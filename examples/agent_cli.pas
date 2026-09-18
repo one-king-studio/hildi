@@ -18,7 +18,8 @@ program agent_cli;
 
 uses
   {$ifdef unix}cthreads,{$endif}   // must come first on Unix
-  SysUtils, hildegard.helper.ansi, hildegard.helper.llm, hildegard.helper.agent;
+  SysUtils, hildegard.helper.ansi, hildegard.helper.env,
+  hildegard.helper.llm, hildegard.helper.agent;
 
 const
   DefaultSystemPrompt =
@@ -102,6 +103,7 @@ var
   Err: TLLMError;
 
 begin
+  LoadDotEnvFile('.env');           // optional local config; shell env wins
   ApplyColorFlags;
 
   Config := Default(TLLMConfig);
