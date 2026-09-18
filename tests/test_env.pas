@@ -1,0 +1,155 @@
+unit test_env;
+{ fpcunit tests for hildegard.helper.env. Parsing is tested purely; apply/load
+  tests use a uniquely named variable cleared first. }
+
+{$mode delphi}{$H+}
+
+interface
+
+uses
+  Classes, SysUtils, ctypes, fpcunit, testregistry, hildegard.helper.env;
+
+type
+  TEnvTest = class(TTestCase)
+  published
+    procedure TestParsesSimplePairs;
+    procedure TestIgnoresCommentsAndBlankLines;
+    procedure TestStripsExportPrefix;
+    procedure TestTrimsWhitespaceAndQuotes;
+    procedure TestKeepsEqualsInValue;
+    procedure TestSkipsMalformedLines;
+    procedure TestApplySkipsExistingEnvironment;
+    procedure TestLoadMissingFileIsNoOp;
+    procedure TestLoadAppliesNewVariable;
+  end;
+
+implementation
+
+{$ifdef unix}
+function c_setenv(Name, Value: PAnsiChar; Overwrite: cint): cint; cdecl;
+  external 'c' name 'setenv';
+function c_unsetenv(Name: PAnsiChar): cint; cdecl; external 'c' name 'unsetenv';
+{$endif}
+
+const
+  TestVar = 'HILDEGARD_TEST_ENV_A1B2';
+
+procedure ClearTestVar;
+begin
+  {$ifdef unix}
+  c_unsetenv(PAnsiChar(AnsiString(TestVar)));
+  {$endif}
+end;
+
+procedure TEnvTest.TestParsesSimplePairs;
+var
+  Pairs: TEnvPairArray;
+begin
+  Pairs := ParseDotEnv('A=1' + LineEnding + 'B=two');
+  AssertEquals('two pairs', 2, Length(Pairs));
+  AssertEquals('name a', 'A', Pairs[0].Name);
+  AssertEquals('value a', '1', Pairs[0].Value);
+  AssertEquals('name b', 'B', Pairs[1].Name);
+  AssertEquals('value b', 'two', Pairs[1].Value);
+end;
+
+procedure TEnvTest.TestIgnoresCommentsAndBlankLines;
+var
+  Pairs: TEnvPairArray;
+begin
+  Pairs := ParseDotEnv('# comment' + LineEnding + LineEnding +
+    '   ' + LineEnding + 'K=v');
+  AssertEquals('one pair', 1, Length(Pairs));
+  AssertEquals('name', 'K', Pairs[0].Name);
+end;
+
+procedure TEnvTest.TestStripsExportPrefix;
+var
+  Pairs: TEnvPairArray;
+begin
+  Pairs := ParseDotEnv('export K=v');
+  AssertEquals('one pair', 1, Length(Pairs));
+  AssertEquals('name', 'K', Pairs[0].Name);
+  AssertEquals('value', 'v', Pairs[0].Value);
+end;
+
+procedure TEnvTest.TestTrimsWhitespaceAndQuotes;
+var
+  Pairs: TEnvPairArray;
+begin
+  Pairs := ParseDotEnv('K = "hello world"' + LineEnding + 'S=' + #39 + 'x y' +
+    #39);
+  AssertEquals('name trimmed', 'K', Pairs[0].Name);
+  AssertEquals('double quotes stripped', 'hello world', Pairs[0].Value);
+  AssertEquals('single quotes stripped', 'x y', Pairs[1].Value);
+end;
+
+procedure TEnvTest.TestKeepsEqualsInValue;
+var
+  Pairs: TEnvPairArray;
+begin
+  Pairs := ParseDotEnv('URL=https://x/?a=1&b=2');
+  AssertEquals('one pair', 1, Length(Pairs));
+  AssertEquals('value keeps equals', 'https://x/?a=1&b=2', Pairs[0].Value);
+end;
+
+procedure TEnvTest.TestSkipsMalformedLines;
+var
+  Pairs: TEnvPairArray;
+begin
+  Pairs := ParseDotEnv('NOEQUALS' + LineEnding + '=novalue' + LineEnding +
+    'OK=1');
+  AssertEquals('one valid pair', 1, Length(Pairs));
+  AssertEquals('name', 'OK', Pairs[0].Name);
+end;
+
+procedure TEnvTest.TestApplySkipsExistingEnvironment;
+var
+  Pairs: TEnvPairArray;
+begin
+  ClearTestVar;
+  {$ifdef unix}
+  c_setenv(PAnsiChar(AnsiString(TestVar)), PAnsiChar(AnsiString('existing')), 1);
+  {$endif}
+  try
+    Pairs := ParseDotEnv(TestVar + '=new');
+    AssertEquals('nothing applied', 0, ApplyEnv(Pairs));
+    AssertEquals('existing kept', 'existing', GetEnvironmentVariable(TestVar));
+  finally
+    ClearTestVar;
+  end;
+end;
+
+procedure TEnvTest.TestLoadMissingFileIsNoOp;
+begin
+  AssertEquals('missing file', 0, LoadDotEnvFile('/no/such/.env'));
+end;
+
+procedure TEnvTest.TestLoadAppliesNewVariable;
+var
+  FileName: string;
+  F: TStringList;
+begin
+  ClearTestVar;
+  FileName := IncludeTrailingPathDelimiter(GetTempDir) +
+    'hildegard_env_test.env';
+  F := TStringList.Create;
+  try
+    F.Add('# sample');
+    F.Add(TestVar + '=loaded');
+    F.SaveToFile(FileName);
+  finally
+    F.Free;
+  end;
+  try
+    AssertEquals('one applied', 1, LoadDotEnvFile(FileName));
+    AssertEquals('value set', 'loaded', GetEnvironmentVariable(TestVar));
+  finally
+    ClearTestVar;
+    DeleteFile(FileName);
+  end;
+end;
+
+initialization
+  RegisterTest(TEnvTest);
+end.
