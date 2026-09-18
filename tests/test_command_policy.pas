@@ -43,6 +43,13 @@ type
     procedure TestPathInsideRootsAllowed;
     procedure TestRelativeDotDotEscapeAsks;
     procedure TestClassifyCompoundCommandWithMixedSegments;
+    procedure TestClassifySegmentsReturnsOnePerSegment;
+    procedure TestSegmentTextJoinsExecutableAndArgs;
+    procedure TestExactArgPatternAllowsOnlyThatArg;
+    procedure TestWildcardArgPatternAllowsAnyArgs;
+    procedure TestFullArgAllowBypassesArgPathCheck;
+    procedure TestRedirectPathStillCheckedWithFullArgAllow;
+    procedure TestDenyArgPatternMatches;
   end;
 
 implementation
@@ -326,6 +333,79 @@ begin
     Policy(['ls', 'cat'], [], ['/srv/data'], False));
   AssertEquals('ask', Ord(cdAsk), Ord(D.Decision));
   AssertTrue('names offending path', Pos('/etc/passwd', D.Reason) > 0);
+end;
+
+procedure TCommandPolicyTest.TestClassifySegmentsReturnsOnePerSegment;
+var
+  P: TCommandPlan;
+  D: TSegmentDecisionArray;
+begin
+  P := Parse('cat /etc/os-release && uname -a');
+  D := ClassifySegments(P, DefaultCommandPolicy);
+  AssertEquals('two decisions', 2, Length(D));
+  AssertEquals('index 0', 0, D[0].SegmentIndex);
+  AssertEquals('index 1', 1, D[1].SegmentIndex);
+  AssertEquals('both ask', Ord(cdAsk), Ord(D[0].Decision));
+  AssertEquals('both ask 2', Ord(cdAsk), Ord(D[1].Decision));
+end;
+
+procedure TCommandPolicyTest.TestSegmentTextJoinsExecutableAndArgs;
+var
+  P: TCommandPlan;
+begin
+  P := Parse('cat /etc/os-release && uname -a');
+  AssertEquals('first segment text', 'cat /etc/os-release', P.Segments[0].Text);
+  AssertEquals('second segment text', 'uname -a', P.Segments[1].Text);
+end;
+
+procedure TCommandPolicyTest.TestExactArgPatternAllowsOnlyThatArg;
+var
+  D: TPolicyDecision;
+begin
+  D := Decide('cat /etc/os-release',
+    Policy(['cat /etc/os-release'], [], [], False));
+  AssertEquals('exact use allowed', Ord(cdAllow), Ord(D.Decision));
+  D := Decide('cat /etc/passwd',
+    Policy(['cat /etc/os-release'], [], [], False));
+  AssertEquals('other arg asks', Ord(cdAsk), Ord(D.Decision));
+end;
+
+procedure TCommandPolicyTest.TestWildcardArgPatternAllowsAnyArgs;
+var
+  D: TPolicyDecision;
+begin
+  D := Decide('cat /etc/passwd', Policy(['cat *'], [], [], False));
+  AssertEquals('wildcard allows any arg', Ord(cdAllow), Ord(D.Decision));
+  D := Decide('uname -r', Policy(['uname *'], [], [], False));
+  AssertEquals('wildcard uname', Ord(cdAllow), Ord(D.Decision));
+end;
+
+procedure TCommandPolicyTest.TestFullArgAllowBypassesArgPathCheck;
+var
+  D: TPolicyDecision;
+begin
+  D := Decide('cat /etc/os-release',
+    Policy(['cat /etc/os-release'], [], [], False));
+  AssertEquals('allowed despite no roots', Ord(cdAllow), Ord(D.Decision));
+end;
+
+procedure TCommandPolicyTest.TestRedirectPathStillCheckedWithFullArgAllow;
+var
+  D: TPolicyDecision;
+begin
+  D := Decide('echo hi > /etc/x', Policy(['echo *'], [], [], False));
+  AssertEquals('redirect still asks', Ord(cdAsk), Ord(D.Decision));
+  AssertTrue('names redirect path', Pos('/etc/x', D.Reason) > 0);
+end;
+
+procedure TCommandPolicyTest.TestDenyArgPatternMatches;
+var
+  P: TCommandPlan;
+  D: TSegmentDecision;
+begin
+  P := Parse('rm -rf /');
+  D := ClassifySegment(P, 0, Policy([], ['rm -rf *'], [], False));
+  AssertEquals('deny', Ord(cdDeny), Ord(D.Decision));
 end;
 
 initialization

@@ -40,6 +40,7 @@ type
   TCommandPath = record
     Text: string;            // literal token as written
     Kind: TPathKind;
+    IsRedirect: Boolean;     // True when the path is a redirection target
   end;
 
   TCommandRedirectArray = array of TCommandRedirect;
@@ -63,11 +64,15 @@ type
     ParseError: string;            // '' => fully parsed; else human-readable
   end;
 
-  { Policy rules. Patterns match an executable token and its basename; '*' and
-    '?' are wildcards (SysUtils.MatchesMask). }
+  { Policy rules. A pattern is whitespace-separated words:
+      - one word ('cat') matches the executable (token or basename), any args;
+      - two or more ('cat /etc/os-release', 'git * main') match the executable
+        and then the arguments, '*' matching any number of arguments and '?'/'*'
+        matching within one argument.
+    '*' and '?' are wildcards (case-sensitive). }
   TCommandPolicy = record
-    Allow: TCommandArgArray;         // executable patterns that may run freely
-    Deny: TCommandArgArray;          // executable patterns that never run
+    Allow: TCommandArgArray;         // patterns that may run freely
+    Deny: TCommandArgArray;          // patterns that never run
     AllowedRoots: TCommandArgArray;  // absolute directory prefixes for paths
     AllowInterpreters: Boolean;      // acknowledge interpreter indirection
   end;
@@ -80,12 +85,28 @@ type
     SegmentIndex: Integer;           // offending segment, or -1
   end;
 
+  { The decision for a single simple-command segment. }
+  TSegmentDecision = record
+    SegmentIndex: Integer;
+    Decision: TCommandDecision;
+    Reason: string;
+  end;
+
+  TSegmentDecisionArray = array of TSegmentDecision;
+
 function DefaultCommandPolicy: TCommandPolicy;
 function ParseCommand(const ACommand: string;
   ASyntax: TShellSyntax = ssPosix): TCommandPlan;
+function ClassifySegment(const APlan: TCommandPlan; AIndex: Integer;
+  const APolicy: TCommandPolicy): TSegmentDecision;
+function ClassifySegments(const APlan: TCommandPlan;
+  const APolicy: TCommandPolicy): TSegmentDecisionArray;
 function ClassifyCommand(const APlan: TCommandPlan;
   const APolicy: TCommandPolicy): TPolicyDecision;
 function IsInterpreter(const AName: string): Boolean;
+{ The executable plus its arguments, joined by spaces; the form an approval
+  pattern is persisted as. Redirections are not included. }
+function SegmentText(const ASegment: TCommandSegment): string;
 
 implementation
 
@@ -452,6 +473,7 @@ begin
           begin
             Text := Tokens[J].Text;
             Kind := PathKindOf(Tokens[J].Text, Tokens[J].Unresolvable);
+            IsRedirect := True;
           end;
         end;
       end
@@ -477,6 +499,7 @@ begin
             begin
               Text := Tokens[J].Text;
               Kind := PathKindOf(Tokens[J].Text, Tokens[J].Unresolvable);
+              IsRedirect := False;
             end;
           end;
         end;
@@ -491,6 +514,9 @@ begin
       if (Executable = '') and (Length(Arguments) = 0) and
         (Length(Redirects) = 0) then
         SetLength(Result.Segments, Length(Result.Segments) - 1);
+
+  for J := 0 to High(Result.Segments) do
+    Result.Segments[J].Text := SegmentText(Result.Segments[J]);
 end;
 
 { --- classifier --------------------------------------------------------- }
@@ -532,14 +558,135 @@ begin
   Result := P > Length(APattern);
 end;
 
-function ExecMatchesAny(const AExecutable: string;
+function SegmentText(const ASegment: TCommandSegment): string;
+var
+  I: Integer;
+begin
+  Result := ASegment.Executable;
+  for I := 0 to High(ASegment.Arguments) do
+    Result := Result + ' ' + ASegment.Arguments[I];
+end;
+
+function SplitWords(const AText: string): TCommandArgArray;
+var
+  I, Start: Integer;
+  S: string;
+begin
+  Result := nil;
+  S := AText;
+  I := 1;
+  while I <= Length(S) do
+  begin
+    while (I <= Length(S)) and ((S[I] = ' ') or (S[I] = #9)) do
+      Inc(I);
+    Start := I;
+    while (I <= Length(S)) and (S[I] <> ' ') and (S[I] <> #9) do
+      Inc(I);
+    if I > Start then
+    begin
+      SetLength(Result, Length(Result) + 1);
+      Result[High(Result)] := Copy(S, Start, I - Start);
+    end;
+  end;
+end;
+
+function ExeMatches(const AExecutable, APattern: string): Boolean;
+begin
+  Result := MatchMask(AExecutable, APattern) or
+    MatchMask(ExtractFileName(AExecutable), APattern);
+end;
+
+{ Matches a pattern's argument words against a segment's arguments, where a
+  standalone '*' word matches any number of arguments. Backtracking over '*'. }
+function ArgsMatch(const APatternArgs, AArguments: TCommandArgArray): Boolean;
+var
+  Pi, Ai, StarP, StarA: Integer;
+begin
+  Pi := 0;
+  Ai := 0;
+  StarP := -1;
+  StarA := 0;
+  while Ai <= High(AArguments) do
+  begin
+    if (Pi <= High(APatternArgs)) and (APatternArgs[Pi] = '*') then
+    begin
+      StarP := Pi;
+      StarA := Ai;
+      Inc(Pi);
+    end
+    else if (Pi <= High(APatternArgs)) and
+      MatchMask(AArguments[Ai], APatternArgs[Pi]) then
+    begin
+      Inc(Pi);
+      Inc(Ai);
+    end
+    else if StarP >= 0 then
+    begin
+      Inc(StarA);
+      Ai := StarA;
+      Pi := StarP + 1;
+    end
+    else
+      Exit(False);
+  end;
+  while (Pi <= High(APatternArgs)) and (APatternArgs[Pi] = '*') do
+    Inc(Pi);
+  Result := Pi > High(APatternArgs);
+end;
+
+{ Any pattern form: executable-only, or executable + argument words. }
+function SegmentMatchesPattern(const ASegment: TCommandSegment;
+  const APattern: string): Boolean;
+var
+  Words, ArgWords: TCommandArgArray;
+  I: Integer;
+begin
+  Words := SplitWords(Trim(APattern));
+  if Length(Words) = 0 then
+    Exit(False);
+  if not ExeMatches(ASegment.Executable, Words[0]) then
+    Exit(False);
+  if Length(Words) = 1 then
+    Exit(True);
+  SetLength(ArgWords, Length(Words) - 1);
+  for I := 1 to High(Words) do
+    ArgWords[I - 1] := Words[I];
+  Result := ArgsMatch(ArgWords, ASegment.Arguments);
+end;
+
+function SegmentMatchesAny(const ASegment: TCommandSegment;
   const APatterns: TCommandArgArray): Boolean;
 var
-  Base, Pattern: string;
+  Pattern: string;
 begin
-  Base := ExtractFileName(AExecutable);
   for Pattern in APatterns do
-    if MatchMask(AExecutable, Pattern) or MatchMask(Base, Pattern) then
+    if SegmentMatchesPattern(ASegment, Pattern) then
+      Exit(True);
+  Result := False;
+end;
+
+{ A pattern that names arguments (more than one word). }
+function SegmentMatchesFullArg(const ASegment: TCommandSegment;
+  const APatterns: TCommandArgArray): Boolean;
+var
+  Pattern: string;
+begin
+  for Pattern in APatterns do
+    if (Length(SplitWords(Trim(Pattern))) > 1) and
+      SegmentMatchesPattern(ASegment, Pattern) then
+      Exit(True);
+  Result := False;
+end;
+
+{ A pattern that names only the executable (one word). }
+function SegmentMatchesExeOnly(const ASegment: TCommandSegment;
+  const APatterns: TCommandArgArray): Boolean;
+var
+  Pattern: string;
+begin
+  for Pattern in APatterns do
+    if (Length(SplitWords(Trim(Pattern))) = 1) and
+      SegmentMatchesPattern(ASegment, Pattern) then
       Exit(True);
   Result := False;
 end;
@@ -565,11 +712,95 @@ begin
   Result := False;
 end;
 
+function ClassifySegment(const APlan: TCommandPlan; AIndex: Integer;
+  const APolicy: TCommandPolicy): TSegmentDecision;
+var
+  Seg: TCommandSegment;
+  J: Integer;
+begin
+  Result := Default(TSegmentDecision);
+  Result.SegmentIndex := AIndex;
+  Result.Decision := cdAsk;
+  if (AIndex < 0) or (AIndex > High(APlan.Segments)) then
+  begin
+    Result.Reason := 'invalid segment index';
+    Exit;
+  end;
+  Seg := APlan.Segments[AIndex];
+
+  { 1. Deny patterns win, in any form. }
+  if SegmentMatchesAny(Seg, APolicy.Deny) then
+  begin
+    Result.Decision := cdDeny;
+    Result.Reason := 'command "' + Seg.Text + '" is denied by policy';
+    Exit;
+  end;
+
+  { 2. Interpreters require explicit acknowledgment. }
+  if (not APolicy.AllowInterpreters) and IsInterpreter(Seg.Executable) then
+  begin
+    Result.Reason := 'interpreter "' + Seg.Executable +
+      '" can run arbitrary commands and needs explicit approval';
+    Exit;
+  end;
+
+  { 3. Redirection targets are always path-checked. }
+  for J := 0 to High(Seg.Paths) do
+    if Seg.Paths[J].IsRedirect and
+      (not PathAllowed(Seg.Paths[J], APolicy.AllowedRoots)) then
+    begin
+      Result.Reason := 'path "' + Seg.Paths[J].Text +
+        '" is outside the allowed roots';
+      Exit;
+    end;
+
+  { 4. An explicit argument pattern (e.g. 'cat /etc/os-release', 'cat *')
+       approves the command as written, including its argument paths. }
+  if SegmentMatchesFullArg(Seg, APolicy.Allow) then
+  begin
+    Result.Decision := cdAllow;
+    Result.Reason := 'command "' + Seg.Text + '" matches an explicit allow rule';
+    Exit;
+  end;
+
+  { 5. Remaining literal paths must stay within the allowed roots. }
+  for J := 0 to High(Seg.Paths) do
+    if (not Seg.Paths[J].IsRedirect) and
+      (not PathAllowed(Seg.Paths[J], APolicy.AllowedRoots)) then
+    begin
+      Result.Reason := 'path "' + Seg.Paths[J].Text +
+        '" is outside the allowed roots';
+      Exit;
+    end;
+
+  { 6. An executable-only pattern allows the command for any arguments. }
+  if SegmentMatchesExeOnly(Seg, APolicy.Allow) then
+  begin
+    Result.Decision := cdAllow;
+    Result.Reason := 'command "' + Seg.Executable + '" is allowed';
+    Exit;
+  end;
+
+  { 7. Otherwise ask. }
+  Result.Reason := 'command "' + Seg.Executable + '" is not in the allow list';
+end;
+
+function ClassifySegments(const APlan: TCommandPlan;
+  const APolicy: TCommandPolicy): TSegmentDecisionArray;
+var
+  I: Integer;
+begin
+  Result := nil;
+  SetLength(Result, Length(APlan.Segments));
+  for I := 0 to High(APlan.Segments) do
+    Result[I] := ClassifySegment(APlan, I, APolicy);
+end;
+
 function ClassifyCommand(const APlan: TCommandPlan;
   const APolicy: TCommandPolicy): TPolicyDecision;
 var
-  I, J, UnmatchedIdx: Integer;
-  AllAllowed: Boolean;
+  Segs: TSegmentDecisionArray;
+  I: Integer;
 begin
   Result := Default(TPolicyDecision);
   Result.Decision := cdAsk;
@@ -586,60 +817,27 @@ begin
     Exit;
   end;
 
-  { 2. Deny patterns win. }
-  for I := 0 to High(APlan.Segments) do
-    if ExecMatchesAny(APlan.Segments[I].Executable, APolicy.Deny) then
+  Segs := ClassifySegments(APlan, APolicy);
+
+  for I := 0 to High(Segs) do
+    if Segs[I].Decision = cdDeny then
     begin
       Result.Decision := cdDeny;
       Result.SegmentIndex := I;
-      Result.Reason := 'command "' + APlan.Segments[I].Executable +
-        '" is denied by policy';
+      Result.Reason := Segs[I].Reason;
       Exit;
     end;
 
-  { 3. Interpreters require explicit acknowledgment. }
-  if not APolicy.AllowInterpreters then
-    for I := 0 to High(APlan.Segments) do
-      if IsInterpreter(APlan.Segments[I].Executable) then
-      begin
-        Result.SegmentIndex := I;
-        Result.Reason := 'interpreter "' + APlan.Segments[I].Executable +
-          '" can run arbitrary commands and needs explicit approval';
-        Exit;
-      end;
-
-  { 4. Literal paths must stay within the allowed roots. }
-  for I := 0 to High(APlan.Segments) do
-    for J := 0 to High(APlan.Segments[I].Paths) do
-      if not PathAllowed(APlan.Segments[I].Paths[J], APolicy.AllowedRoots) then
-      begin
-        Result.SegmentIndex := I;
-        Result.Reason := 'path "' + APlan.Segments[I].Paths[J].Text +
-          '" is outside the allowed roots';
-        Exit;
-      end;
-
-  { 5. Every segment must match the allow list. }
-  AllAllowed := True;
-  UnmatchedIdx := -1;
-  for I := 0 to High(APlan.Segments) do
-    if not ExecMatchesAny(APlan.Segments[I].Executable, APolicy.Allow) then
+  for I := 0 to High(Segs) do
+    if Segs[I].Decision = cdAsk then
     begin
-      AllAllowed := False;
-      UnmatchedIdx := I;
-      Break;
+      Result.SegmentIndex := I;
+      Result.Reason := Segs[I].Reason;
+      Exit;
     end;
-  if AllAllowed then
-  begin
-    Result.Decision := cdAllow;
-    Result.Reason := 'all commands match the allow list';
-    Exit;
-  end;
 
-  { 6. Otherwise ask. }
-  Result.SegmentIndex := UnmatchedIdx;
-  Result.Reason := 'command "' + APlan.Segments[UnmatchedIdx].Executable +
-    '" is not in the allow list';
+  Result.Decision := cdAllow;
+  Result.Reason := 'all commands match the allow list';
 end;
 
 end.
