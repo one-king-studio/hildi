@@ -4,10 +4,13 @@ A headless agent harness written in Free Pascal (FPC), developed locally with a
 heavy emphasis on test-driven development.
 
 The goal is to install this on a remote device, register it to a Hildegard
-account, and have it listen for requests and act on them locally - letting
-Hildegard make changes to or control that machine. Today it provides the
-execution core: running host shell commands as background "subagents" through a
-bounded-concurrency thread pool.
+account, and let an AI agent act on that machine through tools. Today it provides
+the execution core (shell commands via a bounded-concurrency pool), an embedded
+SQLite store, and a single-threaded OpenAI-compatible agent loop with tools and
+an interactive CLI.
+
+New to the project? Start with `HANDOFF.md` for current state, decisions, and
+lessons learned.
 
 - Compiler: Free Pascal 3.3.1 (aarch64-darwin), configured via `~/.fpc.cfg`.
 - FPC source tree (for reading RTL/FCL/Packages units): `/Users/johnrcui/Code/fpc`.
