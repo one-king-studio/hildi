@@ -55,6 +55,11 @@ type
     procedure TestProviderErrorObjectMapsToProviderError;
     procedure TestMalformedStreamMapsToMalformedError;
     procedure TestApiKeyNeverAppearsInError;
+    procedure TestEmitsReasoningDeltasSeparately;
+    procedure TestReasoningAccumulatedInResult;
+    procedure TestReasoningNotInMessageContent;
+    procedure TestReasoningContentPreferredOverReasoning;
+    procedure TestV1CompleteOverloadStillWorks;
   end;
 
 implementation
@@ -624,6 +629,125 @@ begin
     AssertTrue('message clean', Pos('super-secret-key', Err.Message) = 0);
     AssertTrue('detail clean', Pos('super-secret-key', Err.Detail) = 0);
   finally
+    Client.Free;
+    Fake.Free;
+  end;
+end;
+
+procedure TLLMClientTest.TestEmitsReasoningDeltasSeparately;
+var
+  Fake: TFakeTransport;
+  Client: TLLMClient;
+  Res: TChatResult;
+  Err: TLLMError;
+  TextCol, ReasonCol: TTextCollector;
+begin
+  Client := MakeClient(Fake, 'm', 'k');
+  TextCol := TTextCollector.Create;
+  ReasonCol := TTextCollector.Create;
+  try
+    Fake.AddChunk(ReasoningDelta('think '));
+    Fake.AddChunk(ReasoningDelta('more'));
+    Fake.AddChunk(TextDelta('answer'));
+    Fake.AddChunk(FinishFrame('stop'));
+    Fake.AddChunk(DoneFrame);
+    AssertTrue('complete', Client.Complete(UserRequest('hi'), TextCol.OnText,
+      ReasonCol.OnText, Res, Err));
+    AssertEquals('reasoning streamed', 'think more', ReasonCol.Text);
+    AssertEquals('answer streamed', 'answer', TextCol.Text);
+  finally
+    ReasonCol.Free;
+    TextCol.Free;
+    Client.Free;
+    Fake.Free;
+  end;
+end;
+
+procedure TLLMClientTest.TestReasoningAccumulatedInResult;
+var
+  Fake: TFakeTransport;
+  Client: TLLMClient;
+  Res: TChatResult;
+  Err: TLLMError;
+begin
+  Client := MakeClient(Fake, 'm', 'k');
+  try
+    Fake.AddChunk(ReasoningDelta('first '));
+    Fake.AddChunk(ReasoningDelta('second'));
+    Fake.AddChunk(TextDelta('done'));
+    Fake.AddChunk(FinishFrame('stop'));
+    Fake.AddChunk(DoneFrame);
+    AssertTrue('complete', Client.Complete(UserRequest('hi'), nil, nil, Res, Err));
+    AssertEquals('reasoning accumulated', 'first second', Res.ReasoningContent);
+  finally
+    Client.Free;
+    Fake.Free;
+  end;
+end;
+
+procedure TLLMClientTest.TestReasoningNotInMessageContent;
+var
+  Fake: TFakeTransport;
+  Client: TLLMClient;
+  Res: TChatResult;
+  Err: TLLMError;
+begin
+  Client := MakeClient(Fake, 'm', 'k');
+  try
+    Fake.AddChunk(ReasoningDelta('secret thinking'));
+    Fake.AddChunk(TextDelta('visible'));
+    Fake.AddChunk(FinishFrame('stop'));
+    Fake.AddChunk(DoneFrame);
+    AssertTrue('complete', Client.Complete(UserRequest('hi'), nil, Res, Err));
+    AssertEquals('content is answer only', 'visible', Res.Message.Content);
+    AssertTrue('reasoning not in content',
+      Pos('secret thinking', Res.Message.Content) = 0);
+  finally
+    Client.Free;
+    Fake.Free;
+  end;
+end;
+
+procedure TLLMClientTest.TestReasoningContentPreferredOverReasoning;
+var
+  Fake: TFakeTransport;
+  Client: TLLMClient;
+  Res: TChatResult;
+  Err: TLLMError;
+begin
+  Client := MakeClient(Fake, 'm', 'k');
+  try
+    Fake.AddChunk(SSE('{"choices":[{"delta":{' +
+      '"reasoning_content":"primary","reasoning":"secondary"}}]}'));
+    Fake.AddChunk(FinishFrame('stop'));
+    Fake.AddChunk(DoneFrame);
+    AssertTrue('complete', Client.Complete(UserRequest('hi'), nil, Res, Err));
+    AssertEquals('prefers reasoning_content', 'primary', Res.ReasoningContent);
+  finally
+    Client.Free;
+    Fake.Free;
+  end;
+end;
+
+procedure TLLMClientTest.TestV1CompleteOverloadStillWorks;
+var
+  Fake: TFakeTransport;
+  Client: TLLMClient;
+  Res: TChatResult;
+  Err: TLLMError;
+  C: TTextCollector;
+begin
+  Client := MakeClient(Fake, 'm', 'k');
+  C := TTextCollector.Create;
+  try
+    Fake.AddChunk(TextDelta('ok'));
+    Fake.AddChunk(FinishFrame('stop'));
+    Fake.AddChunk(DoneFrame);
+    AssertTrue('v1 overload', Client.Complete(UserRequest('hi'), C.OnText,
+      Res, Err));
+    AssertEquals('answer', 'ok', Res.Message.Content);
+  finally
+    C.Free;
     Client.Free;
     Fake.Free;
   end;

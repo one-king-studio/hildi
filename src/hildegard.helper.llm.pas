@@ -50,6 +50,7 @@ type
     Message: TChatMessage;
     FinishReason: TFinishReason;
     RawFinishReason: string;
+    ReasoningContent: string;   // display-only; not part of the message
   end;
 
   TLLMErrorCode = (
@@ -64,6 +65,7 @@ type
   end;
 
   TLLMTextEvent = procedure(const AText: string) of object;
+  TLLMReasoningEvent = procedure(const AText: string) of object;
   TLLMChunkEvent = procedure(const AData: RawByteString) of object;
 
   TLLMConfig = record
@@ -101,7 +103,10 @@ type
     constructor Create(const AConfig: TLLMConfig; ATransport: TLLMTransport);
     destructor Destroy; override;
     function Complete(const ARequest: TChatRequest; AOnText: TLLMTextEvent;
-      out AResult: TChatResult; out AError: TLLMError): Boolean;
+      out AResult: TChatResult; out AError: TLLMError): Boolean; overload;
+    function Complete(const ARequest: TChatRequest; AOnText: TLLMTextEvent;
+      AOnReasoning: TLLMReasoningEvent;
+      out AResult: TChatResult; out AError: TLLMError): Boolean; overload;
   end;
 
 function ResolveLLMConfig(const AConfig: TLLMConfig): TLLMConfig;
@@ -141,6 +146,7 @@ type
     FPending: RawByteString;
     FHasData: Boolean;
     FOnText: TLLMTextEvent;
+    FOnReasoning: TLLMReasoningEvent;
     FResult: TChatResult;
     FHasFinish: Boolean;
     FDone: Boolean;
@@ -153,7 +159,8 @@ type
     procedure AccumulateToolCalls(const ADelta: TJSONObject);
     procedure SetFinish(const AReason: string);
   public
-    constructor Create(AOnText: TLLMTextEvent);
+    constructor Create(AOnText: TLLMTextEvent;
+      AOnReasoning: TLLMReasoningEvent);
     procedure Feed(const AData: RawByteString);
     procedure Finish;
     property Result: TChatResult read FResult;
@@ -293,10 +300,12 @@ end;
 
 { --- TSSEParser --------------------------------------------------------- }
 
-constructor TSSEParser.Create(AOnText: TLLMTextEvent);
+constructor TSSEParser.Create(AOnText: TLLMTextEvent;
+  AOnReasoning: TLLMReasoningEvent);
 begin
   inherited Create;
   FOnText := AOnText;
+  FOnReasoning := AOnReasoning;
   FBuffer := '';
   FPending := '';
   FHasData := False;
@@ -392,6 +401,7 @@ var
   Choice: TJSONObject;
   Delta: TJSONObject;
   Content: TJSONData;
+  Reasoning: TJSONData;
   Finish: TJSONData;
 begin
   if AJson = nil then
@@ -426,6 +436,19 @@ begin
         if Assigned(FOnText) then
           FOnText(Content.AsString);
       end;
+
+      Reasoning := Delta.Find('reasoning_content');
+      if (Reasoning = nil) or (Reasoning.JSONType <> jtString) then
+        Reasoning := Delta.Find('reasoning');
+      if (Reasoning <> nil) and (Reasoning.JSONType = jtString) and
+        (Reasoning.AsString <> '') then
+      begin
+        FResult.ReasoningContent :=
+          FResult.ReasoningContent + Reasoning.AsString;
+        if Assigned(FOnReasoning) then
+          FOnReasoning(Reasoning.AsString);
+      end;
+
       AccumulateToolCalls(Delta);
     end;
 
@@ -604,6 +627,13 @@ end;
 function TLLMClient.Complete(const ARequest: TChatRequest;
   AOnText: TLLMTextEvent; out AResult: TChatResult;
   out AError: TLLMError): Boolean;
+begin
+  Result := Complete(ARequest, AOnText, nil, AResult, AError);
+end;
+
+function TLLMClient.Complete(const ARequest: TChatRequest;
+  AOnText: TLLMTextEvent; AOnReasoning: TLLMReasoningEvent;
+  out AResult: TChatResult; out AError: TLLMError): Boolean;
 var
   Body: string;
   Headers: TStringList;
@@ -627,7 +657,7 @@ begin
 
   Body := BuildRequestBody(FConfig, ARequest);
   Headers := TStringList.Create;
-  Parser := TSSEParser.Create(AOnText);
+  Parser := TSSEParser.Create(AOnText, AOnReasoning);
   try
     Headers.Values['Authorization'] := 'Bearer ' + FConfig.ApiKey;
     Headers.Values['Content-Type'] := 'application/json';

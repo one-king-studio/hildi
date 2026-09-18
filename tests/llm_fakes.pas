@@ -42,6 +42,8 @@ function SSE(const AJson: string): RawByteString;
 function DataOnly(const AJson: string): RawByteString;   // no trailing blank
 
 function TextDelta(const AText: string): RawByteString;
+function ReasoningDelta(const AText: string): RawByteString;
+function AlsoReasoningDelta(const AText: string): RawByteString;
 function FinishFrame(const AReason: string): RawByteString;
 function ToolNameFrame(AIndex: Integer; const AId, AName: string): RawByteString;
 function ToolArgsFrame(AIndex: Integer; const AArgs: string): RawByteString;
@@ -151,6 +153,46 @@ begin
   Choice := TJSONObject.Create;
   Delta := TJSONObject.Create;
   Delta.Add('content', AText);
+  Choice.Add('delta', Delta);
+  Choices.Add(Choice);
+  Root.Add('choices', Choices);
+  try
+    Result := SSE(Root.AsJSON);
+  finally
+    Root.Free;
+  end;
+end;
+
+function ReasoningDelta(const AText: string): RawByteString;
+var
+  Root, Choice, Delta: TJSONObject;
+  Choices: TJSONArray;
+begin
+  Root := TJSONObject.Create;
+  Choices := TJSONArray.Create;
+  Choice := TJSONObject.Create;
+  Delta := TJSONObject.Create;
+  Delta.Add('reasoning_content', AText);
+  Choice.Add('delta', Delta);
+  Choices.Add(Choice);
+  Root.Add('choices', Choices);
+  try
+    Result := SSE(Root.AsJSON);
+  finally
+    Root.Free;
+  end;
+end;
+
+function AlsoReasoningDelta(const AText: string): RawByteString;
+var
+  Root, Choice, Delta: TJSONObject;
+  Choices: TJSONArray;
+begin
+  Root := TJSONObject.Create;
+  Choices := TJSONArray.Create;
+  Choice := TJSONObject.Create;
+  Delta := TJSONObject.Create;
+  Delta.Add('reasoning', AText);
   Choice.Add('delta', Delta);
   Choices.Add(Choice);
   Root.Add('choices', Choices);
