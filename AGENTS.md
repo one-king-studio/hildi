@@ -10,6 +10,7 @@ execution core: running host shell commands as background "subagents" through a
 bounded-concurrency thread pool.
 
 - Compiler: Free Pascal 3.3.1 (aarch64-darwin), configured via `~/.fpc.cfg`.
+- FPC source tree (for reading RTL/FCL/Packages units): `/Users/johnrcui/Code/fpc`.
 - Language mode: `{$mode delphi}` (Object Pascal).
 
 ## Engineering Ethos: Ponytail

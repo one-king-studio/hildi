@@ -17,7 +17,7 @@ in `../guidelines/spec-driven-development.md`:
 
 | Feature | Status | Specs | Notes |
 | ------- | ------ | ----- | ----- |
-| [Agent Loop](Agent_Loop/FEATURE.md) | Specified | LLM Client v1, Agent Loop v1 | Single-threaded OpenAI-compatible agent loop with streamed SSE responses, injectable tools, and an in-memory multi-turn store. CLI demo. |
+| [Agent Loop](Agent_Loop/FEATURE.md) | In Progress | LLM Client v1, Agent Loop v1 | Single-threaded OpenAI-compatible agent loop with streamed SSE responses, injectable tools, and an in-memory multi-turn store. CLI demo. |
 | [Remote Agent Link](Remote_Agent_Link/FEATURE.md) | Proposed | - | Pair a device to an account and hold an outbound link to execute requests locally. Helper-side only in v1. |
 | [Local SQLite Store](Local_SQLite_Store/FEATURE.md) | Implemented | Store v1 | Embedded SQLite for credentials, request history, durable queue, and settings. Vendored 3.53.4. |
 
