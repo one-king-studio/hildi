@@ -74,6 +74,12 @@ $(SQLITE_LIB): $(SQLITE_DIR)/sqlite3.c
 $(SQLITE_DIR)/sqlite3.c:
 	@scripts/fetch-sqlite.sh
 
+store-demo: libsqlite $(BIN)/hildegard-helper-store-demo
+
+$(BIN)/hildegard-helper-store-demo: $(EXAMPLES)/store_demo.pas $(LIB_SRCS) $(SQLITE_LIB)
+	@mkdir -p $(BIN) $(DBGUNITS)
+	$(FPC) $(DEBUG) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+
 $(BIN)/hildegard-helper-demo: $(EXAMPLES)/demo_harness.pas $(LIB_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<

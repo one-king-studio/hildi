@@ -10,7 +10,8 @@ program hildegard_helper_tests;
 
 uses
   {$ifdef unix}cthreads,{$endif}   // must come first on Unix
-  SysUtils, fpcunit, testregistry, consoletestrunner, test_hildegard_helper;
+  SysUtils, fpcunit, testregistry, consoletestrunner,
+  test_hildegard_helper, test_store;
 
 var
   Runner: TTestRunner;
