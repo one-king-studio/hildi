@@ -104,12 +104,21 @@ type
 
 ### Output Format
 
+The user prompt is always a shell-style marker, in both modes, so output looks
+the same whether typed or echoed:
+
 ```
-[user]
-what time is it?
+> what time is it?
+```
+
+Sections are separated by one blank line. In **plain mode** (no colour - piped or
+`--no-color`) each section is labelled so the transcript stands on its own:
+
+```
+> what time is it?
 
 [reasoning]
-The user is asking for the current time, so I should call the tool.
+The user wants the time; call get_system_time.
 
 [tool get_system_time]
 args: {}
@@ -120,9 +129,26 @@ result: 2026-09-18T20:15:00Z
 It is 20:15 UTC.
 ```
 
-Rules: sections are separated by one blank line; the reasoning section is dim
-and the tool header cyan on a terminal; suppressed sections are omitted entirely
-along with their separator; the answer streams after its `[assistant]` header.
+In **colour mode** (a terminal) the labels are omitted because colour already
+distinguishes the sections: reasoning is dim, the tool call is a cyan
+`name(args)` line, results are green (`  -> ...`), errors red, and the answer is
+plain:
+
+```
+> what time is it?
+
+The user wants the time; call get_system_time.
+
+get_system_time({})
+
+  -> 2026-09-18T20:15:00Z
+
+It is 20:15 UTC.
+```
+
+Rules: suppressed sections are omitted entirely along with their separator; the
+answer streams after its section break; a failure renders as red `  !! ...` (or
+`[error]` in plain mode).
 
 Pacing: when `MaxTokensPerSecond > 0`, each text/reasoning delta is emitted no
 faster than one per `1000 / MaxTokensPerSecond` milliseconds. A delta is treated
@@ -143,9 +169,9 @@ consumer thread with a queue and leave the reader unblocked.
 - Prompt supplied (`-p`, `--prompt`, `-`, or a positional) => once mode.
 - Otherwise, stdin a terminal => interactive; stdin piped => once (prompt read
   from stdin).
-- Interactive echoes a `> ` prompt and omits the `[user]` section (the typed
-  line is the prompt); once mode includes `[user]` so piped output is a complete
-  transcript.
+- Interactive echoes a `> ` prompt and relies on the terminal's echo for the
+  prompt line; once mode prints `> ` plus the prompt itself, so both look the
+  same. The `--no-user` flag hides the echoed prompt in once mode.
 - Reasoning defaults on for interactive, off for once/piped; `--reasoning` forces
   it on, `--no-reasoning` off. Tools default on. `--no-user` hides the user
   section.
@@ -178,6 +204,7 @@ consumer thread with a queue and leave the reader unblocked.
 - [ ] `TestSectionsSeparatedByBlankLine`
 - [ ] `TestErrorRendered`
 - [ ] `TestNoEscapesWhenColorDisabled`
+- [ ] `TestHeadersHiddenWhenColorEnabled`
 - [ ] `TestPacingDelaysOutput`
 
 ## Security Considerations
