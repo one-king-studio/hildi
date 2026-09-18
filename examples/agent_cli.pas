@@ -20,7 +20,9 @@ uses
   {$ifdef unix}cthreads,{$endif}   // must come first on Unix
   SysUtils, Classes, ctypes,
   hildegard.helper.ansi, hildegard.helper.env, hildegard.helper.cli,
-  hildegard.helper.transcript, hildegard.helper.llm, hildegard.helper.agent;
+  hildegard.helper.transcript, hildegard.helper.llm, hildegard.helper.agent,
+  hildegard.helper.command.policy, hildegard.helper.command.tool,
+  hildegard.helper.store;
 
 const
   DefaultSystemPrompt =
@@ -79,6 +81,37 @@ begin
   Halt(ACode);
 end;
 
+type
+  { Prompts the operator on the terminal when the policy asks to run a command. }
+  TConsoleApprover = class
+  public
+    function Approve(const ARequest: TApprovalRequest): TApprovalOutcome;
+  end;
+
+function TConsoleApprover.Approve(
+  const ARequest: TApprovalRequest): TApprovalOutcome;
+var
+  Line: string;
+begin
+  WriteLn;
+  WriteLn(AnsiStyled('[approval needed]', AnsiYellow));
+  WriteLn('  command: ', ARequest.Command);
+  WriteLn('  reason:  ', ARequest.Reason);
+  WriteLn('  policy:  ', ARequest.Decision.Reason);
+  Write('run it? [y]es once / [a]lways allow / [n]o: ');
+  Flush(Output);
+  if EOF(Input) then
+    Exit(aoDeny);
+  ReadLn(Line);
+  Line := LowerCase(Trim(Line));
+  if (Line = 'y') or (Line = 'yes') then
+    Result := aoAllowOnce
+  else if (Line = 'a') or (Line = 'always') then
+    Result := aoAllowAlways
+  else
+    Result := aoDeny;
+end;
+
 var
   RawArgs: TStringList;
   Args: array of string;
@@ -94,9 +127,18 @@ var
   Writer: TTranscriptWriter;
   Events: TAgentEvents;
   Interactive: Boolean;
-  PromptText, Line, Answer: string;
+  PromptText, Line,   Answer: string;
   Err: TLLMError;
   I: Integer;
+  SqliteStore: TSqliteStore;
+  StoreSource: ICommandPolicySource;
+  CommandTool: TCommandTool;
+  Approver: TConsoleApprover;
+  ApproveHandler: TApprovalHandler;
+  StorePath: string;
+  StoreErr: TStoreError;
+  StoreConfig: TStoreConfig;
+  ToolConfig: TCommandToolConfig;
 
 begin
   RawArgs := CollectArgs;
@@ -166,6 +208,45 @@ begin
   Store := TMemoryConversationStore.Create;
   Tools := TToolRegistry.Create;
   RegisterDefaultTools(Tools);
+
+  { The shell tool needs a policy source; enable it when the SQLite store opens.
+    Without a store the agent keeps its safe, read-only tool set. }
+  CommandTool := nil;
+  Approver := nil;
+  StoreSource := nil;
+  SqliteStore := nil;
+  StorePath := GetEnvironmentVariable('HILDEGARD_STORE_PATH');
+  if StorePath = '' then
+    StorePath := IncludeTrailingPathDelimiter(GetUserDir) + '.hildegard-helper' +
+      PathDelim + 'store.db';
+  ForceDirectories(ExtractFileDir(StorePath));
+  StoreConfig := Default(TStoreConfig);
+  StoreConfig.DatabasePath := StorePath;
+  StoreConfig.BusyTimeoutMs := 5000;
+  SqliteStore := TSqliteStore.Create(StoreConfig);
+  if SqliteStore.Open(StoreErr) then
+  begin
+    StoreSource := TStoreCommandPolicySource.Create(SqliteStore);
+    if Interactive then
+    begin
+      Approver := TConsoleApprover.Create;
+      ApproveHandler := Approver.Approve;
+    end
+    else
+      ApproveHandler := nil;
+    ToolConfig := Default(TCommandToolConfig);
+    ToolConfig.Shell := DefaultShellProfile;
+    CommandTool := TCommandTool.Create(ToolConfig, StoreSource, ApproveHandler);
+    CommandTool.Register(Tools);
+  end
+  else
+  begin
+    WriteLn(AnsiStyled('warning: shell tool disabled: ' + StoreErr.Message,
+      AnsiYellow));
+    SqliteStore.Free;
+    SqliteStore := nil;
+  end;
+
   Loop := TAgentLoop.Create(Client, Store, Tools, AgentConfig);
 
   OutStream := THandleStream.Create(StdOutputHandle);
@@ -232,7 +313,15 @@ begin
     Writer.Free;
     OutStream.Free;
     Loop.Free;
+    CommandTool.Free;
+    Approver.Free;
     Tools.Free;
+    StoreSource := nil;
+    if SqliteStore <> nil then
+    begin
+      SqliteStore.Close;
+      SqliteStore.Free;
+    end;
     Store := nil;
     Client.Free;
   end;
