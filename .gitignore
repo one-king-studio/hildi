@@ -10,6 +10,11 @@
 *.res
 *.compiled
 
+# Vendored SQLite amalgamation (fetched by scripts/fetch-sqlite.sh)
+/deps/sqlite3/sqlite3.c
+/deps/sqlite3/sqlite3.h
+/deps/sqlite3/sqlite3ext.h
+
 # Lazarus / IDE
 backup/
 *.lps

@@ -17,6 +17,21 @@ DBGUNITS := $(BUILD)/units/debug
 RELUNITS := $(BUILD)/units/release
 LEAKUNITS:= $(BUILD)/units/leak
 
+# Vendored SQLite: built from deps/sqlite3 into build/lib (see scripts/fetch-sqlite.sh).
+SQLITE_DIR    := deps/sqlite3
+SQLITE_LIBDIR := $(BUILD)/lib
+UNAME_S       := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+SQLITE_LIB     := $(SQLITE_LIBDIR)/libsqlite3.dylib
+SQLITE_CCFLAGS := -dynamiclib -O2 -DSQLITE_THREADSAFE=1
+SQLITE_LDLIBS  := -lpthread
+else
+SQLITE_LIB     := $(SQLITE_LIBDIR)/libsqlite3.so
+SQLITE_CCFLAGS := -shared -fPIC -O2 -DSQLITE_THREADSAFE=1
+SQLITE_LDLIBS  := -lpthread -ldl
+endif
+CC ?= cc
+
 # Language and strictness. -Sew turns warnings into hard errors.
 MODE      := -Mdelphi -Sh
 STRICT    := -vw -Sew
@@ -45,22 +60,32 @@ endif
 LIB_SRCS  := $(wildcard $(SRC)/*.pas)
 TEST_SRCS := $(wildcard $(TESTS)/*.pas)
 
-.PHONY: all test test-leak watch check release clean help
+.PHONY: all test test-leak watch check release clean help libsqlite
 
 all: $(BIN)/hildegard-helper-demo
+
+# Build the vendored SQLite shared library; fetches the amalgamation if missing.
+libsqlite: $(SQLITE_LIB)
+
+$(SQLITE_LIB): $(SQLITE_DIR)/sqlite3.c
+	@mkdir -p $(SQLITE_LIBDIR)
+	$(CC) $(SQLITE_CCFLAGS) -o $@ $< $(SQLITE_LDLIBS)
+
+$(SQLITE_DIR)/sqlite3.c:
+	@scripts/fetch-sqlite.sh
 
 $(BIN)/hildegard-helper-demo: $(EXAMPLES)/demo_harness.pas $(LIB_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
-test: $(BIN)/hildegard-helper-tests
+test: libsqlite $(BIN)/hildegard-helper-tests
 	$(BIN)/hildegard-helper-tests $(TESTARGS)
 
 $(BIN)/hildegard-helper-tests: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) -Fu$(SRC) -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
-test-leak: $(BIN)/hildegard-helper-tests-leak
+test-leak: libsqlite $(BIN)/hildegard-helper-tests-leak
 	HEAPTRC=$(HEAPTRC) $(BIN)/hildegard-helper-tests-leak $(TESTARGS)
 
 # Auto-rerun TARGET (default: test) whenever sources change.
@@ -94,5 +119,6 @@ help:
 	@echo "  make test-leak                run the suite under heaptrc (fails on leaks)"
 	@echo "  make watch [TARGET=test-leak] auto-rerun on source changes"
 	@echo "  make check                    all gates: test + test-leak"
+	@echo "  make libsqlite                build vendored SQLite shared library"
 	@echo "  make release                  build an optimized example"
 	@echo "  make clean                    remove build artifacts"
