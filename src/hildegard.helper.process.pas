@@ -25,6 +25,8 @@ type
     FCommand: string;
     FWorkDir: string;
     FTimeoutMs: QWord;
+    FShellExecutable: string;
+    FShellSwitch: string;
     FOnOutput: TOutputEvent;
     FExitCode: Integer;
     FTimedOut: Boolean;
@@ -35,9 +37,13 @@ type
   protected
     procedure Execute; override;
   public
-    { Created suspended; call Start to launch. ATimeoutMs = 0 means no limit. }
+    { Created suspended; call Start to launch. ATimeoutMs = 0 means no limit.
+      The shell and its command switch default to POSIX bash; callers may pass
+      another profile (e.g. a future cmd.exe) without changing this unit. }
     constructor Create(const AId, ACommand: string; ATimeoutMs: QWord = 0;
-      const AWorkDir: string = ''; AOnOutput: TOutputEvent = nil);
+      const AWorkDir: string = ''; AOnOutput: TOutputEvent = nil;
+      const AShellExecutable: string = '/bin/bash';
+      const AShellSwitch: string = '-c');
     procedure Cancel;
     property Id: string read FId;
     property ExitCode: Integer read FExitCode;
@@ -71,13 +77,16 @@ begin
 end;
 
 constructor TCommandRunner.Create(const AId, ACommand: string;
-  ATimeoutMs: QWord; const AWorkDir: string; AOnOutput: TOutputEvent);
+  ATimeoutMs: QWord; const AWorkDir: string; AOnOutput: TOutputEvent;
+  const AShellExecutable, AShellSwitch: string);
 begin
   inherited Create(True);
   FId := AId;
   FCommand := ACommand;
   FTimeoutMs := ATimeoutMs;
   FWorkDir := AWorkDir;
+  FShellExecutable := AShellExecutable;
+  FShellSwitch := AShellSwitch;
   FOnOutput := AOnOutput;
   FreeOnTerminate := False;
 end;
@@ -138,8 +147,8 @@ begin
   Launched := False;
   FProcess := TProcess.Create(nil);
   try
-    FProcess.Executable := '/bin/bash';
-    FProcess.Parameters.Add('-c');
+    FProcess.Executable := FShellExecutable;
+    FProcess.Parameters.Add(FShellSwitch);
     FProcess.Parameters.Add(FCommand);
     if FWorkDir <> '' then
       FProcess.CurrentDirectory := FWorkDir;

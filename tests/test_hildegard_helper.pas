@@ -40,6 +40,7 @@ type
     procedure TestReportsExitCode;
     procedure TestStderrIsMerged;
     procedure TestTimeoutKillsProcess;
+    procedure TestShellIsConfigurable;
   end;
 
   TAgentPoolTest = class(TTestCase)
@@ -189,6 +190,23 @@ begin
     AssertTrue('timed-out flag set', R.TimedOut);
     AssertEquals('timeout exit sentinel', 124, R.ExitCode);
     AssertTrue('did not wait the full sleep', GetTickCount64 - Started < 5000);
+  finally
+    R.Free;
+  end;
+end;
+
+procedure TCommandRunnerTest.TestShellIsConfigurable;
+var
+  R: TCommandRunner;
+begin
+  { printf '%s' marker only works if both the executable and the switch are
+    honoured; a hard-coded `bash -c` would fail. }
+  R := TCommandRunner.Create('t', 'marker', 0, '', FSink.OnOutput,
+    '/usr/bin/printf', '%s');
+  try
+    R.Start;
+    R.WaitFor;
+    AssertTrue('custom shell and switch used', Pos('marker', FSink.Stdout) > 0);
   finally
     R.Free;
   end;
