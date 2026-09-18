@@ -7,17 +7,20 @@ unit llm_fakes;
 interface
 
 uses
-  Classes, SysUtils, fpjson, hildegard.helper.llm;
+  Classes, SysUtils, Generics.Collections, fpjson, hildegard.helper.llm;
 
 type
-  { Replays a fixed list of raw chunks to the client. Records the last request
-    so tests can assert serialization at the boundary. }
+  { Replays canned SSE chunks to the client. Either a flat chunk list reused for
+    every call, or per-call responses consumed in order (the last one repeats).
+    Records the last request so tests can assert serialization. }
   TFakeTransport = class(TLLMTransport)
   private
     FChunks: TStringList;
+    FResponses: TObjectList<TStringList>;
   public
     StatusCode: Integer;
     FailNetwork: Boolean;
+    Calls: Integer;
     LastURL: string;
     LastBody: string;
     LastHeaders: TStringList;
@@ -25,6 +28,7 @@ type
     constructor Create;
     destructor Destroy; override;
     procedure AddChunk(const AData: RawByteString);
+    procedure AddResponse(const AChunks: array of RawByteString);
     function PostStream(const AURL: string; const ABody: string;
       const AHeaders: TStringList; AOnChunk: TLLMChunkEvent;
       out AStatusCode: Integer; out AError: string): Boolean; override;
@@ -52,14 +56,17 @@ constructor TFakeTransport.Create;
 begin
   inherited Create;
   FChunks := TStringList.Create;
+  FResponses := TObjectList<TStringList>.Create(True);
   LastHeaders := TStringList.Create;
   StatusCode := 200;
   FailNetwork := False;
+  Calls := 0;
 end;
 
 destructor TFakeTransport.Destroy;
 begin
   LastHeaders.Free;
+  FResponses.Free;
   FChunks.Free;
   inherited Destroy;
 end;
@@ -69,12 +76,25 @@ begin
   FChunks.Add(AData);
 end;
 
+procedure TFakeTransport.AddResponse(const AChunks: array of RawByteString);
+var
+  Response: TStringList;
+  I: Integer;
+begin
+  Response := TStringList.Create;
+  for I := Low(AChunks) to High(AChunks) do
+    Response.Add(AChunks[I]);
+  FResponses.Add(Response);
+end;
+
 function TFakeTransport.PostStream(const AURL: string; const ABody: string;
   const AHeaders: TStringList; AOnChunk: TLLMChunkEvent;
   out AStatusCode: Integer; out AError: string): Boolean;
 var
-  I: Integer;
+  I, Idx: Integer;
+  Chunks: TStringList;
 begin
+  Inc(Calls);
   LastURL := AURL;
   LastBody := ABody;
   LastHeaders.Assign(AHeaders);
@@ -85,10 +105,21 @@ begin
     AError := 'simulated network failure';
     Exit(False);
   end;
-  for I := 0 to FChunks.Count - 1 do
+
+  if FResponses.Count > 0 then
+  begin
+    Idx := Calls - 1;
+    if Idx >= FResponses.Count then
+      Idx := FResponses.Count - 1;
+    Chunks := FResponses[Idx];
+  end
+  else
+    Chunks := FChunks;
+
+  for I := 0 to Chunks.Count - 1 do
   begin
     if Assigned(AOnChunk) then
-      AOnChunk(FChunks[I]);
+      AOnChunk(RawByteString(Chunks[I]));
     if Assigned(AfterChunk) then
       AfterChunk(Self);
   end;
