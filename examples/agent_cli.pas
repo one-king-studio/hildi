@@ -95,10 +95,11 @@ var
 begin
   WriteLn;
   WriteLn(AnsiStyled('[approval needed]', AnsiYellow));
-  WriteLn('  command: ', ARequest.Command);
+  WriteLn('  command: ', ARequest.SegmentCommand);
   WriteLn('  reason:  ', ARequest.Reason);
   WriteLn('  policy:  ', ARequest.Decision.Reason);
-  Write('run it? [y]es once / [a]lways allow / [n]o: ');
+  Write('approve? [y] once / [s] always this exact / [a] always any args / ' +
+    '[n]o: ');
   Flush(Output);
   if EOF(Input) then
     Exit(aoDeny);
@@ -106,8 +107,10 @@ begin
   Line := LowerCase(Trim(Line));
   if (Line = 'y') or (Line = 'yes') then
     Result := aoAllowOnce
+  else if (Line = 's') or (Line = 'specific') then
+    Result := aoAllowSpecific
   else if (Line = 'a') or (Line = 'always') then
-    Result := aoAllowAlways
+    Result := aoAllowWildcard
   else
     Result := aoDeny;
 end;

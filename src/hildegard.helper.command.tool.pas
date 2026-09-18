@@ -71,19 +71,23 @@ type
     settings and audit; tests use an in-memory fake. }
   ICommandPolicySource = interface
     function LoadPolicy(out APolicy: TCommandPolicy; out AError: string): Boolean;
-    function SaveApproval(const AExecutable: string;
-      out AError: string): Boolean;
+    { Persists an allow pattern; see TCommandPolicy for pattern forms. }
+    function SaveApproval(const APattern: string; out AError: string): Boolean;
     procedure RecordAudit(const AEntry: TCommandAuditEntry);
   end;
 
   TApprovalRequest = record
-    Command: string;
-    Reason: string;        // the model's stated reason for the call
-    Plan: TCommandPlan;
-    Decision: TPolicyDecision;
+    Command: string;          // the whole command line
+    SegmentCommand: string;   // the individual simple command being approved
+    Segment: TCommandSegment;
+    Reason: string;           // the model's stated reason for the call
+    Decision: TSegmentDecision;
   end;
 
-  TApprovalOutcome = (aoAllowOnce, aoAllowAlways, aoDeny);
+  { aoAllowOnce: run only now. aoAllowSpecific: persist this exact command
+    (executable + arguments). aoAllowWildcard: persist the executable with any
+    arguments. aoDeny: refuse. }
+  TApprovalOutcome = (aoAllowOnce, aoAllowSpecific, aoAllowWildcard, aoDeny);
 
   { Called by the tool on the loop's (calling) thread. Return the outcome. }
   TApprovalHandler = function(const ARequest: TApprovalRequest):
@@ -105,7 +109,7 @@ type
     FExecutor: ICommandExecutor;
     FSeq: Integer;
     function MakeAudit(const ACommand, AReason: string;
-      const ADecision: TPolicyDecision; const AApproval: string;
+      const ADecision: TSegmentDecision; const AApproval: string;
       AExitCode: Integer; ATimedOut: Boolean;
       AOutputBytes: Integer): TCommandAuditEntry;
   public
@@ -131,7 +135,7 @@ type
     constructor Create(const APolicy: TCommandPolicy);
     function LoadPolicy(out APolicy: TCommandPolicy;
       out AError: string): Boolean;
-    function SaveApproval(const AExecutable: string;
+    function SaveApproval(const APattern: string;
       out AError: string): Boolean;
     procedure RecordAudit(const AEntry: TCommandAuditEntry);
   end;
@@ -145,7 +149,7 @@ type
     constructor Create(AStore: TSqliteStore);
     function LoadPolicy(out APolicy: TCommandPolicy;
       out AError: string): Boolean;
-    function SaveApproval(const AExecutable: string;
+    function SaveApproval(const APattern: string;
       out AError: string): Boolean;
     procedure RecordAudit(const AEntry: TCommandAuditEntry);
   end;
@@ -193,18 +197,34 @@ begin
     Result := D.AsInt64;
 end;
 
-function ApprovalExecutable(const APlan: TCommandPlan;
-  const ADecision: TPolicyDecision): string;
-var
-  I: Integer;
+procedure AppendAllow(var APolicy: TCommandPolicy; const APattern: string);
 begin
-  I := ADecision.SegmentIndex;
-  if (I < 0) or (I > High(APlan.Segments)) then
-    I := 0;
-  if Length(APlan.Segments) > 0 then
-    Result := APlan.Segments[I].Executable
-  else
-    Result := '';
+  SetLength(APolicy.Allow, Length(APolicy.Allow) + 1);
+  APolicy.Allow[High(APolicy.Allow)] := APattern;
+end;
+
+{ Summarises per-segment approval modes for the audit: the broadest wins. }
+function ApprovalSummary(const AModes: TCommandArgArray): string;
+var
+  Mode: string;
+  HasOnce, HasSpecific, HasWildcard, HasPolicy: Boolean;
+begin
+  HasOnce := False;
+  HasSpecific := False;
+  HasWildcard := False;
+  HasPolicy := False;
+  for Mode in AModes do
+  begin
+    if Mode = 'wildcard' then HasWildcard := True
+    else if Mode = 'specific' then HasSpecific := True
+    else if Mode = 'once' then HasOnce := True
+    else if Mode = 'policy' then HasPolicy := True;
+  end;
+  if HasWildcard then Result := 'wildcard'
+  else if HasSpecific then Result := 'specific'
+  else if HasOnce then Result := 'once'
+  else if HasPolicy then Result := 'policy'
+  else Result := 'policy';
 end;
 
 function EncodeArgArray(const AList: TCommandArgArray): string;
@@ -378,7 +398,7 @@ begin
 end;
 
 function TCommandTool.MakeAudit(const ACommand, AReason: string;
-  const ADecision: TPolicyDecision; const AApproval: string;
+  const ADecision: TSegmentDecision; const AApproval: string;
   AExitCode: Integer; ATimedOut: Boolean;
   AOutputBytes: Integer): TCommandAuditEntry;
 begin
@@ -423,12 +443,15 @@ var
   TimeoutMs: QWord;
   Policy: TCommandPolicy;
   Plan: TCommandPlan;
-  Decision: TPolicyDecision;
+  SD: TSegmentDecision;
+  Modes: TCommandArgArray;
   Outcome: TApprovalOutcome;
   Request: TApprovalRequest;
   Execution: TCommandExecution;
   Audit: TCommandAuditEntry;
   Truncated: Boolean;
+  I: Integer;
+  Pattern: string;
 begin
   AResult := '';
   AError := '';
@@ -474,59 +497,113 @@ begin
       end;
 
       Plan := ParseCommand(Command, FConfig.Shell.Syntax);
-      Decision := ClassifyCommand(Plan, Policy);
-
-      if Decision.Decision = cdDeny then
+      if (Plan.ParseError <> '') or (Length(Plan.Segments) = 0) then
       begin
-        Audit := MakeAudit(Command, Reason, Decision, 'denied', 0, False, 0);
+        SD := Default(TSegmentDecision);
+        SD.SegmentIndex := -1;
+        SD.Decision := cdAsk;
+        if Plan.ParseError <> '' then
+          SD.Reason := 'could not parse command: ' + Plan.ParseError
+        else
+          SD.Reason := 'empty command';
+        Audit := MakeAudit(Command, Reason, SD, 'denied', 0, False, 0);
         FSource.RecordAudit(Audit);
-        AError := 'denied by policy: ' + Decision.Reason;
+        AError := SD.Reason;
         Exit(False);
       end;
 
-      Approval := 'policy';
-      if Decision.Decision = cdAsk then
+      { Never prompt if any segment is denied: refuse the whole command. }
+      for I := 0 to High(Plan.Segments) do
       begin
+        SD := ClassifySegment(Plan, I, Policy);
+        if SD.Decision = cdDeny then
+        begin
+          Audit := MakeAudit(Command, Reason, SD, 'denied', 0, False, 0);
+          FSource.RecordAudit(Audit);
+          AError := 'denied by policy: ' + SD.Reason;
+          Exit(False);
+        end;
+      end;
+
+      { Evaluate each segment separately and approve only the ones the policy
+        asks about. Persisting an approval updates the in-run policy, so a
+        wildcard covers later matching segments without another prompt. }
+      Modes := nil;
+      for I := 0 to High(Plan.Segments) do
+      begin
+        SD := ClassifySegment(Plan, I, Policy);
+        if SD.Decision = cdAllow then
+        begin
+          SetLength(Modes, Length(Modes) + 1);
+          Modes[High(Modes)] := 'policy';
+          Continue;
+        end;
+
         Outcome := aoDeny;
         if Assigned(FApprover) then
         begin
           Request := Default(TApprovalRequest);
           Request.Command := Command;
+          Request.SegmentCommand := Plan.Segments[I].Text;
+          Request.Segment := Plan.Segments[I];
           Request.Reason := Reason;
-          Request.Plan := Plan;
-          Request.Decision := Decision;
+          Request.Decision := SD;
           Outcome := FApprover(Request);
         end;
+
         case Outcome of
           aoAllowOnce:
-            Approval := 'once';
-          aoAllowAlways:
             begin
-              Approval := 'always';
-              if not FSource.SaveApproval(ApprovalExecutable(Plan, Decision),
-                SErr) then
+              SetLength(Modes, Length(Modes) + 1);
+              Modes[High(Modes)] := 'once';
+            end;
+          aoAllowSpecific:
+            begin
+              Pattern := Plan.Segments[I].Text;
+              if not FSource.SaveApproval(Pattern, SErr) then
               begin
                 AError := 'could not persist approval: ' + SErr;
                 Exit(False);
               end;
+              AppendAllow(Policy, Pattern);
+              SetLength(Modes, Length(Modes) + 1);
+              Modes[High(Modes)] := 'specific';
+            end;
+          aoAllowWildcard:
+            begin
+              Pattern := ExtractFileName(Plan.Segments[I].Executable);
+              if Pattern = '' then
+                Pattern := Plan.Segments[I].Executable;
+              Pattern := Pattern + ' *';
+              if not FSource.SaveApproval(Pattern, SErr) then
+              begin
+                AError := 'could not persist approval: ' + SErr;
+                Exit(False);
+              end;
+              AppendAllow(Policy, Pattern);
+              SetLength(Modes, Length(Modes) + 1);
+              Modes[High(Modes)] := 'wildcard';
             end;
           aoDeny:
             begin
-              Audit := MakeAudit(Command, Reason, Decision, 'denied', 0, False, 0);
+              Audit := MakeAudit(Command, Reason, SD, 'denied', 0, False, 0);
               FSource.RecordAudit(Audit);
-              AError := 'denied by operator: ' + Decision.Reason;
+              AError := 'denied by operator: ' + Plan.Segments[I].Text;
               Exit(False);
             end;
         end;
       end;
+      Approval := ApprovalSummary(Modes);
 
+      SD := Default(TSegmentDecision);
+      SD.Decision := cdAllow;
       EffectiveCwd := Cwd;
       if EffectiveCwd = '' then
         EffectiveCwd := FConfig.DefaultCwd;
       if not FExecutor.Execute(FConfig.Shell, Command, EffectiveCwd, TimeoutMs,
         Execution) then
       begin
-        Audit := MakeAudit(Command, Reason, Decision, Approval, 0, False, 0);
+        Audit := MakeAudit(Command, Reason, SD, Approval, 0, False, 0);
         FSource.RecordAudit(Audit);
         AError := 'failed to execute: ' + Execution.Error;
         Exit(False);
@@ -542,7 +619,7 @@ begin
         AResult := AResult + LineEnding + '[output truncated at ' +
           IntToStr(FConfig.MaxOutputBytes) + ' bytes]';
 
-      Audit := MakeAudit(Command, Reason, Decision, Approval,
+      Audit := MakeAudit(Command, Reason, SD, Approval,
         Execution.ExitCode, Execution.TimedOut, Length(Execution.Output));
       FSource.RecordAudit(Audit);
       Result := True;
@@ -583,19 +660,19 @@ begin
   Result := True;
 end;
 
-function TMemoryCommandPolicySource.SaveApproval(const AExecutable: string;
+function TMemoryCommandPolicySource.SaveApproval(const APattern: string;
   out AError: string): Boolean;
 var
   I: Integer;
 begin
   for I := 0 to High(FApproved) do
-    if FApproved[I] = AExecutable then
+    if FApproved[I] = APattern then
     begin
       AError := '';
       Exit(True);
     end;
   SetLength(FApproved, Length(FApproved) + 1);
-  FApproved[High(FApproved)] := AExecutable;
+  FApproved[High(FApproved)] := APattern;
   AError := '';
   Result := True;
 end;
@@ -688,7 +765,7 @@ begin
   Result := True;
 end;
 
-function TStoreCommandPolicySource.SaveApproval(const AExecutable: string;
+function TStoreCommandPolicySource.SaveApproval(const APattern: string;
   out AError: string): Boolean;
 var
   Approved: TCommandArgArray;
@@ -699,10 +776,10 @@ begin
   if not LoadArraySetting(FStore, SettingPolicyApproved, Approved, AError) then
     Exit(False);
   for I := 0 to High(Approved) do
-    if Approved[I] = AExecutable then
+    if Approved[I] = APattern then
       Exit(True);
   SetLength(Approved, Length(Approved) + 1);
-  Approved[High(Approved)] := AExecutable;
+  Approved[High(Approved)] := APattern;
   if not FStore.SetSetting(SettingPolicyApproved, EncodeArgArray(Approved),
     StoreError) then
   begin

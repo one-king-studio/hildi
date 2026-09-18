@@ -51,12 +51,15 @@ type
     function AuditCount: Integer;
   end;
 
-  { Returns a scripted approval outcome and captures the request. }
+  { Returns a scripted approval outcome and captures the request(s). }
   TFakeApprover = class
   public
     Outcome: TApprovalOutcome;
     Calls: Integer;
     LastRequest: TApprovalRequest;
+    SegmentCommands: TStringList;
+    constructor Create;
+    destructor Destroy; override;
     function Approve(const ARequest: TApprovalRequest): TApprovalOutcome;
   end;
 
@@ -84,7 +87,10 @@ type
     procedure TestDenyDoesNotExecuteAndFails;
     procedure TestAskWithNoApproverDenies;
     procedure TestAskAllowOnceExecutesWithoutPersisting;
-    procedure TestAskAllowAlwaysExecutesAndPersists;
+    procedure TestAskAllowWildcardExecutesAndPersists;
+    procedure TestAskAllowSpecificPersistsExact;
+    procedure TestCompoundCommandApprovedPerSegment;
+    procedure TestWildcardApprovalCoversLaterSegments;
     procedure TestAskDenyDoesNotExecute;
     procedure TestReasonPassedToApprover;
     procedure TestReasonRecordedInAudit;
@@ -200,10 +206,23 @@ end;
 
 { TFakeApprover }
 
+constructor TFakeApprover.Create;
+begin
+  inherited Create;
+  SegmentCommands := TStringList.Create;
+end;
+
+destructor TFakeApprover.Destroy;
+begin
+  SegmentCommands.Free;
+  inherited Destroy;
+end;
+
 function TFakeApprover.Approve(const ARequest: TApprovalRequest): TApprovalOutcome;
 begin
   Inc(Calls);
   LastRequest := ARequest;
+  SegmentCommands.Add(ARequest.SegmentCommand);
   Result := Outcome;
 end;
 
@@ -413,7 +432,7 @@ begin
   end;
 end;
 
-procedure TCommandToolTest.TestAskAllowAlwaysExecutesAndPersists;
+procedure TCommandToolTest.TestAskAllowWildcardExecutesAndPersists;
 var
   Tool: TCommandTool;
   Approver: TFakeApprover;
@@ -422,13 +441,91 @@ begin
   FSource.Policy := MakePolicy(['other'], [], [], False);
   Approver := TFakeApprover.Create;
   try
-    Approver.Outcome := aoAllowAlways;
+    Approver.Outcome := aoAllowWildcard;
     Tool := BuildTool(Approver.Approve, 0);
     try
-      AssertTrue('ok', Tool.Run('{"command":"ls","reason":"r"}', R, E));
+      AssertTrue('ok', Tool.Run('{"command":"ls -la","reason":"r"}', R, E));
       AssertEquals('executed', 1, FExecutor.Calls);
       AssertEquals('persisted once', 1, FSource.Approvals.Count);
-      AssertEquals('persisted executable', 'ls', FSource.Approvals[0]);
+      AssertEquals('persisted wildcard', 'ls *', FSource.Approvals[0]);
+    finally
+      Tool.Free;
+    end;
+  finally
+    Approver.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestAskAllowSpecificPersistsExact;
+var
+  Tool: TCommandTool;
+  Approver: TFakeApprover;
+  R, E: string;
+begin
+  FSource.Policy := MakePolicy(['other'], [], [], False);
+  Approver := TFakeApprover.Create;
+  try
+    Approver.Outcome := aoAllowSpecific;
+    Tool := BuildTool(Approver.Approve, 0);
+    try
+      AssertTrue('ok', Tool.Run(
+        '{"command":"cat /etc/os-release","reason":"r"}', R, E));
+      AssertEquals('executed', 1, FExecutor.Calls);
+      AssertEquals('persisted exact', 'cat /etc/os-release',
+        FSource.Approvals[0]);
+    finally
+      Tool.Free;
+    end;
+  finally
+    Approver.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestCompoundCommandApprovedPerSegment;
+var
+  Tool: TCommandTool;
+  Approver: TFakeApprover;
+  R, E: string;
+begin
+  FSource.Policy := MakePolicy([], [], [], False);
+  Approver := TFakeApprover.Create;
+  try
+    Approver.Outcome := aoAllowOnce;
+    Tool := BuildTool(Approver.Approve, 0);
+    try
+      AssertTrue('ok', Tool.Run(
+        '{"command":"cat /etc/os-release && uname -a","reason":"r"}', R, E));
+      AssertEquals('asked per segment', 2, Approver.Calls);
+      AssertEquals('first segment', 'cat /etc/os-release',
+        Approver.SegmentCommands[0]);
+      AssertEquals('second segment', 'uname -a',
+        Approver.SegmentCommands[1]);
+      AssertEquals('executed whole command once', 1, FExecutor.Calls);
+      AssertEquals('original command executed',
+        'cat /etc/os-release && uname -a', FExecutor.LastCommand);
+    finally
+      Tool.Free;
+    end;
+  finally
+    Approver.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestWildcardApprovalCoversLaterSegments;
+var
+  Tool: TCommandTool;
+  Approver: TFakeApprover;
+  R, E: string;
+begin
+  FSource.Policy := MakePolicy(['other'], [], [], False);
+  Approver := TFakeApprover.Create;
+  try
+    Approver.Outcome := aoAllowWildcard;
+    Tool := BuildTool(Approver.Approve, 0);
+    try
+      AssertTrue('ok', Tool.Run('{"command":"cat a && cat b","reason":"r"}',
+        R, E));
+      AssertEquals('asked once', 1, Approver.Calls);
     finally
       Tool.Free;
     end;
