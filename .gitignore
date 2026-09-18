@@ -1,0 +1,21 @@
+# Build output
+/build/
+
+# FPC compiler artifacts (in case units are built in-tree)
+*.o
+*.ppu
+*.a
+*.rsj
+*.or
+*.res
+*.compiled
+
+# Lazarus / IDE
+backup/
+*.lps
+*.lpi.local
+
+# Editors / OS
+.DS_Store
+*.swp
+*~
