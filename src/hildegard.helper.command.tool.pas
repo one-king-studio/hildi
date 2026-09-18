@@ -119,6 +119,23 @@ type
       out AResult: string; out AError: string): Boolean;
   end;
 
+  { Session-only source for when no store is available. It never persists:
+    "allow always" lasts for the process lifetime and audits are discarded. The
+    intended use is DefaultCommandPolicy (ask everything, deny nothing), so the
+    shell tool is enabled but every command is approved by hand. }
+  TMemoryCommandPolicySource = class(TInterfacedObject, ICommandPolicySource)
+  private
+    FPolicy: TCommandPolicy;
+    FApproved: TCommandArgArray;
+  public
+    constructor Create(const APolicy: TCommandPolicy);
+    function LoadPolicy(out APolicy: TCommandPolicy;
+      out AError: string): Boolean;
+    function SaveApproval(const AExecutable: string;
+      out AError: string): Boolean;
+    procedure RecordAudit(const AEntry: TCommandAuditEntry);
+  end;
+
   { Reuses the existing requests table for audit (Kind='command'); policy lives
     in settings. The store is opened by the owner; this source never opens it. }
   TStoreCommandPolicySource = class(TInterfacedObject, ICommandPolicySource)
@@ -543,6 +560,51 @@ begin
 end;
 
 { --- TStoreCommandPolicySource ------------------------------------------ }
+
+constructor TMemoryCommandPolicySource.Create(const APolicy: TCommandPolicy);
+begin
+  inherited Create;
+  FPolicy := APolicy;
+  FApproved := nil;
+end;
+
+function TMemoryCommandPolicySource.LoadPolicy(out APolicy: TCommandPolicy;
+  out AError: string): Boolean;
+var
+  I: Integer;
+begin
+  APolicy := FPolicy;
+  for I := 0 to High(FApproved) do
+  begin
+    SetLength(APolicy.Allow, Length(APolicy.Allow) + 1);
+    APolicy.Allow[High(APolicy.Allow)] := FApproved[I];
+  end;
+  AError := '';
+  Result := True;
+end;
+
+function TMemoryCommandPolicySource.SaveApproval(const AExecutable: string;
+  out AError: string): Boolean;
+var
+  I: Integer;
+begin
+  for I := 0 to High(FApproved) do
+    if FApproved[I] = AExecutable then
+    begin
+      AError := '';
+      Exit(True);
+    end;
+  SetLength(FApproved, Length(FApproved) + 1);
+  FApproved[High(FApproved)] := AExecutable;
+  AError := '';
+  Result := True;
+end;
+
+procedure TMemoryCommandPolicySource.RecordAudit(
+  const AEntry: TCommandAuditEntry);
+begin
+  { No sink without a store; audit is best-effort. }
+end;
 
 constructor TStoreCommandPolicySource.Create(AStore: TSqliteStore);
 begin

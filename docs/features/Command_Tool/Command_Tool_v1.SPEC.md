@@ -37,6 +37,10 @@ The profile is a value, so a future Windows profile is additive.
 - [ ] Map timeout and cancellation to the existing 124/130 conventions.
 - [ ] Record an audit entry for every decision/outcome.
 - [ ] Never raise; all failures become error tool results.
+- [ ] When the store is unavailable, the tool is still registered using
+      `TMemoryCommandPolicySource` with `DefaultCommandPolicy` (ask everything,
+      deny nothing); "allow always" lasts for the session only. The tool is
+      never silently disabled.
 
 ### Non-Functional
 
@@ -152,10 +156,24 @@ const
   DefaultMaxOutputBytes = 32768;
 ```
 
-### Store-backed source (same unit)
+### Policy sources (same unit)
 
 ```pascal
 type
+  { Session-only fallback for when no store is available. Never persists:
+    "allow always" lasts for the process, audits are discarded. Intended for
+    DefaultCommandPolicy (ask everything, deny nothing), so the tool stays
+    enabled but every command is approved by hand. }
+  TMemoryCommandPolicySource = class(TInterfacedObject, ICommandPolicySource)
+  public
+    constructor Create(const APolicy: TCommandPolicy);
+    function LoadPolicy(out APolicy: TCommandPolicy;
+      out AError: string): Boolean;
+    function SaveApproval(const AExecutable: string;
+      out AError: string): Boolean;
+    procedure RecordAudit(const AEntry: TCommandAuditEntry);
+  end;
+
   { Reuses the existing requests table for audit (Kind='command'); policy lives
     in settings. The store is opened by the owner; this source never opens it. }
   TStoreCommandPolicySource = class(TInterfacedObject, ICommandPolicySource)
@@ -342,6 +360,8 @@ here.
       `{ $IFDEF }`-gated or using the existing store test fixture): sets policy
       settings, loads them back, saves an approval, writes an audit row, and
       queries it.
+- [ ] `TestMemoryPolicySourceAsksThenRemembers`: the fallback asks by default,
+      remembers an approval for the session, and discards audits safely.
 - [ ] `TestRoundTripAgainstFakeProvider`: the model calls `run_command`, the
       fake executor returns output, and the loop feeds the result back (uses the
       existing LLM test fakes).

@@ -97,6 +97,7 @@ type
     procedure TestStoreCommandPolicySourceRoundTrip;
     procedure TestRoundTripAgainstFakeProvider;
     procedure TestProcessExecutorRunsCommand;
+    procedure TestMemoryPolicySourceAsksThenRemembers;
   end;
 
 implementation
@@ -716,6 +717,27 @@ begin
   AssertEquals('exit code', 0, ExecResult.ExitCode);
   AssertTrue('output captured', Pos('hello', ExecResult.Output) > 0);
   AssertFalse('not timed out', ExecResult.TimedOut);
+end;
+
+procedure TCommandToolTest.TestMemoryPolicySourceAsksThenRemembers;
+var
+  Src: ICommandPolicySource;
+  Pol: TCommandPolicy;
+  PErr: string;
+  Entry: TCommandAuditEntry;
+begin
+  Src := TMemoryCommandPolicySource.Create(DefaultCommandPolicy);
+  AssertTrue('load', Src.LoadPolicy(Pol, PErr));
+  AssertEquals('asks first', Ord(cdAsk),
+    Ord(ClassifyCommand(ParseCommand('ls', ssPosix), Pol).Decision));
+
+  AssertTrue('approve', Src.SaveApproval('ls', PErr));
+  AssertTrue('reload', Src.LoadPolicy(Pol, PErr));
+  AssertEquals('remembers', Ord(cdAllow),
+    Ord(ClassifyCommand(ParseCommand('ls', ssPosix), Pol).Decision));
+
+  Entry := Default(TCommandAuditEntry);
+  Src.RecordAudit(Entry);   // no sink; must not raise
 end;
 
 initialization

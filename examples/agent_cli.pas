@@ -225,27 +225,29 @@ begin
   StoreConfig.BusyTimeoutMs := 5000;
   SqliteStore := TSqliteStore.Create(StoreConfig);
   if SqliteStore.Open(StoreErr) then
-  begin
-    StoreSource := TStoreCommandPolicySource.Create(SqliteStore);
-    if Interactive then
-    begin
-      Approver := TConsoleApprover.Create;
-      ApproveHandler := Approver.Approve;
-    end
-    else
-      ApproveHandler := nil;
-    ToolConfig := Default(TCommandToolConfig);
-    ToolConfig.Shell := DefaultShellProfile;
-    CommandTool := TCommandTool.Create(ToolConfig, StoreSource, ApproveHandler);
-    CommandTool.Register(Tools);
-  end
+    StoreSource := TStoreCommandPolicySource.Create(SqliteStore)
   else
   begin
-    WriteLn(AnsiStyled('warning: shell tool disabled: ' + StoreErr.Message,
-      AnsiYellow));
+    { No store: keep the shell tool, but with a session-only ask-everything
+      policy, so nothing runs without an explicit approval. }
+    WriteLn(AnsiStyled('warning: no store: shell policy is session-only and ' +
+      'asks for every command (' + StoreErr.Message + ')', AnsiYellow));
     SqliteStore.Free;
     SqliteStore := nil;
+    StoreSource := TMemoryCommandPolicySource.Create(DefaultCommandPolicy);
   end;
+
+  if Interactive then
+  begin
+    Approver := TConsoleApprover.Create;
+    ApproveHandler := Approver.Approve;
+  end
+  else
+    ApproveHandler := nil;
+  ToolConfig := Default(TCommandToolConfig);
+  ToolConfig.Shell := DefaultShellProfile;
+  CommandTool := TCommandTool.Create(ToolConfig, StoreSource, ApproveHandler);
+  CommandTool.Register(Tools);
 
   Loop := TAgentLoop.Create(Client, Store, Tools, AgentConfig);
 

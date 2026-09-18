@@ -160,9 +160,10 @@ HANDOFF.md                          (unit map, state)
   instance.
 - Fail closed everywhere: any ambiguity or error path denies execution.
 - Record any spec divergence here with the reason.
-- Deviations: the CLI enables the shell tool only when the SQLite store opens,
-  using `HILDEGARD_STORE_PATH` (default `~/.hildegard-helper/store.db`); without
-  a store the agent keeps its read-only tools. Test doubles derive from
-  `TNoRefCountObject` so the test owns their lifetime. Added
-  `TestProcessExecutorRunsCommand` to cover the real executor (the rest use
-  fakes).
+- Deviations: the CLI uses `HILDEGARD_STORE_PATH` (default
+  `~/.hildegard-helper/store.db`); if the store opens it persists policy and
+  audit, otherwise the tool is still registered with
+  `TMemoryCommandPolicySource` and `DefaultCommandPolicy` (ask everything,
+  session-only approvals). Test doubles derive from `TNoRefCountObject` so the
+  test owns their lifetime. Added `TestProcessExecutorRunsCommand` to cover the
+  real executor and `TestMemoryPolicySourceAsksThenRemembers` for the fallback.
