@@ -80,6 +80,12 @@ $(BIN)/hildegard-helper-store-demo: $(EXAMPLES)/store_demo.pas $(LIB_SRCS) $(SQL
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
+agent-cli: $(BIN)/hildegard-helper-agent-cli
+
+$(BIN)/hildegard-helper-agent-cli: $(EXAMPLES)/agent_cli.pas $(LIB_SRCS)
+	@mkdir -p $(BIN) $(DBGUNITS)
+	$(FPC) $(DEBUG) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+
 $(BIN)/hildegard-helper-demo: $(EXAMPLES)/demo_harness.pas $(LIB_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
