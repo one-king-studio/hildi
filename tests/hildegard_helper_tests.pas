@@ -11,7 +11,7 @@ program hildegard_helper_tests;
 uses
   {$ifdef unix}cthreads,{$endif}   // must come first on Unix
   SysUtils, fpcunit, testregistry, consoletestrunner,
-  test_hildegard_helper, test_store;
+  test_hildegard_helper, test_store, test_llm;
 
 var
   Runner: TTestRunner;
