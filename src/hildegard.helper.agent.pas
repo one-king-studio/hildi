@@ -32,6 +32,17 @@ type
   TToolHandler = function(const AArgumentsJson: string;
     out AResult: string; out AError: string): Boolean of object;
 
+  TToolCallEvent = procedure(const AId, AName, AArguments: string) of object;
+  TToolResultEvent = procedure(const AId, AName, AResult: string;
+    AOk: Boolean) of object;
+
+  TAgentEvents = record
+    OnText: TLLMTextEvent;
+    OnReasoning: TLLMReasoningEvent;
+    OnToolCall: TToolCallEvent;
+    OnToolResult: TToolResultEvent;
+  end;
+
   TRegisteredTool = record
     Spec: TToolSpec;
     Handler: TToolHandler;
@@ -61,13 +72,17 @@ type
     FConfig: TAgentConfig;
     function BuildRequest: TChatRequest;
     procedure ExecuteToolCalls(const ACalls: TChatToolCallArray;
-      out AAllOk: Boolean);
+      const AEvents: TAgentEvents; out AAllOk: Boolean);
     function FinishError(const AResult: TChatResult): TLLMError;
+    function DoSend(const AUserText: string; const AEvents: TAgentEvents;
+      out AAnswer: string; out AError: TLLMError): Boolean;
   public
     constructor Create(AClient: TLLMClient; AStore: IConversationStore;
       ATools: TToolRegistry; const AConfig: TAgentConfig);
     function Send(const AUserText: string; AOnText: TLLMTextEvent;
-      out AAnswer: string; out AError: TLLMError): Boolean;
+      out AAnswer: string; out AError: TLLMError): Boolean; overload;
+    function Send(const AUserText: string; const AEvents: TAgentEvents;
+      out AAnswer: string; out AError: TLLMError): Boolean; overload;
   end;
 
 procedure RegisterDefaultTools(ATools: TToolRegistry);
@@ -215,7 +230,7 @@ begin
 end;
 
 procedure TAgentLoop.ExecuteToolCalls(const ACalls: TChatToolCallArray;
-  out AAllOk: Boolean);
+  const AEvents: TAgentEvents; out AAllOk: Boolean);
 var
   I: Integer;
   Tool: TRegisteredTool;
@@ -226,12 +241,15 @@ begin
   AAllOk := True;
   for I := 0 to High(ACalls) do
   begin
+    if Assigned(AEvents.OnToolCall) then
+      AEvents.OnToolCall(ACalls[I].Id, ACalls[I].Name, ACalls[I].Arguments);
+
     ResultText := '';
+    HandlerOk := False;
     if (FTools = nil) or not FTools.Find(ACalls[I].Name, Tool) then
       ResultText := 'error: unknown tool "' + ACalls[I].Name + '"'
     else
     begin
-      HandlerOk := False;
       HandlerError := '';
       try
         HandlerOk := Tool.Handler(ACalls[I].Arguments, ResultText, HandlerError);
@@ -243,12 +261,14 @@ begin
         end;
       end;
       if not HandlerOk then
-      begin
         ResultText := 'error: tool "' + ACalls[I].Name + '" failed: ' +
           HandlerError;
-        AAllOk := False;
-      end;
     end;
+    if not HandlerOk then
+      AAllOk := False;
+
+    if Assigned(AEvents.OnToolResult) then
+      AEvents.OnToolResult(ACalls[I].Id, ACalls[I].Name, ResultText, HandlerOk);
 
     Msg := Default(TChatMessage);
     Msg.Role := crTool;
@@ -272,6 +292,22 @@ begin
 end;
 
 function TAgentLoop.Send(const AUserText: string; AOnText: TLLMTextEvent;
+  out AAnswer: string; out AError: TLLMError): Boolean;
+var
+  Events: TAgentEvents;
+begin
+  Events := Default(TAgentEvents);
+  Events.OnText := AOnText;
+  Result := DoSend(AUserText, Events, AAnswer, AError);
+end;
+
+function TAgentLoop.Send(const AUserText: string; const AEvents: TAgentEvents;
+  out AAnswer: string; out AError: TLLMError): Boolean;
+begin
+  Result := DoSend(AUserText, AEvents, AAnswer, AError);
+end;
+
+function TAgentLoop.DoSend(const AUserText: string; const AEvents: TAgentEvents;
   out AAnswer: string; out AError: TLLMError): Boolean;
 var
   Iterations: Integer;
@@ -300,7 +336,8 @@ begin
   while True do
   begin
     Request := BuildRequest;
-    if not FClient.Complete(Request, AOnText, ChatResult, AError) then
+    if not FClient.Complete(Request, AEvents.OnText, AEvents.OnReasoning,
+      ChatResult, AError) then
       Exit(False);
 
     FStore.Append(ChatResult.Message);
@@ -320,7 +357,7 @@ begin
           IntToStr(FConfig.MaxToolIterations));
         Exit(False);
       end;
-      ExecuteToolCalls(ChatResult.Message.ToolCalls, AllOk);
+      ExecuteToolCalls(ChatResult.Message.ToolCalls, AEvents, AllOk);
       Continue;
     end;
 

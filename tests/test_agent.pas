@@ -27,6 +27,21 @@ type
       out AResult: string; out AError: string): Boolean;
   end;
 
+  { Records every agent event as a line, to assert on ordering and content. }
+  TEventLog = class
+  private
+    FLog: TStringList;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    procedure OnText(const AText: string);
+    procedure OnReasoning(const AText: string);
+    procedure OnToolCall(const AId, AName, AArguments: string);
+    procedure OnToolResult(const AId, AName, AResult: string; AOk: Boolean);
+    function Has(const AFragment: string): Boolean;
+    function IndexOfFragment(const AFragment: string): Integer;
+  end;
+
   { Wraps an in-memory store and counts appends, to prove the loop uses the
     interface rather than a concrete store. }
   TCountingStore = class(TInterfacedObject, IConversationStore)
@@ -74,6 +89,12 @@ type
     procedure TestDefaultToolsRegistered;
     procedure TestGetSystemTimeReturnsParseableTime;
     procedure TestEmptyToolNameIsIgnored;
+    procedure TestReasoningForwardedThroughEvents;
+    procedure TestToolCallEventFiresWithNameAndArgs;
+    procedure TestToolResultEventFiresWithResult;
+    procedure TestToolResultEventReportsFailure;
+    procedure TestToolCallAndResultEventsAreInOrder;
+    procedure TestV1SendOverloadStillWorks;
   end;
 
 implementation
@@ -93,6 +114,56 @@ begin
   AResult := '';
   AError := 'boom';
   Result := False;
+end;
+
+{ TEventLog }
+
+constructor TEventLog.Create;
+begin
+  inherited Create;
+  FLog := TStringList.Create;
+end;
+
+destructor TEventLog.Destroy;
+begin
+  FLog.Free;
+  inherited Destroy;
+end;
+
+procedure TEventLog.OnText(const AText: string);
+begin
+  FLog.Add('text:' + AText);
+end;
+
+procedure TEventLog.OnReasoning(const AText: string);
+begin
+  FLog.Add('reason:' + AText);
+end;
+
+procedure TEventLog.OnToolCall(const AId, AName, AArguments: string);
+begin
+  FLog.Add('call:' + AId + ':' + AName + ':' + AArguments);
+end;
+
+procedure TEventLog.OnToolResult(const AId, AName, AResult: string;
+  AOk: Boolean);
+begin
+  FLog.Add('result:' + AId + ':' + BoolToStr(AOk, True) + ':' + AResult);
+end;
+
+function TEventLog.Has(const AFragment: string): Boolean;
+begin
+  Result := IndexOfFragment(AFragment) >= 0;
+end;
+
+function TEventLog.IndexOfFragment(const AFragment: string): Integer;
+var
+  I: Integer;
+begin
+  for I := 0 to FLog.Count - 1 do
+    if Pos(AFragment, FLog[I]) > 0 then
+      Exit(I);
+  Result := -1;
 end;
 
 function TFailTools.AlwaysRaise(const AArgumentsJson: string;
@@ -532,6 +603,137 @@ begin
   finally
     Tools.Free;
   end;
+end;
+
+procedure TAgentLoopTest.TestReasoningForwardedThroughEvents;
+var
+  Log: TEventLog;
+  Events: TAgentEvents;
+  Answer: string;
+  Err: TLLMError;
+begin
+  BuildLoop('', 8);
+  Log := TEventLog.Create;
+  try
+    FFake.AddResponse([ReasoningDelta('let me think'), TextDelta('answer'),
+      FinishFrame('stop'), DoneFrame]);
+    Events := Default(TAgentEvents);
+    Events.OnText := Log.OnText;
+    Events.OnReasoning := Log.OnReasoning;
+    AssertTrue('send ok', FLoop.Send('hi', Events, Answer, Err));
+    AssertTrue('reasoning event', Log.Has('reason:let me think'));
+    AssertTrue('text event', Log.Has('text:answer'));
+  finally
+    Log.Free;
+  end;
+end;
+
+procedure TAgentLoopTest.TestToolCallEventFiresWithNameAndArgs;
+var
+  Log: TEventLog;
+  Events: TAgentEvents;
+  Answer: string;
+  Err: TLLMError;
+begin
+  BuildLoop('', 8);
+  RegisterDefaultTools(FTools);
+  Log := TEventLog.Create;
+  try
+    FFake.AddResponse([ToolNameFrame(0, 'call_1', 'get_system_time'),
+      ToolArgsFrame(0, '{}'), FinishFrame('tool_calls'), DoneFrame]);
+    FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
+    Events := Default(TAgentEvents);
+    Events.OnToolCall := Log.OnToolCall;
+    Events.OnToolResult := Log.OnToolResult;
+    AssertTrue('send ok', FLoop.Send('time?', Events, Answer, Err));
+    AssertTrue('call event',
+      Log.Has('call:call_1:get_system_time:{}'));
+  finally
+    Log.Free;
+  end;
+end;
+
+procedure TAgentLoopTest.TestToolResultEventFiresWithResult;
+var
+  Log: TEventLog;
+  Events: TAgentEvents;
+  Answer: string;
+  Err: TLLMError;
+begin
+  BuildLoop('', 8);
+  RegisterDefaultTools(FTools);
+  Log := TEventLog.Create;
+  try
+    FFake.AddResponse([ToolNameFrame(0, 'call_1', 'get_system_time'),
+      ToolArgsFrame(0, '{}'), FinishFrame('tool_calls'), DoneFrame]);
+    FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
+    Events := Default(TAgentEvents);
+    Events.OnToolResult := Log.OnToolResult;
+    AssertTrue('send ok', FLoop.Send('time?', Events, Answer, Err));
+    AssertTrue('result event ok', Log.Has('result:call_1:True'));
+  finally
+    Log.Free;
+  end;
+end;
+
+procedure TAgentLoopTest.TestToolResultEventReportsFailure;
+var
+  Log: TEventLog;
+  Events: TAgentEvents;
+  Answer: string;
+  Err: TLLMError;
+begin
+  BuildLoop('', 8);
+  Log := TEventLog.Create;
+  try
+    FFake.AddResponse([ToolNameFrame(0, 'call_1', 'no_such_tool'),
+      ToolArgsFrame(0, '{}'), FinishFrame('tool_calls'), DoneFrame]);
+    FFake.AddResponse([TextDelta('recovered'), FinishFrame('stop'), DoneFrame]);
+    Events := Default(TAgentEvents);
+    Events.OnToolResult := Log.OnToolResult;
+    AssertTrue('send ok', FLoop.Send('go', Events, Answer, Err));
+    AssertTrue('result event failure', Log.Has('result:call_1:False'));
+  finally
+    Log.Free;
+  end;
+end;
+
+procedure TAgentLoopTest.TestToolCallAndResultEventsAreInOrder;
+var
+  Log: TEventLog;
+  Events: TAgentEvents;
+  Answer: string;
+  Err: TLLMError;
+  CallIdx, ResultIdx: Integer;
+begin
+  BuildLoop('', 8);
+  RegisterDefaultTools(FTools);
+  Log := TEventLog.Create;
+  try
+    FFake.AddResponse([ToolNameFrame(0, 'call_1', 'get_system_time'),
+      ToolArgsFrame(0, '{}'), FinishFrame('tool_calls'), DoneFrame]);
+    FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
+    Events := Default(TAgentEvents);
+    Events.OnToolCall := Log.OnToolCall;
+    Events.OnToolResult := Log.OnToolResult;
+    AssertTrue('send ok', FLoop.Send('time?', Events, Answer, Err));
+    CallIdx := Log.IndexOfFragment('call:call_1');
+    ResultIdx := Log.IndexOfFragment('result:call_1');
+    AssertTrue('call before result', (CallIdx >= 0) and (ResultIdx > CallIdx));
+  finally
+    Log.Free;
+  end;
+end;
+
+procedure TAgentLoopTest.TestV1SendOverloadStillWorks;
+var
+  Answer: string;
+  Err: TLLMError;
+begin
+  BuildLoop('', 8);
+  FFake.AddResponse([TextDelta('ok'), FinishFrame('stop'), DoneFrame]);
+  AssertTrue('v1 send', FLoop.Send('hi', nil, Answer, Err));
+  AssertEquals('answer', 'ok', Answer);
 end;
 
 initialization
