@@ -160,6 +160,10 @@ HANDOFF.md                          (unit map, state)
   instance.
 - Fail closed everywhere: any ambiguity or error path denies execution.
 - Record any spec divergence here with the reason.
+- **Revision (v1.1):** approval is per simple-command segment with outcomes
+  once / exact / wildcard / deny; wildcard (`executable *`) overrides granular
+  approvals and covers later matching segments in the same command. Persisted
+  patterns are argument-aware (per the policy v1.1 revision).
 - Deviations: the CLI uses `HILDEGARD_STORE_PATH` (default
   `~/.hildegard-helper/store.db`); if the store opens it persists policy and
   audit, otherwise the tool is still registered with

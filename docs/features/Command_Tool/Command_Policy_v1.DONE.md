@@ -118,3 +118,8 @@ tests/hildegard_helper_tests.pas   (add test unit to uses)
   `MatchMask` glob matcher (`*`/`?`, case-sensitive) lives in this unit instead
   of pulling a dependency. The SPEC's `MatchesMask` reference is descriptive, not
   binding.
+- **Revision (v1.1):** classification is now per segment
+  (`ClassifySegment`/`ClassifySegments`), allow/deny patterns may name arguments
+  (`cat /etc/os-release`, `cat *`), `TCommandPath` gained `IsRedirect`, and
+  redirection targets are always path-checked. Supersedes the original v1
+  classification; see the SPEC revision note. Tests: 32 in `TestCommandPolicy`.

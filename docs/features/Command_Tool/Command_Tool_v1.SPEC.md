@@ -15,6 +15,11 @@ source so the tool is testable without SQLite and without running processes.
 v1 is Unix-first: the default shell profile is `/bin/bash -c` with POSIX syntax.
 The profile is a value, so a future Windows profile is additive.
 
+> **Revision (v1.1):** approval is now requested per simple-command segment, with
+> outcomes once / exact / wildcard / deny. Persisted patterns are argument-aware
+> (see `Command_Policy_v1.SPEC.md`). `TApprovalOutcome.aoAllowAlways` became
+> `aoAllowSpecific` and `aoAllowWildcard`.
+
 ## Requirements
 
 ### Functional
@@ -27,10 +32,13 @@ The profile is a value, so a future Windows profile is additive.
 - [ ] Pass the reason into the approval request and into the audit record.
 - [ ] Parse the command with `Command.Policy` using the profile's syntax mode and
       classify it against the loaded policy.
-- [ ] On **deny**, do not execute; return an error tool result naming the reason.
-- [ ] On **ask**, consult the approval handler; with no handler, deny.
-- [ ] On **allow once**, execute without persisting; on **allow always**, persist
-      the executable to the approved list, then execute.
+- [ ] Classify each segment; if any segment is **deny**, do not execute and
+      return an error tool result naming that segment.
+- [ ] For each segment that is **ask**, consult the approval handler with that
+      segment; with no handler, deny. **allow once** proceeds without persisting;
+      **allow specific** persists the exact argv; **allow wildcard** persists
+      `<executable> *`. Persisting updates the in-run policy so a wildcard covers
+      later matching segments without another prompt.
 - [ ] Execute synchronously through an injectable executor that wraps
       `TCommandRunner`; collect combined stdout/stderr and the exit code.
 - [ ] Cap the output returned to the model with an explicit truncation marker.
@@ -103,8 +111,8 @@ type
     settings and audit; tests use an in-memory fake. }
   ICommandPolicySource = interface
     function LoadPolicy(out APolicy: TCommandPolicy; out AError: string): Boolean;
-    function SaveApproval(const AExecutable: string;
-      out AError: string): Boolean;
+    { Persists an allow pattern: an exact argv, or '<executable> *'. }
+    function SaveApproval(const APattern: string; out AError: string): Boolean;
     procedure RecordAudit(const AEntry: TCommandAuditEntry);
   end;
 
@@ -124,15 +132,19 @@ type
   end;
 
   TApprovalRequest = record
-    Command: string;
-    Reason: string;        // the model's stated reason for the call
-    Plan: TCommandPlan;
-    Decision: TPolicyDecision;
+    Command: string;          // the whole command line
+    SegmentCommand: string;   // the individual simple command being approved
+    Segment: TCommandSegment;
+    Reason: string;           // the model's stated reason for the call
+    Decision: TSegmentDecision;
   end;
 
-  TApprovalOutcome = (aoAllowOnce, aoAllowAlways, aoDeny);
+  { aoAllowOnce: run only now. aoAllowSpecific: persist this exact command.
+    aoAllowWildcard: persist the executable with any arguments. aoDeny: refuse. }
+  TApprovalOutcome = (aoAllowOnce, aoAllowSpecific, aoAllowWildcard, aoDeny);
 
-  { Called by the tool on the loop's (calling) thread. Return the outcome. }
+  { Called by the tool on the loop's (calling) thread, once per segment that
+    needs approval. Return the outcome. }
   TApprovalHandler = function(const ARequest: TApprovalRequest):
     TApprovalOutcome of object;
 
@@ -169,7 +181,7 @@ type
     constructor Create(const APolicy: TCommandPolicy);
     function LoadPolicy(out APolicy: TCommandPolicy;
       out AError: string): Boolean;
-    function SaveApproval(const AExecutable: string;
+    function SaveApproval(const APattern: string;
       out AError: string): Boolean;
     procedure RecordAudit(const AEntry: TCommandAuditEntry);
   end;
@@ -180,7 +192,7 @@ type
   public
     constructor Create(AStore: TSqliteStore);
     function LoadPolicy(out APolicy: TCommandPolicy; out AError: string): Boolean;
-    function SaveApproval(const AExecutable: string; out AError: string): Boolean;
+    function SaveApproval(const APattern: string; out AError: string): Boolean;
     procedure RecordAudit(const AEntry: TCommandAuditEntry);
   end;
 
@@ -280,12 +292,13 @@ tool itself is single-threaded on the loop's thread.
 2. `Run` parses arguments; missing/invalid `command` -> `False` with error. The
    shared contract has already guaranteed `reason` is present and non-empty.
 3. `LoadPolicy`; on error -> fail closed (`False`).
-4. `ParseCommand` + `ClassifyCommand`.
-5. Deny -> audit (with reason), return `False`. Ask -> approver (nil = deny),
-   passing the reason; persist if "always". Allow -> proceed.
-6. `ICommandExecutor.Execute` (joins the runner thread).
-7. Cap output, format result, audit (with reason), return `True`.
-8. Any exception is caught and converted to `False` with `AError`.
+4. `ParseCommand`; refuse parse errors and empty commands.
+5. Pre-scan segments: any deny -> audit, return `False`.
+6. For each segment: allow -> proceed; ask -> approver for that segment
+   (nil = deny), persisting the selected pattern and updating the in-run policy.
+7. `ICommandExecutor.Execute` the whole command line (joins the runner thread).
+8. Cap output, format result, audit (with reason), return `True`.
+9. Any exception is caught and converted to `False` with `AError`.
 
 ### Integration Patterns
 
@@ -338,7 +351,10 @@ here.
 - [ ] `TestDenyDoesNotExecuteAndFails`
 - [ ] `TestAskWithNoApproverDenies`
 - [ ] `TestAskAllowOnceExecutesWithoutPersisting`
-- [ ] `TestAskAllowAlwaysExecutesAndPersists`
+- [ ] `TestAskAllowWildcardExecutesAndPersists`
+- [ ] `TestAskAllowSpecificPersistsExact`
+- [ ] `TestCompoundCommandApprovedPerSegment`
+- [ ] `TestWildcardApprovalCoversLaterSegments`
 - [ ] `TestAskDenyDoesNotExecute`
 - [ ] `TestTimeoutReports124`
 - [ ] `TestOutputIsTruncatedWithMarker`

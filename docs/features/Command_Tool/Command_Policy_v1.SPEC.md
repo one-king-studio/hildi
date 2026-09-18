@@ -19,6 +19,12 @@ Validation Rules).
 v1 implements the POSIX syntax mode only. The `TShellSyntax` type reserves a
 `cmd.exe` mode so a future Windows profile is additive.
 
+> **Revision (v1.1):** classification is now per segment
+> (`ClassifySegment`/`ClassifySegments`), and allow/deny patterns may name
+> arguments (`cat /etc/os-release`, `cat *`), so approvals can be exact or
+> wildcard. `TCommandPath` gained `IsRedirect` so redirection targets are always
+> path-checked. See `Command_Tool_v1.SPEC.md` for the approval model.
+
 ## Requirements
 
 ### Functional
@@ -33,9 +39,15 @@ v1 implements the POSIX syntax mode only. The `TShellSyntax` type reserves a
 - [ ] Collect literal path-like tokens (arguments and redirection targets) and
       classify each as relative, absolute, home (`~`), or unresolved (contains an
       unexpanded variable or substitution).
-- [ ] Classify a plan against a policy using deny-first, then require every
-      segment's executable to match an allow pattern; otherwise **ask**.
-- [ ] Flag paths that resolve outside the configured allowed roots.
+- [ ] Classify each segment independently (`ClassifySegment`), and summarise the
+      plan (`ClassifyCommand`: deny if any deny, else ask if any ask, else allow).
+- [ ] Match allow/deny patterns against the executable and, when a pattern names
+      arguments, the argument list: `cat` (executable only, any args),
+      `cat /etc/os-release` (exact), `cat *` (executable, any args),
+      `git * main` (interleaved `*`).
+- [ ] Flag paths that resolve outside the configured allowed roots; redirection
+      targets are always checked, while an explicit argument pattern approves the
+      command's argument paths.
 - [ ] Treat interpreter/indirection commands as high-risk unless explicitly
       enabled.
 - [ ] Never return **allow** for an unparseable or empty command.
@@ -84,6 +96,7 @@ type
   TCommandPath = record
     Text: string;            // literal token as written
     Kind: TPathKind;
+    IsRedirect: Boolean;     // True when the path is a redirection target
   end;
 
   TCommandRedirectArray = array of TCommandRedirect;
@@ -124,12 +137,27 @@ type
     SegmentIndex: Integer;           // offending segment, or -1
   end;
 
+  { The decision for one simple-command segment. }
+  TSegmentDecision = record
+    SegmentIndex: Integer;
+    Decision: TCommandDecision;
+    Reason: string;
+  end;
+
+  TSegmentDecisionArray = array of TSegmentDecision;
+
 function DefaultCommandPolicy: TCommandPolicy;
 function ParseCommand(const ACommand: string;
   ASyntax: TShellSyntax = ssPosix): TCommandPlan;
+function ClassifySegment(const APlan: TCommandPlan; AIndex: Integer;
+  const APolicy: TCommandPolicy): TSegmentDecision;
+function ClassifySegments(const APlan: TCommandPlan;
+  const APolicy: TCommandPolicy): TSegmentDecisionArray;
 function ClassifyCommand(const APlan: TCommandPlan;
   const APolicy: TCommandPolicy): TPolicyDecision;
 function IsInterpreter(const AName: string): Boolean;
+{ Executable plus arguments, joined by spaces; not including redirections. }
+function SegmentText(const ASegment: TCommandSegment): string;
 ```
 
 ### Data Contracts
@@ -195,19 +223,22 @@ None. The unit is pure and emits nothing.
 - A token containing an unexpanded variable or substitution is `pkUnresolved`
   and can never satisfy a literal path check.
 
-### Classification Precedence
+### Classification Precedence (per segment)
 
-1. `ParseError <> ''` or zero segments -> **ask**.
-2. Any segment whose executable matches a `Deny` pattern -> **deny**.
-3. Any segment whose executable is an interpreter/indirection command and
+1. A `Deny` pattern matches the segment (any pattern form) -> **deny**.
+2. The segment is an interpreter/indirection command and
    `AllowInterpreters = False` -> **ask**.
-4. Any path that is `pkAbsolute`, `pkHome`, or a `pkRelative` `..` escape that is
-   not under an `AllowedRoots` entry -> **ask** (if `AllowedRoots` is empty,
-   absolute/home paths are **ask**, not allow).
-5. Every segment's executable matches an `Allow` pattern -> **allow**.
-6. Otherwise -> **ask**.
+3. A redirection target is `pkAbsolute`/`pkHome`/`pkRelative` with a `..` escape
+   and is not under an `AllowedRoots` entry -> **ask**.
+4. An **argument** allow pattern matches the segment (`cat /etc/os-release`,
+   `cat *`) -> **allow**; this approves the segment's argument paths.
+5. A non-redirect path is outside the allowed roots -> **ask**.
+6. An **executable-only** allow pattern matches the segment -> **allow**.
+7. Otherwise -> **ask**.
 
-`Deny` always takes precedence over `Allow`.
+`ClassifyCommand` summarises the per-segment decisions: **deny** if any segment
+denies, else **ask** if any segment asks, else **allow**. `ParseError <> ''` or
+zero segments is **ask**. `Deny` always takes precedence over `Allow`.
 
 ### Output Guarantees
 
@@ -259,6 +290,13 @@ This unit produces no `TLLMError` and no `TStoreError`; parse problems are data
 - [ ] `TestPathOutsideRootsAsks`
 - [ ] `TestPathInsideRootsAllowed`
 - [ ] `TestRelativeDotDotEscapeAsks`
+- [ ] `TestClassifySegmentsReturnsOnePerSegment`
+- [ ] `TestSegmentTextJoinsExecutableAndArgs`
+- [ ] `TestExactArgPatternAllowsOnlyThatArg`
+- [ ] `TestWildcardArgPatternAllowsAnyArgs`
+- [ ] `TestFullArgAllowBypassesArgPathCheck`
+- [ ] `TestRedirectPathStillCheckedWithFullArgAllow`
+- [ ] `TestDenyArgPatternMatches`
 - [ ] `TestNoLeaks` (enforced by `make test-leak`)
 
 ### Integration Tests

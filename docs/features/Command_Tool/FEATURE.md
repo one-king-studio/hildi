@@ -82,6 +82,9 @@ command parser/classifier, the policy decision, and the tool wiring.
   and which literal paths it touches, so approval is informed rather than blind.
 - As an **operator**, I want the agent to state a short reason for each tool call,
   so I can judge the request and read the audit log as intent, not just argv.
+- As an **operator**, I want to approve a command once, only for that exact
+  command, or for any arguments, so repeated safe commands stop nagging me while
+  changed arguments still ask.
 - As an **operator**, I want my policy and remembered approvals to survive
   restarts, so I configure once.
 - As an **operator**, I want a durable audit trail of what was attempted, allowed,
@@ -172,15 +175,25 @@ Policy
 
 Approval
 
-- [ ] When the decision is *ask*, the tool calls an injected approval handler with
-      the command, the parsed segments, the proposed decision, the policy reason,
-      and the agent's stated reason.
-- [ ] The approval handler may allow once, allow always (persisted), or deny;
-      the default with no handler available is deny.
+- [ ] Approval is requested **per simple-command segment**, not once for the
+      whole line: `cat /etc/os-release && uname -a` shows and decides those two
+      commands separately. The whole line is still executed as one command once
+      every segment is approved.
+- [ ] The approval handler may choose: allow this once, always allow this exact
+      command (executable plus arguments), always allow this executable with any
+      arguments, or deny. The default with no handler available is deny.
+- [ ] "Always allow any arguments" persists a wildcard pattern
+      (`<executable> *`) that covers all later use regardless of arguments.
+      "Always allow this exact command" persists the exact argv, so a different
+      argument needs a new approval.
+- [ ] A wildcard approval overrides granular approvals: once given, later
+      matching segments in the same command (and later commands) do not prompt.
+- [ ] Decisions are made from the parsed segments; a deny on any segment refuses
+      the whole command and nothing is executed.
 - [ ] In non-interactive mode (`-p`, piped stdin) with no handler, an *ask*
       decision is denied, never silently allowed.
-- [ ] A denied command returns a distinct error tool result naming the policy
-      reason; it is not executed.
+- [ ] A denied command returns a distinct error tool result naming the
+      offending segment and the policy reason; it is not executed.
 
 Store integration
 
@@ -297,9 +310,14 @@ Store integration
   report unresolvable paths instead of assuming safe; treat the allowed-roots
   check as a hint, not a guarantee.
 - **Approval fatigue.** Prompting on every novel command makes the tool unusable
-  and users click "always allow" reflexively. Mitigation: session and persisted
-  "allow always" scoped to the executable (not the full argument string), and a
-  small curated default allowlist for read-only commands.
+  and users click "always allow" reflexively. Mitigation: three approval scopes
+  (once, exact command, any arguments), per-segment prompts, and a small curated
+  default allowlist for read-only commands.
+- **The pattern language is a small DSL with sharp edges.** A single-word allow
+  pattern means "this executable, any arguments", so an exact approval of a
+  command with *no* arguments (for example `uname`) is indistinguishable from a
+  wildcard and effectively allows later arguments too. Mitigation: documented;
+  the common case (arguments present) behaves exactly as specified.
 - **Command output floods the context window.** Mitigation: a hard output cap
   with a truncation marker, and side-channel display of the rest in the
   transcript.
