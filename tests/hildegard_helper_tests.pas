@@ -12,7 +12,7 @@ uses
   {$ifdef unix}cthreads,{$endif}   // must come first on Unix
   SysUtils, fpcunit, testregistry, consoletestrunner,
   test_hildegard_helper, test_store, test_llm, test_agent, test_ansi, test_env,
-  test_cli, test_transcript;
+  test_cli, test_transcript, test_command_policy;
 
 var
   Runner: TTestRunner;

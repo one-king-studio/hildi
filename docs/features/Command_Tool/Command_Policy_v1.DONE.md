@@ -16,54 +16,54 @@ this can be built independently of the other components.
 
 ### Phase 1: Setup & Foundation
 
-- [ ] **Add** `tests/test_command_policy.pas` to the `uses` clause of
+- [x] **Add** `tests/test_command_policy.pas` to the `uses` clause of
       `tests/hildegard_helper_tests.pas`
-- [ ] **Create** `src/hildegard.helper.command.policy.pas` with the interface
+- [x] **Create** `src/hildegard.helper.command.policy.pas` with the interface
       types from the SPEC (no bodies)
-- [ ] **Create** `tests/test_command_policy.pas` with an empty `TTestCase`
+- [x] **Create** `tests/test_command_policy.pas` with an empty `TTestCase`
 
 ### Phase 2: Parser (TDD)
 
-- [ ] **Test**: `TestEmptyCommandAsks`
-- [ ] **Test**: `TestSingleCommandParsed`, `TestLeadingAssignmentSkipped`
-- [ ] **Test**: `TestSingleQuotesAndDoubleQuotesStripped`,
+- [x] **Test**: `TestEmptyCommandAsks`
+- [x] **Test**: `TestSingleCommandParsed`, `TestLeadingAssignmentSkipped`
+- [x] **Test**: `TestSingleQuotesAndDoubleQuotesStripped`,
       `TestEscapedOperatorIsNotOperator`
-- [ ] **Test**: `TestSemicolonSplitsSegments`, `TestAndOrPipeSplitSegments`,
+- [x] **Test**: `TestSemicolonSplitsSegments`, `TestAndOrPipeSplitSegments`,
       `TestBackgroundOperator`
-- [ ] **Test**: `TestExecutableWithPathKeepsTokenAndBasename`
-- [ ] **Test**: `TestRedirectionExtractedFromArgv`, `TestRedirectTargetIsPath`
-- [ ] **Test**: `TestUnbalancedQuoteAsks`
-- [ ] **Implement**: `ParseCommand` incrementally until all parser tests are
+- [x] **Test**: `TestExecutableWithPathKeepsTokenAndBasename`
+- [x] **Test**: `TestRedirectionExtractedFromArgv`, `TestRedirectTargetIsPath`
+- [x] **Test**: `TestUnbalancedQuoteAsks`
+- [x] **Implement**: `ParseCommand` incrementally until all parser tests are
       green (single scan, quote/escape state, segment operators)
-- [ ] **Test**: `TestUnresolvedVariablePathIsUnresolved`,
+- [x] **Test**: `TestUnresolvedVariablePathIsUnresolved`,
       `TestHomeAndAbsoluteAndRelativePathKinds`
-- [ ] **Implement**: literal path classification (`pkRelative`/`pkAbsolute`/
+- [x] **Implement**: literal path classification (`pkRelative`/`pkAbsolute`/
       `pkHome`/`pkUnresolved`)
 
 ### Phase 3: Classifier (TDD)
 
-- [ ] **Test**: `TestDenyBeatsAllow`, `TestDenyPatternMatchesBasename`,
+- [x] **Test**: `TestDenyBeatsAllow`, `TestDenyPatternMatchesBasename`,
       `TestGlobPatternMatches`
-- [ ] **Test**: `TestAllowWhenAllSegmentsAllowed`,
+- [x] **Test**: `TestAllowWhenAllSegmentsAllowed`,
       `TestAskWhenAnySegmentUnmatched`
-- [ ] **Test**: `TestInterpreterAsksUnlessAcknowledged`,
+- [x] **Test**: `TestInterpreterAsksUnlessAcknowledged`,
       `TestInterpreterAllowedWhenAcknowledgedAndAllowed`
-- [ ] **Test**: `TestPathOutsideRootsAsks`, `TestPathInsideRootsAllowed`,
+- [x] **Test**: `TestPathOutsideRootsAsks`, `TestPathInsideRootsAllowed`,
       `TestRelativeDotDotEscapeAsks`
-- [ ] **Implement**: `ClassifyCommand` in the precedence order from the SPEC
-- [ ] **Implement**: `IsInterpreter`, `DefaultCommandPolicy`
+- [x] **Implement**: `ClassifyCommand` in the precedence order from the SPEC
+- [x] **Implement**: `IsInterpreter`, `DefaultCommandPolicy`
 
 ### Phase 4: Integration
 
-- [ ] **Test**: `TestClassifyCompoundCommandWithMixedSegments` - a realistic
+- [x] **Test**: `TestClassifyCompoundCommandWithMixedSegments` - a realistic
       pipeline decides **ask** and names the offending segment
 
 ### Phase 5: Validation
 
-- [ ] `make test SUITE=TestCommandPolicy`
-- [ ] `make test`
-- [ ] `make test-leak`
-- [ ] `make check`
+- [x] `make test SUITE=TestCommandPolicy`
+- [x] `make test`
+- [x] `make test-leak`
+- [x] `make check`
 
 ## Dependencies & Ordering
 
@@ -100,10 +100,10 @@ tests/hildegard_helper_tests.pas   (add test unit to uses)
 
 ## Success Criteria
 
-- [ ] Every SPEC precedence rule has a passing test
-- [ ] Unit is pure: no I/O, no globals, no exceptions on arbitrary input
-- [ ] `make check` passes
-- [ ] Implementation matches the specification
+- [x] Every SPEC precedence rule has a passing test
+- [x] Unit is pure: no I/O, no globals, no exceptions on arbitrary input
+- [x] `make check` passes
+- [x] Implementation matches the specification
 
 ## Notes & Considerations
 
@@ -114,3 +114,7 @@ tests/hildegard_helper_tests.pas   (add test unit to uses)
   classifier must not branch on syntax beyond passing `ASyntax` to the parser.
 - `MatchesMask` handles `*`/`?`; test the basename-vs-full-token matching
   explicitly.
+- Deviation: FPC 3.3.1 has no RTL/FCL `MatchesMask` unit, so a small iterative
+  `MatchMask` glob matcher (`*`/`?`, case-sensitive) lives in this unit instead
+  of pulling a dependency. The SPEC's `MatchesMask` reference is descriptive, not
+  binding.
