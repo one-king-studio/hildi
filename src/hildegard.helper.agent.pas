@@ -32,7 +32,10 @@ type
   TToolHandler = function(const AArgumentsJson: string;
     out AResult: string; out AError: string): Boolean of object;
 
-  TToolCallEvent = procedure(const AId, AName, AArguments: string) of object;
+  { Fires before dispatch. AReason is the model's stated reason for the call, or
+    '' when the arguments had none or it was invalid. }
+  TToolCallEvent = procedure(const AId, AName, AArguments, AReason: string)
+    of object;
   TToolResultEvent = procedure(const AId, AName, AResult: string;
     AOk: Boolean) of object;
 
@@ -87,14 +90,19 @@ type
 
 procedure RegisterDefaultTools(ATools: TToolRegistry);
 
+{ Required, non-empty, human-readable reason every tool call must carry. }
+function ExtractToolReason(const AArgumentsJson: string;
+  out AReason: string; out AError: string): Boolean;
+
 const
   DefaultMaxToolIterations = 8;
   BuiltinGetSystemTimeName = 'get_system_time';
+  ToolReasonParamName = 'reason';
 
 implementation
 
 uses
-  DateUtils;
+  DateUtils, fpjson, jsonparser;
 
 type
   { Owns the built-in tool handlers. A singleton because TToolHandler is an
@@ -142,6 +150,128 @@ begin
   ATools.Add(Spec, BuiltinTools.GetSystemTime);
 end;
 
+{ --- tool reason -------------------------------------------------------- }
+
+function ExtractToolReason(const AArgumentsJson: string;
+  out AReason: string; out AError: string): Boolean;
+var
+  Data: TJSONData;
+  Root: TJSONObject;
+  Value: TJSONData;
+begin
+  AReason := '';
+  AError := '';
+  Data := nil;
+  try
+    try
+      Data := GetJSON(AArgumentsJson);
+    except
+      on E: Exception do
+      begin
+        AError := 'invalid arguments JSON';
+        Exit(False);
+      end;
+    end;
+    if not (Data is TJSONObject) then
+    begin
+      AError := 'missing required "' + ToolReasonParamName + '"';
+      Exit(False);
+    end;
+    Root := TJSONObject(Data);
+    Value := Root.Find(ToolReasonParamName);
+    if Value = nil then
+    begin
+      AError := 'missing required "' + ToolReasonParamName + '"';
+      Exit(False);
+    end;
+    if Value.JSONType <> jtString then
+    begin
+      AError := '"' + ToolReasonParamName + '" must be a string';
+      Exit(False);
+    end;
+    AReason := Trim(Value.AsString);
+    if AReason = '' then
+    begin
+      AError := 'missing required "' + ToolReasonParamName + '"';
+      Exit(False);
+    end;
+    Result := True;
+  finally
+    Data.Free;
+  end;
+end;
+
+{ Guarantees the advertised parameter schema declares a required string `reason`.
+  Idempotent: an existing `reason` property/required entry is left as-is.
+  Returns False if the schema is not a JSON object, so Add can reject the spec. }
+function AugmentReasonParam(const AParamsJson: string;
+  out AOut: string): Boolean;
+var
+  Data: TJSONData;
+  Root, Props, ReasonProp: TJSONObject;
+  Required: TJSONArray;
+  Existing: TJSONData;
+  I: Integer;
+  HasReason: Boolean;
+begin
+  AOut := AParamsJson;
+  Data := nil;
+  try
+    try
+      Data := GetJSON(AParamsJson);
+    except
+      Exit(False);
+    end;
+    if not (Data is TJSONObject) then
+      Exit(False);
+    Root := TJSONObject(Data);
+
+    Existing := Root.Find('properties');
+    if Existing is TJSONObject then
+      Props := TJSONObject(Existing)
+    else
+    begin
+      if Existing <> nil then
+        Root.Delete('properties');
+      Props := TJSONObject.Create;
+      Root.Add('properties', Props);
+    end;
+
+    Existing := Props.Find(ToolReasonParamName);
+    if not (Existing is TJSONObject) then
+    begin
+      if Existing <> nil then
+        Props.Delete(ToolReasonParamName);
+      ReasonProp := TJSONObject.Create;
+      ReasonProp.Add('type', 'string');
+      Props.Add(ToolReasonParamName, ReasonProp);
+    end;
+
+    Existing := Root.Find('required');
+    if Existing is TJSONArray then
+      Required := TJSONArray(Existing)
+    else
+    begin
+      if Existing <> nil then
+        Root.Delete('required');
+      Required := TJSONArray.Create;
+      Root.Add('required', Required);
+    end;
+
+    HasReason := False;
+    for I := 0 to Required.Count - 1 do
+      if Required.Strings[I] = ToolReasonParamName then
+        HasReason := True;
+    if not HasReason then
+      Required.Add(ToolReasonParamName);
+
+    AOut := Root.AsJSON;
+    Result := True;
+  finally
+    Data.Free;
+  end;
+end;
+
 { --- TMemoryConversationStore ------------------------------------------- }
 
 procedure TMemoryConversationStore.Append(const AMessage: TChatMessage);
@@ -168,12 +298,20 @@ end;
 procedure TToolRegistry.Add(const ASpec: TToolSpec; AHandler: TToolHandler);
 var
   N: Integer;
+  Augmented: string;
+  Stored: TToolSpec;
 begin
   if ASpec.Name = '' then
     Exit;
+  { Every advertised tool must require a reason; a malformed schema is rejected,
+    like an empty name, rather than advertised as broken JSON. }
+  if not AugmentReasonParam(ASpec.ParametersJson, Augmented) then
+    Exit;
+  Stored := ASpec;
+  Stored.ParametersJson := Augmented;
   N := Length(FTools);
   SetLength(FTools, N + 1);
-  FTools[N].Spec := ASpec;
+  FTools[N].Spec := Stored;
   FTools[N].Handler := AHandler;
 end;
 
@@ -234,19 +372,25 @@ procedure TAgentLoop.ExecuteToolCalls(const ACalls: TChatToolCallArray;
 var
   I: Integer;
   Tool: TRegisteredTool;
-  ResultText, HandlerError: string;
-  HandlerOk: Boolean;
+  ResultText, HandlerError, Reason, ReasonError: string;
+  HandlerOk, ReasonOk: Boolean;
   Msg: TChatMessage;
 begin
   AAllOk := True;
   for I := 0 to High(ACalls) do
   begin
+    Reason := '';
+    ReasonOk := ExtractToolReason(ACalls[I].Arguments, Reason, ReasonError);
+
     if Assigned(AEvents.OnToolCall) then
-      AEvents.OnToolCall(ACalls[I].Id, ACalls[I].Name, ACalls[I].Arguments);
+      AEvents.OnToolCall(ACalls[I].Id, ACalls[I].Name, ACalls[I].Arguments,
+        Reason);
 
     ResultText := '';
     HandlerOk := False;
-    if (FTools = nil) or not FTools.Find(ACalls[I].Name, Tool) then
+    if not ReasonOk then
+      ResultText := 'error: tool "' + ACalls[I].Name + '" ' + ReasonError
+    else if (FTools = nil) or not FTools.Find(ACalls[I].Name, Tool) then
       ResultText := 'error: unknown tool "' + ACalls[I].Name + '"'
     else
     begin

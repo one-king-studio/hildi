@@ -27,6 +27,18 @@ type
       out AResult: string; out AError: string): Boolean;
   end;
 
+  { Captures the raw arguments of each successful handler call. }
+  TCaptureTool = class
+  private
+    FCalls: Integer;
+    FLastArgs: string;
+  public
+    function Handle(const AArgumentsJson: string;
+      out AResult: string; out AError: string): Boolean;
+    property Calls: Integer read FCalls;
+    property LastArgs: string read FLastArgs;
+  end;
+
   { Records every agent event as a line, to assert on ordering and content. }
   TEventLog = class
   private
@@ -36,7 +48,7 @@ type
     destructor Destroy; override;
     procedure OnText(const AText: string);
     procedure OnReasoning(const AText: string);
-    procedure OnToolCall(const AId, AName, AArguments: string);
+    procedure OnToolCall(const AId, AName, AArguments, AReason: string);
     procedure OnToolResult(const AId, AName, AResult: string; AOk: Boolean);
     function Has(const AFragment: string): Boolean;
     function IndexOfFragment(const AFragment: string): Integer;
@@ -95,6 +107,19 @@ type
     procedure TestToolResultEventReportsFailure;
     procedure TestToolCallAndResultEventsAreInOrder;
     procedure TestV1SendOverloadStillWorks;
+    procedure TestRegistrationAddsRequiredReasonParam;
+    procedure TestRegistrationPreservesExistingParams;
+    procedure TestRegistrationIsIdempotent;
+    procedure TestMalformedSchemaIsIgnored;
+    procedure TestExtractReasonAcceptsNonEmpty;
+    procedure TestExtractReasonRejectsMissing;
+    procedure TestExtractReasonRejectsBlank;
+    procedure TestExtractReasonRejectsNonString;
+    procedure TestExtractReasonRejectsInvalidJson;
+    procedure TestCallWithoutReasonReturnsErrorAndContinues;
+    procedure TestHandlerReceivesFullArgumentsIncludingReason;
+    procedure TestToolCallEventCarriesReason;
+    procedure TestPromptAdvertisesReasonRequired;
   end;
 
 implementation
@@ -104,6 +129,18 @@ implementation
 procedure TTextSink.OnText(const AText: string);
 begin
   FText := FText + AText;
+end;
+
+{ TCaptureTool }
+
+function TCaptureTool.Handle(const AArgumentsJson: string;
+  out AResult: string; out AError: string): Boolean;
+begin
+  Inc(FCalls);
+  FLastArgs := AArgumentsJson;
+  AResult := 'ok';
+  AError := '';
+  Result := True;
 end;
 
 { TFailTools }
@@ -140,9 +177,9 @@ begin
   FLog.Add('reason:' + AText);
 end;
 
-procedure TEventLog.OnToolCall(const AId, AName, AArguments: string);
+procedure TEventLog.OnToolCall(const AId, AName, AArguments, AReason: string);
 begin
-  FLog.Add('call:' + AId + ':' + AName + ':' + AArguments);
+  FLog.Add('call:' + AId + ':' + AName + ':' + AArguments + ':' + AReason);
 end;
 
 procedure TEventLog.OnToolResult(const AId, AName, AResult: string;
@@ -330,7 +367,7 @@ begin
   BuildLoop('', 8);
   RegisterDefaultTools(FTools);
   FFake.AddResponse([ToolNameFrame(0, 'call_1', 'get_system_time'),
-    ToolArgsFrame(0, '{}'), FinishFrame('tool_calls'), DoneFrame]);
+    ToolArgsFrame(0, '{"reason":"test"}'), FinishFrame('tool_calls'), DoneFrame]);
   FFake.AddResponse([TextDelta('the time is now'), FinishFrame('stop'),
     DoneFrame]);
 
@@ -359,8 +396,8 @@ begin
   FFake.AddResponse([
     ToolNameFrame(0, 'call_1', 'get_system_time'),
     ToolNameFrame(1, 'call_2', 'get_system_time'),
-    ToolArgsFrame(0, '{}'),
-    ToolArgsFrame(1, '{}'),
+    ToolArgsFrame(0, '{"reason":"test"}'),
+    ToolArgsFrame(1, '{"reason":"test"}'),
     FinishFrame('tool_calls'), DoneFrame]);
   FFake.AddResponse([TextDelta('both done'), FinishFrame('stop'), DoneFrame]);
 
@@ -397,7 +434,7 @@ var
 begin
   BuildLoop('', 8);
   FFake.AddResponse([ToolNameFrame(0, 'call_1', 'no_such_tool'),
-    ToolArgsFrame(0, '{}'), FinishFrame('tool_calls'), DoneFrame]);
+    ToolArgsFrame(0, '{"reason":"test"}'), FinishFrame('tool_calls'), DoneFrame]);
   FFake.AddResponse([TextDelta('recovered'), FinishFrame('stop'), DoneFrame]);
   AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
   AssertEquals('answer', 'recovered', Answer);
@@ -416,7 +453,7 @@ begin
   Spec.ParametersJson := '{"type":"object","properties":{}}';
   FTools.Add(Spec, FFailTools.AlwaysFail);
   FFake.AddResponse([ToolNameFrame(0, 'call_1', 'fail_tool'),
-    ToolArgsFrame(0, '{}'), FinishFrame('tool_calls'), DoneFrame]);
+    ToolArgsFrame(0, '{"reason":"test"}'), FinishFrame('tool_calls'), DoneFrame]);
   FFake.AddResponse([TextDelta('still here'), FinishFrame('stop'), DoneFrame]);
   AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
   AssertEquals('answer', 'still here', Answer);
@@ -435,7 +472,7 @@ begin
   Spec.ParametersJson := '{"type":"object","properties":{}}';
   FTools.Add(Spec, FFailTools.AlwaysRaise);
   FFake.AddResponse([ToolNameFrame(0, 'call_1', 'raise_tool'),
-    ToolArgsFrame(0, '{}'), FinishFrame('tool_calls'), DoneFrame]);
+    ToolArgsFrame(0, '{"reason":"test"}'), FinishFrame('tool_calls'), DoneFrame]);
   FFake.AddResponse([TextDelta('survived'), FinishFrame('stop'), DoneFrame]);
   AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
   AssertEquals('answer', 'survived', Answer);
@@ -451,7 +488,7 @@ begin
   RegisterDefaultTools(FTools);
   { A single response that always asks for a tool call; the fake repeats it. }
   FFake.AddResponse([ToolNameFrame(0, 'call_1', 'get_system_time'),
-    ToolArgsFrame(0, '{}'), FinishFrame('tool_calls'), DoneFrame]);
+    ToolArgsFrame(0, '{"reason":"test"}'), FinishFrame('tool_calls'), DoneFrame]);
   AssertFalse('aborts', FLoop.Send('loop forever', nil, Answer, Err));
   AssertEquals('provider error', Ord(leProvider), Ord(Err.Code));
   AssertTrue('mentions limit', Pos('iteration limit', Err.Message) > 0);
@@ -640,14 +677,14 @@ begin
   Log := TEventLog.Create;
   try
     FFake.AddResponse([ToolNameFrame(0, 'call_1', 'get_system_time'),
-      ToolArgsFrame(0, '{}'), FinishFrame('tool_calls'), DoneFrame]);
+      ToolArgsFrame(0, '{"reason":"test"}'), FinishFrame('tool_calls'), DoneFrame]);
     FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
     Events := Default(TAgentEvents);
     Events.OnToolCall := Log.OnToolCall;
     Events.OnToolResult := Log.OnToolResult;
     AssertTrue('send ok', FLoop.Send('time?', Events, Answer, Err));
     AssertTrue('call event',
-      Log.Has('call:call_1:get_system_time:{}'));
+      Log.Has('call:call_1:get_system_time:{"reason":"test"}:test'));
   finally
     Log.Free;
   end;
@@ -665,7 +702,7 @@ begin
   Log := TEventLog.Create;
   try
     FFake.AddResponse([ToolNameFrame(0, 'call_1', 'get_system_time'),
-      ToolArgsFrame(0, '{}'), FinishFrame('tool_calls'), DoneFrame]);
+      ToolArgsFrame(0, '{"reason":"test"}'), FinishFrame('tool_calls'), DoneFrame]);
     FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
     Events := Default(TAgentEvents);
     Events.OnToolResult := Log.OnToolResult;
@@ -687,7 +724,7 @@ begin
   Log := TEventLog.Create;
   try
     FFake.AddResponse([ToolNameFrame(0, 'call_1', 'no_such_tool'),
-      ToolArgsFrame(0, '{}'), FinishFrame('tool_calls'), DoneFrame]);
+      ToolArgsFrame(0, '{"reason":"test"}'), FinishFrame('tool_calls'), DoneFrame]);
     FFake.AddResponse([TextDelta('recovered'), FinishFrame('stop'), DoneFrame]);
     Events := Default(TAgentEvents);
     Events.OnToolResult := Log.OnToolResult;
@@ -711,7 +748,7 @@ begin
   Log := TEventLog.Create;
   try
     FFake.AddResponse([ToolNameFrame(0, 'call_1', 'get_system_time'),
-      ToolArgsFrame(0, '{}'), FinishFrame('tool_calls'), DoneFrame]);
+      ToolArgsFrame(0, '{"reason":"test"}'), FinishFrame('tool_calls'), DoneFrame]);
     FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
     Events := Default(TAgentEvents);
     Events.OnToolCall := Log.OnToolCall;
@@ -734,6 +771,275 @@ begin
   FFake.AddResponse([TextDelta('ok'), FinishFrame('stop'), DoneFrame]);
   AssertTrue('v1 send', FLoop.Send('hi', nil, Answer, Err));
   AssertEquals('answer', 'ok', Answer);
+end;
+
+procedure TAgentLoopTest.TestRegistrationAddsRequiredReasonParam;
+var
+  Tools: TToolRegistry;
+  Spec: TToolSpec;
+  Stored: TRegisteredTool;
+  Root, Props, ReasonProp: TJSONObject;
+  Required: TJSONArray;
+  I: Integer;
+  HasReason: Boolean;
+begin
+  Tools := TToolRegistry.Create;
+  try
+    Spec.Name := 'x';
+    Spec.Description := 'd';
+    Spec.ParametersJson :=
+      '{"type":"object","properties":{"dir":{"type":"string"}},"required":["dir"]}';
+    Tools.Add(Spec, FFailTools.AlwaysFail);
+    AssertTrue('registered', Tools.Find('x', Stored));
+    Root := TJSONObject(GetJSON(Stored.Spec.ParametersJson));
+    try
+      Props := TJSONObject(Root.Find('properties'));
+      AssertTrue('has properties', Props <> nil);
+      ReasonProp := TJSONObject(Props.Find(ToolReasonParamName));
+      AssertTrue('has reason property', ReasonProp <> nil);
+      AssertEquals('reason is string', 'string',
+        ReasonProp.Get('type', ''));
+      Required := TJSONArray(Root.Find('required'));
+      HasReason := False;
+      for I := 0 to Required.Count - 1 do
+        if Required.Strings[I] = ToolReasonParamName then
+          HasReason := True;
+      AssertTrue('reason required', HasReason);
+    finally
+      Root.Free;
+    end;
+  finally
+    Tools.Free;
+  end;
+end;
+
+procedure TAgentLoopTest.TestRegistrationPreservesExistingParams;
+var
+  Tools: TToolRegistry;
+  Spec: TToolSpec;
+  Stored: TRegisteredTool;
+  Root, Props: TJSONObject;
+begin
+  Tools := TToolRegistry.Create;
+  try
+    Spec.Name := 'x';
+    Spec.Description := 'd';
+    Spec.ParametersJson :=
+      '{"type":"object","properties":{"dir":{"type":"string"}},"required":["dir"]}';
+    Tools.Add(Spec, FFailTools.AlwaysFail);
+    Tools.Find('x', Stored);
+    Root := TJSONObject(GetJSON(Stored.Spec.ParametersJson));
+    try
+      Props := TJSONObject(Root.Find('properties'));
+      AssertTrue('dir preserved', Props.Find('dir') <> nil);
+    finally
+      Root.Free;
+    end;
+  finally
+    Tools.Free;
+  end;
+end;
+
+procedure TAgentLoopTest.TestRegistrationIsIdempotent;
+var
+  Tools: TToolRegistry;
+  Spec: TToolSpec;
+  Stored: TRegisteredTool;
+  Root, Props: TJSONObject;
+  Required: TJSONArray;
+  I, Count: Integer;
+begin
+  Tools := TToolRegistry.Create;
+  try
+    Spec.Name := 'x';
+    Spec.Description := 'd';
+    Spec.ParametersJson :=
+      '{"type":"object","properties":{"reason":{"type":"string"}},"required":["reason"]}';
+    Tools.Add(Spec, FFailTools.AlwaysFail);
+    Tools.Find('x', Stored);
+    Root := TJSONObject(GetJSON(Stored.Spec.ParametersJson));
+    try
+      Props := TJSONObject(Root.Find('properties'));
+      AssertTrue('reason property present', Props.Find('reason') <> nil);
+      Required := TJSONArray(Root.Find('required'));
+      Count := 0;
+      for I := 0 to Required.Count - 1 do
+        if Required.Strings[I] = ToolReasonParamName then
+          Inc(Count);
+      AssertEquals('one required reason', 1, Count);
+    finally
+      Root.Free;
+    end;
+  finally
+    Tools.Free;
+  end;
+end;
+
+procedure TAgentLoopTest.TestMalformedSchemaIsIgnored;
+var
+  Tools: TToolRegistry;
+  Spec: TToolSpec;
+begin
+  Tools := TToolRegistry.Create;
+  try
+    Spec.Name := 'x';
+    Spec.Description := 'd';
+    Spec.ParametersJson := 'not json';
+    Tools.Add(Spec, FFailTools.AlwaysFail);
+    AssertEquals('ignored', 0, Tools.Count);
+  finally
+    Tools.Free;
+  end;
+end;
+
+procedure TAgentLoopTest.TestExtractReasonAcceptsNonEmpty;
+var
+  R, E: string;
+begin
+  AssertTrue('ok', ExtractToolReason('{"reason":"need it"}', R, E));
+  AssertEquals('reason', 'need it', R);
+end;
+
+procedure TAgentLoopTest.TestExtractReasonRejectsMissing;
+var
+  R, E: string;
+begin
+  AssertFalse('missing', ExtractToolReason('{"other":1}', R, E));
+  AssertTrue('names reason', Pos('missing required', E) > 0);
+end;
+
+procedure TAgentLoopTest.TestExtractReasonRejectsBlank;
+var
+  R, E: string;
+begin
+  AssertFalse('blank', ExtractToolReason('{"reason":"   "}', R, E));
+  AssertTrue('names reason', Pos('missing required', E) > 0);
+end;
+
+procedure TAgentLoopTest.TestExtractReasonRejectsNonString;
+var
+  R, E: string;
+begin
+  AssertFalse('non-string', ExtractToolReason('{"reason":42}', R, E));
+  AssertTrue('names type', Pos('must be a string', E) > 0);
+end;
+
+procedure TAgentLoopTest.TestExtractReasonRejectsInvalidJson;
+var
+  R, E: string;
+begin
+  AssertFalse('invalid', ExtractToolReason('{oops', R, E));
+  AssertTrue('names json', Pos('invalid arguments JSON', E) > 0);
+end;
+
+procedure TAgentLoopTest.TestCallWithoutReasonReturnsErrorAndContinues;
+var
+  Answer: string;
+  Err: TLLMError;
+  Spec: TToolSpec;
+  Capture: TCaptureTool;
+begin
+  BuildLoop('', 8);
+  Capture := TCaptureTool.Create;
+  try
+    Spec.Name := 'cap';
+    Spec.Description := 'captures';
+    Spec.ParametersJson := '{"type":"object","properties":{}}';
+    FTools.Add(Spec, Capture.Handle);
+    FFake.AddResponse([ToolNameFrame(0, 'call_1', 'cap'),
+      ToolArgsFrame(0, '{}'), FinishFrame('tool_calls'), DoneFrame]);
+    FFake.AddResponse([TextDelta('recovered'), FinishFrame('stop'), DoneFrame]);
+    AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
+    AssertEquals('handler not called', 0, Capture.Calls);
+    AssertTrue('error names reason',
+      Pos('missing required', FFake.LastBody) > 0);
+  finally
+    Capture.Free;
+  end;
+end;
+
+procedure TAgentLoopTest.TestHandlerReceivesFullArgumentsIncludingReason;
+var
+  Answer: string;
+  Err: TLLMError;
+  Spec: TToolSpec;
+  Capture: TCaptureTool;
+begin
+  BuildLoop('', 8);
+  Capture := TCaptureTool.Create;
+  try
+    Spec.Name := 'cap';
+    Spec.Description := 'captures';
+    Spec.ParametersJson := '{"type":"object","properties":{}}';
+    FTools.Add(Spec, Capture.Handle);
+    FFake.AddResponse([ToolNameFrame(0, 'call_1', 'cap'),
+      ToolArgsFrame(0, '{"reason":"because","x":1}'),
+      FinishFrame('tool_calls'), DoneFrame]);
+    FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
+    AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
+    AssertEquals('handler called', 1, Capture.Calls);
+    AssertEquals('full args passed', '{"reason":"because","x":1}',
+      Capture.LastArgs);
+  finally
+    Capture.Free;
+  end;
+end;
+
+procedure TAgentLoopTest.TestToolCallEventCarriesReason;
+var
+  Log: TEventLog;
+  Events: TAgentEvents;
+  Answer: string;
+  Err: TLLMError;
+begin
+  BuildLoop('', 8);
+  RegisterDefaultTools(FTools);
+  Log := TEventLog.Create;
+  try
+    FFake.AddResponse([ToolNameFrame(0, 'call_1', 'get_system_time'),
+      ToolArgsFrame(0, '{"reason":"why"}'), FinishFrame('tool_calls'),
+      DoneFrame]);
+    FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
+    Events := Default(TAgentEvents);
+    Events.OnToolCall := Log.OnToolCall;
+    AssertTrue('send ok', FLoop.Send('time?', Events, Answer, Err));
+    AssertTrue('reason in event',
+      Log.Has('call:call_1:get_system_time:{"reason":"why"}:why'));
+  finally
+    Log.Free;
+  end;
+end;
+
+procedure TAgentLoopTest.TestPromptAdvertisesReasonRequired;
+var
+  Answer: string;
+  Err: TLLMError;
+  Root, Call, Fn, Params, Props: TJSONObject;
+  ToolsArr, Required: TJSONArray;
+  I: Integer;
+  HasReason: Boolean;
+begin
+  BuildLoop('', 8);
+  RegisterDefaultTools(FTools);
+  FFake.AddResponse([TextDelta('ok'), FinishFrame('stop'), DoneFrame]);
+  AssertTrue('send ok', FLoop.Send('hi', nil, Answer, Err));
+  Root := TJSONObject(GetJSON(FFake.LastBody));
+  try
+    ToolsArr := TJSONArray(Root.Find('tools'));
+    Call := TJSONObject(ToolsArr.Items[0]);
+    Fn := TJSONObject(Call.Find('function'));
+    Params := TJSONObject(Fn.Find('parameters'));
+    Props := TJSONObject(Params.Find('properties'));
+    AssertTrue('reason advertised', Props.Find(ToolReasonParamName) <> nil);
+    Required := TJSONArray(Params.Find('required'));
+    HasReason := False;
+    for I := 0 to Required.Count - 1 do
+      if Required.Strings[I] = ToolReasonParamName then
+        HasReason := True;
+    AssertTrue('reason required', HasReason);
+  finally
+    Root.Free;
+  end;
 end;
 
 initialization

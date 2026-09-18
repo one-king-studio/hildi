@@ -246,6 +246,10 @@ end to end without network.
 
 ## Future Considerations
 
+- **Tool-call reason:** every tool call now requires a non-empty `reason`
+  string on the tool-call event and in the advertised schema (see
+  `../Command_Tool/Tool_Reason_v1.SPEC.md`). `TToolCallEvent` gained an
+  `AReason` parameter as part of that work.
 - A SQLite `IConversationStore` for recall, restore, and durable logs.
 - Streaming-aware tool-call display in the CLI.
 - Context trimming/summarization and token budgets.

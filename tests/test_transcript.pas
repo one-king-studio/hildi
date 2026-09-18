@@ -23,6 +23,7 @@ type
     procedure TestReasoningSectionRenderedWhenEnabled;
     procedure TestReasoningSuppressedWhenDisabled;
     procedure TestToolSectionsRendered;
+    procedure TestTranscriptShowsToolCallReason;
     procedure TestToolsSuppressedWhenDisabled;
     procedure TestSectionsSeparatedByBlankLine;
     procedure TestErrorRendered;
@@ -90,7 +91,7 @@ begin
 end;
 procedure TurnTool(W: TTranscriptWriter);
 begin
-  W.OnToolCall('id1', 'get_system_time', '{}');
+  W.OnToolCall('id1', 'get_system_time', '{}', 'why');
   W.OnToolResult('id1', 'get_system_time', '2026-01-01T00:00:00Z', True);
   W.EndTurn;
 end;
@@ -144,6 +145,14 @@ begin
   AssertTrue('tool header', Pos('[tool get_system_time]', S) > 0);
   AssertTrue('args', Pos('args: {}', S) > 0);
   AssertTrue('result', Pos('result: 2026-01-01T00:00:00Z', S) > 0);
+end;
+
+procedure TTranscriptTest.TestTranscriptShowsToolCallReason;
+var
+  S: string;
+begin
+  S := RenderScenario(MakeOptions(False, False, True, 0), TurnTool);
+  AssertTrue('reason line', Pos('reason: why', S) > 0);
 end;
 
 procedure TTranscriptTest.TestToolsSuppressedWhenDisabled;
@@ -232,7 +241,7 @@ begin
   try
     W.BeginTurn('hi');
     W.OnReasoning('think');
-    W.OnToolCall('id', 'get_system_time', '{}');
+    W.OnToolCall('id', 'get_system_time', '{}', 'why');
     W.OnToolResult('id', 'get_system_time', '2026', True);
     W.OnText('answer');
     W.EndTurn;

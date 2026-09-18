@@ -17,57 +17,57 @@ the foundation the Command Tool's approval and audit build on. Do this first.
 
 ### Phase 1: Setup & Foundation
 
-- [ ] **No new test unit**: extend `tests/test_agent.pas` and
+- [x] **No new test unit**: extend `tests/test_agent.pas` and
       `tests/test_transcript.pas` in place
-- [ ] **Define the changed event signature and constants** in the interface of
+- [x] **Define the changed event signature and constants** in the interface of
       `src/hildegard.helper.agent.pas`:
       `TToolCallEvent` gains `AReason`; add `ToolReasonParamName = 'reason'`
       and `ExtractToolReason`
 
 ### Phase 2: Core Implementation (TDD)
 
-- [ ] **Test**: `TestRegistrationAddsRequiredReasonParam` - red
-- [ ] **Implement**: `TToolRegistry.Add` augments `ParametersJson` to include a
+- [x] **Test**: `TestRegistrationAddsRequiredReasonParam` - red
+- [x] **Implement**: `TToolRegistry.Add` augments `ParametersJson` to include a
       required `reason` string (fpjson, idempotent); malformed schema handled
       per spec - green
-- [ ] **Test**: `TestRegistrationPreservesExistingParams`, `TestRegistrationIsIdempotent`
-- [ ] **Test**: `TestExtractReasonAcceptsNonEmpty` / `RejectsMissing` /
+- [x] **Test**: `TestRegistrationPreservesExistingParams`, `TestRegistrationIsIdempotent`
+- [x] **Test**: `TestExtractReasonAcceptsNonEmpty` / `RejectsMissing` /
       `RejectsBlank` / `RejectsNonString` / `RejectsInvalidJson` - red
-- [ ] **Implement**: `ExtractToolReason` with `fpjson` - green
-- [ ] **Test**: `TestCallWithoutReasonReturnsErrorAndContinues` - red
-- [ ] **Implement**: in `ExecuteToolCalls`, extract `reason`; on failure emit
+- [x] **Implement**: `ExtractToolReason` with `fpjson` - green
+- [x] **Test**: `TestCallWithoutReasonReturnsErrorAndContinues` - red
+- [x] **Implement**: in `ExecuteToolCalls`, extract `reason`; on failure emit
       `OnToolCall` with reason `''`, append
       `error: tool "<name>" missing required "reason"`, set `AAllOk := False`,
       skip the handler - green
-- [ ] **Test**: `TestHandlerReceivesFullArgumentsIncludingReason` (handler still
+- [x] **Test**: `TestHandlerReceivesFullArgumentsIncludingReason` (handler still
       sees the untouched JSON)
-- [ ] **Test**: `TestToolCallEventCarriesReason`, update
+- [x] **Test**: `TestToolCallEventCarriesReason`, update
       `TestToolCallEventFiresWithNameAndArgs` and
       `TestToolCallAndResultEventsAreInOrder` for the new parameter
-- [ ] **Test**: `TestPromptAdvertisesReasonRequired` (serialized request schema
+- [x] **Test**: `TestPromptAdvertisesReasonRequired` (serialized request schema
       contains the reason property and required entry)
 
 ### Phase 3: Transcript
 
-- [ ] **Test**: `TestTranscriptShowsToolCallReason` - red
-- [ ] **Implement**: `TTranscriptWriter.OnToolCall` gains `AReason`; render it on
+- [x] **Test**: `TestTranscriptShowsToolCallReason` - red
+- [x] **Implement**: `TTranscriptWriter.OnToolCall` gains `AReason`; render it on
       the tool-call line (labelled form when colour is off) - green
-- [ ] **Update**: existing transcript tests for the new signature
-- [ ] **Update**: `examples/agent_cli.pas` event wiring
+- [x] **Update**: existing transcript tests for the new signature
+- [x] **Update**: `examples/agent_cli.pas` event wiring
 
 ### Phase 4: Docs
 
-- [ ] **Cross-reference**: add a note in `Agent_Loop_v1.SPEC.md` (or its feature)
+- [x] **Cross-reference**: add a note in `Agent_Loop_v1.SPEC.md` (or its feature)
       that this spec supersedes the `TToolCallEvent` contract
-- [ ] **Doc comments** on the new/changed public interface
+- [x] **Doc comments** on the new/changed public interface
 
 ### Phase 5: Validation
 
-- [ ] `make test SUITE=TestAgentLoop`
-- [ ] `make test SUITE=TestTranscript`
-- [ ] `make test` (whole suite - `get_system_time` and loop tests must still pass)
-- [ ] `make test-leak`
-- [ ] `make check`
+- [x] `make test SUITE=TestAgentLoop`
+- [x] `make test SUITE=TestTranscript`
+- [x] `make test` (whole suite - `get_system_time` and loop tests must still pass)
+- [x] `make test-leak`
+- [x] `make check`
 
 ## Dependencies & Ordering
 
@@ -104,11 +104,11 @@ docs/features/Agent_Loop/Agent_Loop_v1.SPEC.md  (cross-reference note)
 
 ## Success Criteria
 
-- [ ] Every advertised tool requires `reason`
-- [ ] Missing/blank reason is an error tool result, not execution
-- [ ] Reason reaches the tool-call event and the transcript
-- [ ] `make check` passes
-- [ ] Implementation matches the specification
+- [x] Every advertised tool requires `reason`
+- [x] Missing/blank reason is an error tool result, not execution
+- [x] Reason reaches the tool-call event and the transcript
+- [x] `make check` passes
+- [x] Implementation matches the specification
 
 ## Notes & Considerations
 
@@ -118,3 +118,7 @@ docs/features/Agent_Loop/Agent_Loop_v1.SPEC.md  (cross-reference note)
 - Auto-injection mutates the stored `ParametersJson`; keep it idempotent and
   preserve caller-supplied properties.
 - Do not use string concatenation to build the augmented JSON; use `fpjson`.
+- Deviation: the spec's `TestRoundTripWithReasonAgainstFakeTransport` is covered
+  by the updated `TestToolCallIsExecutedAndFedBack` (its tool call now carries a
+  reason) rather than a separately named test. The registry also rejects a
+  malformed schema (extra case `TestMalformedSchemaIsIgnored`).

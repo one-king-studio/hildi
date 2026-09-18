@@ -46,7 +46,7 @@ type
     procedure BeginTurn(const AUserText: string);
     procedure OnReasoning(const AText: string);
     procedure OnText(const AText: string);
-    procedure OnToolCall(const AId, AName, AArguments: string);
+    procedure OnToolCall(const AId, AName, AArguments, AReason: string);
     procedure OnToolResult(const AId, AName, AResult: string; AOk: Boolean);
     procedure WriteError(const AMessage: string);
     procedure EndTurn;
@@ -172,7 +172,8 @@ begin
   UpdateLineOpen(AText);
 end;
 
-procedure TTranscriptWriter.OnToolCall(const AId, AName, AArguments: string);
+procedure TTranscriptWriter.OnToolCall(const AId, AName, AArguments,
+  AReason: string);
 begin
   if not FOptions.ShowTools then
     Exit;
@@ -180,6 +181,8 @@ begin
   begin
     BeginSection(AnsiStyled('[tool ' + AName + ']', AnsiCyan));
     PutLine('args: ' + AArguments);
+    if AReason <> '' then
+      PutLine('reason: ' + AReason);
   end
   else
   begin
@@ -187,7 +190,10 @@ begin
     if FAnySection then
       Put(LineEnding);
     FAnySection := True;
-    PutLine(AnsiStyled(AName + '(' + AArguments + ')', AnsiCyan));
+    if AReason <> '' then
+      PutLine(AnsiStyled(AName + '(' + AArguments + ') - ' + AReason, AnsiCyan))
+    else
+      PutLine(AnsiStyled(AName + '(' + AArguments + ')', AnsiCyan));
   end;
 end;
 
