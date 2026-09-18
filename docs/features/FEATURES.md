@@ -19,7 +19,7 @@ in `../guidelines/spec-driven-development.md`:
 | ------- | ------ | ----- | ----- |
 | [Agent Loop](Agent_Loop/FEATURE.md) | Proposed | - | Single-threaded OpenAI-compatible agent loop with streamed SSE responses, injectable tools, and an in-memory multi-turn store. CLI demo. |
 | [Remote Agent Link](Remote_Agent_Link/FEATURE.md) | Proposed | - | Pair a device to an account and hold an outbound link to execute requests locally. Helper-side only in v1. |
-| [Local SQLite Store](Local_SQLite_Store/FEATURE.md) | In Progress | Store v1 | Embedded SQLite for credentials, request history, durable queue, and settings. Vendored library. |
+| [Local SQLite Store](Local_SQLite_Store/FEATURE.md) | Implemented | Store v1 | Embedded SQLite for credentials, request history, durable queue, and settings. Vendored 3.53.4. |
 
 ## Planned (not yet specified)
 

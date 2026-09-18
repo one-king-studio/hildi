@@ -108,7 +108,12 @@ type
   { The store's external surface. One instance owns one database file. }
   TSqliteStore = class
   public
-    constructor Create(const AConfig: TStoreConfig);
+    constructor Create(const AConfig: TStoreConfig); overload;
+    { Test seam: run with an explicit migration list (e.g. to inject a failing
+      migration and assert rollback). Production callers use the overload above,
+      which uses DefaultMigrations. }
+    constructor Create(const AConfig: TStoreConfig;
+      const AMigrations: TMigrationArray); overload;
     destructor Destroy; override;
 
     { Opens/creates the database and applies migrations. Idempotent. }
@@ -274,10 +279,15 @@ store per process. This is recorded as a `ponytail:` ceiling.
 ### Data Flow
 
 1. **Construction:** `Create` validates configuration shape only; no I/O.
-2. **Open:** resolve the library, load it, open the connection, set pragmas
-   (`journal_mode=WAL`, `foreign_keys=ON`, `busy_timeout`), read `user_version`,
-   apply migrations in ascending order (each in a transaction), then restrict file
-   permissions to owner-only on Unix. `Open` is idempotent while open.
+2. **Open:** resolve the library, load it, open the connection, apply pragmas,
+   read `user_version`, apply migrations in ascending order (each in a
+   transaction), then restrict file permissions to owner-only on Unix. `Open` is
+   idempotent while open. Pragma application has FCL-specific mechanics:
+   `journal_mode=WAL` is set on the raw file before SQLDB connects (it cannot be
+   changed inside SQLDB's transaction and persists in the database header),
+   `foreign_keys=ON` is passed at connect time through
+   `TSQLite3Connection.Params`, and `busy_timeout` is applied with
+   `ExecuteDirect` (allowed inside a transaction).
 3. **Operation:** acquire the lock, ensure open, bind parameters, execute inside a
    transaction where the operation is multi-statement (claim, finish), release the
    lock, map any `EDatabaseError` to a `TStoreError`.

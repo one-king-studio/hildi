@@ -190,5 +190,6 @@ shortcut with a `ponytail:` comment naming its ceiling and upgrade path.
 
 - `AGENTS.md` - project overview, commands, FPC/platform notes
 - `ponytail.md` - the lazy-senior-developer ladder and rules
+- `testing.md` - test conventions, the leak gate, and FPC/FCL testing gotchas
 - `docs/templates/` - FEATURE, SPEC, TODO templates
 - `docs/features/` - all feature documentation

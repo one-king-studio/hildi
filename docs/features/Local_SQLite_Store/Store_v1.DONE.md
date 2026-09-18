@@ -17,72 +17,72 @@ is omitted.
 
 ### Phase 1: Setup & Foundation
 
-- [ ] **Vendor SQLite**: add `scripts/fetch-sqlite.sh` (pinned version + checksum)
+- [x] **Vendor SQLite**: add `scripts/fetch-sqlite.sh` (pinned version + checksum)
       and `deps/sqlite3/README.md`; gitignore the downloaded amalgamation
-- [ ] **Build target**: add Makefile `libsqlite` target producing
+- [x] **Build target**: add Makefile `libsqlite` target producing
       `build/lib/libsqlite3.{dylib,so}`; wire `test`/`test-leak` to depend on it
-- [ ] **Test unit**: create `tests/test_store.pas` with an empty `TStoreTest`
+- [x] **Test unit**: create `tests/test_store.pas` with an empty `TStoreTest`
       suite; add it to the `uses` clause of `tests/hildegard_helper_tests.pas`
-- [ ] **Types**: define the interface-section types from the SPEC in
+- [x] **Types**: define the interface-section types from the SPEC in
       `src/hildegard.helper.store.pas` (no bodies yet)
 
 ### Phase 2: Open, Library Loading & Migrations
 
-- [ ] **Test** `TestOpenCreatesDatabase` - red
-- [ ] **Implement** `Create`/`Open`/`Close`/`IsOpen`, library resolution and
+- [x] **Test** `TestOpenCreatesDatabase` - red
+- [x] **Implement** `Create`/`Open`/`Close`/`IsOpen`, library resolution and
       `TSQLDBLibraryLoader` wiring, pragmas - green
-- [ ] **Test** `TestOpenAppliesMigrations`, `TestOpenIsIdempotent` - red/green
-- [ ] **Test** `TestOpenUnwritablePathFails`, `TestDatabaseFilePermissionsAreOwnerOnly`
-- [ ] **Test** `TestLibraryPathResolutionPrefersExplicit`,
+- [x] **Test** `TestOpenAppliesMigrations`, `TestOpenIsIdempotent` - red/green
+- [x] **Test** `TestOpenUnwritablePathFails`, `TestDatabaseFilePermissionsAreOwnerOnly`
+- [x] **Test** `TestLibraryPathResolutionPrefersExplicit`,
       `TestStoreWorksWithVendoredLibrary`
-- [ ] **Test** `TestOperationsBeforeOpenReturnNotOpen`
-- [ ] **Test** `TestFailedMigrationRollsBackAndKeepsVersion` (needs a seeded,
+- [x] **Test** `TestOperationsBeforeOpenReturnNotOpen`
+- [x] **Test** `TestFailedMigrationRollsBackAndKeepsVersion` (needs a seeded,
       failing migration - use a test-only migration list injection seam)
 
 ### Phase 3: Credentials
 
-- [ ] **Test** `TestSaveLoadClearCredentialsRoundTrip` - red/green
-- [ ] **Test** `TestLoadCredentialsMissingReturnsNotFound`
-- [ ] **Test** `TestCredentialsPersistAcrossReopen`
+- [x] **Test** `TestSaveLoadClearCredentialsRoundTrip` - red/green
+- [x] **Test** `TestLoadCredentialsMissingReturnsNotFound`
+- [x] **Test** `TestCredentialsPersistAcrossReopen`
 
 ### Phase 4: Requests & Durable Queue
 
-- [ ] **Test** `TestEnqueueThenClaimReturnsRequest` - red/green
-- [ ] **Test** `TestClaimEmptyQueueReturnsNotFound`
-- [ ] **Test** `TestFinishMarksTerminalAndIsNotReclaimable`
-- [ ] **Test** `TestFinishRejectsNonTerminalStatus`
-- [ ] **Test** `TestDuplicateRequestIdRejected`
-- [ ] **Test** `TestGetRequestById`
-- [ ] **Test** `TestQueryByStatusAndPagination`
-- [ ] **Test** `TestRequestHistoryPersistsAcrossReopen`
+- [x] **Test** `TestEnqueueThenClaimReturnsRequest` - red/green
+- [x] **Test** `TestClaimEmptyQueueReturnsNotFound`
+- [x] **Test** `TestFinishMarksTerminalAndIsNotReclaimable`
+- [x] **Test** `TestFinishRejectsNonTerminalStatus`
+- [x] **Test** `TestDuplicateRequestIdRejected`
+- [x] **Test** `TestGetRequestById`
+- [x] **Test** `TestQueryByStatusAndPagination`
+- [x] **Test** `TestRequestHistoryPersistsAcrossReopen`
 
 ### Phase 5: Settings
 
-- [ ] **Test** `TestSettingSetGetOverwriteDelete` - red/green
-- [ ] **Test** `TestSettingMissingReturnsNotFound`
+- [x] **Test** `TestSettingSetGetOverwriteDelete` - red/green
+- [x] **Test** `TestSettingMissingReturnsNotFound`
 
 ### Phase 6: Correctness, Concurrency & Security
 
-- [ ] **Test** `TestParameterizedValuesWithQuotesRoundTrip`
-- [ ] **Test** `TestClaimIsAtomicAcrossThreads`
-- [ ] **Test** `TestConcurrentOperationsDoNotCorruptOrDeadlock`
-- [ ] Guard all public methods with the critical section; convert
+- [x] **Test** `TestParameterizedValuesWithQuotesRoundTrip`
+- [x] **Test** `TestClaimIsAtomicAcrossThreads`
+- [x] **Test** `TestConcurrentOperationsDoNotCorruptOrDeadlock`
+- [x] Guard all public methods with the critical section; convert
       `EDatabaseError` to `TStoreError`
 
 ### Phase 7: Example & Docs
 
-- [ ] **Update the example**: extend `examples/` (or add a small store demo) to
+- [x] **Update the example**: extend `examples/` (or add a small store demo) to
       open a temp database, enqueue a request, claim it, and finish it
-- [ ] **Doc comments**: `{** ... }` on the public interface (fpdoc style)
-- [ ] **Update the SPEC** if the implemented behaviour diverged
+- [x] **Doc comments**: `{** ... }` on the public interface (fpdoc style)
+- [x] **Update the SPEC** if the implemented behaviour diverged
 
 ### Phase 8: Validation
 
-- [ ] **Run** `make test SUITE=TStoreTest` (green)
-- [ ] **Run** `make test` (whole suite)
-- [ ] **Run** `make test-leak` (no leaks; `make test-leak SUITE=TStoreTest`)
-- [ ] **Run** `make check` (all gates)
-- [ ] **Rename** this TODO to `Store_v1.DONE.md`; update `FEATURES.md` status
+- [x] **Run** `make test SUITE=TStoreTest` (green)
+- [x] **Run** `make test` (whole suite)
+- [x] **Run** `make test-leak` (no leaks; `make test-leak SUITE=TStoreTest`)
+- [x] **Run** `make check` (all gates)
+- [x] **Rename** this TODO to `Store_v1.DONE.md`; update `FEATURES.md` status
 
 ## Dependencies & Ordering
 
@@ -130,23 +130,46 @@ docs/features/FEATURES.md          (status -> In Progress / Implemented)
 
 ## Success Criteria
 
-- [ ] All tasks above checked
-- [ ] Every acceptance criterion in `FEATURE.md` maps to a passing test or is
+- [x] All tasks above checked
+- [x] Every acceptance criterion in `FEATURE.md` maps to a passing test or is
       explicitly deferred
-- [ ] `make check` passes (tests + leak gate)
-- [ ] Example demonstrates open, enqueue, claim, finish
-- [ ] Implementation matches the specification
+- [x] `make check` passes (tests + leak gate)
+- [x] Example demonstrates open, enqueue, claim, finish
+- [x] Implementation matches the specification
 
 ## Notes & Considerations
 
-- **Test-only injection seam for migration failure.** To test
-  `seMigrationFailed` without a broken shipped migration, the store needs a way
-  for tests to supply an extra migration list (e.g. an optional constructor
-  parameter or a protected hook). Record the chosen approach here.
+### Resolution of the open questions
+
+- **Test-only injection seam for migration failure.** Chosen approach: a second
+  constructor overload taking an explicit `TMigrationArray`. Tests inject a
+  deliberately failing migration and assert `seMigrationFailed` plus a `PRAGMA
+  user_version` read directly (through a separate connection) proving the version
+  was unchanged. The overload is now documented in `Store_v1.SPEC.md`.
+- **WAL and foreign keys cannot be set through SQLDB.** SQLDB wraps statements in
+  a transaction, so `PRAGMA journal_mode=WAL` and `PRAGMA foreign_keys` fail
+  there. WAL is applied to the raw database file before SQLDB connects (it
+  persists in the header); `foreign_keys=ON` is passed at connect time via
+  `TSQLite3Connection.Params`; `busy_timeout` is applied via `ExecuteDirect`.
+  See `docs/guidelines/testing.md`.
 - **Process-global library.** SQLDB has one set of sqlite3 function pointers; the
   store loads the library once and never unloads it. This is a `ponytail:`
-  ceiling noted in the SPEC.
-- **Timestamps** default to `Now` only when zero; tests should pass explicit
-  timestamps for deterministic ordering.
-- **Permissions** are Unix-only; skip the chmod assertion on non-Unix.
-- Record any spec deviations here as they occur.
+  ceiling noted in the SPEC. `InitLibrary` takes the resolved path so the
+  vendored library is actually used (not SQLDB's platform default).
+- **Timestamps** default to `Now` only when zero; tests pass explicit timestamps
+  for deterministic ordering.
+- **Permissions** are Unix-only; the chmod assertion is compiled out elsewhere.
+
+### Deviations from the specification
+
+- The store gained a public `DefaultMigrations` function and a `TMigrationArray`
+  type, and a second constructor overload for the migration test seam. The SPEC
+  was updated to match.
+- A `make store-demo` target and `examples/store_demo.pas` were added (the plan
+  left this as "small, if not folded into demo_harness").
+
+### Discovered work
+
+- `docs/guidelines/testing.md` was created to capture the `FillChar`-on-managed-
+  records leak, managed-local/result initialization, and the SQLDB transaction
+  findings. Referenced from `AGENTS.md` and `spec-driven-development.md`.
