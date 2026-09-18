@@ -30,6 +30,7 @@ type
     FOptions: TTranscriptOptions;
     FAnySection: Boolean;
     FLineOpen: Boolean;
+    FHeaders: Boolean;          // labels only needed when colour is off
     FReasoningStarted: Boolean;
     FTextStarted: Boolean;
     FIntervalMs: Integer;
@@ -63,6 +64,7 @@ begin
   FLineOpen := False;
   FReasoningStarted := False;
   FTextStarted := False;
+  FHeaders := not AnsiEnabled;   // colour already distinguishes sections
   if FOptions.MaxTokensPerSecond > 0 then
   begin
     FIntervalMs := 1000 div FOptions.MaxTokensPerSecond;
@@ -108,7 +110,8 @@ begin
   if FAnySection then
     Put(LineEnding);
   FAnySection := True;
-  PutLine(AHeader);
+  if FHeaders then
+    PutLine(AHeader);
 end;
 
 procedure TTranscriptWriter.Pace;
@@ -135,8 +138,11 @@ begin
   FTextStarted := False;
   if FOptions.ShowUser then
   begin
-    BeginSection(AnsiBold('[user]'));
-    PutLine(AUserText);
+    EnsureNewline;
+    if FAnySection then
+      Put(LineEnding);
+    FAnySection := True;
+    PutLine(AnsiBold('> ') + AUserText);
   end;
 end;
 
@@ -170,8 +176,19 @@ procedure TTranscriptWriter.OnToolCall(const AId, AName, AArguments: string);
 begin
   if not FOptions.ShowTools then
     Exit;
-  BeginSection(AnsiStyled('[tool ' + AName + ']', AnsiCyan));
-  PutLine('args: ' + AArguments);
+  if FHeaders then
+  begin
+    BeginSection(AnsiStyled('[tool ' + AName + ']', AnsiCyan));
+    PutLine('args: ' + AArguments);
+  end
+  else
+  begin
+    EnsureNewline;
+    if FAnySection then
+      Put(LineEnding);
+    FAnySection := True;
+    PutLine(AnsiStyled(AName + '(' + AArguments + ')', AnsiCyan));
+  end;
 end;
 
 procedure TTranscriptWriter.OnToolResult(const AId, AName, AResult: string;
@@ -180,10 +197,20 @@ begin
   if not FOptions.ShowTools then
     Exit;
   EnsureNewline;
-  if AOk then
-    PutLine('result: ' + AResult)
+  if FHeaders then
+  begin
+    if AOk then
+      PutLine('result: ' + AResult)
+    else
+      PutLine(AnsiStyled('error: ' + AResult, AnsiRed));
+  end
   else
-    PutLine(AnsiStyled('error: ' + AResult, AnsiRed));
+  begin
+    if AOk then
+      PutLine(AnsiStyled('  -> ' + AResult, AnsiGreen))
+    else
+      PutLine(AnsiStyled('  !! ' + AResult, AnsiRed));
+  end;
 end;
 
 procedure TTranscriptWriter.WriteError(const AMessage: string);

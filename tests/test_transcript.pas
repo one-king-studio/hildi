@@ -28,6 +28,7 @@ type
     procedure TestErrorRendered;
     procedure TestNoEscapesWhenColorDisabled;
     procedure TestPacingDelaysOutput;
+    procedure TestHeadersHiddenWhenColorEnabled;
   end;
 
 implementation
@@ -104,8 +105,8 @@ var
   S: string;
 begin
   S := RenderScenario(MakeOptions(True, False, False, 0), TurnUser);
-  AssertTrue('has user header', Pos('[user]', S) > 0);
-  AssertTrue('has prompt', Pos('hello', S) > 0);
+  AssertTrue('shell-style marker', Pos('> hello', S) > 0);
+  AssertTrue('no [user] block', Pos('[user]', S) = 0);
 end;
 
 procedure TTranscriptTest.TestAssistantSectionRendered;
@@ -217,6 +218,36 @@ begin
   AssertEquals('all deltas rendered', 5, Length(S) - Length('[assistant]' +
     LineEnding));
   AssertTrue('paced (>= 30ms for 5 at 100/s)', Started >= 30);
+end;
+
+procedure TTranscriptTest.TestHeadersHiddenWhenColorEnabled;
+var
+  S: string;
+  Out_: TStringStream;
+  W: TTranscriptWriter;
+begin
+  AnsiSetEnabled(True);
+  Out_ := TStringStream.Create('');
+  W := TTranscriptWriter.Create(Out_, MakeOptions(True, True, True, 0));
+  try
+    W.BeginTurn('hi');
+    W.OnReasoning('think');
+    W.OnToolCall('id', 'get_system_time', '{}');
+    W.OnToolResult('id', 'get_system_time', '2026', True);
+    W.OnText('answer');
+    W.EndTurn;
+    S := Out_.DataString;
+  finally
+    W.Free;
+    Out_.Free;
+    AnsiSetEnabled(False);
+  end;
+  AssertTrue('no section labels',
+    (Pos('[assistant]', S) = 0) and (Pos('[reasoning]', S) = 0) and
+    (Pos('[tool', S) = 0));
+  AssertTrue('has colour escapes', Pos(#27, S) > 0);
+  AssertTrue('tool call inlined', Pos('get_system_time({})', S) > 0);
+  AssertTrue('prompt marker kept', Pos(AnsiBold('> '), S) > 0);
 end;
 
 initialization
