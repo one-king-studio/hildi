@@ -3,10 +3,23 @@
 **Related Specification:** `Approvals_v1.SPEC.md`
 **Related Feature:** `FEATURE.md`
 
-> **Progress:** Phases 2-4 (matching, store, service) and the store-backed
-> `IApprovalStore` are implemented and committed (20 tests in `TestApproval`).
-> Remaining: Phase 5 (command adapter) and Phase 6 (CLI wiring). The checkboxes
-> below have not all been ticked retroactively; trust this note and the tests.
+> **Progress:** Phases 2-6 are implemented and committed - matching, store,
+> service, SQLite persistence, the `run_command` adapter (per-segment asks,
+> tool-owned options), and CLI wiring with a scope-choosing prompt.
+> (`TestApproval` 20, `TestCommandTool` 17.)
+>
+> **Remaining before DONE:**
+> - Path gating against the workspace root (spec: argument paths superseded by a
+>   matching approval; redirection targets always checked) is **not implemented**;
+>   v1 relies on approvals alone.
+> - Live CLI smoke (needs a provider run).
+> - Cleanup: `hildegard.helper.command.policy`'s classifier
+>   (`ClassifyCommand`/`ClassifySegments`/`IsInterpreter`/pattern matching) is now
+>   dead production code; the parser still populates `Paths`. Delete the retired
+>   classifier and its tests in a follow-up.
+>
+> The checkboxes below are not all ticked retroactively; trust this note and the
+> tests.
 
 ## Overview
 
