@@ -237,28 +237,36 @@ procedure TTranscriptWriter.RenderHistory(const AMessages: TChatMessageArray);
 var
   I, J: Integer;
   M: TChatMessage;
+  SavedShowUser: Boolean;
 begin
-  for I := 0 to High(AMessages) do
-  begin
-    M := AMessages[I];
-    case M.Role of
-      crSystem:
-        ;   // configuration, not history
-      crUser:
-        BeginTurn(M.Content);
-      crAssistant:
-        begin
-          if M.Content <> '' then
-            OnText(M.Content);
-          for J := 0 to High(M.ToolCalls) do
-            OnToolCall(M.ToolCalls[J].Id, M.ToolCalls[J].Name,
-              M.ToolCalls[J].Arguments, '');
-        end;
-      crTool:
-        OnToolResult(M.ToolCallId, '', M.Content, True);
+  { History shows user prompts even in modes that suppress live echoing. }
+  SavedShowUser := FOptions.ShowUser;
+  FOptions.ShowUser := True;
+  try
+    for I := 0 to High(AMessages) do
+    begin
+      M := AMessages[I];
+      case M.Role of
+        crSystem:
+          ;   // configuration, not history
+        crUser:
+          BeginTurn(M.Content);
+        crAssistant:
+          begin
+            if M.Content <> '' then
+              OnText(M.Content);
+            for J := 0 to High(M.ToolCalls) do
+              OnToolCall(M.ToolCalls[J].Id, M.ToolCalls[J].Name,
+                M.ToolCalls[J].Arguments, '');
+          end;
+        crTool:
+          OnToolResult(M.ToolCallId, '', M.Content, True);
+      end;
     end;
+    EndTurn;
+  finally
+    FOptions.ShowUser := SavedShowUser;
   end;
-  EndTurn;
 end;
 
 end.

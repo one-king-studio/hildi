@@ -283,7 +283,8 @@ begin
   Msgs[2] := M;
 
   Out_ := TStringStream.Create('');
-  W := TTranscriptWriter.Create(Out_, MakeOptions(True, False, True, 0));
+  { ShowUser is False in interactive mode; history must still show prompts. }
+  W := TTranscriptWriter.Create(Out_, MakeOptions(False, False, True, 0));
   try
     W.RenderHistory(Msgs);
     S := Out_.DataString;
