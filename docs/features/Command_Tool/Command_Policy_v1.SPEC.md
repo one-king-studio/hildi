@@ -43,8 +43,9 @@ v1 implements the POSIX syntax mode only. The `TShellSyntax` type reserves a
       plan (`ClassifyCommand`: deny if any deny, else ask if any ask, else allow).
 - [ ] Match allow/deny patterns against the executable and, when a pattern names
       arguments, the argument list: `cat` (executable only, any args),
-      `cat /etc/os-release` (exact), `cat *` (executable, any args),
-      `git * main` (interleaved `*`).
+      `cat *` (executable, any args), `git * main` (interleaved `*`), and a
+      leading `=` for the exact command with no wildcards (`=uname`,
+      `=cat /etc/os-release`).
 - [ ] Flag paths that resolve outside the configured allowed roots; redirection
       targets are always checked, while an explicit argument pattern approves the
       command's argument paths.
@@ -120,11 +121,16 @@ type
     ParseError: string;            // '' => fully parsed; else human-readable
   end;
 
-  { Policy rules. Patterns match an executable token and its basename. '*' and
-    '?' are wildcards (SysUtils.MatchesMask). }
+  { Policy rules. Patterns are whitespace-separated words:
+      - one word ('cat') = executable (token or basename), any arguments;
+      - two or more = executable plus arguments, '*' matches any number of
+        arguments ('cat *', 'git * main');
+      - a leading '=' means the exact command, no wildcards ('=uname',
+        '=cat /etc/os-release').
+    '*' and '?' are wildcards elsewhere (case-sensitive). }
   TCommandPolicy = record
-    Allow: TCommandArgArray;         // executable patterns that may run freely
-    Deny: TCommandArgArray;          // executable patterns that never run
+    Allow: TCommandArgArray;         // patterns that may run freely
+    Deny: TCommandArgArray;          // patterns that never run
     AllowedRoots: TCommandArgArray;  // absolute directory prefixes for paths
     AllowInterpreters: Boolean;      // acknowledge interpreter indirection
   end;
@@ -297,6 +303,9 @@ This unit produces no `TLLMError` and no `TStoreError`; parse problems are data
 - [ ] `TestFullArgAllowBypassesArgPathCheck`
 - [ ] `TestRedirectPathStillCheckedWithFullArgAllow`
 - [ ] `TestDenyArgPatternMatches`
+- [ ] `TestExactPrefixAllowsOnlyNoArgs`
+- [ ] `TestExactPrefixAllowsOnlyThatArg`
+- [ ] `TestSingleWordPatternStillAllowsAnyArgs`
 - [ ] `TestNoLeaks` (enforced by `make test-leak`)
 
 ### Integration Tests

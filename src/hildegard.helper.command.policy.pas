@@ -68,7 +68,9 @@ type
       - one word ('cat') matches the executable (token or basename), any args;
       - two or more ('cat /etc/os-release', 'git * main') match the executable
         and then the arguments, '*' matching any number of arguments and '?'/'*'
-        matching within one argument.
+        matching within one argument;
+      - a leading '=' means the exact command, no wildcards: '=uname' matches
+        only bare 'uname', '=cat /etc/os-release' only that argv.
     '*' and '?' are wildcards (case-sensitive). }
   TCommandPolicy = record
     Allow: TCommandArgArray;         // patterns that may run freely
@@ -634,13 +636,42 @@ begin
   Result := Pi > High(APatternArgs);
 end;
 
-{ Any pattern form: executable-only, or executable + argument words. }
+function PatternIsExact(const APattern: string): Boolean;
+begin
+  Result := (APattern <> '') and (APattern[1] = '=');
+end;
+
+{ Exact match: same executable (token or basename) and exactly the same
+  arguments, no wildcards. }
+function ExactMatch(const ASegment: TCommandSegment;
+  const AExactText: string): Boolean;
+var
+  Words: TCommandArgArray;
+  I: Integer;
+begin
+  Words := SplitWords(Trim(AExactText));
+  if Length(Words) = 0 then
+    Exit(False);
+  if (ASegment.Executable <> Words[0]) and
+    (ExtractFileName(ASegment.Executable) <> Words[0]) then
+    Exit(False);
+  if Length(Words) - 1 <> Length(ASegment.Arguments) then
+    Exit(False);
+  for I := 1 to High(Words) do
+    if Words[I] <> ASegment.Arguments[I - 1] then
+      Exit(False);
+  Result := True;
+end;
+
+{ Any pattern form: executable-only, executable + argument words, or exact. }
 function SegmentMatchesPattern(const ASegment: TCommandSegment;
   const APattern: string): Boolean;
 var
   Words, ArgWords: TCommandArgArray;
   I: Integer;
 begin
+  if PatternIsExact(APattern) then
+    Exit(ExactMatch(ASegment, Copy(APattern, 2, MaxInt)));
   Words := SplitWords(Trim(APattern));
   if Length(Words) = 0 then
     Exit(False);
@@ -672,20 +703,22 @@ var
   Pattern: string;
 begin
   for Pattern in APatterns do
-    if (Length(SplitWords(Trim(Pattern))) > 1) and
+    if (PatternIsExact(Pattern) or
+      (Length(SplitWords(Trim(Pattern))) > 1)) and
       SegmentMatchesPattern(ASegment, Pattern) then
       Exit(True);
   Result := False;
 end;
 
-{ A pattern that names only the executable (one word). }
+{ A pattern that names only the executable (one word, not exact). }
 function SegmentMatchesExeOnly(const ASegment: TCommandSegment;
   const APatterns: TCommandArgArray): Boolean;
 var
   Pattern: string;
 begin
   for Pattern in APatterns do
-    if (Length(SplitWords(Trim(Pattern))) = 1) and
+    if (not PatternIsExact(Pattern)) and
+      (Length(SplitWords(Trim(Pattern))) = 1) and
       SegmentMatchesPattern(ASegment, Pattern) then
       Exit(True);
   Result := False;

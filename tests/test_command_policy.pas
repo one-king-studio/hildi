@@ -50,6 +50,9 @@ type
     procedure TestFullArgAllowBypassesArgPathCheck;
     procedure TestRedirectPathStillCheckedWithFullArgAllow;
     procedure TestDenyArgPatternMatches;
+    procedure TestExactPrefixAllowsOnlyNoArgs;
+    procedure TestExactPrefixAllowsOnlyThatArg;
+    procedure TestSingleWordPatternStillAllowsAnyArgs;
   end;
 
 implementation
@@ -406,6 +409,36 @@ begin
   P := Parse('rm -rf /');
   D := ClassifySegment(P, 0, Policy([], ['rm -rf *'], [], False));
   AssertEquals('deny', Ord(cdDeny), Ord(D.Decision));
+end;
+
+procedure TCommandPolicyTest.TestExactPrefixAllowsOnlyNoArgs;
+var
+  D: TPolicyDecision;
+begin
+  D := Decide('uname', Policy(['=uname'], [], [], False));
+  AssertEquals('bare command allowed', Ord(cdAllow), Ord(D.Decision));
+  D := Decide('uname -a', Policy(['=uname'], [], [], False));
+  AssertEquals('with args asks', Ord(cdAsk), Ord(D.Decision));
+end;
+
+procedure TCommandPolicyTest.TestExactPrefixAllowsOnlyThatArg;
+var
+  D: TPolicyDecision;
+begin
+  D := Decide('cat /etc/os-release',
+    Policy(['=cat /etc/os-release'], [], [], False));
+  AssertEquals('exact allowed', Ord(cdAllow), Ord(D.Decision));
+  D := Decide('cat /etc/passwd',
+    Policy(['=cat /etc/os-release'], [], [], False));
+  AssertEquals('other arg asks', Ord(cdAsk), Ord(D.Decision));
+end;
+
+procedure TCommandPolicyTest.TestSingleWordPatternStillAllowsAnyArgs;
+var
+  D: TPolicyDecision;
+begin
+  D := Decide('uname -a', Policy(['uname'], [], [], False));
+  AssertEquals('exe-only still any args', Ord(cdAllow), Ord(D.Decision));
 end;
 
 initialization

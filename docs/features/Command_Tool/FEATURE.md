@@ -313,11 +313,11 @@ Store integration
   and users click "always allow" reflexively. Mitigation: three approval scopes
   (once, exact command, any arguments), per-segment prompts, and a small curated
   default allowlist for read-only commands.
-- **The pattern language is a small DSL with sharp edges.** A single-word allow
-  pattern means "this executable, any arguments", so an exact approval of a
-  command with *no* arguments (for example `uname`) is indistinguishable from a
-  wildcard and effectively allows later arguments too. Mitigation: documented;
-  the common case (arguments present) behaves exactly as specified.
+- **The pattern language is a small DSL with sharp edges.** A single-word
+  `executable` pattern means "any arguments"; an exact command uses a leading
+  `=` (`=uname`, `=cat /etc/os-release`). Mitigation: the grammar is small,
+  documented, and table-tested; an unexpected pattern simply fails to match and
+  the command asks.
 - **Command output floods the context window.** Mitigation: a hard output cap
   with a truncation marker, and side-channel display of the rest in the
   transcript.

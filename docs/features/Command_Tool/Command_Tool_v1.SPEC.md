@@ -36,7 +36,7 @@ The profile is a value, so a future Windows profile is additive.
       return an error tool result naming that segment.
 - [ ] For each segment that is **ask**, consult the approval handler with that
       segment; with no handler, deny. **allow once** proceeds without persisting;
-      **allow specific** persists the exact argv; **allow wildcard** persists
+      **allow specific** persists `=<exact argv>`; **allow wildcard** persists
       `<executable> *`. Persisting updates the in-run policy so a wildcard covers
       later matching segments without another prompt.
 - [ ] Execute synchronously through an injectable executor that wraps
@@ -111,7 +111,7 @@ type
     settings and audit; tests use an in-memory fake. }
   ICommandPolicySource = interface
     function LoadPolicy(out APolicy: TCommandPolicy; out AError: string): Boolean;
-    { Persists an allow pattern: an exact argv, or '<executable> *'. }
+    { Persists an allow pattern: '=<exact argv>' or '<executable> *'. }
     function SaveApproval(const APattern: string; out AError: string): Boolean;
     procedure RecordAudit(const AEntry: TCommandAuditEntry);
   end;
@@ -353,6 +353,7 @@ here.
 - [ ] `TestAskAllowOnceExecutesWithoutPersisting`
 - [ ] `TestAskAllowWildcardExecutesAndPersists`
 - [ ] `TestAskAllowSpecificPersistsExact`
+- [ ] `TestAskAllowSpecificNoArgsPersistedExact`
 - [ ] `TestCompoundCommandApprovedPerSegment`
 - [ ] `TestWildcardApprovalCoversLaterSegments`
 - [ ] `TestAskDenyDoesNotExecute`

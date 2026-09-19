@@ -559,7 +559,9 @@ begin
             end;
           aoAllowSpecific:
             begin
-              Pattern := Plan.Segments[I].Text;
+              { '=' prefix: exact command, no wildcards, so a no-argument
+                command is not confused with '<executable> *'. }
+              Pattern := '=' + Plan.Segments[I].Text;
               if not FSource.SaveApproval(Pattern, SErr) then
               begin
                 AError := 'could not persist approval: ' + SErr;

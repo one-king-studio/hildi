@@ -89,6 +89,7 @@ type
     procedure TestAskAllowOnceExecutesWithoutPersisting;
     procedure TestAskAllowWildcardExecutesAndPersists;
     procedure TestAskAllowSpecificPersistsExact;
+    procedure TestAskAllowSpecificNoArgsPersistedExact;
     procedure TestCompoundCommandApprovedPerSegment;
     procedure TestWildcardApprovalCoversLaterSegments;
     procedure TestAskDenyDoesNotExecute;
@@ -471,8 +472,30 @@ begin
       AssertTrue('ok', Tool.Run(
         '{"command":"cat /etc/os-release","reason":"r"}', R, E));
       AssertEquals('executed', 1, FExecutor.Calls);
-      AssertEquals('persisted exact', 'cat /etc/os-release',
+      AssertEquals('persisted exact', '=cat /etc/os-release',
         FSource.Approvals[0]);
+    finally
+      Tool.Free;
+    end;
+  finally
+    Approver.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestAskAllowSpecificNoArgsPersistedExact;
+var
+  Tool: TCommandTool;
+  Approver: TFakeApprover;
+  R, E: string;
+begin
+  FSource.Policy := MakePolicy(['other'], [], [], False);
+  Approver := TFakeApprover.Create;
+  try
+    Approver.Outcome := aoAllowSpecific;
+    Tool := BuildTool(Approver.Approve, 0);
+    try
+      AssertTrue('ok', Tool.Run('{"command":"uname","reason":"r"}', R, E));
+      AssertEquals('persisted exact no-args', '=uname', FSource.Approvals[0]);
     finally
       Tool.Free;
     end;
