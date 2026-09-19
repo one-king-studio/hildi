@@ -28,6 +28,8 @@ type
     procedure TestFullRoundTripMatchesAppended;
     procedure TestRestoreSkipsReasoningAndErrors;
     procedure TestRestoreAfterReopen;
+    procedure TestTailKeepsSystemAndRecent;
+    procedure TestTailDropsOrphanTools;
   end;
 
 implementation
@@ -225,6 +227,69 @@ begin
     AssertEquals('content', 'hello', Msgs[0].Content);
     AssertEquals('tool calls restored', 2, Length(Msgs[1].ToolCalls));
     AssertEquals('tool', 'time', Msgs[2].Content);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TSessionTest.TestTailKeepsSystemAndRecent;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  SessionId: string;
+  WorkspaceId: Integer;
+  Conv: IConversationStore;
+  Msgs: TChatMessageArray;
+  Sys: TChatMessage;
+  I: Integer;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', WorkspaceId, Err);
+    S.CreateSession(WorkspaceId, SessionId, Err);
+    Conv := TSqliteConversationStore.Create(S, SessionId, 5);
+    Sys := Default(TChatMessage);
+    Sys.Role := crSystem;
+    Sys.Content := 'sys';
+    Conv.Append(Sys);
+    for I := 1 to 6 do
+      Conv.Append(UserMsg('m' + IntToStr(I)));
+
+    Msgs := Conv.Messages;
+    AssertEquals('system + last five', 6, Length(Msgs));
+    AssertEquals('system kept', Ord(crSystem), Ord(Msgs[0].Role));
+    AssertEquals('first kept is m2', 'm2', Msgs[1].Content);
+    AssertEquals('last is m6', 'm6', Msgs[5].Content);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TSessionTest.TestTailDropsOrphanTools;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  SessionId: string;
+  WorkspaceId: Integer;
+  Conv: IConversationStore;
+  Msgs: TChatMessageArray;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', WorkspaceId, Err);
+    S.CreateSession(WorkspaceId, SessionId, Err);
+    Conv := TSqliteConversationStore.Create(S, SessionId, 2);
+    Conv.Append(UserMsg('u'));
+    Conv.Append(AssistantMsg('calling'));
+    Conv.Append(ToolMsg('call_1', 'time'));
+    Conv.Append(ToolMsg('call_2', 'out'));
+    Conv.Append(UserMsg('x'));
+
+    { Full: u, assistant(2 calls), tool, tool, x. Last two are [tool, x];
+      the orphan tool is dropped. }
+    Msgs := Conv.Messages;
+    AssertEquals('one message', 1, Length(Msgs));
+    AssertEquals('user x', 'x', Msgs[0].Content);
   finally
     S.Free;
   end;

@@ -24,6 +24,7 @@ type
     procedure TestWorkspaceFlag;
     procedure TestSessionFlag;
     procedure TestContinueFlag;
+    procedure TestTailFlag;
     procedure TestListSessionsSubcommand;
     procedure TestLongFlagsWithEquals;
     procedure TestHelpFlag;
@@ -159,6 +160,19 @@ begin
   AssertTrue('long continue', O.ContinueSession);
   O := ParseCLIOptions([]);
   AssertFalse('default not continue', O.ContinueSession);
+end;
+
+procedure TCLITest.TestTailFlag;
+var
+  O: TCLIOptions;
+begin
+  O := ParseCLIOptions([]);
+  AssertEquals('tail unset', -1, O.SessionTail);
+  O := ParseCLIOptions(['--tail', '5']);
+  AssertEquals('tail 5', 5, O.SessionTail);
+  O := ParseCLIOptions(['--tail=0']);
+  AssertEquals('tail all', 0, O.SessionTail);
+  AssertTrue('negative raises', Raises(['--tail', '-1']));
 end;
 
 procedure TCLITest.TestListSessionsSubcommand;

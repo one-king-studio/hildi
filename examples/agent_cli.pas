@@ -166,6 +166,8 @@ var
   WorkspaceId: Integer;
   SessionId: string;
   Summaries: TSessionSummaryArray;
+  TailCount, LoadedMessages: Integer;
+  SessionResumed: Boolean;
 
 begin
   RawArgs := CollectArgs;
@@ -299,6 +301,7 @@ begin
     { Resume a named or most-recent session, or start a new one. }
     if (Opts.Session <> '') and Opts.ContinueSession then
       Fatal('choose either --session or --continue, not both', 2);
+    SessionResumed := (Opts.Session <> '') or Opts.ContinueSession;
     SessionId := Opts.Session;
     if SessionId = '' then
     begin
@@ -314,8 +317,12 @@ begin
     end
     else if not SqliteStore.SessionExists(SessionId, StoreErr) then
       Fatal('unknown session: ' + SessionId, 1);
+    if Opts.SessionTail < 0 then
+      TailCount := 5
+    else
+      TailCount := Opts.SessionTail;
     Store := nil;
-    Store := TSqliteConversationStore.Create(SqliteStore, SessionId);
+    Store := TSqliteConversationStore.Create(SqliteStore, SessionId, TailCount);
   end
   else
   begin
@@ -325,6 +332,8 @@ begin
     SqliteStore := nil;
     ApprovalStore := TMemoryApprovalStore.Create;
   end;
+
+  LoadedMessages := Length(Store.Messages);
 
   if Interactive then
     Approver := TConsoleApprover.Create;
@@ -361,7 +370,20 @@ begin
   try
     if Interactive then
     begin
-      WriteLn('hildegard-helper-agent (model: ', Config.Model, ')');
+      WriteLn('hildegard-helper-agent');
+      WriteLn('  workspace: ', Workspace.Root);
+      if SessionId = '' then
+        WriteLn('  session:   (in memory; no store)')
+      else if SessionResumed then
+        WriteLn('  session:   ', SessionId, '  (resumed, last ', LoadedMessages,
+          ' messages)')
+      else
+        WriteLn('  session:   ', SessionId, '  (new)');
+      WriteLn('  model:     ', Config.Model);
+      if SqliteStore <> nil then
+        WriteLn('  store:     ', StorePath)
+      else
+        WriteLn('  store:     (in memory)');
       WriteLn('Type a message; /exit or Ctrl-D to quit.');
       while True do
       begin

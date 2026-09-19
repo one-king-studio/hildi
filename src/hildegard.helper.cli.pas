@@ -23,6 +23,7 @@ type
     Workspace: string;
     Session: string;
     ContinueSession: Boolean;
+    SessionTail: Integer;       // -1 = unset (5 on resume); 0 = all messages
     ShowUser: Boolean;
     ShowTools: Boolean;
     Reasoning: TTriState;        // tsDefault => on for interactive, off for once
@@ -42,6 +43,7 @@ function DefaultOptions: TCLIOptions;
 begin
   Result := Default(TCLIOptions);
   Result.Mode := cmInteractive;
+  Result.SessionTail := -1;
   Result.ShowUser := True;
   Result.ShowTools := True;
   Result.Reasoning := tsDefault;
@@ -128,6 +130,12 @@ begin
       Result.Session := ValueOf(AArgs, I, Key, Inline)
     else if (Key = '-c') or (Key = '--continue') then
       Result.ContinueSession := True
+    else if Key = '--tail' then
+    begin
+      Result.SessionTail := StrToIntDef(ValueOf(AArgs, I, Key, Inline), -1);
+      if Result.SessionTail < 0 then
+        raise ECLIError.Create('--tail requires a non-negative integer');
+    end
     else if (Arg = '-') then
     begin
       Result.PromptFromStdin := True;
@@ -188,6 +196,9 @@ begin
     LineEnding +
     '  -c, --continue      resume the most recent session for the workspace' +
     LineEnding +
+    '      --tail N        on resume, load the last N messages (default 5,' +
+    LineEnding +
+    '                      0 = all)' + LineEnding +
     '  -h, --help          show this help' + LineEnding +
     LineEnding +
     'Environment: HILDEGARD_LLM_ENDPOINT, HILDEGARD_LLM_MODEL,' +

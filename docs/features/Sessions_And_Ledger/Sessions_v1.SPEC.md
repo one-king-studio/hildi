@@ -35,6 +35,9 @@ This work also removes the store's `requests` table and its public API.
       timestamps and a record count.
 - [ ] Resolve the most recently updated session for a workspace.
 - [ ] Remove the `requests` table and the store's request API.
+- [ ] On resume, load only the most recent messages (a tail), keeping the system
+      prompt and dropping leading orphaned tool results; the tail defaults to 5
+      messages and `0` means all.
 
 ### CLI
 
@@ -42,6 +45,10 @@ This work also removes the store's `requests` table and its public API.
       (`id  updated  record-count`), needing no provider configuration.
 - [ ] `-c`/`--continue` resumes the most recently updated session for the active
       workspace; `--session` and `--continue` are mutually exclusive.
+- [ ] `--tail N` sets the number of recent messages loaded on resume (default 5,
+      `0` = all).
+- [ ] On interactive start, print a short banner: workspace directory, session id
+      (new/resumed and how many messages loaded), model, and store path.
 
 ### Non-Functional
 
@@ -87,21 +94,17 @@ function NewSessionId: string;
 
 { Ledger seam; the SQLite implementation lives here, an in-memory one supports
   tests. }
-ISessionLedger = interface
-  function Append(const ARecord: TSessionRecord; out AError: string): Boolean;
-  function Query(const ASessionId: string; AUseKind: Boolean;
-    AKind: TSessionRecordKind; ALimit, AOffset: Integer;
-    out ARecords: TSessionRecordArray; out AError: string): Boolean;
-end;
+> Revision: `ISessionLedger` was dropped (the adapter uses `TSqliteStore`
+> directly, and the no-store CLI path keeps the in-memory conversation store).
 
 { The loop's conversation store, persisted through the ledger. }
 TSqliteConversationStore = class(TInterfacedObject, IConversationStore)
 public
   constructor Create(AStore: TSqliteStore; const ASessionId: string;
-    ALedger: ISessionLedger);
+    AMaxMessages: Integer = 0);   // 0 = all; else keep last N + system prompt
   procedure Append(const AMessage: TChatMessage);
   function Messages: TChatMessageArray;
-  procedure Clear;
+  procedure Clear;                // no-op: the ledger is durable history
 end;
 ```
 
@@ -243,6 +246,8 @@ has no error channel; it must not raise into the loop.
 - [ ] `TestToolCallResultCorrelatedByToolCallId`
 - [ ] `TestRestoreAfterReopen` (close/reopen the store)
 - [ ] `TestListAndMostRecentSessions` (store; newest-first, counts, not-found)
+- [ ] `TestTailKeepsSystemAndRecent` (tail keeps the system prompt + last N)
+- [ ] `TestTailDropsOrphanTools` (a mid-turn tail drops leading tool results)
 - [ ] `TestNoLeaks`
 
 ### Store removal tests

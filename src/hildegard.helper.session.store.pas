@@ -16,10 +16,15 @@ type
   private
     FStore: TSqliteStore;
     FSessionId: string;
+    FMaxMessages: Integer;   // 0 = all
     procedure Write(const AKind: TSessionRecordKind; const AContent,
       ADataJson: string);
+    function Compose: TChatMessageArray;
   public
-    constructor Create(AStore: TSqliteStore; const ASessionId: string);
+    { AMaxMessages > 0 keeps only the most recent AMaxMessages messages (after
+      the system prompt), dropping leading orphaned tool results. }
+    constructor Create(AStore: TSqliteStore; const ASessionId: string;
+      AMaxMessages: Integer = 0);
     procedure Append(const AMessage: TChatMessage);
     function Messages: TChatMessageArray;
     { The ledger is the durable record; clearing it here would defeat restore.
@@ -91,11 +96,12 @@ begin
 end;
 
 constructor TSqliteConversationStore.Create(AStore: TSqliteStore;
-  const ASessionId: string);
+  const ASessionId: string; AMaxMessages: Integer);
 begin
   inherited Create;
   FStore := AStore;
   FSessionId := ASessionId;
+  FMaxMessages := AMaxMessages;
 end;
 
 procedure TSqliteConversationStore.Write(const AKind: TSessionRecordKind;
@@ -135,7 +141,7 @@ begin
   end;
 end;
 
-function TSqliteConversationStore.Messages: TChatMessageArray;
+function TSqliteConversationStore.Compose: TChatMessageArray;
 var
   Records: TSessionRecordArray;
   Err: TStoreError;
@@ -198,6 +204,34 @@ begin
     end;
     Inc(I);
   end;
+end;
+
+function TSqliteConversationStore.Messages: TChatMessageArray;
+var
+  All: TChatMessageArray;
+  I, SysCount, RestCount, Start: Integer;
+begin
+  All := Compose;
+  if (FMaxMessages <= 0) or (Length(All) <= FMaxMessages) then
+    Exit(All);
+
+  { Keep every leading system message, then the last FMaxMessages of the rest. }
+  I := 0;
+  while (I <= High(All)) and (All[I].Role = crSystem) do
+    Inc(I);
+  SysCount := I;
+  RestCount := Length(All) - SysCount;
+  if RestCount <= FMaxMessages then
+    Exit(All);
+
+  Start := SysCount + (RestCount - FMaxMessages);
+  { Starting mid-turn can orphan tool results; drop them. }
+  while (Start < Length(All)) and (All[Start].Role = crTool) do
+    Inc(Start);
+
+  Result := Copy(All, 0, SysCount);
+  for I := Start to High(All) do
+    AppendMessage(Result, All[I]);
 end;
 
 procedure TSqliteConversationStore.Clear;

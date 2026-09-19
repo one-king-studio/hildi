@@ -15,8 +15,10 @@
 > in-memory conversation store). `Clear` is a no-op by design (the ledger is
 > durable history). 7 request tests were deleted with the table.
 >
-> Added: `sessions` subcommand (list a workspace's sessions) and `-c/--continue`
-> (resume the most recent). Store `ListSessions`/`MostRecentSessionId` + tests.
+> Added: `sessions` subcommand (list a workspace's sessions), `-c/--continue`
+> (resume the most recent), `--tail N` (resume loads the last N messages,
+> default 5, 0 = all), and an interactive startup banner (workspace, session,
+> model, store, loaded count).
 >
 > **Remaining before DONE:** live CLI smoke (run, exit, resume by id).
 >
