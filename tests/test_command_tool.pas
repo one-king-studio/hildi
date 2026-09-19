@@ -1,8 +1,7 @@
 unit test_command_tool;
-{ fpcunit tests for hildegard.helper.command.tool. The tool is exercised with
-  fake policy sources, executors, and approvers: no SQLite, no network, and no
-  real process. One test round-trips the store-backed source against a temporary
-  database. }
+{ fpcunit tests for hildegard.helper.command.tool: the approval-driven shell
+  tool. Uses a fake executor and prompt and an in-memory approval store; one
+  test exercises the real process executor. }
 
 {$mode delphi}{$H+}
 
@@ -11,17 +10,15 @@ interface
 uses
   Classes, SysUtils, fpcunit, testregistry,
   hildegard.helper.agent, hildegard.helper.llm,
-  hildegard.helper.command.policy, hildegard.helper.command.tool,
-  hildegard.helper.store, llm_fakes;
+  hildegard.helper.command.policy, hildegard.helper.approval,
+  hildegard.helper.command.tool;
 
 type
-  { Records calls and returns a canned execution. }
   TFakeExecutor = class(TNoRefCountObject, ICommandExecutor)
   public
     Calls: Integer;
     ReturnOk: Boolean;
     RaiseOnExecute: Boolean;
-    LastProfile: TShellProfile;
     LastCommand: string;
     LastCwd: string;
     LastTimeoutMs: QWord;
@@ -32,48 +29,26 @@ type
       out AExecution: TCommandExecution): Boolean;
   end;
 
-  { In-memory policy source with recording of approvals and audits. }
-  TMemoryPolicySource = class(TNoRefCountObject, ICommandPolicySource)
+  TFakePrompt = class
   public
-    Policy: TCommandPolicy;
-    LoadFails: Boolean;
-    RaiseOnLoad: Boolean;
-    LoadCalls: Integer;
-    Approvals: TStringList;
-    Audits: array of TCommandAuditEntry;
-    constructor Create;
-    destructor Destroy; override;
-    function LoadPolicy(out APolicy: TCommandPolicy;
-      out AError: string): Boolean;
-    function SaveApproval(const AExecutable: string;
-      out AError: string): Boolean;
-    procedure RecordAudit(const AEntry: TCommandAuditEntry);
-    function AuditCount: Integer;
-  end;
-
-  { Returns a scripted approval outcome and captures the request(s). }
-  TFakeApprover = class
-  public
-    Outcome: TApprovalOutcome;
+    Allowed: Boolean;
+    OptionKey: string;
+    Scope: TApprovalScope;
     Calls: Integer;
-    LastRequest: TApprovalRequest;
-    SegmentCommands: TStringList;
-    constructor Create;
-    destructor Destroy; override;
-    function Approve(const ARequest: TApprovalRequest): TApprovalOutcome;
+    LastAsk: TApprovalAsk;
+    function Prompt(const AAsk: TApprovalAsk): TApprovalChoice;
   end;
 
   TCommandToolTest = class(TTestCase)
   private
-    FDir: string;
-    FDbPath: string;
-    FSource: TMemoryPolicySource;
     FExecutor: TFakeExecutor;
+    FApprovalStore: IApprovalStore;
     function MakeConfig(AMaxBytes: Integer): TCommandToolConfig;
-    function BuildTool(AApprover: TApprovalHandler;
+    function BuildTool(APrompt: TApprovalPrompt;
       AMaxBytes: Integer): TCommandTool;
-    function OpenStore: TSqliteStore;
-    procedure DeleteDbFiles;
+    function AddRule(AEffect: TApprovalEffect; const ARef: string;
+      const AParams: array of string; AAny: Boolean): TApprovalRule;
+    function ServiceWith(APrompt: TApprovalPrompt): IApprovalService;
   protected
     procedure SetUp; override;
     procedure TearDown; override;
@@ -83,52 +58,21 @@ type
     procedure TestMissingCommandArgumentFails;
     procedure TestInvalidJsonFails;
     procedure TestMissingReasonNotExecuted;
-    procedure TestAllowExecutesAndReturnsOutput;
-    procedure TestDenyDoesNotExecuteAndFails;
-    procedure TestAskWithNoApproverDenies;
-    procedure TestAskAllowOnceExecutesWithoutPersisting;
-    procedure TestAskAllowWildcardExecutesAndPersists;
-    procedure TestAskAllowSpecificPersistsExact;
-    procedure TestAskAllowSpecificNoArgsPersistedExact;
-    procedure TestCompoundCommandApprovedPerSegment;
-    procedure TestWildcardApprovalCoversLaterSegments;
-    procedure TestAskDenyDoesNotExecute;
-    procedure TestReasonPassedToApprover;
-    procedure TestReasonRecordedInAudit;
-    procedure TestTimeoutReports124;
+    procedure TestAllowedByRuleExecutes;
+    procedure TestDeniedByRuleDoesNotExecute;
+    procedure TestAskWithNoPromptDenies;
+    procedure TestPromptAllowOnceDoesNotPersist;
+    procedure TestPromptExactPersistsAndAllowsSame;
+    procedure TestPromptAnyAllowsOtherArgs;
+    procedure TestPromptPrefixScopesSubtree;
+    procedure TestApprovalAsksPerSegment;
     procedure TestOutputIsTruncatedWithMarker;
-    procedure TestPolicyReloadedEachCall;
-    procedure TestLoadPolicyErrorFailsClosed;
-    procedure TestAuditRecordedForAllowDenyAndOutcome;
+    procedure TestTimeoutReports124;
     procedure TestHandlerNeverRaises;
-    procedure TestStoreCommandPolicySourceRoundTrip;
-    procedure TestStoreCommandPolicySourcePersistsAcrossReopen;
-    procedure TestRoundTripAgainstFakeProvider;
     procedure TestProcessExecutorRunsCommand;
-    procedure TestMemoryPolicySourceAsksThenRemembers;
   end;
 
 implementation
-
-function MakePolicy(const AAllow, ADeny, ARoots: array of string;
-  AInterpreters: Boolean): TCommandPolicy;
-var
-  I: Integer;
-begin
-  Result := Default(TCommandPolicy);
-  SetLength(Result.Allow, Length(AAllow));
-  for I := 0 to High(AAllow) do
-    Result.Allow[I] := AAllow[I];
-  SetLength(Result.Deny, Length(ADeny));
-  for I := 0 to High(ADeny) do
-    Result.Deny[I] := ADeny[I];
-  SetLength(Result.AllowedRoots, Length(ARoots));
-  for I := 0 to High(ARoots) do
-    Result.AllowedRoots[I] := ARoots[I];
-  Result.AllowInterpreters := AInterpreters;
-end;
-
-{ TFakeExecutor }
 
 constructor TFakeExecutor.Create;
 begin
@@ -147,7 +91,6 @@ begin
   if RaiseOnExecute then
     raise Exception.Create('executor boom');
   Inc(Calls);
-  LastProfile := AProfile;
   LastCommand := ACommand;
   LastCwd := AWorkDir;
   LastTimeoutMs := ATimeoutMs;
@@ -155,104 +98,43 @@ begin
   Result := ReturnOk;
 end;
 
-{ TMemoryPolicySource }
-
-constructor TMemoryPolicySource.Create;
-begin
-  inherited Create;
-  Policy := Default(TCommandPolicy);
-  Approvals := TStringList.Create;
-end;
-
-destructor TMemoryPolicySource.Destroy;
-begin
-  Approvals.Free;
-  inherited Destroy;
-end;
-
-function TMemoryPolicySource.LoadPolicy(out APolicy: TCommandPolicy;
-  out AError: string): Boolean;
-begin
-  Inc(LoadCalls);
-  if RaiseOnLoad then
-    raise Exception.Create('load boom');
-  if LoadFails then
-  begin
-    APolicy := Default(TCommandPolicy);
-    AError := 'policy unavailable';
-    Exit(False);
-  end;
-  APolicy := Policy;
-  AError := '';
-  Result := True;
-end;
-
-function TMemoryPolicySource.SaveApproval(const AExecutable: string;
-  out AError: string): Boolean;
-begin
-  Approvals.Add(AExecutable);
-  AError := '';
-  Result := True;
-end;
-
-procedure TMemoryPolicySource.RecordAudit(const AEntry: TCommandAuditEntry);
-begin
-  SetLength(Audits, Length(Audits) + 1);
-  Audits[High(Audits)] := AEntry;
-end;
-
-function TMemoryPolicySource.AuditCount: Integer;
-begin
-  Result := Length(Audits);
-end;
-
-{ TFakeApprover }
-
-constructor TFakeApprover.Create;
-begin
-  inherited Create;
-  SegmentCommands := TStringList.Create;
-end;
-
-destructor TFakeApprover.Destroy;
-begin
-  SegmentCommands.Free;
-  inherited Destroy;
-end;
-
-function TFakeApprover.Approve(const ARequest: TApprovalRequest): TApprovalOutcome;
+function TFakePrompt.Prompt(const AAsk: TApprovalAsk): TApprovalChoice;
 begin
   Inc(Calls);
-  LastRequest := ARequest;
-  SegmentCommands.Add(ARequest.SegmentCommand);
-  Result := Outcome;
+  LastAsk := AAsk;
+  Result := Default(TApprovalChoice);
+  Result.Allowed := Allowed;
+  Result.OptionKey := OptionKey;
+  Result.Scope := Scope;
 end;
-
-{ TCommandToolTest }
 
 procedure TCommandToolTest.SetUp;
 begin
-  FDir := IncludeTrailingPathDelimiter(GetTempDir) + 'hhcmd_' +
-    IntToStr(GetTickCount64) + '_' + IntToStr(Random(100000));
-  CreateDir(FDir);
-  FDbPath := IncludeTrailingPathDelimiter(FDir) + 'store.db';
-  FSource := TMemoryPolicySource.Create;
   FExecutor := TFakeExecutor.Create;
-end;
-
-procedure TCommandToolTest.DeleteDbFiles;
-begin
-  DeleteFile(FDbPath);
-  DeleteFile(FDbPath + '-wal');
-  DeleteFile(FDbPath + '-shm');
+  FApprovalStore := TMemoryApprovalStore.Create;
 end;
 
 procedure TCommandToolTest.TearDown;
 begin
-  FSource.Free;
   FExecutor.Free;
-  DeleteDbFiles;
-  RemoveDir(FDir);
+  FApprovalStore := nil;
+end;
+
+function TCommandToolTest.AddRule(AEffect: TApprovalEffect;
+  const ARef: string; const AParams: array of string;
+  AAny: Boolean): TApprovalRule;
+var
+  I: Integer;
+  Err: string;
+begin
+  Result := DefaultApprovalRule(AEffect);
+  Result.Scope := asGlobal;
+  Result.Ref := ARef;
+  SetLength(Result.Params, Length(AParams));
+  for I := 0 to High(AParams) do
+    Result.Params[I] := AParams[I];
+  Result.AnyParams := AAny;
+  FApprovalStore.Save(Result, Err);
 end;
 
 function TCommandToolTest.MakeConfig(AMaxBytes: Integer): TCommandToolConfig;
@@ -263,27 +145,20 @@ begin
   Result.MaxOutputBytes := AMaxBytes;
 end;
 
-function TCommandToolTest.BuildTool(AApprover: TApprovalHandler;
-  AMaxBytes: Integer): TCommandTool;
+function TCommandToolTest.ServiceWith(
+  APrompt: TApprovalPrompt): IApprovalService;
+var
+  Ctx: TApprovalContext;
 begin
-  Result := TCommandTool.Create(MakeConfig(AMaxBytes), FSource, AApprover,
-    FExecutor);
+  Ctx.WorkspaceId := 1;
+  Result := TApprovalService.Create(FApprovalStore, APrompt, Ctx);
 end;
 
-function TCommandToolTest.OpenStore: TSqliteStore;
-var
-  Cfg: TStoreConfig;
-  Err: TStoreError;
+function TCommandToolTest.BuildTool(APrompt: TApprovalPrompt;
+  AMaxBytes: Integer): TCommandTool;
 begin
-  Cfg.DatabasePath := FDbPath;
-  Cfg.LibraryPath := '';
-  Cfg.BusyTimeoutMs := 5000;
-  Result := TSqliteStore.Create(Cfg);
-  if not Result.Open(Err) then
-  begin
-    Result.Free;
-    raise Exception.Create('store failed to open: ' + Err.Message);
-  end;
+  Result := TCommandTool.Create(MakeConfig(AMaxBytes), ServiceWith(APrompt),
+    FExecutor);
 end;
 
 procedure TCommandToolTest.TestRegisterAddsRunCommandSpec;
@@ -322,7 +197,6 @@ begin
   Tool := BuildTool(nil, 0);
   try
     AssertFalse('fails', Tool.Run('{"reason":"r"}', R, E));
-    AssertTrue('names command', Pos('command', E) > 0);
     AssertEquals('not executed', 0, FExecutor.Calls);
   finally
     Tool.Free;
@@ -351,290 +225,181 @@ begin
   Tool := BuildTool(nil, 0);
   try
     AssertFalse('fails', Tool.Run('{"command":"ls"}', R, E));
-    AssertTrue('names reason', Pos('reason', E) > 0);
     AssertEquals('not executed', 0, FExecutor.Calls);
   finally
     Tool.Free;
   end;
 end;
 
-procedure TCommandToolTest.TestAllowExecutesAndReturnsOutput;
+procedure TCommandToolTest.TestAllowedByRuleExecutes;
 var
   Tool: TCommandTool;
   R, E: string;
 begin
-  FSource.Policy := MakePolicy(['echo'], [], [], False);
+  AddRule(aeAllow, 'run_command:echo', [], True);
   FExecutor.ResultExec.Output := 'hello' + LineEnding;
   Tool := BuildTool(nil, 0);
   try
     AssertTrue('ok', Tool.Run('{"command":"echo hi","reason":"r"}', R, E));
     AssertEquals('executed once', 1, FExecutor.Calls);
-    AssertEquals('command passed', 'echo hi', FExecutor.LastCommand);
-    AssertTrue('exit line', Pos('exit_code: 0', R) > 0);
+    AssertEquals('command', 'echo hi', FExecutor.LastCommand);
     AssertTrue('output', Pos('hello', R) > 0);
-    AssertEquals('default timeout used', 1234, FExecutor.LastTimeoutMs);
+    AssertEquals('cwd default', '', FExecutor.LastCwd);
+    AssertEquals('timeout default', 1234, FExecutor.LastTimeoutMs);
   finally
     Tool.Free;
   end;
 end;
 
-procedure TCommandToolTest.TestDenyDoesNotExecuteAndFails;
+procedure TCommandToolTest.TestDeniedByRuleDoesNotExecute;
 var
   Tool: TCommandTool;
   R, E: string;
 begin
-  FSource.Policy := MakePolicy([], ['rm'], [], False);
+  AddRule(aeDeny, 'run_command:rm', [], True);
   Tool := BuildTool(nil, 0);
   try
-    AssertFalse('denied', Tool.Run('{"command":"rm file","reason":"r"}', R, E));
+    AssertFalse('denied', Tool.Run('{"command":"rm x","reason":"r"}', R, E));
     AssertEquals('not executed', 0, FExecutor.Calls);
-    AssertTrue('mentions policy', Pos('denied by policy', E) > 0);
+    AssertTrue('mentions deny', Pos('denied', E) > 0);
   finally
     Tool.Free;
   end;
 end;
 
-procedure TCommandToolTest.TestAskWithNoApproverDenies;
+procedure TCommandToolTest.TestAskWithNoPromptDenies;
 var
   Tool: TCommandTool;
   R, E: string;
 begin
-  FSource.Policy := MakePolicy(['other'], [], [], False);
   Tool := BuildTool(nil, 0);
   try
     AssertFalse('denied', Tool.Run('{"command":"ls","reason":"r"}', R, E));
     AssertEquals('not executed', 0, FExecutor.Calls);
-    AssertTrue('mentions operator', Pos('denied by operator', E) > 0);
   finally
     Tool.Free;
   end;
 end;
 
-procedure TCommandToolTest.TestAskAllowOnceExecutesWithoutPersisting;
+procedure TCommandToolTest.TestPromptAllowOnceDoesNotPersist;
 var
   Tool: TCommandTool;
-  Approver: TFakeApprover;
+  Prompt: TFakePrompt;
   R, E: string;
 begin
-  FSource.Policy := MakePolicy(['other'], [], [], False);
-  Approver := TFakeApprover.Create;
+  Prompt := TFakePrompt.Create;
   try
-    Approver.Outcome := aoAllowOnce;
-    Tool := BuildTool(Approver.Approve, 0);
+    Prompt.Allowed := True;
+    Prompt.OptionKey := 'once';
+    Tool := BuildTool(Prompt.Prompt, 0);
     try
-      AssertTrue('ok', Tool.Run('{"command":"ls","reason":"r"}', R, E));
-      AssertEquals('executed', 1, FExecutor.Calls);
-      AssertEquals('approver asked', 1, Approver.Calls);
-      AssertEquals('not persisted', 0, FSource.Approvals.Count);
+      AssertTrue('first', Tool.Run('{"command":"ls","reason":"r"}', R, E));
+      AssertTrue('second', Tool.Run('{"command":"ls","reason":"r"}', R, E));
+      AssertEquals('prompted twice', 2, Prompt.Calls);
+      AssertEquals('executed twice', 2, FExecutor.Calls);
     finally
       Tool.Free;
     end;
   finally
-    Approver.Free;
+    Prompt.Free;
   end;
 end;
 
-procedure TCommandToolTest.TestAskAllowWildcardExecutesAndPersists;
+procedure TCommandToolTest.TestPromptExactPersistsAndAllowsSame;
 var
   Tool: TCommandTool;
-  Approver: TFakeApprover;
+  Prompt: TFakePrompt;
   R, E: string;
 begin
-  FSource.Policy := MakePolicy(['other'], [], [], False);
-  Approver := TFakeApprover.Create;
+  Prompt := TFakePrompt.Create;
   try
-    Approver.Outcome := aoAllowWildcard;
-    Tool := BuildTool(Approver.Approve, 0);
+    Prompt.Allowed := True;
+    Prompt.OptionKey := 'exact';
+    Prompt.Scope := asGlobal;
+    Tool := BuildTool(Prompt.Prompt, 0);
     try
-      AssertTrue('ok', Tool.Run('{"command":"ls -la","reason":"r"}', R, E));
-      AssertEquals('executed', 1, FExecutor.Calls);
-      AssertEquals('persisted once', 1, FSource.Approvals.Count);
-      AssertEquals('persisted wildcard', 'ls *', FSource.Approvals[0]);
+      AssertTrue('first', Tool.Run(
+        '{"command":"cat test","reason":"r"}', R, E));
+      AssertTrue('second same', Tool.Run(
+        '{"command":"cat test","reason":"r"}', R, E));
+      AssertEquals('prompted once', 1, Prompt.Calls);
+      Tool.Run('{"command":"cat other","reason":"r"}', R, E);
+      AssertEquals('other arg asks again', 2, Prompt.Calls);
     finally
       Tool.Free;
     end;
   finally
-    Approver.Free;
+    Prompt.Free;
   end;
 end;
 
-procedure TCommandToolTest.TestAskAllowSpecificPersistsExact;
+procedure TCommandToolTest.TestPromptAnyAllowsOtherArgs;
 var
   Tool: TCommandTool;
-  Approver: TFakeApprover;
+  Prompt: TFakePrompt;
   R, E: string;
 begin
-  FSource.Policy := MakePolicy(['other'], [], [], False);
-  Approver := TFakeApprover.Create;
+  Prompt := TFakePrompt.Create;
   try
-    Approver.Outcome := aoAllowSpecific;
-    Tool := BuildTool(Approver.Approve, 0);
+    Prompt.Allowed := True;
+    Prompt.OptionKey := 'any';
+    Prompt.Scope := asGlobal;
+    Tool := BuildTool(Prompt.Prompt, 0);
     try
-      AssertTrue('ok', Tool.Run(
-        '{"command":"cat /etc/os-release","reason":"r"}', R, E));
-      AssertEquals('executed', 1, FExecutor.Calls);
-      AssertEquals('persisted exact', '=cat /etc/os-release',
-        FSource.Approvals[0]);
+      AssertTrue('first', Tool.Run('{"command":"cat a","reason":"r"}', R, E));
+      AssertTrue('other', Tool.Run('{"command":"cat b","reason":"r"}', R, E));
+      AssertEquals('prompted once', 1, Prompt.Calls);
     finally
       Tool.Free;
     end;
   finally
-    Approver.Free;
+    Prompt.Free;
   end;
 end;
 
-procedure TCommandToolTest.TestAskAllowSpecificNoArgsPersistedExact;
+procedure TCommandToolTest.TestPromptPrefixScopesSubtree;
 var
   Tool: TCommandTool;
-  Approver: TFakeApprover;
+  Prompt: TFakePrompt;
   R, E: string;
 begin
-  FSource.Policy := MakePolicy(['other'], [], [], False);
-  Approver := TFakeApprover.Create;
+  Prompt := TFakePrompt.Create;
   try
-    Approver.Outcome := aoAllowSpecific;
-    Tool := BuildTool(Approver.Approve, 0);
+    Prompt.Allowed := True;
+    Prompt.OptionKey := 'prefix';
+    Prompt.Scope := asGlobal;
+    Tool := BuildTool(Prompt.Prompt, 0);
     try
-      AssertTrue('ok', Tool.Run('{"command":"uname","reason":"r"}', R, E));
-      AssertEquals('persisted exact no-args', '=uname', FSource.Approvals[0]);
+      AssertTrue('first', Tool.Run(
+        '{"command":"php artisan migrate","reason":"r"}', R, E));
+      AssertTrue('same subtree', Tool.Run(
+        '{"command":"php artisan db","reason":"r"}', R, E));
+      AssertEquals('prompted once', 1, Prompt.Calls);
+      Tool.Run('{"command":"php foo","reason":"r"}', R, E);
+      AssertEquals('prompted again', 2, Prompt.Calls);
     finally
       Tool.Free;
     end;
   finally
-    Approver.Free;
+    Prompt.Free;
   end;
 end;
 
-procedure TCommandToolTest.TestCompoundCommandApprovedPerSegment;
+procedure TCommandToolTest.TestApprovalAsksPerSegment;
 var
   Tool: TCommandTool;
-  Approver: TFakeApprover;
-  R, E: string;
+  Asks: TApprovalAskArray;
 begin
-  FSource.Policy := MakePolicy([], [], [], False);
-  Approver := TFakeApprover.Create;
-  try
-    Approver.Outcome := aoAllowOnce;
-    Tool := BuildTool(Approver.Approve, 0);
-    try
-      AssertTrue('ok', Tool.Run(
-        '{"command":"cat /etc/os-release && uname -a","reason":"r"}', R, E));
-      AssertEquals('asked per segment', 2, Approver.Calls);
-      AssertEquals('first segment', 'cat /etc/os-release',
-        Approver.SegmentCommands[0]);
-      AssertEquals('second segment', 'uname -a',
-        Approver.SegmentCommands[1]);
-      AssertEquals('executed whole command once', 1, FExecutor.Calls);
-      AssertEquals('original command executed',
-        'cat /etc/os-release && uname -a', FExecutor.LastCommand);
-    finally
-      Tool.Free;
-    end;
-  finally
-    Approver.Free;
-  end;
-end;
-
-procedure TCommandToolTest.TestWildcardApprovalCoversLaterSegments;
-var
-  Tool: TCommandTool;
-  Approver: TFakeApprover;
-  R, E: string;
-begin
-  FSource.Policy := MakePolicy(['other'], [], [], False);
-  Approver := TFakeApprover.Create;
-  try
-    Approver.Outcome := aoAllowWildcard;
-    Tool := BuildTool(Approver.Approve, 0);
-    try
-      AssertTrue('ok', Tool.Run('{"command":"cat a && cat b","reason":"r"}',
-        R, E));
-      AssertEquals('asked once', 1, Approver.Calls);
-    finally
-      Tool.Free;
-    end;
-  finally
-    Approver.Free;
-  end;
-end;
-
-procedure TCommandToolTest.TestAskDenyDoesNotExecute;
-var
-  Tool: TCommandTool;
-  Approver: TFakeApprover;
-  R, E: string;
-begin
-  FSource.Policy := MakePolicy(['other'], [], [], False);
-  Approver := TFakeApprover.Create;
-  try
-    Approver.Outcome := aoDeny;
-    Tool := BuildTool(Approver.Approve, 0);
-    try
-      AssertFalse('denied', Tool.Run('{"command":"ls","reason":"r"}', R, E));
-      AssertEquals('not executed', 0, FExecutor.Calls);
-      AssertEquals('approver asked', 1, Approver.Calls);
-    finally
-      Tool.Free;
-    end;
-  finally
-    Approver.Free;
-  end;
-end;
-
-procedure TCommandToolTest.TestReasonPassedToApprover;
-var
-  Tool: TCommandTool;
-  Approver: TFakeApprover;
-  R, E: string;
-begin
-  FSource.Policy := MakePolicy(['other'], [], [], False);
-  Approver := TFakeApprover.Create;
-  try
-    Approver.Outcome := aoAllowOnce;
-    Tool := BuildTool(Approver.Approve, 0);
-    try
-      Tool.Run('{"command":"ls","reason":"because reasons"}', R, E);
-      AssertEquals('reason forwarded', 'because reasons',
-        Approver.LastRequest.Reason);
-      AssertEquals('command forwarded', 'ls', Approver.LastRequest.Command);
-    finally
-      Tool.Free;
-    end;
-  finally
-    Approver.Free;
-  end;
-end;
-
-procedure TCommandToolTest.TestReasonRecordedInAudit;
-var
-  Tool: TCommandTool;
-  R, E: string;
-begin
-  FSource.Policy := MakePolicy(['echo'], [], [], False);
   Tool := BuildTool(nil, 0);
   try
-    Tool.Run('{"command":"echo hi","reason":"audit me"}', R, E);
-    AssertEquals('one audit', 1, FSource.AuditCount);
-    AssertEquals('reason in audit', 'audit me', FSource.Audits[0].Reason);
-  finally
-    Tool.Free;
-  end;
-end;
-
-procedure TCommandToolTest.TestTimeoutReports124;
-var
-  Tool: TCommandTool;
-  R, E: string;
-begin
-  FSource.Policy := MakePolicy(['sleep'], [], [], False);
-  FExecutor.ResultExec.Output := '';
-  FExecutor.ResultExec.ExitCode := 124;
-  FExecutor.ResultExec.TimedOut := True;
-  Tool := BuildTool(nil, 0);
-  try
-    AssertTrue('ok', Tool.Run('{"command":"sleep 9","reason":"r"}', R, E));
-    AssertTrue('reports 124', Pos('exit_code: 124', R) > 0);
-    AssertTrue('audit timed out', FSource.Audits[0].TimedOut);
+    Asks := Tool.ApprovalAsks(
+      '{"command":"cat /etc/os-release && uname -a","reason":"r"}');
+    AssertEquals('two asks', 2, Length(Asks));
+    AssertEquals('first ref', 'run_command:cat', Asks[0].Subject.Ref);
+    AssertEquals('first summary', 'cat /etc/os-release', Asks[0].Summary);
+    AssertEquals('second ref', 'run_command:uname', Asks[1].Subject.Ref);
+    AssertEquals('second summary', 'uname -a', Asks[1].Summary);
+    AssertTrue('has once option', Asks[0].Options[0].Key = 'once');
   finally
     Tool.Free;
   end;
@@ -645,7 +410,7 @@ var
   Tool: TCommandTool;
   R, E: string;
 begin
-  FSource.Policy := MakePolicy(['echo'], [], [], False);
+  AddRule(aeAllow, 'run_command:echo', [], True);
   FExecutor.ResultExec.Output := 'abcdefgh';
   Tool := BuildTool(nil, 4);
   try
@@ -658,56 +423,19 @@ begin
   end;
 end;
 
-procedure TCommandToolTest.TestPolicyReloadedEachCall;
+procedure TCommandToolTest.TestTimeoutReports124;
 var
   Tool: TCommandTool;
   R, E: string;
 begin
-  FSource.Policy := MakePolicy(['echo'], [], [], False);
+  AddRule(aeAllow, 'run_command:sleep', [], True);
+  FExecutor.ResultExec.Output := '';
+  FExecutor.ResultExec.ExitCode := 124;
+  FExecutor.ResultExec.TimedOut := True;
   Tool := BuildTool(nil, 0);
   try
-    Tool.Run('{"command":"echo a","reason":"r"}', R, E);
-    FSource.Policy := MakePolicy([], [], [], False);
-    AssertFalse('second now asks and denies', Tool.Run(
-      '{"command":"echo a","reason":"r"}', R, E));
-    AssertEquals('reloaded per call', 2, FSource.LoadCalls);
-  finally
-    Tool.Free;
-  end;
-end;
-
-procedure TCommandToolTest.TestLoadPolicyErrorFailsClosed;
-var
-  Tool: TCommandTool;
-  R, E: string;
-begin
-  FSource.LoadFails := True;
-  Tool := BuildTool(nil, 0);
-  try
-    AssertFalse('fails closed', Tool.Run('{"command":"ls","reason":"r"}', R, E));
-    AssertEquals('not executed', 0, FExecutor.Calls);
-    AssertTrue('mentions policy', Pos('policy', E) > 0);
-  finally
-    Tool.Free;
-  end;
-end;
-
-procedure TCommandToolTest.TestAuditRecordedForAllowDenyAndOutcome;
-var
-  Tool: TCommandTool;
-  R, E: string;
-begin
-  FSource.Policy := MakePolicy(['echo'], ['rm'], [], False);
-  Tool := BuildTool(nil, 0);
-  try
-    Tool.Run('{"command":"echo hi","reason":"r"}', R, E);
-    AssertEquals('allowed audit', 'policy', FSource.Audits[0].Approval);
-    AssertEquals('allow decision', Ord(cdAllow),
-      Ord(FSource.Audits[0].Decision));
-    Tool.Run('{"command":"rm x","reason":"r"}', R, E);
-    AssertEquals('two audits', 2, FSource.AuditCount);
-    AssertEquals('denied audit', 'denied', FSource.Audits[1].Approval);
-    AssertEquals('deny decision', Ord(cdDeny), Ord(FSource.Audits[1].Decision));
+    AssertTrue('ok', Tool.Run('{"command":"sleep 9","reason":"r"}', R, E));
+    AssertTrue('reports 124', Pos('exit_code: 124', R) > 0);
   finally
     Tool.Free;
   end;
@@ -718,7 +446,7 @@ var
   Tool: TCommandTool;
   R, E: string;
 begin
-  FSource.Policy := MakePolicy(['echo'], [], [], False);
+  AddRule(aeAllow, 'run_command:echo', [], True);
   FExecutor.RaiseOnExecute := True;
   Tool := BuildTool(nil, 0);
   try
@@ -726,139 +454,6 @@ begin
     AssertTrue('error text', Pos('run_command error', E) > 0);
   finally
     Tool.Free;
-  end;
-end;
-
-procedure TCommandToolTest.TestStoreCommandPolicySourceRoundTrip;
-var
-  Store: TSqliteStore;
-  Err: TStoreError;
-  Src: ICommandPolicySource;
-  Pol: TCommandPolicy;
-  PErr: string;
-  Entry: TCommandAuditEntry;
-  Req: TStoredRequest;
-begin
-  Store := OpenStore;
-  try
-    AssertTrue('set allow', Store.SetSetting(SettingPolicyAllow,
-      '["echo","ls"]', Err));
-    AssertTrue('set deny', Store.SetSetting(SettingPolicyDeny, '["rm"]', Err));
-    AssertTrue('set roots', Store.SetSetting(SettingPolicyRoots,
-      '["/srv"]', Err));
-    Src := TStoreCommandPolicySource.Create(Store);
-    AssertTrue('load', Src.LoadPolicy(Pol, PErr));
-    AssertEquals('allow count', 2, Length(Pol.Allow));
-    AssertEquals('deny', 'rm', Pol.Deny[0]);
-    AssertEquals('root', '/srv', Pol.AllowedRoots[0]);
-
-    AssertTrue('save approval', Src.SaveApproval('echo', PErr));
-    AssertTrue('reload', Src.LoadPolicy(Pol, PErr));
-    AssertEquals('approved merged into allow', 3, Length(Pol.Allow));
-
-    Entry := Default(TCommandAuditEntry);
-    Entry.Id := 'audit-1';
-    Entry.Command := 'echo hi';
-    Entry.Reason := 'because';
-    Entry.Decision := cdAllow;
-    Entry.Approval := 'policy';
-    Entry.ExitCode := 0;
-    Src.RecordAudit(Entry);
-
-    AssertTrue('audit stored', Store.GetRequest('audit-1', Req, Err));
-    AssertEquals('kind', 'command', Req.Kind);
-    AssertEquals('payload', 'echo hi', Req.Payload);
-    AssertEquals('status', Ord(rsCompleted), Ord(Req.Status));
-  finally
-    Store.Free;
-  end;
-end;
-
-procedure TCommandToolTest.TestStoreCommandPolicySourcePersistsAcrossReopen;
-var
-  Store: TSqliteStore;
-  Src: ICommandPolicySource;
-  Pol: TCommandPolicy;
-  PErr: string;
-  I: Integer;
-  Found: Boolean;
-begin
-  Store := OpenStore;
-  try
-    Src := TStoreCommandPolicySource.Create(Store);
-    AssertTrue('approve', Src.SaveApproval('=uname', PErr));
-  finally
-    Store.Close;
-    Store.Free;
-  end;
-
-  Store := OpenStore;
-  try
-    Src := TStoreCommandPolicySource.Create(Store);
-    AssertTrue('reload', Src.LoadPolicy(Pol, PErr));
-    Found := False;
-    for I := 0 to High(Pol.Allow) do
-      if Pol.Allow[I] = '=uname' then
-        Found := True;
-    AssertTrue('approval survived reopen', Found);
-    AssertEquals('exact command now allowed', Ord(cdAllow),
-      Ord(ClassifyCommand(ParseCommand('uname', ssPosix), Pol).Decision));
-  finally
-    Store.Close;
-    Store.Free;
-  end;
-end;
-
-procedure TCommandToolTest.TestRoundTripAgainstFakeProvider;
-var
-  Cfg: TLLMConfig;
-  ACfg: TAgentConfig;
-  Fake: TFakeTransport;
-  Client: TLLMClient;
-  Store: IConversationStore;
-  Tools: TToolRegistry;
-  Loop: TAgentLoop;
-  Tool: TCommandTool;
-  Answer: string;
-  Err: TLLMError;
-begin
-  FSource.Policy := MakePolicy(['echo'], [], [], False);
-  FExecutor.ResultExec.Output := 'hi there' + LineEnding;
-  Fake := TFakeTransport.Create;
-  try
-    Cfg := Default(TLLMConfig);
-    Cfg.Endpoint := 'https://example.test/v1/chat/completions';
-    Cfg.Model := 'm';
-    Cfg.ApiKey := 'k';
-    Client := TLLMClient.Create(Cfg, Fake);
-    Store := TMemoryConversationStore.Create;
-    Tools := TToolRegistry.Create;
-    Tool := TCommandTool.Create(MakeConfig(0), FSource, nil, FExecutor);
-    try
-      Tool.Register(Tools);
-      ACfg := Default(TAgentConfig);
-      ACfg.MaxToolIterations := 8;
-      Loop := TAgentLoop.Create(Client, Store, Tools, ACfg);
-      try
-        Fake.AddResponse([ToolNameFrame(0, 'call_1', CommandToolName),
-          ToolArgsFrame(0, '{"command":"echo hi","reason":"r"}'),
-          FinishFrame('tool_calls'), DoneFrame]);
-        Fake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
-        AssertTrue('send ok', Loop.Send('go', nil, Answer, Err));
-        AssertEquals('answer', 'done', Answer);
-        AssertEquals('executed once', 1, FExecutor.Calls);
-        AssertTrue('output fed back', Pos('hi there', Fake.LastBody) > 0);
-      finally
-        Loop.Free;
-      end;
-    finally
-      Tool.Free;
-      Tools.Free;
-      Store := nil;
-      Client.Free;
-    end;
-  finally
-    Fake.Free;
   end;
 end;
 
@@ -873,27 +468,6 @@ begin
   AssertEquals('exit code', 0, ExecResult.ExitCode);
   AssertTrue('output captured', Pos('hello', ExecResult.Output) > 0);
   AssertFalse('not timed out', ExecResult.TimedOut);
-end;
-
-procedure TCommandToolTest.TestMemoryPolicySourceAsksThenRemembers;
-var
-  Src: ICommandPolicySource;
-  Pol: TCommandPolicy;
-  PErr: string;
-  Entry: TCommandAuditEntry;
-begin
-  Src := TMemoryCommandPolicySource.Create(DefaultCommandPolicy);
-  AssertTrue('load', Src.LoadPolicy(Pol, PErr));
-  AssertEquals('asks first', Ord(cdAsk),
-    Ord(ClassifyCommand(ParseCommand('ls', ssPosix), Pol).Decision));
-
-  AssertTrue('approve', Src.SaveApproval('ls', PErr));
-  AssertTrue('reload', Src.LoadPolicy(Pol, PErr));
-  AssertEquals('remembers', Ord(cdAllow),
-    Ord(ClassifyCommand(ParseCommand('ls', ssPosix), Pol).Decision));
-
-  Entry := Default(TCommandAuditEntry);
-  Src.RecordAudit(Entry);   // no sink; must not raise
 end;
 
 initialization

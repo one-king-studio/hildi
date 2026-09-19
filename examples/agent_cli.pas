@@ -22,6 +22,7 @@ uses
   hildegard.helper.ansi, hildegard.helper.env, hildegard.helper.cli,
   hildegard.helper.transcript, hildegard.helper.llm, hildegard.helper.agent,
   hildegard.helper.command.policy, hildegard.helper.command.tool,
+  hildegard.helper.approval, hildegard.helper.approval.store,
   hildegard.helper.store, hildegard.helper.workspace;
 
 const
@@ -82,37 +83,53 @@ begin
 end;
 
 type
-  { Prompts the operator on the terminal when the policy asks to run a command. }
+  { Renders the tool's approval options and reads the operator's choice. }
   TConsoleApprover = class
   public
-    function Approve(const ARequest: TApprovalRequest): TApprovalOutcome;
+    function Prompt(const AAsk: TApprovalAsk): TApprovalChoice;
   end;
 
-function TConsoleApprover.Approve(
-  const ARequest: TApprovalRequest): TApprovalOutcome;
+function TConsoleApprover.Prompt(const AAsk: TApprovalAsk): TApprovalChoice;
 var
-  Line: string;
+  Line, ScopeLine: string;
+  N, I: Integer;
+  Scope: TApprovalScope;
 begin
+  Result := Default(TApprovalChoice);
+  Result.Allowed := False;
   WriteLn;
   WriteLn(AnsiStyled('[approval needed]', AnsiYellow));
-  WriteLn('  command: ', ARequest.SegmentCommand);
-  WriteLn('  reason:  ', ARequest.Reason);
-  WriteLn('  policy:  ', ARequest.Decision.Reason);
-  Write('approve? [y] once / [s] always this exact / [a] always any args / ' +
-    '[n]o: ');
+  WriteLn('  command: ', AAsk.Summary);
+  for I := 0 to High(AAsk.Options) do
+    WriteLn(Format('    %d) %s', [I + 1, AAsk.Options[I].Caption]));
+  Write('  choose (0 = deny): ');
   Flush(Output);
   if EOF(Input) then
-    Exit(aoDeny);
+    Exit;
   ReadLn(Line);
-  Line := LowerCase(Trim(Line));
-  if (Line = 'y') or (Line = 'yes') then
-    Result := aoAllowOnce
-  else if (Line = 's') or (Line = 'specific') then
-    Result := aoAllowSpecific
-  else if (Line = 'a') or (Line = 'always') then
-    Result := aoAllowWildcard
-  else
-    Result := aoDeny;
+  N := StrToIntDef(Trim(Line), 0);
+  if (N < 1) or (N > Length(AAsk.Options)) then
+    Exit;
+
+  Scope := asWorkspace;
+  if AAsk.Options[N - 1].Persists then
+  begin
+    Write('  scope [g]lobal / [w]orkspace / [s]ession (default w): ');
+    Flush(Output);
+    if EOF(Input) then
+      Exit;
+    ReadLn(ScopeLine);
+    ScopeLine := LowerCase(Trim(ScopeLine));
+    if ScopeLine = 'g' then
+      Scope := asGlobal
+    else if ScopeLine = 's' then
+      Scope := asSession
+    else
+      Scope := asWorkspace;
+  end;
+  Result.Allowed := True;
+  Result.OptionKey := AAsk.Options[N - 1].Key;
+  Result.Scope := Scope;
 end;
 
 var
@@ -134,16 +151,18 @@ var
   Err: TLLMError;
   I: Integer;
   SqliteStore: TSqliteStore;
-  StoreSource: ICommandPolicySource;
-  CommandTool: TCommandTool;
+  ApprovalStore: IApprovalStore;
+  ApprovalService: IApprovalService;
   Approver: TConsoleApprover;
-  ApproveHandler: TApprovalHandler;
+  ApprovalCtx: TApprovalContext;
+  CommandTool: TCommandTool;
   StorePath: string;
   StoreErr: TStoreError;
   StoreConfig: TStoreConfig;
   ToolConfig: TCommandToolConfig;
   Workspace: TWorkspace;
   WorkspacePath, WSErr: string;
+  WorkspaceId: Integer;
 
 begin
   RawArgs := CollectArgs;
@@ -221,12 +240,14 @@ begin
   Tools := TToolRegistry.Create;
   RegisterDefaultTools(Tools);
 
-  { The shell tool needs a policy source; enable it when the SQLite store opens.
-    Without a store the agent keeps its safe, read-only tool set. }
+  { Approvals persist in the SQLite store when it opens; otherwise they are
+    session-only (in memory). Either way the shell tool is enabled and nothing
+    runs without a matching approval or an explicit prompt. }
   CommandTool := nil;
   Approver := nil;
-  StoreSource := nil;
+  ApprovalStore := nil;
   SqliteStore := nil;
+  WorkspaceId := 0;
   StorePath := GetEnvironmentVariable('HILDEGARD_STORE_PATH');
   if StorePath = '' then
     StorePath := IncludeTrailingPathDelimiter(GetUserDir) + '.hildegard-helper' +
@@ -237,29 +258,33 @@ begin
   StoreConfig.BusyTimeoutMs := 5000;
   SqliteStore := TSqliteStore.Create(StoreConfig);
   if SqliteStore.Open(StoreErr) then
-    StoreSource := TStoreCommandPolicySource.Create(SqliteStore)
+  begin
+    SqliteStore.EnsureWorkspace(Workspace.Root, WorkspaceId, StoreErr);
+    ApprovalStore := TStoreApprovalStore.Create(SqliteStore);
+  end
   else
   begin
-    { No store: keep the shell tool, but with a session-only ask-everything
-      policy, so nothing runs without an explicit approval. }
-    WriteLn(AnsiStyled('warning: no store: shell policy is session-only and ' +
-      'asks for every command (' + StoreErr.Message + ')', AnsiYellow));
+    WriteLn(AnsiStyled('warning: no store: approvals are session-only (' +
+      StoreErr.Message + ')', AnsiYellow));
     SqliteStore.Free;
     SqliteStore := nil;
-    StoreSource := TMemoryCommandPolicySource.Create(DefaultCommandPolicy);
+    ApprovalStore := TMemoryApprovalStore.Create;
   end;
 
   if Interactive then
-  begin
     Approver := TConsoleApprover.Create;
-    ApproveHandler := Approver.Approve;
-  end
+  ApprovalCtx.WorkspaceId := WorkspaceId;
+  ApprovalCtx.SessionId := '';
+  if Approver <> nil then
+    ApprovalService := TApprovalService.Create(ApprovalStore, Approver.Prompt,
+      ApprovalCtx)
   else
-    ApproveHandler := nil;
+    ApprovalService := TApprovalService.Create(ApprovalStore, nil,
+      ApprovalCtx);
   ToolConfig := Default(TCommandToolConfig);
   ToolConfig.Shell := DefaultShellProfile;
   ToolConfig.DefaultCwd := Workspace.Root;
-  CommandTool := TCommandTool.Create(ToolConfig, StoreSource, ApproveHandler);
+  CommandTool := TCommandTool.Create(ToolConfig, ApprovalService);
   CommandTool.Register(Tools);
 
   Loop := TAgentLoop.Create(Client, Store, Tools, AgentConfig);
@@ -331,7 +356,8 @@ begin
     CommandTool.Free;
     Approver.Free;
     Tools.Free;
-    StoreSource := nil;
+    ApprovalService := nil;
+    ApprovalStore := nil;
     if SqliteStore <> nil then
     begin
       SqliteStore.Close;
