@@ -3,6 +3,11 @@
 **Related Specification:** `Approvals_v1.SPEC.md`
 **Related Feature:** `FEATURE.md`
 
+> **Progress:** Phases 2-4 (matching, store, service) and the store-backed
+> `IApprovalStore` are implemented and committed (20 tests in `TestApproval`).
+> Remaining: Phase 5 (command adapter) and Phase 6 (CLI wiring). The checkboxes
+> below have not all been ticked retroactively; trust this note and the tests.
+
 ## Overview
 
 Build `hildegard.helper.approval`: the generic rule model, matcher, scope
