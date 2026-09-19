@@ -31,7 +31,17 @@ This work also removes the store's `requests` table and its public API.
 - [ ] Recompose restored messages in provider order: system, user, assistant
       (with its tool calls), tool results; skip reasoning and error records.
 - [ ] Correlate tool calls and results by tool-call id.
+- [ ] List a workspace's sessions newest-updated first, with created/updated
+      timestamps and a record count.
+- [ ] Resolve the most recently updated session for a workspace.
 - [ ] Remove the `requests` table and the store's request API.
+
+### CLI
+
+- [ ] The `sessions` subcommand lists the active workspace's sessions
+      (`id  updated  record-count`), needing no provider configuration.
+- [ ] `-c`/`--continue` resumes the most recently updated session for the active
+      workspace; `--session` and `--continue` are mutually exclusive.
 
 ### Non-Functional
 
@@ -109,6 +119,21 @@ function TSqliteStore.AppendSessionRecord(const ARecord: TSessionRecord;
 function TSqliteStore.QuerySessionRecords(const ASessionId: string;
   AUseKind: Boolean; AKind: TSessionRecordKind; ALimit, AOffset: Integer;
   out ARecords: TSessionRecordArray; out AError: TStoreError): Boolean;
+function TSqliteStore.ListSessions(AWorkspaceId: Integer;
+  out AList: TSessionSummaryArray; out AError: TStoreError): Boolean;
+function TSqliteStore.MostRecentSessionId(AWorkspaceId: Integer;
+  out AId: string; out AError: TStoreError): Boolean;
+```
+
+```pascal
+type
+  TSessionSummary = record
+    Id: string;
+    CreatedAtMs: Int64;
+    UpdatedAtMs: Int64;
+    RecordCount: Integer;
+  end;
+  TSessionSummaryArray = array of TSessionSummary;
 ```
 
 ### Removed store API
@@ -217,6 +242,7 @@ has no error channel; it must not raise into the loop.
 - [ ] `TestRestoreSkipsReasoningAndErrors`
 - [ ] `TestToolCallResultCorrelatedByToolCallId`
 - [ ] `TestRestoreAfterReopen` (close/reopen the store)
+- [ ] `TestListAndMostRecentSessions` (store; newest-first, counts, not-found)
 - [ ] `TestNoLeaks`
 
 ### Store removal tests

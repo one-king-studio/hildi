@@ -18,7 +18,7 @@ program agent_cli;
 
 uses
   {$ifdef unix}cthreads,{$endif}   // must come first on Unix
-  SysUtils, Classes, ctypes,
+  SysUtils, Classes, ctypes, DateUtils,
   hildegard.helper.ansi, hildegard.helper.env, hildegard.helper.cli,
   hildegard.helper.transcript, hildegard.helper.llm, hildegard.helper.agent,
   hildegard.helper.command.policy, hildegard.helper.command.tool,
@@ -165,6 +165,7 @@ var
   WorkspacePath, WSErr: string;
   WorkspaceId: Integer;
   SessionId: string;
+  Summaries: TSessionSummaryArray;
 
 begin
   RawArgs := CollectArgs;
@@ -200,6 +201,44 @@ begin
   else if Opts.ColorMode = tsOff then
     AnsiSetEnabled(False);
 
+  WorkspacePath := Opts.Workspace;
+  if WorkspacePath = '' then
+    WorkspacePath := GetEnvironmentVariable('HILDEGARD_WORKSPACE');
+  Workspace := TWorkspace.Open(WorkspacePath, WSErr);
+  if Workspace = nil then
+    Fatal('workspace: ' + WSErr, 1);
+
+  if Opts.Mode = cmListSessions then
+  begin
+    StorePath := GetEnvironmentVariable('HILDEGARD_STORE_PATH');
+    if StorePath = '' then
+      StorePath := IncludeTrailingPathDelimiter(GetUserDir) +
+        '.hildegard-helper' + PathDelim + 'store.db';
+    ForceDirectories(ExtractFileDir(StorePath));
+    StoreConfig := Default(TStoreConfig);
+    StoreConfig.DatabasePath := StorePath;
+    StoreConfig.BusyTimeoutMs := 5000;
+    SqliteStore := TSqliteStore.Create(StoreConfig);
+    if not SqliteStore.Open(StoreErr) then
+      Fatal('could not open store: ' + StoreErr.Message, 1);
+    if not SqliteStore.EnsureWorkspace(Workspace.Root, WorkspaceId, StoreErr) then
+      Fatal('workspace: ' + StoreErr.Message, 1);
+    if not SqliteStore.ListSessions(WorkspaceId, Summaries, StoreErr) then
+      Fatal('could not list sessions: ' + StoreErr.Message, 1);
+    if Length(Summaries) = 0 then
+      WriteLn('no sessions for ', Workspace.Root)
+    else
+      for I := 0 to High(Summaries) do
+        WriteLn(Summaries[I].Id, '  ',
+          FormatDateTime('yyyy-mm-dd hh:nn',
+            UnixToDateTime(Summaries[I].UpdatedAtMs div 1000)),
+          '  ', Summaries[I].RecordCount, ' records');
+    SqliteStore.Close;
+    SqliteStore.Free;
+    Workspace.Free;
+    Halt(0);
+  end;
+
   Config := Default(TLLMConfig);
   Config := ResolveLLMConfig(Config);
   if Opts.Model <> '' then
@@ -210,13 +249,6 @@ begin
     Fatal('no API key. Set HILDEGARD_LLM_API_KEY or FIREWORKS_API_KEY.', 1);
   if Config.Model = '' then
     Fatal('no model. Set HILDEGARD_LLM_MODEL or use --model.', 1);
-
-  WorkspacePath := Opts.Workspace;
-  if WorkspacePath = '' then
-    WorkspacePath := GetEnvironmentVariable('HILDEGARD_WORKSPACE');
-  Workspace := TWorkspace.Open(WorkspacePath, WSErr);
-  if Workspace = nil then
-    Fatal('workspace: ' + WSErr, 1);
 
   Interactive := (Opts.Mode = cmInteractive) and StdinIsTTY;
 
@@ -264,11 +296,20 @@ begin
     SqliteStore.EnsureWorkspace(Workspace.Root, WorkspaceId, StoreErr);
     ApprovalStore := TStoreApprovalStore.Create(SqliteStore);
 
-    { Resume the named session or start a new one; persist the conversation. }
+    { Resume a named or most-recent session, or start a new one. }
+    if (Opts.Session <> '') and Opts.ContinueSession then
+      Fatal('choose either --session or --continue, not both', 2);
     SessionId := Opts.Session;
     if SessionId = '' then
     begin
-      if not SqliteStore.CreateSession(WorkspaceId, SessionId, StoreErr) then
+      if Opts.ContinueSession then
+      begin
+        if not SqliteStore.MostRecentSessionId(WorkspaceId, SessionId, StoreErr)
+        then
+          Fatal('no session to continue for ' + Workspace.Root, 1);
+      end
+      else if not SqliteStore.CreateSession(WorkspaceId, SessionId, StoreErr)
+      then
         Fatal('could not create session: ' + StoreErr.Message, 1);
     end
     else if not SqliteStore.SessionExists(SessionId, StoreErr) then

@@ -45,6 +45,7 @@ type
     procedure TestConcurrentOperationsDoNotCorruptOrDeadlock;
     procedure TestSchemaHasNoRequestsTable;
     procedure TestSessionAndLedgerRoundTrip;
+    procedure TestListAndMostRecentSessions;
   end;
 
 implementation
@@ -553,6 +554,46 @@ begin
     AssertTrue('touch', S.TouchSession(Id, Err));
     AssertTrue('create 2', S.CreateSession(WorkspaceId, Id2, Err));
     AssertTrue('ids differ', Id <> Id2);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestListAndMostRecentSessions;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  W, IdA, IdB, Recent: string;
+  WorkspaceId: Integer;
+  List: TSessionSummaryArray;
+  Rec: TSessionRecord;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', WorkspaceId, Err);
+    S.CreateSession(WorkspaceId, IdA, Err);
+    S.CreateSession(WorkspaceId, IdB, Err);
+
+    Rec := Default(TSessionRecord);
+    Rec.SessionId := IdA;
+    Rec.Kind := srkUserMessage;
+    Rec.Content := 'x';
+    S.AppendSessionRecord(Rec, Err);
+    Sleep(10);
+    S.TouchSession(IdA, Err);   // A is now the most recently updated
+
+    AssertTrue('list', S.ListSessions(WorkspaceId, List, Err));
+    AssertEquals('two sessions', 2, Length(List));
+    AssertEquals('newest first', IdA, List[0].Id);
+    AssertEquals('record count', 1, List[0].RecordCount);
+    AssertEquals('other empty', 0, List[1].RecordCount);
+
+    AssertTrue('most recent', S.MostRecentSessionId(WorkspaceId, Recent, Err));
+    AssertEquals('most recent id', IdA, Recent);
+
+    AssertTrue('no sessions for other workspace',
+      S.MostRecentSessionId(WorkspaceId + 999, Recent, Err) = False);
+    AssertEquals('not found', Ord(seNotFound), Ord(Err.Code));
   finally
     S.Free;
   end;

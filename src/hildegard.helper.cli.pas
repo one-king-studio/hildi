@@ -11,7 +11,7 @@ uses
 
 type
   TTriState = (tsDefault, tsOn, tsOff);
-  TCLIMode = (cmInteractive, cmOnce);
+  TCLIMode = (cmInteractive, cmOnce, cmListSessions);
 
   TCLIOptions = record
     Mode: TCLIMode;
@@ -22,6 +22,7 @@ type
     Endpoint: string;
     Workspace: string;
     Session: string;
+    ContinueSession: Boolean;
     ShowUser: Boolean;
     ShowTools: Boolean;
     Reasoning: TTriState;        // tsDefault => on for interactive, off for once
@@ -125,6 +126,8 @@ begin
       Result.Workspace := ValueOf(AArgs, I, Key, Inline)
     else if Key = '--session' then
       Result.Session := ValueOf(AArgs, I, Key, Inline)
+    else if (Key = '-c') or (Key = '--continue') then
+      Result.ContinueSession := True
     else if (Arg = '-') then
     begin
       Result.PromptFromStdin := True;
@@ -134,10 +137,16 @@ begin
       raise ECLIError.Create('unknown option: ' + Arg)
     else
     begin
-      if (Result.Prompt <> '') or Result.PromptFromStdin then
+      if (Result.Prompt <> '') or Result.PromptFromStdin or
+        (Result.Mode = cmListSessions) then
         raise ECLIError.Create('prompt given more than once');
-      Result.Prompt := Arg;
-      Result.Mode := cmOnce;
+      if Arg = 'sessions' then
+        Result.Mode := cmListSessions
+      else
+      begin
+        Result.Prompt := Arg;
+        Result.Mode := cmOnce;
+      end;
     end;
     Inc(I);
   end;
@@ -152,6 +161,8 @@ begin
     '  hildegard-helper-agent                 interactive session' + LineEnding +
     '  hildegard-helper-agent -p "PROMPT"     run one prompt and exit' + LineEnding +
     '  echo "PROMPT" | hildegard-helper-agent  prompt from stdin' + LineEnding +
+    '  hildegard-helper-agent sessions        list this workspace''s sessions' +
+    LineEnding +
     LineEnding +
     'Options:' + LineEnding +
     '  -p, --prompt TEXT   run a single prompt (use - to read stdin)' +
@@ -174,6 +185,8 @@ begin
     '  -w, --workspace DIR working directory for the agent (default: cwd)' +
     LineEnding +
     '      --session ID    resume a stored session (default: a new one)' +
+    LineEnding +
+    '  -c, --continue      resume the most recent session for the workspace' +
     LineEnding +
     '  -h, --help          show this help' + LineEnding +
     LineEnding +

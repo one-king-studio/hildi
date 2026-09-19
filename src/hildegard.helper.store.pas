@@ -134,6 +134,12 @@ type
     function QuerySessionRecords(const ASessionId: string; AUseKind: Boolean;
       AKind: TSessionRecordKind; ALimit, AOffset: Integer;
       out ARecords: TSessionRecordArray; out AError: TStoreError): Boolean;
+    { Sessions for a workspace, newest updated first. }
+    function ListSessions(AWorkspaceId: Integer;
+      out AList: TSessionSummaryArray; out AError: TStoreError): Boolean;
+    { The most recently updated session for a workspace; seNotFound if none. }
+    function MostRecentSessionId(AWorkspaceId: Integer; out AId: string;
+      out AError: TStoreError): Boolean;
   end;
 
 function ResolveLibraryPath(const AExplicit: string): string;
@@ -1295,6 +1301,86 @@ begin
         Inc(N);
         Q.Next;
       end;
+      Q.Close;
+    finally
+      Q.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.ListSessions(AWorkspaceId: Integer;
+  out AList: TSessionSummaryArray; out AError: TStoreError): Boolean;
+var
+  Q: TSQLQuery;
+  N: Integer;
+  Item: TSessionSummary;
+begin
+  AError := OkError;
+  AList := nil;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Q := TSQLQuery.Create(nil);
+    try
+      Q.DataBase := FConn;
+      Q.Transaction := FTx;
+      Q.SQL.Text :=
+        'SELECT s.id, s.created_at, s.updated_at, COUNT(r.id) AS n ' +
+        'FROM sessions s LEFT JOIN session_records r ON r.session_id = s.id ' +
+        'WHERE s.workspace_id = :w GROUP BY s.id ' +
+        'ORDER BY s.updated_at DESC, s.rowid DESC';
+      Q.ParamByName('w').AsInteger := AWorkspaceId;
+      Q.Open;
+      N := 0;
+      while not Q.EOF do
+      begin
+        Item := Default(TSessionSummary);
+        Item.Id := Q.FieldByName('id').AsString;
+        Item.CreatedAtMs := Q.FieldByName('created_at').AsLargeInt;
+        Item.UpdatedAtMs := Q.FieldByName('updated_at').AsLargeInt;
+        Item.RecordCount := Q.FieldByName('n').AsInteger;
+        SetLength(AList, N + 1);
+        AList[N] := Item;
+        Inc(N);
+        Q.Next;
+      end;
+      Q.Close;
+    finally
+      Q.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.MostRecentSessionId(AWorkspaceId: Integer;
+  out AId: string; out AError: TStoreError): Boolean;
+var
+  Q: TSQLQuery;
+begin
+  AError := OkError;
+  AId := '';
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Q := TSQLQuery.Create(nil);
+    try
+      Q.DataBase := FConn;
+      Q.Transaction := FTx;
+      Q.SQL.Text :=
+        'SELECT id FROM sessions WHERE workspace_id = :w ' +
+        'ORDER BY updated_at DESC, rowid DESC LIMIT 1';
+      Q.ParamByName('w').AsInteger := AWorkspaceId;
+      Q.Open;
+      if Q.EOF then
+        Exit(Fail(AError, seNotFound, 'no session for workspace', ''));
+      AId := Q.FieldByName('id').AsString;
       Q.Close;
     finally
       Q.Free;

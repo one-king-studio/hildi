@@ -31,6 +31,16 @@ type
 
   TSessionRecordArray = array of TSessionRecord;
 
+  { A session listing entry. }
+  TSessionSummary = record
+    Id: string;
+    CreatedAtMs: Int64;
+    UpdatedAtMs: Int64;
+    RecordCount: Integer;
+  end;
+
+  TSessionSummaryArray = array of TSessionSummary;
+
 { A random 128-bit session id as 32 lowercase hex characters. }
 function NewSessionId: string;
 

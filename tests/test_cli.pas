@@ -23,6 +23,8 @@ type
     procedure TestModelSystemEndpointFlags;
     procedure TestWorkspaceFlag;
     procedure TestSessionFlag;
+    procedure TestContinueFlag;
+    procedure TestListSessionsSubcommand;
     procedure TestLongFlagsWithEquals;
     procedure TestHelpFlag;
     procedure TestUnknownOptionRaises;
@@ -145,6 +147,28 @@ begin
   AssertEquals('session', 'abc123', O.Session);
   O := ParseCLIOptions([]);
   AssertEquals('session default empty', '', O.Session);
+end;
+
+procedure TCLITest.TestContinueFlag;
+var
+  O: TCLIOptions;
+begin
+  O := ParseCLIOptions(['-c']);
+  AssertTrue('short continue', O.ContinueSession);
+  O := ParseCLIOptions(['--continue']);
+  AssertTrue('long continue', O.ContinueSession);
+  O := ParseCLIOptions([]);
+  AssertFalse('default not continue', O.ContinueSession);
+end;
+
+procedure TCLITest.TestListSessionsSubcommand;
+var
+  O: TCLIOptions;
+begin
+  O := ParseCLIOptions(['sessions']);
+  AssertEquals('list mode', Ord(cmListSessions), Ord(O.Mode));
+  AssertEquals('no prompt', '', O.Prompt);
+  AssertTrue('sessions with prompt raises', Raises(['sessions', 'hello']));
 end;
 
 procedure TCLITest.TestLongFlagsWithEquals;

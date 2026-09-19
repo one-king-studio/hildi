@@ -15,6 +15,9 @@
 > in-memory conversation store). `Clear` is a no-op by design (the ledger is
 > durable history). 7 request tests were deleted with the table.
 >
+> Added: `sessions` subcommand (list a workspace's sessions) and `-c/--continue`
+> (resume the most recent). Store `ListSessions`/`MostRecentSessionId` + tests.
+>
 > **Remaining before DONE:** live CLI smoke (run, exit, resume by id).
 >
 > The checkboxes below are not ticked retroactively.
