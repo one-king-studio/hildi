@@ -21,6 +21,7 @@ type
     procedure TestMaxTpsFlag;
     procedure TestColorFlagsSetTriState;
     procedure TestModelSystemEndpointFlags;
+    procedure TestWorkspaceFlag;
     procedure TestLongFlagsWithEquals;
     procedure TestHelpFlag;
     procedure TestUnknownOptionRaises;
@@ -121,6 +122,18 @@ begin
   AssertEquals('model', 'model-x', O.Model);
   AssertEquals('system', 'be terse', O.SystemPrompt);
   AssertEquals('endpoint', 'https://e/x', O.Endpoint);
+end;
+
+procedure TCLITest.TestWorkspaceFlag;
+var
+  O: TCLIOptions;
+begin
+  O := ParseCLIOptions(['-w', '/tmp/project']);
+  AssertEquals('workspace short', '/tmp/project', O.Workspace);
+  O := ParseCLIOptions(['--workspace=/tmp/other']);
+  AssertEquals('workspace long inline', '/tmp/other', O.Workspace);
+  O := ParseCLIOptions([]);
+  AssertEquals('workspace default empty', '', O.Workspace);
 end;
 
 procedure TCLITest.TestLongFlagsWithEquals;

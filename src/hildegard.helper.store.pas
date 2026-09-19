@@ -139,6 +139,13 @@ type
       out AError: TStoreError): Boolean;
     function DeleteSetting(const AKey: string;
       out AError: TStoreError): Boolean;
+
+    { Returns the id for a canonical workspace path, inserting it if new. }
+    function EnsureWorkspace(const APath: string; out AId: Integer;
+      out AError: TStoreError): Boolean;
+    { Looks up a workspace by canonical path; seNotFound if absent. }
+    function FindWorkspace(const APath: string; out AId: Integer;
+      out AError: TStoreError): Boolean;
   end;
 
 function ResolveLibraryPath(const AExplicit: string): string;
@@ -171,7 +178,7 @@ end;
 function DefaultMigrations: TMigrationArray;
 begin
   Result := nil;
-  SetLength(Result, 1);
+  SetLength(Result, 2);
   Result[0].Version := 1;
   Result[0].Name := 'initial schema';
   Result[0].Statements := [
@@ -195,6 +202,15 @@ begin
     'CREATE TABLE settings (' +
       'key TEXT PRIMARY KEY, ' +
       'value TEXT NOT NULL)'
+  ];
+
+  Result[1].Version := 2;
+  Result[1].Name := 'workspaces';
+  Result[1].Statements := [
+    'CREATE TABLE workspaces (' +
+      'id INTEGER PRIMARY KEY AUTOINCREMENT, ' +
+      'path TEXT NOT NULL UNIQUE, ' +
+      'created_at INTEGER NOT NULL)'
   ];
 end;
 
@@ -1055,6 +1071,100 @@ begin
           Exit(Fail(AError, seError, 'could not delete setting', E.Message));
         end;
       end;
+    finally
+      Q.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.FindWorkspace(const APath: string; out AId: Integer;
+  out AError: TStoreError): Boolean;
+var
+  Q: TSQLQuery;
+begin
+  AError := OkError;
+  AId := 0;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    if APath = '' then
+      Exit(Fail(AError, seInvalidArgument, 'workspace path is required', ''));
+    Q := TSQLQuery.Create(nil);
+    try
+      Q.DataBase := FConn;
+      Q.Transaction := FTx;
+      Q.SQL.Text := 'SELECT id FROM workspaces WHERE path = :p';
+      Q.ParamByName('p').AsString := APath;
+      Q.Open;
+      if Q.EOF then
+        Exit(Fail(AError, seNotFound, 'workspace not found', APath));
+      AId := Q.FieldByName('id').AsInteger;
+      Q.Close;
+    finally
+      Q.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.EnsureWorkspace(const APath: string; out AId: Integer;
+  out AError: TStoreError): Boolean;
+var
+  Q: TSQLQuery;
+begin
+  AError := OkError;
+  AId := 0;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    if APath = '' then
+      Exit(Fail(AError, seInvalidArgument, 'workspace path is required', ''));
+
+    Q := TSQLQuery.Create(nil);
+    try
+      Q.DataBase := FConn;
+      Q.Transaction := FTx;
+      Q.SQL.Text := 'SELECT id FROM workspaces WHERE path = :p';
+      Q.ParamByName('p').AsString := APath;
+      Q.Open;
+      if not Q.EOF then
+      begin
+        AId := Q.FieldByName('id').AsInteger;
+        Q.Close;
+        Exit(True);
+      end;
+      Q.Close;
+
+      Q.SQL.Text :=
+        'INSERT INTO workspaces (path, created_at) VALUES (:p, :t)';
+      Q.ParamByName('p').AsString := APath;
+      Q.ParamByName('t').AsLargeInt := NowMs;
+      try
+        Q.ExecSQL;
+        FTx.Commit;
+      except
+        on E: Exception do
+        begin
+          if FTx.Active then
+            FTx.Rollback;
+          Exit(Fail(AError, seError, 'could not create workspace', E.Message));
+        end;
+      end;
+
+      Q.SQL.Text := 'SELECT id FROM workspaces WHERE path = :p';
+      Q.ParamByName('p').AsString := APath;
+      Q.Open;
+      if Q.EOF then
+        Exit(Fail(AError, seError, 'workspace missing after insert', APath));
+      AId := Q.FieldByName('id').AsInteger;
+      Q.Close;
     finally
       Q.Free;
     end;

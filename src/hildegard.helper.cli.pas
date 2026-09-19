@@ -20,6 +20,7 @@ type
     SystemPrompt: string;
     Model: string;
     Endpoint: string;
+    Workspace: string;
     ShowUser: Boolean;
     ShowTools: Boolean;
     Reasoning: TTriState;        // tsDefault => on for interactive, off for once
@@ -119,6 +120,8 @@ begin
       Result.Model := ValueOf(AArgs, I, Key, Inline)
     else if Key = '--endpoint' then
       Result.Endpoint := ValueOf(AArgs, I, Key, Inline)
+    else if (Key = '-w') or (Key = '--workspace') then
+      Result.Workspace := ValueOf(AArgs, I, Key, Inline)
     else if (Arg = '-') then
     begin
       Result.PromptFromStdin := True;
@@ -165,11 +168,15 @@ begin
     '  -m, --model NAME    model name (overrides environment)' + LineEnding +
     '      --endpoint URL  provider endpoint (overrides environment)' +
     LineEnding +
+    '  -w, --workspace DIR working directory for the agent (default: cwd)' +
+    LineEnding +
     '  -h, --help          show this help' + LineEnding +
     LineEnding +
     'Environment: HILDEGARD_LLM_ENDPOINT, HILDEGARD_LLM_MODEL,' +
     LineEnding +
-    '  HILDEGARD_LLM_API_KEY (or FIREWORKS_API_KEY), and ./.env';
+    '  HILDEGARD_LLM_API_KEY (or FIREWORKS_API_KEY), HILDEGARD_WORKSPACE,' +
+    LineEnding +
+    '  HILDEGARD_STORE_PATH, and ./.env';
 end;
 
 end.

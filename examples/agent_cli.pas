@@ -22,7 +22,7 @@ uses
   hildegard.helper.ansi, hildegard.helper.env, hildegard.helper.cli,
   hildegard.helper.transcript, hildegard.helper.llm, hildegard.helper.agent,
   hildegard.helper.command.policy, hildegard.helper.command.tool,
-  hildegard.helper.store;
+  hildegard.helper.store, hildegard.helper.workspace;
 
 const
   DefaultSystemPrompt =
@@ -142,6 +142,8 @@ var
   StoreErr: TStoreError;
   StoreConfig: TStoreConfig;
   ToolConfig: TCommandToolConfig;
+  Workspace: TWorkspace;
+  WorkspacePath, WSErr: string;
 
 begin
   RawArgs := CollectArgs;
@@ -187,6 +189,13 @@ begin
     Fatal('no API key. Set HILDEGARD_LLM_API_KEY or FIREWORKS_API_KEY.', 1);
   if Config.Model = '' then
     Fatal('no model. Set HILDEGARD_LLM_MODEL or use --model.', 1);
+
+  WorkspacePath := Opts.Workspace;
+  if WorkspacePath = '' then
+    WorkspacePath := GetEnvironmentVariable('HILDEGARD_WORKSPACE');
+  Workspace := TWorkspace.Open(WorkspacePath, WSErr);
+  if Workspace = nil then
+    Fatal('workspace: ' + WSErr, 1);
 
   Interactive := (Opts.Mode = cmInteractive) and StdinIsTTY;
 
@@ -249,6 +258,7 @@ begin
     ApproveHandler := nil;
   ToolConfig := Default(TCommandToolConfig);
   ToolConfig.Shell := DefaultShellProfile;
+  ToolConfig.DefaultCwd := Workspace.Root;
   CommandTool := TCommandTool.Create(ToolConfig, StoreSource, ApproveHandler);
   CommandTool.Register(Tools);
 
@@ -327,6 +337,7 @@ begin
       SqliteStore.Close;
       SqliteStore.Free;
     end;
+    Workspace.Free;
     Store := nil;
     Client.Free;
   end;
