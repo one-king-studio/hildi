@@ -20,7 +20,8 @@ unit hildegard.helper.store;
 interface
 
 uses
-  Classes, SysUtils, SyncObjs, sqldb, sqlite3conn, sqldblib;
+  Classes, SysUtils, SyncObjs, sqldb, sqlite3conn, sqldblib,
+  hildegard.helper.approval;
 
 type
   { Stable error codes. seOk is success. }
@@ -146,6 +147,15 @@ type
     { Looks up a workspace by canonical path; seNotFound if absent. }
     function FindWorkspace(const APath: string; out AId: Integer;
       out AError: TStoreError): Boolean;
+
+    { Approval rules relevant to a context (global + workspace + session). }
+    function LoadApprovals(const AContext: TApprovalContext;
+      out ARules: TApprovalRuleArray; out AError: TStoreError): Boolean;
+    { Inserts a rule, ignoring an exact duplicate. }
+    function SaveApproval(const ARule: TApprovalRule;
+      out AError: TStoreError): Boolean;
+    function RemoveApproval(const ARule: TApprovalRule;
+      out AError: TStoreError): Boolean;
   end;
 
 function ResolveLibraryPath(const AExplicit: string): string;
@@ -156,7 +166,7 @@ implementation
 
 uses
   {$ifdef unix}BaseUnix,{$endif}
-  sqlite3dyn;
+  sqlite3dyn, fpjson, jsonparser;
 
 const
   DefaultBusyTimeoutMs = 5000;
@@ -211,6 +221,26 @@ begin
       'id INTEGER PRIMARY KEY AUTOINCREMENT, ' +
       'path TEXT NOT NULL UNIQUE, ' +
       'created_at INTEGER NOT NULL)'
+  ];
+
+  SetLength(Result, 3);
+  Result[2].Version := 3;
+  Result[2].Name := 'approvals';
+  Result[2].Statements := [
+    'CREATE TABLE approvals (' +
+      'id INTEGER PRIMARY KEY AUTOINCREMENT, ' +
+      'effect INTEGER NOT NULL, ' +
+      'scope INTEGER NOT NULL, ' +
+      'workspace_id INTEGER NOT NULL DEFAULT 0, ' +
+      'session_id TEXT NOT NULL DEFAULT '''', ' +
+      'ref TEXT NOT NULL, ' +
+      'params TEXT NOT NULL DEFAULT ''[]'', ' +
+      'any_params INTEGER NOT NULL DEFAULT 0, ' +
+      'created_at INTEGER NOT NULL, ' +
+      'UNIQUE (effect, scope, workspace_id, session_id, ref, params, ' +
+      'any_params))',
+    'CREATE INDEX idx_approvals_scope ON approvals (scope, workspace_id, ' +
+      'session_id)'
   ];
 end;
 
@@ -1165,6 +1195,195 @@ begin
         Exit(Fail(AError, seError, 'workspace missing after insert', APath));
       AId := Q.FieldByName('id').AsInteger;
       Q.Close;
+    finally
+      Q.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+{ --- approvals ---------------------------------------------------------- }
+
+function EncodeApprovalParams(const AParams: TApprovalParams): string;
+var
+  Arr: TJSONArray;
+  I: Integer;
+begin
+  Arr := TJSONArray.Create;
+  try
+    for I := 0 to High(AParams) do
+      Arr.Add(AParams[I]);
+    Result := Arr.AsJSON;
+  finally
+    Arr.Free;
+  end;
+end;
+
+function DecodeApprovalParams(const AJson: string;
+  out AParams: TApprovalParams): Boolean;
+var
+  Data: TJSONData;
+  Arr: TJSONArray;
+  I: Integer;
+begin
+  AParams := nil;
+  Data := nil;
+  try
+    try
+      Data := GetJSON(AJson);
+    except
+      Exit(False);
+    end;
+    if not (Data is TJSONArray) then
+      Exit(False);
+    Arr := TJSONArray(Data);
+    SetLength(AParams, Arr.Count);
+    for I := 0 to Arr.Count - 1 do
+      AParams[I] := Arr.Strings[I];
+    Result := True;
+  finally
+    Data.Free;
+  end;
+end;
+
+function TSqliteStore.LoadApprovals(const AContext: TApprovalContext;
+  out ARules: TApprovalRuleArray; out AError: TStoreError): Boolean;
+var
+  Q: TSQLQuery;
+  N: Integer;
+  Rule: TApprovalRule;
+begin
+  AError := OkError;
+  ARules := nil;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Q := TSQLQuery.Create(nil);
+    try
+      Q.DataBase := FConn;
+      Q.Transaction := FTx;
+      Q.SQL.Text :=
+        'SELECT effect, scope, workspace_id, session_id, ref, params, ' +
+        'any_params FROM approvals ' +
+        'WHERE scope = 0 ' +
+        'OR (scope = 1 AND workspace_id = :w) ' +
+        'OR (scope = 2 AND session_id = :s AND :s <> '''')';
+      Q.ParamByName('w').AsInteger := AContext.WorkspaceId;
+      Q.ParamByName('s').AsString := AContext.SessionId;
+      Q.Open;
+      N := 0;
+      while not Q.EOF do
+      begin
+        Rule := Default(TApprovalRule);
+        Rule.Effect := TApprovalEffect(Q.FieldByName('effect').AsInteger);
+        Rule.Scope := TApprovalScope(Q.FieldByName('scope').AsInteger);
+        Rule.WorkspaceId := Q.FieldByName('workspace_id').AsInteger;
+        Rule.SessionId := Q.FieldByName('session_id').AsString;
+        Rule.Ref := Q.FieldByName('ref').AsString;
+        DecodeApprovalParams(Q.FieldByName('params').AsString, Rule.Params);
+        Rule.AnyParams := Q.FieldByName('any_params').AsInteger <> 0;
+        SetLength(ARules, N + 1);
+        ARules[N] := Rule;
+        Inc(N);
+        Q.Next;
+      end;
+      Q.Close;
+    finally
+      Q.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.SaveApproval(const ARule: TApprovalRule;
+  out AError: TStoreError): Boolean;
+var
+  Q: TSQLQuery;
+begin
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    if ARule.Ref = '' then
+      Exit(Fail(AError, seInvalidArgument, 'approval ref is required', ''));
+    Q := TSQLQuery.Create(nil);
+    try
+      Q.DataBase := FConn;
+      Q.Transaction := FTx;
+      Q.SQL.Text :=
+        'INSERT OR IGNORE INTO approvals ' +
+        '(effect, scope, workspace_id, session_id, ref, params, any_params, ' +
+        'created_at) VALUES (:e, :sc, :w, :s, :r, :p, :a, :t)';
+      Q.ParamByName('e').AsInteger := Ord(ARule.Effect);
+      Q.ParamByName('sc').AsInteger := Ord(ARule.Scope);
+      Q.ParamByName('w').AsInteger := ARule.WorkspaceId;
+      Q.ParamByName('s').AsString := ARule.SessionId;
+      Q.ParamByName('r').AsString := ARule.Ref;
+      Q.ParamByName('p').AsString := EncodeApprovalParams(ARule.Params);
+      Q.ParamByName('a').AsInteger := Ord(ARule.AnyParams);
+      Q.ParamByName('t').AsLargeInt := NowMs;
+      try
+        Q.ExecSQL;
+        FTx.Commit;
+      except
+        on E: Exception do
+        begin
+          if FTx.Active then
+            FTx.Rollback;
+          Exit(Fail(AError, seError, 'could not save approval', E.Message));
+        end;
+      end;
+    finally
+      Q.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.RemoveApproval(const ARule: TApprovalRule;
+  out AError: TStoreError): Boolean;
+var
+  Q: TSQLQuery;
+begin
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Q := TSQLQuery.Create(nil);
+    try
+      Q.DataBase := FConn;
+      Q.Transaction := FTx;
+      Q.SQL.Text :=
+        'DELETE FROM approvals WHERE effect = :e AND scope = :sc AND ' +
+        'workspace_id = :w AND session_id = :s AND ref = :r AND ' +
+        'params = :p AND any_params = :a';
+      Q.ParamByName('e').AsInteger := Ord(ARule.Effect);
+      Q.ParamByName('sc').AsInteger := Ord(ARule.Scope);
+      Q.ParamByName('w').AsInteger := ARule.WorkspaceId;
+      Q.ParamByName('s').AsString := ARule.SessionId;
+      Q.ParamByName('r').AsString := ARule.Ref;
+      Q.ParamByName('p').AsString := EncodeApprovalParams(ARule.Params);
+      Q.ParamByName('a').AsInteger := Ord(ARule.AnyParams);
+      try
+        Q.ExecSQL;
+        FTx.Commit;
+      except
+        on E: Exception do
+        begin
+          if FTx.Active then
+            FTx.Rollback;
+          Exit(Fail(AError, seError, 'could not remove approval', E.Message));
+        end;
+      end;
     finally
       Q.Free;
     end;

@@ -7,7 +7,8 @@ unit test_approval;
 interface
 
 uses
-  SysUtils, fpcunit, testregistry, hildegard.helper.approval;
+  SysUtils, fpcunit, testregistry, hildegard.helper.approval,
+  hildegard.helper.approval.store, hildegard.helper.store;
 
 type
   { Scripted approval prompt. }
@@ -23,6 +24,8 @@ type
 
   TApprovalTest = class(TTestCase)
   private
+    FDir, FDbPath: string;
+    function OpenStore: TSqliteStore;
     function Params(const AItems: array of string): TApprovalParams;
     function Rule(AEffect: TApprovalEffect; AScope: TApprovalScope;
       AWorkspace: Integer; const ASession, ARef: string;
@@ -53,9 +56,47 @@ type
     procedure TestOnceChoiceDoesNotPersist;
     procedure TestMissingPromptDenies;
     procedure TestInvalidOptionDenies;
+    procedure TestStoreSaveLoadRemoveRoundTrip;
+    procedure TestStoreSuppressesDuplicates;
+    procedure TestStoreFiltersByContext;
+  protected
+    procedure SetUp; override;
+    procedure TearDown; override;
   end;
 
 implementation
+
+procedure TApprovalTest.SetUp;
+begin
+  FDir := IncludeTrailingPathDelimiter(GetTempDir) + 'hhappr_' +
+    IntToStr(GetTickCount64) + '_' + IntToStr(Random(100000));
+  CreateDir(FDir);
+  FDbPath := IncludeTrailingPathDelimiter(FDir) + 'store.db';
+end;
+
+procedure TApprovalTest.TearDown;
+begin
+  DeleteFile(FDbPath);
+  DeleteFile(FDbPath + '-wal');
+  DeleteFile(FDbPath + '-shm');
+  RemoveDir(FDir);
+end;
+
+function TApprovalTest.OpenStore: TSqliteStore;
+var
+  Cfg: TStoreConfig;
+  Err: TStoreError;
+begin
+  Cfg.DatabasePath := FDbPath;
+  Cfg.LibraryPath := '';
+  Cfg.BusyTimeoutMs := 5000;
+  Result := TSqliteStore.Create(Cfg);
+  if not Result.Open(Err) then
+  begin
+    Result.Free;
+    raise Exception.Create('store failed to open: ' + Err.Message);
+  end;
+end;
 
 function TApprovalTest.Params(const AItems: array of string): TApprovalParams;
 var
@@ -413,6 +454,88 @@ begin
     AssertTrue('denied', Result_.Denied);
   finally
     Prompt.Free;
+  end;
+end;
+
+procedure TApprovalTest.TestStoreSaveLoadRemoveRoundTrip;
+var
+  Store: TSqliteStore;
+  Src: IApprovalStore;
+  Ctx: TApprovalContext;
+  Rules: TApprovalRuleArray;
+  E: string;
+begin
+  Store := OpenStore;
+  try
+    Src := TStoreApprovalStore.Create(Store);
+    Ctx.WorkspaceId := 7;
+    Ctx.SessionId := 's1';
+    AssertTrue('save', Src.Save(Rule(aeAllow, asWorkspace, 7, '',
+      'run_command:cat', ['test'], False), E));
+    AssertTrue('load', Src.Load(Ctx, Rules, E));
+    AssertEquals('one', 1, Length(Rules));
+    AssertEquals('ref', 'run_command:cat', Rules[0].Ref);
+    AssertEquals('params count', 1, Length(Rules[0].Params));
+    AssertEquals('param', 'test', Rules[0].Params[0]);
+    AssertTrue('remove', Src.Remove(Rules[0], E));
+    AssertTrue('load empty', Src.Load(Ctx, Rules, E));
+    AssertEquals('none', 0, Length(Rules));
+  finally
+    Store.Free;
+  end;
+end;
+
+procedure TApprovalTest.TestStoreSuppressesDuplicates;
+var
+  Store: TSqliteStore;
+  Src: IApprovalStore;
+  Ctx: TApprovalContext;
+  Rules: TApprovalRuleArray;
+  E: string;
+  R: TApprovalRule;
+begin
+  Store := OpenStore;
+  try
+    Src := TStoreApprovalStore.Create(Store);
+    Ctx.WorkspaceId := 0;
+    Ctx.SessionId := '';
+    R := Rule(aeAllow, asGlobal, 0, '', 'run_command:cat', [], True);
+    AssertTrue('save 1', Src.Save(R, E));
+    AssertTrue('save 2', Src.Save(R, E));
+    AssertTrue('load', Src.Load(Ctx, Rules, E));
+    AssertEquals('one', 1, Length(Rules));
+  finally
+    Store.Free;
+  end;
+end;
+
+procedure TApprovalTest.TestStoreFiltersByContext;
+var
+  Store: TSqliteStore;
+  Src: IApprovalStore;
+  Ctx: TApprovalContext;
+  Rules: TApprovalRuleArray;
+  E: string;
+begin
+  Store := OpenStore;
+  try
+    Src := TStoreApprovalStore.Create(Store);
+    Src.Save(Rule(aeAllow, asGlobal, 0, '', 'run_command:cat', [], True), E);
+    Src.Save(Rule(aeAllow, asWorkspace, 7, '', 'run_command:ls', [], True), E);
+    Src.Save(Rule(aeAllow, asWorkspace, 8, '', 'run_command:ls', [], True), E);
+    Src.Save(Rule(aeAllow, asSession, 7, 's1', 'run_command:pwd', [], True), E);
+
+    Ctx.WorkspaceId := 7;
+    Ctx.SessionId := 's1';
+    Src.Load(Ctx, Rules, E);
+    AssertEquals('global + ws7 + s1', 3, Length(Rules));
+
+    Ctx.WorkspaceId := 8;
+    Ctx.SessionId := '';
+    Src.Load(Ctx, Rules, E);
+    AssertEquals('global + ws8', 2, Length(Rules));
+  finally
+    Store.Free;
   end;
 end;
 
