@@ -85,7 +85,7 @@ type
   { An option a tool offers the operator for a specific subject. }
   TApprovalOption = record
     Key: string;            // 'once', 'exact', 'any', 'prefix', ...
-    Label: string;          // human text
+    Caption: string;        // human text ('Label' is a Pascal keyword)
     Persists: Boolean;      // False for "once"
     Rule: TApprovalRule;    // Scope filled in by the service
   end;

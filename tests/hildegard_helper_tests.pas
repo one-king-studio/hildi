@@ -13,7 +13,7 @@ uses
   SysUtils, fpcunit, testregistry, consoletestrunner,
   test_hildegard_helper, test_store, test_llm, test_agent, test_ansi, test_env,
   test_cli, test_transcript, test_command_policy, test_command_tool,
-  test_workspace;
+  test_workspace, test_approval;
 
 var
   Runner: TTestRunner;
