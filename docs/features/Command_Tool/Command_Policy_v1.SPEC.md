@@ -1,5 +1,11 @@
 # Component Specification: Command Policy
 
+> **PARTLY SUPERSEDED.** The parser (`ParseCommand`, `TCommandPlan`,
+> `TCommandSegment`, `SegmentText`) carries forward and feeds the command
+> approval adapter. The policy/allow/deny/root classification, the `=`
+> exact marker, and the interleaved `*` are replaced by
+> [Tool Approvals](../Tool_Approvals/FEATURE.md).
+
 **Related Feature:** [FEATURE.md](FEATURE.md)
 
 ## Purpose

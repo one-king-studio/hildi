@@ -1,5 +1,14 @@
 # Implementation Plan: Command Tool v1
 
+> **SUPERSEDED / CANCELLED.** The policy source, `command.policy.*` settings,
+> `=`/interleaved-`*` patterns, and the `requests`-table audit built here are
+> replaced by the [Tool Approvals](../Tool_Approvals/FEATURE.md) and
+> [Sessions and Ledger](../Sessions_And_Ledger/FEATURE.md) features. What
+> survives: the command parser (`hildegard.helper.command.policy`), the required
+> tool-call `reason` (`Tool_Reason_v1`), the shell-parameter change in
+> `hildegard.helper.process`, and the synchronous executor. Do not extend this
+> plan; open tasks are cancelled.
+
 **Related Specification:** `Command_Tool_v1.SPEC.md`
 **Related Feature:** `FEATURE.md`
 
@@ -96,9 +105,9 @@ and on a small shell-parameter change in `hildegard.helper.process`.
 - [x] `make test`
 - [x] `make test-leak`
 - [x] `make check`
-- [ ] Manual smoke: CLI runs an allowlisted `date`, prompts on an unknown
-      command, denies a denied pattern  (PENDING: needs a live provider run;
-      keep this TODO open until verified)
+- [~] Manual smoke: CLI runs an allowlisted `date`, prompts on an unknown
+      command, denies a denied pattern  — **CANCELLED** (the approval/persistence
+      layer is being replaced; live verification moves to the new features).
 
 ## Dependencies & Ordering
 

@@ -1,5 +1,11 @@
 # Component Specification: Command Tool
 
+> **SUPERSEDED.** The policy source, approval outcomes, store settings, and audit
+> described here are replaced by [Tool Approvals](../Tool_Approvals/FEATURE.md)
+> and [Sessions and Ledger](../Sessions_And_Ledger/FEATURE.md). The parser, the
+> required `reason`, the shell-profile parameter, and the synchronous executor
+> carry forward.
+
 **Related Feature:** [FEATURE.md](FEATURE.md)
 
 ## Purpose
