@@ -8,15 +8,17 @@
 > tool-owned options), and CLI wiring with a scope-choosing prompt.
 > (`TestApproval` 20, `TestCommandTool` 17.)
 >
-> **Remaining before DONE:**
-> - Path gating against the workspace root (spec: argument paths superseded by a
->   matching approval; redirection targets always checked) is **not implemented**;
->   v1 relies on approvals alone.
-> - Live CLI smoke (needs a provider run).
-> - Cleanup: `hildegard.helper.command.policy`'s classifier
->   (`ClassifyCommand`/`ClassifySegments`/`IsInterpreter`/pattern matching) is now
->   dead production code; the parser still populates `Paths`. Delete the retired
->   classifier and its tests in a follow-up.
+> **Resolved during completion:**
+> - **Path gating dropped by decision.** With command-level approvals a separate
+>   path gate is either a no-op (unapproved commands already ask) or contradicts
+>   the global read-whitelist (an allowed `cat *` must read `/etc/os-release`).
+>   The workspace root remains the cwd and relative-path base; path-aware rules
+>   are future work. The spec's path-check acceptance is superseded.
+> - **Dead classifier deleted** from `hildegard.helper.command.policy`; only the
+>   parser (and `SegmentText`/`Paths`) remains. `TestCommandPolicy` is now 15
+>   parser tests.
+>
+> **Remaining before DONE:** live CLI smoke (needs a provider run).
 >
 > The checkboxes below are not all ticked retroactively; trust this note and the
 > tests.

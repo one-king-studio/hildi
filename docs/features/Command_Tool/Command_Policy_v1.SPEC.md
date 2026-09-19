@@ -2,9 +2,10 @@
 
 > **PARTLY SUPERSEDED.** The parser (`ParseCommand`, `TCommandPlan`,
 > `TCommandSegment`, `SegmentText`) carries forward and feeds the command
-> approval adapter. The policy/allow/deny/root classification, the `=`
-> exact marker, and the interleaved `*` are replaced by
-> [Tool Approvals](../Tool_Approvals/FEATURE.md).
+> approval adapter. The classifier (`ClassifyCommand`/`ClassifySegments`),
+> `TCommandPolicy`, the `=` exact marker, interleaved `*`, interpreter gating,
+> and path-root checks have been **deleted**; classification and trust now live
+> in [Tool Approvals](../Tool_Approvals/FEATURE.md).
 
 **Related Feature:** [FEATURE.md](FEATURE.md)
 

@@ -124,9 +124,10 @@ Command adapter
       `run_command:php` params `[artisan]`, `any_params=true`).
 - [ ] Approving bare `cat` stores `run_command:cat`, params `[]`,
       `any_params=false`.
-- [ ] Path checks use the active workspace root (see Workspaces); an explicit
-      approval that matches the call supersedes the argument-path check, while
-      redirection targets remain path-checked.
+- [ ] Path-aware trust is deferred: the workspace root is the cwd and
+      relative-path base, but command-level approvals already gate every command,
+      so a separate path gate would either be a no-op or block the global
+      read-whitelist. Path-aware rules are future work (see Notes).
 
 Operator flow
 
