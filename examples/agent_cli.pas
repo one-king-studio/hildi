@@ -90,6 +90,7 @@ type
     function Prompt(const AAsk: TApprovalAsk): TApprovalChoice;
   end;
 
+{ Renders a restored conversation tail using the transcript conventions. }
 function TConsoleApprover.Prompt(const AAsk: TApprovalAsk): TApprovalChoice;
 var
   Line, ScopeLine: string;
@@ -168,6 +169,7 @@ var
   Summaries: TSessionSummaryArray;
   TailCount, LoadedMessages: Integer;
   SessionResumed: Boolean;
+  History: TChatMessageArray;
 
 begin
   RawArgs := CollectArgs;
@@ -333,7 +335,8 @@ begin
     ApprovalStore := TMemoryApprovalStore.Create;
   end;
 
-  LoadedMessages := Length(Store.Messages);
+  History := Store.Messages;
+  LoadedMessages := Length(History);
 
   if Interactive then
     Approver := TConsoleApprover.Create;
@@ -384,6 +387,14 @@ begin
         WriteLn('  store:     ', StorePath)
       else
         WriteLn('  store:     (in memory)');
+      if SessionResumed and (Length(History) > 0) then
+      begin
+        WriteLn;
+        WriteLn(AnsiDim('--- recent history (' + IntToStr(Length(History)) +
+          ' messages) ---'));
+        Writer.RenderHistory(History);
+        WriteLn;
+      end;
       WriteLn('Type a message; /exit or Ctrl-D to quit.');
       while True do
       begin

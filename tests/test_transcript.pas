@@ -8,7 +8,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.ansi, hildegard.helper.transcript;
+  hildegard.helper.ansi, hildegard.helper.transcript, hildegard.helper.llm;
 
 type
   TTranscriptTest = class(TTestCase)
@@ -30,6 +30,7 @@ type
     procedure TestNoEscapesWhenColorDisabled;
     procedure TestPacingDelaysOutput;
     procedure TestHeadersHiddenWhenColorEnabled;
+    procedure TestRenderHistoryRestoresMessages;
   end;
 
 implementation
@@ -257,6 +258,42 @@ begin
   AssertTrue('has colour escapes', Pos(#27, S) > 0);
   AssertTrue('tool call inlined', Pos('get_system_time({})', S) > 0);
   AssertTrue('prompt marker kept', Pos(AnsiBold('> '), S) > 0);
+end;
+
+procedure TTranscriptTest.TestRenderHistoryRestoresMessages;
+var
+  S: string;
+  Out_: TStringStream;
+  W: TTranscriptWriter;
+  Msgs: TChatMessageArray;
+  M: TChatMessage;
+begin
+  SetLength(Msgs, 3);
+  M := Default(TChatMessage);
+  M.Role := crSystem;
+  M.Content := 'sys';
+  Msgs[0] := M;
+  M := Default(TChatMessage);
+  M.Role := crUser;
+  M.Content := 'what time?';
+  Msgs[1] := M;
+  M := Default(TChatMessage);
+  M.Role := crAssistant;
+  M.Content := 'noon';
+  Msgs[2] := M;
+
+  Out_ := TStringStream.Create('');
+  W := TTranscriptWriter.Create(Out_, MakeOptions(True, False, True, 0));
+  try
+    W.RenderHistory(Msgs);
+    S := Out_.DataString;
+  finally
+    W.Free;
+    Out_.Free;
+  end;
+  AssertTrue('user shown', Pos('> what time?', S) > 0);
+  AssertTrue('assistant shown', Pos('noon', S) > 0);
+  AssertFalse('system hidden', Pos('sys', S) > 0);
 end;
 
 initialization

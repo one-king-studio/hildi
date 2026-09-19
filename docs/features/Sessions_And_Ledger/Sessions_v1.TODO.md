@@ -18,7 +18,8 @@
 > Added: `sessions` subcommand (list a workspace's sessions), `-c/--continue`
 > (resume the most recent), `--tail N` (resume loads the last N messages,
 > default 5, 0 = all), and an interactive startup banner (workspace, session,
-> model, store, loaded count).
+> model, store, loaded count), and the restored tail is rendered on screen
+> (TTranscriptWriter.RenderHistory).
 >
 > **Remaining before DONE:** live CLI smoke (run, exit, resume by id).
 >

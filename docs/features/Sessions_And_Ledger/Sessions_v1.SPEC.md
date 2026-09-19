@@ -49,6 +49,9 @@ This work also removes the store's `requests` table and its public API.
       `0` = all).
 - [ ] On interactive start, print a short banner: workspace directory, session id
       (new/resumed and how many messages loaded), model, and store path.
+- [ ] On resume, **print the restored tail on screen** (user prompts, assistant
+      text, tool calls/results) using the transcript conventions before the
+      prompt; the system message is not shown.
 
 ### Non-Functional
 
@@ -248,6 +251,8 @@ has no error channel; it must not raise into the loop.
 - [ ] `TestListAndMostRecentSessions` (store; newest-first, counts, not-found)
 - [ ] `TestTailKeepsSystemAndRecent` (tail keeps the system prompt + last N)
 - [ ] `TestTailDropsOrphanTools` (a mid-turn tail drops leading tool results)
+- [ ] `TestRenderHistoryRestoresMessages` (transcript; system hidden, user and
+      assistant shown)
 - [ ] `TestNoLeaks`
 
 ### Store removal tests

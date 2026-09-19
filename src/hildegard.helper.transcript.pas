@@ -14,7 +14,7 @@ unit hildegard.helper.transcript;
 interface
 
 uses
-  Classes, SysUtils, hildegard.helper.ansi;
+  Classes, SysUtils, hildegard.helper.ansi, hildegard.helper.llm;
 
 type
   TTranscriptOptions = record
@@ -50,6 +50,9 @@ type
     procedure OnToolResult(const AId, AName, AResult: string; AOk: Boolean);
     procedure WriteError(const AMessage: string);
     procedure EndTurn;
+    { Renders a restored conversation (system skipped) using the same
+      conventions, e.g. the tail of a resumed session. }
+    procedure RenderHistory(const AMessages: TChatMessageArray);
   end;
 
 implementation
@@ -228,6 +231,34 @@ end;
 procedure TTranscriptWriter.EndTurn;
 begin
   EnsureNewline;
+end;
+
+procedure TTranscriptWriter.RenderHistory(const AMessages: TChatMessageArray);
+var
+  I, J: Integer;
+  M: TChatMessage;
+begin
+  for I := 0 to High(AMessages) do
+  begin
+    M := AMessages[I];
+    case M.Role of
+      crSystem:
+        ;   // configuration, not history
+      crUser:
+        BeginTurn(M.Content);
+      crAssistant:
+        begin
+          if M.Content <> '' then
+            OnText(M.Content);
+          for J := 0 to High(M.ToolCalls) do
+            OnToolCall(M.ToolCalls[J].Id, M.ToolCalls[J].Name,
+              M.ToolCalls[J].Arguments, '');
+        end;
+      crTool:
+        OnToolResult(M.ToolCallId, '', M.Content, True);
+    end;
+  end;
+  EndTurn;
 end;
 
 end.
