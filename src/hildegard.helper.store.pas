@@ -21,7 +21,7 @@ interface
 
 uses
   Classes, SysUtils, SyncObjs, sqldb, sqlite3conn, sqldblib,
-  hildegard.helper.approval;
+  hildegard.helper.approval, hildegard.helper.session;
 
 type
   { Stable error codes. seOk is success. }
@@ -55,28 +55,6 @@ type
     AccountId: string;
   end;
 
-  TRequestStatus = (rsPending, rsClaimed, rsCompleted, rsFailed, rsCancelled);
-
-  TStoredRequest = record
-    Id: string;
-    Kind: string;
-    Payload: string;
-    Status: TRequestStatus;
-    ExitCode: Integer;
-    Result: string;
-    CreatedAtMs: Int64;
-    UpdatedAtMs: Int64;
-  end;
-
-  TStoredRequestArray = array of TStoredRequest;
-
-  TRequestQuery = record
-    UseStatus: Boolean;
-    Status: TRequestStatus;
-    Limit: Integer;
-    Offset: Integer;
-  end;
-
   TMigration = record
     Version: Integer;
     Name: string;
@@ -103,8 +81,6 @@ type
       out AError: TStoreError): Boolean;
     function ExecInTransaction(const ASQL: string;
       out AError: TStoreError): Boolean;
-    function ReadOneRequest(AQuery: TSQLQuery;
-      out AValue: TStoredRequest; out AError: TStoreError): Boolean;
     procedure InitLibrary(const ALibraryPath: string);
   public
     constructor Create(const AConfig: TStoreConfig); overload;
@@ -121,18 +97,6 @@ type
     function LoadCredentials(out AValue: TDeviceCredentials;
       out AError: TStoreError): Boolean;
     function ClearCredentials(out AError: TStoreError): Boolean;
-
-    function EnqueueRequest(const AValue: TStoredRequest;
-      out AError: TStoreError): Boolean;
-    function ClaimNextPending(out AValue: TStoredRequest;
-      out AError: TStoreError): Boolean;
-    function FinishRequest(const AId: string; AStatus: TRequestStatus;
-      AExitCode: Integer; const AResult: string;
-      out AError: TStoreError): Boolean;
-    function GetRequest(const AId: string; out AValue: TStoredRequest;
-      out AError: TStoreError): Boolean;
-    function QueryRequests(const AQuery: TRequestQuery;
-      out AList: TStoredRequestArray; out AError: TStoreError): Boolean;
 
     function SetSetting(const AKey, AValue: string;
       out AError: TStoreError): Boolean;
@@ -156,6 +120,20 @@ type
       out AError: TStoreError): Boolean;
     function RemoveApproval(const ARule: TApprovalRule;
       out AError: TStoreError): Boolean;
+
+    { Creates a session bound to a workspace and returns its 32-hex id. }
+    function CreateSession(AWorkspaceId: Integer; out AId: string;
+      out AError: TStoreError): Boolean;
+    function SessionExists(const AId: string;
+      out AError: TStoreError): Boolean;
+    function TouchSession(const AId: string;
+      out AError: TStoreError): Boolean;
+    { Appends a ledger record, assigning its per-session sequence. }
+    function AppendSessionRecord(const ARecord: TSessionRecord;
+      out AError: TStoreError): Boolean;
+    function QuerySessionRecords(const ASessionId: string; AUseKind: Boolean;
+      AKind: TSessionRecordKind; ALimit, AOffset: Integer;
+      out ARecords: TSessionRecordArray; out AError: TStoreError): Boolean;
   end;
 
 function ResolveLibraryPath(const AExplicit: string): string;
@@ -241,6 +219,27 @@ begin
       'any_params))',
     'CREATE INDEX idx_approvals_scope ON approvals (scope, workspace_id, ' +
       'session_id)'
+  ];
+
+  SetLength(Result, 4);
+  Result[3].Version := 4;
+  Result[3].Name := 'sessions and ledger';
+  Result[3].Statements := [
+    'CREATE TABLE sessions (' +
+      'id TEXT PRIMARY KEY, ' +
+      'workspace_id INTEGER NOT NULL, ' +
+      'created_at INTEGER NOT NULL, ' +
+      'updated_at INTEGER NOT NULL)',
+    'CREATE TABLE session_records (' +
+      'id INTEGER PRIMARY KEY AUTOINCREMENT, ' +
+      'session_id TEXT NOT NULL, ' +
+      'seq INTEGER NOT NULL, ' +
+      'kind INTEGER NOT NULL, ' +
+      'content TEXT NOT NULL DEFAULT '''', ' +
+      'data TEXT NOT NULL DEFAULT '''', ' +
+      'created_at INTEGER NOT NULL)',
+    'CREATE INDEX idx_session_records ON session_records (session_id, seq)',
+    'DROP TABLE IF EXISTS requests'
   ];
 end;
 
@@ -676,322 +675,6 @@ begin
   end;
 end;
 
-function TSqliteStore.EnqueueRequest(const AValue: TStoredRequest;
-  out AError: TStoreError): Boolean;
-var
-  Q: TSQLQuery;
-  Exists: Boolean;
-  Created, Updated: Int64;
-begin
-  AError := OkError;
-  FLock.Acquire;
-  try
-    if not EnsureOpen(AError) then
-      Exit(False);
-    if AValue.Id = '' then
-      Exit(Fail(AError, seInvalidArgument, 'request id is required', ''));
-    if AValue.Kind = '' then
-      Exit(Fail(AError, seInvalidArgument, 'request kind is required', ''));
-
-    Created := AValue.CreatedAtMs;
-    Updated := AValue.UpdatedAtMs;
-    if Created = 0 then
-      Created := NowMs;
-    if Updated = 0 then
-      Updated := Created;
-    if (Created < 0) or (Updated < 0) then
-      Exit(Fail(AError, seInvalidArgument, 'timestamps must not be negative', ''));
-
-    Q := TSQLQuery.Create(nil);
-    try
-      Q.DataBase := FConn;
-      Q.Transaction := FTx;
-      Q.SQL.Text := 'SELECT 1 FROM requests WHERE id = :id';
-      Q.ParamByName('id').AsString := AValue.Id;
-      Q.Open;
-      Exists := not Q.EOF;
-      Q.Close;
-      if Exists then
-        Exit(Fail(AError, seConstraint, 'request id already exists',
-          AValue.Id));
-
-      Q.SQL.Text :=
-        'INSERT INTO requests ' +
-        '(id, kind, payload, status, exit_code, result, created_at, updated_at) ' +
-        'VALUES (:id, :kind, :payload, :status, :exit_code, :result, ' +
-        ':created_at, :updated_at)';
-      Q.ParamByName('id').AsString := AValue.Id;
-      Q.ParamByName('kind').AsString := AValue.Kind;
-      Q.ParamByName('payload').AsString := AValue.Payload;
-      Q.ParamByName('status').AsInteger := Ord(rsPending);
-      Q.ParamByName('exit_code').AsInteger := 0;
-      Q.ParamByName('result').AsString := '';
-      Q.ParamByName('created_at').AsLargeInt := Created;
-      Q.ParamByName('updated_at').AsLargeInt := Updated;
-      try
-        Q.ExecSQL;
-        FTx.Commit;
-      except
-        on E: Exception do
-        begin
-          if FTx.Active then
-            FTx.Rollback;
-          Exit(Fail(AError, seError, 'could not enqueue request', E.Message));
-        end;
-      end;
-    finally
-      Q.Free;
-    end;
-    Result := True;
-  finally
-    FLock.Release;
-  end;
-end;
-
-function TSqliteStore.ReadOneRequest(AQuery: TSQLQuery;
-  out AValue: TStoredRequest; out AError: TStoreError): Boolean;
-begin
-  Result := True;
-  AError := OkError;
-  if AQuery.EOF then
-    Exit(False);
-  AValue.Id := AQuery.FieldByName('id').AsString;
-  AValue.Kind := AQuery.FieldByName('kind').AsString;
-  AValue.Payload := AQuery.FieldByName('payload').AsString;
-  AValue.Status := TRequestStatus(AQuery.FieldByName('status').AsInteger);
-  AValue.ExitCode := AQuery.FieldByName('exit_code').AsInteger;
-  AValue.Result := AQuery.FieldByName('result').AsString;
-  AValue.CreatedAtMs := AQuery.FieldByName('created_at').AsLargeInt;
-  AValue.UpdatedAtMs := AQuery.FieldByName('updated_at').AsLargeInt;
-end;
-
-function TSqliteStore.ClaimNextPending(out AValue: TStoredRequest;
-  out AError: TStoreError): Boolean;
-var
-  Q: TSQLQuery;
-  Claimed: Int64;
-begin
-  AError := OkError;
-  FLock.Acquire;
-  try
-    if not EnsureOpen(AError) then
-      Exit(False);
-    Q := TSQLQuery.Create(nil);
-    try
-      Q.DataBase := FConn;
-      Q.Transaction := FTx;
-      try
-        Q.SQL.Text :=
-          'SELECT * FROM requests WHERE status = :st ' +
-          'ORDER BY created_at, id LIMIT 1';
-        Q.ParamByName('st').AsInteger := Ord(rsPending);
-        Q.Open;
-        if Q.EOF then
-        begin
-          Q.Close;
-          if FTx.Active then
-            FTx.Commit;
-          Exit(Fail(AError, seNotFound, 'no pending requests', ''));
-        end;
-        ReadOneRequest(Q, AValue, AError);
-        Q.Close;
-
-        Claimed := NowMs;
-        Q.SQL.Text :=
-          'UPDATE requests SET status = :claimed, updated_at = :now ' +
-          'WHERE id = :id AND status = :pending';
-        Q.ParamByName('claimed').AsInteger := Ord(rsClaimed);
-        Q.ParamByName('now').AsLargeInt := Claimed;
-        Q.ParamByName('id').AsString := AValue.Id;
-        Q.ParamByName('pending').AsInteger := Ord(rsPending);
-        Q.ExecSQL;
-        if Q.RowsAffected <> 1 then
-        begin
-          FTx.Rollback;
-          Exit(Fail(AError, seError, 'claim lost a race', AValue.Id));
-        end;
-        FTx.Commit;
-        AValue.Status := rsClaimed;
-        AValue.UpdatedAtMs := Claimed;
-      except
-        on E: Exception do
-        begin
-          if FTx.Active then
-            FTx.Rollback;
-          Exit(Fail(AError, seError, 'could not claim request', E.Message));
-        end;
-      end;
-    finally
-      Q.Free;
-    end;
-    Result := True;
-  finally
-    FLock.Release;
-  end;
-end;
-
-function TSqliteStore.FinishRequest(const AId: string; AStatus: TRequestStatus;
-  AExitCode: Integer; const AResult: string;
-  out AError: TStoreError): Boolean;
-var
-  Q: TSQLQuery;
-  Exists: Boolean;
-begin
-  AError := OkError;
-  FLock.Acquire;
-  try
-    if not EnsureOpen(AError) then
-      Exit(False);
-    if not (AStatus in [rsCompleted, rsFailed, rsCancelled]) then
-      Exit(Fail(AError, seInvalidArgument, 'not a terminal status', ''));
-    if AId = '' then
-      Exit(Fail(AError, seInvalidArgument, 'request id is required', ''));
-
-    Q := TSQLQuery.Create(nil);
-    try
-      Q.DataBase := FConn;
-      Q.Transaction := FTx;
-      try
-        Q.SQL.Text :=
-          'UPDATE requests SET status = :st, exit_code = :ec, result = :res, ' +
-          'updated_at = :now WHERE id = :id AND status IN (:pending, :claimed)';
-        Q.ParamByName('st').AsInteger := Ord(AStatus);
-        Q.ParamByName('ec').AsInteger := AExitCode;
-        Q.ParamByName('res').AsString := AResult;
-        Q.ParamByName('now').AsLargeInt := NowMs;
-        Q.ParamByName('id').AsString := AId;
-        Q.ParamByName('pending').AsInteger := Ord(rsPending);
-        Q.ParamByName('claimed').AsInteger := Ord(rsClaimed);
-        Q.ExecSQL;
-        if Q.RowsAffected = 1 then
-        begin
-          FTx.Commit;
-          Exit(True);
-        end;
-
-        FTx.Rollback;
-        Q.SQL.Text := 'SELECT 1 FROM requests WHERE id = :id';
-        Q.ParamByName('id').AsString := AId;
-        Q.Open;
-        Exists := not Q.EOF;
-        Q.Close;
-        if Exists then
-          Exit(Fail(AError, seConstraint, 'request is already terminal', AId))
-        else
-          Exit(Fail(AError, seNotFound, 'no such request', AId));
-      except
-        on E: Exception do
-        begin
-          if FTx.Active then
-            FTx.Rollback;
-          Exit(Fail(AError, seError, 'could not finish request', E.Message));
-        end;
-      end;
-    finally
-      Q.Free;
-    end;
-  finally
-    FLock.Release;
-  end;
-end;
-
-function TSqliteStore.GetRequest(const AId: string; out AValue: TStoredRequest;
-  out AError: TStoreError): Boolean;
-var
-  Q: TSQLQuery;
-begin
-  AError := OkError;
-  FLock.Acquire;
-  try
-    if not EnsureOpen(AError) then
-      Exit(False);
-    Q := TSQLQuery.Create(nil);
-    try
-      Q.DataBase := FConn;
-      Q.Transaction := FTx;
-      Q.SQL.Text := 'SELECT * FROM requests WHERE id = :id';
-      Q.ParamByName('id').AsString := AId;
-      try
-        Q.Open;
-        if Q.EOF then
-          Result := Fail(AError, seNotFound, 'no such request', AId)
-        else
-          Result := ReadOneRequest(Q, AValue, AError);
-        Q.Close;
-      except
-        on E: Exception do
-          Exit(Fail(AError, seError, 'could not read request', E.Message));
-      end;
-    finally
-      Q.Free;
-    end;
-  finally
-    FLock.Release;
-  end;
-end;
-
-function TSqliteStore.QueryRequests(const AQuery: TRequestQuery;
-  out AList: TStoredRequestArray; out AError: TStoreError): Boolean;
-var
-  Q: TSQLQuery;
-  Sql: string;
-  Count: Integer;
-  Item: TStoredRequest;
-begin
-  AError := OkError;
-  SetLength(AList, 0);
-  FLock.Acquire;
-  try
-    if not EnsureOpen(AError) then
-      Exit(False);
-    Q := TSQLQuery.Create(nil);
-    try
-      Q.DataBase := FConn;
-      Q.Transaction := FTx;
-      Sql := 'SELECT * FROM requests';
-      if AQuery.UseStatus then
-        Sql := Sql + ' WHERE status = :st';
-      Sql := Sql + ' ORDER BY created_at, id';
-      if AQuery.Limit > 0 then
-      begin
-        Sql := Sql + ' LIMIT :lim';
-        if AQuery.Offset > 0 then
-          Sql := Sql + ' OFFSET :off';
-      end;
-      Q.SQL.Text := Sql;
-      if AQuery.UseStatus then
-        Q.ParamByName('st').AsInteger := Ord(AQuery.Status);
-      if AQuery.Limit > 0 then
-      begin
-        Q.ParamByName('lim').AsInteger := AQuery.Limit;
-        if AQuery.Offset > 0 then
-          Q.ParamByName('off').AsInteger := AQuery.Offset;
-      end;
-      try
-        Q.Open;
-        Count := 0;
-        while not Q.EOF do
-        begin
-          ReadOneRequest(Q, Item, AError);
-          SetLength(AList, Count + 1);
-          AList[Count] := Item;
-          Inc(Count);
-          Q.Next;
-        end;
-        Q.Close;
-        Result := True;
-      except
-        on E: Exception do
-          Exit(Fail(AError, seError, 'could not query requests', E.Message));
-      end;
-    finally
-      Q.Free;
-    end;
-  finally
-    FLock.Release;
-  end;
-end;
-
 function TSqliteStore.SetSetting(const AKey, AValue: string;
   out AError: TStoreError): Boolean;
 var
@@ -1393,4 +1076,234 @@ begin
   end;
 end;
 
+{ --- sessions and ledger ------------------------------------------------ }
+
+function TSqliteStore.CreateSession(AWorkspaceId: Integer; out AId: string;
+  out AError: TStoreError): Boolean;
+var
+  Q: TSQLQuery;
+begin
+  AError := OkError;
+  AId := '';
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    if AWorkspaceId < 0 then
+      Exit(Fail(AError, seInvalidArgument, 'workspace id is required', ''));
+    AId := NewSessionId;
+    Q := TSQLQuery.Create(nil);
+    try
+      Q.DataBase := FConn;
+      Q.Transaction := FTx;
+      Q.SQL.Text :=
+        'INSERT INTO sessions (id, workspace_id, created_at, updated_at) ' +
+        'VALUES (:id, :w, :t, :t2)';
+      Q.ParamByName('id').AsString := AId;
+      Q.ParamByName('w').AsInteger := AWorkspaceId;
+      Q.ParamByName('t').AsLargeInt := NowMs;
+      Q.ParamByName('t2').AsLargeInt := NowMs;
+      try
+        Q.ExecSQL;
+        FTx.Commit;
+      except
+        on E: Exception do
+        begin
+          if FTx.Active then
+            FTx.Rollback;
+          Exit(Fail(AError, seError, 'could not create session', E.Message));
+        end;
+      end;
+    finally
+      Q.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.SessionExists(const AId: string;
+  out AError: TStoreError): Boolean;
+var
+  Q: TSQLQuery;
+begin
+  AError := OkError;
+  Result := False;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Q := TSQLQuery.Create(nil);
+    try
+      Q.DataBase := FConn;
+      Q.Transaction := FTx;
+      Q.SQL.Text := 'SELECT 1 FROM sessions WHERE id = :id';
+      Q.ParamByName('id').AsString := AId;
+      Q.Open;
+      Result := not Q.EOF;
+      Q.Close;
+    finally
+      Q.Free;
+    end;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.TouchSession(const AId: string;
+  out AError: TStoreError): Boolean;
+var
+  Q: TSQLQuery;
+begin
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Q := TSQLQuery.Create(nil);
+    try
+      Q.DataBase := FConn;
+      Q.Transaction := FTx;
+      Q.SQL.Text := 'UPDATE sessions SET updated_at = :t WHERE id = :id';
+      Q.ParamByName('t').AsLargeInt := NowMs;
+      Q.ParamByName('id').AsString := AId;
+      try
+        Q.ExecSQL;
+        FTx.Commit;
+      except
+        on E: Exception do
+        begin
+          if FTx.Active then
+            FTx.Rollback;
+          Exit(Fail(AError, seError, 'could not touch session', E.Message));
+        end;
+      end;
+    finally
+      Q.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.AppendSessionRecord(const ARecord: TSessionRecord;
+  out AError: TStoreError): Boolean;
+var
+  Q: TSQLQuery;
+begin
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    if ARecord.SessionId = '' then
+      Exit(Fail(AError, seInvalidArgument, 'session id is required', ''));
+    Q := TSQLQuery.Create(nil);
+    try
+      Q.DataBase := FConn;
+      Q.Transaction := FTx;
+      Q.SQL.Text := 'SELECT 1 FROM sessions WHERE id = :id';
+      Q.ParamByName('id').AsString := ARecord.SessionId;
+      Q.Open;
+      if Q.EOF then
+        Exit(Fail(AError, seNotFound, 'session not found', ARecord.SessionId));
+      Q.Close;
+
+      Q.SQL.Text :=
+        'INSERT INTO session_records ' +
+        '(session_id, seq, kind, content, data, created_at) VALUES ' +
+        '(:s, (SELECT COALESCE(MAX(seq), 0) + 1 FROM session_records ' +
+        'WHERE session_id = :s2), :k, :c, :d, :t)';
+      Q.ParamByName('s').AsString := ARecord.SessionId;
+      Q.ParamByName('s2').AsString := ARecord.SessionId;
+      Q.ParamByName('k').AsInteger := Ord(ARecord.Kind);
+      Q.ParamByName('c').AsString := ARecord.Content;
+      Q.ParamByName('d').AsString := ARecord.DataJson;
+      Q.ParamByName('t').AsLargeInt := NowMs;
+      try
+        Q.ExecSQL;
+        FTx.Commit;
+      except
+        on E: Exception do
+        begin
+          if FTx.Active then
+            FTx.Rollback;
+          Exit(Fail(AError, seError, 'could not append record', E.Message));
+        end;
+      end;
+    finally
+      Q.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.QuerySessionRecords(const ASessionId: string;
+  AUseKind: Boolean; AKind: TSessionRecordKind; ALimit, AOffset: Integer;
+  out ARecords: TSessionRecordArray; out AError: TStoreError): Boolean;
+var
+  Q: TSQLQuery;
+  N: Integer;
+  Rec: TSessionRecord;
+begin
+  AError := OkError;
+  ARecords := nil;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Q := TSQLQuery.Create(nil);
+    try
+      Q.DataBase := FConn;
+      Q.Transaction := FTx;
+      if AUseKind then
+        Q.SQL.Text :=
+          'SELECT id, session_id, seq, kind, content, data, created_at ' +
+          'FROM session_records WHERE session_id = :s AND kind = :k ' +
+          'ORDER BY seq LIMIT :l OFFSET :o'
+      else
+        Q.SQL.Text :=
+          'SELECT id, session_id, seq, kind, content, data, created_at ' +
+          'FROM session_records WHERE session_id = :s ' +
+          'ORDER BY seq LIMIT :l OFFSET :o';
+      Q.ParamByName('s').AsString := ASessionId;
+      if AUseKind then
+        Q.ParamByName('k').AsInteger := Ord(AKind);
+      if ALimit > 0 then
+        Q.ParamByName('l').AsInteger := ALimit
+      else
+        Q.ParamByName('l').AsInteger := -1;   // SQLite: no limit
+      Q.ParamByName('o').AsInteger := AOffset;
+      Q.Open;
+      N := 0;
+      while not Q.EOF do
+      begin
+        Rec := Default(TSessionRecord);
+        Rec.Id := Q.FieldByName('id').AsLargeInt;
+        Rec.SessionId := Q.FieldByName('session_id').AsString;
+        Rec.Seq := Q.FieldByName('seq').AsLargeInt;
+        Rec.Kind := TSessionRecordKind(Q.FieldByName('kind').AsInteger);
+        Rec.Content := Q.FieldByName('content').AsString;
+        Rec.DataJson := Q.FieldByName('data').AsString;
+        Rec.CreatedAtMs := Q.FieldByName('created_at').AsLargeInt;
+        SetLength(ARecords, N + 1);
+        ARecords[N] := Rec;
+        Inc(N);
+        Q.Next;
+      end;
+      Q.Close;
+    finally
+      Q.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
 end.
+

@@ -21,6 +21,7 @@ type
     Model: string;
     Endpoint: string;
     Workspace: string;
+    Session: string;
     ShowUser: Boolean;
     ShowTools: Boolean;
     Reasoning: TTriState;        // tsDefault => on for interactive, off for once
@@ -122,6 +123,8 @@ begin
       Result.Endpoint := ValueOf(AArgs, I, Key, Inline)
     else if (Key = '-w') or (Key = '--workspace') then
       Result.Workspace := ValueOf(AArgs, I, Key, Inline)
+    else if Key = '--session' then
+      Result.Session := ValueOf(AArgs, I, Key, Inline)
     else if (Arg = '-') then
     begin
       Result.PromptFromStdin := True;
@@ -169,6 +172,8 @@ begin
     '      --endpoint URL  provider endpoint (overrides environment)' +
     LineEnding +
     '  -w, --workspace DIR working directory for the agent (default: cwd)' +
+    LineEnding +
+    '      --session ID    resume a stored session (default: a new one)' +
     LineEnding +
     '  -h, --help          show this help' + LineEnding +
     LineEnding +

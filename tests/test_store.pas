@@ -10,41 +10,15 @@ uses
   Classes, SysUtils, SyncObjs, fpcunit, testregistry,
   {$ifdef unix}BaseUnix,{$endif}
   sqldb, sqlite3conn, sqldblib,
-  hildegard.helper.store;
+  hildegard.helper.store, hildegard.helper.session;
 
 type
-  { Enqueues a batch of requests from a thread. }
-  TEnqueueThread = class(TThread)
-  private
-    FStore: TSqliteStore;
-    FPrefix: string;
-    FCount: Integer;
-  protected
-    procedure Execute; override;
-  public
-    constructor Create(AStore: TSqliteStore; const APrefix: string; ACount: Integer);
-  end;
-
-  { Claims requests until the queue is empty, recording ids thread-safely. }
-  TClaimThread = class(TThread)
-  private
-    FStore: TSqliteStore;
-    FLock: TCriticalSection;
-    FIds: TStringList;
-  protected
-    procedure Execute; override;
-  public
-    constructor Create(AStore: TSqliteStore; ALock: TCriticalSection;
-      AIds: TStringList);
-  end;
-
   TStoreTest = class(TTestCase)
   private
     FDir: string;
     FDbPath: string;
     function NewStore: TSqliteStore;
     function OpenStore: TSqliteStore;
-    function CountUnique(const AList: TStrings): Integer;
     procedure DeleteDbFiles;
   protected
     procedure SetUp; override;
@@ -63,21 +37,14 @@ type
     procedure TestLoadCredentialsMissingReturnsNotFound;
     procedure TestCredentialsPersistAcrossReopen;
 
-    procedure TestEnqueueThenClaimReturnsRequest;
-    procedure TestClaimEmptyQueueReturnsNotFound;
-    procedure TestFinishMarksTerminalAndIsNotReclaimable;
-    procedure TestFinishRejectsNonTerminalStatus;
-    procedure TestDuplicateRequestIdRejected;
-    procedure TestQueryByStatusAndPagination;
-    procedure TestRequestHistoryPersistsAcrossReopen;
-
     procedure TestSettingSetGetOverwriteDelete;
     procedure TestSettingMissingReturnsNotFound;
     procedure TestParameterizedValuesWithQuotesRoundTrip;
 
     procedure TestFailedMigrationRollsBackAndKeepsVersion;
-    procedure TestClaimIsAtomicAcrossThreads;
     procedure TestConcurrentOperationsDoNotCorruptOrDeadlock;
+    procedure TestSchemaHasNoRequestsTable;
+    procedure TestSessionAndLedgerRoundTrip;
   end;
 
 implementation
@@ -118,62 +85,6 @@ begin
     Tx.Free;
     Conn.Free;
     Loader.Free;
-  end;
-end;
-
-{ TEnqueueThread }
-
-constructor TEnqueueThread.Create(AStore: TSqliteStore; const APrefix: string;
-  ACount: Integer);
-begin
-  inherited Create(True);
-  FStore := AStore;
-  FPrefix := APrefix;
-  FCount := ACount;
-  FreeOnTerminate := False;
-end;
-
-procedure TEnqueueThread.Execute;
-var
-  I: Integer;
-  Req: TStoredRequest;
-  Err: TStoreError;
-begin
-  for I := 0 to FCount - 1 do
-  begin
-    Req := Default(TStoredRequest);
-    Req.Id := FPrefix + IntToStr(I);
-    Req.Kind := 'shell';
-    Req.Payload := '{}';
-    FStore.EnqueueRequest(Req, Err);
-  end;
-end;
-
-{ TClaimThread }
-
-constructor TClaimThread.Create(AStore: TSqliteStore; ALock: TCriticalSection;
-  AIds: TStringList);
-begin
-  inherited Create(True);
-  FStore := AStore;
-  FLock := ALock;
-  FIds := AIds;
-  FreeOnTerminate := False;
-end;
-
-procedure TClaimThread.Execute;
-var
-  Req: TStoredRequest;
-  Err: TStoreError;
-begin
-  while FStore.ClaimNextPending(Req, Err) do
-  begin
-    FLock.Acquire;
-    try
-      FIds.Add(Req.Id);
-    finally
-      FLock.Release;
-    end;
   end;
 end;
 
@@ -222,25 +133,6 @@ begin
       Err.Detail);
   end;
 end;
-
-function TStoreTest.CountUnique(const AList: TStrings): Integer;
-var
-  I: Integer;
-  Seen: TStringList;
-begin
-  Seen := TStringList.Create;
-  try
-    Seen.Sorted := True;
-    Seen.Duplicates := dupIgnore;
-    for I := 0 to AList.Count - 1 do
-      Seen.Add(AList[I]);
-    Result := Seen.Count;
-  finally
-    Seen.Free;
-  end;
-end;
-
-{ --- open / migrations --- }
 
 procedure TStoreTest.TestOpenCreatesDatabase;
 var
@@ -430,184 +322,6 @@ end;
 
 { --- requests / queue --- }
 
-procedure TStoreTest.TestEnqueueThenClaimReturnsRequest;
-var
-  S: TSqliteStore;
-  Err: TStoreError;
-  Req, Claimed: TStoredRequest;
-begin
-  S := OpenStore;
-  try
-    Req := Default(TStoredRequest);
-    Req.Id := 'r1';
-    Req.Kind := 'shell';
-    Req.Payload := '{"cmd":"date"}';
-    AssertTrue('enqueue', S.EnqueueRequest(Req, Err));
-
-    AssertTrue('claim', S.ClaimNextPending(Claimed, Err));
-    AssertEquals('id', 'r1', Claimed.Id);
-    AssertEquals('kind', 'shell', Claimed.Kind);
-    AssertEquals('payload', '{"cmd":"date"}', Claimed.Payload);
-    AssertEquals('claimed status', Ord(rsClaimed), Ord(Claimed.Status));
-  finally
-    S.Free;
-  end;
-end;
-
-procedure TStoreTest.TestClaimEmptyQueueReturnsNotFound;
-var
-  S: TSqliteStore;
-  Err: TStoreError;
-  Claimed: TStoredRequest;
-begin
-  S := OpenStore;
-  try
-    AssertFalse(S.ClaimNextPending(Claimed, Err));
-    AssertEquals('not found', Ord(seNotFound), Ord(Err.Code));
-  finally
-    S.Free;
-  end;
-end;
-
-procedure TStoreTest.TestFinishMarksTerminalAndIsNotReclaimable;
-var
-  S: TSqliteStore;
-  Err: TStoreError;
-  Req, Claimed, Got: TStoredRequest;
-begin
-  S := OpenStore;
-  try
-    Req := Default(TStoredRequest);
-    Req.Id := 'r-fin';
-    Req.Kind := 'shell';
-    Req.Payload := '{}';
-    S.EnqueueRequest(Req, Err);
-    S.ClaimNextPending(Claimed, Err);
-    AssertTrue('finish', S.FinishRequest('r-fin', rsCompleted, 0, 'done', Err));
-    AssertTrue('get', S.GetRequest('r-fin', Got, Err));
-    AssertEquals('completed', Ord(rsCompleted), Ord(Got.Status));
-    AssertEquals('result', 'done', Got.Result);
-    AssertFalse('nothing left to claim', S.ClaimNextPending(Claimed, Err));
-  finally
-    S.Free;
-  end;
-end;
-
-procedure TStoreTest.TestFinishRejectsNonTerminalStatus;
-var
-  S: TSqliteStore;
-  Err: TStoreError;
-  Req: TStoredRequest;
-begin
-  S := OpenStore;
-  try
-    Req := Default(TStoredRequest);
-    Req.Id := 'r-nonterm';
-    Req.Kind := 'shell';
-    Req.Payload := '{}';
-    S.EnqueueRequest(Req, Err);
-    AssertFalse('pending is not terminal',
-      S.FinishRequest('r-nonterm', rsPending, 0, '', Err));
-    AssertEquals('invalid argument', Ord(seInvalidArgument), Ord(Err.Code));
-  finally
-    S.Free;
-  end;
-end;
-
-procedure TStoreTest.TestDuplicateRequestIdRejected;
-var
-  S: TSqliteStore;
-  Err: TStoreError;
-  Req: TStoredRequest;
-begin
-  S := OpenStore;
-  try
-    Req := Default(TStoredRequest);
-    Req.Id := 'dup';
-    Req.Kind := 'shell';
-    Req.Payload := '{}';
-    AssertTrue('first', S.EnqueueRequest(Req, Err));
-    AssertFalse('second rejected', S.EnqueueRequest(Req, Err));
-    AssertEquals('constraint', Ord(seConstraint), Ord(Err.Code));
-  finally
-    S.Free;
-  end;
-end;
-
-procedure TStoreTest.TestQueryByStatusAndPagination;
-var
-  S: TSqliteStore;
-  Err: TStoreError;
-  Req: TStoredRequest;
-  Q: TRequestQuery;
-  List: TStoredRequestArray;
-  I: Integer;
-begin
-  S := OpenStore;
-  try
-    for I := 0 to 4 do
-    begin
-      Req := Default(TStoredRequest);
-      Req.Id := 'q' + IntToStr(I);
-      Req.Kind := 'shell';
-      Req.Payload := '{}';
-      Req.CreatedAtMs := 1000 + I;
-      S.EnqueueRequest(Req, Err);
-    end;
-
-    Q.UseStatus := False;
-    Q.Limit := 2;
-    Q.Offset := 0;
-    AssertTrue('query page 1', S.QueryRequests(Q, List, Err));
-    AssertEquals('page size', 2, Length(List));
-    AssertEquals('ordered', 'q0', List[0].Id);
-
-    Q.UseStatus := False;
-    Q.Limit := 2;
-    Q.Offset := 2;
-    AssertTrue('query page 2', S.QueryRequests(Q, List, Err));
-    AssertEquals('page 2 size', 2, Length(List));
-    AssertEquals('ordered offset', 'q2', List[0].Id);
-
-    Q.UseStatus := True;
-    Q.Status := rsPending;
-    Q.Limit := 0;
-    Q.Offset := 0;
-    AssertTrue('all pending', S.QueryRequests(Q, List, Err));
-    AssertEquals('all five pending', 5, Length(List));
-  finally
-    S.Free;
-  end;
-end;
-
-procedure TStoreTest.TestRequestHistoryPersistsAcrossReopen;
-var
-  S: TSqliteStore;
-  Err: TStoreError;
-  Req, Got: TStoredRequest;
-begin
-  S := OpenStore;
-  try
-    Req := Default(TStoredRequest);
-    Req.Id := 'persist-req';
-    Req.Kind := 'script';
-    Req.Payload := '{"x":1}';
-    S.EnqueueRequest(Req, Err);
-  finally
-    S.Free;
-  end;
-
-  S := OpenStore;
-  try
-    AssertTrue('get after reopen', S.GetRequest('persist-req', Got, Err));
-    AssertEquals('kind persisted', 'script', Got.Kind);
-  finally
-    S.Free;
-  end;
-end;
-
-{ --- settings --- }
-
 procedure TStoreTest.TestSettingSetGetOverwriteDelete;
 var
   S: TSqliteStore;
@@ -721,51 +435,6 @@ begin
   end;
 end;
 
-procedure TStoreTest.TestClaimIsAtomicAcrossThreads;
-var
-  S: TSqliteStore;
-  Err: TStoreError;
-  Enq: array[0..3] of TEnqueueThread;
-  Clm: array[0..3] of TClaimThread;
-  Lock: TCriticalSection;
-  Ids: TStringList;
-  I: Integer;
-begin
-  S := OpenStore;
-  Lock := TCriticalSection.Create;
-  Ids := TStringList.Create;
-  try
-    for I := 0 to 3 do
-    begin
-      Enq[I] := TEnqueueThread.Create(S, 'w' + IntToStr(I) + '_', 5);
-      Enq[I].Start;
-    end;
-    for I := 0 to 3 do
-    begin
-      Enq[I].WaitFor;
-      Enq[I].Free;
-    end;
-
-    for I := 0 to 3 do
-    begin
-      Clm[I] := TClaimThread.Create(S, Lock, Ids);
-      Clm[I].Start;
-    end;
-    for I := 0 to 3 do
-    begin
-      Clm[I].WaitFor;
-      Clm[I].Free;
-    end;
-
-    AssertEquals('all claimed', 20, Ids.Count);
-    AssertEquals('no duplicate claims', 20, CountUnique(Ids));
-  finally
-    Ids.Free;
-    Lock.Free;
-    S.Free;
-  end;
-end;
-
 procedure TStoreTest.TestConcurrentOperationsDoNotCorruptOrDeadlock;
 var
   S: TSqliteStore;
@@ -782,6 +451,108 @@ begin
       AssertTrue('get ' + IntToStr(I), S.GetSetting('k' + IntToStr(I), V, Err));
       AssertEquals('roundtrip ' + IntToStr(I), IntToStr(I), V);
     end;
+  finally
+    S.Free;
+  end;
+end;
+
+{ Reads sqlite_master through a direct connection to assert schema presence. }
+function RawTableExists(const APath, AName: string): Boolean;
+var
+  Loader: TSQLDBLibraryLoader;
+  Conn: TSQLite3Connection;
+  Tx: TSQLTransaction;
+  Q: TSQLQuery;
+begin
+  Result := False;
+  Loader := TSQLDBLibraryLoader.Create(nil);
+  Conn := TSQLite3Connection.Create(nil);
+  Tx := TSQLTransaction.Create(nil);
+  Q := TSQLQuery.Create(nil);
+  try
+    Loader.ConnectionType := 'SQLite3';
+    Loader.LibraryName := ResolveLibraryPath('');
+    Loader.LoadLibrary;
+    Conn.DatabaseName := APath;
+    Conn.Transaction := Tx;
+    Conn.Open;
+    Q.DataBase := Conn;
+    Q.Transaction := Tx;
+    Q.SQL.Text :=
+      'SELECT 1 FROM sqlite_master WHERE type = ''table'' AND name = :n';
+    Q.ParamByName('n').AsString := AName;
+    Q.Open;
+    Result := not Q.EOF;
+    Q.Close;
+    Conn.Close;
+  finally
+    Q.Free;
+    Tx.Free;
+    Conn.Free;
+    Loader.Free;
+  end;
+end;
+
+procedure TStoreTest.TestSchemaHasNoRequestsTable;
+var
+  S: TSqliteStore;
+begin
+  S := OpenStore;
+  try
+  finally
+    S.Free;
+  end;
+  AssertTrue('sessions table exists', RawTableExists(FDbPath, 'sessions'));
+  AssertTrue('session_records exists', RawTableExists(FDbPath, 'session_records'));
+  AssertFalse('requests dropped', RawTableExists(FDbPath, 'requests'));
+end;
+
+procedure TStoreTest.TestSessionAndLedgerRoundTrip;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Id, Id2: string;
+  Rec, Rec2, Rec3: TSessionRecord;
+  Rows: TSessionRecordArray;
+  WorkspaceId: Integer;
+begin
+  S := OpenStore;
+  try
+    AssertTrue('workspace', S.EnsureWorkspace('/tmp', WorkspaceId, Err));
+    AssertTrue('create session', S.CreateSession(WorkspaceId, Id, Err));
+    AssertEquals('id length', 32, Length(Id));
+    AssertTrue('exists', S.SessionExists(Id, Err));
+
+    Rec := Default(TSessionRecord);
+    Rec.SessionId := Id;
+    Rec.Kind := srkUserMessage;
+    Rec.Content := 'hello';
+    AssertTrue('append 1', S.AppendSessionRecord(Rec, Err));
+    Rec2 := Default(TSessionRecord);
+    Rec2.SessionId := Id;
+    Rec2.Kind := srkAssistantMessage;
+    Rec2.Content := 'hi';
+    AssertTrue('append 2', S.AppendSessionRecord(Rec2, Err));
+
+    AssertTrue('query', S.QuerySessionRecords(Id, False, srkEvent, 0, 0, Rows,
+      Err));
+    AssertEquals('two records', 2, Length(Rows));
+    AssertEquals('ordered seq 1', 1, Rows[0].Seq);
+    AssertEquals('ordered seq 2', 2, Rows[1].Seq);
+    AssertEquals('first kind', Ord(srkUserMessage), Ord(Rows[0].Kind));
+
+    AssertTrue('query by kind', S.QuerySessionRecords(Id, True,
+      srkUserMessage, 0, 0, Rows, Err));
+    AssertEquals('one user record', 1, Length(Rows));
+
+    Rec3 := Default(TSessionRecord);
+    Rec3.SessionId := 'nope';
+    AssertFalse('append unknown session', S.AppendSessionRecord(Rec3, Err));
+    AssertEquals('not found', Ord(seNotFound), Ord(Err.Code));
+
+    AssertTrue('touch', S.TouchSession(Id, Err));
+    AssertTrue('create 2', S.CreateSession(WorkspaceId, Id2, Err));
+    AssertTrue('ids differ', Id <> Id2);
   finally
     S.Free;
   end;

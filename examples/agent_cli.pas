@@ -23,6 +23,7 @@ uses
   hildegard.helper.transcript, hildegard.helper.llm, hildegard.helper.agent,
   hildegard.helper.command.policy, hildegard.helper.command.tool,
   hildegard.helper.approval, hildegard.helper.approval.store,
+  hildegard.helper.session, hildegard.helper.session.store,
   hildegard.helper.store, hildegard.helper.workspace;
 
 const
@@ -163,6 +164,7 @@ var
   Workspace: TWorkspace;
   WorkspacePath, WSErr: string;
   WorkspaceId: Integer;
+  SessionId: string;
 
 begin
   RawArgs := CollectArgs;
@@ -261,6 +263,18 @@ begin
   begin
     SqliteStore.EnsureWorkspace(Workspace.Root, WorkspaceId, StoreErr);
     ApprovalStore := TStoreApprovalStore.Create(SqliteStore);
+
+    { Resume the named session or start a new one; persist the conversation. }
+    SessionId := Opts.Session;
+    if SessionId = '' then
+    begin
+      if not SqliteStore.CreateSession(WorkspaceId, SessionId, StoreErr) then
+        Fatal('could not create session: ' + StoreErr.Message, 1);
+    end
+    else if not SqliteStore.SessionExists(SessionId, StoreErr) then
+      Fatal('unknown session: ' + SessionId, 1);
+    Store := nil;
+    Store := TSqliteConversationStore.Create(SqliteStore, SessionId);
   end
   else
   begin
@@ -274,7 +288,7 @@ begin
   if Interactive then
     Approver := TConsoleApprover.Create;
   ApprovalCtx.WorkspaceId := WorkspaceId;
-  ApprovalCtx.SessionId := '';
+  ApprovalCtx.SessionId := SessionId;
   if Approver <> nil then
     ApprovalService := TApprovalService.Create(ApprovalStore, Approver.Prompt,
       ApprovalCtx)
@@ -358,13 +372,13 @@ begin
     Tools.Free;
     ApprovalService := nil;
     ApprovalStore := nil;
+    Store := nil;            // release the conversation adapter before the store
     if SqliteStore <> nil then
     begin
       SqliteStore.Close;
       SqliteStore.Free;
     end;
     Workspace.Free;
-    Store := nil;
     Client.Free;
   end;
 end.

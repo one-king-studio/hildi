@@ -3,6 +3,22 @@
 **Related Specification:** `Sessions_v1.SPEC.md`
 **Related Feature:** `FEATURE.md`
 
+> **Progress:** implemented and committed. `hildegard.helper.session` (session
+> ids + record model), migration v4 (`sessions`, `session_records`, drop
+> `requests`), store session/ledger methods, `TSqliteConversationStore`
+> (persist + restore, skipping reasoning/errors), and CLI `--session` resume.
+> `tests/test_session.pas` covers id format, the round trip, restore skipping,
+> and restore after reopen; `test_store` asserts `requests` is gone.
+>
+> **Deviations:** `ISessionLedger` was dropped (unnecessary indirection - the
+> adapter uses `TSqliteStore` directly; the no-store CLI path keeps the
+> in-memory conversation store). `Clear` is a no-op by design (the ledger is
+> durable history). 7 request tests were deleted with the table.
+>
+> **Remaining before DONE:** live CLI smoke (run, exit, resume by id).
+>
+> The checkboxes below are not ticked retroactively.
+
 ## Overview
 
 Build `hildegard.helper.session`: session identity, the typed ledger, and a

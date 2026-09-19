@@ -22,6 +22,7 @@ type
     procedure TestColorFlagsSetTriState;
     procedure TestModelSystemEndpointFlags;
     procedure TestWorkspaceFlag;
+    procedure TestSessionFlag;
     procedure TestLongFlagsWithEquals;
     procedure TestHelpFlag;
     procedure TestUnknownOptionRaises;
@@ -134,6 +135,16 @@ begin
   AssertEquals('workspace long inline', '/tmp/other', O.Workspace);
   O := ParseCLIOptions([]);
   AssertEquals('workspace default empty', '', O.Workspace);
+end;
+
+procedure TCLITest.TestSessionFlag;
+var
+  O: TCLIOptions;
+begin
+  O := ParseCLIOptions(['--session', 'abc123']);
+  AssertEquals('session', 'abc123', O.Session);
+  O := ParseCLIOptions([]);
+  AssertEquals('session default empty', '', O.Session);
 end;
 
 procedure TCLITest.TestLongFlagsWithEquals;
