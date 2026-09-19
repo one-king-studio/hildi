@@ -102,6 +102,7 @@ type
     procedure TestAuditRecordedForAllowDenyAndOutcome;
     procedure TestHandlerNeverRaises;
     procedure TestStoreCommandPolicySourceRoundTrip;
+    procedure TestStoreCommandPolicySourcePersistsAcrossReopen;
     procedure TestRoundTripAgainstFakeProvider;
     procedure TestProcessExecutorRunsCommand;
     procedure TestMemoryPolicySourceAsksThenRemembers;
@@ -769,6 +770,41 @@ begin
     AssertEquals('payload', 'echo hi', Req.Payload);
     AssertEquals('status', Ord(rsCompleted), Ord(Req.Status));
   finally
+    Store.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestStoreCommandPolicySourcePersistsAcrossReopen;
+var
+  Store: TSqliteStore;
+  Src: ICommandPolicySource;
+  Pol: TCommandPolicy;
+  PErr: string;
+  I: Integer;
+  Found: Boolean;
+begin
+  Store := OpenStore;
+  try
+    Src := TStoreCommandPolicySource.Create(Store);
+    AssertTrue('approve', Src.SaveApproval('=uname', PErr));
+  finally
+    Store.Close;
+    Store.Free;
+  end;
+
+  Store := OpenStore;
+  try
+    Src := TStoreCommandPolicySource.Create(Store);
+    AssertTrue('reload', Src.LoadPolicy(Pol, PErr));
+    Found := False;
+    for I := 0 to High(Pol.Allow) do
+      if Pol.Allow[I] = '=uname' then
+        Found := True;
+    AssertTrue('approval survived reopen', Found);
+    AssertEquals('exact command now allowed', Ord(cdAllow),
+      Ord(ClassifyCommand(ParseCommand('uname', ssPosix), Pol).Decision));
+  finally
+    Store.Close;
     Store.Free;
   end;
 end;
