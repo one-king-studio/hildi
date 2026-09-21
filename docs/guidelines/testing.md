@@ -146,7 +146,15 @@ separate direct connection in the test rather than widening the production API.
 - HTTP and SSE parsing must be tested against in-memory streams so the suite
   stays fast and deterministic.
 
-## Database-specific notes (SQLDB / SQLite)
+## Database-specific notes (SQLite)
+
+> **Superseded (SQLDB removed).** The store no longer uses SQLDB; it binds the
+> vendored SQLite directly (`hildegard.helper.sqlite`) and links it statically
+> (`-k<archive>`). The SQLDB notes below are kept for historical context only.
+> Current hard-won points: `external 'sqlite3'` pulls no library by itself;
+> `-Fl`+`-lsqlite3` resolves to the *system* dylib (FPC's search order), so link
+> the archive with `-k`; SQLite placeholders are 1-based and indices shift when
+> optional clauses add binds (a real bug we hit).
 
 Hard-won FPC `fcl-db` behaviours that affect both implementation and tests:
 

@@ -1,5 +1,11 @@
 # Component Specification: Local SQLite Store
 
+> **Revision:** SQLDB has since been removed. The store now binds the vendored
+> SQLite directly (`hildegard.helper.sqlite`) and links it **statically** (no
+> runtime `.dylib`/`.so`, no `TSQLDBLibraryLoader`, no `LibraryPath`). References
+> to SQLDB below are historical; the schema, migrations, and public store API are
+> unchanged.
+
 **Related Feature:** [FEATURE.md](FEATURE.md)
 
 ## Purpose

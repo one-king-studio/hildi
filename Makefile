@@ -17,20 +17,21 @@ DBGUNITS := $(BUILD)/units/debug
 RELUNITS := $(BUILD)/units/release
 LEAKUNITS:= $(BUILD)/units/leak
 
-# Vendored SQLite: built from deps/sqlite3 into build/lib (see scripts/fetch-sqlite.sh).
-SQLITE_DIR    := deps/sqlite3
-SQLITE_LIBDIR := $(BUILD)/lib
-UNAME_S       := $(shell uname -s)
+# Vendored SQLite: the amalgamation is compiled into a STATIC archive and linked
+# into the binaries (no runtime .dylib/.so, no SQLDB). See scripts/fetch-sqlite.sh.
+SQLITE_DIR      := deps/sqlite3
+SQLITE_LIBDIR   := $(BUILD)/libstatic
+SQLITE_AR       := $(SQLITE_LIBDIR)/libsqlite3.a
+UNAME_S         := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
-SQLITE_LIB     := $(SQLITE_LIBDIR)/libsqlite3.dylib
-SQLITE_CCFLAGS := -dynamiclib -O2 -DSQLITE_THREADSAFE=1
-SQLITE_LDLIBS  := -lpthread
+SQLITE_CCFLAGS  := -O2 -DSQLITE_THREADSAFE=1 -mmacosx-version-min=11.0
 else
-SQLITE_LIB     := $(SQLITE_LIBDIR)/libsqlite3.so
-SQLITE_CCFLAGS := -shared -fPIC -O2 -DSQLITE_THREADSAFE=1
-SQLITE_LDLIBS  := -lpthread -ldl
+SQLITE_CCFLAGS  := -O2 -fPIC -DSQLITE_THREADSAFE=1
 endif
+# Link the static archive explicitly (-k), so a system libsqlite3 is never used.
+SQLITE_LDFLAGS  := -k$(abspath $(SQLITE_AR))
 CC ?= cc
+AR ?= ar
 
 # Language and strictness. -Sew turns warnings into hard errors.
 MODE      := -Mdelphi -Sh
@@ -64,27 +65,28 @@ TEST_SRCS := $(wildcard $(TESTS)/*.pas)
 
 all: $(BIN)/hildegard-helper-demo
 
-# Build the vendored SQLite shared library; fetches the amalgamation if missing.
-libsqlite: $(SQLITE_LIB)
+# Build the vendored SQLite static archive; fetches the amalgamation if missing.
+libsqlite: $(SQLITE_AR)
 
-$(SQLITE_LIB): $(SQLITE_DIR)/sqlite3.c
+$(SQLITE_AR): $(SQLITE_DIR)/sqlite3.c
 	@mkdir -p $(SQLITE_LIBDIR)
-	$(CC) $(SQLITE_CCFLAGS) -o $@ $< $(SQLITE_LDLIBS)
+	$(CC) $(SQLITE_CCFLAGS) -c -o $(SQLITE_LIBDIR)/sqlite3.o $<
+	$(AR) rcs $@ $(SQLITE_LIBDIR)/sqlite3.o
 
 $(SQLITE_DIR)/sqlite3.c:
 	@scripts/fetch-sqlite.sh
 
 store-demo: libsqlite $(BIN)/hildegard-helper-store-demo
 
-$(BIN)/hildegard-helper-store-demo: $(EXAMPLES)/store_demo.pas $(LIB_SRCS) $(SQLITE_LIB)
+$(BIN)/hildegard-helper-store-demo: $(EXAMPLES)/store_demo.pas $(LIB_SRCS) $(SQLITE_AR)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(DEBUG) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 agent-cli: libsqlite $(BIN)/hildegard-helper-agent-cli
 
-$(BIN)/hildegard-helper-agent-cli: $(EXAMPLES)/agent_cli.pas $(LIB_SRCS)
+$(BIN)/hildegard-helper-agent-cli: $(EXAMPLES)/agent_cli.pas $(LIB_SRCS) $(SQLITE_AR)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(DEBUG) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 $(BIN)/hildegard-helper-demo: $(EXAMPLES)/demo_harness.pas $(LIB_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
@@ -93,9 +95,9 @@ $(BIN)/hildegard-helper-demo: $(EXAMPLES)/demo_harness.pas $(LIB_SRCS)
 test: libsqlite $(BIN)/hildegard-helper-tests
 	$(BIN)/hildegard-helper-tests $(TESTARGS)
 
-$(BIN)/hildegard-helper-tests: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS)
+$(BIN)/hildegard-helper-tests: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(SQLITE_AR)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(DEBUG) -Fu$(SRC) -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -Fu$(SRC) -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 test-leak: libsqlite $(BIN)/hildegard-helper-tests-leak
 	HEAPTRC=$(HEAPTRC) $(BIN)/hildegard-helper-tests-leak $(TESTARGS)
@@ -104,9 +106,9 @@ test-leak: libsqlite $(BIN)/hildegard-helper-tests-leak
 watch:
 	@scripts/watch.sh $(TARGET)
 
-$(BIN)/hildegard-helper-tests-leak: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS)
+$(BIN)/hildegard-helper-tests-leak: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(SQLITE_AR)
 	@mkdir -p $(BIN) $(LEAKUNITS)
-	$(FPC) $(LEAKFLAGS) -Fu$(SRC) -Fu$(TESTS) -FU$(LEAKUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(LEAKFLAGS) $(SQLITE_LDFLAGS) -Fu$(SRC) -Fu$(TESTS) -FU$(LEAKUNITS) -FE$(BIN) -o$@ $<
 
 # All quality gates, for CI: functional tests + leak check.
 check: test test-leak
@@ -131,6 +133,6 @@ help:
 	@echo "  make test-leak                run the suite under heaptrc (fails on leaks)"
 	@echo "  make watch [TARGET=test-leak] auto-rerun on source changes"
 	@echo "  make check                    all gates: test + test-leak"
-	@echo "  make libsqlite                build vendored SQLite shared library"
+	@echo "  make libsqlite                build vendored SQLite static archive"
 	@echo "  make release                  build an optimized example"
 	@echo "  make clean                    remove build artifacts"

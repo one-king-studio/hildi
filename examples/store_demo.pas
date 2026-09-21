@@ -1,6 +1,7 @@
 program store_demo;
 { Demo: exercise the embedded SQLite store. Opens a temporary database, saves
-  credentials, enqueues a request, claims and finishes it, and reads it back.
+  credentials, registers a workspace, starts a session, appends a ledger record,
+  lists sessions, and round-trips a setting.
 
   Run:  make store-demo && ./build/bin/hildegard-helper-store-demo }
 
@@ -8,17 +9,17 @@ program store_demo;
 
 uses
   {$ifdef unix}cthreads,{$endif}   // must come first on Unix
-  SysUtils, hildegard.helper.store;
+  SysUtils, hildegard.helper.store, hildegard.helper.session;
 
 var
   Cfg: TStoreConfig;
   Store: TSqliteStore;
   Err: TStoreError;
-  Cred: TDeviceCredentials;
-  Req, Claimed, Fetched: TStoredRequest;
-  Query: TRequestQuery;
-  List: TStoredRequestArray;
-  Path: string;
+  Cred, Loaded: TDeviceCredentials;
+  Rec: TSessionRecord;
+  Summaries: TSessionSummaryArray;
+  Path, SessionId, Value: string;
+  WorkspaceId: Integer;
 
 procedure Fail(const AWhere: string);
 begin
@@ -33,7 +34,6 @@ begin
   DeleteFile(Path + '-shm');
 
   Cfg.DatabasePath := Path;
-  Cfg.LibraryPath := '';
   Cfg.BusyTimeoutMs := 5000;
 
   Store := TSqliteStore.Create(Cfg);
@@ -49,36 +49,32 @@ begin
     Cred.AccountId := 'demo-account';
     if not Store.SaveCredentials(Cred, Err) then
       Fail('SaveCredentials');
-    WriteLn('credentials saved');
+    if not Store.LoadCredentials(Loaded, Err) then
+      Fail('LoadCredentials');
+    WriteLn('credentials round trip: ', Loaded.DeviceId);
 
-    Req := Default(TStoredRequest);
-    Req.Id := 'req-1';
-    Req.Kind := 'shell';
-    Req.Payload := '{"cmd":"date"}';
-    if not Store.EnqueueRequest(Req, Err) then
-      Fail('EnqueueRequest');
-    WriteLn('enqueued ', Req.Id);
+    if not Store.EnsureWorkspace('/tmp', WorkspaceId, Err) then
+      Fail('EnsureWorkspace');
+    WriteLn('workspace id: ', WorkspaceId);
 
-    if not Store.ClaimNextPending(Claimed, Err) then
-      Fail('ClaimNextPending');
-    WriteLn('claimed ', Claimed.Id, ' kind=', Claimed.Kind,
-      ' payload=', Claimed.Payload);
+    if not Store.CreateSession(WorkspaceId, SessionId, Err) then
+      Fail('CreateSession');
+    Rec := Default(TSessionRecord);
+    Rec.SessionId := SessionId;
+    Rec.Kind := srkUserMessage;
+    Rec.Content := 'hello';
+    if not Store.AppendSessionRecord(Rec, Err) then
+      Fail('AppendSessionRecord');
 
-    if not Store.FinishRequest(Claimed.Id, rsCompleted, 0, 'ok', Err) then
-      Fail('FinishRequest');
+    if not Store.ListSessions(WorkspaceId, Summaries, Err) then
+      Fail('ListSessions');
+    WriteLn('session ', SessionId, ' records=', Summaries[0].RecordCount);
 
-    if not Store.GetRequest('req-1', Fetched, Err) then
-      Fail('GetRequest');
-    WriteLn('finished request status=', Ord(Fetched.Status),
-      ' result=', Fetched.Result);
-
-    Query.UseStatus := True;
-    Query.Status := rsCompleted;
-    Query.Limit := 0;
-    Query.Offset := 0;
-    if not Store.QueryRequests(Query, List, Err) then
-      Fail('QueryRequests');
-    WriteLn('completed requests: ', Length(List));
+    if not Store.SetSetting('demo.key', 'demo.value', Err) then
+      Fail('SetSetting');
+    if not Store.GetSetting('demo.key', Value, Err) then
+      Fail('GetSetting');
+    WriteLn('setting round trip: ', Value);
   finally
     Store.Free;
   end;

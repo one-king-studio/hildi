@@ -86,8 +86,8 @@ Each `test_*.pas` unit must be added to the `uses` clause of
 `tests/hildegard_helper_tests.pas` - FPC does not auto-link test units.
 
 Test conventions and the FPC/FCL testing gotchas we have hit (managed-record
-`Default` vs `FillChar`, initialising managed locals and results, SQLDB
-transaction behaviour) are collected in `docs/guidelines/testing.md`.
+`Default` vs `FillChar`, initialising managed locals and results, SQLite binding
+and parameter numbering) are collected in `docs/guidelines/testing.md`.
 
 ### Commits
 

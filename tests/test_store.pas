@@ -9,7 +9,7 @@ interface
 uses
   Classes, SysUtils, SyncObjs, fpcunit, testregistry,
   {$ifdef unix}BaseUnix,{$endif}
-  sqldb, sqlite3conn, sqldblib,
+  hildegard.helper.sqlite,
   hildegard.helper.store, hildegard.helper.session;
 
 type
@@ -29,8 +29,7 @@ type
     procedure TestOpenIsIdempotent;
     procedure TestOpenUnwritablePathFails;
     procedure TestDatabaseFilePermissionsAreOwnerOnly;
-    procedure TestLibraryPathResolutionPrefersExplicit;
-    procedure TestStoreWorksWithVendoredLibrary;
+    procedure TestSqliteIsLinkedStatically;
 
     procedure TestOperationsBeforeOpenReturnNotOpen;
     procedure TestSaveLoadClearCredentialsRoundTrip;
@@ -50,43 +49,31 @@ type
 
 implementation
 
-const
-  TestLibPath = '';   // resolve relative to the test binary (build/bin -> build/lib)
-
-{ Reads PRAGMA user_version through a direct SQLDB connection. Test-only: lets
-  us assert the schema version without exposing it on the store's public API. }
+{ Reads PRAGMA user_version through the static binding. Test-only: lets us
+  assert the schema version without exposing it on the store's public API. }
 function RawReadUserVersion(const APath: string): Integer;
 var
-  Loader: TSQLDBLibraryLoader;
-  Conn: TSQLite3Connection;
-  Tx: TSQLTransaction;
-  Q: TSQLQuery;
+  Db: Psqlite3;
+  Stmt: Psqlite3_stmt;
+  S: AnsiString;
 begin
   Result := -1;
-  Loader := TSQLDBLibraryLoader.Create(nil);
-  Conn := TSQLite3Connection.Create(nil);
-  Tx := TSQLTransaction.Create(nil);
-  Q := TSQLQuery.Create(nil);
-  try
-    Loader.ConnectionType := 'SQLite3';
-    Loader.LibraryName := ResolveLibraryPath('');
-    Loader.LoadLibrary;
-    Conn.DatabaseName := APath;
-    Conn.Transaction := Tx;
-    Conn.Open;
-    Q.DataBase := Conn;
-    Q.Transaction := Tx;
-    Q.SQL.Text := 'PRAGMA user_version';
-    Q.Open;
-    Result := Q.Fields[0].AsInteger;
-    Q.Close;
-    Conn.Close;
-  finally
-    Q.Free;
-    Tx.Free;
-    Conn.Free;
-    Loader.Free;
+  Db := nil;
+  if sqlite3_open(PAnsiChar(AnsiString(APath)), @Db) <> SQLITE_OK then
+  begin
+    if Db <> nil then
+      sqlite3_close(Db);
+    Exit;
   end;
+  Stmt := nil;
+  S := 'PRAGMA user_version';
+  if sqlite3_prepare_v2(Db, PAnsiChar(S), -1, @Stmt, nil) = SQLITE_OK then
+  begin
+    if sqlite3_step(Stmt) = SQLITE_ROW then
+      Result := sqlite3_column_int(Stmt, 0);
+    sqlite3_finalize(Stmt);
+  end;
+  sqlite3_close(Db);
 end;
 
 { TStoreTest }
@@ -117,7 +104,6 @@ var
   Cfg: TStoreConfig;
 begin
   Cfg.DatabasePath := FDbPath;
-  Cfg.LibraryPath := TestLibPath;
   Cfg.BusyTimeoutMs := 5000;
   Result := TSqliteStore.Create(Cfg);
 end;
@@ -187,7 +173,6 @@ var
   Cfg: TStoreConfig;
 begin
   Cfg.DatabasePath := '/definitely/not/a/real/directory/store.db';
-  Cfg.LibraryPath := TestLibPath;
   Cfg.BusyTimeoutMs := 5000;
   S := TSqliteStore.Create(Cfg);
   try
@@ -219,19 +204,11 @@ begin
   {$endif}
 end;
 
-procedure TStoreTest.TestLibraryPathResolutionPrefersExplicit;
+procedure TStoreTest.TestSqliteIsLinkedStatically;
 begin
-  AssertEquals('explicit wins', '/custom/libsqlite3',
-    ResolveLibraryPath('/custom/libsqlite3'));
-end;
-
-procedure TStoreTest.TestStoreWorksWithVendoredLibrary;
-var
-  Resolved: string;
-begin
-  Resolved := ResolveLibraryPath('');
-  AssertTrue('resolved a library path', Resolved <> '');
-  AssertTrue('resolved library exists: ' + Resolved, FileExists(Resolved));
+  { The binding is statically linked; libversion reports the compiled-in lib. }
+  AssertTrue('sqlite version present',
+    string(AnsiString(sqlite3_libversion)) <> '');
 end;
 
 { --- credentials --- }
@@ -388,7 +365,6 @@ var
   V: string;
 begin
   Cfg.DatabasePath := FDbPath;
-  Cfg.LibraryPath := TestLibPath;
   Cfg.BusyTimeoutMs := 5000;
 
   SetLength(M, 2);
@@ -457,41 +433,31 @@ begin
   end;
 end;
 
-{ Reads sqlite_master through a direct connection to assert schema presence. }
+{ Reads sqlite_master through the static binding to assert schema presence. }
 function RawTableExists(const APath, AName: string): Boolean;
 var
-  Loader: TSQLDBLibraryLoader;
-  Conn: TSQLite3Connection;
-  Tx: TSQLTransaction;
-  Q: TSQLQuery;
+  Db: Psqlite3;
+  Stmt: Psqlite3_stmt;
+  S: AnsiString;
 begin
   Result := False;
-  Loader := TSQLDBLibraryLoader.Create(nil);
-  Conn := TSQLite3Connection.Create(nil);
-  Tx := TSQLTransaction.Create(nil);
-  Q := TSQLQuery.Create(nil);
-  try
-    Loader.ConnectionType := 'SQLite3';
-    Loader.LibraryName := ResolveLibraryPath('');
-    Loader.LoadLibrary;
-    Conn.DatabaseName := APath;
-    Conn.Transaction := Tx;
-    Conn.Open;
-    Q.DataBase := Conn;
-    Q.Transaction := Tx;
-    Q.SQL.Text :=
-      'SELECT 1 FROM sqlite_master WHERE type = ''table'' AND name = :n';
-    Q.ParamByName('n').AsString := AName;
-    Q.Open;
-    Result := not Q.EOF;
-    Q.Close;
-    Conn.Close;
-  finally
-    Q.Free;
-    Tx.Free;
-    Conn.Free;
-    Loader.Free;
+  Db := nil;
+  if sqlite3_open(PAnsiChar(AnsiString(APath)), @Db) <> SQLITE_OK then
+  begin
+    if Db <> nil then
+      sqlite3_close(Db);
+    Exit;
   end;
+  Stmt := nil;
+  S := 'SELECT 1 FROM sqlite_master WHERE type = ''table'' AND name = ?';
+  if sqlite3_prepare_v2(Db, PAnsiChar(S), -1, @Stmt, nil) = SQLITE_OK then
+  begin
+    sqlite3_bind_text(Stmt, 1, PAnsiChar(AnsiString(AName)), Length(AName),
+      SQLiteTransient);
+    Result := sqlite3_step(Stmt) = SQLITE_ROW;
+    sqlite3_finalize(Stmt);
+  end;
+  sqlite3_close(Db);
 end;
 
 procedure TStoreTest.TestSchemaHasNoRequestsTable;

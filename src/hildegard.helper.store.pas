@@ -1,27 +1,23 @@
 unit hildegard.helper.store;
-{ Embedded SQLite persistence for the helper. Owns one database file and exposes
-  typed operations for device credentials, request history / durable queue, and
-  key/value settings. SQL, schema, migrations, and thread serialization stay
-  behind this unit.
+{ Embedded SQLite persistence for the helper, built directly on the static
+  hildegard.helper.sqlite binding (no SQLDB, no runtime library loading). Owns
+  one database file and exposes typed operations for credentials, settings,
+  workspaces, approvals, and sessions/ledger. SQL, schema, migrations, and
+  thread serialization stay behind this unit.
 
   Implementation notes:
-    * SQLDB's TSQLite3Connection is not thread-safe, so one connection is
-      serialized by one critical section.
-    * PRAGMA journal_mode=WAL cannot be set through SQLDB (it wraps statements
-      in a transaction); it is applied to the raw file before SQLDB connects and
-      persists in the database header.
-    * PRAGMA foreign_keys is set at connect time via TSQLite3Connection.Params.
-    * The vendored libsqlite3 is loaded once per process; Close does not unload
-      it (SQLDB shares one set of function pointers). ponytail: single store per
-      process; revisit if multiple stores with different libraries are needed. }
+    * One connection is serialized by one critical section (single store per
+      process). SQLite is opened with the default thread mode.
+    * WAL and foreign_keys are set with PRAGMA statements after opening; there
+      is no SQLDB implicit transaction to fight. }
 
 {$mode delphi}{$H+}
 
 interface
 
 uses
-  Classes, SysUtils, SyncObjs, sqldb, sqlite3conn, sqldblib,
-  hildegard.helper.approval, hildegard.helper.session;
+  Classes, SysUtils, SyncObjs,
+  hildegard.helper.sqlite, hildegard.helper.approval, hildegard.helper.session;
 
 type
   { Stable error codes. seOk is success. }
@@ -44,7 +40,6 @@ type
 
   TStoreConfig = record
     DatabasePath: string;
-    LibraryPath: string;
     BusyTimeoutMs: Integer;
   end;
 
@@ -67,21 +62,17 @@ type
   private
     FConfig: TStoreConfig;
     FLock: TCriticalSection;
-    FLoader: TSQLDBLibraryLoader;
-    FConn: TSQLite3Connection;
-    FTx: TSQLTransaction;
+    FDb: Psqlite3;
     FOpen: Boolean;
-    FInitialized: Boolean;
     FMigrations: TMigrationArray;
     function Fail(out AError: TStoreError; ACode: TStoreErrorCode;
       const AMessage, ADetail: string): Boolean;
     function EnsureOpen(out AError: TStoreError): Boolean;
+    function DoExec(const ASQL: string; out AError: TStoreError): Boolean;
     function ApplyMigrations(out AError: TStoreError): Boolean;
     function ReadUserVersion(out AVersion: Integer;
       out AError: TStoreError): Boolean;
-    function ExecInTransaction(const ASQL: string;
-      out AError: TStoreError): Boolean;
-    procedure InitLibrary(const ALibraryPath: string);
+    function DbErrorText: string;
   public
     constructor Create(const AConfig: TStoreConfig); overload;
     constructor Create(const AConfig: TStoreConfig;
@@ -142,7 +133,6 @@ type
       out AError: TStoreError): Boolean;
   end;
 
-function ResolveLibraryPath(const AExplicit: string): string;
 function StoreSchemaVersion: Integer;
 function DefaultMigrations: TMigrationArray;
 
@@ -150,7 +140,7 @@ implementation
 
 uses
   {$ifdef unix}BaseUnix,{$endif}
-  sqlite3dyn, fpjson, jsonparser;
+  fpjson, jsonparser;
 
 const
   DefaultBusyTimeoutMs = 5000;
@@ -167,12 +157,17 @@ begin
   Result.Detail := '';
 end;
 
+function AsUtf8(const AValue: string): AnsiString;
+begin
+  Result := AnsiString(AValue);
+end;
+
 { --- migrations --------------------------------------------------------- }
 
 function DefaultMigrations: TMigrationArray;
 begin
   Result := nil;
-  SetLength(Result, 2);
+  SetLength(Result, 4);
   Result[0].Version := 1;
   Result[0].Name := 'initial schema';
   Result[0].Statements := [
@@ -182,17 +177,6 @@ begin
       'token TEXT NOT NULL, ' +
       'endpoint TEXT NOT NULL, ' +
       'account_id TEXT NOT NULL)',
-    'CREATE TABLE requests (' +
-      'id TEXT PRIMARY KEY, ' +
-      'kind TEXT NOT NULL, ' +
-      'payload TEXT NOT NULL, ' +
-      'status INTEGER NOT NULL, ' +
-      'exit_code INTEGER NOT NULL DEFAULT 0, ' +
-      'result TEXT NOT NULL DEFAULT '''', ' +
-      'created_at INTEGER NOT NULL, ' +
-      'updated_at INTEGER NOT NULL)',
-    'CREATE INDEX idx_requests_status ON requests (status, created_at)',
-    'CREATE INDEX idx_requests_created ON requests (created_at)',
     'CREATE TABLE settings (' +
       'key TEXT PRIMARY KEY, ' +
       'value TEXT NOT NULL)'
@@ -207,7 +191,6 @@ begin
       'created_at INTEGER NOT NULL)'
   ];
 
-  SetLength(Result, 3);
   Result[2].Version := 3;
   Result[2].Name := 'approvals';
   Result[2].Statements := [
@@ -227,7 +210,6 @@ begin
       'session_id)'
   ];
 
-  SetLength(Result, 4);
   Result[3].Version := 4;
   Result[3].Name := 'sessions and ledger';
   Result[3].Statements := [
@@ -261,35 +243,88 @@ begin
       Result := M[I].Version;
 end;
 
-function ResolveLibraryPath(const AExplicit: string): string;
-const
-  {$ifdef darwin}
-  LibName = 'libsqlite3.dylib';
-  {$else}
-  LibName = 'libsqlite3.so';
-  {$endif}
-var
-  Env: string;
-  ExeDir, Candidate: string;
+{ --- statement helper --------------------------------------------------- }
+
+type
+  TStmt = class
+  private
+    FStmt: Psqlite3_stmt;
+  public
+    constructor Create(ADb: Psqlite3; const ASQL: string);
+    destructor Destroy; override;
+    function Valid: Boolean;
+    procedure BindText(AIndex: Integer; const AValue: string);
+    procedure BindInt(AIndex: Integer; AValue: Integer);
+    procedure BindInt64(AIndex: Integer; AValue: Int64);
+    function Step: Integer;
+    function ColText(AIndex: Integer): string;
+    function ColInt(AIndex: Integer): Integer;
+    function ColInt64(AIndex: Integer): Int64;
+  end;
+
+constructor TStmt.Create(ADb: Psqlite3; const ASQL: string);
 begin
-  if AExplicit <> '' then
-    Exit(AExplicit);
+  inherited Create;
+  FStmt := nil;
+  if sqlite3_prepare_v2(ADb, PAnsiChar(AsUtf8(ASQL)), -1, @FStmt, nil) <>
+    SQLITE_OK then
+    FStmt := nil;
+end;
 
-  Env := GetEnvironmentVariable('HILDEGARD_SQLITE_LIB');
-  if (Env <> '') and FileExists(Env) then
-    Exit(Env);
+destructor TStmt.Destroy;
+begin
+  if FStmt <> nil then
+    sqlite3_finalize(FStmt);
+  inherited Destroy;
+end;
 
-  ExeDir := ExtractFileDir(ParamStr(0));
-  Candidate := IncludeTrailingPathDelimiter(ExeDir) + LibName;
-  if FileExists(Candidate) then
-    Exit(Candidate);
+function TStmt.Valid: Boolean;
+begin
+  Result := FStmt <> nil;
+end;
 
-  Candidate := IncludeTrailingPathDelimiter(ExeDir) + '..' + PathDelim +
-    'lib' + PathDelim + LibName;
-  if FileExists(Candidate) then
-    Exit(ExpandFileName(Candidate));
+procedure TStmt.BindText(AIndex: Integer; const AValue: string);
+var
+  S: AnsiString;
+begin
+  S := AsUtf8(AValue);
+  sqlite3_bind_text(FStmt, AIndex, PAnsiChar(S), Length(S), SQLiteTransient);
+end;
 
-  Result := '';
+procedure TStmt.BindInt(AIndex: Integer; AValue: Integer);
+begin
+  sqlite3_bind_int(FStmt, AIndex, AValue);
+end;
+
+procedure TStmt.BindInt64(AIndex: Integer; AValue: Int64);
+begin
+  sqlite3_bind_int64(FStmt, AIndex, AValue);
+end;
+
+function TStmt.Step: Integer;
+begin
+  Result := sqlite3_step(FStmt);
+end;
+
+function TStmt.ColText(AIndex: Integer): string;
+var
+  P: PAnsiChar;
+begin
+  P := sqlite3_column_text(FStmt, AIndex);
+  if P = nil then
+    Result := ''
+  else
+    Result := string(AnsiString(P));
+end;
+
+function TStmt.ColInt(AIndex: Integer): Integer;
+begin
+  Result := sqlite3_column_int(FStmt, AIndex);
+end;
+
+function TStmt.ColInt64(AIndex: Integer): Int64;
+begin
+  Result := sqlite3_column_int64(FStmt, AIndex);
 end;
 
 { --- TSqliteStore ------------------------------------------------------- }
@@ -306,14 +341,13 @@ begin
   FConfig := AConfig;
   FMigrations := AMigrations;
   FLock := TCriticalSection.Create;
+  FDb := nil;
   FOpen := False;
-  FInitialized := False;
 end;
 
 destructor TSqliteStore.Destroy;
 begin
   Close;
-  FLoader.Free;
   FLock.Free;
   inherited Destroy;
 end;
@@ -327,16 +361,109 @@ begin
   Result := False;
 end;
 
-procedure TSqliteStore.InitLibrary(const ALibraryPath: string);
+function TSqliteStore.DbErrorText: string;
 begin
-  if FInitialized then
-    Exit;
-  FLoader := TSQLDBLibraryLoader.Create(nil);
-  FLoader.ConnectionType := 'SQLite3';
-  if ALibraryPath <> '' then
-    FLoader.LibraryName := ALibraryPath;
-  FLoader.LoadLibrary;
-  FInitialized := True;
+  if FDb = nil then
+    Result := 'no database'
+  else
+    Result := string(AnsiString(sqlite3_errmsg(FDb)));
+end;
+
+function TSqliteStore.DoExec(const ASQL: string; out AError: TStoreError): Boolean;
+var
+  ErrMsg: PAnsiChar;
+  Rc: Integer;
+begin
+  AError := OkError;
+  ErrMsg := nil;
+  Rc := sqlite3_exec(FDb, PAnsiChar(AsUtf8(ASQL)), nil, nil, @ErrMsg);
+  if Rc <> SQLITE_OK then
+  begin
+    if ErrMsg <> nil then
+    begin
+      Result := Fail(AError, seError, 'statement failed',
+        string(AnsiString(ErrMsg)));
+      sqlite3_free(ErrMsg);
+    end
+    else
+      Result := Fail(AError, seError, 'statement failed', DbErrorText);
+    Exit(False);
+  end;
+  Result := True;
+end;
+
+function TSqliteStore.EnsureOpen(out AError: TStoreError): Boolean;
+begin
+  AError := OkError;
+  if not FOpen then
+    Exit(Fail(AError, seNotOpen, 'store is not open', ''));
+  Result := True;
+end;
+
+function TSqliteStore.ReadUserVersion(out AVersion: Integer;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  AVersion := 0;
+  Stmt := TStmt.Create(FDb, 'PRAGMA user_version');
+  try
+    if not Stmt.Valid then
+      Exit(Fail(AError, seError, 'could not read schema version',
+        DbErrorText));
+    if Stmt.Step = SQLITE_ROW then
+      AVersion := Stmt.ColInt(0);
+    Result := True;
+  finally
+    Stmt.Free;
+  end;
+end;
+
+function TSqliteStore.ApplyMigrations(out AError: TStoreError): Boolean;
+var
+  I, J, Cur, V: Integer;
+  Migration: TMigration;
+begin
+  AError := OkError;
+  if not ReadUserVersion(Cur, AError) then
+    Exit(False);
+
+  for I := 0 to High(FMigrations) do
+  begin
+    Migration := FMigrations[I];
+    if Migration.Version <= Cur then
+      Continue;
+
+    if not DoExec('BEGIN', AError) then
+      Exit(False);
+    try
+      for J := 0 to High(Migration.Statements) do
+        if not DoExec(Migration.Statements[J], AError) then
+        begin
+          DoExec('ROLLBACK', AError);
+          AError.Code := seMigrationFailed;
+          AError.Message := 'migration failed: ' + Migration.Name;
+          Exit(False);
+        end;
+      V := Migration.Version;
+      if not DoExec('PRAGMA user_version=' + IntToStr(V), AError) then
+      begin
+        DoExec('ROLLBACK', AError);
+        Exit(False);
+      end;
+      if not DoExec('COMMIT', AError) then
+        Exit(False);
+    except
+      on E: Exception do
+      begin
+        DoExec('ROLLBACK', AError);
+        Exit(Fail(AError, seMigrationFailed,
+          'migration failed: ' + Migration.Name, E.Message));
+      end;
+    end;
+  end;
+  Result := True;
 end;
 
 {$ifdef unix}
@@ -345,40 +472,17 @@ begin
   if FileExists(APath) then
     fpChmod(APath, &600);
 end;
-
-procedure PresetWal(const APath: string);
-var
-  Db: psqlite3;
-  Rc: Integer;
-begin
-  Db := nil;
-  Rc := sqlite3_open(PAnsiChar(AnsiString(APath)), @Db);
-  if Rc <> 0 then
-  begin
-    if Db <> nil then
-      sqlite3_close(Db);
-    Exit;
-  end;
-  try
-    sqlite3_exec(Db, 'PRAGMA journal_mode=WAL', nil, nil, nil);
-  finally
-    sqlite3_close(Db);
-  end;
-end;
 {$else}
 procedure ChmodOwnerOnly(const APath: string);
-begin
-end;
-
-procedure PresetWal(const APath: string);
 begin
 end;
 {$endif}
 
 function TSqliteStore.Open(out AError: TStoreError): Boolean;
 var
-  LibPath: string;
-  Ver: Integer;
+  Rc: Integer;
+  ExecErr: TStoreError;
+  Busy: Integer;
 begin
   AError := OkError;
   FLock.Acquire;
@@ -388,64 +492,37 @@ begin
     if FConfig.DatabasePath = '' then
       Exit(Fail(AError, seInvalidArgument, 'DatabasePath is required', ''));
 
-    LibPath := ResolveLibraryPath(FConfig.LibraryPath);
-
-    try
-      InitLibrary(LibPath);
-    except
-      on E: Exception do
-        Exit(Fail(AError, seCannotOpen,
-          'failed to load SQLite library', LibPath + ': ' + E.Message));
-    end;
-
-    try
-      PresetWal(FConfig.DatabasePath);
-    except
-      on E: Exception do
-        Exit(Fail(AError, seCannotOpen,
-          'failed to initialize database file', E.Message));
-    end;
-
-    try
-      FConn := TSQLite3Connection.Create(nil);
-      FTx := TSQLTransaction.Create(nil);
-      FConn.DatabaseName := FConfig.DatabasePath;
-      FConn.Params.Add('foreign_keys=ON');
-      FConn.Transaction := FTx;
-      FConn.Open;
-      if FConfig.BusyTimeoutMs > 0 then
-        FConn.ExecuteDirect('PRAGMA busy_timeout=' +
-          IntToStr(FConfig.BusyTimeoutMs))
-      else
-        FConn.ExecuteDirect('PRAGMA busy_timeout=' +
-          IntToStr(DefaultBusyTimeoutMs));
-    except
-      on E: Exception do
-      begin
-        FreeAndNil(FConn);
-        FreeAndNil(FTx);
-        Exit(Fail(AError, seCannotOpen, 'failed to open database',
-          FConfig.DatabasePath + ': ' + E.Message));
-      end;
-    end;
-
-    if not ReadUserVersion(Ver, AError) then
+    FDb := nil;
+    Rc := sqlite3_open(PAnsiChar(AsUtf8(FConfig.DatabasePath)), @FDb);
+    if Rc <> SQLITE_OK then
     begin
-      FConn.Close;
-      FreeAndNil(FConn);
-      FreeAndNil(FTx);
+      Result := Fail(AError, seCannotOpen, 'could not open database',
+        DbErrorText);
+      if FDb <> nil then
+      begin
+        sqlite3_close(FDb);
+        FDb := nil;
+      end;
       Exit(False);
     end;
+
+    Busy := FConfig.BusyTimeoutMs;
+    if Busy <= 0 then
+      Busy := DefaultBusyTimeoutMs;
+    sqlite3_busy_timeout(FDb, Busy);
+
+    { Set pragmas outside any transaction; ignore a failed WAL (best effort). }
+    DoExec('PRAGMA journal_mode=WAL', ExecErr);
+    DoExec('PRAGMA foreign_keys=ON', ExecErr);
+    ChmodOwnerOnly(FConfig.DatabasePath);
 
     if not ApplyMigrations(AError) then
     begin
-      FConn.Close;
-      FreeAndNil(FConn);
-      FreeAndNil(FTx);
+      sqlite3_close(FDb);
+      FDb := nil;
       Exit(False);
     end;
 
-    ChmodOwnerOnly(FConfig.DatabasePath);
     FOpen := True;
     Result := True;
   finally
@@ -457,13 +534,10 @@ procedure TSqliteStore.Close;
 begin
   FLock.Acquire;
   try
-    if FConn <> nil then
+    if FDb <> nil then
     begin
-      if FTx <> nil then
-        FTx.Active := False;   // avoid closing inside an open transaction
-      FConn.Close;
-      FreeAndNil(FConn);
-      FreeAndNil(FTx);
+      sqlite3_close(FDb);
+      FDb := nil;
     end;
     FOpen := False;
   finally
@@ -481,97 +555,12 @@ begin
   end;
 end;
 
-function TSqliteStore.EnsureOpen(out AError: TStoreError): Boolean;
-begin
-  AError := OkError;
-  if not FOpen then
-    Exit(Fail(AError, seNotOpen, 'store is not open', ''));
-  Result := True;
-end;
-
-function TSqliteStore.ReadUserVersion(out AVersion: Integer;
-  out AError: TStoreError): Boolean;
-var
-  Q: TSQLQuery;
-begin
-  Result := True;
-  AVersion := 0;
-  AError := OkError;
-  Q := TSQLQuery.Create(nil);
-  try
-    Q.DataBase := FConn;
-    Q.Transaction := FTx;
-    Q.SQL.Text := 'PRAGMA user_version';
-    try
-      Q.Open;
-      AVersion := Q.Fields[0].AsInteger;
-      Q.Close;
-    except
-      on E: Exception do
-        Exit(Fail(AError, seCannotOpen, 'cannot read schema version',
-          E.Message));
-    end;
-  finally
-    Q.Free;
-  end;
-end;
-
-function TSqliteStore.ExecInTransaction(const ASQL: string;
-  out AError: TStoreError): Boolean;
-begin
-  Result := True;
-  AError := OkError;
-  try
-    if not FTx.Active then
-      FTx.StartTransaction;
-    FConn.ExecuteDirect(ASQL, FTx);
-  except
-    on E: Exception do
-      Exit(Fail(AError, seError, 'statement failed', E.Message));
-  end;
-end;
-
-function TSqliteStore.ApplyMigrations(out AError: TStoreError): Boolean;
-var
-  I, J, Cur: Integer;
-  V: Integer;
-  Migration: TMigration;
-begin
-  Result := True;
-  AError := OkError;
-  if not ReadUserVersion(Cur, AError) then
-    Exit(False);
-
-  for I := 0 to High(FMigrations) do
-  begin
-    Migration := FMigrations[I];
-    if Migration.Version <= Cur then
-      Continue;
-
-    try
-      if FTx.Active then
-        FTx.Rollback;
-      for J := 0 to High(Migration.Statements) do
-        FConn.ExecuteDirect(Migration.Statements[J], FTx);
-      V := Migration.Version;
-      FConn.ExecuteDirect('PRAGMA user_version=' + IntToStr(V), FTx);
-      FTx.Commit;
-    except
-      on E: Exception do
-      begin
-        if FTx.Active then
-          FTx.Rollback;
-        Exit(Fail(AError, seMigrationFailed,
-          'migration failed: ' + Migration.Name, E.Message));
-      end;
-    end;
-  end;
-end;
+{ --- credentials -------------------------------------------------------- }
 
 function TSqliteStore.SaveCredentials(const AValue: TDeviceCredentials;
   out AError: TStoreError): Boolean;
 var
-  Q: TSQLQuery;
+  Stmt: TStmt;
 begin
   AError := OkError;
   FLock.Acquire;
@@ -580,33 +569,23 @@ begin
       Exit(False);
     if AValue.DeviceId = '' then
       Exit(Fail(AError, seInvalidArgument, 'DeviceId is required', ''));
-    Q := TSQLQuery.Create(nil);
+    Stmt := TStmt.Create(FDb,
+      'INSERT INTO credentials (id, device_id, token, endpoint, account_id) ' +
+      'VALUES (1, ?, ?, ?, ?) ' +
+      'ON CONFLICT(id) DO UPDATE SET device_id = excluded.device_id, ' +
+      'token = excluded.token, endpoint = excluded.endpoint, ' +
+      'account_id = excluded.account_id');
     try
-      Q.DataBase := FConn;
-      Q.Transaction := FTx;
-      Q.SQL.Text :=
-        'INSERT INTO credentials (id, device_id, token, endpoint, account_id) ' +
-        'VALUES (1, :device_id, :token, :endpoint, :account_id) ' +
-        'ON CONFLICT(id) DO UPDATE SET device_id = excluded.device_id, ' +
-        'token = excluded.token, endpoint = excluded.endpoint, ' +
-        'account_id = excluded.account_id';
-      Q.ParamByName('device_id').AsString := AValue.DeviceId;
-      Q.ParamByName('token').AsString := AValue.Token;
-      Q.ParamByName('endpoint').AsString := AValue.Endpoint;
-      Q.ParamByName('account_id').AsString := AValue.AccountId;
-      try
-        Q.ExecSQL;
-        FTx.Commit;
-      except
-        on E: Exception do
-        begin
-          if FTx.Active then
-            FTx.Rollback;
-          Exit(Fail(AError, seError, 'could not save credentials', E.Message));
-        end;
-      end;
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not save credentials', DbErrorText));
+      Stmt.BindText(1, AValue.DeviceId);
+      Stmt.BindText(2, AValue.Token);
+      Stmt.BindText(3, AValue.Endpoint);
+      Stmt.BindText(4, AValue.AccountId);
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not save credentials', DbErrorText));
     finally
-      Q.Free;
+      Stmt.Free;
     end;
     Result := True;
   finally
@@ -617,40 +596,30 @@ end;
 function TSqliteStore.LoadCredentials(out AValue: TDeviceCredentials;
   out AError: TStoreError): Boolean;
 var
-  Q: TSQLQuery;
+  Stmt: TStmt;
 begin
   AError := OkError;
+  AValue := Default(TDeviceCredentials);
   FLock.Acquire;
   try
     if not EnsureOpen(AError) then
       Exit(False);
-    Q := TSQLQuery.Create(nil);
+    Stmt := TStmt.Create(FDb,
+      'SELECT device_id, token, endpoint, account_id FROM credentials ' +
+      'WHERE id = 1');
     try
-      Q.DataBase := FConn;
-      Q.Transaction := FTx;
-      Q.SQL.Text :=
-        'SELECT device_id, token, endpoint, account_id ' +
-        'FROM credentials WHERE id = 1';
-      try
-        Q.Open;
-        if not Q.EOF then
-        begin
-          AValue.DeviceId := Q.Fields[0].AsString;
-          AValue.Token := Q.Fields[1].AsString;
-          AValue.Endpoint := Q.Fields[2].AsString;
-          AValue.AccountId := Q.Fields[3].AsString;
-          Result := True;
-        end
-        else
-          Result := Fail(AError, seNotFound, 'no credentials stored', '');
-        Q.Close;
-      except
-        on E: Exception do
-          Exit(Fail(AError, seError, 'could not load credentials', E.Message));
-      end;
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not load credentials', DbErrorText));
+      if Stmt.Step <> SQLITE_ROW then
+        Exit(Fail(AError, seNotFound, 'credentials not found', ''));
+      AValue.DeviceId := Stmt.ColText(0);
+      AValue.Token := Stmt.ColText(1);
+      AValue.Endpoint := Stmt.ColText(2);
+      AValue.AccountId := Stmt.ColText(3);
     finally
-      Q.Free;
+      Stmt.Free;
     end;
+    Result := True;
   finally
     FLock.Release;
   end;
@@ -663,28 +632,18 @@ begin
   try
     if not EnsureOpen(AError) then
       Exit(False);
-    if not ExecInTransaction('DELETE FROM credentials', AError) then
-    begin
-      if FTx.Active then
-        FTx.Rollback;
-      Exit(False);
-    end;
-    try
-      FTx.Commit;
-    except
-      on E: Exception do
-        Exit(Fail(AError, seError, 'could not clear credentials', E.Message));
-    end;
-    Result := True;
+    Result := DoExec('DELETE FROM credentials', AError);
   finally
     FLock.Release;
   end;
 end;
 
+{ --- settings ----------------------------------------------------------- }
+
 function TSqliteStore.SetSetting(const AKey, AValue: string;
   out AError: TStoreError): Boolean;
 var
-  Q: TSQLQuery;
+  Stmt: TStmt;
 begin
   AError := OkError;
   FLock.Acquire;
@@ -693,28 +652,18 @@ begin
       Exit(False);
     if AKey = '' then
       Exit(Fail(AError, seInvalidArgument, 'setting key is required', ''));
-    Q := TSQLQuery.Create(nil);
+    Stmt := TStmt.Create(FDb,
+      'INSERT INTO settings (key, value) VALUES (?, ?) ' +
+      'ON CONFLICT(key) DO UPDATE SET value = excluded.value');
     try
-      Q.DataBase := FConn;
-      Q.Transaction := FTx;
-      Q.SQL.Text :=
-        'INSERT INTO settings (key, value) VALUES (:k, :v) ' +
-        'ON CONFLICT(key) DO UPDATE SET value = excluded.value';
-      Q.ParamByName('k').AsString := AKey;
-      Q.ParamByName('v').AsString := AValue;
-      try
-        Q.ExecSQL;
-        FTx.Commit;
-      except
-        on E: Exception do
-        begin
-          if FTx.Active then
-            FTx.Rollback;
-          Exit(Fail(AError, seError, 'could not set setting', E.Message));
-        end;
-      end;
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not save setting', DbErrorText));
+      Stmt.BindText(1, AKey);
+      Stmt.BindText(2, AValue);
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not save setting', DbErrorText));
     finally
-      Q.Free;
+      Stmt.Free;
     end;
     Result := True;
   finally
@@ -725,7 +674,7 @@ end;
 function TSqliteStore.GetSetting(const AKey: string; out AValue: string;
   out AError: TStoreError): Boolean;
 var
-  Q: TSQLQuery;
+  Stmt: TStmt;
 begin
   AError := OkError;
   AValue := '';
@@ -733,29 +682,20 @@ begin
   try
     if not EnsureOpen(AError) then
       Exit(False);
-    Q := TSQLQuery.Create(nil);
+    if AKey = '' then
+      Exit(Fail(AError, seInvalidArgument, 'setting key is required', ''));
+    Stmt := TStmt.Create(FDb, 'SELECT value FROM settings WHERE key = ?');
     try
-      Q.DataBase := FConn;
-      Q.Transaction := FTx;
-      Q.SQL.Text := 'SELECT value FROM settings WHERE key = :k';
-      Q.ParamByName('k').AsString := AKey;
-      try
-        Q.Open;
-        if Q.EOF then
-          Result := Fail(AError, seNotFound, 'no such setting', AKey)
-        else
-        begin
-          AValue := Q.Fields[0].AsString;
-          Result := True;
-        end;
-        Q.Close;
-      except
-        on E: Exception do
-          Exit(Fail(AError, seError, 'could not read setting', E.Message));
-      end;
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not read setting', DbErrorText));
+      Stmt.BindText(1, AKey);
+      if Stmt.Step <> SQLITE_ROW then
+        Exit(Fail(AError, seNotFound, 'setting not found', AKey));
+      AValue := Stmt.ColText(0);
     finally
-      Q.Free;
+      Stmt.Free;
     end;
+    Result := True;
   finally
     FLock.Release;
   end;
@@ -764,7 +704,7 @@ end;
 function TSqliteStore.DeleteSetting(const AKey: string;
   out AError: TStoreError): Boolean;
 var
-  Q: TSQLQuery;
+  Stmt: TStmt;
 begin
   AError := OkError;
   FLock.Acquire;
@@ -773,25 +713,15 @@ begin
       Exit(False);
     if AKey = '' then
       Exit(Fail(AError, seInvalidArgument, 'setting key is required', ''));
-    Q := TSQLQuery.Create(nil);
+    Stmt := TStmt.Create(FDb, 'DELETE FROM settings WHERE key = ?');
     try
-      Q.DataBase := FConn;
-      Q.Transaction := FTx;
-      Q.SQL.Text := 'DELETE FROM settings WHERE key = :k';
-      Q.ParamByName('k').AsString := AKey;
-      try
-        Q.ExecSQL;
-        FTx.Commit;
-      except
-        on E: Exception do
-        begin
-          if FTx.Active then
-            FTx.Rollback;
-          Exit(Fail(AError, seError, 'could not delete setting', E.Message));
-        end;
-      end;
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not delete setting', DbErrorText));
+      Stmt.BindText(1, AKey);
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not delete setting', DbErrorText));
     finally
-      Q.Free;
+      Stmt.Free;
     end;
     Result := True;
   finally
@@ -799,10 +729,12 @@ begin
   end;
 end;
 
+{ --- workspaces --------------------------------------------------------- }
+
 function TSqliteStore.FindWorkspace(const APath: string; out AId: Integer;
   out AError: TStoreError): Boolean;
 var
-  Q: TSQLQuery;
+  Stmt: TStmt;
 begin
   AError := OkError;
   AId := 0;
@@ -812,19 +744,16 @@ begin
       Exit(False);
     if APath = '' then
       Exit(Fail(AError, seInvalidArgument, 'workspace path is required', ''));
-    Q := TSQLQuery.Create(nil);
+    Stmt := TStmt.Create(FDb, 'SELECT id FROM workspaces WHERE path = ?');
     try
-      Q.DataBase := FConn;
-      Q.Transaction := FTx;
-      Q.SQL.Text := 'SELECT id FROM workspaces WHERE path = :p';
-      Q.ParamByName('p').AsString := APath;
-      Q.Open;
-      if Q.EOF then
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not find workspace', DbErrorText));
+      Stmt.BindText(1, APath);
+      if Stmt.Step <> SQLITE_ROW then
         Exit(Fail(AError, seNotFound, 'workspace not found', APath));
-      AId := Q.FieldByName('id').AsInteger;
-      Q.Close;
+      AId := Stmt.ColInt(0);
     finally
-      Q.Free;
+      Stmt.Free;
     end;
     Result := True;
   finally
@@ -835,7 +764,7 @@ end;
 function TSqliteStore.EnsureWorkspace(const APath: string; out AId: Integer;
   out AError: TStoreError): Boolean;
 var
-  Q: TSQLQuery;
+  Stmt: TStmt;
 begin
   AError := OkError;
   AId := 0;
@@ -846,46 +775,41 @@ begin
     if APath = '' then
       Exit(Fail(AError, seInvalidArgument, 'workspace path is required', ''));
 
-    Q := TSQLQuery.Create(nil);
+    Stmt := TStmt.Create(FDb, 'SELECT id FROM workspaces WHERE path = ?');
     try
-      Q.DataBase := FConn;
-      Q.Transaction := FTx;
-      Q.SQL.Text := 'SELECT id FROM workspaces WHERE path = :p';
-      Q.ParamByName('p').AsString := APath;
-      Q.Open;
-      if not Q.EOF then
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not find workspace', DbErrorText));
+      Stmt.BindText(1, APath);
+      if Stmt.Step = SQLITE_ROW then
       begin
-        AId := Q.FieldByName('id').AsInteger;
-        Q.Close;
+        AId := Stmt.ColInt(0);
         Exit(True);
       end;
-      Q.Close;
-
-      Q.SQL.Text :=
-        'INSERT INTO workspaces (path, created_at) VALUES (:p, :t)';
-      Q.ParamByName('p').AsString := APath;
-      Q.ParamByName('t').AsLargeInt := NowMs;
-      try
-        Q.ExecSQL;
-        FTx.Commit;
-      except
-        on E: Exception do
-        begin
-          if FTx.Active then
-            FTx.Rollback;
-          Exit(Fail(AError, seError, 'could not create workspace', E.Message));
-        end;
-      end;
-
-      Q.SQL.Text := 'SELECT id FROM workspaces WHERE path = :p';
-      Q.ParamByName('p').AsString := APath;
-      Q.Open;
-      if Q.EOF then
-        Exit(Fail(AError, seError, 'workspace missing after insert', APath));
-      AId := Q.FieldByName('id').AsInteger;
-      Q.Close;
     finally
-      Q.Free;
+      Stmt.Free;
+    end;
+
+    Stmt := TStmt.Create(FDb,
+      'INSERT INTO workspaces (path, created_at) VALUES (?, ?)');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not create workspace', DbErrorText));
+      Stmt.BindText(1, APath);
+      Stmt.BindInt64(2, NowMs);
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not create workspace', DbErrorText));
+    finally
+      Stmt.Free;
+    end;
+
+    Stmt := TStmt.Create(FDb, 'SELECT id FROM workspaces WHERE path = ?');
+    try
+      Stmt.BindText(1, APath);
+      if Stmt.Step <> SQLITE_ROW then
+        Exit(Fail(AError, seError, 'workspace missing after insert', APath));
+      AId := Stmt.ColInt(0);
+    finally
+      Stmt.Free;
     end;
     Result := True;
   finally
@@ -940,7 +864,7 @@ end;
 function TSqliteStore.LoadApprovals(const AContext: TApprovalContext;
   out ARules: TApprovalRuleArray; out AError: TStoreError): Boolean;
 var
-  Q: TSQLQuery;
+  Stmt: TStmt;
   N: Integer;
   Rule: TApprovalRule;
 begin
@@ -950,38 +874,34 @@ begin
   try
     if not EnsureOpen(AError) then
       Exit(False);
-    Q := TSQLQuery.Create(nil);
+    Stmt := TStmt.Create(FDb,
+      'SELECT effect, scope, workspace_id, session_id, ref, params, ' +
+      'any_params FROM approvals ' +
+      'WHERE scope = 0 OR (scope = 1 AND workspace_id = ?) ' +
+      'OR (scope = 2 AND session_id = ? AND ? <> '''')');
     try
-      Q.DataBase := FConn;
-      Q.Transaction := FTx;
-      Q.SQL.Text :=
-        'SELECT effect, scope, workspace_id, session_id, ref, params, ' +
-        'any_params FROM approvals ' +
-        'WHERE scope = 0 ' +
-        'OR (scope = 1 AND workspace_id = :w) ' +
-        'OR (scope = 2 AND session_id = :s AND :s <> '''')';
-      Q.ParamByName('w').AsInteger := AContext.WorkspaceId;
-      Q.ParamByName('s').AsString := AContext.SessionId;
-      Q.Open;
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not load approvals', DbErrorText));
+      Stmt.BindInt(1, AContext.WorkspaceId);
+      Stmt.BindText(2, AContext.SessionId);
+      Stmt.BindText(3, AContext.SessionId);
       N := 0;
-      while not Q.EOF do
+      while Stmt.Step = SQLITE_ROW do
       begin
         Rule := Default(TApprovalRule);
-        Rule.Effect := TApprovalEffect(Q.FieldByName('effect').AsInteger);
-        Rule.Scope := TApprovalScope(Q.FieldByName('scope').AsInteger);
-        Rule.WorkspaceId := Q.FieldByName('workspace_id').AsInteger;
-        Rule.SessionId := Q.FieldByName('session_id').AsString;
-        Rule.Ref := Q.FieldByName('ref').AsString;
-        DecodeApprovalParams(Q.FieldByName('params').AsString, Rule.Params);
-        Rule.AnyParams := Q.FieldByName('any_params').AsInteger <> 0;
+        Rule.Effect := TApprovalEffect(Stmt.ColInt(0));
+        Rule.Scope := TApprovalScope(Stmt.ColInt(1));
+        Rule.WorkspaceId := Stmt.ColInt(2);
+        Rule.SessionId := Stmt.ColText(3);
+        Rule.Ref := Stmt.ColText(4);
+        DecodeApprovalParams(Stmt.ColText(5), Rule.Params);
+        Rule.AnyParams := Stmt.ColInt(6) <> 0;
         SetLength(ARules, N + 1);
         ARules[N] := Rule;
         Inc(N);
-        Q.Next;
       end;
-      Q.Close;
     finally
-      Q.Free;
+      Stmt.Free;
     end;
     Result := True;
   finally
@@ -992,7 +912,7 @@ end;
 function TSqliteStore.SaveApproval(const ARule: TApprovalRule;
   out AError: TStoreError): Boolean;
 var
-  Q: TSQLQuery;
+  Stmt: TStmt;
 begin
   AError := OkError;
   FLock.Acquire;
@@ -1001,35 +921,25 @@ begin
       Exit(False);
     if ARule.Ref = '' then
       Exit(Fail(AError, seInvalidArgument, 'approval ref is required', ''));
-    Q := TSQLQuery.Create(nil);
+    Stmt := TStmt.Create(FDb,
+      'INSERT OR IGNORE INTO approvals ' +
+      '(effect, scope, workspace_id, session_id, ref, params, any_params, ' +
+      'created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
     try
-      Q.DataBase := FConn;
-      Q.Transaction := FTx;
-      Q.SQL.Text :=
-        'INSERT OR IGNORE INTO approvals ' +
-        '(effect, scope, workspace_id, session_id, ref, params, any_params, ' +
-        'created_at) VALUES (:e, :sc, :w, :s, :r, :p, :a, :t)';
-      Q.ParamByName('e').AsInteger := Ord(ARule.Effect);
-      Q.ParamByName('sc').AsInteger := Ord(ARule.Scope);
-      Q.ParamByName('w').AsInteger := ARule.WorkspaceId;
-      Q.ParamByName('s').AsString := ARule.SessionId;
-      Q.ParamByName('r').AsString := ARule.Ref;
-      Q.ParamByName('p').AsString := EncodeApprovalParams(ARule.Params);
-      Q.ParamByName('a').AsInteger := Ord(ARule.AnyParams);
-      Q.ParamByName('t').AsLargeInt := NowMs;
-      try
-        Q.ExecSQL;
-        FTx.Commit;
-      except
-        on E: Exception do
-        begin
-          if FTx.Active then
-            FTx.Rollback;
-          Exit(Fail(AError, seError, 'could not save approval', E.Message));
-        end;
-      end;
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not save approval', DbErrorText));
+      Stmt.BindInt(1, Ord(ARule.Effect));
+      Stmt.BindInt(2, Ord(ARule.Scope));
+      Stmt.BindInt(3, ARule.WorkspaceId);
+      Stmt.BindText(4, ARule.SessionId);
+      Stmt.BindText(5, ARule.Ref);
+      Stmt.BindText(6, EncodeApprovalParams(ARule.Params));
+      Stmt.BindInt(7, Ord(ARule.AnyParams));
+      Stmt.BindInt64(8, NowMs);
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not save approval', DbErrorText));
     finally
-      Q.Free;
+      Stmt.Free;
     end;
     Result := True;
   finally
@@ -1040,41 +950,31 @@ end;
 function TSqliteStore.RemoveApproval(const ARule: TApprovalRule;
   out AError: TStoreError): Boolean;
 var
-  Q: TSQLQuery;
+  Stmt: TStmt;
 begin
   AError := OkError;
   FLock.Acquire;
   try
     if not EnsureOpen(AError) then
       Exit(False);
-    Q := TSQLQuery.Create(nil);
+    Stmt := TStmt.Create(FDb,
+      'DELETE FROM approvals WHERE effect = ? AND scope = ? AND ' +
+      'workspace_id = ? AND session_id = ? AND ref = ? AND params = ? AND ' +
+      'any_params = ?');
     try
-      Q.DataBase := FConn;
-      Q.Transaction := FTx;
-      Q.SQL.Text :=
-        'DELETE FROM approvals WHERE effect = :e AND scope = :sc AND ' +
-        'workspace_id = :w AND session_id = :s AND ref = :r AND ' +
-        'params = :p AND any_params = :a';
-      Q.ParamByName('e').AsInteger := Ord(ARule.Effect);
-      Q.ParamByName('sc').AsInteger := Ord(ARule.Scope);
-      Q.ParamByName('w').AsInteger := ARule.WorkspaceId;
-      Q.ParamByName('s').AsString := ARule.SessionId;
-      Q.ParamByName('r').AsString := ARule.Ref;
-      Q.ParamByName('p').AsString := EncodeApprovalParams(ARule.Params);
-      Q.ParamByName('a').AsInteger := Ord(ARule.AnyParams);
-      try
-        Q.ExecSQL;
-        FTx.Commit;
-      except
-        on E: Exception do
-        begin
-          if FTx.Active then
-            FTx.Rollback;
-          Exit(Fail(AError, seError, 'could not remove approval', E.Message));
-        end;
-      end;
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not remove approval', DbErrorText));
+      Stmt.BindInt(1, Ord(ARule.Effect));
+      Stmt.BindInt(2, Ord(ARule.Scope));
+      Stmt.BindInt(3, ARule.WorkspaceId);
+      Stmt.BindText(4, ARule.SessionId);
+      Stmt.BindText(5, ARule.Ref);
+      Stmt.BindText(6, EncodeApprovalParams(ARule.Params));
+      Stmt.BindInt(7, Ord(ARule.AnyParams));
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not remove approval', DbErrorText));
     finally
-      Q.Free;
+      Stmt.Free;
     end;
     Result := True;
   finally
@@ -1087,7 +987,7 @@ end;
 function TSqliteStore.CreateSession(AWorkspaceId: Integer; out AId: string;
   out AError: TStoreError): Boolean;
 var
-  Q: TSQLQuery;
+  Stmt: TStmt;
 begin
   AError := OkError;
   AId := '';
@@ -1098,30 +998,20 @@ begin
     if AWorkspaceId < 0 then
       Exit(Fail(AError, seInvalidArgument, 'workspace id is required', ''));
     AId := NewSessionId;
-    Q := TSQLQuery.Create(nil);
+    Stmt := TStmt.Create(FDb,
+      'INSERT INTO sessions (id, workspace_id, created_at, updated_at) ' +
+      'VALUES (?, ?, ?, ?)');
     try
-      Q.DataBase := FConn;
-      Q.Transaction := FTx;
-      Q.SQL.Text :=
-        'INSERT INTO sessions (id, workspace_id, created_at, updated_at) ' +
-        'VALUES (:id, :w, :t, :t2)';
-      Q.ParamByName('id').AsString := AId;
-      Q.ParamByName('w').AsInteger := AWorkspaceId;
-      Q.ParamByName('t').AsLargeInt := NowMs;
-      Q.ParamByName('t2').AsLargeInt := NowMs;
-      try
-        Q.ExecSQL;
-        FTx.Commit;
-      except
-        on E: Exception do
-        begin
-          if FTx.Active then
-            FTx.Rollback;
-          Exit(Fail(AError, seError, 'could not create session', E.Message));
-        end;
-      end;
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not create session', DbErrorText));
+      Stmt.BindText(1, AId);
+      Stmt.BindInt(2, AWorkspaceId);
+      Stmt.BindInt64(3, NowMs);
+      Stmt.BindInt64(4, NowMs);
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not create session', DbErrorText));
     finally
-      Q.Free;
+      Stmt.Free;
     end;
     Result := True;
   finally
@@ -1132,7 +1022,7 @@ end;
 function TSqliteStore.SessionExists(const AId: string;
   out AError: TStoreError): Boolean;
 var
-  Q: TSQLQuery;
+  Stmt: TStmt;
 begin
   AError := OkError;
   Result := False;
@@ -1140,17 +1030,14 @@ begin
   try
     if not EnsureOpen(AError) then
       Exit(False);
-    Q := TSQLQuery.Create(nil);
+    Stmt := TStmt.Create(FDb, 'SELECT 1 FROM sessions WHERE id = ?');
     try
-      Q.DataBase := FConn;
-      Q.Transaction := FTx;
-      Q.SQL.Text := 'SELECT 1 FROM sessions WHERE id = :id';
-      Q.ParamByName('id').AsString := AId;
-      Q.Open;
-      Result := not Q.EOF;
-      Q.Close;
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not check session', DbErrorText));
+      Stmt.BindText(1, AId);
+      Result := Stmt.Step = SQLITE_ROW;
     finally
-      Q.Free;
+      Stmt.Free;
     end;
   finally
     FLock.Release;
@@ -1160,33 +1047,24 @@ end;
 function TSqliteStore.TouchSession(const AId: string;
   out AError: TStoreError): Boolean;
 var
-  Q: TSQLQuery;
+  Stmt: TStmt;
 begin
   AError := OkError;
   FLock.Acquire;
   try
     if not EnsureOpen(AError) then
       Exit(False);
-    Q := TSQLQuery.Create(nil);
+    Stmt := TStmt.Create(FDb,
+      'UPDATE sessions SET updated_at = ? WHERE id = ?');
     try
-      Q.DataBase := FConn;
-      Q.Transaction := FTx;
-      Q.SQL.Text := 'UPDATE sessions SET updated_at = :t WHERE id = :id';
-      Q.ParamByName('t').AsLargeInt := NowMs;
-      Q.ParamByName('id').AsString := AId;
-      try
-        Q.ExecSQL;
-        FTx.Commit;
-      except
-        on E: Exception do
-        begin
-          if FTx.Active then
-            FTx.Rollback;
-          Exit(Fail(AError, seError, 'could not touch session', E.Message));
-        end;
-      end;
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not touch session', DbErrorText));
+      Stmt.BindInt64(1, NowMs);
+      Stmt.BindText(2, AId);
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not touch session', DbErrorText));
     finally
-      Q.Free;
+      Stmt.Free;
     end;
     Result := True;
   finally
@@ -1197,7 +1075,7 @@ end;
 function TSqliteStore.AppendSessionRecord(const ARecord: TSessionRecord;
   out AError: TStoreError): Boolean;
 var
-  Q: TSQLQuery;
+  Stmt: TStmt;
 begin
   AError := OkError;
   FLock.Acquire;
@@ -1206,41 +1084,32 @@ begin
       Exit(False);
     if ARecord.SessionId = '' then
       Exit(Fail(AError, seInvalidArgument, 'session id is required', ''));
-    Q := TSQLQuery.Create(nil);
-    try
-      Q.DataBase := FConn;
-      Q.Transaction := FTx;
-      Q.SQL.Text := 'SELECT 1 FROM sessions WHERE id = :id';
-      Q.ParamByName('id').AsString := ARecord.SessionId;
-      Q.Open;
-      if Q.EOF then
-        Exit(Fail(AError, seNotFound, 'session not found', ARecord.SessionId));
-      Q.Close;
 
-      Q.SQL.Text :=
-        'INSERT INTO session_records ' +
-        '(session_id, seq, kind, content, data, created_at) VALUES ' +
-        '(:s, (SELECT COALESCE(MAX(seq), 0) + 1 FROM session_records ' +
-        'WHERE session_id = :s2), :k, :c, :d, :t)';
-      Q.ParamByName('s').AsString := ARecord.SessionId;
-      Q.ParamByName('s2').AsString := ARecord.SessionId;
-      Q.ParamByName('k').AsInteger := Ord(ARecord.Kind);
-      Q.ParamByName('c').AsString := ARecord.Content;
-      Q.ParamByName('d').AsString := ARecord.DataJson;
-      Q.ParamByName('t').AsLargeInt := NowMs;
-      try
-        Q.ExecSQL;
-        FTx.Commit;
-      except
-        on E: Exception do
-        begin
-          if FTx.Active then
-            FTx.Rollback;
-          Exit(Fail(AError, seError, 'could not append record', E.Message));
-        end;
-      end;
+    if not SessionExists(ARecord.SessionId, AError) then
+    begin
+      AError.Code := seNotFound;
+      AError.Message := 'session not found';
+      AError.Detail := ARecord.SessionId;
+      Exit(False);
+    end;
+
+    Stmt := TStmt.Create(FDb,
+      'INSERT INTO session_records (session_id, seq, kind, content, data, ' +
+      'created_at) VALUES (?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM ' +
+      'session_records WHERE session_id = ?), ?, ?, ?, ?)');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not append record', DbErrorText));
+      Stmt.BindText(1, ARecord.SessionId);
+      Stmt.BindText(2, ARecord.SessionId);
+      Stmt.BindInt(3, Ord(ARecord.Kind));
+      Stmt.BindText(4, ARecord.Content);
+      Stmt.BindText(5, ARecord.DataJson);
+      Stmt.BindInt64(6, NowMs);
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not append record', DbErrorText));
     finally
-      Q.Free;
+      Stmt.Free;
     end;
     Result := True;
   finally
@@ -1252,8 +1121,9 @@ function TSqliteStore.QuerySessionRecords(const ASessionId: string;
   AUseKind: Boolean; AKind: TSessionRecordKind; ALimit, AOffset: Integer;
   out ARecords: TSessionRecordArray; out AError: TStoreError): Boolean;
 var
-  Q: TSQLQuery;
-  N: Integer;
+  Stmt: TStmt;
+  SQL: string;
+  N, NextIndex: Integer;
   Rec: TSessionRecord;
 begin
   AError := OkError;
@@ -1262,48 +1132,46 @@ begin
   try
     if not EnsureOpen(AError) then
       Exit(False);
-    Q := TSQLQuery.Create(nil);
+    SQL := 'SELECT id, session_id, seq, kind, content, data, created_at ' +
+      'FROM session_records WHERE session_id = ?';
+    if AUseKind then
+      SQL := SQL + ' AND kind = ?';
+    SQL := SQL + ' ORDER BY seq LIMIT ? OFFSET ?';
+    Stmt := TStmt.Create(FDb, SQL);
     try
-      Q.DataBase := FConn;
-      Q.Transaction := FTx;
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not query records', DbErrorText));
+      NextIndex := 1;
+      Stmt.BindText(NextIndex, ASessionId);
+      Inc(NextIndex);
       if AUseKind then
-        Q.SQL.Text :=
-          'SELECT id, session_id, seq, kind, content, data, created_at ' +
-          'FROM session_records WHERE session_id = :s AND kind = :k ' +
-          'ORDER BY seq LIMIT :l OFFSET :o'
-      else
-        Q.SQL.Text :=
-          'SELECT id, session_id, seq, kind, content, data, created_at ' +
-          'FROM session_records WHERE session_id = :s ' +
-          'ORDER BY seq LIMIT :l OFFSET :o';
-      Q.ParamByName('s').AsString := ASessionId;
-      if AUseKind then
-        Q.ParamByName('k').AsInteger := Ord(AKind);
+      begin
+        Stmt.BindInt(NextIndex, Ord(AKind));
+        Inc(NextIndex);
+      end;
       if ALimit > 0 then
-        Q.ParamByName('l').AsInteger := ALimit
+        Stmt.BindInt(NextIndex, ALimit)
       else
-        Q.ParamByName('l').AsInteger := -1;   // SQLite: no limit
-      Q.ParamByName('o').AsInteger := AOffset;
-      Q.Open;
+        Stmt.BindInt(NextIndex, -1);   // SQLite: negative LIMIT means no limit
+      Inc(NextIndex);
+      Stmt.BindInt(NextIndex, AOffset);
       N := 0;
-      while not Q.EOF do
+      while Stmt.Step = SQLITE_ROW do
       begin
         Rec := Default(TSessionRecord);
-        Rec.Id := Q.FieldByName('id').AsLargeInt;
-        Rec.SessionId := Q.FieldByName('session_id').AsString;
-        Rec.Seq := Q.FieldByName('seq').AsLargeInt;
-        Rec.Kind := TSessionRecordKind(Q.FieldByName('kind').AsInteger);
-        Rec.Content := Q.FieldByName('content').AsString;
-        Rec.DataJson := Q.FieldByName('data').AsString;
-        Rec.CreatedAtMs := Q.FieldByName('created_at').AsLargeInt;
+        Rec.Id := Stmt.ColInt64(0);
+        Rec.SessionId := Stmt.ColText(1);
+        Rec.Seq := Stmt.ColInt64(2);
+        Rec.Kind := TSessionRecordKind(Stmt.ColInt(3));
+        Rec.Content := Stmt.ColText(4);
+        Rec.DataJson := Stmt.ColText(5);
+        Rec.CreatedAtMs := Stmt.ColInt64(6);
         SetLength(ARecords, N + 1);
         ARecords[N] := Rec;
         Inc(N);
-        Q.Next;
       end;
-      Q.Close;
     finally
-      Q.Free;
+      Stmt.Free;
     end;
     Result := True;
   finally
@@ -1314,7 +1182,7 @@ end;
 function TSqliteStore.ListSessions(AWorkspaceId: Integer;
   out AList: TSessionSummaryArray; out AError: TStoreError): Boolean;
 var
-  Q: TSQLQuery;
+  Stmt: TStmt;
   N: Integer;
   Item: TSessionSummary;
 begin
@@ -1324,33 +1192,29 @@ begin
   try
     if not EnsureOpen(AError) then
       Exit(False);
-    Q := TSQLQuery.Create(nil);
+    Stmt := TStmt.Create(FDb,
+      'SELECT s.id, s.created_at, s.updated_at, COUNT(r.id) AS n ' +
+      'FROM sessions s LEFT JOIN session_records r ON r.session_id = s.id ' +
+      'WHERE s.workspace_id = ? GROUP BY s.id ' +
+      'ORDER BY s.updated_at DESC, s.rowid DESC');
     try
-      Q.DataBase := FConn;
-      Q.Transaction := FTx;
-      Q.SQL.Text :=
-        'SELECT s.id, s.created_at, s.updated_at, COUNT(r.id) AS n ' +
-        'FROM sessions s LEFT JOIN session_records r ON r.session_id = s.id ' +
-        'WHERE s.workspace_id = :w GROUP BY s.id ' +
-        'ORDER BY s.updated_at DESC, s.rowid DESC';
-      Q.ParamByName('w').AsInteger := AWorkspaceId;
-      Q.Open;
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not list sessions', DbErrorText));
+      Stmt.BindInt(1, AWorkspaceId);
       N := 0;
-      while not Q.EOF do
+      while Stmt.Step = SQLITE_ROW do
       begin
         Item := Default(TSessionSummary);
-        Item.Id := Q.FieldByName('id').AsString;
-        Item.CreatedAtMs := Q.FieldByName('created_at').AsLargeInt;
-        Item.UpdatedAtMs := Q.FieldByName('updated_at').AsLargeInt;
-        Item.RecordCount := Q.FieldByName('n').AsInteger;
+        Item.Id := Stmt.ColText(0);
+        Item.CreatedAtMs := Stmt.ColInt64(1);
+        Item.UpdatedAtMs := Stmt.ColInt64(2);
+        Item.RecordCount := Stmt.ColInt(3);
         SetLength(AList, N + 1);
         AList[N] := Item;
         Inc(N);
-        Q.Next;
       end;
-      Q.Close;
     finally
-      Q.Free;
+      Stmt.Free;
     end;
     Result := True;
   finally
@@ -1361,7 +1225,7 @@ end;
 function TSqliteStore.MostRecentSessionId(AWorkspaceId: Integer;
   out AId: string; out AError: TStoreError): Boolean;
 var
-  Q: TSQLQuery;
+  Stmt: TStmt;
 begin
   AError := OkError;
   AId := '';
@@ -1369,21 +1233,19 @@ begin
   try
     if not EnsureOpen(AError) then
       Exit(False);
-    Q := TSQLQuery.Create(nil);
+    Stmt := TStmt.Create(FDb,
+      'SELECT id FROM sessions WHERE workspace_id = ? ' +
+      'ORDER BY updated_at DESC, rowid DESC LIMIT 1');
     try
-      Q.DataBase := FConn;
-      Q.Transaction := FTx;
-      Q.SQL.Text :=
-        'SELECT id FROM sessions WHERE workspace_id = :w ' +
-        'ORDER BY updated_at DESC, rowid DESC LIMIT 1';
-      Q.ParamByName('w').AsInteger := AWorkspaceId;
-      Q.Open;
-      if Q.EOF then
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not find recent session',
+          DbErrorText));
+      Stmt.BindInt(1, AWorkspaceId);
+      if Stmt.Step <> SQLITE_ROW then
         Exit(Fail(AError, seNotFound, 'no session for workspace', ''));
-      AId := Q.FieldByName('id').AsString;
-      Q.Close;
+      AId := Stmt.ColText(0);
     finally
-      Q.Free;
+      Stmt.Free;
     end;
     Result := True;
   finally
@@ -1392,4 +1254,3 @@ begin
 end;
 
 end.
-

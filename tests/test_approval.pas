@@ -88,7 +88,6 @@ var
   Err: TStoreError;
 begin
   Cfg.DatabasePath := FDbPath;
-  Cfg.LibraryPath := '';
   Cfg.BusyTimeoutMs := 5000;
   Result := TSqliteStore.Create(Cfg);
   if not Result.Open(Err) then
