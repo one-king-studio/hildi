@@ -88,6 +88,13 @@ $(BIN)/hildegard-helper-agent-cli: $(EXAMPLES)/agent_cli.pas $(LIB_SRCS) $(SQLIT
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
+# Optimized, self-contained production binary (static SQLite, no runtime libs).
+release-agent-cli: libsqlite $(BIN)/hildegard-helper-agent-cli-release
+
+$(BIN)/hildegard-helper-agent-cli-release: $(EXAMPLES)/agent_cli.pas $(LIB_SRCS) $(SQLITE_AR)
+	@mkdir -p $(BIN) $(RELUNITS)
+	$(FPC) $(RELEASE) $(SQLITE_LDFLAGS) -Fu$(SRC) -FU$(RELUNITS) -FE$(BIN) -o$@ $<
+
 $(BIN)/hildegard-helper-demo: $(EXAMPLES)/demo_harness.pas $(LIB_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
@@ -135,4 +142,5 @@ help:
 	@echo "  make check                    all gates: test + test-leak"
 	@echo "  make libsqlite                build vendored SQLite static archive"
 	@echo "  make release                  build an optimized example"
+	@echo "  make release-agent-cli        build the optimized, static CLI binary"
 	@echo "  make clean                    remove build artifacts"
