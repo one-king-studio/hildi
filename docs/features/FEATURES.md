@@ -23,6 +23,7 @@ in `../guidelines/spec-driven-development.md`:
 | [Workspaces](Workspaces/FEATURE.md) | Implemented | Workspaces v1 | The directory the agent operates in: canonical identity, access check, relative-path base, and the trust boundary for path checks; scopes approvals and sessions. |
 | [Sessions and Ledger](Sessions_And_Ledger/FEATURE.md) | In Progress | Sessions v1 | Random-hex session ids bound to a workspace, an append-only typed ledger (messages, reasoning, tool calls/results, errors), restore into messages, and a SQLite conversation adapter; drops the `requests` table. Ledger + adapter done; live smoke pending. |
 | [Remote Agent Link](Remote_Agent_Link/FEATURE.md) | Proposed | - | Pair a device to an account and hold an outbound link to execute requests locally. Helper-side only in v1. |
+| [TUI Harness](TUI_Harness/FEATURE.md) | Specified | TUI Core v1, Markdown v1 | Full-screen front end: nested grid layout, independently scrolling panes, modal overlay planes, and markdown-coloured text. Reuses FPC `video`/`keyboard`; no new deps. Reverses the earlier CLI-only/pager decision (the CLI is retained). |
 | [Local SQLite Store](Local_SQLite_Store/FEATURE.md) | Implemented | Store v1 | Embedded SQLite for credentials, request history, durable queue, and settings. Vendored 3.53.4. |
 
 ## Planned (not yet specified)
