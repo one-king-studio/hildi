@@ -122,7 +122,9 @@ type
   { Terminal implementation over FPC's video unit. Owns the video lifecycle
     (alternate screen, cursor). Maps TAttr to TEnhancedVideoCell: Fg/Bg become
     ForegroundColor/BackgroundColor (0..255) and Style becomes the enhanced
-    video attribute set. }
+    video attribute set. Declared in the adapter unit
+    `hildegard.helper.tui.surface.video` so this core unit never `uses` video
+    (the test binary stays terminal-free). }
   TSurfaceVideo = class(TInterfacedObject, ISurface)
   public
     constructor Create;
@@ -141,8 +143,13 @@ type
     function LastFrameChangedCells: Integer;   // cells that differed last Flush
     function RowText(Y, X, Len: Integer): UnicodeString;
     procedure ResetFrameStats;                  // zero the counters
+    procedure Resize(AWidth, AHeight: Integer); // test seam: mirrors a terminal resize
   end;
 ```
+
+Note: `Resize` exists only on the in-memory surface, to let tests change
+dimensions in place; the terminal surface gets its size from `video` and reports
+the change through an `ikResize` input event instead.
 
 Notes:
 
@@ -207,6 +214,8 @@ type
     function Wait(ATimeoutMs: Integer; out AEvent: TInputEvent): Boolean;
   end;
 
+  { Declared in the adapter unit `hildegard.helper.tui.input.terminal` so this
+    core unit never `uses` keyboard (the test binary stays terminal-free). }
   TInputSourceTerminal = class(TInterfacedObject, IInputSource)
   public
     constructor Create;
@@ -355,12 +364,15 @@ type
 
   { A scrollbar. v1 implements the vertical case; orientation is a property so
     horizontal can be added without a contract break. }
+  TScrollBarOrientation = (soVertical, soHorizontal);
   TScrollBar = class(TWidget)
   public
     constructor Create(AOrientation: TScrollBarOrientation);
-    property Value: Integer;    // read/write
+    property Value: Integer;    // read/write (clamped to [0, Range - Page])
     property Range: Integer;    // read/write (content extent)
     property Page: Integer;     // read/write (viewport extent)
+    function ThumbSize: Integer;    // thumb length in cells
+    function ThumbStart: Integer;   // absolute cell (row/column) of the thumb
   end;
 ```
 
@@ -371,6 +383,11 @@ Behaviour:
 - Scrollbar interaction in v1 is keyboard-driven through the container; the
   scrollbar is display plus optional click in a later version.
 - Clamping: `ScrollX`/`ScrollY` are clamped to `[0, max(0, Content - Viewport)]`.
+- Scrollbar geometry: the track is the bar's own length (height for vertical,
+  width for horizontal). When `Range <= Page` the thumb covers the whole track;
+  otherwise `ThumbSize = max(1, Track * Page div Range)` and the thumb offset is
+  `Value * (Track - ThumbSize) div (Range - Page)`. `ThumbStart` is absolute
+  (bar origin plus offset).
 
 ### Planes and Application
 
@@ -397,6 +414,8 @@ type
     procedure PushPlane(const APlane: TPlane);
     procedure PopPlane;
     function ModalActive: Boolean;
+    procedure Stop;             // request the loop to end on the next Step
+    procedure Invalidate;       // mark layout dirty for the next Step
 
     { One iteration: process at most one input event (or resize), mark layout
       dirty on change, lay out if dirty, render the frame, flush. Returns False
@@ -428,8 +447,10 @@ Behaviour:
   modal would dim the already-dimmed base once more (documented; typical UIs use
   one modal at a time).
 - **Input routing.** If any modal plane exists, dispatch only to the topmost
-  modal; otherwise to the base root, then to the top plane. A consumed event is
-  not offered further.
+  modal; otherwise to the base root. A consumed event is not offered further.
+  If the topmost modal does not handle a `kkEscape`, the app pops it, so a modal
+  is dismissible by a key (the base is never popped this way). `Stop` requests
+  the loop to end: the next `Step` returns False.
 - **Focus.** The application holds the focused widget; a container forwards
   unhandled scroll keys to its focused descendant. `kkTab` cycles focus among
   focusable widgets in the base plane. v1 may keep focus set programmatically by
@@ -438,7 +459,10 @@ Behaviour:
 - **Resize.** An `ikResize` marks layout dirty; the surface already reflects the
   new size. The root is re-arranged to the new bounds.
 - **Layout dirtying.** `Arrange` is only called when the surface size, content,
-  or plane stack changes, not on every `Step`.
+  or plane stack changes, not on every `Step`. A resize, `PushPlane`, and
+  `PopPlane` mark layout dirty internally; a caller whose widget content changed
+  calls `Invalidate` (for example, after appending text or changing a container
+  tree). The next `Step` arranges once and clears the flag.
 
 ## Architecture
 
@@ -476,8 +500,10 @@ application loop.
 - **Responsibilities:** cell rendering, input events, layout, widgets, scrolling,
   planes, the loop.
 - **Dependencies:** FPC `video`, `keyboard`, `SysUtils`, `Classes`, and the RTL
-  Unicode units. The core units (`base`, `widget`, `text`, `scroll`, `app`) must
-  not depend on `video` directly; only `surface` and `input` do.
+  Unicode units. The core units (`base`, `surface`, `input`, `widget`, `text`,
+  `scroll`, `app`) must not depend on `video`/`keyboard` directly; only the
+  adapter units `surface.video` and `input.terminal` do, so the test binary never
+  links a terminal.
 - **Side effects:** the terminal surface owns the screen (alt-screen, raw mode,
   cursor); nothing else mutates global state.
 
