@@ -21,6 +21,8 @@ type
   TInputSourceTerminal = class(TInterfacedObject, IInputSource)
   private
     FLastCol, FLastRow: Integer;
+    FInputFd: Integer;
+    FOpenedTty: Boolean;
     FOldTio: termios;
     FRawSet: Boolean;
     FDecoder: TKeyDecoder;
@@ -36,7 +38,19 @@ type
 implementation
 
 uses
-  SysUtils, baseunix;
+  ctypes, SysUtils, baseunix;
+
+function c_isatty(Fd: cint): cint; cdecl; external 'c' name 'isatty';
+
+{ The fd to read keys from and to set raw mode on. Prefer stdin; some terminals
+  (e.g. VSCode, Ghostty) launch the process with stdin not connected to the tty,
+  so fall back to the controlling terminal. }
+function OpenInputFd: Integer;
+begin
+  if c_isatty(0) = 1 then
+    Exit(0);
+  Result := fpOpen('/dev/tty', O_RDONLY);
+end;
 
 constructor TInputSourceTerminal.Create;
 const
@@ -49,18 +63,24 @@ var
 begin
   inherited Create;
   FRawSet := False;
-  if TCGetAttr(0, FOldTio) = 0 then
+  FOpenedTty := False;
+  FInputFd := OpenInputFd;
+  if FInputFd < 0 then
+    FInputFd := 0
+  else
+    FOpenedTty := FInputFd > 2;
+  if TCGetAttr(FInputFd, FOldTio) = 0 then
   begin
     Tio := FOldTio;
     CFMakeRaw(Tio);
-    if TCSetAttr(0, TCSANOW, Tio) = 0 then
+    if TCSetAttr(FInputFd, TCSANOW, Tio) = 0 then
       FRawSet := True;
   end;
   fpWrite(1, MouseOn[1], Length(MouseOn));
   FDecoder := TKeyDecoder.Create;
   FillChar(WS, SizeOf(WS), 0);
-  if (fpioctl(0, TIOCGWINSZ, @WS) = 0) and (WS.ws_col > 0) and (WS.ws_row > 0)
-  then
+  if (fpioctl(FInputFd, TIOCGWINSZ, @WS) = 0) and (WS.ws_col > 0) and
+    (WS.ws_row > 0) then
   begin
     FLastCol := WS.ws_col;
     FLastRow := WS.ws_row;
@@ -79,7 +99,9 @@ begin
   fpWrite(1, MouseOff[1], Length(MouseOff));
   FDecoder.Free;
   if FRawSet then
-    TCSetAttr(0, TCSANOW, FOldTio);
+    TCSetAttr(FInputFd, TCSANOW, FOldTio);
+  if FOpenedTty then
+    fpClose(FInputFd);
   inherited Destroy;
 end;
 
@@ -90,7 +112,7 @@ begin
   AEvent := Default(TInputEvent);
   Result := False;
   FillChar(WS, SizeOf(WS), 0);
-  if fpioctl(0, TIOCGWINSZ, @WS) <> 0 then
+  if fpioctl(FInputFd, TIOCGWINSZ, @WS) <> 0 then
     Exit;
   if (WS.ws_col <= 0) or (WS.ws_row <= 0) then
     Exit;
@@ -114,12 +136,12 @@ var
   N, I: Integer;
 begin
   fpFD_ZERO(Fds);
-  fpFD_SET(0, Fds);
+  fpFD_SET(FInputFd, Fds);
   TV.tv_sec := 0;
   TV.tv_usec := 0;
-  if fpSelect(1, @Fds, nil, nil, @TV) <= 0 then
+  if fpSelect(FInputFd + 1, @Fds, nil, nil, @TV) <= 0 then
     Exit;
-  N := fpRead(0, @Bytes[0], SizeOf(Bytes));
+  N := fpRead(FInputFd, @Bytes[0], SizeOf(Bytes));
   if N <= 0 then
     Exit;
   SetLength(Data, N);

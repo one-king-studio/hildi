@@ -19,6 +19,7 @@ type
   private
     FClips: array of TRect;
     FClipCount: Integer;
+    FNeedFullRepaint: Boolean;
     procedure SyncSize;
     function EffectiveClip: TRect;
     function Intersect(const A, B: TRect): TRect;
@@ -97,6 +98,7 @@ constructor TSurfaceVideo.Create;
 begin
   inherited Create;
   FClipCount := 0;
+  FNeedFullRepaint := False;
   InitEnhancedVideo;
   SetCursorType(crHidden);
 end;
@@ -124,7 +126,11 @@ begin
     Mode.Col := WS.ws_col;
     Mode.Row := WS.ws_row;
     Mode.Color := True;
-    SetVideoMode(Mode);
+    if SetVideoMode(Mode) then
+      { The resized buffer's new cells differ from the terminal's actual screen;
+        a diffing flush would skip them and leave stale content, so force one
+        full repaint. }
+      FNeedFullRepaint := True;
   end;
   {$endif}
 end;
@@ -271,7 +277,13 @@ end;
 procedure TSurfaceVideo.Flush;
 begin
   SyncSize;
-  UpdateScreen(False);
+  if FNeedFullRepaint then
+  begin
+    UpdateScreen(True);
+    FNeedFullRepaint := False;
+  end
+  else
+    UpdateScreen(False);
 end;
 
 end.

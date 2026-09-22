@@ -312,12 +312,16 @@ begin
       Params := '';
       for I := 2 to FinalIdx - 1 do
         Params := Params + AnsiChar(FBuf[I]);
-      Result := MapFinal(AnsiChar(FBuf[FinalIdx]), Params, AEvent);
-      if Result then
-        Drop(FinalIdx + 1)
-      else
-        Drop(1);  { unknown sequence: drop the ESC only }
-      Exit;
+      if MapFinal(AnsiChar(FBuf[FinalIdx]), Params, AEvent) then
+      begin
+        Drop(FinalIdx + 1);
+        Exit(True);
+      end;
+      { Unknown sequence (terminal reports, focus events, unsupported keys):
+        consume the whole thing so its bytes are not decoded as characters, then
+        try the next buffered event. }
+      Drop(FinalIdx + 1);
+      Exit(Next(AEvent));
     end;
     AEvent.Kind := ikKey;
     AEvent.Key.Kind := kkEscape;
@@ -358,7 +362,7 @@ begin
   if B < 32 then
   begin
     Drop(1);  { ignore other control characters }
-    Exit(False);
+    Exit(Next(AEvent));
   end;
 
   if B < 127 then
@@ -380,7 +384,7 @@ begin
   else
   begin
     Drop(1);  { invalid lead byte }
-    Exit(False);
+    Exit(Next(AEvent));
   end;
   if Length(FBuf) < N then
     Exit(False);

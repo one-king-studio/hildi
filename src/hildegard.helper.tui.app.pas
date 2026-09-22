@@ -42,6 +42,7 @@ type
     FStop: Boolean;
     FLayoutDirty: Boolean;
     procedure ArrangeBase;
+    procedure ArrangePlanes;
     procedure RenderFrame;
   public
     constructor Create(const ASurface: ISurface; const AInput: IInputSource;
@@ -129,6 +130,17 @@ begin
     FPlanes[0].Root.Arrange(Rect4(0, 0, FSurface.Width, FSurface.Height));
 end;
 
+procedure TTuiApp.ArrangePlanes;
+var
+  I: Integer;
+  R: TRect;
+begin
+  R := Rect4(0, 0, FSurface.Width, FSurface.Height);
+  for I := 0 to High(FPlanes) do
+    if FPlanes[I].Root <> nil then
+      FPlanes[I].Root.Arrange(R);
+end;
+
 procedure TTuiApp.PushPlane(const APlane: TPlane);
 begin
   if APlane = nil then
@@ -197,7 +209,11 @@ begin
   if FInput.Poll(E) then
     case E.Kind of
       ikResize:
-        FLayoutDirty := True;
+        begin
+          { Re-arrange every plane (base and any modal) to the new size. }
+          ArrangePlanes;
+          FLayoutDirty := False;
+        end;
       ikKey:
         if ModalActive then
         begin

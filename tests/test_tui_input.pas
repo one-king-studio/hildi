@@ -29,6 +29,7 @@ type
     procedure TestDecodeFunctionKeys;
     procedure TestDecodeUtf8;
     procedure TestDecodeIncompleteSequenceBuffers;
+    procedure TestDecodeIgnoresUnknownSequence;
     procedure TestDecodeMouseWheel;
   end;
 
@@ -236,6 +237,25 @@ begin
     AssertTrue('completed', D.Next(E));
     AssertTrue('is up', E.Key.Kind = kkUp);
     AssertEquals('buffer drained', 0, D.Buffered);
+  finally
+    D.Free;
+  end;
+end;
+
+procedure TTuiInputTest.TestDecodeIgnoresUnknownSequence;
+var
+  D: TKeyDecoder;
+  E: TInputEvent;
+begin
+  D := TKeyDecoder.Create;
+  try
+    { A terminal DA1 report ESC[?1;2c followed by a real key 'q': the report must
+      be consumed, not decoded as stray characters. }
+    D.Feed([27, Ord('['), Ord('?'), Ord('1'), Ord(';'), Ord('2'),
+      Ord('c'), Ord('q')]);
+    AssertTrue('next event after report', D.Next(E));
+    AssertTrue('is char', E.Key.Kind = kkChar);
+    AssertEquals('the real key', 'q', E.Key.Ch);
   finally
     D.Free;
   end;

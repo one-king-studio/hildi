@@ -459,8 +459,10 @@ Behaviour:
   focusable widgets in the base plane. v1 may keep focus set programmatically by
   the caller rather than fully implementing tab traversal, provided the example
   demonstrates switching panes.
-- **Resize.** An `ikResize` marks layout dirty; the surface already reflects the
-  new size. The root is re-arranged to the new bounds.
+- **Resize.** An `ikResize` re-arranges every plane's root (base and any modal)
+  to the new surface bounds; the surface already reflects the new size. A surface
+  size change also forces one full repaint (`UpdateScreen(True)`), because the
+  resized diff buffers would otherwise skip the new cells and leave stale content.
 - **Layout dirtying.** `Arrange` is only called when the surface size, content,
   or plane stack changes, not on every `Step`. A resize, `PushPlane`, and
   `PopPlane` mark layout dirty internally; a caller whose widget content changed
