@@ -50,6 +50,7 @@ HEAPTRC   := haltonnotreleased:skipifnoleaks
 #   make watch [TARGET=test-leak]           -> auto-rerun on source changes
 SUITE  ?=
 TARGET ?= test
+ARGS   ?=
 
 TESTARGS := --format=plain
 ifneq ($(SUITE),)
@@ -61,7 +62,8 @@ endif
 LIB_SRCS  := $(wildcard $(SRC)/*.pas)
 TEST_SRCS := $(wildcard $(TESTS)/*.pas)
 
-.PHONY: all test test-leak watch check release clean help libsqlite
+.PHONY: all test test-leak watch check release clean help libsqlite \
+        store-demo agent-cli release-agent-cli tui-demo bench perf
 
 all: $(BIN)/hildegard-helper-demo
 
@@ -96,6 +98,25 @@ $(BIN)/hildegard-helper-agent-cli-release: $(EXAMPLES)/agent_cli.pas $(LIB_SRCS)
 	$(FPC) $(RELEASE) $(SQLITE_LDFLAGS) -Fu$(SRC) -FU$(RELUNITS) -FE$(BIN) -o$@ $<
 
 $(BIN)/hildegard-helper-demo: $(EXAMPLES)/demo_harness.pas $(LIB_SRCS)
+	@mkdir -p $(BIN) $(DBGUNITS)
+	$(FPC) $(DEBUG) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+
+# Interactive TUI demonstration (nested panes, scrolling, modal, markdown colour).
+tui-demo: $(BIN)/hildegard-helper-tui-demo
+
+$(BIN)/hildegard-helper-tui-demo: $(EXAMPLES)/tui_demo.pas $(LIB_SRCS)
+	@mkdir -p $(BIN) $(DBGUNITS)
+	$(FPC) $(DEBUG) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+
+# Printable wall-clock benchmark. `make bench ARGS=--real` measures the real
+# terminal; `make perf` asserts the budgets and is not part of `make check`.
+bench: $(BIN)/hildegard-helper-tui-bench
+	$(BIN)/hildegard-helper-tui-bench $(ARGS)
+
+perf: $(BIN)/hildegard-helper-tui-bench
+	$(BIN)/hildegard-helper-tui-bench --assert
+
+$(BIN)/hildegard-helper-tui-bench: $(EXAMPLES)/tui_bench.pas $(LIB_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
@@ -143,4 +164,7 @@ help:
 	@echo "  make libsqlite                build vendored SQLite static archive"
 	@echo "  make release                  build an optimized example"
 	@echo "  make release-agent-cli        build the optimized, static CLI binary"
+	@echo "  make tui-demo                 build the interactive TUI demonstration"
+	@echo "  make bench [ARGS=--real]      build & run the TUI wall-clock benchmark"
+	@echo "  make perf                     run the benchmark with budget assertions"
 	@echo "  make clean                    remove build artifacts"
