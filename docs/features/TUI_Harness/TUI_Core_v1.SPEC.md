@@ -153,6 +153,10 @@ the change through an `ikResize` input event instead.
 
 Notes:
 
+- **Alternate screen.** `TSurfaceVideo` enters the alternate screen explicitly
+  (`CSI ?1049h`) on create and leaves it on destroy, in addition to `video`'s
+  terminfo-driven attempt, so a terminal `video` does not recognise still gets a
+  private screen instead of sharing (and scrolling) the normal one.
 - **256 colours.** `TSurfaceVideo` writes `Fg`/`Bg` into
   `TEnhancedVideoCell.ForegroundColor`/`BackgroundColor`; `video`'s `attr2ansi`
   emits the basic 16 colours for indices <= 15 and `38;5;n`/`48;5;n` for the
@@ -233,6 +237,11 @@ type
 
 Notes:
 
+- Terminals using the kitty keyboard protocol send
+  `CSI <codepoint>[;<mods>[:<event>]] u`; `input.decode` maps these as well
+  (release events are ignored), so keys work whether the terminal is in legacy
+  or kitty mode. The adapter also pops the protocol (`CSI < u`) on exit, in case
+  a previous program left it pushed.
 - Mouse is implemented: `TInputSourceTerminal` enables button-event and SGR
   mouse reporting (`?1000h`/`?1002h`/`?1006h`) while active and disables it on
   destroy, and `input.decode` maps `ESC[<Cb;Cx;CyM` (and the `m` release form) to

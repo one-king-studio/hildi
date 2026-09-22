@@ -26,6 +26,7 @@ type
     function MapFinal(AFinal: AnsiChar; const AParams: string;
       out AEvent: TInputEvent): Boolean;
     function MapTilde(const AParams: string; out AEvent: TInputEvent): Boolean;
+    function MapCSIu(const AParams: string; out AEvent: TInputEvent): Boolean;
     function MapMouse(const AParams: string; ARelease: Boolean;
       out AEvent: TInputEvent): Boolean;
   public
@@ -132,9 +133,88 @@ begin
       Result := MapTilde(AParams, AEvent);
     'M', 'm':
       Result := MapMouse(AParams, AFinal = 'm', AEvent);
+    'u':
+      Result := MapCSIu(AParams, AEvent);
   else
     Result := False;
   end;
+end;
+
+function TKeyDecoder.MapCSIu(const AParams: string;
+  out AEvent: TInputEvent): Boolean;
+var
+  S, ModPart: string;
+  Codepoint, Mods, EventType, P: Integer;
+begin
+  { Kitty keyboard protocol: CSI <codepoint>[;<mods>[:<event>]] u.
+    Event 1=press, 2=repeat, 3=release; releases are ignored. Mods bits are the
+    same as the legacy forms (mods-1: 1=shift, 2=alt, 4=ctrl). }
+  AEvent := Default(TInputEvent);
+  Result := False;
+  S := AParams;
+  P := Pos(';', S);
+  if P > 0 then
+  begin
+    Codepoint := StrToIntDef(Copy(S, 1, P - 1), 0);
+    ModPart := Copy(S, P + 1, MaxInt);
+  end
+  else
+  begin
+    Codepoint := StrToIntDef(S, 0);
+    ModPart := '';
+  end;
+  EventType := 0;
+  P := Pos(':', ModPart);
+  if P > 0 then
+  begin
+    EventType := StrToIntDef(Copy(ModPart, P + 1, MaxInt), 0);
+    ModPart := Copy(ModPart, 1, P - 1);
+  end;
+  if EventType = 3 then
+    Exit(False);
+  if ModPart <> '' then
+    Mods := StrToIntDef(ModPart, 1)
+  else
+    Mods := 1;
+  if Mods < 1 then
+    Mods := 1;
+  Dec(Mods);
+  AEvent.Kind := ikKey;
+  if (Mods and 1) <> 0 then
+    Include(AEvent.Key.Mods, moShift);
+  if (Mods and 2) <> 0 then
+    Include(AEvent.Key.Mods, moAlt);
+  if (Mods and 4) <> 0 then
+    Include(AEvent.Key.Mods, moCtrl);
+
+  case Codepoint of
+    13:
+      AEvent.Key.Kind := kkEnter;
+    9:
+      AEvent.Key.Kind := kkTab;
+    27:
+      AEvent.Key.Kind := kkEscape;
+    8, 127:
+      AEvent.Key.Kind := kkBackspace;
+  else
+    if Codepoint >= 32 then
+    begin
+      AEvent.Key.Kind := kkChar;
+      if Codepoint <= $FFFF then
+        AEvent.Key.Ch := UnicodeString(WideChar(Codepoint))
+      else
+        AEvent.Key.Ch := UnicodeString(WideChar(Codepoint));
+    end
+    else if (Codepoint >= 1) and (Codepoint <= 26) then
+    begin
+      AEvent.Key.Kind := kkChar;
+      AEvent.Key.Ch := UnicodeString(AnsiChar(Ord('a') + Codepoint - 1));
+      Include(AEvent.Key.Mods, moCtrl);
+    end
+    else
+      Exit(False);
+  end;
+  Result := True;
 end;
 
 function TKeyDecoder.MapMouse(const AParams: string; ARelease: Boolean;

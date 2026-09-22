@@ -32,6 +32,7 @@ type
     procedure TestDecodeIgnoresUnknownSequence;
     procedure TestDecodeMouseWheel;
     procedure TestDecodeMouseMotionAndRelease;
+    procedure TestDecodeKittyKeyboard;
   end;
 
 implementation
@@ -301,6 +302,37 @@ begin
       Ord('5'), Ord(';'), Ord('5'), Ord('m')]);
     AssertTrue('release decoded', D.Next(E));
     AssertTrue('button released', E.Mouse.Button = mbNone);
+  finally
+    D.Free;
+  end;
+end;
+
+procedure TTuiInputTest.TestDecodeKittyKeyboard;
+var
+  D: TKeyDecoder;
+  E: TInputEvent;
+begin
+  D := TKeyDecoder.Create;
+  try
+    { CSI 9 u = Tab press (kitty keyboard protocol). }
+    D.Feed([27, Ord('['), Ord('9'), Ord('u')]);
+    AssertTrue('tab press', D.Next(E) and (E.Key.Kind = kkTab));
+
+    { CSI 113 u = 'q' press. }
+    D.Feed([27, Ord('['), Ord('1'), Ord('1'), Ord('3'), Ord('u')]);
+    AssertTrue('q press', D.Next(E));
+    AssertTrue('is char', E.Key.Kind = kkChar);
+    AssertEquals('char value', 'q', E.Key.Ch);
+
+    { CSI 113;5 u = Ctrl+'q'; CSI 9;1:3 u is a release and is ignored. }
+    D.Feed([27, Ord('['), Ord('1'), Ord('1'), Ord('3'), Ord(';'),
+      Ord('5'), Ord('u')]);
+    AssertTrue('ctrl q press', D.Next(E));
+    AssertTrue('ctrl set', moCtrl in E.Key.Mods);
+
+    D.Feed([27, Ord('['), Ord('9'), Ord(';'), Ord('1'), Ord(':'),
+      Ord('3'), Ord('u')]);
+    AssertFalse('release ignored', D.Next(E));
   finally
     D.Free;
   end;

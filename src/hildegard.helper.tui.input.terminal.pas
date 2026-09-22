@@ -101,7 +101,9 @@ end;
 
 destructor TInputSourceTerminal.Destroy;
 const
-  MouseOff = #27'[?1006l'#27'[?1002l'#27'[?1000l';
+  { Disable mouse reporting and, defensively, pop the kitty keyboard protocol
+    (CSI < u) in case a previous program left it pushed. }
+  MouseOff = #27'[?1006l'#27'[?1002l'#27'[?1000l'#27'[<u';
 begin
   fpWrite(1, MouseOff[1], Length(MouseOff));
   FDecoder.Free;

@@ -43,6 +43,10 @@ implementation
 uses
   baseunix, termio, video;
 
+const
+  AltOn = #27'[?1049h';
+  AltOff = #27'[?1049l';
+
 function DimIndex(AIndex: Byte): Byte;
 var
   R, G, B: Integer;
@@ -103,11 +107,16 @@ begin
     leave the rest with a different background ("islands" of mismatched colour). }
   FNeedFullRepaint := True;
   InitEnhancedVideo;
+  { Enter the alternate screen explicitly. video does this from terminfo when it
+    recognises the terminal; some (ghostty, VSCode) it does not, in which case
+    drawing would share the normal screen and scroll its history. }
+  fpWrite(1, AltOn[1], Length(AltOn));
   SetCursorType(crHidden);
 end;
 
 destructor TSurfaceVideo.Destroy;
 begin
+  fpWrite(1, AltOff[1], Length(AltOff));
   SetCursorType(crUnderLine);
   DoneEnhancedVideo;
   inherited Destroy;
