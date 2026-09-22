@@ -76,6 +76,12 @@ begin
   Result.H := AH;
 end;
 
+function PointIn(const R: TRect; X, Y: Integer): Boolean;
+begin
+  Result := (X >= R.X) and (Y >= R.Y) and (X < R.X + R.W) and
+    (Y < R.Y + R.H);
+end;
+
 function Inset(const R: TRect; ADx, ADy: Integer): TRect;
 begin
   Result := Default(TRect);
@@ -227,10 +233,10 @@ procedure TShell.SetFocus(AIndex: Integer);
 begin
   FFocus := AIndex;
   if FFocus <> 0 then
-    FStatus.SetText('status: focus right (diff)   [Tab] switch  [m] modal  [q] quit',
+    FStatus.SetText('status: focus right (diff)   [Tab/click] switch  [m] modal  [q] quit',
       Span('', 244).Attr)
   else
-    FStatus.SetText('status: focus left (chat)   [Tab] switch  [m] modal  [q] quit',
+    FStatus.SetText('status: focus left (chat)   [Tab/click] switch  [m] modal  [q] quit',
       Span('', 244).Attr);
 end;
 
@@ -286,7 +292,21 @@ end;
 function TShell.HandleEvent(const E: TInputEvent): Boolean;
 begin
   if E.Kind = ikMouse then
+  begin
+    { Click or wheel over a pane focuses it. }
+    case E.Mouse.Button of
+      mbLeft, mbWheelUp, mbWheelDown:
+        begin
+          if PointIn(FChat.Bounds, E.Mouse.X, E.Mouse.Y) then
+            SetFocus(0)
+          else if PointIn(FDiff.Bounds, E.Mouse.X, E.Mouse.Y) then
+            SetFocus(1);
+        end;
+    else
+      ;
+    end;
     Exit(FChild.HandleEvent(E));
+  end;
   if E.Kind <> ikKey then
     Exit(False);
 
@@ -393,7 +413,7 @@ begin
 
   Status := TContainer.Create([Fill(1)], [Fixed(1)]);
   StatusText := TTextBlock.Create(
-    [Span('status: focus left (chat)   [Tab] switch  [m] modal  [q] quit',
+    [Span('status: focus left (chat)   [Tab/click] switch  [m] modal  [q] quit',
       244)], wmNone);
   Status.Add(StatusText, 0, 0);
 
