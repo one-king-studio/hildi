@@ -293,17 +293,13 @@ function TShell.HandleEvent(const E: TInputEvent): Boolean;
 begin
   if E.Kind = ikMouse then
   begin
-    { Click or wheel over a pane focuses it. }
-    case E.Mouse.Button of
-      mbLeft, mbWheelUp, mbWheelDown:
-        begin
-          if PointIn(FChat.Bounds, E.Mouse.X, E.Mouse.Y) then
-            SetFocus(0)
-          else if PointIn(FDiff.Bounds, E.Mouse.X, E.Mouse.Y) then
-            SetFocus(1);
-        end;
-    else
-      ;
+    { A left click focuses the pane under the pointer; the wheel only scrolls. }
+    if E.Mouse.Button = mbLeft then
+    begin
+      if PointIn(FChat.Bounds, E.Mouse.X, E.Mouse.Y) then
+        SetFocus(0)
+      else if PointIn(FDiff.Bounds, E.Mouse.X, E.Mouse.Y) then
+        SetFocus(1);
     end;
     Exit(FChild.HandleEvent(E));
   end;
