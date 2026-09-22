@@ -101,8 +101,9 @@ $(BIN)/hildegard-helper-demo: $(EXAMPLES)/demo_harness.pas $(LIB_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
-# Interactive TUI demonstration (nested panes, scrolling, modal, markdown colour).
+# Interactive TUI demonstration: build, then run it in the terminal.
 tui-demo: $(BIN)/hildegard-helper-tui-demo
+	$(BIN)/hildegard-helper-tui-demo
 
 $(BIN)/hildegard-helper-tui-demo: $(EXAMPLES)/tui_demo.pas $(LIB_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
@@ -164,7 +165,7 @@ help:
 	@echo "  make libsqlite                build vendored SQLite static archive"
 	@echo "  make release                  build an optimized example"
 	@echo "  make release-agent-cli        build the optimized, static CLI binary"
-	@echo "  make tui-demo                 build the interactive TUI demonstration"
+	@echo "  make tui-demo                 build & run the interactive TUI demonstration"
 	@echo "  make bench [ARGS=--real]      build & run the TUI wall-clock benchmark"
 	@echo "  make perf                     run the benchmark with budget assertions"
 	@echo "  make clean                    remove build artifacts"
