@@ -472,7 +472,14 @@ begin
   App.Background := Bg;
   Shell.SetApp(App);
   try
-    App.Run;
+    { Same as App.Run, but also stop on SIGTERM/SIGINT/SIGHUP so the terminal is
+      restored on the normal exit path. }
+    while App.Step do
+    begin
+      if InputTerm.Terminated then
+        App.Stop;
+      Sleep(1);
+    end;
   finally
     App.Free;
     Input := nil;

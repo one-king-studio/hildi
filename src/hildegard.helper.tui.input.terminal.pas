@@ -29,6 +29,7 @@ type
     FTrace: Boolean;
     FTracePath: string;
     procedure TraceLine(const S: string);
+    procedure DrainInput;
     function ResizeEvent(out AEvent: TInputEvent): Boolean;
     procedure ReadAvailable;
   public
@@ -42,6 +43,10 @@ type
       mode is already active on the input fd here, which is why this lives in
       the adapter rather than in the caller. }
     function QueryBackground: string;
+
+    { True once SIGTERM/SIGINT/SIGHUP has been received; the caller should stop
+      its loop so the terminal is restored on the normal exit path. }
+    function Terminated: Boolean;
   end;
 
 implementation
@@ -51,6 +56,16 @@ uses
 
 function c_isatty(Fd: cint): cint; cdecl; external 'c' name 'isatty';
 function c_tcflush(Fd, Queue: cint): cint; cdecl; external 'c' name 'tcflush';
+
+var
+  GTerminated: LongInt = 0;
+
+procedure TermSignalHandler(Sig: cint); cdecl;
+begin
+  { Only sets a flag: the loop checks it and exits through the normal path so
+    video/mouse/keyboard and termios are all restored. }
+  GTerminated := 1;
+end;
 
 { The fd to read keys from and to set raw mode on. Prefer stdin; some terminals
   (e.g. VSCode, Ghostty) launch the process with stdin not connected to the tty,
@@ -91,6 +106,9 @@ begin
       FRawSet := True;
   end;
   fpWrite(1, MouseOn[1], Length(MouseOn));
+  fpsignal(SIGTERM, @TermSignalHandler);
+  fpsignal(SIGINT, @TermSignalHandler);
+  fpsignal(SIGHUP, @TermSignalHandler);
   FDecoder := TKeyDecoder.Create;
   FillChar(WS, SizeOf(WS), 0);
   if (fpioctl(FInputFd, TIOCGWINSZ, @WS) = 0) and (WS.ws_col > 0) and
@@ -113,12 +131,45 @@ const
   MouseOff = #27'[?1006l'#27'[?1002l'#27'[?1000l'#27'[<u';
 begin
   fpWrite(1, MouseOff[1], Length(MouseOff));
+  { Discard pending input (late key-release events, a late OSC reply) so it is
+    not handed to the shell once we restore the terminal. }
+  DrainInput;
   FDecoder.Free;
   if FRawSet then
     TCSetAttr(FInputFd, TCSANOW, FOldTio);
   if FOpenedTty then
     fpClose(FInputFd);
+  fpsignal(SIGTERM, nil);
+  fpsignal(SIGINT, nil);
+  fpsignal(SIGHUP, nil);
   inherited Destroy;
+end;
+
+procedure TInputSourceTerminal.DrainInput;
+var
+  Bytes: array[0..255] of Byte;
+  Fds: TFDSet;
+  TV: TTimeVal;
+  Attempt: Integer;
+begin
+  if FInputFd < 0 then
+    Exit;
+  for Attempt := 1 to 4 do
+  begin
+    fpFD_ZERO(Fds);
+    fpFD_SET(FInputFd, Fds);
+    TV.tv_sec := 0;
+    TV.tv_usec := 0;
+    if fpSelect(FInputFd + 1, @Fds, nil, nil, @TV) > 0 then
+      fpRead(FInputFd, @Bytes[0], SizeOf(Bytes));
+    Sleep(5);
+  end;
+  c_tcflush(FInputFd, TCIFLUSH);
+end;
+
+function TInputSourceTerminal.Terminated: Boolean;
+begin
+  Result := GTerminated <> 0;
 end;
 
 procedure TInputSourceTerminal.TraceLine(const S: string);
