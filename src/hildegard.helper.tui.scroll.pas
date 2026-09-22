@@ -49,9 +49,12 @@ type
     FViewport: TRect;
     FContentW, FContentH: Integer;
     FVBar, FHBar: TScrollBar;
+    FBarDragging: Boolean;
     function MaxScrollX: Integer;
     function MaxScrollY: Integer;
     function PointInside(AX, AY: Integer): Boolean;
+    procedure SyncBars;
+    procedure DragBarTo(AY: Integer);
     procedure UpdateChildBounds;
     procedure SetScroll(AX, AY: Integer);
     procedure SetScrollX(AValue: Integer);
@@ -83,6 +86,12 @@ begin
   Result.Y := AY;
   Result.W := AW;
   Result.H := AH;
+end;
+
+function PointInRect(const R: TRect; X, Y: Integer): Boolean;
+begin
+  Result := (X >= R.X) and (Y >= R.Y) and (X < R.X + R.W) and
+    (Y < R.Y + R.H);
 end;
 
 { TScrollBar }
@@ -266,7 +275,34 @@ begin
     AY := MaxScrollY;
   FScrollX := AX;
   FScrollY := AY;
+  SyncBars;
   UpdateChildBounds;
+end;
+
+procedure TScrollContainer.SyncBars;
+begin
+  if FVBar <> nil then
+    FVBar.Value := FScrollY;
+  if FHBar <> nil then
+    FHBar.Value := FScrollX;
+end;
+
+procedure TScrollContainer.DragBarTo(AY: Integer);
+var
+  Track, MaxV, Num: Integer;
+begin
+  if FVBar = nil then
+    Exit;
+  Track := FVBar.Bounds.H;
+  if Track <= 1 then
+    Exit;
+  MaxV := MaxScrollY;
+  Num := AY - FVBar.Bounds.Y;
+  if Num < 0 then
+    Num := 0;
+  if Num > Track - 1 then
+    Num := Track - 1;
+  SetScroll(0, Num * MaxV div (Track - 1));
 end;
 
 procedure TScrollContainer.SetScrollX(AValue: Integer);
@@ -296,6 +332,28 @@ begin
   Result := False;
   if E.Kind = ikMouse then
   begin
+    { Continue an in-progress scrollbar drag (release ends it). }
+    if FBarDragging then
+    begin
+      if E.Mouse.Button = mbNone then
+      begin
+        FBarDragging := False;
+        Exit(True);
+      end;
+      DragBarTo(E.Mouse.Y);
+      Exit(True);
+    end;
+    { Begin a drag on the vertical scrollbar track. }
+    if (FVBar <> nil) and PointInRect(FVBar.Bounds, E.Mouse.X, E.Mouse.Y) then
+    begin
+      if E.Mouse.Button = mbLeft then
+      begin
+        FBarDragging := True;
+        DragBarTo(E.Mouse.Y);
+        Exit(True);
+      end;
+      Exit(False);
+    end;
     if ((E.Mouse.Button = mbWheelUp) or (E.Mouse.Button = mbWheelDown)) and
       PointInside(E.Mouse.X, E.Mouse.Y) then
     begin
@@ -392,7 +450,6 @@ begin
     FVBar.Arrange(Rect4(ABounds.X + ABounds.W - 1, ABounds.Y, 1, VpH));
     FVBar.Page := VpH;
     FVBar.Range := FContentH;
-    FVBar.Value := FScrollY;
   end
   else
     FreeAndNil(FVBar);
@@ -404,10 +461,11 @@ begin
     FHBar.Arrange(Rect4(ABounds.X, ABounds.Y + ABounds.H - 1, VpW, 1));
     FHBar.Page := VpW;
     FHBar.Range := FContentW;
-    FHBar.Value := FScrollX;
   end
   else
     FreeAndNil(FHBar);
+
+  SyncBars;
 end;
 
 procedure TScrollContainer.Render(const S: ISurface);

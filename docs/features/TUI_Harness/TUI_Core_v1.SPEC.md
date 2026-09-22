@@ -233,12 +233,13 @@ type
 
 Notes:
 
-- Mouse is implemented: `TInputSourceTerminal` enables SGR mouse reporting
-  (`?1000h`/`?1006h`) while active and disables it on destroy, and
-  `input.decode` maps `ESC[<Cb;Cx;CyM` to a `TMouseEvent` (wheel up/down and the
-  buttons). `TScrollContainer` scrolls on a wheel event inside its viewport, so
-  the wheel scrolls the pane under the pointer rather than the terminal
-  scrollback. Other widgets need not consume mouse to satisfy the feature.
+- Mouse is implemented: `TInputSourceTerminal` enables button-event and SGR
+  mouse reporting (`?1000h`/`?1002h`/`?1006h`) while active and disables it on
+  destroy, and `input.decode` maps `ESC[<Cb;Cx;CyM` (and the `m` release form) to
+  a `TMouseEvent`: wheel up/down, the buttons, and motion while a button is held
+  (the `0x20` bit). `TScrollContainer` scrolls on a wheel event inside its
+  viewport and drags on its scrollbar, so the wheel/pointer drives the pane, not
+  the terminal scrollback. Other widgets need not consume mouse.
 - `Wait` is used by the application loop to idle without busy-spinning; a
   timeout of zero is a pure poll.
 
@@ -386,8 +387,10 @@ Behaviour:
 
 - `TScrollContainer` handles `kkUp`/`kkDown`/`kkPageUp`/`kkPageDown`/`kkHome`/
   `kkEnd` when focused, and forwards any other event to its child first.
-- Scrollbar interaction in v1 is keyboard-driven through the container; the
-  scrollbar is display plus optional click in a later version.
+- The scrollbar reflects the container's offset (its `Value` is updated on every
+  scroll) and is draggable: a left press on the vertical track jumps to that
+  position and a held drag tracks the pointer; the wheel scrolls the pane under
+  the pointer. Keyboard scrolling is also handled by the container.
 - Clamping: `ScrollX`/`ScrollY` are clamped to `[0, max(0, Content - Viewport)]`.
 - Scrollbar geometry: the track is the bar's own length (height for vertical,
   width for horizontal). When `Range <= Page` the thumb covers the whole track;

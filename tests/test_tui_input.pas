@@ -31,6 +31,7 @@ type
     procedure TestDecodeIncompleteSequenceBuffers;
     procedure TestDecodeIgnoresUnknownSequence;
     procedure TestDecodeMouseWheel;
+    procedure TestDecodeMouseMotionAndRelease;
   end;
 
 implementation
@@ -276,6 +277,30 @@ begin
     AssertTrue('wheel up', E.Mouse.Button = mbWheelUp);
     AssertEquals('mouse x', 9, E.Mouse.X);
     AssertEquals('mouse y', 4, E.Mouse.Y);
+  finally
+    D.Free;
+  end;
+end;
+
+procedure TTuiInputTest.TestDecodeMouseMotionAndRelease;
+var
+  D: TKeyDecoder;
+  E: TInputEvent;
+begin
+  D := TKeyDecoder.Create;
+  try
+    { Motion with the left button held: Cb has the 0x20 motion bit. }
+    D.Feed([27, Ord('['), Ord('<'), Ord('3'), Ord('2'), Ord(';'),
+      Ord('5'), Ord(';'), Ord('5'), Ord('M')]);
+    AssertTrue('motion decoded', D.Next(E));
+    AssertTrue('is mouse', E.Kind = ikMouse);
+    AssertTrue('left button held', E.Mouse.Button = mbLeft);
+
+    { Release (final 'm') ends the button. }
+    D.Feed([27, Ord('['), Ord('<'), Ord('0'), Ord(';'),
+      Ord('5'), Ord(';'), Ord('5'), Ord('m')]);
+    AssertTrue('release decoded', D.Next(E));
+    AssertTrue('button released', E.Mouse.Button = mbNone);
   finally
     D.Free;
   end;

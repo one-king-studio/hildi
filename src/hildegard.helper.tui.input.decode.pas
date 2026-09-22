@@ -26,7 +26,8 @@ type
     function MapFinal(AFinal: AnsiChar; const AParams: string;
       out AEvent: TInputEvent): Boolean;
     function MapTilde(const AParams: string; out AEvent: TInputEvent): Boolean;
-    function MapMouse(const AParams: string; out AEvent: TInputEvent): Boolean;
+    function MapMouse(const AParams: string; ARelease: Boolean;
+      out AEvent: TInputEvent): Boolean;
   public
     procedure Feed(const AData: array of Byte);
     function Next(out AEvent: TInputEvent): Boolean;
@@ -130,13 +131,13 @@ begin
     '~':
       Result := MapTilde(AParams, AEvent);
     'M', 'm':
-      Result := MapMouse(AParams, AEvent);
+      Result := MapMouse(AParams, AFinal = 'm', AEvent);
   else
     Result := False;
   end;
 end;
 
-function TKeyDecoder.MapMouse(const AParams: string;
+function TKeyDecoder.MapMouse(const AParams: string; ARelease: Boolean;
   out AEvent: TInputEvent): Boolean;
 var
   S, T: string;
@@ -181,6 +182,8 @@ begin
     else
       AEvent.Mouse.Button := mbNone;
     end;
+  if ARelease then
+    AEvent.Mouse.Button := mbNone;
   Result := True;
 end;
 

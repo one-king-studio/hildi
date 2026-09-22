@@ -9,6 +9,7 @@ interface
 uses
   SysUtils, fpcunit, testregistry,
   hildegard.helper.tui.base, hildegard.helper.tui.input,
+  hildegard.helper.tui.surface,
   hildegard.helper.tui.widget, hildegard.helper.tui.scroll;
 
 type
@@ -24,6 +25,7 @@ type
   private
     function Rc(AX, AY, AW, AH: Integer): TRect;
     function KeyEvent(AKind: TKeyKind): TInputEvent;
+    function MouseEvent(AX, AY: Integer; AButton: TMouseButton): TInputEvent;
   published
     procedure TestContentSmallerThanViewportDoesNotScroll;
     procedure TestContentEqualViewportDoesNotScroll;
@@ -32,6 +34,8 @@ type
     procedure TestKeyboardScrollKeysMoveViewport;
     procedure TestTwoContainersScrollIndependently;
     procedure TestScrollbarThumbGeometry;
+    procedure TestScrollbarThumbTracksScroll;
+    procedure TestScrollbarDragScrolls;
   end;
 
 implementation
@@ -64,6 +68,16 @@ begin
   Result := Default(TInputEvent);
   Result.Kind := ikKey;
   Result.Key.Kind := AKind;
+end;
+
+function TTuiScrollTest.MouseEvent(AX, AY: Integer;
+  AButton: TMouseButton): TInputEvent;
+begin
+  Result := Default(TInputEvent);
+  Result.Kind := ikMouse;
+  Result.Mouse.X := AX;
+  Result.Mouse.Y := AY;
+  Result.Mouse.Button := AButton;
 end;
 
 procedure TTuiScrollTest.TestContentSmallerThanViewportDoesNotScroll;
@@ -186,6 +200,61 @@ begin
     AssertEquals('full thumb at origin', 0, Bar.ThumbStart);
   finally
     Bar.Free;
+  end;
+end;
+
+procedure TTuiScrollTest.TestScrollbarThumbTracksScroll;
+var
+  C: TScrollContainer;
+  S: TSurfaceMemory;
+begin
+  S := TSurfaceMemory.Create(10, 10);
+  try
+    C := TScrollContainer.Create(TScrollProbe.Create(10, 100), smAuto, smNever);
+    try
+      C.Arrange(Rc(0, 0, 10, 10));
+      S.Clear(DefaultAttr);
+      C.Render(S);
+      S.Flush;
+      AssertEquals('thumb at top', '#', S.CellAt(9, 0).Ch);
+
+      C.ScrollTo(0, 90);
+      S.Clear(DefaultAttr);
+      C.Render(S);
+      S.Flush;
+      AssertEquals('thumb moved to bottom', '#', S.CellAt(9, 9).Ch);
+      AssertEquals('track left behind', '|', S.CellAt(9, 0).Ch);
+    finally
+      C.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiScrollTest.TestScrollbarDragScrolls;
+var
+  C: TScrollContainer;
+  E: TInputEvent;
+begin
+  C := TScrollContainer.Create(TScrollProbe.Create(10, 100), smAuto, smNever);
+  try
+    C.Arrange(Rc(0, 0, 10, 10));
+    { Press on the bottom of the vertical track (column 9). }
+    AssertTrue('press on bar handled',
+      C.HandleEvent(MouseEvent(9, 9, mbLeft)));
+    AssertEquals('dragged to bottom', 90, C.ScrollY);
+    { Motion while held updates the position. }
+    E := MouseEvent(9, 4, mbLeft);
+    AssertTrue('motion handled', C.HandleEvent(E));
+    AssertEquals('dragged to middle', 40, C.ScrollY);
+    { Release ends the drag; a wheel event then scrolls normally. }
+    AssertTrue('release handled', C.HandleEvent(MouseEvent(9, 4, mbNone)));
+    AssertTrue('wheel handled',
+      C.HandleEvent(MouseEvent(3, 4, mbWheelUp)));
+    AssertEquals('wheel scrolled up by three', 37, C.ScrollY);
+  finally
+    C.Free;
   end;
 end;
 

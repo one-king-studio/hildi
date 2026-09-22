@@ -54,9 +54,9 @@ end;
 
 constructor TInputSourceTerminal.Create;
 const
-  { Enable button + SGR-extended mouse reporting so wheel/click reach the app
-    instead of the terminal scrollback. }
-  MouseOn = #27'[?1000h'#27'[?1006h';
+  { Enable button-event and SGR-extended mouse reporting so clicks, wheel and
+    drag motion reach the app instead of the terminal scrollback. }
+  MouseOn = #27'[?1000h'#27'[?1002h'#27'[?1006h';
 var
   WS: TWinsize;
   Tio: termios;
@@ -94,7 +94,7 @@ end;
 
 destructor TInputSourceTerminal.Destroy;
 const
-  MouseOff = #27'[?1006l'#27'[?1000l';
+  MouseOff = #27'[?1006l'#27'[?1002l'#27'[?1000l';
 begin
   fpWrite(1, MouseOff[1], Length(MouseOff));
   FDecoder.Free;
