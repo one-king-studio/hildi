@@ -291,6 +291,19 @@ docs/features/FEATURES.md          (status)
   `hildegard.helper.tui.input.decode` (unit-tested). The SPEC was updated.
 - **`TTuiApp.Run` idles (1 ms) between steps.** A tight `Step` loop can starve
   terminal input on macOS; tests drive `Step` directly, so only `Run` changed.
+- **Mouse is implemented (v1 said "deferred").** The operator asked for it.
+  `input.decode` parses SGR mouse (`ESC[<Cb;Cx;CyM`), the adapter enables
+  `?1000h`/`?1006h` reporting, and `TScrollContainer` scrolls on a wheel event in
+  its viewport, so the wheel scrolls the pane under the pointer, not the terminal
+  scrollback. The demo also uses plain `j`/`k`/`u`/`d` and `Tab` for keyboard
+  scrolling, since some terminals intercept PageUp/PageDown for scrollback.
+- **Dim is made visible by darkening the palette.** `TSurfaceVideo.DimRect` now
+  remaps fg/bg to darker indices as well as setting `evaFaint`, because many
+  terminals ignore SGR 2; the in-memory surface still only records `sfDim`.
+- **The modal is a filled panel.** The demo wraps modal content in a `TPanel`
+  (background + inset child) so it reads as a surface over the dimmed base, and
+  the panel handles `m`/Escape to dismiss (the app base otherwise never sees keys
+  while a modal is up).
 
 ### Discovered work
 

@@ -42,6 +42,38 @@ implementation
 uses
   baseunix, termio, video;
 
+function DimIndex(AIndex: Byte): Byte;
+var
+  R, G, B: Integer;
+begin
+  if AIndex < 8 then
+    Result := 0
+  else if AIndex < 16 then
+    Result := AIndex - 8
+  else if AIndex < 232 then
+  begin
+    { 6x6x6 colour cube: step each channel down one level. }
+    R := (AIndex - 16) div 36;
+    G := ((AIndex - 16) mod 36) div 6;
+    B := (AIndex - 16) mod 6;
+    if R > 0 then
+      Dec(R);
+    if G > 0 then
+      Dec(G);
+    if B > 0 then
+      Dec(B);
+    Result := 16 + R * 36 + G * 6 + B;
+  end
+  else
+  begin
+    { greyscale ramp: drop ~1/3. }
+    if AIndex > 232 + 8 then
+      Result := AIndex - 8
+    else
+      Result := 232;
+  end;
+end;
+
 function ToVideoAttrs(const AStyle: TStyle): TEnhancedVideoAttributes;
 begin
   Result := [];
@@ -211,6 +243,12 @@ begin
       if (X < 0) or (Y < 0) or (X >= ScreenWidth) or (Y >= ScreenHeight) then
         Continue;
       I := Y * Integer(ScreenWidth) + X;
+      { Darken the palette as well as setting faint: many terminals ignore
+        SGR 2, so without the remap the dim would be invisible. }
+      EnhancedVideoBuf[I].ForegroundColor :=
+        DimIndex(EnhancedVideoBuf[I].ForegroundColor);
+      EnhancedVideoBuf[I].BackgroundColor :=
+        DimIndex(EnhancedVideoBuf[I].BackgroundColor);
       EnhancedVideoBuf[I].EnhancedVideoAttributes :=
         EnhancedVideoBuf[I].EnhancedVideoAttributes + [evaFaint];
     end;

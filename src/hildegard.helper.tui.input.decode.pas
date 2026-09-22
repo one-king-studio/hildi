@@ -26,6 +26,7 @@ type
     function MapFinal(AFinal: AnsiChar; const AParams: string;
       out AEvent: TInputEvent): Boolean;
     function MapTilde(const AParams: string; out AEvent: TInputEvent): Boolean;
+    function MapMouse(const AParams: string; out AEvent: TInputEvent): Boolean;
   public
     procedure Feed(const AData: array of Byte);
     function Next(out AEvent: TInputEvent): Boolean;
@@ -128,9 +129,59 @@ begin
       end;
     '~':
       Result := MapTilde(AParams, AEvent);
+    'M', 'm':
+      Result := MapMouse(AParams, AEvent);
   else
     Result := False;
   end;
+end;
+
+function TKeyDecoder.MapMouse(const AParams: string;
+  out AEvent: TInputEvent): Boolean;
+var
+  S, T: string;
+  Cb, Cx, Cy, P: Integer;
+begin
+  AEvent := Default(TInputEvent);
+  Result := False;
+  S := AParams;
+  if (S = '') or (S[1] <> '<') then
+    Exit;
+  S := Copy(S, 2, MaxInt);
+  P := Pos(';', S);
+  if P = 0 then
+    Exit;
+  Cb := StrToIntDef(Copy(S, 1, P - 1), 0);
+  T := Copy(S, P + 1, MaxInt);
+  P := Pos(';', T);
+  if P = 0 then
+    Exit;
+  Cx := StrToIntDef(Copy(T, 1, P - 1), 0);
+  Cy := StrToIntDef(Copy(T, P + 1, MaxInt), 0);
+  if (Cx <= 0) or (Cy <= 0) then
+    Exit;
+  AEvent.Kind := ikMouse;
+  AEvent.Mouse.X := Cx - 1;
+  AEvent.Mouse.Y := Cy - 1;
+  if (Cb and 64) <> 0 then
+  begin
+    if (Cb and 1) = 0 then
+      AEvent.Mouse.Button := mbWheelUp
+    else
+      AEvent.Mouse.Button := mbWheelDown;
+  end
+  else
+    case Cb and 3 of
+      0:
+        AEvent.Mouse.Button := mbLeft;
+      1:
+        AEvent.Mouse.Button := mbMiddle;
+      2:
+        AEvent.Mouse.Button := mbRight;
+    else
+      AEvent.Mouse.Button := mbNone;
+    end;
+  Result := True;
 end;
 
 function TKeyDecoder.MapTilde(const AParams: string;

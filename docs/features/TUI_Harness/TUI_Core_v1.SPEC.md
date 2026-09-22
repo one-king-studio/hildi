@@ -160,13 +160,12 @@ Notes:
 - **Diff and flush.** `TSurfaceVideo.Flush` calls `video.UpdateScreen(False)`;
   `video` diffs against its own previous buffer, so the toolkit never tracks
   damage and unchanged cells are not re-emitted.
-- **DimRect** rewrites the attributes of cells already in the region: it adds
-  `sfDim` (mapped by the backend to `evaFaint`) to every cell, leaving the glyphs
-  and the colour indices unchanged. Because the whole frame is rebuilt on every
-  `Step`, dimming never accumulates. If a terminal does not render faint, the
-  terminal surface falls back to mapping each colour index to a darker index
-  (documented; the in-memory surface always records `sfDim`, so behaviour is
-  testable regardless of terminal support).
+- **DimRect** rewrites cells already in the region without erasing them: it adds
+  `sfDim` and, in the terminal surface, also maps each colour index to a darker
+  one (many terminals ignore SGR 2 `evaFaint`, so the palette remap is what makes
+  the dim visible). The in-memory surface only records `sfDim`, so the behaviour
+  is asserted regardless of terminal support. Because the whole frame is rebuilt
+  on every `Step`, dimming never accumulates.
 - `Put` outside the clip rectangle is silently ignored (all widgets may draw
   freely; clipping is enforced by the surface).
 
@@ -231,9 +230,12 @@ type
 
 Notes:
 
-- v1 emits `ikMouse` only if the terminal source is implemented for it; the
-  toolkit consumes the event shape but no widget needs mouse to satisfy the
-  feature. Mouse can be deferred without changing contracts.
+- Mouse is implemented: `TInputSourceTerminal` enables SGR mouse reporting
+  (`?1000h`/`?1006h`) while active and disables it on destroy, and
+  `input.decode` maps `ESC[<Cb;Cx;CyM` to a `TMouseEvent` (wheel up/down and the
+  buttons). `TScrollContainer` scrolls on a wheel event inside its viewport, so
+  the wheel scrolls the pane under the pointer rather than the terminal
+  scrollback. Other widgets need not consume mouse to satisfy the feature.
 - `Wait` is used by the application loop to idle without busy-spinning; a
   timeout of zero is a pure poll.
 

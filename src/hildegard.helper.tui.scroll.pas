@@ -51,6 +51,7 @@ type
     FVBar, FHBar: TScrollBar;
     function MaxScrollX: Integer;
     function MaxScrollY: Integer;
+    function PointInside(AX, AY: Integer): Boolean;
     procedure UpdateChildBounds;
     procedure SetScroll(AX, AY: Integer);
     procedure SetScrollX(AValue: Integer);
@@ -239,6 +240,12 @@ begin
     Result := 0;
 end;
 
+function TScrollContainer.PointInside(AX, AY: Integer): Boolean;
+begin
+  Result := (AX >= FViewport.X) and (AY >= FViewport.Y) and
+    (AX < FViewport.X + FViewport.W) and (AY < FViewport.Y + FViewport.H);
+end;
+
 procedure TScrollContainer.UpdateChildBounds;
 begin
   if FChild = nil then
@@ -287,6 +294,19 @@ var
   PageStep: Integer;
 begin
   Result := False;
+  if E.Kind = ikMouse then
+  begin
+    if ((E.Mouse.Button = mbWheelUp) or (E.Mouse.Button = mbWheelDown)) and
+      PointInside(E.Mouse.X, E.Mouse.Y) then
+    begin
+      if E.Mouse.Button = mbWheelUp then
+        ScrollBy(0, -3)
+      else
+        ScrollBy(0, 3);
+      Exit(True);
+    end;
+    Exit(False);
+  end;
   if E.Kind = ikKey then
   begin
     PageStep := FViewport.H;

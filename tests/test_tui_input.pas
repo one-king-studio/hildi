@@ -29,6 +29,7 @@ type
     procedure TestDecodeFunctionKeys;
     procedure TestDecodeUtf8;
     procedure TestDecodeIncompleteSequenceBuffers;
+    procedure TestDecodeMouseWheel;
   end;
 
 implementation
@@ -235,6 +236,26 @@ begin
     AssertTrue('completed', D.Next(E));
     AssertTrue('is up', E.Key.Kind = kkUp);
     AssertEquals('buffer drained', 0, D.Buffered);
+  finally
+    D.Free;
+  end;
+end;
+
+procedure TTuiInputTest.TestDecodeMouseWheel;
+var
+  D: TKeyDecoder;
+  E: TInputEvent;
+begin
+  D := TKeyDecoder.Create;
+  try
+    { SGR mouse: ESC [ < Cb ; Cx ; Cy M ; wheel up Cb=64 at (10,5) }
+    D.Feed([27, Ord('['), Ord('<'), Ord('6'), Ord('4'), Ord(';'),
+      Ord('1'), Ord('0'), Ord(';'), Ord('5'), Ord('M')]);
+    AssertTrue('wheel decoded', D.Next(E));
+    AssertTrue('is mouse', E.Kind = ikMouse);
+    AssertTrue('wheel up', E.Mouse.Button = mbWheelUp);
+    AssertEquals('mouse x', 9, E.Mouse.X);
+    AssertEquals('mouse y', 4, E.Mouse.Y);
   finally
     D.Free;
   end;

@@ -39,6 +39,10 @@ uses
   SysUtils, baseunix;
 
 constructor TInputSourceTerminal.Create;
+const
+  { Enable button + SGR-extended mouse reporting so wheel/click reach the app
+    instead of the terminal scrollback. }
+  MouseOn = #27'[?1000h'#27'[?1006h';
 var
   WS: TWinsize;
   Tio: termios;
@@ -52,6 +56,7 @@ begin
     if TCSetAttr(0, TCSANOW, Tio) = 0 then
       FRawSet := True;
   end;
+  fpWrite(1, MouseOn[1], Length(MouseOn));
   FDecoder := TKeyDecoder.Create;
   FillChar(WS, SizeOf(WS), 0);
   if (fpioctl(0, TIOCGWINSZ, @WS) = 0) and (WS.ws_col > 0) and (WS.ws_row > 0)
@@ -68,7 +73,10 @@ begin
 end;
 
 destructor TInputSourceTerminal.Destroy;
+const
+  MouseOff = #27'[?1006l'#27'[?1000l';
 begin
+  fpWrite(1, MouseOff[1], Length(MouseOff));
   FDecoder.Free;
   if FRawSet then
     TCSetAttr(0, TCSANOW, FOldTio);
