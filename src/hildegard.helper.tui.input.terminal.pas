@@ -36,6 +36,12 @@ type
     destructor Destroy; override;
     function Poll(out AEvent: TInputEvent): Boolean;
     function Wait(ATimeoutMs: Integer; out AEvent: TInputEvent): Boolean;
+
+    { Query the terminal background (OSC 11) and return its raw reply, draining
+      the response so it never leaks to the shell. Empty if unsupported. Raw
+      mode is already active on the input fd here, which is why this lives in
+      the adapter rather than in the caller. }
+    function QueryBackground: string;
   end;
 
 implementation
@@ -44,6 +50,7 @@ uses
   ctypes, SysUtils, baseunix;
 
 function c_isatty(Fd: cint): cint; cdecl; external 'c' name 'isatty';
+function c_tcflush(Fd, Queue: cint): cint; cdecl; external 'c' name 'tcflush';
 
 { The fd to read keys from and to set raw mode on. Prefer stdin; some terminals
   (e.g. VSCode, Ghostty) launch the process with stdin not connected to the tty,
@@ -198,6 +205,43 @@ begin
       [Ord(AEvent.Kind), Ord(AEvent.Key.Kind),
       string(AEvent.Key.Ch), Ord(AEvent.Mouse.Button),
       AEvent.Mouse.X, AEvent.Mouse.Y]));
+end;
+
+function TInputSourceTerminal.QueryBackground: string;
+const
+  Query = #27']11;?'#27'\';
+var
+  Bytes: array[0..255] of Byte;
+  N, I, Attempt: Integer;
+  Fds: TFDSet;
+  TV: TTimeVal;
+begin
+  Result := '';
+  if FInputFd < 0 then
+    Exit;
+  fpWrite(1, Query[1], Length(Query));
+  for Attempt := 1 to 15 do
+  begin
+    fpFD_ZERO(Fds);
+    fpFD_SET(FInputFd, Fds);
+    TV.tv_sec := 0;
+    TV.tv_usec := 0;
+    if fpSelect(FInputFd + 1, @Fds, nil, nil, @TV) > 0 then
+    begin
+      N := fpRead(FInputFd, @Bytes[0], SizeOf(Bytes));
+      if N > 0 then
+        for I := 0 to N - 1 do
+          Result := Result + AnsiChar(Bytes[I]);
+      if (Pos(#7, Result) > 0) or (Pos(#27 + '\', Result) > 0) then
+        Break;
+    end;
+    Sleep(10);
+  end;
+  { Discard any straggler bytes (a late reply, or keys typed during startup) so
+    they cannot reach the shell once we restore the terminal. }
+  c_tcflush(FInputFd, TCIFLUSH);
+  if FTrace then
+    TraceLine('background query reply ' + Result);
 end;
 
 function TInputSourceTerminal.Wait(ATimeoutMs: Integer;

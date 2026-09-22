@@ -22,7 +22,7 @@ program tui_demo;
 {$mode delphi}{$H+}
 
 uses
-  SysUtils, baseunix,
+  SysUtils,
   hildegard.helper.tui.base, hildegard.helper.tui.input,
   hildegard.helper.tui.surface, hildegard.helper.tui.surface.video,
   hildegard.helper.tui.widget, hildegard.helper.tui.text,
@@ -161,17 +161,10 @@ begin
     wmNone);
 end;
 
-{ Query the terminal for its background and choose a palette. }
-function QueryThemeKind: TThemeKind;
-const
-  OSC11Query = #27']11;?'#27'\';
+{ Choose a palette from the env override, COLORFGBG, or the OSC 11 reply. }
+function ChooseThemeKind(const AReply: string): TThemeKind;
 var
   V: string;
-  Bytes: array[0..255] of Byte;
-  Buf: string;
-  N, I, Attempt: Integer;
-  Fds: TFDSet;
-  TV: TTimeVal;
   R, G, B: Byte;
 begin
   V := LowerCase(GetEnvironmentVariable('HILDEGARD_TUI_THEME'));
@@ -182,26 +175,7 @@ begin
   if ParseColorFGBG(GetEnvironmentVariable('COLORFGBG'), Result) then
     Exit;
   Result := thDark;
-  fpWrite(1, OSC11Query[1], Length(OSC11Query));
-  Buf := '';
-  for Attempt := 1 to 20 do
-  begin
-    fpFD_ZERO(Fds);
-    fpFD_SET(0, Fds);
-    TV.tv_sec := 0;
-    TV.tv_usec := 0;
-    if fpSelect(1, @Fds, nil, nil, @TV) > 0 then
-    begin
-      N := fpRead(0, @Bytes[0], SizeOf(Bytes));
-      if N > 0 then
-        for I := 0 to N - 1 do
-          Buf := Buf + AnsiChar(Bytes[I]);
-      if (Pos(#7, Buf) > 0) or (Pos(#27 + '\', Buf) > 0) then
-        Break;
-    end;
-    Sleep(10);
-  end;
-  if ParseOSC11(Buf, R, G, B) and ColorIsLight(R, G, B) then
+  if ParseOSC11(AReply, R, G, B) and ColorIsLight(R, G, B) then
     Result := thLight;
 end;
 
@@ -450,6 +424,7 @@ end;
 var
   Surface: ISurface;
   Input: IInputSource;
+  InputTerm: TInputSourceTerminal;
   App: TTuiApp;
   Shell: TShell;
   Root, Panes, Status: TContainer;
@@ -461,13 +436,15 @@ begin
     before the surface: video's init must run first, and each restores the
     termios it saved, so the tty ends up cooked. }
   Surface := TSurfaceVideo.Create;
+  InputTerm := TInputSourceTerminal.Create;
+  Input := InputTerm;
 
-  if QueryThemeKind = thLight then
+  { Query from the input adapter (raw mode is active there), so the reply is
+    read and drained rather than leaking to the shell. }
+  if ChooseThemeKind(InputTerm.QueryBackground) = thLight then
     Pal := LightPalette
   else
     Pal := DarkPalette;
-
-  Input := TInputSourceTerminal.Create;
 
   Root := TContainer.Create([Fill(1)], [Fill(1), Fixed(1)]);
   Panes := TContainer.Create([Fill(2), Fill(1)], [Fill(1)]);
