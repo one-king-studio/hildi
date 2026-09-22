@@ -153,10 +153,6 @@ the change through an `ikResize` input event instead.
 
 Notes:
 
-- **Alternate screen.** `TSurfaceVideo` enters the alternate screen explicitly
-  (`CSI ?1049h`) on create and leaves it on destroy, in addition to `video`'s
-  terminfo-driven attempt, so a terminal `video` does not recognise still gets a
-  private screen instead of sharing (and scrolling) the normal one.
 - **256 colours.** `TSurfaceVideo` writes `Fg`/`Bg` into
   `TEnhancedVideoCell.ForegroundColor`/`BackgroundColor`; `video`'s `attr2ansi`
   emits the basic 16 colours for indices <= 15 and `38;5;n`/`48;5;n` for the
@@ -408,17 +404,11 @@ Behaviour:
   `Value * (Track - ThumbSize) div (Range - Page)`. `ThumbStart` is absolute
   (bar origin plus offset).
 
-### Theming
-
 The toolkit is theme-agnostic: it draws whatever palette indices the caller puts
-in `TAttr`, and `TTuiApp.Background` sets the colour the surface is cleared to
-each frame. A caller that wants to match the terminal theme can query the
-terminal's background with OSC 11 (`ESC]11;?`) and fall back to `COLORFGBG`;
-`hildegard.helper.tui.theme` provides the pure parsing/luminance helpers
-(`ParseOSC11`, `ColorIsLight`, `ParseColorFGBG`) so the decision is unit-tested.
-The demo uses this to pick a light or dark palette. `video` only emits palette
-indices (there is no "terminal default background" cell), so matching the theme
-means choosing suitable indices, not leaving the background unset.
+in `TAttr`. `video` only emits palette indices (there is no "terminal default
+background" cell), so a light terminal theme is not detected automatically; the
+caller chooses indices. (Automatic light/dark detection was prototyped and
+reverted: the OSC 11 round-trip could leak a late reply to the shell.)
 
 ### Planes and Application
 
@@ -447,7 +437,6 @@ type
     function ModalActive: Boolean;
     procedure Stop;             // request the loop to end on the next Step
     procedure Invalidate;       // mark layout dirty for the next Step
-    property Background: TAttr; // colour the surface is cleared to each frame
 
     { One iteration: process at most one input event (or resize), mark layout
       dirty on change, lay out if dirty, render the frame, flush. Returns False
