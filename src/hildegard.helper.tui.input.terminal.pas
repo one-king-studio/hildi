@@ -126,9 +126,10 @@ end;
 
 destructor TInputSourceTerminal.Destroy;
 const
-  { Disable mouse reporting and, defensively, pop the kitty keyboard protocol
-    (CSI < u) in case a previous program left it pushed. }
-  MouseOff = #27'[?1006l'#27'[?1002l'#27'[?1000l'#27'[<u';
+  { Disable mouse reporting. Do NOT touch the kitty keyboard protocol: we only
+    decode it, never push it, so a pop (CSI < u) would remove an entry owned by
+    the shell and leave its keyboard state corrupted. }
+  MouseOff = #27'[?1006l'#27'[?1002l'#27'[?1000l';
 begin
   fpWrite(1, MouseOff[1], Length(MouseOff));
   { Discard pending input (late key-release events, a late OSC reply) so it is
@@ -137,9 +138,9 @@ begin
   FDecoder.Free;
   if FRawSet then
     TCSetAttr(FInputFd, TCSANOW, FOldTio);
-  { Flush once more: bytes that arrived during teardown would otherwise be read
-    by the shell after we exit. }
-  c_tcflush(FInputFd, TCIFLUSH);
+  { Drain and flush once more, after restoring cooked mode: bytes that arrived
+    during teardown would otherwise be read by the shell after we exit. }
+  DrainInput;
   if FOpenedTty then
     fpClose(FInputFd);
   fpsignal(SIGTERM, nil);

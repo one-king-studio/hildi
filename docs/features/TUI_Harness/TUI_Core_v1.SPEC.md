@@ -240,8 +240,9 @@ Notes:
 - Terminals using the kitty keyboard protocol send
   `CSI <codepoint>[;<mods>[:<event>]] u`; `input.decode` maps these as well
   (release events are ignored), so keys work whether the terminal is in legacy
-  or kitty mode. The adapter also pops the protocol (`CSI < u`) on exit, in case
-  a previous program left it pushed.
+  or kitty mode. The adapter only decodes the protocol: it never pushes or pops
+  it, because a pop removes an entry the shell may own and corrupts the
+  terminal's keyboard state.
 - Mouse is implemented: `TInputSourceTerminal` enables button-event and SGR
   mouse reporting (`?1000h`/`?1002h`/`?1006h`) while active and disables it on
   destroy, and `input.decode` maps `ESC[<Cb;Cx;CyM` (and the `m` release form) to
