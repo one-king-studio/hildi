@@ -159,7 +159,10 @@ Notes:
   rest. No escape-sequence code is written by this toolkit.
 - **Diff and flush.** `TSurfaceVideo.Flush` calls `video.UpdateScreen(False)`;
   `video` diffs against its own previous buffer, so the toolkit never tracks
-  damage and unchanged cells are not re-emitted.
+  damage and unchanged cells are not re-emitted. The first flush, and any flush
+  after a size change, forces a full repaint (`UpdateScreen(True)`): otherwise
+  the screen would keep the terminal's own default background for cells we did
+  not happen to change, giving text "islands" of a different colour.
 - **DimRect** rewrites cells already in the region without erasing them: it adds
   `sfDim` and, in the terminal surface, also maps each colour index to a darker
   one (many terminals ignore SGR 2 `evaFaint`, so the palette remap is what makes

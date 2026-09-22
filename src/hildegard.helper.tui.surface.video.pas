@@ -98,7 +98,10 @@ constructor TSurfaceVideo.Create;
 begin
   inherited Create;
   FClipCount := 0;
-  FNeedFullRepaint := False;
+  { Force a full first paint: video clears to the terminal's own default
+    background, so a diffing first flush would render only our changed cells and
+    leave the rest with a different background ("islands" of mismatched colour). }
+  FNeedFullRepaint := True;
   InitEnhancedVideo;
   SetCursorType(crHidden);
 end;
