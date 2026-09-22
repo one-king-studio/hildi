@@ -26,6 +26,9 @@ type
     FOldTio: termios;
     FRawSet: Boolean;
     FDecoder: TKeyDecoder;
+    FTrace: Boolean;
+    FTracePath: string;
+    procedure TraceLine(const S: string);
     function ResizeEvent(out AEvent: TInputEvent): Boolean;
     procedure ReadAvailable;
   public
@@ -62,9 +65,13 @@ var
   Tio: termios;
 begin
   inherited Create;
+  FTracePath := GetEnvironmentVariable('HILDEGARD_TUI_TRACE');
+  FTrace := FTracePath <> '';
   FRawSet := False;
   FOpenedTty := False;
   FInputFd := OpenInputFd;
+  if FTrace then
+    TraceLine(Format('open fd=%d opened=%s', [FInputFd, BoolToStr(FOpenedTty, True)]));
   if FInputFd < 0 then
     FInputFd := 0
   else
@@ -105,6 +112,21 @@ begin
   inherited Destroy;
 end;
 
+procedure TInputSourceTerminal.TraceLine(const S: string);
+var
+  F: TextFile;
+begin
+  if not FTrace then
+    Exit;
+  Assign(F, FTracePath);
+  if FileExists(FTracePath) then
+    Append(F)
+  else
+    Rewrite(F);
+  WriteLn(F, S);
+  Close(F);
+end;
+
 function TInputSourceTerminal.ResizeEvent(out AEvent: TInputEvent): Boolean;
 var
   WS: TWinsize;
@@ -134,6 +156,7 @@ var
   Bytes: array[0..63] of Byte;
   Data: array of Byte;
   N, I: Integer;
+  Hex: string;
 begin
   fpFD_ZERO(Fds);
   fpFD_SET(FInputFd, Fds);
@@ -148,15 +171,31 @@ begin
   for I := 0 to N - 1 do
     Data[I] := Bytes[I];
   FDecoder.Feed(Data);
+  if FTrace then
+  begin
+    Hex := '';
+    for I := 0 to N - 1 do
+      Hex := Hex + IntToHex(Bytes[I], 2) + ' ';
+    TraceLine('bytes ' + Hex);
+  end;
 end;
 
 function TInputSourceTerminal.Poll(out AEvent: TInputEvent): Boolean;
 begin
   AEvent := Default(TInputEvent);
   if ResizeEvent(AEvent) then
+  begin
+    if FTrace then
+      TraceLine(Format('event resize %dx%d', [AEvent.NewSize.W, AEvent.NewSize.H]));
     Exit(True);
+  end;
   ReadAvailable;
   Result := FDecoder.Next(AEvent);
+  if FTrace and Result then
+    TraceLine(Format('event kind=%d key=%d ch=%s btn=%d xy=%d,%d',
+      [Ord(AEvent.Kind), Ord(AEvent.Key.Kind),
+      string(AEvent.Key.Ch), Ord(AEvent.Mouse.Button),
+      AEvent.Mouse.X, AEvent.Mouse.Y]));
 end;
 
 function TInputSourceTerminal.Wait(ATimeoutMs: Integer;
