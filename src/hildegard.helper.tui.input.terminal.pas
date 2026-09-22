@@ -1,25 +1,31 @@
 unit hildegard.helper.tui.input.terminal;
-{ Terminal input adapter: FPC keyboard decoding plus TIOCGWINSZ resize.
+{ Terminal input adapter: raw-mode byte reads, TIOCGWINSZ resize, and the pure
+  escape-sequence decoder in hildegard.helper.tui.input.decode.
 
-  This is the only place the toolkit touches the keyboard. Poll first checks the
-  window size (emitting ikResize when it changed) and then decodes one key via
-  the enhanced keyboard events. The core input unit has no terminal dependency. }
+  This is the only place the toolkit touches the tty. It deliberately does not
+  use FPC's keyboard unit: keyboard.InitKeyboard runs a kitty-key/DA1 probe that
+  blocks in a blocking read (and can swallow the first keypress), and its decoder
+  proved unreliable. Reading bytes ourselves over the RTL termio/baseunix units
+  is deterministic, still dependency-free, and the mapping is unit-tested. }
 
 {$mode delphi}{$H+}
 
 interface
 
 uses
-  keyboard,
-  hildegard.helper.tui.base, hildegard.helper.tui.input;
+  termio,
+  hildegard.helper.tui.base, hildegard.helper.tui.input,
+  hildegard.helper.tui.input.decode;
 
 type
   TInputSourceTerminal = class(TInterfacedObject, IInputSource)
   private
     FLastCol, FLastRow: Integer;
+    FOldTio: termios;
+    FRawSet: Boolean;
+    FDecoder: TKeyDecoder;
     function ResizeEvent(out AEvent: TInputEvent): Boolean;
-    function MapKey(const AKey: TEnhancedKeyEvent;
-      out AEvent: TInputEvent): Boolean;
+    procedure ReadAvailable;
   public
     constructor Create;
     destructor Destroy; override;
@@ -30,14 +36,23 @@ type
 implementation
 
 uses
-  SysUtils, baseunix, termio;
+  SysUtils, baseunix;
 
 constructor TInputSourceTerminal.Create;
 var
   WS: TWinsize;
+  Tio: termios;
 begin
   inherited Create;
-  InitKeyboard;
+  FRawSet := False;
+  if TCGetAttr(0, FOldTio) = 0 then
+  begin
+    Tio := FOldTio;
+    CFMakeRaw(Tio);
+    if TCSetAttr(0, TCSANOW, Tio) = 0 then
+      FRawSet := True;
+  end;
+  FDecoder := TKeyDecoder.Create;
   FillChar(WS, SizeOf(WS), 0);
   if (fpioctl(0, TIOCGWINSZ, @WS) = 0) and (WS.ws_col > 0) and (WS.ws_row > 0)
   then
@@ -54,7 +69,9 @@ end;
 
 destructor TInputSourceTerminal.Destroy;
 begin
-  DoneKeyboard;
+  FDecoder.Free;
+  if FRawSet then
+    TCSetAttr(0, TCSANOW, FOldTio);
   inherited Destroy;
 end;
 
@@ -80,79 +97,36 @@ begin
   end;
 end;
 
-function TInputSourceTerminal.MapKey(const AKey: TEnhancedKeyEvent;
-  out AEvent: TInputEvent): Boolean;
+procedure TInputSourceTerminal.ReadAvailable;
 var
-  Mods: TModifiers;
+  Fds: TFDSet;
+  TV: TTimeVal;
+  Bytes: array[0..63] of Byte;
+  Data: array of Byte;
+  N, I: Integer;
 begin
-  AEvent := Default(TInputEvent);
-  Result := False;
-  Mods := [];
-  if essShift in AKey.ShiftState then
-    Include(Mods, moShift);
-  if essCtrl in AKey.ShiftState then
-    Include(Mods, moCtrl);
-  if (essAlt in AKey.ShiftState) or (essAltGr in AKey.ShiftState) then
-    Include(Mods, moAlt);
-  AEvent.Kind := ikKey;
-  AEvent.Key.Mods := Mods;
-  case AKey.VirtualKeyCode of
-    kbdUp:
-      AEvent.Key.Kind := kkUp;
-    kbdDown:
-      AEvent.Key.Kind := kkDown;
-    kbdLeft:
-      AEvent.Key.Kind := kkLeft;
-    kbdRight:
-      AEvent.Key.Kind := kkRight;
-    kbdPgUp:
-      AEvent.Key.Kind := kkPageUp;
-    kbdPgDn:
-      AEvent.Key.Kind := kkPageDown;
-    kbdHome:
-      AEvent.Key.Kind := kkHome;
-    kbdEnd:
-      AEvent.Key.Kind := kkEnd;
-    kbdDelete:
-      AEvent.Key.Kind := kkDelete;
-  else
-    if (AKey.VirtualKeyCode >= kbdF1) and (AKey.VirtualKeyCode <= kbdF20) then
-    begin
-      AEvent.Key.Kind := kkFunction;
-      AEvent.Key.FuncIndex := AKey.VirtualKeyCode - kbdF1 + 1;
-    end
-    else
-      case AKey.UnicodeChar of
-        #13:
-          AEvent.Key.Kind := kkEnter;
-        #27:
-          AEvent.Key.Kind := kkEscape;
-        #9:
-          AEvent.Key.Kind := kkTab;
-        #8, #127:
-          AEvent.Key.Kind := kkBackspace;
-      else
-        if Ord(AKey.UnicodeChar) >= 32 then
-        begin
-          AEvent.Key.Kind := kkChar;
-          AEvent.Key.Ch := UnicodeString(AKey.UnicodeChar);
-        end
-        else
-          Exit(False);
-      end;
-  end;
-  Result := True;
+  fpFD_ZERO(Fds);
+  fpFD_SET(0, Fds);
+  TV.tv_sec := 0;
+  TV.tv_usec := 0;
+  if fpSelect(1, @Fds, nil, nil, @TV) <= 0 then
+    Exit;
+  N := fpRead(0, @Bytes[0], SizeOf(Bytes));
+  if N <= 0 then
+    Exit;
+  SetLength(Data, N);
+  for I := 0 to N - 1 do
+    Data[I] := Bytes[I];
+  FDecoder.Feed(Data);
 end;
 
 function TInputSourceTerminal.Poll(out AEvent: TInputEvent): Boolean;
-var
-  K: TEnhancedKeyEvent;
 begin
   AEvent := Default(TInputEvent);
   if ResizeEvent(AEvent) then
     Exit(True);
-  K := PollEnhancedKeyEvent;
-  Result := MapKey(K, AEvent);
+  ReadAvailable;
+  Result := FDecoder.Next(AEvent);
 end;
 
 function TInputSourceTerminal.Wait(ATimeoutMs: Integer;

@@ -65,6 +65,9 @@ type
 
 implementation
 
+uses
+  SysUtils;
+
 function Rect4(AX, AY, AW, AH: Integer): TRect;
 begin
   Result := Default(TRect);
@@ -223,8 +226,11 @@ end;
 
 procedure TTuiApp.Run;
 begin
+  { Yield between frames: a tight Step loop can starve the OS terminal input
+    path (observed on macOS), so keys are not delivered. Tests drive Step
+    directly and are unaffected. }
   while Step do
-    ;
+    Sleep(1);
 end;
 
 end.

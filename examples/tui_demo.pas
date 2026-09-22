@@ -206,6 +206,10 @@ var
   Root, Panes, Status: TContainer;
   ChatScroll, DiffScroll: TKeyScroll;
 begin
+  { Create the surface before the input source, and destroy the input source
+    before the surface: video's init must run first, and each restores the
+    termios it saved, so the tty ends up cooked. Reversing either order leaves
+    the terminal in raw mode or breaks input. }
   Surface := TSurfaceVideo.Create;
   Input := TInputSourceTerminal.Create;
 
@@ -234,7 +238,7 @@ begin
     App.Run;
   finally
     App.Free;
-    Surface := nil;
     Input := nil;
+    Surface := nil;
   end;
 end.

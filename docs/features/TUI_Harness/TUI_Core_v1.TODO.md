@@ -193,7 +193,10 @@ benchmark, run explicitly.
 ```
 src/hildegard.helper.tui.base.pas      (cell, attr, rect, size)
 src/hildegard.helper.tui.surface.pas   (ISurface, TSurfaceMemory, TSurfaceVideo)
-src/hildegard.helper.tui.input.pas     (event types, IInputSource, adapters)
+src/hildegard.helper.tui.input.pas     (event types, IInputSource, scripted source)
+src/hildegard.helper.tui.input.decode.pas (pure raw-bytes-to-event decoder)
+src/hildegard.helper.tui.input.terminal.pas (raw mode + TIOCGWINSZ + decoder)
+src/hildegard.helper.tui.surface.video.pas  (TSurfaceVideo over FPC video)
 src/hildegard.helper.tui.widget.pas    (TWidget, tracks, TContainer)
 src/hildegard.helper.tui.text.pas      (TSpan, TTextBlock)
 src/hildegard.helper.tui.scroll.pas    (TScrollContainer, TScrollBar)
@@ -281,6 +284,13 @@ docs/features/FEATURES.md          (status)
   `SetScroll` now calls `UpdateChildBounds`.
 - **Coloured demo instead of markdown.** `Markdown_v1` is not implemented yet
   (no TODO); the demo uses styled spans directly to show the palette.
+- **Input adapter does not use FPC `keyboard`.** `keyboard.InitKeyboard` runs a
+  blocking kitty-key/DA1 probe (can hang or swallow the first key) and its
+  decoder latched a phantom keypress under a pty. The adapter sets raw mode with
+  `termio` and decodes bytes in the new pure unit
+  `hildegard.helper.tui.input.decode` (unit-tested). The SPEC was updated.
+- **`TTuiApp.Run` idles (1 ms) between steps.** A tight `Step` loop can starve
+  terminal input on macOS; tests drive `Step` directly, so only `Run` changed.
 
 ### Discovered work
 

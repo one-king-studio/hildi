@@ -214,8 +214,9 @@ type
     function Wait(ATimeoutMs: Integer; out AEvent: TInputEvent): Boolean;
   end;
 
-  { Declared in the adapter unit `hildegard.helper.tui.input.terminal` so this
-    core unit never `uses` keyboard (the test binary stays terminal-free). }
+  { Declared in the adapter unit `hildegard.helper.tui.input.terminal`, which
+    owns raw mode and reads bytes; the pure decoding lives in
+    `hildegard.helper.tui.input.decode`. The core input unit stays terminal-free. }
   TInputSourceTerminal = class(TInterfacedObject, IInputSource)
   public
     constructor Create;
@@ -476,7 +477,11 @@ Behaviour:
   3 of the ladder and removes the need to write any escape-sequence code. The
   256-colour extended palette is exactly the ceiling `video`'s cell model
   supports, which is sufficient for this feature.
-- **FPC `keyboard`** supplies raw-mode key decoding (`GetKeyEvent`/`PollKeyEvent`).
+- **FPC `keyboard` is deliberately not used.** Its `InitKeyboard` runs a blocking
+  kitty-key/DA1 probe (it can hang or swallow the first key) and its decoder
+  proved unreliable under a pty. Instead, RTL `termio`/`baseunix` set raw mode
+  and read bytes, and `hildegard.helper.tui.input.decode` maps them to events
+  (a pure, unit-tested unit).
 - **RTL `graphemebreakproperty` and `eastasianwidth`** supply grapheme cluster
   iteration and display width, already used by `video`.
 - **`fcl-fpterm`** (`packages/fcl-fpterm/src`) is prior art: its `TCell`/
@@ -499,11 +504,11 @@ application loop.
 
 - **Responsibilities:** cell rendering, input events, layout, widgets, scrolling,
   planes, the loop.
-- **Dependencies:** FPC `video`, `keyboard`, `SysUtils`, `Classes`, and the RTL
-  Unicode units. The core units (`base`, `surface`, `input`, `widget`, `text`,
-  `scroll`, `app`) must not depend on `video`/`keyboard` directly; only the
-  adapter units `surface.video` and `input.terminal` do, so the test binary never
-  links a terminal.
+- **Dependencies:** FPC `video`, `SysUtils`, `Classes`, RTL `termio`/`baseunix`,
+  and the RTL Unicode units. The core units (`base`, `surface`, `input`,
+  `widget`, `text`, `scroll`, `app`) must not depend on `video` directly; only
+  the adapter units `surface.video` and `input.terminal` do, so the test binary
+  never links a terminal. (`input.decode` is pure and is unit-tested.)
 - **Side effects:** the terminal surface owns the screen (alt-screen, raw mode,
   cursor); nothing else mutates global state.
 
