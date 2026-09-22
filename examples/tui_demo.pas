@@ -293,15 +293,20 @@ function TShell.HandleEvent(const E: TInputEvent): Boolean;
 begin
   if E.Kind = ikMouse then
   begin
-    { A left click focuses the pane under the pointer; the wheel only scrolls. }
+    { Give the panes first refusal: wheel scrolling and scrollbar drags are
+      consumed there and must not change focus. A left click no pane consumes
+      focuses the pane under the pointer. }
+    if FChild.HandleEvent(E) then
+      Exit(True);
     if E.Mouse.Button = mbLeft then
     begin
       if PointIn(FChat.Bounds, E.Mouse.X, E.Mouse.Y) then
         SetFocus(0)
       else if PointIn(FDiff.Bounds, E.Mouse.X, E.Mouse.Y) then
         SetFocus(1);
+      Exit(True);
     end;
-    Exit(FChild.HandleEvent(E));
+    Exit(False);
   end;
   if E.Kind <> ikKey then
     Exit(False);
