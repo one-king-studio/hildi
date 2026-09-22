@@ -137,6 +137,9 @@ begin
   FDecoder.Free;
   if FRawSet then
     TCSetAttr(FInputFd, TCSANOW, FOldTio);
+  { Flush once more: bytes that arrived during teardown would otherwise be read
+    by the shell after we exit. }
+  c_tcflush(FInputFd, TCIFLUSH);
   if FOpenedTty then
     fpClose(FInputFd);
   fpsignal(SIGTERM, nil);

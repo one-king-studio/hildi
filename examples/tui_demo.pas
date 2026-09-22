@@ -13,9 +13,10 @@ program tui_demo;
          m                   toggle the approval modal
          q                   quit
 
-  The palette follows the terminal background: it queries OSC 11 (and falls back
-  to COLORFGBG), so a light terminal theme gets dark text on a light background.
-  Override with HILDEGARD_TUI_THEME=light|dark.
+  The palette follows the terminal background: HILDEGARD_TUI_THEME=light|dark
+  forces it, else COLORFGBG is used, else it queries OSC 11 when
+  HILDEGARD_TUI_DETECT_THEME=1 (opt-in, because a slow reply can leak to the
+  shell). Default is dark.
 
   Run with `make tui-demo` in a real terminal. }
 
@@ -431,6 +432,7 @@ var
   ChatScroll, DiffScroll: TScrollContainer;
   StatusText: TTextBlock;
   Bg: TAttr;
+  Reply: string;
 begin
   { Create the surface before the input source, and destroy the input source
     before the surface: video's init must run first, and each restores the
@@ -440,8 +442,13 @@ begin
   Input := InputTerm;
 
   { Query from the input adapter (raw mode is active there), so the reply is
-    read and drained rather than leaking to the shell. }
-  if ChooseThemeKind(InputTerm.QueryBackground) = thLight then
+    read and drained. Opt-in only: a slow terminal can answer after startup, and
+    that late reply would otherwise reach the shell. Use COLORFGBG,
+    HILDEGARD_TUI_THEME=light|dark, or HILDEGARD_TUI_DETECT_THEME=1. }
+  Reply := '';
+  if GetEnvironmentVariable('HILDEGARD_TUI_DETECT_THEME') = '1' then
+    Reply := InputTerm.QueryBackground;
+  if ChooseThemeKind(Reply) = thLight then
     Pal := LightPalette
   else
     Pal := DarkPalette;
