@@ -41,6 +41,7 @@ type
     FPlanes: array of TPlane;
     FStop: Boolean;
     FLayoutDirty: Boolean;
+    FBackground: TAttr;
     procedure ArrangeBase;
     procedure ArrangePlanes;
     procedure RenderFrame;
@@ -57,6 +58,9 @@ type
     procedure PopPlane;
     function ModalActive: Boolean;
     procedure Stop;
+
+    { Colour the whole surface is cleared to each frame (a theme background). }
+    property Background: TAttr read FBackground write FBackground;
 
     { One iteration: process at most one input event (or resize), lay out on
       change, render the frame, flush. Returns False once stopped. }
@@ -105,6 +109,7 @@ begin
   FInput := AInput;
   FStop := False;
   FLayoutDirty := False;
+  FBackground := DefaultAttr;
   SetLength(FPlanes, 1);
   FPlanes[0] := TPlane.Create(ARoot, False);
   ArrangeBase;
@@ -186,7 +191,7 @@ procedure TTuiApp.RenderFrame;
 var
   I: Integer;
 begin
-  FSurface.Clear(DefaultAttr);
+  FSurface.Clear(FBackground);
   for I := 0 to High(FPlanes) do
     if not FPlanes[I].IsModal then
       FPlanes[I].Root.Render(FSurface);

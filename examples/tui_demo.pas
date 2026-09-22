@@ -8,23 +8,41 @@ program tui_demo;
   Keys:  Tab / Left / Right  switch focus between panes
          Up / Down, j / k    scroll the focused pane by one line
          PgUp / PgDn, u / d  scroll the focused pane by a page
+         click               focus the pane under the pointer
          mouse wheel         scroll the pane under the pointer
          m                   toggle the approval modal
          q                   quit
 
-  Run with `make tui-demo` in a real terminal. Markdown-to-span parsing is a
-  follow-on component (Markdown_v1.SPEC.md); this demo uses styled spans
-  directly to show the 256-colour palette. }
+  The palette follows the terminal background: it queries OSC 11 (and falls back
+  to COLORFGBG), so a light terminal theme gets dark text on a light background.
+  Override with HILDEGARD_TUI_THEME=light|dark.
+
+  Run with `make tui-demo` in a real terminal. }
 
 {$mode delphi}{$H+}
 
 uses
-  SysUtils,
+  SysUtils, baseunix,
   hildegard.helper.tui.base, hildegard.helper.tui.input,
   hildegard.helper.tui.surface, hildegard.helper.tui.surface.video,
   hildegard.helper.tui.widget, hildegard.helper.tui.text,
   hildegard.helper.tui.scroll, hildegard.helper.tui.app,
+  hildegard.helper.tui.theme,
   hildegard.helper.tui.input.terminal;
+
+type
+  TPalette = record
+    Bg, Fg, Head, Help, Code, Good, Del, Add, PanelBg, StatusFg: Byte;
+  end;
+
+const
+  DarkPalette: TPalette = (Bg: 0; Fg: 7; Head: 81; Help: 244; Code: 215;
+    Good: 114; Del: 203; Add: 114; PanelBg: 236; StatusFg: 244);
+  LightPalette: TPalette = (Bg: 231; Fg: 0; Head: 25; Help: 240; Code: 130;
+    Good: 28; Del: 124; Add: 28; PanelBg: 252; StatusFg: 240);
+
+var
+  Pal: TPalette;
 
 type
   { A filled panel: draws a background over its bounds and insets the child,
@@ -95,13 +113,13 @@ begin
     Result.H := 0;
 end;
 
-function Span(const AText: UnicodeString; AFg: Byte;
+function Span(const AText: UnicodeString; AFg, ABg: Byte;
   AStyle: TStyle = []): TSpan;
 begin
   Result := Default(TSpan);
   Result.Text := AText;
   Result.Attr.Fg := AFg;
-  Result.Attr.Bg := 0;
+  Result.Attr.Bg := ABg;
   Result.Attr.Style := AStyle;
 end;
 
@@ -119,34 +137,72 @@ begin
 end;
 
 function MakeConversation: TTextBlock;
-const
-  Help = 244;
-  Head = 81;
-  Code = 215;
-  Good = 114;
 begin
   Result := TTextBlock.Create([
-    Span('TUI Harness demo' + #10, Head, [sfBold]),
-    Span('Nested grid; tracks are fixed/auto/fill.' + #10, Help),
-    Span('Spans carry 256-colour attributes, e.g. ', Help),
-    Span('inline code', Code, [sfBold]),
-    Span(' or ', Help),
-    Span('emphasis.', Good, [sfItalic]),
-    Span(#10 + #10, Help),
+    Span('TUI Harness demo' + #10, Pal.Head, Pal.Bg, [sfBold]),
+    Span('Nested grid; tracks are fixed/auto/fill.' + #10, Pal.Help, Pal.Bg),
+    Span('Spans carry 256-colour attributes, e.g. ', Pal.Help, Pal.Bg),
+    Span('inline code', Pal.Code, Pal.Bg, [sfBold]),
+    Span(' or ', Pal.Help, Pal.Bg),
+    Span('emphasis.', Pal.Good, Pal.Bg, [sfItalic]),
+    Span(#10 + #10, Pal.Help, Pal.Bg),
     Span(UnicodeString(RepeatedLines('assistant: response line ', 60, 1)),
-      Help)],
+      Pal.Help, Pal.Bg)],
     wmNone);
 end;
 
 function MakeDiff: TTextBlock;
-const
-  Add = 114;
-  Del = 203;
 begin
   Result := TTextBlock.Create([
-    Span(UnicodeString(RepeatedLines('- removed line ', 40, 1)) + #10, Del),
-    Span(UnicodeString(RepeatedLines('+ added line ', 40, 1)), Add)],
+    Span(UnicodeString(RepeatedLines('- removed line ', 40, 1)) + #10,
+      Pal.Del, Pal.Bg),
+    Span(UnicodeString(RepeatedLines('+ added line ', 40, 1)),
+      Pal.Add, Pal.Bg)],
     wmNone);
+end;
+
+{ Query the terminal for its background and choose a palette. }
+function QueryThemeKind: TThemeKind;
+const
+  OSC11Query = #27']11;?'#27'\';
+var
+  V: string;
+  Bytes: array[0..255] of Byte;
+  Buf: string;
+  N, I, Attempt: Integer;
+  Fds: TFDSet;
+  TV: TTimeVal;
+  R, G, B: Byte;
+begin
+  V := LowerCase(GetEnvironmentVariable('HILDEGARD_TUI_THEME'));
+  if V = 'light' then
+    Exit(thLight);
+  if V = 'dark' then
+    Exit(thDark);
+  if ParseColorFGBG(GetEnvironmentVariable('COLORFGBG'), Result) then
+    Exit;
+  Result := thDark;
+  fpWrite(1, OSC11Query[1], Length(OSC11Query));
+  Buf := '';
+  for Attempt := 1 to 20 do
+  begin
+    fpFD_ZERO(Fds);
+    fpFD_SET(0, Fds);
+    TV.tv_sec := 0;
+    TV.tv_usec := 0;
+    if fpSelect(1, @Fds, nil, nil, @TV) > 0 then
+    begin
+      N := fpRead(0, @Bytes[0], SizeOf(Bytes));
+      if N > 0 then
+        for I := 0 to N - 1 do
+          Buf := Buf + AnsiChar(Bytes[I]);
+      if (Pos(#7, Buf) > 0) or (Pos(#27 + '\', Buf) > 0) then
+        Break;
+    end;
+    Sleep(10);
+  end;
+  if ParseOSC11(Buf, R, G, B) and ColorIsLight(R, G, B) then
+    Result := thLight;
 end;
 
 { TPanel }
@@ -233,11 +289,13 @@ procedure TShell.SetFocus(AIndex: Integer);
 begin
   FFocus := AIndex;
   if FFocus <> 0 then
-    FStatus.SetText('status: focus right (diff)   [Tab/click] switch  [m] modal  [q] quit',
-      Span('', 244).Attr)
+    FStatus.SetText(
+      'status: focus right (diff)   [Tab/click] switch  [m] modal  [q] quit',
+      Span('', Pal.StatusFg, Pal.Bg).Attr)
   else
-    FStatus.SetText('status: focus left (chat)   [Tab/click] switch  [m] modal  [q] quit',
-      Span('', 244).Attr);
+    FStatus.SetText(
+      'status: focus left (chat)   [Tab/click] switch  [m] modal  [q] quit',
+      Span('', Pal.StatusFg, Pal.Bg).Attr);
 end;
 
 procedure TShell.ScrollFocused(ADelta: Integer);
@@ -276,12 +334,14 @@ begin
     Root := TContainer.Create([Fill(1), Fixed(46), Fill(1)],
       [Fill(1), Fixed(9), Fill(1)]);
     Body := TTextBlock.Create([
-      Span('Approve this command?' + #10 + #10, 81, [sfBold]),
-      Span('  rm -rf build/' + #10, 215),
-      Span('  Reason: clear generated output.' + #10 + #10, 244),
-      Span('[m] dismiss', 114)],
+      Span('Approve this command?' + #10 + #10, Pal.Head, Pal.PanelBg,
+        [sfBold]),
+      Span('  rm -rf build/' + #10, Pal.Code, Pal.PanelBg),
+      Span('  Reason: clear generated output.' + #10 + #10, Pal.Help,
+        Pal.PanelBg),
+      Span('[m] dismiss', Pal.Good, Pal.PanelBg)],
       wmNone);
-    Panel := TPanel.Create(Body, 236);
+    Panel := TPanel.Create(Body, Pal.PanelBg);
     TPanel(Panel).SetApp(FApp);
     Root.Add(Panel, 1, 1);
     Root.Arrange(FBounds);
@@ -395,12 +455,18 @@ var
   Root, Panes, Status: TContainer;
   ChatScroll, DiffScroll: TScrollContainer;
   StatusText: TTextBlock;
+  Bg: TAttr;
 begin
   { Create the surface before the input source, and destroy the input source
     before the surface: video's init must run first, and each restores the
-    termios it saved, so the tty ends up cooked. Reversing either order leaves
-    the terminal in raw mode or breaks input. }
+    termios it saved, so the tty ends up cooked. }
   Surface := TSurfaceVideo.Create;
+
+  if QueryThemeKind = thLight then
+    Pal := LightPalette
+  else
+    Pal := DarkPalette;
+
   Input := TInputSourceTerminal.Create;
 
   Root := TContainer.Create([Fill(1)], [Fill(1), Fixed(1)]);
@@ -415,7 +481,7 @@ begin
   Status := TContainer.Create([Fill(1)], [Fixed(1)]);
   StatusText := TTextBlock.Create(
     [Span('status: focus left (chat)   [Tab/click] switch  [m] modal  [q] quit',
-      244)], wmNone);
+      Pal.StatusFg, Pal.Bg)], wmNone);
   Status.Add(StatusText, 0, 0);
 
   Root.Add(Panes, 0, 0);
@@ -423,6 +489,10 @@ begin
 
   Shell := TShell.Create(Root, ChatScroll, DiffScroll, StatusText);
   App := TTuiApp.Create(Surface, Input, Shell);
+  Bg := DefaultAttr;
+  Bg.Fg := Pal.Fg;
+  Bg.Bg := Pal.Bg;
+  App.Background := Bg;
   Shell.SetApp(App);
   try
     App.Run;

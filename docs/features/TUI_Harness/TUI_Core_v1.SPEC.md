@@ -407,6 +407,18 @@ Behaviour:
   `Value * (Track - ThumbSize) div (Range - Page)`. `ThumbStart` is absolute
   (bar origin plus offset).
 
+### Theming
+
+The toolkit is theme-agnostic: it draws whatever palette indices the caller puts
+in `TAttr`, and `TTuiApp.Background` sets the colour the surface is cleared to
+each frame. A caller that wants to match the terminal theme can query the
+terminal's background with OSC 11 (`ESC]11;?`) and fall back to `COLORFGBG`;
+`hildegard.helper.tui.theme` provides the pure parsing/luminance helpers
+(`ParseOSC11`, `ColorIsLight`, `ParseColorFGBG`) so the decision is unit-tested.
+The demo uses this to pick a light or dark palette. `video` only emits palette
+indices (there is no "terminal default background" cell), so matching the theme
+means choosing suitable indices, not leaving the background unset.
+
 ### Planes and Application
 
 ```pascal
@@ -434,6 +446,7 @@ type
     function ModalActive: Boolean;
     procedure Stop;             // request the loop to end on the next Step
     procedure Invalidate;       // mark layout dirty for the next Step
+    property Background: TAttr; // colour the surface is cleared to each frame
 
     { One iteration: process at most one input event (or resize), mark layout
       dirty on change, lay out if dirty, render the frame, flush. Returns False
