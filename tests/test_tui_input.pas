@@ -33,6 +33,8 @@ type
     procedure TestDecodeMouseWheel;
     procedure TestDecodeMouseMotionAndRelease;
     procedure TestDecodeKittyKeyboard;
+    procedure TestDecodeKittyFunctionalKeysIgnored;
+    procedure TestDecodeKittyShiftedAndTextKeys;
   end;
 
 implementation
@@ -333,6 +335,82 @@ begin
     D.Feed([27, Ord('['), Ord('9'), Ord(';'), Ord('1'), Ord(':'),
       Ord('3'), Ord('u')]);
     AssertFalse('release ignored', D.Next(E));
+  finally
+    D.Free;
+  end;
+end;
+
+procedure TTuiInputTest.TestDecodeKittyFunctionalKeysIgnored;
+var
+  D: TKeyDecoder;
+  E: TInputEvent;
+begin
+  D := TKeyDecoder.Create;
+  try
+    { CSI 57441;2 u = left shift press. Holding a modifier must not emit a
+      private-use character. }
+    D.Feed([27, Ord('['), Ord('5'), Ord('7'), Ord('4'), Ord('4'), Ord('1'),
+      Ord(';'), Ord('2'), Ord('u')]);
+    AssertFalse('left shift ignored', D.Next(E));
+
+    { CSI 57441;2:2 u = left shift repeat. }
+    D.Feed([27, Ord('['), Ord('5'), Ord('7'), Ord('4'), Ord('4'), Ord('1'),
+      Ord(';'), Ord('2'), Ord(':'), Ord('2'), Ord('u')]);
+    AssertFalse('left shift repeat ignored', D.Next(E));
+
+    { CSI 57358 u = caps lock. }
+    D.Feed([27, Ord('['), Ord('5'), Ord('7'), Ord('3'), Ord('5'), Ord('8'),
+      Ord('u')]);
+    AssertFalse('caps lock ignored', D.Next(E));
+
+    { A following normal key still decodes. }
+    D.Feed([27, Ord('['), Ord('1'), Ord('1'), Ord('3'), Ord('u')]);
+    AssertTrue('q still decodes', D.Next(E) and (E.Key.Kind = kkChar));
+    AssertEquals('char value', 'q', E.Key.Ch);
+  finally
+    D.Free;
+  end;
+end;
+
+procedure TTuiInputTest.TestDecodeKittyShiftedAndTextKeys;
+var
+  D: TKeyDecoder;
+  E: TInputEvent;
+begin
+  D := TKeyDecoder.Create;
+  try
+    { Shift+/ with alternate and associated text: base 47 '/', shifted 63 '?',
+      text 63. Must produce '?', not '/' and not nothing. }
+    D.Feed([27, Ord('['), Ord('4'), Ord('7'), Ord(':'), Ord('6'), Ord('3'),
+      Ord(';'), Ord('2'), Ord(';'), Ord('6'), Ord('3'), Ord('u')]);
+    AssertTrue('shift+/ decodes', D.Next(E));
+    AssertTrue('is char', E.Key.Kind = kkChar);
+    AssertEquals('shifted char', '?', E.Key.Ch);
+    AssertTrue('shift modifier', moShift in E.Key.Mods);
+
+    { Shift+a: base 97, shifted 65, text 65 -> 'A'. }
+    D.Feed([27, Ord('['), Ord('9'), Ord('7'), Ord(':'), Ord('6'), Ord('5'),
+      Ord(';'), Ord('2'), Ord(';'), Ord('6'), Ord('5'), Ord('u')]);
+    AssertTrue('shift+a decodes', D.Next(E));
+    AssertEquals('shifted letter', 'A', E.Key.Ch);
+
+    { Alternate key with no associated text still resolves via the shifted key. }
+    D.Feed([27, Ord('['), Ord('4'), Ord('7'), Ord(':'), Ord('6'), Ord('3'),
+      Ord(';'), Ord('2'), Ord('u')]);
+    AssertTrue('alt key decodes', D.Next(E));
+    AssertEquals('alt char', '?', E.Key.Ch);
+
+    { Plain key with associated text decodes to that text. }
+    D.Feed([27, Ord('['), Ord('9'), Ord('7'), Ord(';'), Ord('1'), Ord(';'),
+      Ord('9'), Ord('7'), Ord('u')]);
+    AssertTrue('plain text key decodes', D.Next(E));
+    AssertEquals('plain char', 'a', E.Key.Ch);
+
+    { Ctrl+c: base 99 with ctrl; no control-code text field. }
+    D.Feed([27, Ord('['), Ord('9'), Ord('9'), Ord(';'), Ord('5'), Ord('u')]);
+    AssertTrue('ctrl c decodes', D.Next(E));
+    AssertEquals('ctrl char', 'c', E.Key.Ch);
+    AssertTrue('ctrl modifier', moCtrl in E.Key.Mods);
   finally
     D.Free;
   end;

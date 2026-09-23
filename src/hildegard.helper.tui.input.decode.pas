@@ -140,45 +140,124 @@ begin
   end;
 end;
 
+function CodepointToUnicode(ACodepoint: Integer): UnicodeString;
+begin
+  if ACodepoint <= 0 then
+    Exit('');
+  if ACodepoint > $FFFF then
+  begin
+    Dec(ACodepoint, $10000);
+    Result := UnicodeString(WideChar($D800 + (ACodepoint shr 10))) +
+      WideChar($DC00 + (ACodepoint and $3FF));
+  end
+  else
+    Result := UnicodeString(WideChar(ACodepoint));
+end;
+
+{ Associated text: colon-separated codepoints. Emit them all. }
+function TextCodepointsToUnicode(const AField: string): UnicodeString;
+var
+  S, Part: string;
+  P: Integer;
+begin
+  Result := '';
+  S := AField;
+  while S <> '' do
+  begin
+    P := Pos(':', S);
+    if P > 0 then
+    begin
+      Part := Copy(S, 1, P - 1);
+      S := Copy(S, P + 1, MaxInt);
+    end
+    else
+    begin
+      Part := S;
+      S := '';
+    end;
+    Result := Result + CodepointToUnicode(StrToIntDef(Part, 0));
+  end;
+end;
+
 function TKeyDecoder.MapCSIu(const AParams: string;
   out AEvent: TInputEvent): Boolean;
 var
-  S, ModPart: string;
-  Codepoint, Mods, EventType, P: Integer;
+  KeyField, ModField, TextField, Tail, S: string;
+  Base, Shifted, Mods, EventType, P, P2: Integer;
+  ModsStr, EventStr: string;
+  Ch: UnicodeString;
+  HasText: Boolean;
 begin
-  { Kitty keyboard protocol: CSI <codepoint>[;<mods>[:<event>]] u.
-    Event 1=press, 2=repeat, 3=release; releases are ignored. Mods bits are the
-    same as the legacy forms (mods-1: 1=shift, 2=alt, 4=ctrl). }
+  { Kitty keyboard protocol:
+      CSI unicode[:shifted[:base]] ; modifiers[:event] ; text u
+    The codepoint is always the *unshifted* key (per the spec), so a shifted
+    character (e.g. Shift+/ = '?') arrives as an alternate shifted codepoint or,
+    when associated-text reporting is on, as the text field. Event 1=press,
+    2=repeat, 3=release; releases are ignored. Mods bits are as the legacy forms
+    (mods-1: 1=shift, 2=alt, 4=ctrl). }
   AEvent := Default(TInputEvent);
   Result := False;
+
   S := AParams;
   P := Pos(';', S);
   if P > 0 then
   begin
-    Codepoint := StrToIntDef(Copy(S, 1, P - 1), 0);
-    ModPart := Copy(S, P + 1, MaxInt);
+    KeyField := Copy(S, 1, P - 1);
+    S := Copy(S, P + 1, MaxInt);
   end
   else
   begin
-    Codepoint := StrToIntDef(S, 0);
-    ModPart := '';
+    KeyField := S;
+    S := '';
   end;
-  EventType := 0;
-  P := Pos(':', ModPart);
+  P := Pos(';', S);
   if P > 0 then
   begin
-    EventType := StrToIntDef(Copy(ModPart, P + 1, MaxInt), 0);
-    ModPart := Copy(ModPart, 1, P - 1);
+    ModField := Copy(S, 1, P - 1);
+    TextField := Copy(S, P + 1, MaxInt);
+  end
+  else
+  begin
+    ModField := S;
+    TextField := '';
   end;
+
+  Base := 0;
+  Shifted := 0;
+  P := Pos(':', KeyField);
+  if P > 0 then
+  begin
+    Base := StrToIntDef(Copy(KeyField, 1, P - 1), 0);
+    Tail := Copy(KeyField, P + 1, MaxInt);
+    P2 := Pos(':', Tail);
+    if P2 > 0 then
+      Shifted := StrToIntDef(Copy(Tail, 1, P2 - 1), 0)
+    else
+      Shifted := StrToIntDef(Tail, 0);
+  end
+  else
+    Base := StrToIntDef(KeyField, 0);
+
+  ModsStr := ModField;
+  EventStr := '';
+  P := Pos(':', ModField);
+  if P > 0 then
+  begin
+    ModsStr := Copy(ModField, 1, P - 1);
+    EventStr := Copy(ModField, P + 1, MaxInt);
+  end;
+  EventType := StrToIntDef(EventStr, 0);
   if EventType = 3 then
     Exit(False);
-  if ModPart <> '' then
-    Mods := StrToIntDef(ModPart, 1)
+
+  if ModsStr <> '' then
+    Mods := StrToIntDef(ModsStr, 1)
   else
     Mods := 1;
   if Mods < 1 then
     Mods := 1;
   Dec(Mods);
+
   AEvent.Kind := ikKey;
   if (Mods and 1) <> 0 then
     Include(AEvent.Key.Mods, moShift);
@@ -187,33 +266,55 @@ begin
   if (Mods and 4) <> 0 then
     Include(AEvent.Key.Mods, moCtrl);
 
-  case Codepoint of
+  { Special keys ignore any alternate/text fields. }
+  case Base of
     13:
-      AEvent.Key.Kind := kkEnter;
+      begin
+        AEvent.Key.Kind := kkEnter;
+        Exit(True);
+      end;
     9:
-      AEvent.Key.Kind := kkTab;
+      begin
+        AEvent.Key.Kind := kkTab;
+        Exit(True);
+      end;
     27:
-      AEvent.Key.Kind := kkEscape;
+      begin
+        AEvent.Key.Kind := kkEscape;
+        Exit(True);
+      end;
     8, 127:
-      AEvent.Key.Kind := kkBackspace;
-  else
-    if Codepoint >= 32 then
-    begin
-      AEvent.Key.Kind := kkChar;
-      if Codepoint <= $FFFF then
-        AEvent.Key.Ch := UnicodeString(WideChar(Codepoint))
-      else
-        AEvent.Key.Ch := UnicodeString(WideChar(Codepoint));
-    end
-    else if (Codepoint >= 1) and (Codepoint <= 26) then
-    begin
-      AEvent.Key.Kind := kkChar;
-      AEvent.Key.Ch := UnicodeString(AnsiChar(Ord('a') + Codepoint - 1));
-      Include(AEvent.Key.Mods, moCtrl);
-    end
-    else
-      Exit(False);
+      begin
+        AEvent.Key.Kind := kkBackspace;
+        Exit(True);
+      end;
   end;
+
+  { Functional keys live in the Unicode Private Use Area (57344..63743) and have
+    no character form. Modifier keys (Left Shift = 57441, ...) arrive here as
+    press/repeat events; emitting them as characters produced a stray glyph
+    rendered as '?'. Ignore the whole range. }
+  if (Base >= 57344) and (Base <= 63743) then
+    Exit(False);
+
+  HasText := TextField <> '';
+  Ch := '';
+  if HasText then
+    Ch := TextCodepointsToUnicode(TextField)
+  else if ((Mods and 1) <> 0) and (Shifted > 0) then
+    Ch := CodepointToUnicode(Shifted)
+  else if Base >= 32 then
+    Ch := CodepointToUnicode(Base)
+  else if (Base >= 1) and (Base <= 26) then
+  begin
+    Ch := UnicodeString(AnsiChar(Ord('a') + Base - 1));
+    Include(AEvent.Key.Mods, moCtrl);
+  end;
+
+  if Ch = '' then
+    Exit(False);
+  AEvent.Key.Kind := kkChar;
+  AEvent.Key.Ch := Ch;
   Result := True;
 end;
 

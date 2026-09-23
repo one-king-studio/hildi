@@ -38,10 +38,6 @@ type
     function Poll(out AEvent: TInputEvent): Boolean;
     function Wait(ATimeoutMs: Integer; out AEvent: TInputEvent): Boolean;
 
-    { Query the terminal background (OSC 11) and return its raw reply, draining
-      the response so it never leaks to the shell. Empty if unsupported. Raw
-      mode is already active on the input fd here, which is why this lives in
-      the adapter rather than in the caller. }
     { True once SIGTERM/SIGINT/SIGHUP has been received; the caller should stop
       its loop so the terminal is restored on the normal exit path. }
     function Terminated: Boolean;
