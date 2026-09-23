@@ -272,10 +272,104 @@ Demonstration
 - Wiring to the agent loop, approvals, or sessions (a follow-on spec).
 - Windows and other non-Unix targets.
 
+## Application: Harness UI (v1)
+
+The toolkit above has no consumer yet; `Harness_UI_v1` is the actual application
+that binds it to the agent. It is the TUI counterpart to the CLI and shares the
+same configuration and trust model. Agent execution runs off the UI thread so the
+interface stays interactive while a turn streams.
+
+### Goals
+
+- A prompt/response loop inside the TUI: type a prompt, submit, watch the answer.
+- Live streaming of assistant text and reasoning while a turn runs.
+- Tool activity (call, reason, result) shown as labelled lines as it happens.
+- Approvals presented as modal dialogs, answered without losing the transcript.
+- Durable sessions: workspace, session id, and ledger in the SQLite store, with
+  resume; in-memory when no store is configured.
+- UI stays responsive (input, scroll, resize) throughout a turn.
+
+### User Stories
+
+- As an **operator**, I want to type a prompt and watch the reply stream in, so I
+  can follow the agent without leaving the program.
+- As an **operator**, I want to see each tool call, its stated reason, and its
+  result as they happen, so I know what the agent is doing.
+- As an **operator**, I want to approve or deny a command in a modal, with the
+  same once/exact/wildcard/deny choices as the CLI, so the transcript stays
+  visible.
+- As an **operator**, I want to resume a session and see earlier messages, so I
+  can continue prior work.
+- As an **operator**, I want to quit at any time (including mid-turn) and have my
+  terminal restored, so the TUI is never dangerous to my shell.
+- As a **harness author**, I want the agent loop to run off the UI thread behind
+  an event queue, so the UI never blocks on the network and stays testable.
+
+### Acceptance Criteria
+
+#### Functional Requirements
+
+Prompt and turn lifecycle
+
+- [ ] A single-line prompt editor accepts typed characters, Backspace/Delete,
+      Home/End, and left/right cursor movement; Enter submits the line.
+- [ ] Up/Down recalls previously submitted prompts (history).
+- [ ] Submitting echoes the prompt into the conversation and starts a turn; the
+      prompt editor is disabled until the turn ends.
+- [ ] While a turn runs the UI keeps processing input (scroll, resize, quit).
+- [ ] Assistant text (and, when present, reasoning) appears incrementally as it
+      streams, appended to the conversation, which auto-scrolls to the newest
+      line unless the user has scrolled away.
+- [ ] Each tool call renders a labelled line with the tool name, the model's
+      reason, and its arguments; each result renders a labelled outcome line.
+- [ ] When an approval ask arrives, a modal shows the summary and its options;
+      choosing an option resolves the ask (persisting the rule per its scope when
+      the option persists) and the turn resumes; deny refuses the call.
+- [ ] LLM and tool errors render as error lines; the prompt editor re-enables.
+- [ ] On completion the final assistant text is in the conversation and the
+      prompt editor re-enables.
+- [ ] Quitting mid-turn denies any pending ask, stops the worker, joins it, and
+      restores the terminal.
+
+Persistence and configuration
+
+- [ ] With a store configured, the workspace is ensured, a session is created (or
+      resumed), and every user/assistant/reasoning/tool message is appended to the
+      ledger as it occurs.
+- [ ] On resume, prior messages are rendered into the conversation before the
+      first new turn.
+- [ ] With no store, the app runs against an in-memory conversation and
+      session-only approvals (never silently disabled).
+- [ ] Model, endpoint, workspace, session, and system prompt come from the same
+      environment/`.env`/flags resolution the CLI uses.
+
+#### Non-Functional Requirements
+
+- [ ] The UI thread never performs network or blocking I/O; a turn runs on a
+      worker thread and communicates only through a thread-safe queue.
+- [ ] Input-to-visible latency stays under 50 ms while a turn streams;
+      interactive frame rate stays >= 60 fps (measured work, not wall-clock, in
+      `make check`; wall-clock via `make bench`).
+- [ ] The worker thread is always joined and its objects freed on every exit
+      path; leak-clean under `make test-leak`.
+- [ ] `cthreads` is listed first in the example program on Unix.
+- [ ] Builds on macOS and Linux with FPC 3.3.1; no new dependency.
+- [ ] `make check` is green.
+
+### Out of Scope (Harness UI v1)
+
+- Markdown rendering (deferred to `Markdown_v1`, which is spec-only).
+- A file/diff viewport pane (a later spec).
+- Editing files, an editor buffer, or syntax highlighting.
+- Multiple concurrent turns or subagent panes.
+- Horizontal scrolling in the conversation.
+- The Remote Agent Link.
+
 ## Future Considerations
 
 - `Harness_UI_v1`: the real application - conversation pane, file/diff viewport,
-  status line, approval modal - bound to `TAgentLoop`.
+  status line, approval modal - bound to `TAgentLoop` (specified in
+  `Harness_UI_v1.SPEC.md`).
 - Editable text: reuse FPC's gap-buffer editor model (`packages/fv/src/editors`)
   rather than writing one.
 - A terminal pane that hosts a real command via a pty, rendering through
