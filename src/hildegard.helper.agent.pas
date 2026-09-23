@@ -98,6 +98,9 @@ const
   DefaultMaxToolIterations = 8;
   BuiltinGetSystemTimeName = 'get_system_time';
   ToolReasonParamName = 'reason';
+  DefaultSystemPrompt =
+    'You are a helpful assistant running inside hildegard-helper. ' +
+    'Use the provided tools when they help answer the user.';
 
 implementation
 

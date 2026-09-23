@@ -50,8 +50,6 @@ type
     FContentW, FContentH: Integer;
     FVBar, FHBar: TScrollBar;
     FBarDragging: Boolean;
-    function MaxScrollX: Integer;
-    function MaxScrollY: Integer;
     function PointInside(AX, AY: Integer): Boolean;
     procedure SyncBars;
     procedure DragBarTo(AY: Integer);
@@ -65,6 +63,9 @@ type
     destructor Destroy; override;
     procedure ScrollTo(AX, AY: Integer);
     procedure ScrollBy(AX, AY: Integer);
+    { The furthest the content can scroll; ScrollY = MaxScrollY is the bottom. }
+    function MaxScrollY: Integer;
+    function MaxScrollX: Integer;
     function HandleEvent(const E: TInputEvent): Boolean; override;
     procedure Arrange(const ABounds: TRect); override;
     procedure Render(const S: ISurface); override;

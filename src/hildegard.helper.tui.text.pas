@@ -30,6 +30,7 @@ type
     FSpans: array of TSpan;
     FWrap: TWrapMode;
     FAlign: TTextAlign;
+    FWrapWidth: Integer;
   public
     constructor Create(const ASpans: array of TSpan;
       AWrap: TWrapMode = wmWord);
@@ -38,6 +39,10 @@ type
     function Measure(const AAvail: TSize): TSize; override;
     procedure Render(const S: ISurface); override;
     property Align: TTextAlign read FAlign write FAlign;
+    { When > 0 and wrapping is on, Measure wraps at this many columns instead of
+      max-content (the longest word). Callers in a fixed-size viewport set it so
+      the block fills the width and reports the correct wrapped height. }
+    property WrapWidth: Integer read FWrapWidth write FWrapWidth;
   end;
 
 implementation
@@ -232,6 +237,7 @@ begin
   inherited Create;
   FWrap := AWrap;
   FAlign := taLeft;
+  FWrapWidth := 0;
   SetSpans(ASpans);
 end;
 
@@ -272,6 +278,12 @@ begin
       if LW > Result.W then
         Result.W := LW;
     end;
+    Result.H := Length(Lines);
+  end
+  else if FWrapWidth > 0 then
+  begin
+    Result.W := FWrapWidth;
+    Lines := WrapClusters(Clusters, FWrapWidth, FWrap);
     Result.H := Length(Lines);
   end
   else

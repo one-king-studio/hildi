@@ -26,11 +26,6 @@ uses
   hildegard.helper.session, hildegard.helper.session.store,
   hildegard.helper.store, hildegard.helper.workspace;
 
-const
-  DefaultSystemPrompt =
-    'You are a helpful assistant running inside hildegard-helper. ' +
-    'Use the provided tools when they help answer the user.';
-
 {$ifdef unix}
 function c_isatty(Fd: cint): cint; cdecl; external 'c' name 'isatty';
 {$endif}

@@ -25,6 +25,7 @@ type
     procedure TestCombiningMarkIsOneCluster;
     procedure TestStyledSpansRetainAttributes;
     procedure TestTextClippedToBounds;
+    procedure TestWrapWidthOverridesMaxContent;
   end;
 
 implementation
@@ -202,6 +203,26 @@ begin
     AssertEquals('second line clipped away', '', S.RowText(2, 1, 3));
   finally
     S.Free;
+  end;
+end;
+
+procedure TTuiTextTest.TestWrapWidthOverridesMaxContent;
+var
+  T: TTextBlock;
+  Sz: TSize;
+begin
+  T := TTextBlock.Create([SpanOf('aa bb cc dd')], wmWord);
+  try
+    { Without WrapWidth, Measure is max-content (longest word = 2). }
+    Sz := T.Measure(Default(TSize));
+    AssertEquals('max-content width', 2, Sz.W);
+    { With WrapWidth, the block fills the width and reports wrapped height. }
+    T.WrapWidth := 5;
+    Sz := T.Measure(Default(TSize));
+    AssertEquals('wrapped width', 5, Sz.W);
+    AssertEquals('wrapped height', 3, Sz.H);
+  finally
+    T.Free;
   end;
 end;
 

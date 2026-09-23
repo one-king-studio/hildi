@@ -1,0 +1,488 @@
+unit test_harness_turn;
+{ fpcunit tests for hildegard.helper.harness.turn: the thread-safe event queue,
+  the approval gate that bridges the worker to the UI, and the turn worker that
+  maps agent callbacks to turn events. Uses the fake LLM transport; no terminal
+  and no real network. }
+
+{$mode delphi}{$H+}
+
+interface
+
+uses
+  Classes, SysUtils, fpcunit, testregistry,
+  hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.approval,
+  hildegard.helper.harness.turn, llm_fakes;
+
+type
+  { Runs Gate.Ask on its own thread so the main thread can Answer/Cancel. }
+  TGateAskThread = class(TThread)
+  private
+    FGate: TApprovalGate;
+    FAsk: TApprovalAsk;
+  public
+    Choice: TApprovalChoice;
+    constructor Create(AGate: TApprovalGate; const AAsk: TApprovalAsk);
+    procedure Execute; override;
+  end;
+
+  { Pushes ACount events onto a shared queue, to stress concurrent access. }
+  TQueuePushThread = class(TThread)
+  private
+    FQueue: TTurnQueue;
+    FCount: Integer;
+  public
+    constructor Create(AQueue: TTurnQueue; ACount: Integer);
+    procedure Execute; override;
+  end;
+
+  TTurnQueueTest = class(TTestCase)
+  published
+    procedure TestFifoOrderAndEmpty;
+    procedure TestConcurrentPushPop;
+  end;
+
+  TApprovalGateTest = class(TTestCase)
+  private
+    FQueue: TTurnQueue;
+    function WaitForAsk(out AEvent: TTurnEvent): Boolean;
+    function MakeAsk: TApprovalAsk;
+  protected
+    procedure SetUp; override;
+    procedure TearDown; override;
+  published
+    procedure TestAskBlocksUntilAnswer;
+    procedure TestTimeoutDenies;
+    procedure TestCancelDenies;
+    procedure TestStaleAnswerIgnored;
+  end;
+
+  TTurnWorkerTest = class(TTestCase)
+  private
+    FFake: TFakeTransport;
+    FClient: TLLMClient;
+    FStore: TMemoryConversationStore;
+    FTools: TToolRegistry;
+    FLoop: TAgentLoop;
+    FQueue: TTurnQueue;
+    function BuildLoop(ARegisterTools: Boolean): TAgentLoop;
+    function Drain: string;
+  protected
+    procedure SetUp; override;
+    procedure TearDown; override;
+  published
+    procedure TestStreamsDeltasThenDone;
+    procedure TestProviderErrorEmitsError;
+    procedure TestToolEventsCarryNameReasonOk;
+    procedure TestCancelBeforeStart;
+  end;
+
+implementation
+
+{ TGateAskThread }
+
+constructor TGateAskThread.Create(AGate: TApprovalGate;
+  const AAsk: TApprovalAsk);
+begin
+  inherited Create(True);
+  FreeOnTerminate := False;
+  FGate := AGate;
+  FAsk := AAsk;
+end;
+
+procedure TGateAskThread.Execute;
+begin
+  Choice := FGate.Ask(FAsk);
+end;
+
+{ TQueuePushThread }
+
+constructor TQueuePushThread.Create(AQueue: TTurnQueue; ACount: Integer);
+begin
+  inherited Create(True);
+  FreeOnTerminate := False;
+  FQueue := AQueue;
+  FCount := ACount;
+end;
+
+procedure TQueuePushThread.Execute;
+var
+  I: Integer;
+  Event: TTurnEvent;
+begin
+  for I := 0 to FCount - 1 do
+  begin
+    Event := Default(TTurnEvent);
+    Event.Kind := teAssistantDelta;
+    Event.Text := IntToStr(I);
+    FQueue.Push(Event);
+  end;
+end;
+
+{ TTurnQueueTest }
+
+procedure TTurnQueueTest.TestFifoOrderAndEmpty;
+var
+  Queue: TTurnQueue;
+  Event: TTurnEvent;
+  A, B, C: TTurnEvent;
+begin
+  Queue := TTurnQueue.Create;
+  try
+    AssertTrue('empty at first', Queue.IsEmpty);
+    AssertFalse('nothing to pop', Queue.Pop(Event));
+
+    A := Default(TTurnEvent);
+    A.Kind := teAssistantDelta;
+    A.Text := 'a';
+    B := Default(TTurnEvent);
+    B.Kind := teAssistantDelta;
+    B.Text := 'b';
+    C := Default(TTurnEvent);
+    C.Kind := teAssistantDelta;
+    C.Text := 'c';
+    Queue.Push(A);
+    Queue.Push(B);
+    Queue.Push(C);
+    AssertFalse('not empty', Queue.IsEmpty);
+
+    AssertTrue(Queue.Pop(Event));
+    AssertEquals('first', 'a', Event.Text);
+    AssertTrue(Queue.Pop(Event));
+    AssertEquals('second', 'b', Event.Text);
+    AssertTrue(Queue.Pop(Event));
+    AssertEquals('third', 'c', Event.Text);
+    AssertFalse('drained', Queue.Pop(Event));
+    AssertTrue('empty after drain', Queue.IsEmpty);
+  finally
+    Queue.Free;
+  end;
+end;
+
+procedure TTurnQueueTest.TestConcurrentPushPop;
+const
+  Threads = 4;
+  PerThread = 250;
+var
+  Queue: TTurnQueue;
+  Workers: array[0..Threads - 1] of TQueuePushThread;
+  I, Seen: Integer;
+  Event: TTurnEvent;
+begin
+  Queue := TTurnQueue.Create;
+  try
+    for I := 0 to Threads - 1 do
+    begin
+      Workers[I] := TQueuePushThread.Create(Queue, PerThread);
+      Workers[I].Start;
+    end;
+    for I := 0 to Threads - 1 do
+    begin
+      Workers[I].WaitFor;
+      Workers[I].Free;
+    end;
+    Seen := 0;
+    while Queue.Pop(Event) do
+      Inc(Seen);
+    AssertEquals('all events', Threads * PerThread, Seen);
+  finally
+    Queue.Free;
+  end;
+end;
+
+{ TApprovalGateTest }
+
+procedure TApprovalGateTest.SetUp;
+begin
+  FQueue := TTurnQueue.Create;
+end;
+
+procedure TApprovalGateTest.TearDown;
+begin
+  FQueue.Free;
+end;
+
+function TApprovalGateTest.MakeAsk: TApprovalAsk;
+var
+  Option: TApprovalOption;
+begin
+  Result := Default(TApprovalAsk);
+  Result.Summary := 'Run cat?';
+  Result.Subject.Ref := 'run_command:cat';
+  Option := Default(TApprovalOption);
+  Option.Key := 'once';
+  Option.Caption := 'Allow once';
+  SetLength(Result.Options, 1);
+  Result.Options[0] := Option;
+end;
+
+function TApprovalGateTest.WaitForAsk(out AEvent: TTurnEvent): Boolean;
+var
+  Waited: Integer;
+begin
+  Waited := 0;
+  while Waited < 2000 do
+  begin
+    if FQueue.Pop(AEvent) then
+      Exit(AEvent.Kind = teApprovalAsk);
+    Sleep(1);
+    Inc(Waited);
+  end;
+  Result := False;
+end;
+
+procedure TApprovalGateTest.TestAskBlocksUntilAnswer;
+var
+  Gate: TApprovalGate;
+  Thread: TGateAskThread;
+  Ask: TTurnEvent;
+  Choice: TApprovalChoice;
+begin
+  Gate := TApprovalGate.Create(FQueue);
+  try
+    Thread := TGateAskThread.Create(Gate, MakeAsk);
+    Thread.Start;
+    AssertTrue('ask posted', WaitForAsk(Ask));
+    AssertEquals('ask summary', 'Run cat?', Ask.Ask.Summary);
+    AssertTrue('request id set', Ask.RequestId > 0);
+
+    Choice := Default(TApprovalChoice);
+    Choice.Allowed := True;
+    Choice.OptionKey := 'once';
+    Gate.Answer(Ask.RequestId, Choice);
+
+    Thread.WaitFor;
+    AssertTrue('allowed', Thread.Choice.Allowed);
+    AssertEquals('option key', 'once', Thread.Choice.OptionKey);
+    Thread.Free;
+  finally
+    Gate.Free;
+  end;
+end;
+
+procedure TApprovalGateTest.TestTimeoutDenies;
+var
+  Gate: TApprovalGate;
+  Choice: TApprovalChoice;
+begin
+  Gate := TApprovalGate.Create(FQueue, 30);
+  try
+    Choice := Gate.Ask(MakeAsk);
+    AssertFalse('denied on timeout', Choice.Allowed);
+    AssertEquals('no option', '', Choice.OptionKey);
+  finally
+    Gate.Free;
+  end;
+end;
+
+procedure TApprovalGateTest.TestCancelDenies;
+var
+  Gate: TApprovalGate;
+  Thread: TGateAskThread;
+  Ask: TTurnEvent;
+begin
+  Gate := TApprovalGate.Create(FQueue);
+  try
+    Thread := TGateAskThread.Create(Gate, MakeAsk);
+    Thread.Start;
+    AssertTrue('ask posted', WaitForAsk(Ask));
+    Gate.Cancel;
+    Thread.WaitFor;
+    AssertFalse('denied', Thread.Choice.Allowed);
+    Thread.Free;
+  finally
+    Gate.Free;
+  end;
+end;
+
+procedure TApprovalGateTest.TestStaleAnswerIgnored;
+var
+  Gate: TApprovalGate;
+  Thread: TGateAskThread;
+  Ask: TTurnEvent;
+  Stale, Real: TApprovalChoice;
+begin
+  Gate := TApprovalGate.Create(FQueue);
+  try
+    Thread := TGateAskThread.Create(Gate, MakeAsk);
+    Thread.Start;
+    AssertTrue('ask posted', WaitForAsk(Ask));
+
+    Stale := Default(TApprovalChoice);
+    Stale.Allowed := False;
+    Gate.Answer(Ask.RequestId + 999, Stale);
+
+    Real := Default(TApprovalChoice);
+    Real.Allowed := True;
+    Real.OptionKey := 'exact';
+    Gate.Answer(Ask.RequestId, Real);
+
+    Thread.WaitFor;
+    AssertTrue('stale ignored; real applied', Thread.Choice.Allowed);
+    AssertEquals('real option', 'exact', Thread.Choice.OptionKey);
+    Thread.Free;
+  finally
+    Gate.Free;
+  end;
+end;
+
+{ TTurnWorkerTest }
+
+procedure TTurnWorkerTest.SetUp;
+begin
+  FQueue := TTurnQueue.Create;
+end;
+
+procedure TTurnWorkerTest.TearDown;
+begin
+  FLoop.Free;
+  FTools.Free;
+  FStore := nil;
+  FClient.Free;
+  FFake.Free;
+  FQueue.Free;
+  FLoop := nil;
+  FTools := nil;
+  FClient := nil;
+  FFake := nil;
+end;
+
+function TTurnWorkerTest.BuildLoop(ARegisterTools: Boolean): TAgentLoop;
+var
+  Cfg: TLLMConfig;
+  ACfg: TAgentConfig;
+begin
+  Cfg := Default(TLLMConfig);
+  Cfg.Endpoint := 'https://example.test/v1/chat/completions';
+  Cfg.Model := 'm';
+  Cfg.ApiKey := 'k';
+  Cfg.ConnectTimeoutMs := 1000;
+  Cfg.ReadTimeoutMs := 5000;
+  FFake := TFakeTransport.Create;
+  FClient := TLLMClient.Create(Cfg, FFake);
+  FStore := TMemoryConversationStore.Create;
+  FTools := TToolRegistry.Create;
+  ACfg := Default(TAgentConfig);
+  FLoop := TAgentLoop.Create(FClient, FStore, FTools, ACfg);
+  if ARegisterTools then
+    RegisterDefaultTools(FTools);
+  Result := FLoop;
+end;
+
+function TTurnWorkerTest.Drain: string;
+var
+  Event: TTurnEvent;
+begin
+  Result := '';
+  while FQueue.Pop(Event) do
+  begin
+    case Event.Kind of
+      teAssistantDelta:
+        Result := Result + 'T:' + Event.Text + '|';
+      teReasoningDelta:
+        Result := Result + 'R:' + Event.Text + '|';
+      teToolCall:
+        Result := Result + 'C:' + Event.ToolName + ':' + Event.ToolReason + '|';
+      teToolResult:
+        Result := Result + 'X:' + Event.ToolName + ':' +
+          BoolToStr(Event.ToolOk, True) + ':' + Event.Text + '|';
+      teUserMessage:
+        Result := Result + 'U:' + Event.Text + '|';
+      teApprovalAsk:
+        Result := Result + 'A:' + IntToStr(Event.RequestId) + '|';
+      teDone:
+        Result := Result + 'D:' + Event.Answer + '|';
+      teError:
+        Result := Result + 'E:' + IntToStr(Ord(Event.ErrorCode)) + ':' +
+          Event.Text + '|';
+    end;
+  end;
+end;
+
+procedure TTurnWorkerTest.TestStreamsDeltasThenDone;
+var
+  Worker: TTurnWorker;
+begin
+  BuildLoop(False);
+  FFake.AddChunk(TextDelta('Hello'));
+  FFake.AddChunk(TextDelta(', '));
+  FFake.AddChunk(TextDelta('world'));
+  FFake.AddChunk(FinishFrame('stop'));
+  FFake.AddChunk(DoneFrame);
+
+  Worker := TTurnWorker.Create(FLoop, FQueue, 'hi');
+  Worker.Start;
+  Worker.WaitFor;
+  try
+    AssertEquals('stream then done', 'T:Hello|T:, |T:world|D:Hello, world|',
+      Drain);
+  finally
+    Worker.Free;
+  end;
+end;
+
+procedure TTurnWorkerTest.TestProviderErrorEmitsError;
+var
+  Worker: TTurnWorker;
+begin
+  BuildLoop(False);
+  FFake.FailNetwork := True;
+
+  Worker := TTurnWorker.Create(FLoop, FQueue, 'hi');
+  Worker.Start;
+  Worker.WaitFor;
+  try
+    AssertEquals('network error', 'E:2:request failed|', Drain);
+  finally
+    Worker.Free;
+  end;
+end;
+
+procedure TTurnWorkerTest.TestToolEventsCarryNameReasonOk;
+var
+  Worker: TTurnWorker;
+  Log: string;
+begin
+  BuildLoop(True);
+  FFake.AddResponse([ToolNameFrame(0, 'call_1', 'get_system_time'),
+    ToolArgsFrame(0, '{"reason":"testing"}'), FinishFrame('tool_calls'),
+    DoneFrame]);
+  FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
+
+  Worker := TTurnWorker.Create(FLoop, FQueue, 'time?');
+  Worker.Start;
+  Worker.WaitFor;
+  try
+    Log := Drain;
+    AssertTrue('tool call with reason',
+      Pos('C:get_system_time:testing|', Log) > 0);
+    AssertTrue('tool result ok',
+      Pos('X:get_system_time:True:', Log) > 0);
+    AssertTrue('ends with done',
+      Pos('T:done|D:done|', Log) > 0);
+  finally
+    Worker.Free;
+  end;
+end;
+
+procedure TTurnWorkerTest.TestCancelBeforeStart;
+var
+  Worker: TTurnWorker;
+begin
+  BuildLoop(False);
+  Worker := TTurnWorker.Create(FLoop, FQueue, 'hi');
+  Worker.RequestCancel;
+  Worker.Start;
+  Worker.WaitFor;
+  try
+    AssertEquals('cancelled', 'E:7:cancelled|', Drain);
+  finally
+    Worker.Free;
+  end;
+end;
+
+initialization
+  RegisterTest(TTurnQueueTest);
+  RegisterTest(TApprovalGateTest);
+  RegisterTest(TTurnWorkerTest);
+
+end.

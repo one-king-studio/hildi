@@ -15,7 +15,9 @@ uses
   test_cli, test_transcript, test_command_policy, test_command_tool,
   test_workspace, test_approval, test_session, test_tui_surface,
   test_tui_input, test_tui_layout, test_tui_text, test_tui_scroll,
-  test_tui_app, test_tui_perf;
+  test_tui_app, test_tui_perf, test_harness_turn, test_tui_prompt,
+  test_tui_conversation, test_tui_approvalmodal, test_harness_session,
+  test_harness_app;
 
 var
   Runner: TTestRunner;
