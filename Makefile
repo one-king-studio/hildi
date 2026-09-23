@@ -109,6 +109,15 @@ $(BIN)/hildegard-helper-tui-demo: $(EXAMPLES)/tui_demo.pas $(LIB_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
+# Full-screen agent harness (conversation + approvals + sessions). Builds and
+# runs; Ctrl-C quits.
+tui-agent: libsqlite $(BIN)/hildegard-helper-tui-agent
+	$(BIN)/hildegard-helper-tui-agent $(ARGS)
+
+$(BIN)/hildegard-helper-tui-agent: $(EXAMPLES)/tui_agent.pas $(LIB_SRCS) $(SQLITE_AR)
+	@mkdir -p $(BIN) $(DBGUNITS)
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+
 # Printable wall-clock benchmark. `make bench ARGS=--real` measures the real
 # terminal; `make perf` asserts the budgets and is not part of `make check`.
 bench: $(BIN)/hildegard-helper-tui-bench

@@ -1,0 +1,117 @@
+program tui_agent;
+{ The full-screen agent harness: a conversation pane, streaming assistant text,
+  tool-activity lines, an approval modal, and SQLite-backed session persistence.
+
+  Type a prompt and press Enter. The agent runs off the UI thread, so the view
+  stays responsive. Ctrl-C (or Ctrl-D) quits; a turn in flight is cancelled and
+  the terminal is restored.
+
+  Config comes from the environment/.env like the CLI; flags mirror it:
+    --workspace PATH  --session ID  --continue  --model M  --endpoint URL
+    --no-store        run in memory (no persistence, session-only approvals)
+
+  Run with `make tui-agent`. }
+
+{$mode delphi}{$H+}
+
+uses
+  {$ifdef unix}cthreads,{$endif}   // must come first on Unix
+  Classes, SysUtils,
+  hildegard.helper.cli,
+  hildegard.helper.tui.base, hildegard.helper.tui.input,
+  hildegard.helper.tui.surface, hildegard.helper.tui.surface.video,
+  hildegard.helper.tui.input.terminal,
+  hildegard.helper.harness.session, hildegard.helper.harness.app;
+
+var
+  RawArgs: TStringList;
+  Args: array of string;
+  Opts: TCLIOptions;
+  I: Integer;
+  NoStore: Boolean;
+  StorePath: string;
+  Cfg: THarnessSessionConfig;
+  Session: THarnessSession;
+  Err: string;
+  Surface: ISurface;
+  InputTerm: TInputSourceTerminal;
+  Input: IInputSource;
+  App: THarnessApp;
+begin
+  RawArgs := TStringList.Create;
+  try
+    for I := 1 to ParamCount do
+      RawArgs.Add(ParamStr(I));
+    NoStore := RawArgs.IndexOf('--no-store') >= 0;
+    SetLength(Args, 0);
+    for I := 0 to RawArgs.Count - 1 do
+      if RawArgs[I] <> '--no-store' then
+      begin
+        SetLength(Args, Length(Args) + 1);
+        Args[High(Args)] := RawArgs[I];
+      end;
+    try
+      Opts := ParseCLIOptions(Args);
+    except
+      on E: ECLIError do
+      begin
+        WriteLn('error: ', E.Message);
+        WriteLn;
+        WriteLn(UsageText);
+        Halt(2);
+      end;
+    end;
+  finally
+    RawArgs.Free;
+  end;
+
+  if Opts.Help then
+  begin
+    WriteLn(UsageText);
+    Halt(0);
+  end;
+
+  StorePath := '';
+  if not NoStore then
+  begin
+    StorePath := GetEnvironmentVariable('HILDEGARD_STORE_PATH');
+    if StorePath = '' then
+      StorePath := IncludeTrailingPathDelimiter(GetUserDir) +
+        '.hildegard-helper' + PathDelim + 'store.db';
+  end;
+
+  Cfg := Default(THarnessSessionConfig);
+  Cfg.WorkspacePath := Opts.Workspace;
+  Cfg.StorePath := StorePath;
+  Cfg.SessionId := Opts.Session;
+  Cfg.Resume := Opts.ContinueSession;
+  Cfg.Model := Opts.Model;
+  Cfg.Endpoint := Opts.Endpoint;
+
+  Session := THarnessSession.Open(Cfg, Err);
+  if Session = nil then
+  begin
+    WriteLn('error: ', Err);
+    Halt(1);
+  end;
+
+  { Create the surface before the input source; destroy the input before the
+    surface, so each restores the termios it saved and the tty ends cooked. }
+  Surface := TSurfaceVideo.Create;
+  InputTerm := TInputSourceTerminal.Create;
+  Input := InputTerm;
+  App := THarnessApp.Create(Surface, Input, Session);
+  try
+    while App.Step do
+    begin
+      if InputTerm.Terminated then
+        App.Stop;
+      Sleep(1);
+    end;
+  finally
+    App.Free;
+    Input := nil;
+    Surface := nil;
+    Session.Free;
+  end;
+end.
