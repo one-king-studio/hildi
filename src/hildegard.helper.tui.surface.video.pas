@@ -1,29 +1,39 @@
 unit hildegard.helper.tui.surface.video;
 { Terminal surface adapter over FPC's video unit.
 
-  This is the only place the toolkit touches video. It reuses video's enhanced
-  Unicode cell buffer and its diffing UpdateScreen: the toolkit never writes an
-  escape sequence. video's InitEnhancedVideo enters the alternate screen and
-  DoneEnhancedVideo restores it, so the surface owns the terminal lifecycle and
-  the caller must free it on every exit path. }
+  video owns the terminal lifecycle (the alternate screen, the kitty keyboard
+  push/pop, the cursor) and the window size. We do NOT use its UpdateScreen diff,
+  which leaves stale cells around wide characters and scroll edges: the surface
+  keeps its own cell buffer and emits only changed cells through
+  hildegard.helper.tui.encoder, which is pure and unit-tested.
+
+  InitEnhancedVideo/DoneEnhancedVideo still enter and leave the alternate screen,
+  so the caller must free the surface on every exit path. }
 
 {$mode delphi}{$H+}
 
 interface
 
 uses
-  hildegard.helper.tui.base, hildegard.helper.tui.surface;
+  hildegard.helper.tui.base, hildegard.helper.tui.surface,
+  hildegard.helper.tui.encoder;
 
 type
   TSurfaceVideo = class(TInterfacedObject, ISurface)
   private
+    FWidth, FHeight: Integer;
+    FCells: array of TCell;
+    FPrev: array of TCell;
     FClips: array of TRect;
     FClipCount: Integer;
     FNeedFullRepaint: Boolean;
+    FEncoder: TCellEncoder;
     procedure SyncSize;
+    procedure WriteOut(const AData: RawByteString);
     function EffectiveClip: TRect;
     function Intersect(const A, B: TRect): TRect;
     function InClip(X, Y: Integer): Boolean;
+    function IndexOf(X, Y: Integer): Integer;
   public
     constructor Create;
     destructor Destroy; override;
@@ -35,6 +45,7 @@ type
     procedure DimRect(const R: TRect);
     procedure PushClip(const R: TRect);
     procedure PopClip;
+    procedure Invalidate;
     procedure Flush;
   end;
 
@@ -75,67 +86,76 @@ begin
   end;
 end;
 
-function ToVideoAttrs(const AStyle: TStyle): TEnhancedVideoAttributes;
-begin
-  Result := [];
-  if sfBold in AStyle then
-    Include(Result, evaBold);
-  if sfDim in AStyle then
-    Include(Result, evaFaint);
-  if sfItalic in AStyle then
-    Include(Result, evaItalicized);
-  if sfUnderline in AStyle then
-    Include(Result, evaUnderlined);
-  if sfReverse in AStyle then
-    Include(Result, evaInverse);
-  if sfBlink in AStyle then
-    Include(Result, evaBlinkSlow);
-  if sfStrike in AStyle then
-    Include(Result, evaCrossedOut);
-end;
-
 constructor TSurfaceVideo.Create;
 begin
   inherited Create;
   FClipCount := 0;
-  { Force a full first paint: video clears to the terminal's own default
-    background, so a diffing first flush would render only our changed cells and
-    leave the rest with a different background ("islands" of mismatched colour). }
-  FNeedFullRepaint := True;
+  FWidth := 0;
+  FHeight := 0;
+  FEncoder := TCellEncoder.Create;
   InitEnhancedVideo;
   SetCursorType(crHidden);
+  WriteOut(#27'[?7l');          { autowrap off: we always position explicitly }
+  FNeedFullRepaint := True;
+  SyncSize;
 end;
 
 destructor TSurfaceVideo.Destroy;
 begin
+  WriteOut(#27'[?7h');          { restore autowrap before leaving }
   SetCursorType(crUnderLine);
   DoneEnhancedVideo;
+  FEncoder.Free;
   inherited Destroy;
+end;
+
+procedure TSurfaceVideo.WriteOut(const AData: RawByteString);
+var
+  Off, N: Integer;
+begin
+  if AData = '' then
+    Exit;
+  Off := 1;
+  while Off <= Length(AData) do
+  begin
+    N := fpWrite(1, AData[Off], Length(AData) - Off + 1);
+    if N <= 0 then
+      Break;
+    Inc(Off, N);
+  end;
 end;
 
 procedure TSurfaceVideo.SyncSize;
 {$ifdef unix}
 var
   WS: TWinsize;
-  Mode: TVideoMode;
 {$endif}
 begin
   {$ifdef unix}
   FillChar(WS, SizeOf(WS), 0);
   if (fpioctl(0, TIOCGWINSZ, @WS) = 0) and (WS.ws_col > 0) and
-    (WS.ws_row > 0) and
-    ((WS.ws_col <> ScreenWidth) or (WS.ws_row <> ScreenHeight)) then
+    (WS.ws_row > 0) and ((WS.ws_col <> FWidth) or (WS.ws_row <> FHeight)) then
   begin
-    Mode.Col := WS.ws_col;
-    Mode.Row := WS.ws_row;
-    Mode.Color := True;
-    if SetVideoMode(Mode) then
-      { The resized buffer's new cells differ from the terminal's actual screen;
-        a diffing flush would skip them and leave stale content, so force one
-        full repaint. }
-      FNeedFullRepaint := True;
+    FWidth := WS.ws_col;
+    FHeight := WS.ws_row;
+    SetLength(FCells, FWidth * FHeight);
+    SetLength(FPrev, FWidth * FHeight);
+    FNeedFullRepaint := True;
   end;
   {$endif}
+  if (FWidth <= 0) or (FHeight <= 0) then
+  begin
+    FWidth := 80;
+    FHeight := 25;
+    SetLength(FCells, FWidth * FHeight);
+    SetLength(FPrev, FWidth * FHeight);
+    FNeedFullRepaint := True;
+  end;
+end;
+
+function TSurfaceVideo.IndexOf(X, Y: Integer): Integer;
+begin
+  Result := Y * FWidth + X;
 end;
 
 function TSurfaceVideo.Intersect(const A, B: TRect): TRect;
@@ -170,8 +190,8 @@ begin
     Result := Default(TRect);
     Result.X := 0;
     Result.Y := 0;
-    Result.W := Width;
-    Result.H := Height;
+    Result.W := FWidth;
+    Result.H := FHeight;
   end
   else
     Result := FClips[FClipCount - 1];
@@ -188,32 +208,22 @@ end;
 function TSurfaceVideo.Width: Integer;
 begin
   SyncSize;
-  Result := ScreenWidth;
+  Result := FWidth;
 end;
 
 function TSurfaceVideo.Height: Integer;
 begin
   SyncSize;
-  Result := ScreenHeight;
+  Result := FHeight;
 end;
 
 procedure TSurfaceVideo.Put(X, Y: Integer; const ACell: TCell);
-var
-  I: Integer;
-  S: UnicodeString;
 begin
   if not InClip(X, Y) then
     Exit;
-  if (X < 0) or (Y < 0) or (X >= ScreenWidth) or (Y >= ScreenHeight) then
+  if (X < 0) or (Y < 0) or (X >= FWidth) or (Y >= FHeight) then
     Exit;
-  I := Y * Integer(ScreenWidth) + X;
-  S := ACell.Ch;
-  if S = '' then
-    S := ' ';
-  EnhancedVideoBuf[I].ExtendedGraphemeCluster := S;
-  EnhancedVideoBuf[I].ForegroundColor := ACell.Attr.Fg;
-  EnhancedVideoBuf[I].BackgroundColor := ACell.Attr.Bg;
-  EnhancedVideoBuf[I].EnhancedVideoAttributes := ToVideoAttrs(ACell.Attr.Style);
+  FCells[IndexOf(X, Y)] := ACell;
 end;
 
 procedure TSurfaceVideo.Clear(const AAttr: TAttr);
@@ -224,19 +234,19 @@ end;
 procedure TSurfaceVideo.FillRect(const R: TRect; const AAttr: TAttr);
 var
   C: TRect;
-  X, Y, I: Integer;
+  X, Y: Integer;
+  Blank: TCell;
 begin
   C := Intersect(R, EffectiveClip);
+  Blank := Default(TCell);
+  Blank.Ch := ErasedChar;
+  Blank.Attr := AAttr;
   for Y := C.Y to C.Y + C.H - 1 do
     for X := C.X to C.X + C.W - 1 do
     begin
-      if (X < 0) or (Y < 0) or (X >= ScreenWidth) or (Y >= ScreenHeight) then
+      if (X < 0) or (Y < 0) or (X >= FWidth) or (Y >= FHeight) then
         Continue;
-      I := Y * Integer(ScreenWidth) + X;
-      EnhancedVideoBuf[I].ExtendedGraphemeCluster := ' ';
-      EnhancedVideoBuf[I].ForegroundColor := AAttr.Fg;
-      EnhancedVideoBuf[I].BackgroundColor := AAttr.Bg;
-      EnhancedVideoBuf[I].EnhancedVideoAttributes := ToVideoAttrs(AAttr.Style);
+      FCells[IndexOf(X, Y)] := Blank;
     end;
 end;
 
@@ -249,17 +259,14 @@ begin
   for Y := C.Y to C.Y + C.H - 1 do
     for X := C.X to C.X + C.W - 1 do
     begin
-      if (X < 0) or (Y < 0) or (X >= ScreenWidth) or (Y >= ScreenHeight) then
+      if (X < 0) or (Y < 0) or (X >= FWidth) or (Y >= FHeight) then
         Continue;
-      I := Y * Integer(ScreenWidth) + X;
+      I := IndexOf(X, Y);
       { Darken the palette as well as setting faint: many terminals ignore
         SGR 2, so without the remap the dim would be invisible. }
-      EnhancedVideoBuf[I].ForegroundColor :=
-        DimIndex(EnhancedVideoBuf[I].ForegroundColor);
-      EnhancedVideoBuf[I].BackgroundColor :=
-        DimIndex(EnhancedVideoBuf[I].BackgroundColor);
-      EnhancedVideoBuf[I].EnhancedVideoAttributes :=
-        EnhancedVideoBuf[I].EnhancedVideoAttributes + [evaFaint];
+      FCells[I].Attr.Fg := DimIndex(FCells[I].Attr.Fg);
+      FCells[I].Attr.Bg := DimIndex(FCells[I].Attr.Bg);
+      Include(FCells[I].Attr.Style, sfDim);
     end;
 end;
 
@@ -277,16 +284,26 @@ begin
     Dec(FClipCount);
 end;
 
+procedure TSurfaceVideo.Invalidate;
+begin
+  FNeedFullRepaint := True;
+end;
+
 procedure TSurfaceVideo.Flush;
+var
+  Data: RawByteString;
+  Full: Boolean;
+  I: Integer;
 begin
   SyncSize;
-  if FNeedFullRepaint then
-  begin
-    UpdateScreen(True);
-    FNeedFullRepaint := False;
-  end
-  else
-    UpdateScreen(False);
+  Full := FNeedFullRepaint;
+  if Full then
+    FEncoder.Reset;
+  Data := FEncoder.Encode(FPrev, FCells, FWidth, FHeight, Full);
+  FNeedFullRepaint := False;
+  WriteOut(Data);
+  for I := 0 to High(FCells) do
+    FPrev[I] := FCells[I];
 end;
 
 end.

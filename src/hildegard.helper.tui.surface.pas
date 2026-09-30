@@ -27,6 +27,10 @@ type
     procedure DimRect(const R: TRect);
     procedure PushClip(const R: TRect);
     procedure PopClip;
+    { Request a full repaint on the next Flush: every cell is re-emitted rather
+      than diffed. Used after interaction to guarantee a clean screen when the
+      terminal's own diffing can leave stale cells (e.g. wide-character edges). }
+    procedure Invalidate;
     procedure Flush;
   end;
 
@@ -43,6 +47,8 @@ type
     FFlushCount: Integer;
     FChanged: Integer;
     FFirstFlush: Boolean;
+    FForceFull: Boolean;
+    FInvalidations: Integer;
     function IndexOf(X, Y: Integer): Integer;
     function EffectiveClip: TRect;
     function InClip(X, Y: Integer): Boolean;
@@ -53,6 +59,7 @@ type
     function CellAt(X, Y: Integer): TCell;
     function FlushCount: Integer;
     function LastFrameChangedCells: Integer;
+    function Invalidations: Integer;
     function RowText(Y, X, Len: Integer): UnicodeString;
     procedure ResetFrameStats;
     procedure Resize(AWidth, AHeight: Integer);
@@ -65,6 +72,7 @@ type
     procedure DimRect(const R: TRect);
     procedure PushClip(const R: TRect);
     procedure PopClip;
+    procedure Invalidate;
     procedure Flush;
   end;
 
@@ -85,6 +93,8 @@ begin
   FFlushCount := 0;
   FChanged := 0;
   FFirstFlush := True;
+  FForceFull := False;
+  FInvalidations := 0;
 end;
 
 function TSurfaceMemory.IndexOf(X, Y: Integer): Integer;
@@ -201,6 +211,12 @@ begin
     Dec(FClipCount);
 end;
 
+procedure TSurfaceMemory.Invalidate;
+begin
+  FForceFull := True;
+  Inc(FInvalidations);
+end;
+
 function TSurfaceMemory.SameCell(const A, B: TCell): Boolean;
 begin
   Result := (A.Ch = B.Ch) and (A.Attr.Fg = B.Attr.Fg) and
@@ -211,10 +227,11 @@ procedure TSurfaceMemory.Flush;
 var
   I: Integer;
 begin
-  if FFirstFlush then
+  if FFirstFlush or FForceFull then
   begin
     FChanged := FWidth * FHeight;
     FFirstFlush := False;
+    FForceFull := False;
   end
   else
   begin
@@ -243,6 +260,11 @@ end;
 function TSurfaceMemory.LastFrameChangedCells: Integer;
 begin
   Result := FChanged;
+end;
+
+function TSurfaceMemory.Invalidations: Integer;
+begin
+  Result := FInvalidations;
 end;
 
 function TSurfaceMemory.RowText(Y, X, Len: Integer): UnicodeString;
@@ -285,6 +307,7 @@ begin
   end;
   FClipCount := 0;
   FFirstFlush := True;
+  FForceFull := False;
 end;
 
 end.

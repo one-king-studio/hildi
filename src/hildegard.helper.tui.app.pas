@@ -207,6 +207,7 @@ begin
   if FStop then
     Exit(False);
   if FInput.Poll(E) then
+  begin
     case E.Kind of
       ikResize:
         begin
@@ -231,6 +232,7 @@ begin
     else
       ;
     end;
+  end;
   if FLayoutDirty then
   begin
     ArrangeBase;

@@ -13,7 +13,8 @@ components build on.
 
 The render target is an interface so that the entire toolkit is exercised in
 tests without a terminal. The concrete target is FPC's `video` unit on Unix,
-which already provides a dynamic Unicode cell buffer and a diffing flush, and
+which owns the alternate screen, the cursor, and the window size; the cell diff
+and ANSI emission are our own (`hildegard.helper.tui.encoder`), and the toolkit
 renders **the full 256-colour palette** (indices 0..255) by emitting `38;5;n` /
 `48;5;n`.
 
@@ -116,6 +117,7 @@ type
     procedure DimRect(const R: TRect);
     procedure PushClip(const R: TRect);   // intersects with the current clip
     procedure PopClip;
+    procedure Invalidate;                  // force a full repaint on next Flush
     procedure Flush;                       // present the buffer (diff only)
   end;
 
@@ -153,16 +155,19 @@ the change through an `ikResize` input event instead.
 
 Notes:
 
-- **256 colours.** `TSurfaceVideo` writes `Fg`/`Bg` into
-  `TEnhancedVideoCell.ForegroundColor`/`BackgroundColor`; `video`'s `attr2ansi`
-  emits the basic 16 colours for indices <= 15 and `38;5;n`/`48;5;n` for the
-  rest. No escape-sequence code is written by this toolkit.
-- **Diff and flush.** `TSurfaceVideo.Flush` calls `video.UpdateScreen(False)`;
-  `video` diffs against its own previous buffer, so the toolkit never tracks
-  damage and unchanged cells are not re-emitted. The first flush, and any flush
-  after a size change, forces a full repaint (`UpdateScreen(True)`): otherwise
-  the screen would keep the terminal's own default background for cells we did
-  not happen to change, giving text "islands" of a different colour.
+- **256 colours.** The encoder emits `38;5;n`/`48;5;n` for the 256-colour
+  palette (and the rendition flags as SGR). Escape sequences are written by
+  `hildegard.helper.tui.encoder`, not by `video`.
+- **Diff and flush.** `TSurfaceVideo` keeps its own current/previous cell buffer
+  and emits only changed cells through `hildegard.helper.tui.encoder` (pure and
+  unit-tested). `video`'s own `UpdateScreen` diff is **not** used: it left stale
+  cells around wide characters and scroll edges. The encoder emits a cursor move
+  only when a run is not adjacent, tracks SGR state, draws a wide cluster as one
+  unit (skipping its trailing cell), and blanks a wide cluster that would
+  straddle the right edge. The first flush, a size change, and any interaction
+  (`ISurface.Invalidate`) force a full repaint; otherwise only changed cells are
+  re-emitted. `video` is still used for the alternate screen, the kitty push/pop,
+  the cursor, and the window size.
 - **DimRect** rewrites cells already in the region without erasing them: it adds
   `sfDim` and, in the terminal surface, also maps each colour index to a darker
   one (many terminals ignore SGR 2 `evaFaint`, so the palette remap is what makes
@@ -336,7 +341,7 @@ type
     grapheme clusters and East Asian width. }
   TTextBlock = class(TWidget)
   public
-    constructor Create(const ASpans: array of TSpan; AWrap: TWrapMode = wmWord);
+    constructor Create(const ASpans: array of TSpan; AWrap: TWrapMode = wmNone);
     procedure SetText(const AText: string; const AAttr: TAttr);
     procedure SetSpans(const ASpans: array of TSpan);
     property Align: TTextAlign;   // read/write
@@ -345,6 +350,9 @@ type
 
 Behaviour:
 
+- **Default is clip, not wrap.** `wmNone` is the default; long lines are clipped
+  to the block's bounds. Wrapping is opt-in (`wmChar`/`wmWord`) and will move to
+  the container level later.
 - `Measure` returns the preferred size for the current spans: with `wmNone`, the
   longest line; with wrapping, the block needs a width to be meaningful, so its
   preferred width is the longest word and its preferred height is the wrapped
@@ -479,8 +487,8 @@ Behaviour:
   demonstrates switching panes.
 - **Resize.** An `ikResize` re-arranges every plane's root (base and any modal)
   to the new surface bounds; the surface already reflects the new size. A surface
-  size change also forces one full repaint (`UpdateScreen(True)`), because the
-  resized diff buffers would otherwise skip the new cells and leave stale content.
+  size change also forces one full repaint, because the freshly allocated buffer
+  would otherwise be diffed against a stale one.
 - **Layout dirtying.** `Arrange` is only called when the surface size, content,
   or plane stack changes, not on every `Step`. A resize, `PushPlane`, and
   `PopPlane` mark layout dirty internally; a caller whose widget content changed
@@ -491,14 +499,13 @@ Behaviour:
 
 ### Prior Art & Reuse
 
-- **FPC `video`** supplies the entire terminal layer: `EnhancedVideoBuf` (a
-  dynamic array of Unicode cells with 8-bit foreground/background indices),
-  `UpdateScreen(Force)` (a cell-by-cell diff and flush that emits true 256-colour
-  `38;5;n`/`48;5;n`), `SetCursorPos`/`SetCursorType`, `ScreenWidth`/`ScreenHeight`,
-  `StringDisplayWidth`, and `SetVideoMode`/`TIOCGWINSZ` for resize. This is rung
-  3 of the ladder and removes the need to write any escape-sequence code. The
-  256-colour extended palette is exactly the ceiling `video`'s cell model
-  supports, which is sufficient for this feature.
+- **FPC `video`** supplies the terminal lifecycle: the alternate screen and the
+  kitty keyboard push/pop (`InitEnhancedVideo`/`DoneEnhancedVideo`), the cursor
+  (`SetCursorType`), and the window size (`TIOCGWINSZ`). Its `UpdateScreen` diff
+  is **not** used (it left stale cells around wide characters and scroll edges);
+  `hildegard.helper.tui.encoder` owns the cell diff and the 256-colour
+  `38;5;n`/`48;5;n` emission instead. The 256-colour extended palette is exactly
+  the ceiling the model supports, which is sufficient for this feature.
 - **FPC `keyboard` is deliberately not used.** Its `InitKeyboard` runs a blocking
   kitty-key/DA1 probe (it can hang or swallow the first key) and its decoder
   proved unreliable under a pty. Instead, RTL `termio`/`baseunix` set raw mode
@@ -681,7 +688,7 @@ frames:
 For each it prints: frames, total ms, ms/frame, fps, and average changed
 cells/frame (from `TSurfaceMemory.LastFrameChangedCells`). Two modes: headless
 (memory surface, deterministic cells; default) and `--real` (the actual
-`TSurfaceVideo`, end-to-end including `video.UpdateScreen`). The benchmark
+`TSurfaceVideo`, end-to-end including the encoder). The benchmark
 exits 0 and makes no assertions; the operator reads the table. A short printed
 verdict compares the numbers against the budgets above.
 
@@ -710,9 +717,10 @@ loose enough to be stable locally and tight enough to catch a regression.
 ## Security Considerations
 
 - Text content may originate from the model or command output and is **untrusted
-  for display only**: it is drawn as cells, never evaluated, never used to build
-  escape sequences, and clips rather than overflows. Control characters other
-  than the ones the surface handles are rendered as their printable replacement.
+  for display only**: it is drawn as cells, never evaluated, and never used to
+  build escape sequences. The encoder replaces C0/C1 control characters and DEL
+  with U+FFFD before emitting, so content cannot inject terminal control
+  sequences; cell content is the only untrusted part of the byte stream.
 - The toolkit adds no network, filesystem, or process access.
 
 ## Success Criteria

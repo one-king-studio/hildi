@@ -26,6 +26,7 @@ type
     procedure TestFillRect;
     procedure Test256ColorIndexRetainedInCell;
     procedure TestFlushIdempotent;
+    procedure TestInvalidateForcesFullRepaint;
     procedure TestDimAddsFaintButKeepsGlyphsAndColors;
   end;
 
@@ -174,6 +175,27 @@ begin
     S.Flush;
     AssertEquals('second flush changes none', 0, S.LastFrameChangedCells);
     AssertEquals('flush counted', 2, S.FlushCount);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiSurfaceTest.TestInvalidateForcesFullRepaint;
+var
+  S: TSurfaceMemory;
+begin
+  S := TSurfaceMemory.Create(4, 4);
+  try
+    S.Clear(DefaultAttr);
+    S.Flush;
+    S.Flush;
+    AssertEquals('nothing changed on an idle flush', 0,
+      S.LastFrameChangedCells);
+    S.Invalidate;
+    S.Flush;
+    AssertEquals('invalidate re-emits every cell', 16,
+      S.LastFrameChangedCells);
+    AssertEquals('invalidation counted', 1, S.Invalidations);
   finally
     S.Free;
   end;
