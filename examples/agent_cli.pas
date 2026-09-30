@@ -22,6 +22,7 @@ uses
   hildegard.helper.ansi, hildegard.helper.env, hildegard.helper.cli,
   hildegard.helper.transcript, hildegard.helper.llm, hildegard.helper.agent,
   hildegard.helper.command.policy, hildegard.helper.command.tool,
+  hildegard.helper.files,
   hildegard.helper.approval, hildegard.helper.approval.store,
   hildegard.helper.session, hildegard.helper.session.store,
   hildegard.helper.store, hildegard.helper.workspace;
@@ -153,6 +154,8 @@ var
   Approver: TConsoleApprover;
   ApprovalCtx: TApprovalContext;
   CommandTool: TCommandTool;
+  FileTool: TFileTool;
+  FileToolConfig: TFileToolConfig;
   StorePath: string;
   StoreErr: TStoreError;
   StoreConfig: TStoreConfig;
@@ -349,6 +352,11 @@ begin
   CommandTool := TCommandTool.Create(ToolConfig, ApprovalService);
   CommandTool.Register(Tools);
 
+  FileToolConfig := Default(TFileToolConfig);
+  FileToolConfig.Root := Workspace.Root;
+  FileTool := TFileTool.Create(FileToolConfig, ApprovalService);
+  FileTool.Register(Tools);
+
   Loop := TAgentLoop.Create(Client, Store, Tools, AgentConfig);
 
   OutStream := THandleStream.Create(StdOutputHandle);
@@ -436,6 +444,7 @@ begin
     Writer.Free;
     OutStream.Free;
     Loop.Free;
+    FileTool.Free;
     CommandTool.Free;
     Approver.Free;
     Tools.Free;

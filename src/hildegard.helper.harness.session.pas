@@ -13,6 +13,7 @@ uses
   Classes, SysUtils,
   hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.approval,
   hildegard.helper.approval.store, hildegard.helper.command.tool,
+  hildegard.helper.files,
   hildegard.helper.workspace, hildegard.helper.store,
   hildegard.helper.session.store, hildegard.helper.harness.turn;
 
@@ -41,6 +42,7 @@ type
     FClient: TLLMClient;
     FTools: TToolRegistry;
     FCommandTool: TCommandTool;
+    FFileTool: TFileTool;
     FLoop: TAgentLoop;
     FQueue: TTurnQueue;
     FGate: TApprovalGate;
@@ -92,6 +94,8 @@ begin
   FLoop := nil;
   FCommandTool.Free;
   FCommandTool := nil;
+  FFileTool.Free;
+  FFileTool := nil;
   FTools.Free;
   FTools := nil;
   FClient.Free;
@@ -144,6 +148,7 @@ var
   ApprovalService: IApprovalService;
   ApprovalCtx: TApprovalContext;
   ToolConfig: TCommandToolConfig;
+  FileConfig: TFileToolConfig;
   AgentConfig: TAgentConfig;
 begin
   Result := False;
@@ -236,6 +241,11 @@ begin
   ToolConfig.DefaultCwd := FWorkspaceRoot;
   FCommandTool := TCommandTool.Create(ToolConfig, ApprovalService);
   FCommandTool.Register(FTools);
+
+  FileConfig := Default(TFileToolConfig);
+  FileConfig.Root := FWorkspaceRoot;
+  FFileTool := TFileTool.Create(FileConfig, ApprovalService);
+  FFileTool.Register(FTools);
 
   AgentConfig := Default(TAgentConfig);
   AgentConfig.SystemPrompt := AConfig.SystemPrompt;
