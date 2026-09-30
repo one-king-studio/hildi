@@ -276,9 +276,9 @@ type
       ASession: THarnessSession);
     destructor Destroy; override;
 
-    { One iteration: drain all queued turn events (rendering once), show or
-      resolve an approval modal, then run TTuiApp.Step. Returns False once
-      stopped. Also stops on TInputSourceTerminal.Terminated. }
+    { One iteration: pop an answered approval modal and surface the next queued
+      ask, drain all queued turn events (rendering once), then run TTuiApp.Step.
+      Returns False once stopped. Also stops on TInputSourceTerminal.Terminated. }
     function Step: Boolean;
     procedure Run;
   end;
@@ -343,7 +343,9 @@ the toolkit/yadapter split.
 3. **Approval.** A `run_command` ask reaches `TApprovalService`, whose prompt is
    `TApprovalGate.Prompt`; the worker blocks while the gate posts
    `teApprovalAsk`. The UI renders a modal and calls
-   `Gate.Answer(RequestId, Choice)`; the worker resumes.
+   `Gate.Answer(RequestId, Choice)`; the worker resumes. Asks are shown **one at
+   a time**: a second ask that arrives while a modal is open is queued and shown
+   once the current one is answered.
 4. **Drain.** Each `THarnessApp.Step` drains the queue, appends to the
    conversation/activity, routes asks, then renders exactly one frame.
 5. **Complete.** `teDone`/`teError` re-enable the prompt and free/join the worker.

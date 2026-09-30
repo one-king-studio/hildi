@@ -37,10 +37,13 @@ type
     FModal: TApprovalModal;
     FPendingRequest: Integer;
     FCloseModal: Boolean;
+    FAskQueue: array of TTurnEvent;
     function BuildTree: TWidget;
     procedure Submit(const AText: string);
     procedure DrainQueue;
     procedure HandleTurnEvent(const E: TTurnEvent);
+    procedure EnqueueAsk(const E: TTurnEvent);
+    procedure ShowNextAsk;
     procedure ShowApproval(const E: TTurnEvent);
     procedure OnApprovalChosen(const AChoice: TApprovalChoice);
     procedure CloseModal;
@@ -304,7 +307,7 @@ begin
           AppendLine('  ' + E.Text, Attr(ClReasoning, [sfDim]));
       end;
     teApprovalAsk:
-      ShowApproval(E);
+      EnqueueAsk(E);
     teDone:
       begin
         AppendLine('', AssistantAttr);
@@ -318,6 +321,33 @@ begin
   else
     ;
   end;
+end;
+
+procedure THarnessApp.EnqueueAsk(const E: TTurnEvent);
+begin
+  { One modal at a time. A batch (a compound run_command, or the next tool call)
+    can queue several asks; show them in order as each is answered. }
+  if FApp.ModalActive then
+  begin
+    SetLength(FAskQueue, Length(FAskQueue) + 1);
+    FAskQueue[High(FAskQueue)] := E;
+    Exit;
+  end;
+  ShowApproval(E);
+end;
+
+procedure THarnessApp.ShowNextAsk;
+var
+  E: TTurnEvent;
+  I: Integer;
+begin
+  if Length(FAskQueue) = 0 then
+    Exit;
+  E := FAskQueue[0];
+  for I := 1 to High(FAskQueue) do
+    FAskQueue[I - 1] := FAskQueue[I];
+  SetLength(FAskQueue, Length(FAskQueue) - 1);
+  ShowApproval(E);
 end;
 
 procedure THarnessApp.ShowApproval(const E: TTurnEvent);
@@ -347,12 +377,13 @@ end;
 
 procedure THarnessApp.CloseModal;
 begin
-  if FCloseModal then
-  begin
+  if not FCloseModal then
+    Exit;
+  if FApp.ModalActive then
     FApp.PopPlane;
-    FModal := nil;
-    FCloseModal := False;
-  end;
+  FModal := nil;
+  FCloseModal := False;
+  ShowNextAsk;
 end;
 
 procedure THarnessApp.FinishTurn;
@@ -379,8 +410,10 @@ end;
 
 function THarnessApp.Step: Boolean;
 begin
-  DrainQueue;
+  { Pop an answered modal (and show the next queued ask) before draining, so a
+    fresh ask is never stacked on top of one still being answered. }
   CloseModal;
+  DrainQueue;
   Result := FApp.Step;
 end;
 

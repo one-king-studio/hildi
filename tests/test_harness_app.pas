@@ -43,6 +43,8 @@ type
     function Pump(AMax: Integer): Boolean;
     function MakeAsk: TApprovalAsk;
     function AssistantEvent(const AText: string): TTurnEvent;
+    function ApprovalEvent(ARequestId: Integer;
+      const AAsk: TApprovalAsk): TTurnEvent;
     function Config: THarnessSessionConfig;
   protected
     procedure TearDown; override;
@@ -51,6 +53,7 @@ type
     procedure TestToolLineAppears;
     procedure TestErrorLineAppears;
     procedure TestApprovalModalResolvesGateAsk;
+    procedure TestAsksDoNotStack;
     procedure TestOneFramePerStep;
   end;
 
@@ -154,6 +157,15 @@ begin
   Result.Text := AText;
 end;
 
+function THarnessAppTest.ApprovalEvent(ARequestId: Integer;
+  const AAsk: TApprovalAsk): TTurnEvent;
+begin
+  Result := Default(TTurnEvent);
+  Result.Kind := teApprovalAsk;
+  Result.RequestId := ARequestId;
+  Result.Ask := AAsk;
+end;
+
 function THarnessAppTest.MakeAsk: TApprovalAsk;
 var
   Option: TApprovalOption;
@@ -254,6 +266,28 @@ begin
   AssertTrue('allowed', Thread.Choice.Allowed);
   AssertEquals('chosen option', 'opt2', Thread.Choice.OptionKey);
   Thread.Free;
+end;
+
+procedure THarnessAppTest.TestAsksDoNotStack;
+begin
+  Build;
+  FSession.Queue.Push(ApprovalEvent(1, MakeAsk));
+  FSession.Queue.Push(ApprovalEvent(2, MakeAsk));
+
+  { First drain shows one modal and queues the second. }
+  FApp.Step;
+  AssertTrue('first modal shown', FApp.ModalActive);
+
+  { Answering the first must surface the second, not pop it. }
+  FInput.Push(Key(kkEnter));
+  FApp.Step;   { consumes Enter -> chooses the first }
+  FApp.Step;   { pops the first and shows the second }
+  AssertTrue('second modal shown', FApp.ModalActive);
+
+  FInput.Push(Key(kkEnter));
+  FApp.Step;   { chooses the second }
+  FApp.Step;   { pops it }
+  AssertFalse('no modal left', FApp.ModalActive);
 end;
 
 procedure THarnessAppTest.TestOneFramePerStep;
