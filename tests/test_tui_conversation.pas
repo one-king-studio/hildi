@@ -28,6 +28,7 @@ type
     procedure TestScrollUpStopsFollowing;
     procedure TestEndResumesFollowing;
     procedure TestClear;
+    procedure TestLongLineClipsNotWraps;
   end;
 
 implementation
@@ -139,6 +140,25 @@ begin
   try
     FView.Render(Surface);
     AssertEquals('cleared', '', Surface.RowText(0, 0, 10));
+  finally
+    Surface.Free;
+  end;
+end;
+
+procedure TConversationViewTest.TestLongLineClipsNotWraps;
+var
+  Surface: TSurfaceMemory;
+  Attr: TAttr;
+begin
+  Attr := DefaultAttr;
+  FView.Append('abcdefghijklmnopqrstuvwxyz', Attr);
+  FView.Arrange(Rc(10, 3));
+  Surface := TSurfaceMemory.Create(10, 3);
+  try
+    FView.Render(Surface);
+    AssertEquals('clipped to the first ten columns', 'abcdefghij',
+      Surface.RowText(0, 0, 10));
+    AssertEquals('no wrapped continuation', '', Surface.RowText(1, 0, 10));
   finally
     Surface.Free;
   end;

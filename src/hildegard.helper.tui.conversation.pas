@@ -47,7 +47,8 @@ begin
   inherited Create;
   FSpans := nil;
   FFollow := True;
-  FBlock := TTextBlock.Create([], wmWord);
+  { v1 clips rather than wraps; wrapping is a container concern for later. }
+  FBlock := TTextBlock.Create([], wmNone);
   FScroll := TScrollContainer.Create(FBlock, smAuto, smNever);
 end;
 
@@ -109,12 +110,6 @@ end;
 procedure TConversationView.Arrange(const ABounds: TRect);
 begin
   inherited Arrange(ABounds);
-  { Reserve one column for the vertical bar so the wrapped height does not
-    depend on whether the bar appears (avoids a reflow cycle). }
-  if ABounds.W > 1 then
-    FBlock.WrapWidth := ABounds.W - 1
-  else
-    FBlock.WrapWidth := ABounds.W;
   FScroll.Arrange(ABounds);
   if FFollow then
     FScroll.ScrollY := High(Integer);

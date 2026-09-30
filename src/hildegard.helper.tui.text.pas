@@ -33,7 +33,7 @@ type
     FWrapWidth: Integer;
   public
     constructor Create(const ASpans: array of TSpan;
-      AWrap: TWrapMode = wmWord);
+      AWrap: TWrapMode = wmNone);
     procedure SetText(const AText: string; const AAttr: TAttr);
     procedure SetSpans(const ASpans: array of TSpan);
     function Measure(const AAvail: TSize): TSize; override;
