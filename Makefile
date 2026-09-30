@@ -109,6 +109,15 @@ $(BIN)/hildegard-helper-tui-demo: $(EXAMPLES)/tui_demo.pas $(LIB_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
+# Widget-kit demo: a list, a preview panel, and focusable buttons. Builds and
+# runs; Tab/Shift-Tab or click to focus, Enter/Space to activate, q to quit.
+widgets-demo: $(BIN)/hildegard-helper-tui-widgets-demo
+	$(BIN)/hildegard-helper-tui-widgets-demo
+
+$(BIN)/hildegard-helper-tui-widgets-demo: $(EXAMPLES)/tui_widgets_demo.pas $(LIB_SRCS)
+	@mkdir -p $(BIN) $(DBGUNITS)
+	$(FPC) $(DEBUG) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+
 # Full-screen agent harness (conversation + approvals + sessions). Builds and
 # runs; Ctrl-C quits.
 tui-agent: libsqlite $(BIN)/hildegard-helper-tui-agent
@@ -175,6 +184,8 @@ help:
 	@echo "  make release                  build an optimized example"
 	@echo "  make release-agent-cli        build the optimized, static CLI binary"
 	@echo "  make tui-demo                 build & run the interactive TUI demonstration"
+	@echo "  make widgets-demo             build & run the widget-kit demo"
+	@echo "  make tui-agent [ARGS=...]     build & run the agent harness (needs an API key)"
 	@echo "  make bench [ARGS=--real]      build & run the TUI wall-clock benchmark"
 	@echo "  make perf                     run the benchmark with budget assertions"
 	@echo "  make clean                    remove build artifacts"

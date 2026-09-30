@@ -82,6 +82,8 @@ type
     procedure Add(const AW: TWidget); overload;
     procedure Add(const AW: TWidget; ACol, ARow: Integer); overload;
     function ChildCount: Integer;
+    { The child at AIndex in Add order, or nil when out of range. }
+    function ChildAt(AIndex: Integer): TWidget;
     function Measure(const AAvail: TSize): TSize; override;
     procedure Arrange(const ABounds: TRect); override;
     procedure Render(const S: ISurface); override;
@@ -177,6 +179,14 @@ end;
 function TContainer.ChildCount: Integer;
 begin
   Result := FCount;
+end;
+
+function TContainer.ChildAt(AIndex: Integer): TWidget;
+begin
+  if (AIndex >= 0) and (AIndex < FCount) then
+    Result := FWidgets[AIndex]
+  else
+    Result := nil;
 end;
 
 procedure TContainer.Add(const AW: TWidget);
