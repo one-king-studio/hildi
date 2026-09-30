@@ -75,8 +75,7 @@ const
 Every schema is an object; the registry auto-injects the required string
 `reason`.
 
-- `read_file`: `path` (string, req), `offset` (integer), `limit` (integer).
-- `write_file`: `path` (string, req), `content` (string, req).
+- `read_file`: `path` (string, req), `offset` (integer), `limit` (integer).- `write_file`: `path` (string, req), `content` (string, req).
 - `edit_file`: `path`, `old_string`, `new_string` (all string, req),
   `replace_all` (boolean).
 - `list_dir`: `path` (string), `recursive` (boolean).
@@ -152,7 +151,8 @@ Gap designed here: the tool handlers, the glob matcher, and path containment.
 
 ### Output Guarantees
 
-- `read_file` lines are `N<TAB>text`, numbering from `offset`.
+- `read_file` returns the file's text (optionally a line range); no line-number
+  prefixes.
 - `list_dir` directories end with `/`; entries are sorted.
 - `glob` results are workspace-relative and sorted.
 - `grep` lines are `relpath:lineno: text`.
@@ -173,7 +173,7 @@ Failures return `False` with a human-readable `AError`:
 
 ### Unit Tests
 
-- [ ] `read_file`: numbered lines; `offset`/`limit`; missing file; directory;
+- [ ] `read_file`: text content; `offset`/`limit`; missing file; directory;
       truncation at `MaxReadBytes`.
 - [ ] `write_file`: creates parents; overwrites; reports bytes; refused write
       leaves no file.

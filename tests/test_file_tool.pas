@@ -44,7 +44,7 @@ type
     procedure SetUp; override;
     procedure TearDown; override;
   published
-    procedure TestReadFileNumbered;
+    procedure TestReadFileContent;
     procedure TestReadFileOffsetLimit;
     procedure TestReadErrors;
     procedure TestWriteFileCreatesAndReports;
@@ -204,14 +204,15 @@ begin
   end;
 end;
 
-procedure TFileToolTest.TestReadFileNumbered;
+procedure TFileToolTest.TestReadFileContent;
 var
   Res, Err: string;
 begin
   WriteRaw(Full('a.txt'), 'alpha'#10'beta');
   AssertTrue('ok', FTool.ReadFile(Args(['path', 'a.txt', 'reason', 'r']), Res, Err));
-  AssertTrue('line 1 numbered', Pos('1'#9'alpha', Res) > 0);
-  AssertTrue('line 2 numbered', Pos('2'#9'beta', Res) > 0);
+  AssertTrue('first line', Pos('alpha', Res) > 0);
+  AssertTrue('second line', Pos('beta', Res) > 0);
+  AssertFalse('no line-number prefix', Pos(#9, Res) > 0);
   AssertEquals('asked for read', 'file:read', FApproval.LastRef);
 end;
 
@@ -221,12 +222,11 @@ var
 begin
   WriteRaw(Full('a.txt'), 'l1'#10'l2'#10'l3'#10'l4'#10'l5');
   AssertTrue('ok', FTool.ReadFile(
-    Args(['path', 'a.txt', 'reason', 'r']) + '', Res, Err));
-  AssertTrue('ok', FTool.ReadFile(
     '{"path":"a.txt","reason":"r","offset":2,"limit":2}', Res, Err));
-  AssertTrue('starts at 2', Pos('2'#9'l2', Res) > 0);
-  AssertTrue('has 3', Pos('3'#9'l3', Res) > 0);
-  AssertTrue('no 4', Pos('4'#9'l4', Res) = 0);
+  AssertTrue('starts at l2', Pos('l2', Res) > 0);
+  AssertTrue('has l3', Pos('l3', Res) > 0);
+  AssertFalse('no l1', Pos('l1', Res) > 0);
+  AssertFalse('no l4', Pos('l4', Res) > 0);
 end;
 
 procedure TFileToolTest.TestReadErrors;

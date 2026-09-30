@@ -12,7 +12,7 @@ decision, and every path is resolved against the workspace root.
 
 Today the only way the model can touch files is `run_command` (`cat`, `sed`,
 `grep`, `find`). That is powerful but blunt: it composes shell quoting, gives no
-line-numbered read for reliable edits, and makes every file operation look like a
+structured read, and makes every file operation look like a
 shell command to the approval whitelist. A coding harness wants first-class file
 operations with structured arguments, bounded output, and per-operation approval.
 
@@ -31,8 +31,8 @@ exists - so only the tool layer and a small glob matcher are new.
 
 ## User Stories
 
-- As an **operator**, I want the agent to read a file with line numbers so it can
-  propose precise edits.
+- As an **operator**, I want the agent to read a file's contents so it can
+  inspect and edit it.
 - As an **operator**, I want the agent to write and edit files, so it can make
   changes without shelling out.
 - As an **operator**, I want to approve each file operation (read or write) with
@@ -46,8 +46,9 @@ exists - so only the tool layer and a small glob matcher are new.
 
 ### Functional Requirements
 
-- [ ] `read_file(path, offset?, limit?)` returns numbered lines (`N<TAB>text`)
-      for a file under the root; a directory or missing file is an error.
+- [ ] `read_file(path, offset?, limit?)` returns the file's text (optionally a
+      line range) for a file under the root; a directory or missing file is an
+      error.
 - [ ] `write_file(path, content)` creates or overwrites a file, creating parent
       directories as needed, and reports bytes written.
 - [ ] `edit_file(path, old_string, new_string, replace_all?)` replaces an exact

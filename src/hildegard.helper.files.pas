@@ -502,7 +502,7 @@ begin
     begin
       if (Limit > 0) and (OutLines.Count >= Limit) then
         Break;
-      OutLines.Add(IntToStr(I + 1) + #9 + Lines[I]);
+      OutLines.Add(Lines[I]);
     end;
     AResult := CapText(OutLines.Text, MaxOutput);
     if Truncated then
@@ -859,7 +859,7 @@ var
   Spec: TToolSpec;
 begin
   Spec.Name := 'read_file';
-  Spec.Description := 'Read a text file inside the workspace as numbered lines. ' +
+  Spec.Description := 'Read a text file inside the workspace. ' +
     'Requires a short reason. Gated by approval.';
   Spec.ParametersJson :=
     '{"type":"object","properties":{' +
