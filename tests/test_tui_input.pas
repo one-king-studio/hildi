@@ -35,6 +35,7 @@ type
     procedure TestDecodeKittyKeyboard;
     procedure TestDecodeKittyFunctionalKeysIgnored;
     procedure TestDecodeKittyShiftedAndTextKeys;
+    procedure TestDecodeKittyEventTypes;
   end;
 
 implementation
@@ -411,6 +412,45 @@ begin
     AssertTrue('ctrl c decodes', D.Next(E));
     AssertEquals('ctrl char', 'c', E.Key.Ch);
     AssertTrue('ctrl modifier', moCtrl in E.Key.Mods);
+  finally
+    D.Free;
+  end;
+end;
+
+procedure TTuiInputTest.TestDecodeKittyEventTypes;
+var
+  D: TKeyDecoder;
+  E: TInputEvent;
+begin
+  D := TKeyDecoder.Create;
+  try
+    { Down press `CSI 1;1B`, repeat `CSI 1;1:2B`, release `CSI 1;1:3B`. Only the
+      press and repeat are events; the release must be ignored, or one tap moves
+      the selection twice. }
+    D.Feed([27, Ord('['), Ord('1'), Ord(';'), Ord('1'), Ord('B')]);
+    AssertTrue('press is Down', D.Next(E) and (E.Key.Kind = kkDown));
+
+    D.Feed([27, Ord('['), Ord('1'), Ord(';'), Ord('1'), Ord(':'), Ord('2'),
+      Ord('B')]);
+    AssertTrue('repeat is Down', D.Next(E) and (E.Key.Kind = kkDown));
+
+    D.Feed([27, Ord('['), Ord('1'), Ord(';'), Ord('1'), Ord(':'), Ord('3'),
+      Ord('B')]);
+    AssertFalse('release ignored', D.Next(E));
+
+    { Shift+Up release `CSI 1;2:3A` is ignored; a repeat carries its modifier. }
+    D.Feed([27, Ord('['), Ord('1'), Ord(';'), Ord('2'), Ord(':'), Ord('3'),
+      Ord('A')]);
+    AssertFalse('shift release ignored', D.Next(E));
+    D.Feed([27, Ord('['), Ord('1'), Ord(';'), Ord('5'), Ord(':'), Ord('2'),
+      Ord('A')]);
+    AssertTrue('ctrl repeat is Up', D.Next(E) and (E.Key.Kind = kkUp));
+    AssertTrue('ctrl modifier kept', moCtrl in E.Key.Mods);
+
+    { A `~`-form release is ignored too. }
+    D.Feed([27, Ord('['), Ord('5'), Ord(';'), Ord('1'), Ord(':'), Ord('3'),
+      Ord('~')]);
+    AssertFalse('page-up release ignored', D.Next(E));
   finally
     D.Free;
   end;

@@ -23,6 +23,7 @@ type
     FBuf: array of Byte;
     procedure Drop(N: Integer);
     function ParseMods(const AParams: string): TModifiers;
+    function EventType(const AParams: string): Integer;
     function MapFinal(AFinal: AnsiChar; const AParams: string;
       out AEvent: TInputEvent): Boolean;
     function MapTilde(const AParams: string; out AEvent: TInputEvent): Boolean;
@@ -66,13 +67,19 @@ end;
 
 function TKeyDecoder.ParseMods(const AParams: string): TModifiers;
 var
-  P, M: Integer;
+  P, Q, M: Integer;
+  Mods: string;
 begin
   Result := [];
   P := Pos(';', AParams);
   if P = 0 then
     Exit;
-  M := StrToIntDef(Copy(AParams, P + 1, MaxInt), 1);
+  Q := Pos(':', AParams);
+  if Q > P then
+    Mods := Copy(AParams, P + 1, Q - P - 1)
+  else
+    Mods := Copy(AParams, P + 1, MaxInt);
+  M := StrToIntDef(Mods, 1);
   if M < 1 then
     Exit;
   Dec(M);
@@ -84,10 +91,31 @@ begin
     Include(Result, moCtrl);
 end;
 
+{ The kitty event type: `mods:event` in the modifier field (1 press, 2 repeat,
+  3 release). 0 when absent. }
+function TKeyDecoder.EventType(const AParams: string): Integer;
+var
+  P, Q: Integer;
+begin
+  Result := 0;
+  P := Pos(';', AParams);
+  if P = 0 then
+    Exit;
+  Q := Pos(':', AParams);
+  if Q <= P then
+    Exit;
+  Result := StrToIntDef(Copy(AParams, Q + 1, MaxInt), 0);
+end;
+
 function TKeyDecoder.MapFinal(AFinal: AnsiChar; const AParams: string;
   out AEvent: TInputEvent): Boolean;
 begin
   AEvent := Default(TInputEvent);
+  { Kitty reports event types in the modifier field (`mods:event`). A release
+    (3) must not be decoded as another key: `CSI 1;1:3B` is the release of Down,
+    and treating it as a press made one arrow tap move the selection twice. }
+  if EventType(AParams) = 3 then
+    Exit(False);
   AEvent.Kind := ikKey;
   AEvent.Key.Mods := ParseMods(AParams);
   Result := True;
@@ -376,6 +404,8 @@ var
   P: Integer;
 begin
   Result := True;
+  if EventType(AParams) = 3 then
+    Exit(False);   { release: not another key }
   S := AParams;
   P := Pos(';', S);
   if P > 0 then
