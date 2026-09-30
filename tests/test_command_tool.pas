@@ -69,6 +69,7 @@ type
     procedure TestOutputIsTruncatedWithMarker;
     procedure TestTimeoutReports124;
     procedure TestHandlerNeverRaises;
+    procedure TestCommandPreservesUtf8;
     procedure TestProcessExecutorRunsCommand;
   end;
 
@@ -452,6 +453,25 @@ begin
   try
     AssertFalse('caught', Tool.Run('{"command":"echo hi","reason":"r"}', R, E));
     AssertTrue('error text', Pos('run_command error', E) > 0);
+  finally
+    Tool.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestCommandPreservesUtf8;
+var
+  Tool: TCommandTool;
+  R, E, Cmd: string;
+begin
+  { Regression: without the cwstring unit the RTL's ASCII widestring manager
+    replaced non-ASCII with '?' (a BMP emoji with one, an astral emoji with two),
+    so the model's command reached the shell mangled. }
+  AddRule(aeAllow, 'run_command:echo', [], True);
+  Tool := BuildTool(nil, 0);
+  try
+    Cmd := 'echo X' + #$E2#$9C#$A8 + 'Y' + #$F0#$9F#$90#$9B + 'Z';
+    AssertTrue('ok', Tool.Run('{"command":"' + Cmd + '","reason":"r"}', R, E));
+    AssertEquals('utf8 preserved', Cmd, FExecutor.LastCommand);
   finally
     Tool.Free;
   end;

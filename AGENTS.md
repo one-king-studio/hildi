@@ -100,7 +100,11 @@ progressively - one logical change per commit - and only commit when asked.
 Hard-won constraints; please respect them:
 
 - Unix programs must list `cthreads` as the **first** unit, or threading and
-  synchronization are broken at runtime.
+  synchronization are broken at runtime. List `cwstring` immediately after it in
+  any program that handles non-ASCII text: without it the RTL uses an ASCII-only
+  widestring manager, so implicit `AnsiString`↔`UnicodeString` conversions
+  (fpjson, tool arguments, command strings) replace each non-ASCII code unit with
+  `?`.
 - `TSemaphore` is unusable on macOS (`sem_init` returns `ENOSYS`). Use
   `TCriticalSection` + `TSimpleEvent`.
 - FPC's `TDictionary` `D[key] := value` setter raises `EListError` when the key

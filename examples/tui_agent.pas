@@ -15,7 +15,7 @@ program tui_agent;
 {$mode delphi}{$H+}
 
 uses
-  {$ifdef unix}cthreads,{$endif}   // must come first on Unix
+  {$ifdef unix}cthreads, cwstring,{$endif}   // cthreads first; cwstring for Unicode
   Classes, SysUtils,
   hildegard.helper.cli,
   hildegard.helper.tui.base, hildegard.helper.tui.input,

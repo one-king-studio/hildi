@@ -17,7 +17,7 @@ program agent_cli;
 {$mode delphi}{$H+}
 
 uses
-  {$ifdef unix}cthreads,{$endif}   // must come first on Unix
+  {$ifdef unix}cthreads, cwstring,{$endif}   // cthreads first; cwstring for Unicode
   SysUtils, Classes, ctypes, DateUtils,
   hildegard.helper.ansi, hildegard.helper.env, hildegard.helper.cli,
   hildegard.helper.transcript, hildegard.helper.llm, hildegard.helper.agent,
