@@ -244,7 +244,8 @@ type
   TApprovalChoiceEvent = procedure(const AChoice: TApprovalChoice) of object;
 
   { A modal for one TApprovalAsk. Up/Down (or number keys 1..n) select; Enter
-    confirms; Escape denies. Answering fires OnChoose once and sets Answered. }
+    confirms; Escape denies; Tab (or g/w/s) cycles the persist scope. Answering
+    fires OnChoose once and sets Answered. }
   TApprovalModal = class(TWidget)
   public
     constructor Create(const AAsk: TApprovalAsk);

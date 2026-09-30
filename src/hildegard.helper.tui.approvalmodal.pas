@@ -25,6 +25,7 @@ type
     FOnChoose: TApprovalChoiceEvent;
     procedure Choose(AIndex: Integer);
     procedure Deny;
+    procedure CycleScope;
     function LineAt(AIndex: Integer): string;
     function LineCount: Integer;
   public
@@ -101,7 +102,7 @@ begin
     Result := '';
     Exit;
   end;
-  Result := Format('  scope: %s  [g/w/s]  Enter select  Esc deny',
+  Result := Format('  scope: %s  [Tab / g w s]   Up/Down or 1-9   Enter accept   Esc deny',
     [ScopeName(FScope)]);
 end;
 
@@ -189,6 +190,18 @@ begin
   Choose(-1);
 end;
 
+procedure TApprovalModal.CycleScope;
+begin
+  case FScope of
+    asWorkspace:
+      FScope := asSession;
+    asSession:
+      FScope := asGlobal;
+  else
+    FScope := asWorkspace;
+  end;
+end;
+
 function TApprovalModal.HandleEvent(const E: TInputEvent): Boolean;
 var
   N: Integer;
@@ -221,6 +234,11 @@ begin
     kkEscape:
       begin
         Deny;
+        Exit(True);
+      end;
+    kkTab:
+      begin
+        CycleScope;
         Exit(True);
       end;
     kkChar:

@@ -36,6 +36,7 @@ type
     procedure TestNumberChooses;
     procedure TestEscapeDenies;
     procedure TestScopeKeyIsUsed;
+    procedure TestTabCyclesScope;
     procedure TestZeroOptionAskDeniesSafely;
     procedure TestAnsweredIgnoresFurtherInput;
   end;
@@ -181,6 +182,33 @@ begin
     Modal.Free;
   end;
 end;
+
+procedure TApprovalModalTest.TestTabCyclesScope;
+var
+  Modal: TApprovalModal;
+begin
+  Modal := TApprovalModal.Create(MakeAsk(1));
+  try
+    Modal.OnChoose := FRecorder.OnChoose;
+    Modal.HandleEvent(Key(kkTab));
+    Modal.HandleEvent(Key(kkEnter));
+    AssertEquals('tab -> session', Ord(asSession), Ord(FRecorder.Last.Scope));
+  finally
+    Modal.Free;
+  end;
+
+  Modal := TApprovalModal.Create(MakeAsk(1));
+  try
+    Modal.OnChoose := FRecorder.OnChoose;
+    Modal.HandleEvent(Key(kkTab));
+    Modal.HandleEvent(Key(kkTab));
+    Modal.HandleEvent(Key(kkEnter));
+    AssertEquals('tab tab -> global', Ord(asGlobal), Ord(FRecorder.Last.Scope));
+  finally
+    Modal.Free;
+  end;
+end;
+
 
 procedure TApprovalModalTest.TestZeroOptionAskDeniesSafely;
 var
