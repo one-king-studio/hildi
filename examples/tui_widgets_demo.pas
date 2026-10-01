@@ -1,7 +1,8 @@
 program tui_widgets_demo;
 { A demo of the TUI widget kit: a list, a preview panel, and buttons, driven by
-  Tab/Shift-Tab or the mouse. Enter/Space activates the focused control; 'q' or
-  Ctrl-C quits.
+  Tab/Shift-Tab or the mouse. A status row shows a clock-driven spinner and an
+  indeterminate progress bar (no per-widget timers; TTuiApp.Run advances them).
+  Enter/Space activates the focused control; 'q' or Ctrl-C quits.
 
   Run: make widgets-demo }
 
@@ -16,22 +17,17 @@ uses
   hildegard.helper.tui.surface.video, hildegard.helper.tui.input.terminal,
   hildegard.helper.tui.theme, hildegard.helper.tui.panel,
   hildegard.helper.tui.focus, hildegard.helper.tui.button,
-  hildegard.helper.tui.list;
+  hildegard.helper.tui.list, hildegard.helper.tui.spinner,
+  hildegard.helper.tui.progress;
 
 var
   QuitRequested: Boolean = False;
 
 type
-  { Wraps the root so 'q'/Ctrl-C quit before the focus group consumes them. }
-  TQuitShell = class(TWidget)
-  private
-    FChild: TWidget;
+  { Wraps the root so 'q'/Ctrl-C quit before the focus group consumes them.
+    Extends TSingleChild so Advance/Animating reach the whole tree. }
+  TQuitShell = class(TSingleChild)
   public
-    constructor Create(AChild: TWidget);
-    destructor Destroy; override;
-    function Measure(const AAvail: TSize): TSize; override;
-    procedure Arrange(const ABounds: TRect); override;
-    procedure Render(const S: ISurface); override;
     function HandleEvent(const E: TInputEvent): Boolean; override;
   end;
 
@@ -42,43 +38,19 @@ type
     FPreview: TTextBlock;
     FList: TListView;
     FTheme: TTheme;
+    FInput: TInputSourceTerminal;
   public
     constructor Create(const ATheme: TTheme; APreview: TTextBlock;
       AList: TListView);
     procedure SetApp(AApp: TTuiApp);
+    procedure SetInput(AInput: TInputSourceTerminal);
+    { The Run loop's stop condition: a quit key or a signal. }
+    function ShouldStop: Boolean;
     procedure Show(const S: string);
     procedure OnOpen(Sender: TObject);
     procedure OnQuit(Sender: TObject);
     procedure OnActivate(Sender: TObject);
   end;
-
-constructor TQuitShell.Create(AChild: TWidget);
-begin
-  inherited Create;
-  FChild := AChild;
-end;
-
-destructor TQuitShell.Destroy;
-begin
-  FChild.Free;
-  inherited Destroy;
-end;
-
-function TQuitShell.Measure(const AAvail: TSize): TSize;
-begin
-  Result := FChild.Measure(AAvail);
-end;
-
-procedure TQuitShell.Arrange(const ABounds: TRect);
-begin
-  inherited Arrange(ABounds);
-  FChild.Arrange(ABounds);
-end;
-
-procedure TQuitShell.Render(const S: ISurface);
-begin
-  FChild.Render(S);
-end;
 
 function TQuitShell.HandleEvent(const E: TInputEvent): Boolean;
 begin
@@ -89,7 +61,7 @@ begin
     QuitRequested := True;
     Exit(True);
   end;
-  Result := FChild.HandleEvent(E);
+  Result := inherited HandleEvent(E);
 end;
 
 constructor TDemo.Create(const ATheme: TTheme; APreview: TTextBlock;
@@ -104,6 +76,16 @@ end;
 procedure TDemo.SetApp(AApp: TTuiApp);
 begin
   FApp := AApp;
+end;
+
+procedure TDemo.SetInput(AInput: TInputSourceTerminal);
+begin
+  FInput := AInput;
+end;
+
+function TDemo.ShouldStop: Boolean;
+begin
+  Result := QuitRequested or ((FInput <> nil) and FInput.Terminated);
 end;
 
 procedure TDemo.Show(const S: string);
@@ -140,7 +122,11 @@ var
   List: TListView;
   PreviewPanel: TPanel;
   OpenBtn, QuitBtn: TButton;
-  Root: TFocusGroup;
+  Spinner: TSpinner;
+  Bar: TProgress;
+  Main: TFocusGroup;
+  Status: TContainer;
+  Root: TContainer;
   App: TTuiApp;
   Demo: TDemo;
   Style: TBoxStyle;
@@ -167,11 +153,24 @@ begin
   QuitBtn := TButton.Create('Quit', Theme);
 
   { The list and the buttons are direct children so the focus group sees them. }
-  Root := TFocusGroup.Create([Fixed(28), Fill(1)], [Fill(1), Fixed(1)]);
-  Root.Add(List, 0, 0);
-  Root.Add(PreviewPanel, 1, 0);
-  Root.Add(OpenBtn, 0, 1);
-  Root.Add(QuitBtn, 1, 1);
+  Main := TFocusGroup.Create([Fixed(28), Fill(1)], [Fill(1), Fixed(1)]);
+  Main.Add(List, 0, 0);
+  Main.Add(PreviewPanel, 1, 0);
+  Main.Add(OpenBtn, 0, 1);
+  Main.Add(QuitBtn, 1, 1);
+
+  { A status row driven by the frame clock: a spinner and an indeterminate bar,
+    both pure functions of time, advanced by TTuiApp each frame. }
+  Spinner := TSpinner.Create(BrailleFrames, 90, Theme.Accent);
+  Bar := TProgress.Create(20, Theme.Success);
+  Bar.Indeterminate := True;
+  Status := TContainer.Create([Auto, Fixed(2), Fixed(20), Fill(1)], [Auto]);
+  Status.Add(Spinner, 0, 0);
+  Status.Add(Bar, 2, 0);
+
+  Root := TContainer.Create([Fill(1)], [Fill(1), Fixed(1)]);
+  Root.Add(Main, 0, 0);
+  Root.Add(Status, 0, 1);
 
   Demo := TDemo.Create(Theme, Preview, List);
   OpenBtn.OnClick := Demo.OnOpen;
@@ -182,13 +181,10 @@ begin
 
   App := TTuiApp.Create(Surface, Input, TQuitShell.Create(Root));
   Demo.SetApp(App);
+  Demo.SetInput(InputTerm);
   try
-    while App.Step do
-    begin
-      if QuitRequested or InputTerm.Terminated then
-        App.Stop;
-      Sleep(1);
-    end;
+    { Run waits on input to the next frame while the spinner/bar animate. }
+    App.Run(Demo.ShouldStop);
   finally
     App.Free;
     Demo.Free;

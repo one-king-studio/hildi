@@ -17,6 +17,7 @@ uses
   hildegard.helper.tui.surface, hildegard.helper.tui.widget,
   hildegard.helper.tui.text, hildegard.helper.tui.conversation,
   hildegard.helper.tui.prompt, hildegard.helper.tui.approvalmodal,
+  hildegard.helper.tui.panel,
   hildegard.helper.tui.app, hildegard.helper.harness.turn,
   hildegard.helper.harness.session;
 
@@ -94,17 +95,13 @@ end;
 
 type
   { Wraps the root so global quit keys (Ctrl-C/Ctrl-D) are handled before the
-    prompt, which otherwise consumes every printable character. }
-  TAppShell = class(TWidget)
+    prompt, which otherwise consumes every printable character. Extends
+    TSingleChild so Advance/Animating reach the tree. }
+  TAppShell = class(TSingleChild)
   private
-    FChild: TWidget;
     FOnQuit: TNotifyEvent;
   public
     constructor Create(AChild: TWidget; AOnQuit: TNotifyEvent);
-    destructor Destroy; override;
-    function Measure(const AAvail: TSize): TSize; override;
-    procedure Arrange(const ABounds: TRect); override;
-    procedure Render(const S: ISurface); override;
     function HandleEvent(const E: TInputEvent): Boolean; override;
   end;
 
@@ -126,31 +123,8 @@ end;
 
 constructor TAppShell.Create(AChild: TWidget; AOnQuit: TNotifyEvent);
 begin
-  inherited Create;
-  FChild := AChild;
+  inherited Create(AChild);
   FOnQuit := AOnQuit;
-end;
-
-destructor TAppShell.Destroy;
-begin
-  FChild.Free;
-  inherited Destroy;
-end;
-
-function TAppShell.Measure(const AAvail: TSize): TSize;
-begin
-  Result := FChild.Measure(AAvail);
-end;
-
-procedure TAppShell.Arrange(const ABounds: TRect);
-begin
-  inherited Arrange(ABounds);
-  FChild.Arrange(ABounds);
-end;
-
-procedure TAppShell.Render(const S: ISurface);
-begin
-  FChild.Render(S);
 end;
 
 function TAppShell.HandleEvent(const E: TInputEvent): Boolean;
@@ -162,7 +136,7 @@ begin
       FOnQuit(Self);
     Exit(True);
   end;
-  Result := FChild.HandleEvent(E);
+  Result := inherited HandleEvent(E);
 end;
 
 constructor THarnessApp.Create(const ASurface: ISurface; const AInput: IInputSource;
