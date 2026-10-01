@@ -258,11 +258,25 @@ end;
 
 function TInputSourceTerminal.Wait(ATimeoutMs: Integer;
   out AEvent: TInputEvent): Boolean;
+var
+  Fds: TFDSet;
+  TV: TTimeVal;
 begin
   if Poll(AEvent) then
     Exit(True);
-  if ATimeoutMs > 0 then
-    Sleep(ATimeoutMs);
+  { Block until the tty is readable (or the timeout). Sleeping then polling
+    would delay the first keypress by up to the whole timeout, which reads as a
+    laggy UI; select wakes the moment a key arrives. }
+  fpFD_ZERO(Fds);
+  fpFD_SET(FInputFd, Fds);
+  if ATimeoutMs < 0 then
+    fpSelect(FInputFd + 1, @Fds, nil, nil, nil)
+  else
+  begin
+    TV.tv_sec := ATimeoutMs div 1000;
+    TV.tv_usec := (ATimeoutMs mod 1000) * 1000;
+    fpSelect(FInputFd + 1, @Fds, nil, nil, @TV);
+  end;
   Result := Poll(AEvent);
 end;
 
