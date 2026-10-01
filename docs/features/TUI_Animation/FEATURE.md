@@ -47,29 +47,29 @@ not a new rendering model.
 
 ### Functional Requirements
 
-- [ ] `TTuiApp` owns a monotonic clock and a configurable tick period (default
+- [x] `TTuiApp` owns a monotonic clock and a configurable tick period (default
       10 ms / 100 Hz).
-- [ ] Each frame calls `Advance(ANowMs)` on the root, which forwards to the whole
+- [x] Each frame calls `Advance(ANowMs)` on the root, which forwards to the whole
       tree.
-- [ ] `TWidget.Animating` reports whether any time-based content is active;
+- [x] `TWidget.Animating` reports whether any time-based content is active;
       `TTuiApp` uses it to decide whether to schedule the next frame.
-- [ ] The app blocks on input with a timeout to the next frame while animating,
-      and indefinitely when idle.
-- [ ] A frame composites all planes and flushes once; the encoder writes only
+- [x] The app waits on input to the next frame while animating, and on a long idle
+      timeout when idle.
+- [x] A frame composites all planes and flushes once; the encoder writes only
       changed cells.
-- [ ] `TSpinner` renders a frame set at a configurable interval from the clock.
-- [ ] `TProgress` renders determinate (eighths) and indeterminate (bounce)
+- [x] `TSpinner` renders a frame set at a configurable interval from the clock.
+- [x] `TProgress` renders determinate (eighths) and indeterminate (bounce)
       progress from the clock.
-- [ ] `Tick(ANowMs)` lets tests advance time deterministically; no test waits on
+- [x] `Tick(ANowMs)` lets tests advance time deterministically; no test waits on
       the wall clock.
-- [ ] The demos use the clock and a spinner/progress.
+- [x] The demos use the clock and a spinner/progress.
 
 ### Non-Functional Requirements
 
-- [ ] No per-widget timers; exactly one clock and one frame cadence.
-- [ ] An idle app makes no periodic wakeups (input-blocked).
-- [ ] Deterministic tests; leak-clean under `make test-leak`; `make check` green.
-- [ ] No new dependency; style `{$mode delphi}{$H+}`, `hildegard.helper.tui.*`.
+- [x] No per-widget timers; exactly one clock and one frame cadence.
+- [x] An idle app makes no periodic wakeups at the frame rate.
+- [x] Deterministic tests; leak-clean under `make test-leak`; `make check` green.
+- [x] No new dependency; style `{$mode delphi}{$H+}`, `hildegard.helper.tui.*`.
 
 ## Success Metrics
 

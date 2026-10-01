@@ -12,13 +12,13 @@ time-based content from the frame time; animations are pure functions of it.
 
 ### Functional
 
-- [ ] A monotonic millisecond clock.
-- [ ] `TWidget.Advance(ANowMs)` (no-op by default) and `TWidget.Animating`.
-- [ ] `TTuiApp` advances the tree, composites, and flushes once per frame.
-- [ ] The app waits on input to the next frame while animating, and indefinitely
+- [x] A monotonic millisecond clock.
+- [x] `TWidget.Advance(ANowMs)` (no-op by default) and `TWidget.Animating`.
+- [x] `TTuiApp` advances the tree, composites, and flushes once per frame.
+- [x] The app waits on input to the next frame while animating, and indefinitely
       when idle.
-- [ ] `TSpinner` and `TProgress` are the first time-based widgets.
-- [ ] `Tick(ANowMs)` advances a frame deterministically for tests.
+- [x] `TSpinner` and `TProgress` are the first time-based widgets.
+- [x] `Tick(ANowMs)` advances a frame deterministically for tests.
 
 ### Non-Functional
 
@@ -32,10 +32,8 @@ time-based content from the frame time; animations are pure functions of it.
 ### Clock — `hildegard.helper.tui.clock`
 
 ```pascal
-type
-  { Monotonic milliseconds since an unspecified epoch. Never wall-clock. }
-  TNowMsProvider = function: Int64 of object;
-
+{ Monotonic milliseconds since an unspecified epoch. Never wall-clock; backed by
+  GetTickCount64 (clock_gettime(CLOCK_MONOTONIC) on Unix). }
 function MonotonicMs: Int64;
 
 const
@@ -59,6 +57,10 @@ end;
 ### App frame loop — `hildegard.helper.tui.app`
 
 ```pascal
+type
+  { Returns True to stop the run loop (a signal, a quit flag). }
+  TStopCheck = function: Boolean of object;
+
 TTuiApp = class
   constructor Create(const ASurface: ISurface; const AInput: IInputSource;
     ARoot: TWidget; ATickMs: Integer = DefaultTickMs);
@@ -71,38 +73,51 @@ TTuiApp = class
     Exposed so the gating is testable. }
   function NextFrameDelayMs: Integer;
 
+  procedure Run(ACheckStop: TStopCheck = nil);
+
   property TickMs: Integer read FTickMs write FTickMs;
   property NowMs: Int64 read FNowMs;
-  property Animating: Boolean read GetAnimating;   // Root.Animating
+  property Animating: Boolean read GetAnimating;   // OR over all planes
 end;
 ```
 
 `Run` loop (prose; `Step`/`Tick` are the tested units):
 
-1. `Timeout := NextFrameDelayMs` (`-1` ⇒ block indefinitely).
+1. `Timeout := NextFrameDelayMs` (`-1` ⇒ use the idle timeout below).
 2. `if Input.Wait(Timeout, E)` handle the event and render immediately.
 3. If the frame is due, `Tick(MonotonicMs)`.
-4. Repeat until stopped.
+4. Repeat until `Stop`, or until `ACheckStop` returns True.
 
 `NextFrameDelayMs` returns `-1` when `not Animating`; otherwise
-`max(0, TickMs - (NowMs - LastTickMs))`.
+`max(0, min(TickMs, TickMs - (NowMs - LastTickMs)))`.
+
+**Idle wait.** `IInputSource.Wait` has no blocking form (the terminal adapter is
+poll-then-sleep), so `Run` cannot truly block forever; when idle it waits on a
+long `IdleWaitMs` (1000 ms) timeout instead. That is a signal-check cadence, not
+a refresh rate - the UI still repaints only when something changes.
 
 ### Spinner — `hildegard.helper.tui.spinner`
 
 ```pascal
 type
+  TSpinnerFrames = array of UnicodeString;
+
   TSpinner = class(TWidget)
   public
+    { FPC cannot default a record parameter, so the attr is an overload. }
     constructor Create(const AFrames: array of UnicodeString;
-      AIntervalMs: Integer = 90; const AAttr: TAttr = DefaultAttr);
-    procedure Advance(const ANowMs: Int64); override;   // frame = (now div interval) mod n
-    function Animating: Boolean; override;              // True
+      AIntervalMs: Integer = 90); overload;
+    constructor Create(const AFrames: array of UnicodeString;
+      AIntervalMs: Integer; const AAttr: TAttr); overload;
+    procedure Advance(const ANowMs: Int64); override;   // frame = f(now - origin)
+    function Animating: Boolean; override;              // True when frames exist
     function Measure(const AAvail: TSize): TSize; override;
     procedure Render(const S: ISurface); override;
 
     property Frames: TSpinnerFrames;   // read
     property IntervalMs: Integer;
     property Attr: TAttr;
+    property Index: Integer;           // read; current frame (tests)
   end;
 
 const
@@ -121,7 +136,8 @@ const
 type
   TProgress = class(TWidget)
   public
-    constructor Create(AWidthCells: Integer; const AAttr: TAttr = DefaultAttr);
+    constructor Create(AWidthCells: Integer); overload;
+    constructor Create(AWidthCells: Integer; const AAttr: TAttr); overload;
     procedure Advance(const ANowMs: Int64); override;   // indeterminate only
     function Animating: Boolean; override;              // Indeterminate
     function Measure(const AAvail: TSize): TSize; override;
@@ -132,13 +148,14 @@ type
     property Indeterminate: Boolean;
     property WidthCells: Integer;
     property Attr: TAttr;
+    property Position: Integer;     // read; bounce cell (tests)
   end;
 ```
 
-- Determinate: `round(Value / Max * WidthCells)` rendered with eighth blocks
-  (`█▉▊▋▌▍▎▏`) and a trailing blank.
+- Determinate: `round(Value / Max * WidthCells * 8)` eighths rendered with
+  `█▉▊▋▌▍▎▏`, then blanks to the width.
 - Indeterminate: a single block bounces across the inner width (one cell margin
-  at each end) as a function of `ANowMs`.
+  at each end, positions `1..WidthCells-2`) as a function of `ANowMs`.
 
 ## Architecture
 
@@ -187,26 +204,26 @@ time-based widgets.
 
 ### Unit Tests
 
-- [ ] `MonotonicMs` is non-decreasing.
-- [ ] `TContainer.Advance` reaches every child; `Animating` is the OR.
-- [ ] `TTuiApp.Tick`: advances the tree, renders once, and an unchanged frame
+- [x] `MonotonicMs` is non-decreasing.
+- [x] `TContainer.Advance` reaches every child; `Animating` is the OR.
+- [x] `TTuiApp.Tick`: advances the tree, renders once, and an unchanged frame
       emits zero changed cells; a changed frame emits only those cells.
-- [ ] `NextFrameDelayMs`: `-1` when idle; otherwise within `[0, TickMs]`.
-- [ ] `TSpinner`: frame advances with `now` at the interval; two spinners with
+- [x] `NextFrameDelayMs`: `-1` when idle; otherwise within `[0, TickMs]`.
+- [x] `TSpinner`: frame advances with `now` at the interval; two spinners with
       the same origin are in phase; `Animating` is True.
-- [ ] `TProgress`: determinate renders the right number of eighths at 0/50/100%;
+- [x] `TProgress`: determinate renders the right number of eighths at 0/50/100%;
       indeterminate bounces between the inner cells; `Animating` follows
       `Indeterminate`.
-- [ ] Determinism: the same `ANowMs` sequence yields identical cells.
+- [x] Determinism: the same `ANowMs` sequence yields identical cells.
 
 ### Integration Tests
 
-- [ ] A panel containing a spinner and a progress bar composites and diffs in one
+- [x] A panel containing a spinner and a progress bar composites and diffs in one
       frame; only the animated cells change between two ticks.
 
 ### Leak Tests
 
-- [ ] `make test-leak` clean.
+- [x] `make test-leak` clean.
 
 ## Performance Targets
 
@@ -221,13 +238,28 @@ time-based widgets.
 
 ### Functional
 
-- [ ] All contracts implemented; all validation rules enforced.
-- [ ] Every acceptance criterion maps to a test; `make check` passes.
+- [x] All contracts implemented; all validation rules enforced.
+- [x] Every acceptance criterion maps to a test; `make check` passes.
 
 ### Quality
 
-- [ ] No per-widget timers; idle is input-blocked.
-- [ ] Animations are pure functions of `ANowMs`.
+- [x] No per-widget timers; idle is input-blocked.
+- [x] Animations are pure functions of `ANowMs`.
+
+## Implementation Notes
+
+- **`{$codepage utf8}` is required in any unit with non-ASCII string literals**
+  (the braille frames, the eighth blocks). Without it FPC stores the literal
+  bytes one-per-code-unit and the glyphs render as `?`. The unit directive is
+  preferred over `WideChar($XXXX)` for literal-heavy sources.
+- **A wrapper widget must forward `Advance`/`Animating`.** The ad-hoc shells in
+  the demos silently swallowed their subtree's clock until they were rebased on
+  `TSingleChild`. Extend `TSingleChild` (or `TContainer`) rather than wrapping
+  `TWidget` by hand.
+- `Animating` is the OR across **all planes**, not just the base, so a spinner in
+  a modal also keeps the frame clock running.
+- FPC cannot give a record parameter a default value, so `TSpinner`/`TProgress`
+  expose an `overload` for the attribute.
 
 ## Future Considerations
 

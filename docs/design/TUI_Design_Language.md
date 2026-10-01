@@ -189,11 +189,15 @@ changed cells reach the terminal.
 
 - **Cadence** is a property of the app (`TickMs`, default **10 ms / 100 Hz**),
   not of a widget. A widget only *derives* its content from the frame time:
-  `frame = (nowMs div IntervalMs) mod FrameCount`. Two spinners started together
-  stay in step.
+  `frame = f(nowMs)` (a spinner uses `((now - origin) div IntervalMs) mod N`, so
+  two spinners advanced together stay in step).
 - **Idle means silent.** A widget reports `Animating`; when nothing animates the
-  app blocks on input indefinitely instead of waking at the frame rate. "100 Hz"
-  is a ceiling while motion is on screen, not a forced refresh.
+  app stops scheduling frames and waits on input (a long timeout, since
+  `IInputSource.Wait` has no blocking form) instead of waking at the frame rate.
+  "100 Hz" is a ceiling while motion is on screen, not a forced refresh.
+- **Composite once.** Each frame advances the tree, then clears, renders the
+  planes, dims, renders modals, and flushes once; the encoder writes only changed
+  cells.
 - **Timelines are functions of time.** An animation is `value = f(nowMs)` (or a
   keyframe list sampled by time). No easing engine is required in v1; a timeline
   helper can come later.

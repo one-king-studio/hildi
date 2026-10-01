@@ -102,6 +102,20 @@ seem to be initialized
 **Fix:** assign `Result := nil;` (or `Result := Default(T);`) before `SetLength`,
 or before the first conditional assignment.
 
+### Finding: non-ASCII source literals compile to `?`
+
+**Symptom:** a test expecting a box-drawing, braille, or block glyph fails with
+`expected: <?????     >` while the actual value is correct.
+
+**Cause:** FPC reads source in the default codepage, so a literal such as `'█'`
+(three UTF-8 bytes) is stored one code unit per byte; converting it to
+`UnicodeString` yields mojibake, and the rendered/comparison value shows `?`.
+
+**Fix:** add `{$codepage utf8}` to the unit (right after `{$mode delphi}{$H+}`),
+or build the string from code points (`UnicodeString(WideChar($2588))`). Prefer
+the directive in literal-heavy units (spinner frames, eighth blocks). Programs
+that render such text already list `cwstring` second on Unix.
+
 ## Isolation and resources
 
 - Create a unique temp directory per test (`GetTempDir` + a unique suffix) in
@@ -184,6 +198,8 @@ Hard-won FPC `fcl-db` behaviours that affect both implementation and tests:
   non-managed fields).
 - Managed function results assigned only via `SetLength` must be initialised
   first.
+- Non-ASCII source literals need `{$codepage utf8}` (or `WideChar($XXXX)`), or
+  they compile to `?`.
 - A leak gate is only useful if tests run under it: `make test-leak` is part of
   `make check`, not optional.
 - "Compatible" APIs have edge cases: verify the exact call path (transactions,
