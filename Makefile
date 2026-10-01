@@ -63,7 +63,8 @@ LIB_SRCS  := $(wildcard $(SRC)/*.pas)
 TEST_SRCS := $(wildcard $(TESTS)/*.pas)
 
 .PHONY: all test test-leak watch check release clean help libsqlite \
-        store-demo agent-cli release-agent-cli tui-demo bench perf
+        store-demo agent-cli release-agent-cli tui-demo widgets-demo layout-demo \
+        tui-agent bench perf
 
 all: $(BIN)/hildegard-helper-demo
 
@@ -115,6 +116,17 @@ widgets-demo: $(BIN)/hildegard-helper-tui-widgets-demo
 	$(BIN)/hildegard-helper-tui-widgets-demo
 
 $(BIN)/hildegard-helper-tui-widgets-demo: $(EXAMPLES)/tui_widgets_demo.pas $(LIB_SRCS)
+	@mkdir -p $(BIN) $(DBGUNITS)
+	$(FPC) $(DEBUG) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+
+# Layout exploration: a responsive two-column harness layout (files + editor |
+# chat column). The chat column has an optional side panel and a persistent
+# bottom input panel. The split appears only when the terminal is wider than 180
+# columns; Ctrl-B toggles the side panel, Ctrl-C quits.
+layout-demo: $(BIN)/hildegard-helper-tui-layout-demo
+	$(BIN)/hildegard-helper-tui-layout-demo
+
+$(BIN)/hildegard-helper-tui-layout-demo: $(EXAMPLES)/tui_layout_demo.pas $(LIB_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
@@ -185,6 +197,7 @@ help:
 	@echo "  make release-agent-cli        build the optimized, static CLI binary"
 	@echo "  make tui-demo                 build & run the interactive TUI demonstration"
 	@echo "  make widgets-demo             build & run the widget-kit demo"
+	@echo "  make layout-demo              build & run the responsive two-column layout demo"
 	@echo "  make tui-agent [ARGS=...]     build & run the agent harness (needs an API key)"
 	@echo "  make bench [ARGS=--real]      build & run the TUI wall-clock benchmark"
 	@echo "  make perf                     run the benchmark with budget assertions"
