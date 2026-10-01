@@ -170,8 +170,8 @@ var
 begin
   D := DarkTheme;
   L := LightTheme;
-  AssertTrue('base differs', D.Base.Bg <> L.Base.Bg);
-  AssertTrue('panel bg set', D.Panel.Bg <> 0);
+  AssertTrue('base fg differs', D.Base.Fg <> L.Base.Fg);
+  AssertTrue('panel fg set', D.Panel.Fg <> 0);
   AssertTrue('border set', D.Border.Fg <> 0);
   AssertTrue('title set', D.Title.Fg <> 0);
   AssertTrue('text set', D.Text.Fg <> 0);
@@ -179,6 +179,18 @@ begin
   AssertTrue('accent set', D.Accent.Fg <> 0);
   AssertTrue('error set', D.Error.Fg <> 0);
   AssertTrue('success set', D.Success.Fg <> 0);
+  { The UI paints its own background, chosen for the terminal's mode. }
+  AssertTrue('base uses the screen background', sfScreenBg in D.Base.Style);
+  AssertTrue('panel uses the screen background', sfScreenBg in D.Panel.Style);
+  AssertTrue('text uses the screen background', sfScreenBg in D.Text.Style);
+  AssertTrue('dark background set', D.Bg = DarkBg);
+  AssertTrue('light background set', L.Bg = LightBg);
+  AssertTrue('warn role set', D.Warn.Fg <> 0);
+  { Forcing a mode ignores the detected terminal background. }
+  AssertTrue('forced dark', SelectTheme(tmDark, True).Bg = DarkBg);
+  AssertTrue('forced light', SelectTheme(tmLight, False).Bg = LightBg);
+  AssertTrue('auto dark', SelectTheme(tmAuto, False).Bg = DarkBg);
+  AssertTrue('auto light', SelectTheme(tmAuto, True).Bg = LightBg);
 end;
 
 { TSingleChildTest }

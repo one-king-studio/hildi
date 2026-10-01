@@ -23,6 +23,8 @@ type
     procedure TestForceEmitsUnchangedCells;
     procedure TestEachChangedCellIsPositioned;
     procedure TestAttrChangeEmitsSgr;
+    procedure TestScreenBgUsesAppBackground;
+    procedure TestExplicitBgEmitsPalette;
     procedure TestWideClusterIsEmitted;
     procedure TestWideClusterAtRightEdgeBecomesSpace;
     procedure TestRemovingWideClusterEmitsLead;
@@ -144,6 +146,45 @@ begin
     Cur[0] := Cell('a', 200);
     OutBytes := Enc.Encode(Prev, Cur, 1, 1, False);
     AssertTrue('256-colour foreground', Contains(OutBytes, '38;5;200'));
+  finally
+    Enc.Free;
+  end;
+end;
+
+procedure TTuiEncoderTest.TestScreenBgUsesAppBackground;
+var
+  Enc: TCellEncoder;
+  Prev, Cur: array of TCell;
+  OutBytes: RawByteString;
+begin
+  Enc := TCellEncoder.Create;
+  try
+    SetLength(Prev, 1);
+    SetLength(Cur, 1);
+    Cur[0] := Cell('a', 200);
+    Cur[0].Attr.Style := [sfScreenBg];
+    Enc.SetScreenBg(234);
+    OutBytes := Enc.Encode(Prev, Cur, 1, 1, False);
+    AssertTrue('paints the app screen background', Contains(OutBytes, '48;5;234'));
+  finally
+    Enc.Free;
+  end;
+end;
+
+procedure TTuiEncoderTest.TestExplicitBgEmitsPalette;
+var
+  Enc: TCellEncoder;
+  Prev, Cur: array of TCell;
+  OutBytes: RawByteString;
+begin
+  Enc := TCellEncoder.Create;
+  try
+    SetLength(Prev, 1);
+    SetLength(Cur, 1);
+    Cur[0] := Cell('a', 200);
+    Cur[0].Attr.Bg := 52;
+    OutBytes := Enc.Encode(Prev, Cur, 1, 1, False);
+    AssertTrue('palette background', Contains(OutBytes, '48;5;52'));
   finally
     Enc.Free;
   end;

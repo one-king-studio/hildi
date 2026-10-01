@@ -46,6 +46,7 @@ type
     procedure PushClip(const R: TRect);
     procedure PopClip;
     procedure Invalidate;
+    procedure SetScreenBg(AIndex: Byte);
     procedure Flush;
   end;
 
@@ -287,6 +288,11 @@ end;
 procedure TSurfaceVideo.Invalidate;
 begin
   FNeedFullRepaint := True;
+end;
+
+procedure TSurfaceVideo.SetScreenBg(AIndex: Byte);
+begin
+  FEncoder.SetScreenBg(AIndex);
 end;
 
 procedure TSurfaceVideo.Flush;

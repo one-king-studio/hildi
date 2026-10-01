@@ -88,21 +88,32 @@ window is not visible; a spinner must not force a full repaint beyond its cell.
 Design rules:
 - Prefer the **cube and greyscale** for a stable look across terminals; use base
   0–15 only for semantic red/green/yellow when you accept theme remapping.
-- Backgrounds from the greyscale ramp (`234–238`) keep a dark UI consistent.
-- Keep body text at a high-contrast index (e.g. `252`) and reserve saturated
-  colour for emphasis.
+- **We own the background.** The app paints one background colour (`TTuiApp.
+  ScreenBg`) and cells carry `sfScreenBg`, so every text run matches the surface
+  behind it - no black boxes on a grey panel. Panels are separated by their
+  border, not by a fill colour.
+- **Match the terminal's mode.** The theme is `auto` (detect the terminal's
+  background with an OSC 11 query), or forced `dark`/`light`
+  (`--theme=…` / `HILDEGARD_THEME`). Auto picks the palette; forcing ignores the
+  terminal. A light terminal gets dark text on a light background.
+- Keep body text at a high-contrast index (e.g. `252` on dark, `235` on light).
 
 ### 3.2 Semantic roles (mirrors `TTheme`)
 
+`TTheme.Bg` is the single background painted for `sfScreenBg` cells; every role
+uses it. The indices below are foregrounds.
+
 | Role | Purpose | Dark (index) | Light (index) |
 | --- | --- | --- | --- |
-| Base | screen background | 234 | 255 |
-| Panel | panel/box fill | 236 | 254 |
+| Bg | app background | 234 | 255 |
+| Base | screen background | 252 | 235 |
+| Panel | panel/box | 252 | 235 |
 | Border | frame | 240 | 245 |
 | Title | panel titles | 81 | 25 |
 | Text | primary | 252 | 235 |
-| Muted | secondary/hints | 244 | 244 |
+| Muted | secondary/hints | 244 | 242 |
 | Accent | focus/selection | 81 | 25 |
+| Warn | tool/caution | 215 | 130 |
 | Error | failures | 203 | 160 |
 | Success | success | 114 | 28 |
 

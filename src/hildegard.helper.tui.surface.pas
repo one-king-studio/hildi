@@ -31,6 +31,9 @@ type
       than diffed. Used after interaction to guarantee a clean screen when the
       terminal's own diffing can leave stale cells (e.g. wide-character edges). }
     procedure Invalidate;
+    { The palette index painted for cells whose attr has sfScreenBg. Set by the
+      app from the theme so text backgrounds match the screen. }
+    procedure SetScreenBg(AIndex: Byte);
     procedure Flush;
   end;
 
@@ -49,6 +52,7 @@ type
     FFirstFlush: Boolean;
     FForceFull: Boolean;
     FInvalidations: Integer;
+    FScreenBg: Byte;
     function IndexOf(X, Y: Integer): Integer;
     function EffectiveClip: TRect;
     function InClip(X, Y: Integer): Boolean;
@@ -73,6 +77,7 @@ type
     procedure PushClip(const R: TRect);
     procedure PopClip;
     procedure Invalidate;
+    procedure SetScreenBg(AIndex: Byte);
     procedure Flush;
   end;
 
@@ -95,6 +100,7 @@ begin
   FFirstFlush := True;
   FForceFull := False;
   FInvalidations := 0;
+  FScreenBg := 0;
 end;
 
 function TSurfaceMemory.IndexOf(X, Y: Integer): Integer;
@@ -215,6 +221,11 @@ procedure TSurfaceMemory.Invalidate;
 begin
   FForceFull := True;
   Inc(FInvalidations);
+end;
+
+procedure TSurfaceMemory.SetScreenBg(AIndex: Byte);
+begin
+  FScreenBg := AIndex;
 end;
 
 function TSurfaceMemory.SameCell(const A, B: TCell): Boolean;

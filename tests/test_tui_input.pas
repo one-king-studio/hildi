@@ -36,6 +36,8 @@ type
     procedure TestDecodeKittyFunctionalKeysIgnored;
     procedure TestDecodeKittyShiftedAndTextKeys;
     procedure TestDecodeKittyEventTypes;
+    procedure TestDecodeConsumesOscReply;
+    procedure TestParseOsc11Background;
   end;
 
 implementation
@@ -454,6 +456,46 @@ begin
   finally
     D.Free;
   end;
+end;
+
+procedure TTuiInputTest.TestDecodeConsumesOscReply;
+var
+  D: TKeyDecoder;
+  E: TInputEvent;
+  S: AnsiString;
+  I: Integer;
+  Data: array of Byte;
+begin
+  D := TKeyDecoder.Create;
+  try
+    { An OSC 11 background reply followed by a real key: the reply must be
+      consumed whole (a bare ESC used to leak it as stray characters). }
+    S := #27']11;rgb:1e1e/1e1e/1e1e'#27'\' + 'a';
+    SetLength(Data, Length(S));
+    for I := 1 to Length(S) do
+      Data[I - 1] := Ord(S[I]);
+    D.Feed(Data);
+    AssertTrue('the OSC reply is consumed, then the key decodes',
+      D.Next(E) and (E.Key.Kind = kkChar) and (E.Key.Ch = 'a'));
+  finally
+    D.Free;
+  end;
+end;
+
+procedure TTuiInputTest.TestParseOsc11Background;
+var
+  R, G, B: Byte;
+begin
+  AssertTrue('xterm reply',
+    ParseOsc11Background(']11;rgb:1e1e/2a2a/3b3b', R, G, B));
+  AssertEquals('red', Integer($1e), Integer(R));
+  AssertEquals('green', Integer($2a), Integer(G));
+  AssertEquals('blue', Integer($3b), Integer(B));
+  AssertTrue('short channels', ParseOsc11Background(']11;rgb:ff/00/80', R, G, B));
+  AssertEquals('short red', 255, Integer(R));
+  AssertEquals('short blue', 128, Integer(B));
+  AssertFalse('not a reply', ParseOsc11Background(']11;rgb:zz', R, G, B));
+  AssertFalse('not present', ParseOsc11Background('rgb:ff/ff/ff', R, G, B));
 end;
 
 initialization

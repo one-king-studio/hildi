@@ -17,7 +17,7 @@ uses
   hildegard.helper.tui.surface, hildegard.helper.tui.widget,
   hildegard.helper.tui.text, hildegard.helper.tui.conversation,
   hildegard.helper.tui.prompt, hildegard.helper.tui.approvalmodal,
-  hildegard.helper.tui.panel,
+  hildegard.helper.tui.panel, hildegard.helper.tui.theme,
   hildegard.helper.tui.app, hildegard.helper.harness.turn,
   hildegard.helper.harness.session;
 
@@ -30,6 +30,7 @@ type
     FInput: IInputSource;
     FSession: THarnessSession;
     FApp: TTuiApp;
+    FTheme: TTheme;
     FConversation: TConversationView;
     FStatus: TTextBlock;
     FPrompt: TPromptLine;
@@ -49,7 +50,7 @@ type
     procedure OnApprovalChosen(const AChoice: TApprovalChoice);
     procedure CloseModal;
     procedure FinishTurn;
-    procedure SetStatus(const AText: string; AFg: Byte);
+    procedure SetStatus(const AText: string; const AAttr: TAttr);
     procedure AppendLine(const AText: string; const AAttr: TAttr);
     procedure RenderHistory;
     procedure SyncBusy;
@@ -60,7 +61,8 @@ type
     procedure Quit(Sender: TObject);
   public
     constructor Create(const ASurface: ISurface; const AInput: IInputSource;
-      ASession: THarnessSession);
+      ASession: THarnessSession; AMode: TThemeMode = tmAuto;
+      ALightDetected: Boolean = False);
     destructor Destroy; override;
 
     { One iteration: drain the queue, resolve any answered approval modal, then
@@ -81,21 +83,6 @@ type
   end;
 
 implementation
-
-const
-  ClUser = 81;
-  ClAssistant = 252;
-  ClReasoning = 244;
-  ClTool = 215;
-  ClError = 203;
-  ClStatus = 244;
-
-function Attr(AFg: Byte; AStyle: TStyle = []): TAttr;
-begin
-  Result := DefaultAttr;
-  Result.Fg := AFg;
-  Result.Style := AStyle;
-end;
 
 type
   { Wraps the root so global quit keys (Ctrl-C/Ctrl-D) are handled before the
@@ -144,21 +131,23 @@ begin
 end;
 
 constructor THarnessApp.Create(const ASurface: ISurface; const AInput: IInputSource;
-  ASession: THarnessSession);
+  ASession: THarnessSession; AMode: TThemeMode; ALightDetected: Boolean);
 begin
   inherited Create;
   FSurface := ASurface;
   FInput := AInput;
   FSession := ASession;
+  FTheme := SelectTheme(AMode, ALightDetected);
   FApp := TTuiApp.Create(ASurface, AInput, BuildTree);
+  FApp.ScreenBg := FTheme.Bg;
   RenderHistory;
-  AppendLine('workspace: ' + FSession.WorkspaceRoot, Attr(ClStatus));
+  AppendLine('workspace: ' + FSession.WorkspaceRoot, FTheme.Muted);
   if FSession.SessionId <> '' then
-    AppendLine('session: ' + FSession.SessionId, Attr(ClStatus))
+    AppendLine('session: ' + FSession.SessionId, FTheme.Muted)
   else
-    AppendLine('session: (in memory; no store)', Attr(ClStatus, [sfDim]));
-  AppendLine('', Attr(ClStatus));
-  SetStatus('ready  [Enter] send  [q/Ctrl-C] quit', ClStatus);
+    AppendLine('session: (in memory; no store)', FTheme.Muted);
+  AppendLine('', FTheme.Muted);
+  SetStatus('ready  [Enter] send  [q/Ctrl-C] quit', FTheme.Muted);
 end;
 
 destructor THarnessApp.Destroy;
@@ -189,6 +178,7 @@ begin
   FConversation := TConversationView.Create;
   FStatus := TTextBlock.Create([], wmNone);
   FPrompt := TPromptLine.Create('> ');
+  FPrompt.Attr := FTheme.Text;
   FPrompt.OnSubmit := Submit;
   Root.Add(FConversation, 0, 0);
   Root.Add(FStatus, 0, 1);
@@ -203,7 +193,7 @@ end;
 
 function THarnessApp.AssistantAttr: TAttr;
 begin
-  Result := Attr(ClAssistant);
+  Result := FTheme.Text;
 end;
 
 procedure THarnessApp.AppendLine(const AText: string; const AAttr: TAttr);
@@ -212,9 +202,9 @@ begin
   FApp.Invalidate;
 end;
 
-procedure THarnessApp.SetStatus(const AText: string; AFg: Byte);
+procedure THarnessApp.SetStatus(const AText: string; const AAttr: TAttr);
 begin
-  FStatus.SetText(AText, Attr(AFg));
+  FStatus.SetText(AText, AAttr);
   FApp.Invalidate;
 end;
 
@@ -231,11 +221,11 @@ begin
     Msg := History[I];
     case Msg.Role of
       crUser:
-        A := Attr(ClUser, [sfBold]);
+        A := FTheme.Accent;
       crTool:
-        A := Attr(ClTool);
+        A := FTheme.Warn;
       crSystem:
-        A := Attr(ClReasoning, [sfDim]);
+        A := FTheme.Muted;
     else
       A := AssistantAttr;
     end;
@@ -247,11 +237,11 @@ procedure THarnessApp.Submit(const AText: string);
 begin
   if FBusy then
     Exit;
-  AppendLine('> ' + AText, Attr(ClUser, [sfBold]));
+  AppendLine('> ' + AText, FTheme.Accent);
   FPrompt.Active := False;
   FBusy := True;
   SyncBusy;
-  SetStatus('thinking...', ClStatus);
+  SetStatus('thinking...', FTheme.Muted);
   FWorker := TTurnWorker.Create(FSession.Loop, FSession.Queue, AText);
   FWorker.Start;
 end;
@@ -266,24 +256,24 @@ begin
       end;
     teReasoningDelta:
       begin
-        FConversation.Append(UnicodeString(E.Text), Attr(ClReasoning, [sfDim]));
+        FConversation.Append(UnicodeString(E.Text), FTheme.Muted);
         FApp.Invalidate;
       end;
     teToolCall:
       begin
         AppendLine(#10 + '[tool] ' + E.ToolName + '  (' + E.ToolReason + ')',
-          Attr(ClTool, [sfBold]));
+          FTheme.Warn);
         if E.ToolArguments <> '' then
-          AppendLine('  ' + E.ToolArguments, Attr(ClReasoning));
+          AppendLine('  ' + E.ToolArguments, FTheme.Muted);
       end;
     teToolResult:
       begin
         if E.ToolOk then
-          AppendLine('[result] ' + E.ToolName + ': ok', Attr(ClTool))
+          AppendLine('[result] ' + E.ToolName + ': ok', FTheme.Warn)
         else
-          AppendLine('[result] ' + E.ToolName + ': failed', Attr(ClError));
+          AppendLine('[result] ' + E.ToolName + ': failed', FTheme.Error);
         if E.Text <> '' then
-          AppendLine('  ' + E.Text, Attr(ClReasoning, [sfDim]));
+          AppendLine('  ' + E.Text, FTheme.Muted);
       end;
     teApprovalAsk:
       EnqueueAsk(E);
@@ -294,7 +284,7 @@ begin
       end;
     teError:
       begin
-        AppendLine('[error] ' + E.Text, Attr(ClError, [sfBold]));
+        AppendLine('[error] ' + E.Text, FTheme.Error);
         FinishTurn;
       end;
   else
@@ -334,7 +324,7 @@ var
   Wrap: TContainer;
   R: TRect;
 begin
-  FModal := TApprovalModal.Create(E.Ask);
+  FModal := TApprovalModal.Create(E.Ask, FTheme.Text);
   FModal.OnChoose := OnApprovalChosen;
   FPendingRequest := E.RequestId;
   Wrap := TContainer.Create([Fill(1), Auto, Fill(1)], [Fill(1), Auto, Fill(1)]);
@@ -344,7 +334,7 @@ begin
   R.H := FSurface.Height;
   Wrap.Arrange(R);
   FApp.PushPlane(TPlane.Create(Wrap, True, True));
-  SetStatus('approval needed', ClTool);
+  SetStatus('approval needed', FTheme.Warn);
 end;
 
 procedure THarnessApp.OnApprovalChosen(const AChoice: TApprovalChoice);
@@ -376,7 +366,7 @@ begin
   end;
   FBusy := False;
   FPrompt.Active := True;
-  SetStatus('ready', ClStatus);
+  SetStatus('ready', FTheme.Muted);
   SyncBusy;
 end;
 

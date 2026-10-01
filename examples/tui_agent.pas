@@ -20,7 +20,7 @@ uses
   hildegard.helper.cli,
   hildegard.helper.tui.base, hildegard.helper.tui.input,
   hildegard.helper.tui.surface, hildegard.helper.tui.surface.video,
-  hildegard.helper.tui.input.terminal,
+  hildegard.helper.tui.input.terminal, hildegard.helper.tui.theme,
   hildegard.helper.harness.session, hildegard.helper.harness.app;
 
 var
@@ -29,6 +29,9 @@ var
   Opts: TCLIOptions;
   I: Integer;
   NoStore: Boolean;
+  ThemeArg: string;
+  ThemeMode: TThemeMode;
+  Light: Boolean;
   StorePath: string;
   Cfg: THarnessSessionConfig;
   Session: THarnessSession;
@@ -50,13 +53,20 @@ begin
     for I := 1 to ParamCount do
       RawArgs.Add(ParamStr(I));
     NoStore := RawArgs.IndexOf('--no-store') >= 0;
+    ThemeArg := '';
     SetLength(Args, 0);
     for I := 0 to RawArgs.Count - 1 do
-      if RawArgs[I] <> '--no-store' then
+    begin
+      if RawArgs[I] = '--no-store' then
+        Continue;
+      if Copy(RawArgs[I], 1, 8) = '--theme=' then
       begin
-        SetLength(Args, Length(Args) + 1);
-        Args[High(Args)] := RawArgs[I];
+        ThemeArg := Copy(RawArgs[I], 9, MaxInt);
+        Continue;
       end;
+      SetLength(Args, Length(Args) + 1);
+      Args[High(Args)] := RawArgs[I];
+    end;
     try
       Opts := ParseCLIOptions(Args);
     except
@@ -107,7 +117,11 @@ begin
   Surface := TSurfaceVideo.Create;
   InputTerm := TInputSourceTerminal.Create;
   Input := InputTerm;
-  App := THarnessApp.Create(Surface, Input, Session);
+
+  { Theme: forced by --theme, else detected from the terminal (OSC 11). }
+  ThemeMode := ThemeModeFromString(ThemeArg);
+  Light := (ThemeMode = tmAuto) and InputTerm.DetectLightBackground;
+  App := THarnessApp.Create(Surface, Input, Session, ThemeMode, Light);
   try
     { Clock-driven: waits on input, drains the turn queue each iteration, and
       renders on the frame cadence only while a turn is in flight. }

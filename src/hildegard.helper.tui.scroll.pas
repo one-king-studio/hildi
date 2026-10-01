@@ -191,7 +191,7 @@ begin
   TrackCell := Default(TCell);
   TrackCell.Ch := '|';
   TrackCell.Attr := DefaultAttr;
-  TrackCell.Attr.Style := [sfDim];
+  TrackCell.Attr.Style := [sfDim, sfScreenBg];
   ThumbCell := Default(TCell);
   ThumbCell.Ch := '#';
   ThumbCell.Attr := DefaultAttr;

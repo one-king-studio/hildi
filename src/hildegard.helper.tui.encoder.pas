@@ -27,6 +27,7 @@ type
     FCurX, FCurY: Integer;
     FFg, FBg: Integer;
     FStyle: TStyle;
+    FScreenBg: Byte;
     FBuf: RawByteString;
     procedure Out(const ABytes: RawByteString);
     procedure OutStr(const S: UnicodeString);
@@ -36,6 +37,9 @@ type
     constructor Create;
     { Forget cursor/attribute state (call after a mode change or clear). }
     procedure Reset;
+    { The palette index painted for cells whose attr has sfScreenBg. The app sets
+      this from the theme so text backgrounds match the screen. }
+    procedure SetScreenBg(AIndex: Byte);
     { Bytes that turn APrev into ACur. AForce emits every cell. Updates the
       encoder's cursor/attribute state. }
     function Encode(const APrev, ACur: array of TCell;
@@ -116,7 +120,13 @@ end;
 constructor TCellEncoder.Create;
 begin
   inherited Create;
+  FScreenBg := 0;
   Reset;
+end;
+
+procedure TCellEncoder.SetScreenBg(AIndex: Byte);
+begin
+  FScreenBg := AIndex;
 end;
 
 procedure TCellEncoder.Reset;
@@ -163,6 +173,15 @@ var
     else
       Result := '';
   end;
+  { sfScreenBg means "paint the app's screen background" rather than this cell's
+    Bg index, so text always matches the surface behind it. }
+  function BgParams: string;
+  begin
+    if sfScreenBg in A.Style then
+      Result := '48;5;' + IntToStr(FScreenBg)
+    else
+      Result := '48;5;' + IntToStr(A.Bg);
+  end;
 begin
   if (A.Fg = FFg) and (A.Bg = FBg) and (A.Style = FStyle) then
     Exit;
@@ -178,7 +197,7 @@ begin
     Params := Params + Flag(sfReverse in A.Style, 7);
     Params := Params + Flag(sfStrike in A.Style, 9);
     Params := Params + ';38;5;' + IntToStr(A.Fg);
-    Params := Params + ';48;5;' + IntToStr(A.Bg);
+    Params := Params + ';' + BgParams;
   end
   else
   begin
@@ -189,7 +208,7 @@ begin
     begin
       if Params <> '' then
         Params := Params + ';';
-      Params := Params + '48;5;' + IntToStr(A.Bg);
+      Params := Params + BgParams;
     end;
   end;
   if Params <> '' then

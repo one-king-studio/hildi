@@ -41,6 +41,12 @@ type
     { True once SIGTERM/SIGINT/SIGHUP has been received; the caller should stop
       its loop so the terminal is restored on the normal exit path. }
     function Terminated: Boolean;
+
+    { Ask the terminal for its default background (OSC 11) and classify it as
+      light or dark. Returns False when the terminal does not answer (dark
+      assumed). Any bytes read are fed to the decoder, so a late reply or a
+      keystroke during the query is not lost. Call once, after Create. }
+    function DetectLightBackground: Boolean;
   end;
 
 implementation
@@ -168,6 +174,51 @@ end;
 function TInputSourceTerminal.Terminated: Boolean;
 begin
   Result := GTerminated <> 0;
+end;
+
+function TInputSourceTerminal.DetectLightBackground: Boolean;
+const
+  { OSC 11 query, terminated with ST. }
+  Query = #27']11;?'#27'\';
+var
+  Bytes: array[0..255] of Byte;
+  Data: array of Byte;
+  Fds: TFDSet;
+  TV: TTimeVal;
+  Buf: RawByteString;
+  N, Attempt, I: Integer;
+  R, G, B: Byte;
+begin
+  Result := False;
+  fpWrite(1, Query[1], Length(Query));
+  Buf := '';
+  for Attempt := 1 to 4 do
+  begin
+    fpFD_ZERO(Fds);
+    fpFD_SET(FInputFd, Fds);
+    TV.tv_sec := 0;
+    TV.tv_usec := 50000;
+    if fpSelect(FInputFd + 1, @Fds, nil, nil, @TV) <= 0 then
+      Continue;
+    N := fpRead(FInputFd, @Bytes[0], SizeOf(Bytes));
+    if N <= 0 then
+      Continue;
+    SetLength(Data, N);
+    for I := 0 to N - 1 do
+    begin
+      Data[I] := Bytes[I];
+      Buf := Buf + AnsiChar(Bytes[I]);
+    end;
+    { Feed the bytes through the decoder: it consumes the OSC reply whole and
+      keeps any real keystroke that arrived during the query. }
+    FDecoder.Feed(Data);
+    if ParseOsc11Background(string(Buf), R, G, B) then
+    begin
+      { Rec. 601 luma; > 50% reads as a light background. }
+      Result := (299 * R + 587 * G + 114 * B) > 128 * 1000;
+      Exit;
+    end;
+  end;
 end;
 
 procedure TInputSourceTerminal.TraceLine(const S: string);

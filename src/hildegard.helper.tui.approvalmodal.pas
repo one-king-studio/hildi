@@ -23,13 +23,15 @@ type
     FAnswered: Boolean;
     FChoice: TApprovalChoice;
     FOnChoose: TApprovalChoiceEvent;
+    FAttr: TAttr;
     procedure Choose(AIndex: Integer);
     procedure Deny;
     procedure CycleScope;
     function LineAt(AIndex: Integer): string;
     function LineCount: Integer;
   public
-    constructor Create(const AAsk: TApprovalAsk);
+    constructor Create(const AAsk: TApprovalAsk); overload;
+    constructor Create(const AAsk: TApprovalAsk; const AAttr: TAttr); overload;
     function Measure(const AAvail: TSize): TSize; override;
     procedure Render(const S: ISurface); override;
     function HandleEvent(const E: TInputEvent): Boolean; override;
@@ -37,6 +39,7 @@ type
     property Ask: TApprovalAsk read FAsk;
     property Answered: Boolean read FAnswered;
     property Choice: TApprovalChoice read FChoice;
+    property Attr: TAttr read FAttr write FAttr;
     property OnChoose: TApprovalChoiceEvent read FOnChoose write FOnChoose;
   end;
 
@@ -60,11 +63,18 @@ end;
 
 constructor TApprovalModal.Create(const AAsk: TApprovalAsk);
 begin
+  Create(AAsk, DefaultAttr);
+end;
+
+constructor TApprovalModal.Create(const AAsk: TApprovalAsk;
+  const AAttr: TAttr);
+begin
   inherited Create;
   FAsk := AAsk;
   FSelected := 0;
   FScope := asWorkspace;
   FAnswered := False;
+  FAttr := AAttr;
 end;
 
 function TApprovalModal.LineCount: Integer;
@@ -141,9 +151,7 @@ var
 begin
   if (FBounds.W <= 0) or (FBounds.H <= 0) then
     Exit;
-  Bg := DefaultAttr;
-  Bg.Bg := 236;
-  Bg.Fg := 252;
+  Bg := FAttr;
   S.FillRect(FBounds, Bg);
 
   for I := 0 to LineCount - 1 do

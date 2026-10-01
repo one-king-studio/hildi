@@ -36,10 +36,91 @@ type
     function Buffered: Integer;
   end;
 
+  { Parse an OSC 11 background reply such as `]11;rgb:1e1e/1e1e/1e1e` into 8-bit
+    channels (each channel is 1-4 hex digits). Returns False when the string is
+    not a complete reply. Pure: the terminal adapter feeds it raw bytes. }
+  function ParseOsc11Background(const S: string; out ARed, AGreen, ABlue: Byte):
+    Boolean;
+
 implementation
 
 uses
   SysUtils;
+
+function HexDigit(ACh: AnsiChar; out AValue: Integer): Boolean;
+begin
+  case ACh of
+    '0'..'9':
+      begin
+        AValue := Ord(ACh) - Ord('0');
+        Result := True;
+      end;
+    'a'..'f':
+      begin
+        AValue := Ord(ACh) - Ord('a') + 10;
+        Result := True;
+      end;
+    'A'..'F':
+      begin
+        AValue := Ord(ACh) - Ord('A') + 10;
+        Result := True;
+      end;
+  else
+    AValue := 0;
+    Result := False;
+  end;
+end;
+
+{ Read 1-4 hex digits and scale them to 8 bits. }
+function ReadHexChannel(const S: string; var I: Integer; out AValue: Byte): Boolean;
+var
+  V, D, Digits: Integer;
+begin
+  V := 0;
+  Digits := 0;
+  while (I <= Length(S)) and (Digits < 4) and HexDigit(S[I], D) do
+  begin
+    V := V * 16 + D;
+    Inc(Digits);
+    Inc(I);
+  end;
+  if Digits = 0 then
+    Exit(False);
+  AValue := Byte(V * 255 div ((1 shl (4 * Digits)) - 1));
+  Result := True;
+end;
+
+function ParseOsc11Background(const S: string; out ARed, AGreen, ABlue: Byte):
+  Boolean;
+var
+  P, I: Integer;
+begin
+  ARed := 0;
+  AGreen := 0;
+  ABlue := 0;
+  Result := False;
+  P := Pos(']11;', S);
+  if P = 0 then
+    Exit;
+  I := P + 4;
+  if Copy(S, I, 4) = 'rgb:' then
+    Inc(I, 4)
+  else
+    Exit;
+  if not ReadHexChannel(S, I, ARed) then
+    Exit;
+  if (I > Length(S)) or (S[I] <> '/') then
+    Exit;
+  Inc(I);
+  if not ReadHexChannel(S, I, AGreen) then
+    Exit;
+  if (I > Length(S)) or (S[I] <> '/') then
+    Exit;
+  Inc(I);
+  if not ReadHexChannel(S, I, ABlue) then
+    Exit;
+  Result := True;
+end;
 
 procedure TKeyDecoder.Feed(const AData: array of Byte);
 var
@@ -511,6 +592,29 @@ begin
       AEvent.Key.Kind := kkEscape;
       Drop(1);
       Exit(True);
+    end;
+    if FBuf[1] = Ord(']') then
+    begin
+      { OSC, e.g. the OSC 11 background reply (`ESC]11;rgb:...`). Consume it up
+        to BEL or ST so its bytes are not decoded as stray characters; a bare
+        ESC here is how a late reply used to leak into the UI and the shell. }
+      FinalIdx := -1;
+      for I := 2 to High(FBuf) do
+        if FBuf[I] = 7 then
+        begin
+          FinalIdx := I;
+          Break;
+        end
+        else if (FBuf[I] = 27) and (I < High(FBuf)) and
+          (FBuf[I + 1] = Ord('\')) then
+        begin
+          FinalIdx := I + 1;
+          Break;
+        end;
+      if FinalIdx < 0 then
+        Exit(False);   { wait for the terminator }
+      Drop(FinalIdx + 1);
+      Exit(Next(AEvent));
     end;
     if (FBuf[1] = Ord('[')) or (FBuf[1] = Ord('O')) then
     begin

@@ -21,14 +21,19 @@ type
     X, Y, W, H: Integer;
   end;
 
-  { Rendition flags, mapped to the terminal backend's attributes. }
+  { Rendition flags, mapped to the terminal backend's attributes. sfScreenBg
+    means "paint the app's screen background" (a palette index the app sets via
+    TTuiApp.ScreenBg), so a widget never has to know the background colour and
+    text never sits on a mismatched box. }
   TStyleFlag = (sfBold, sfDim, sfItalic, sfUnderline, sfReverse, sfBlink,
-    sfStrike);
+    sfStrike, sfScreenBg);
   TStyle = set of TStyleFlag;
 
   { A cell attribute: 256-colour foreground/background palette indices plus
     rendition flags. Indices 0..15 are the base ANSI colours, 16..231 the 6x6x6
-    colour cube, and 232..255 greyscale; a theme chooses the indices. }
+    colour cube, and 232..255 greyscale; a theme chooses the indices. When
+    sfScreenBg is set the background index is ignored and the app's screen
+    background is painted instead. }
   TAttr = record
     Fg, Bg: Byte;
     Style: TStyle;
@@ -41,7 +46,7 @@ type
   end;
 
 const
-  DefaultAttr: TAttr = (Fg: 7; Bg: 0; Style: []);
+  DefaultAttr: TAttr = (Fg: 7; Bg: 0; Style: [sfScreenBg]);
   ErasedChar = '';
 
 implementation

@@ -60,6 +60,7 @@ type
     FLastTickMs: Int64;
     FBusy: Boolean;
     FNeedsRepaint: Boolean;
+    FScreenBg: Byte;
     procedure ArrangeBase;
     procedure ArrangePlanes;
     procedure RenderFrame;
@@ -109,6 +110,9 @@ type
       streaming into a queue). Keeps the frame cadence instead of the long idle
       wait, without a busy poll. }
     property Busy: Boolean read FBusy write FBusy;
+    { The palette index painted for cells with sfScreenBg (the app background).
+      Set it from the theme; 0 is black. }
+    property ScreenBg: Byte read FScreenBg write FScreenBg;
   end;
 
 implementation
@@ -152,6 +156,7 @@ begin
     a change; do not mark the layout dirty, or the first Step would re-arrange. }
   FLayoutDirty := False;
   FNeedsRepaint := True;
+  FScreenBg := 0;
   if ATickMs < 1 then
     ATickMs := DefaultTickMs;
   FTickMs := ATickMs;
@@ -239,6 +244,7 @@ procedure TTuiApp.RenderFrame;
 var
   I: Integer;
 begin
+  FSurface.SetScreenBg(FScreenBg);
   FSurface.Clear(DefaultAttr);
   for I := 0 to High(FPlanes) do
     if not FPlanes[I].IsModal then
