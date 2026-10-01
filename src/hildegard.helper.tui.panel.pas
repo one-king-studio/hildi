@@ -26,6 +26,8 @@ type
     procedure Arrange(const ABounds: TRect); override;
     procedure Render(const S: ISurface); override;
     function HandleEvent(const E: TInputEvent): Boolean; override;
+    procedure Advance(const ANowMs: Int64); override;
+    function Animating: Boolean; override;
   end;
 
   TBoxStyle = record
@@ -107,6 +109,20 @@ function TSingleChild.HandleEvent(const E: TInputEvent): Boolean;
 begin
   if FChild <> nil then
     Result := FChild.HandleEvent(E)
+  else
+    Result := False;
+end;
+
+procedure TSingleChild.Advance(const ANowMs: Int64);
+begin
+  if FChild <> nil then
+    FChild.Advance(ANowMs);
+end;
+
+function TSingleChild.Animating: Boolean;
+begin
+  if FChild <> nil then
+    Result := FChild.Animating
   else
     Result := False;
 end;
