@@ -22,9 +22,10 @@ type
     AdvanceCount: Integer;
     LastNow: Int64;
     IsAnimating: Boolean;
+    AdvanceResult: Boolean;
     Ch: UnicodeString;
     constructor Create;
-    procedure Advance(const ANowMs: Int64); override;
+    function Advance(const ANowMs: Int64): Boolean; override;
     function Animating: Boolean; override;
     function Measure(const AAvail: TSize): TSize; override;
     procedure Render(const S: ISurface); override;
@@ -49,6 +50,7 @@ type
     procedure TestChangedFrameEmitsOnlyChangedCells;
     procedure TestNextFrameDelayIdleIsMinusOne;
     procedure TestNextFrameDelayAnimatingIsWithinTick;
+    procedure TestNextFrameDelayBusyKeepsCadence;
   end;
 
   TSpinnerTest = class(TTestCase)
@@ -98,10 +100,11 @@ begin
   Ch := 'A';
 end;
 
-procedure TAnimProbe.Advance(const ANowMs: Int64);
+function TAnimProbe.Advance(const ANowMs: Int64): Boolean;
 begin
   Inc(AdvanceCount);
   LastNow := ANowMs;
+  Result := AdvanceResult;
 end;
 
 function TAnimProbe.Animating: Boolean;
@@ -230,10 +233,11 @@ begin
   P := TAnimProbe.Create;
   App := TTuiApp.Create(S, Src, P);
   try
-    App.Tick(0);          { first flush is a forced full repaint }
+    App.Tick(0);          { first frame (forced full repaint) }
     App.Tick(10);
-    AssertEquals('an unchanged frame diffs to zero cells', 0,
-      S.LastFrameChangedCells);
+    { Nothing changed and nothing animates, so the second tick does not even
+      flush: the screen is not bound to the clock cadence. }
+    AssertEquals('an unchanged frame is not repainted', 1, S.FlushCount);
   finally
     App.Free;
   end;
@@ -252,6 +256,7 @@ begin
   App := TTuiApp.Create(S, Src, P);
   try
     App.Tick(0);
+    P.AdvanceResult := True;   { the widget reports a change }
     P.Ch := 'B';
     App.Tick(10);
     AssertEquals('only the changed cell is re-emitted', 1,
@@ -298,6 +303,33 @@ begin
     App.Tick(1000);
     AssertEquals('a full tick after a frame', DefaultTickMs,
       App.NextFrameDelayMs);
+  finally
+    App.Free;
+  end;
+end;
+
+procedure TAppTickTest.TestNextFrameDelayBusyKeepsCadence;
+var
+  S: TSurfaceMemory;
+  Src: TInputSourceScripted;
+  P: TAnimProbe;
+  App: TTuiApp;
+begin
+  S := TSurfaceMemory.Create(4, 1);
+  Src := TInputSourceScripted.Create;
+  P := TAnimProbe.Create;
+  App := TTuiApp.Create(S, Src, P);
+  try
+    { Nothing animates, but out-of-band work (a streaming worker) keeps the
+      frame cadence instead of the long idle wait. }
+    App.Busy := True;
+    AssertEquals('due immediately before the first tick', 0,
+      App.NextFrameDelayMs);
+    App.Tick(1000);
+    AssertEquals('busy keeps the frame cadence', DefaultTickMs,
+      App.NextFrameDelayMs);
+    App.Busy := False;
+    AssertEquals('idle again once not busy', -1, App.NextFrameDelayMs);
   finally
     App.Free;
   end;

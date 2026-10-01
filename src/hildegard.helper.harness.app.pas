@@ -52,6 +52,8 @@ type
     procedure SetStatus(const AText: string; AFg: Byte);
     procedure AppendLine(const AText: string; const AAttr: TAttr);
     procedure RenderHistory;
+    procedure SyncBusy;
+    procedure OnLoop;
     function AssistantAttr: TAttr;
     function GetModalActive: Boolean;
     function GetPromptActive: Boolean;
@@ -64,7 +66,9 @@ type
     { One iteration: drain the queue, resolve any answered approval modal, then
       run TTuiApp.Step. Returns False once stopped. }
     function Step: Boolean;
-    procedure Run;
+    { Clock-driven loop: wait on input, drain the queue each iteration, and render
+      on the frame cadence while a turn is in flight. }
+    procedure Run(ACheckStop: TStopCheck = nil);
     procedure Stop;
 
     { Quit mid-turn: deny pending approvals, join the worker, restore state. }
@@ -246,6 +250,7 @@ begin
   AppendLine('> ' + AText, Attr(ClUser, [sfBold]));
   FPrompt.Active := False;
   FBusy := True;
+  SyncBusy;
   SetStatus('thinking...', ClStatus);
   FWorker := TTurnWorker.Create(FSession.Loop, FSession.Queue, AText);
   FWorker.Start;
@@ -372,6 +377,7 @@ begin
   FBusy := False;
   FPrompt.Active := True;
   SetStatus('ready', ClStatus);
+  SyncBusy;
 end;
 
 procedure THarnessApp.DrainQueue;
@@ -380,6 +386,20 @@ var
 begin
   while FSession.Queue.Pop(E) do
     HandleTurnEvent(E);
+end;
+
+procedure THarnessApp.SyncBusy;
+begin
+  FApp.Busy := FBusy;
+end;
+
+procedure THarnessApp.OnLoop;
+begin
+  { Drain each iteration, then reflect the resulting busy state so Run picks the
+    frame cadence (not the idle wait) while a turn is streaming. }
+  CloseModal;
+  DrainQueue;
+  SyncBusy;
 end;
 
 function THarnessApp.Step: Boolean;
@@ -391,10 +411,9 @@ begin
   Result := FApp.Step;
 end;
 
-procedure THarnessApp.Run;
+procedure THarnessApp.Run(ACheckStop: TStopCheck);
 begin
-  while Step do
-    Sleep(1);
+  FApp.Run(ACheckStop, OnLoop);
 end;
 
 procedure THarnessApp.Stop;

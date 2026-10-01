@@ -28,7 +28,7 @@ type
       AIntervalMs: Integer = 90); overload;
     constructor Create(const AFrames: array of UnicodeString;
       AIntervalMs: Integer; const AAttr: TAttr); overload;
-    procedure Advance(const ANowMs: Int64); override;
+    function Advance(const ANowMs: Int64): Boolean; override;
     function Animating: Boolean; override;
     function Measure(const AAvail: TSize): TSize; override;
     procedure Render(const S: ISurface); override;
@@ -72,7 +72,9 @@ begin
   FStarted := False;
 end;
 
-procedure TSpinner.Advance(const ANowMs: Int64);
+function TSpinner.Advance(const ANowMs: Int64): Boolean;
+var
+  NewIndex: Integer;
 begin
   if not FStarted then
   begin
@@ -80,14 +82,13 @@ begin
     FStarted := True;
   end;
   if Length(FFrames) = 0 then
-  begin
-    FIndex := 0;
-    Exit;
-  end;
-  if ANowMs <= FOriginMs then
-    FIndex := 0
+    NewIndex := 0
+  else if ANowMs <= FOriginMs then
+    NewIndex := 0
   else
-    FIndex := ((ANowMs - FOriginMs) div FIntervalMs) mod Length(FFrames);
+    NewIndex := ((ANowMs - FOriginMs) div FIntervalMs) mod Length(FFrames);
+  Result := NewIndex <> FIndex;
+  FIndex := NewIndex;
 end;
 
 function TSpinner.Animating: Boolean;

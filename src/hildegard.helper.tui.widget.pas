@@ -35,9 +35,10 @@ type
     procedure Render(const S: ISurface); virtual;
     { Consume an event. Return True if handled. }
     function HandleEvent(const E: TInputEvent): Boolean; virtual;
-    { Update time-based content to ANowMs. Default: no-op. Must not arrange;
-      the app calls this once per frame on the whole tree. }
-    procedure Advance(const ANowMs: Int64); virtual;
+    { Update time-based content to ANowMs. Default: no-op. Must not arrange; the
+      app calls this once per frame. Returns True when the content changed, so
+      the app repaints only the frames that actually differ. }
+    function Advance(const ANowMs: Int64): Boolean; virtual;
     { True while this widget (or a descendant) has time-based content. The app
       uses it to decide whether to schedule the next frame at all. }
     function Animating: Boolean; virtual;
@@ -94,7 +95,7 @@ type
     procedure Arrange(const ABounds: TRect); override;
     procedure Render(const S: ISurface); override;
     function HandleEvent(const E: TInputEvent): Boolean; override;
-    procedure Advance(const ANowMs: Int64); override;
+    function Advance(const ANowMs: Int64): Boolean; override;
     function Animating: Boolean; override;
   end;
 
@@ -147,8 +148,9 @@ begin
   Result := False;
 end;
 
-procedure TWidget.Advance(const ANowMs: Int64);
+function TWidget.Advance(const ANowMs: Int64): Boolean;
 begin
+  Result := False;
 end;
 
 function TWidget.Animating: Boolean;
@@ -440,13 +442,14 @@ begin
   Result := False;
 end;
 
-procedure TContainer.Advance(const ANowMs: Int64);
+function TContainer.Advance(const ANowMs: Int64): Boolean;
 var
   I: Integer;
 begin
+  Result := False;
   for I := 0 to FCount - 1 do
-    if FWidgets[I].Visible then
-      FWidgets[I].Advance(ANowMs);
+    if FWidgets[I].Visible and FWidgets[I].Advance(ANowMs) then
+      Result := True;
 end;
 
 function TContainer.Animating: Boolean;

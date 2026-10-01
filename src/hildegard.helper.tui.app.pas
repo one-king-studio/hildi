@@ -10,9 +10,12 @@ unit hildegard.helper.tui.app;
   Because the frame is rebuilt every Tick, dimming never accumulates and the
   base stays visible underneath a modal.
 
-  Run waits on input to the next frame while anything animates, and on a long
-  idle timeout when nothing does - there is no forced refresh rate. Step remains
-  the event-only iteration the demos and tests use. }
+  Run waits on input to the next frame while anything animates or the owner is
+  Busy (a worker streaming into a queue), and on a short idle timeout when idle -
+  there is no forced refresh rate and no busy poll. The clock ticks at the frame
+  cadence, but the screen repaints only when a widget reports a change (Advance
+  returns True) or the layout is dirty. Step remains the event-only iteration the
+  demos and tests use. }
 
 {$mode delphi}{$H+}
 
@@ -25,7 +28,10 @@ uses
 
 type
   { Returns True to stop the run loop (a signal, a quit flag). }
-  TStopCheck = function: Boolean of object;
+  TStopCheck = function: Boolean;
+  { Called once per Run iteration, before the frame decision (drain queues,
+    update external state). }
+  TLoopHook = procedure of object;
 
   { A plane is a widget tree drawn as one layer. Modal planes trap input. }
   TPlane = class
@@ -52,11 +58,14 @@ type
     FTickMs: Integer;
     FNowMs: Int64;
     FLastTickMs: Int64;
+    FBusy: Boolean;
+    FNeedsRepaint: Boolean;
     procedure ArrangeBase;
     procedure ArrangePlanes;
     procedure RenderFrame;
     procedure DispatchEvent(const E: TInputEvent);
     procedure Present;
+    function AdvanceTree(const ANowMs: Int64): Boolean;
     function FrameDue: Boolean;
     function GetAnimating: Boolean;
   public
@@ -78,22 +87,28 @@ type
       advance time; callers that animate use Tick or Run. }
     function Step: Boolean;
 
-    { Advance a frame to an explicit time: advance the whole tree, re-arrange if
-      dirty, render and flush once. Deterministic; the test seam. }
+    { Advance a frame to an explicit time: advance the whole tree and repaint
+      only when a widget reports a change (or the layout is dirty). Deterministic;
+      the test seam. }
     procedure Tick(const ANowMs: Int64);
 
     { Milliseconds until the next frame (0..TickMs), or -1 when nothing is
-      animating (the caller should wait indefinitely). Exposed for tests. }
+      animating and the app is not Busy (the caller should wait indefinitely).
+      Exposed for tests. }
     function NextFrameDelayMs: Integer;
 
-    { Wait on input to the next frame (or a long idle timeout when nothing
-      animates), advance the tree on each frame, and render once per frame.
-      ACheckStop, when set, ends the loop (the caller restores the terminal). }
-    procedure Run(ACheckStop: TStopCheck = nil);
+    { Wait on input to the next frame (or a long idle timeout when idle),
+      advance the tree on each frame, and render once per frame. ACheckStop,
+      when set, ends the loop; AOnLoop runs each iteration (drain a queue). }
+    procedure Run(ACheckStop: TStopCheck = nil; AOnLoop: TLoopHook = nil);
 
     property TickMs: Integer read FTickMs write FTickMs;
     property NowMs: Int64 read FNowMs;
     property Animating: Boolean read GetAnimating;
+    { True while the owner has out-of-band work pending (for example a worker
+      streaming into a queue). Keeps the frame cadence instead of the long idle
+      wait, without a busy poll. }
+    property Busy: Boolean read FBusy write FBusy;
   end;
 
 implementation
@@ -133,12 +148,16 @@ begin
   FSurface := ASurface;
   FInput := AInput;
   FStop := False;
+  { Start needing a paint so the first Present/Tick draws even if nothing reports
+    a change; do not mark the layout dirty, or the first Step would re-arrange. }
   FLayoutDirty := False;
+  FNeedsRepaint := True;
   if ATickMs < 1 then
     ATickMs := DefaultTickMs;
   FTickMs := ATickMs;
   FNowMs := 0;
   FLastTickMs := 0;
+  FBusy := False;
   SetLength(FPlanes, 1);
   FPlanes[0] := TPlane.Create(ARoot, False);
   ArrangeBase;
@@ -283,6 +302,7 @@ begin
     FLayoutDirty := False;
   end;
   RenderFrame;
+  FNeedsRepaint := False;
 end;
 
 function TTuiApp.FrameDue: Boolean;
@@ -300,23 +320,31 @@ begin
   Result := False;
 end;
 
-procedure TTuiApp.Tick(const ANowMs: Int64);
+function TTuiApp.AdvanceTree(const ANowMs: Int64): Boolean;
 var
   I: Integer;
+begin
+  Result := False;
+  for I := 0 to High(FPlanes) do
+    if (FPlanes[I].Root <> nil) and FPlanes[I].Root.Advance(ANowMs) then
+      Result := True;
+end;
+
+procedure TTuiApp.Tick(const ANowMs: Int64);
 begin
   if FStop then
     Exit;
   FNowMs := ANowMs;
   FLastTickMs := ANowMs;
-  for I := 0 to High(FPlanes) do
-    if FPlanes[I].Root <> nil then
-      FPlanes[I].Root.Advance(ANowMs);
-  Present;
+  { Advance every frame, but repaint only when a widget reports a change (or the
+    layout is dirty): the clock ticks at 100 Hz, the screen does not. }
+  if AdvanceTree(ANowMs) or FLayoutDirty or FNeedsRepaint then
+    Present;
 end;
 
 function TTuiApp.NextFrameDelayMs: Integer;
 begin
-  if not Animating then
+  if not (Animating or FBusy) then
     Exit(-1);
   if FLastTickMs = 0 then
     Exit(0);
@@ -327,16 +355,20 @@ begin
     Result := FTickMs;
 end;
 
-procedure TTuiApp.Run(ACheckStop: TStopCheck);
+procedure TTuiApp.Run(ACheckStop: TStopCheck; AOnLoop: TLoopHook);
 const
-  { Idle wake-up, not a refresh rate: IInputSource.Wait has no blocking form, so
-    a long timeout keeps the loop responsive to signals without spinning. }
-  IdleWaitMs = 1000;
+  { Idle wake-up, not a refresh rate. IInputSource.Wait blocks on the tty, so
+    this only bounds how long a signal or resize goes unnoticed; it is not a
+    repaint cadence. }
+  IdleWaitMs = 100;
 var
   E: TInputEvent;
   Timeout: Integer;
   Handled: Boolean;
 begin
+  { Draw the first frame immediately; an idle loop would otherwise wait out the
+    idle timeout before anything appears. }
+  Present;
   while not FStop do
   begin
     if Assigned(ACheckStop) and ACheckStop() then
@@ -348,15 +380,17 @@ begin
     Handled := FInput.Wait(Timeout, E);
     if Handled then
       DispatchEvent(E);
+    if Assigned(AOnLoop) then
+      AOnLoop();
     FNowMs := MonotonicMs;
-    if Animating then
+    if Animating or FBusy then
     begin
       if FrameDue then
         Tick(FNowMs)
       else if Handled then
         Present;
     end
-    else if Handled then
+    else if Handled or FLayoutDirty or FNeedsRepaint then
       Present;
   end;
 end;

@@ -38,14 +38,10 @@ type
     FPreview: TTextBlock;
     FList: TListView;
     FTheme: TTheme;
-    FInput: TInputSourceTerminal;
   public
     constructor Create(const ATheme: TTheme; APreview: TTextBlock;
       AList: TListView);
     procedure SetApp(AApp: TTuiApp);
-    procedure SetInput(AInput: TInputSourceTerminal);
-    { The Run loop's stop condition: a quit key or a signal. }
-    function ShouldStop: Boolean;
     procedure Show(const S: string);
     procedure OnOpen(Sender: TObject);
     procedure OnQuit(Sender: TObject);
@@ -76,16 +72,6 @@ end;
 procedure TDemo.SetApp(AApp: TTuiApp);
 begin
   FApp := AApp;
-end;
-
-procedure TDemo.SetInput(AInput: TInputSourceTerminal);
-begin
-  FInput := AInput;
-end;
-
-function TDemo.ShouldStop: Boolean;
-begin
-  Result := QuitRequested or ((FInput <> nil) and FInput.Terminated);
 end;
 
 procedure TDemo.Show(const S: string);
@@ -130,6 +116,13 @@ var
   App: TTuiApp;
   Demo: TDemo;
   Style: TBoxStyle;
+
+{ The Run loop's stop condition: a quit key or a signal. }
+function ShouldStop: Boolean;
+begin
+  Result := QuitRequested or InputTerm.Terminated;
+end;
+
 begin
   Surface := TSurfaceVideo.Create;
   InputTerm := TInputSourceTerminal.Create;
@@ -181,10 +174,9 @@ begin
 
   App := TTuiApp.Create(Surface, Input, TQuitShell.Create(Root));
   Demo.SetApp(App);
-  Demo.SetInput(InputTerm);
   try
     { Run waits on input to the next frame while the spinner/bar animate. }
-    App.Run(Demo.ShouldStop);
+    App.Run(@ShouldStop);
   finally
     App.Free;
     Demo.Free;

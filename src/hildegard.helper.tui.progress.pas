@@ -31,7 +31,7 @@ type
   public
     constructor Create(AWidthCells: Integer); overload;
     constructor Create(AWidthCells: Integer; const AAttr: TAttr); overload;
-    procedure Advance(const ANowMs: Int64); override;
+    function Advance(const ANowMs: Int64): Boolean; override;
     function Animating: Boolean; override;
     function Measure(const AAvail: TSize): TSize; override;
     procedure Render(const S: ISurface); override;
@@ -102,12 +102,12 @@ begin
   Result := FIndeterminate;
 end;
 
-procedure TProgress.Advance(const ANowMs: Int64);
+function TProgress.Advance(const ANowMs: Int64): Boolean;
 var
-  Lo, Hi, Span, Period, Step: Integer;
+  Lo, Hi, Span, Period, Step, NewPos: Integer;
 begin
   if not FIndeterminate then
-    Exit;
+    Exit(False);
   if not FStarted then
   begin
     FOriginMs := ANowMs;
@@ -123,19 +123,21 @@ begin
   end;
   Span := Hi - Lo;
   if Span <= 0 then
+    NewPos := Lo
+  else
   begin
-    FPos := Lo;
-    Exit;
+    Period := Span * 2;
+    if ANowMs <= FOriginMs then
+      Step := 0
+    else
+      Step := Integer(((ANowMs - FOriginMs) div ProgressIntervalMs) mod Period);
+    if Step <= Span then
+      NewPos := Lo + Step
+    else
+      NewPos := Hi - (Step - Span);
   end;
-  Period := Span * 2;
-  if ANowMs <= FOriginMs then
-    Step := 0
-  else
-    Step := Integer(((ANowMs - FOriginMs) div ProgressIntervalMs) mod Period);
-  if Step <= Span then
-    FPos := Lo + Step
-  else
-    FPos := Hi - (Step - Span);
+  Result := NewPos <> FPos;
+  FPos := NewPos;
 end;
 
 function TProgress.Measure(const AAvail: TSize): TSize;

@@ -26,7 +26,7 @@ type
     procedure Arrange(const ABounds: TRect); override;
     procedure Render(const S: ISurface); override;
     function HandleEvent(const E: TInputEvent): Boolean; override;
-    procedure Advance(const ANowMs: Int64); override;
+    function Advance(const ANowMs: Int64): Boolean; override;
     function Animating: Boolean; override;
   end;
 
@@ -113,10 +113,12 @@ begin
     Result := False;
 end;
 
-procedure TSingleChild.Advance(const ANowMs: Int64);
+function TSingleChild.Advance(const ANowMs: Int64): Boolean;
 begin
   if FChild <> nil then
-    FChild.Advance(ANowMs);
+    Result := FChild.Advance(ANowMs)
+  else
+    Result := False;
 end;
 
 function TSingleChild.Animating: Boolean;

@@ -37,6 +37,13 @@ var
   InputTerm: TInputSourceTerminal;
   Input: IInputSource;
   App: THarnessApp;
+
+{ End the run loop on SIGTERM/SIGINT/SIGHUP so the terminal is restored. }
+function ShouldStop: Boolean;
+begin
+  Result := InputTerm.Terminated;
+end;
+
 begin
   RawArgs := TStringList.Create;
   try
@@ -102,12 +109,9 @@ begin
   Input := InputTerm;
   App := THarnessApp.Create(Surface, Input, Session);
   try
-    while App.Step do
-    begin
-      if InputTerm.Terminated then
-        App.Stop;
-      Sleep(1);
-    end;
+    { Clock-driven: waits on input, drains the turn queue each iteration, and
+      renders on the frame cadence only while a turn is in flight. }
+    App.Run(@ShouldStop);
   finally
     App.Free;
     Input := nil;
