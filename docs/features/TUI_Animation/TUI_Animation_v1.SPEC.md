@@ -44,57 +44,82 @@ const
 
 ```pascal
 TWidget = class
-  { Update time-based content to ANowMs. Default: no-op. Must not arrange. }
-  procedure Advance(const ANowMs: Int64); virtual;
+  { Update time-based content to ANowMs. Default: no-op. Must not arrange.
+    Returns True when the content changed, so the app repaints only the frames
+    that actually differ (the clock ticks at 100 Hz; the screen does not). }
+  function Advance(const ANowMs: Int64): Boolean; virtual;
   { True while this widget (or a descendant) has time-based content. }
   function Animating: Boolean; virtual;
 end;
 ```
 
-- `TContainer.Advance` forwards to every child; `TContainer.Animating` is the OR
-  of its children.
+- `TContainer.Advance` forwards to every child and ORs their results;
+  `TContainer.Animating` is the OR of its children.
+- `TSpinner`/`TProgress` return True only when the frame index / bounce cell
+  actually moves, so a 90 ms spinner repaints ~11 times a second, not 100.
 
 ### App frame loop — `hildegard.helper.tui.app`
 
 ```pascal
 type
   { Returns True to stop the run loop (a signal, a quit flag). }
-  TStopCheck = function: Boolean of object;
+  TStopCheck = function: Boolean;
+  { Called once per Run iteration (drain queues, update external state). }
+  TLoopHook = procedure of object;
 
 TTuiApp = class
   constructor Create(const ASurface: ISurface; const AInput: IInputSource;
     ARoot: TWidget; ATickMs: Integer = DefaultTickMs);
 
-  { Advance a frame to an explicit time: Root.Advance(ANowMs); re-arrange if
-    dirty; render and flush once. Deterministic; the test seam. }
+  { Advance a frame to an explicit time: advance the whole tree and repaint only
+    when a widget reports a change (or the layout is dirty). Deterministic; the
+    test seam. }
   procedure Tick(const ANowMs: Int64);
 
-  { Milliseconds until the next frame (>= 0), or -1 when idle (wait forever).
-    Exposed so the gating is testable. }
+  { Milliseconds until the next frame (0..TickMs), or -1 when idle (nothing
+    animating and not Busy). Exposed so the gating is testable. }
   function NextFrameDelayMs: Integer;
 
-  procedure Run(ACheckStop: TStopCheck = nil);
+  procedure Run(ACheckStop: TStopCheck = nil; AOnLoop: TLoopHook = nil);
 
   property TickMs: Integer read FTickMs write FTickMs;
   property NowMs: Int64 read FNowMs;
   property Animating: Boolean read GetAnimating;   // OR over all planes
+  property Busy: Boolean read FBusy write FBusy;   // out-of-band work pending
 end;
 ```
 
 `Run` loop (prose; `Step`/`Tick` are the tested units):
 
-1. `Timeout := NextFrameDelayMs` (`-1` ⇒ use the idle timeout below).
-2. `if Input.Wait(Timeout, E)` handle the event and render immediately.
-3. If the frame is due, `Tick(MonotonicMs)`.
-4. Repeat until `Stop`, or until `ACheckStop` returns True.
+1. Render the first frame immediately (an idle loop would otherwise wait out the
+   idle timeout before anything appears).
+2. `Timeout := NextFrameDelayMs` (`-1` ⇒ the idle timeout below).
+3. `if Input.Wait(Timeout, E)` handle the event.
+4. `AOnLoop` (drain an external queue); `Busy` may change here.
+5. If `Animating` or `Busy`, advance the frame when due and repaint **only if a
+   widget reports a change** (or the layout is dirty); otherwise repaint only on
+   input or a dirty layout.
+6. Repeat until `Stop`, or until `ACheckStop` returns True.
 
-`NextFrameDelayMs` returns `-1` when `not Animating`; otherwise
+`NextFrameDelayMs` returns `-1` when `not (Animating or Busy)`; otherwise
 `max(0, min(TickMs, TickMs - (NowMs - LastTickMs)))`.
 
-**Idle wait.** `IInputSource.Wait` has no blocking form (the terminal adapter is
-poll-then-sleep), so `Run` cannot truly block forever; when idle it waits on a
-long `IdleWaitMs` (1000 ms) timeout instead. That is a signal-check cadence, not
-a refresh rate - the UI still repaints only when something changes.
+**The tick and the repaint are decoupled.** `Tick` advances the tree every frame,
+but calls `Present` only when `Advance` returned True or the layout is dirty. A
+100 Hz clock therefore does not mean 100 recomposes per second: a 90 ms spinner
+repaints ~11 times a second. `Run` also draws the first frame before waiting.
+
+**`Busy` vs `Animating`.** `Animating` is "a widget has time-based content".
+`Busy` is "the owner has out-of-band work pending" (a worker streaming into a
+queue): it keeps the frame cadence so streamed output appears promptly, without
+the owner falling back to a 1 ms busy poll. The harness sets `Busy` from its
+in-flight turn.
+
+**Idle wait.** The terminal `Wait` blocks on `select`, so a keypress wakes the
+loop immediately - a poll-then-sleep `Wait` delayed the first key by up to the
+whole timeout and read as a laggy UI. When idle, `Run` still uses a short
+`IdleWaitMs` (100 ms) timeout so a signal or a resize is noticed promptly; that
+is a wake-up cadence, not a repaint cadence.
 
 ### Spinner — `hildegard.helper.tui.spinner`
 
@@ -260,6 +285,13 @@ time-based widgets.
   a modal also keeps the frame clock running.
 - FPC cannot give a record parameter a default value, so `TSpinner`/`TProgress`
   expose an `overload` for the attribute.
+- **The harness no longer busy-polls.** `tui_agent` used
+  `while Step do Sleep(1)` - about 1000 full recomposes per second (a stack
+  sample sat in `nanosleep`), roughly 8% CPU while idle, and the per-frame
+  managed-cell churn made RSS oscillate (FPC has no GC; that is allocator churn).
+  It now runs through `THarnessApp.Run` -> `TTuiApp.Run` with `Busy`, so an idle
+  app waits on input (~0% CPU, stable RSS) and only a streaming turn keeps the
+  frame cadence.
 
 ## Future Considerations
 

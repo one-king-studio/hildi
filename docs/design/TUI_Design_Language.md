@@ -192,9 +192,15 @@ changed cells reach the terminal.
   `frame = f(nowMs)` (a spinner uses `((now - origin) div IntervalMs) mod N`, so
   two spinners advanced together stay in step).
 - **Idle means silent.** A widget reports `Animating`; when nothing animates the
-  app stops scheduling frames and waits on input (a long timeout, since
-  `IInputSource.Wait` has no blocking form) instead of waking at the frame rate.
-  "100 Hz" is a ceiling while motion is on screen, not a forced refresh.
+  app stops scheduling frames and waits on input (the terminal `Wait` blocks on
+  `select`, so a key wakes it immediately) instead of waking at the frame rate.
+  An owner with out-of-band work (a worker streaming into a queue) sets `Busy`,
+  which keeps the frame cadence so streamed output appears promptly - never a
+  1 ms busy poll. "100 Hz" is a ceiling while motion is on screen, not a forced
+  refresh.
+- **Advance is not repaint.** `Advance` returns whether a widget's content
+  changed; the app repaints only then (or on input / a dirty layout). The clock
+  may tick at 100 Hz while the screen repaints ~11x/s for a 90 ms spinner.
 - **Composite once.** Each frame advances the tree, then clears, renders the
   planes, dims, renders modals, and flushes once; the encoder writes only changed
   cells.

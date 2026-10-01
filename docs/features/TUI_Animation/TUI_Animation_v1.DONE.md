@@ -53,6 +53,33 @@ with a failing test; `make check` before moving on.
 - [x] **Validation**: `make check` green (370 tests, leak-clean); pty smoke of the
       demo (spinner + bar render, `q` exits 0)
 
+### Phase 6: Harness adoption (idle CPU)
+
+- [x] **Diagnose**: `tui_agent`'s `while Step do Sleep(1)` recomposed the frame
+      ~1000x/s (stack sample in `nanosleep`); ~8% CPU idle, RSS oscillating
+- [x] **Implement**: `TTuiApp.Busy` + `Run(ACheckStop, AOnLoop)`; `NextFrameDelayMs`
+      is `-1` only when neither animating nor busy; `Run` paints the first frame
+      immediately
+- [x] **Implement**: `THarnessApp.Run` drives the clock loop and drains the turn
+      queue each iteration; `tui_agent` calls it with a `ShouldStop` function
+- [x] **Test**: `Busy` keeps the frame cadence (not the idle wait)
+- [x] **Validation**: idle `tui_agent` ~0.0% CPU with stable RSS; first frame
+      paints immediately; `q`/Ctrl-C exit; `make check` green (371 tests)
+
+### Phase 7: Decouple the repaint from the tick (scroll latency, animation CPU)
+
+- [x] **Fix**: terminal `Wait` now blocks on `select` instead of sleep-then-poll,
+      so a keypress wakes the loop immediately (was up to a full idle timeout)
+- [x] **Implement**: `TWidget.Advance` returns whether the content changed;
+      `TContainer`/`TSingleChild` OR it; `TSpinner`/`TProgress` report only real
+      frame/position changes
+- [x] **Implement**: `Tick` advances every frame but repaints only on a change or
+      a dirty layout; `FNeedsRepaint` forces the first paint without marking the
+      layout dirty; `IdleWaitMs` lowered to 100 ms
+- [x] **Test**: an unchanged frame is not repainted at all (`FlushCount` stays 1)
+- [x] **Validation**: animating demo ~1.0% CPU (was ~4.5%); idle ~0.0%;
+      input→paint 0 ms; `make check` green (371 tests)
+
 ## Files to Create/Modify
 
 ### New Files
