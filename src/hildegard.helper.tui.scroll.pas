@@ -24,6 +24,7 @@ type
   private
     FOrientation: TScrollBarOrientation;
     FValue, FRange, FPage: Integer;
+    FTrackVisible: Boolean;
     procedure ClampValue;
     procedure SetValue(AValue: Integer);
     procedure SetRange(AValue: Integer);
@@ -35,6 +36,9 @@ type
     property Value: Integer read FValue write SetValue;
     property Range: Integer read FRange write SetRange;
     property Page: Integer read FPage write SetPage;
+    { When False the track is not painted, so whatever sits behind the bar (a
+      panel border, say) reads as the track and only the thumb is drawn. }
+    property TrackVisible: Boolean read FTrackVisible write FTrackVisible;
     function ThumbSize: Integer;
     function ThumbStart: Integer;
     procedure Render(const S: ISurface); override;
@@ -50,6 +54,7 @@ type
     FContentW, FContentH: Integer;
     FVBar, FHBar: TScrollBar;
     FBarDragging: Boolean;
+    FTrackVisible: Boolean;
     function PointInside(AX, AY: Integer): Boolean;
     procedure SyncBars;
     procedure DragBarTo(AY: Integer);
@@ -73,6 +78,8 @@ type
     property ScrollY: Integer read FScrollY write SetScrollY;
     property VertScrollBar: TScrollMode read FVert write FVert;
     property HorzScrollBar: TScrollMode read FHorz write FHorz;
+    { Paint the scrollbar track; set False when the bar sits on a border. }
+    property TrackVisible: Boolean read FTrackVisible write FTrackVisible;
   end;
 
 implementation
@@ -104,6 +111,7 @@ begin
   FValue := 0;
   FRange := 0;
   FPage := 0;
+  FTrackVisible := True;
 end;
 
 function TScrollBar.MaxValue: Integer;
@@ -208,10 +216,11 @@ begin
       else
         S.Put(FBounds.X + I, FBounds.Y, ThumbCell);
     end
-    else if FOrientation = soVertical then
-      S.Put(FBounds.X, FBounds.Y + I, TrackCell)
-    else
-      S.Put(FBounds.X + I, FBounds.Y, TrackCell);
+    else if FTrackVisible then
+      if FOrientation = soVertical then
+        S.Put(FBounds.X, FBounds.Y + I, TrackCell)
+      else
+        S.Put(FBounds.X + I, FBounds.Y, TrackCell);
   S.PopClip;
 end;
 
@@ -228,6 +237,7 @@ begin
   FScrollY := 0;
   FContentW := 0;
   FContentH := 0;
+  FTrackVisible := True;
 end;
 
 destructor TScrollContainer.Destroy;
@@ -453,6 +463,7 @@ begin
   begin
     if FVBar = nil then
       FVBar := TScrollBar.Create(soVertical);
+    FVBar.TrackVisible := FTrackVisible;
     FVBar.Arrange(Rect4(ABounds.X + ABounds.W - 1, ABounds.Y, 1, VpH));
     FVBar.Page := VpH;
     FVBar.Range := FContentH;
@@ -464,6 +475,7 @@ begin
   begin
     if FHBar = nil then
       FHBar := TScrollBar.Create(soHorizontal);
+    FHBar.TrackVisible := FTrackVisible;
     FHBar.Arrange(Rect4(ABounds.X, ABounds.Y + ABounds.H - 1, VpW, 1));
     FHBar.Page := VpW;
     FHBar.Range := FContentW;

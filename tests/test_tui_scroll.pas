@@ -38,6 +38,7 @@ type
     procedure TestScrollbarThumbGeometry;
     procedure TestScrollbarThumbTracksScroll;
     procedure TestScrollbarDragScrolls;
+    procedure TestHiddenTrackLeavesWhatIsBehind;
     procedure TestClickInsideViewportReachesChild;
   end;
 
@@ -268,6 +269,32 @@ begin
     AssertEquals('wheel scrolled up by three', 37, C.ScrollY);
   finally
     C.Free;
+  end;
+end;
+
+procedure TTuiScrollTest.TestHiddenTrackLeavesWhatIsBehind;
+var
+  C: TScrollContainer;
+  S: TSurfaceMemory;
+begin
+  S := TSurfaceMemory.Create(10, 10);
+  try
+    C := TScrollContainer.Create(TScrollProbe.Create(10, 100), smAuto, smNever);
+    try
+      { With the track hidden the bar only paints its thumb, so a panel border
+        behind the bar column reads as the track. }
+      C.TrackVisible := False;
+      C.Arrange(Rc(0, 0, 10, 10));
+      S.Clear(DefaultAttr);
+      C.Render(S);
+      S.Flush;
+      AssertEquals('thumb still drawn', '┃', S.CellAt(9, 0).Ch);
+      AssertEquals('track cell left untouched', ErasedChar, S.CellAt(9, 9).Ch);
+    finally
+      C.Free;
+    end;
+  finally
+    S.Free;
   end;
 end;
 
