@@ -427,7 +427,7 @@ end;
 
 procedure TScrollContainer.Arrange(const ABounds: TRect);
 var
-  Avail: TSize;
+  Avail, ContentSize: TSize;
   VpW, VpH: Integer;
   VertShown, HorzShown: Boolean;
 begin
@@ -438,8 +438,9 @@ begin
   Avail := Default(TSize);
   Avail.W := ABounds.W;
   Avail.H := ABounds.H;
-  FContentW := FChild.Measure(Avail).W;
-  FContentH := FChild.Measure(Avail).H;
+  ContentSize := FChild.Measure(Avail);
+  FContentW := ContentSize.W;
+  FContentH := ContentSize.H;
 
   VpW := ABounds.W;
   VpH := ABounds.H;

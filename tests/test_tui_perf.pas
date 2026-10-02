@@ -39,6 +39,7 @@ type
     procedure TestOneLineAppendChangesOnlyItsRow;
     procedure TestScrollChangesOnlyViewportRows;
     procedure TestLayoutRunsOnlyWhenDirty;
+    procedure TestLargeBlockLayoutIsCachedOnce;
     procedure TestModalToggleChangesOnlyOverlayAndDimmedRegion;
   end;
 
@@ -155,6 +156,49 @@ begin
       AssertTrue('append changed something', S.LastFrameChangedCells > 0);
     finally
       Scroll.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiPerfTest.TestLargeBlockLayoutIsCachedOnce;
+var
+  S: TSurfaceMemory;
+  Block: TTextBlock;
+  Text: string;
+  I, After: Integer;
+  Sz: TSize;
+begin
+  Text := '';
+  for I := 1 to 500 do
+    Text := Text + 'line ' + IntToStr(I) + ' of a large tool result' + #10;
+
+  S := TSurfaceMemory.Create(60, 20);
+  try
+    Block := TTextBlock.Create([SpanOf(UnicodeString(Text))], wmWord);
+    try
+      Block.WrapWidth := 56;
+      Block.Arrange(Rc(0, 0, 56, 20));
+      Sz := Default(TSize);
+      Sz.W := 56;
+      Sz.H := 20;
+      { Warm the cache. }
+      Block.Measure(Sz);
+      Block.Render(S);
+      After := Block.LayoutBuilds;
+
+      { Twenty more measures and renders must not rebuild the layout: a large
+        block was previously re-wrapped on every frame. }
+      for I := 1 to 20 do
+      begin
+        Block.Measure(Sz);
+        Block.Render(S);
+      end;
+      AssertEquals('layout built once, not per frame', After,
+        Block.LayoutBuilds);
+    finally
+      Block.Free;
     end;
   finally
     S.Free;

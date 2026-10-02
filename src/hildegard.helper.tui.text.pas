@@ -24,13 +24,32 @@ type
   TWrapMode = (wmNone, wmChar, wmWord);
   TTextAlign = (taLeft, taCenter, taRight);
 
-  { A leaf that holds styled text, measured and wrapped in display columns. }
+  { A styled cluster and the wrapped lines a text block lays out. Exposed so the
+    block can cache its layout between measures and renders. }
+  TStyledCluster = record
+    Ch: UnicodeString;
+    Attr: TAttr;
+  end;
+  TStyledClusters = array of TStyledCluster;
+  TStyledLines = array of TStyledClusters;
+
+  { A leaf that holds styled text, measured and wrapped in display columns. The
+    cluster build and the wrap are cached and only redone when the spans or the
+    wrap width change, so a large block is not re-wrapped on every frame. }
   TTextBlock = class(TWidget)
   private
     FSpans: array of TSpan;
     FWrap: TWrapMode;
     FAlign: TTextAlign;
     FWrapWidth: Integer;
+    FCacheClusters: TStyledClusters;
+    FCacheLines: TStyledLines;
+    FCacheWidth: Integer;
+    FClustersValid: Boolean;
+    FLinesValid: Boolean;
+    FLayoutBuilds: Integer;
+    function CachedClusters: TStyledClusters;
+    function CachedLines(AWidth: Integer): TStyledLines;
   public
     constructor Create(const ASpans: array of TSpan;
       AWrap: TWrapMode = wmNone);
@@ -43,17 +62,12 @@ type
       max-content (the longest word). Callers in a fixed-size viewport set it so
       the block fills the width and reports the correct wrapped height. }
     property WrapWidth: Integer read FWrapWidth write FWrapWidth;
+    { Diagnostic: how many times the block has built clusters or wrapped. A
+      steady-state measure/render must not increase it. }
+    property LayoutBuilds: Integer read FLayoutBuilds;
   end;
 
 implementation
-
-type
-  TStyledCluster = record
-    Ch: UnicodeString;
-    Attr: TAttr;
-  end;
-  TStyledClusters = array of TStyledCluster;
-  TStyledLines = array of TStyledClusters;
 
 function LineWidth(const ALine: TStyledClusters): Integer;
 var
@@ -209,6 +223,8 @@ begin
   SetLength(FSpans, Length(ASpans));
   for I := 0 to High(ASpans) do
     FSpans[I] := ASpans[I];
+  FClustersValid := False;
+  FLinesValid := False;
 end;
 
 procedure TTextBlock.SetText(const AText: string; const AAttr: TAttr);
@@ -220,19 +236,42 @@ begin
   One.Attr := AAttr;
   SetLength(FSpans, 1);
   FSpans[0] := One;
+  FClustersValid := False;
+  FLinesValid := False;
+end;
+
+function TTextBlock.CachedClusters: TStyledClusters;
+begin
+  if not FClustersValid then
+  begin
+    FCacheClusters := BuildClusters(FSpans);
+    FClustersValid := True;
+    FLinesValid := False;
+    Inc(FLayoutBuilds);
+  end;
+  Result := FCacheClusters;
+end;
+
+function TTextBlock.CachedLines(AWidth: Integer): TStyledLines;
+begin
+  if FLinesValid and (FCacheWidth = AWidth) then
+    Exit(FCacheLines);
+  FCacheLines := WrapClusters(CachedClusters, AWidth, FWrap);
+  FCacheWidth := AWidth;
+  FLinesValid := True;
+  Inc(FLayoutBuilds);
+  Result := FCacheLines;
 end;
 
 function TTextBlock.Measure(const AAvail: TSize): TSize;
 var
-  Clusters: TStyledClusters;
   Lines: TStyledLines;
   I, LW: Integer;
 begin
   Result := Default(TSize);
-  Clusters := BuildClusters(FSpans);
   if FWrap = wmNone then
   begin
-    Lines := WrapClusters(Clusters, 0, wmNone);
+    Lines := CachedLines(0);
     for I := 0 to High(Lines) do
     begin
       LW := LineWidth(Lines[I]);
@@ -244,28 +283,24 @@ begin
   else if FWrapWidth > 0 then
   begin
     Result.W := FWrapWidth;
-    Lines := WrapClusters(Clusters, FWrapWidth, FWrap);
-    Result.H := Length(Lines);
+    Result.H := Length(CachedLines(FWrapWidth));
   end
   else
   begin
-    Result.W := LongestWordWidth(Clusters);
-    Lines := WrapClusters(Clusters, Result.W, FWrap);
-    Result.H := Length(Lines);
+    Result.W := LongestWordWidth(CachedClusters);
+    Result.H := Length(CachedLines(Result.W));
   end;
 end;
 
 procedure TTextBlock.Render(const S: ISurface);
 var
-  Clusters: TStyledClusters;
   Lines: TStyledLines;
   Row, I, X, LW, Offset, CW: Integer;
   Cell: TCell;
 begin
   if (FBounds.W <= 0) or (FBounds.H <= 0) then
     Exit;
-  Clusters := BuildClusters(FSpans);
-  Lines := WrapClusters(Clusters, FBounds.W, FWrap);
+  Lines := CachedLines(FBounds.W);
   S.PushClip(FBounds);
   for Row := 0 to High(Lines) do
   begin
