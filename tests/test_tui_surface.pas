@@ -28,6 +28,10 @@ type
     procedure TestFlushIdempotent;
     procedure TestInvalidateForcesFullRepaint;
     procedure TestDimAddsFaintButKeepsGlyphsAndColors;
+    procedure TestPutChPlacesOneCell;
+    procedure TestPutTextPlacesAString;
+    procedure TestPutTextClipsAtBounds;
+    procedure TestPutTextAdvancesByDisplayWidth;
   end;
 
 implementation
@@ -219,6 +223,70 @@ begin
     AssertTrue('dim added', sfDim in S.CellAt(1, 1).Attr.Style);
     AssertTrue('bold kept', sfBold in S.CellAt(1, 1).Attr.Style);
     AssertTrue('blank cell dimmed too', sfDim in S.CellAt(0, 0).Attr.Style);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiSurfaceTest.TestPutChPlacesOneCell;
+var
+  S: TSurfaceMemory;
+  A: TAttr;
+begin
+  S := TSurfaceMemory.Create(6, 2);
+  try
+    A := DefaultAttr;
+    A.Fg := 12;
+    PutCh(S, 2, 1, 'x', A);
+    AssertEquals('glyph placed', 'x', S.CellAt(2, 1).Ch);
+    AssertEquals('attr kept', 12, S.CellAt(2, 1).Attr.Fg);
+    AssertEquals('nothing to the left', '', S.CellAt(1, 1).Ch);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiSurfaceTest.TestPutTextPlacesAString;
+var
+  S: TSurfaceMemory;
+begin
+  S := TSurfaceMemory.Create(8, 2);
+  try
+    PutText(S, 1, 0, 'abc', DefaultAttr);
+    AssertEquals('first', 'a', S.CellAt(1, 0).Ch);
+    AssertEquals('second', 'b', S.CellAt(2, 0).Ch);
+    AssertEquals('third', 'c', S.CellAt(3, 0).Ch);
+    AssertEquals('stops after the string', '', S.CellAt(4, 0).Ch);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiSurfaceTest.TestPutTextClipsAtBounds;
+var
+  S: TSurfaceMemory;
+begin
+  S := TSurfaceMemory.Create(4, 1);
+  try
+    { Writing past the right edge must not wrap or raise. }
+    PutText(S, 2, 0, 'abcd', DefaultAttr);
+    AssertEquals('last in-bounds cell', 'b', S.CellAt(3, 0).Ch);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiSurfaceTest.TestPutTextAdvancesByDisplayWidth;
+var
+  S: TSurfaceMemory;
+begin
+  S := TSurfaceMemory.Create(8, 1);
+  try
+    { A wide cluster takes two columns; a combining mark joins its base. }
+    PutText(S, 0, 0, 'a' + #$4E16 + 'b', DefaultAttr);
+    AssertEquals('narrow first', 'a', S.CellAt(0, 0).Ch);
+    AssertEquals('wide cluster at column 1', #$4E16, S.CellAt(1, 0).Ch);
+    AssertEquals('next cluster after two columns', 'b', S.CellAt(3, 0).Ch);
   finally
     S.Free;
   end;

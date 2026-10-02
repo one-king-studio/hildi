@@ -86,7 +86,44 @@ type
     procedure Flush;
   end;
 
+{ Put one cell, and one string of cells, at (X, Y). Small conveniences the
+  widgets would otherwise each re-implement. PutText advances by display width,
+  so a wide cluster moves two columns and a combining mark none. }
+procedure PutCh(const S: ISurface; X, Y: Integer; const ACh: UnicodeString;
+  const AAttr: TAttr);
+procedure PutText(const S: ISurface; X, Y: Integer; const AText: UnicodeString;
+  const AAttr: TAttr);
+
 implementation
+
+uses
+  hildegard.helper.tui.grapheme;
+
+procedure PutCh(const S: ISurface; X, Y: Integer; const ACh: UnicodeString;
+  const AAttr: TAttr);
+var
+  C: TCell;
+begin
+  C := Default(TCell);
+  C.Ch := ACh;
+  C.Attr := AAttr;
+  S.Put(X, Y, C);
+end;
+
+procedure PutText(const S: ISurface; X, Y: Integer; const AText: UnicodeString;
+  const AAttr: TAttr);
+var
+  Clusters: TClusterArray;
+  I, Col: Integer;
+begin
+  Clusters := hildegard.helper.tui.grapheme.Clusters(AText);
+  Col := X;
+  for I := 0 to High(Clusters) do
+  begin
+    PutCh(S, Col, Y, Clusters[I], AAttr);
+    Inc(Col, ClusterWidth(Clusters[I]));
+  end;
+end;
 
 constructor TSurfaceMemory.Create(AWidth, AHeight: Integer);
 begin
