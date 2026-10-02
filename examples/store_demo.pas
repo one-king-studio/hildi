@@ -16,7 +16,8 @@ var
   Store: TSqliteStore;
   Err: TStoreError;
   Cred, Loaded: TDeviceCredentials;
-  Rec: TSessionRecord;
+  Rec: TMessageRecord;
+  TurnId: Int64;
   Summaries: TSessionSummaryArray;
   Path, SessionId, Value: string;
   WorkspaceId: Integer;
@@ -59,16 +60,22 @@ begin
 
     if not Store.CreateSession(WorkspaceId, SessionId, Err) then
       Fail('CreateSession');
-    Rec := Default(TSessionRecord);
+    if not Store.BeginTurn(SessionId, TurnId, Err) then
+      Fail('BeginTurn');
+    Rec := Default(TMessageRecord);
     Rec.SessionId := SessionId;
-    Rec.Kind := srkUserMessage;
+    Rec.TurnId := TurnId;
+    Rec.Role := mrUser;
     Rec.Content := 'hello';
-    if not Store.AppendSessionRecord(Rec, Err) then
-      Fail('AppendSessionRecord');
+    if not Store.AppendMessage(Rec, Err) then
+      Fail('AppendMessage');
+    if not Store.FinishTurn(TurnId, tsCompleted, 'stop', 0, '', '', Err) then
+      Fail('FinishTurn');
 
     if not Store.ListSessions(WorkspaceId, Summaries, Err) then
       Fail('ListSessions');
-    WriteLn('session ', SessionId, ' records=', Summaries[0].RecordCount);
+    WriteLn('session ', SessionId, ' messages=', Summaries[0].MessageCount,
+      ' turns=', Summaries[0].TurnCount);
 
     if not Store.SetSetting('demo.key', 'demo.value', Err) then
       Fail('SetSetting');

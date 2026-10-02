@@ -15,7 +15,8 @@ uses
   hildegard.helper.tui.surface, hildegard.helper.tui.widget,
   hildegard.helper.tui.chat,
   hildegard.helper.harness.turn, hildegard.helper.harness.session,
-  hildegard.helper.harness.app, llm_fakes;
+  hildegard.helper.harness.app, hildegard.helper.store,
+  hildegard.helper.session, llm_fakes;
 
 type
   { Calls Gate.Ask on its own thread so the app can answer it. }
@@ -37,6 +38,7 @@ type
     FInput: TInputSourceScripted;
     FApp: THarnessApp;
     FFake: TFakeTransport;
+    FStorePath: string;
     procedure Build;
     function Key(AKind: TKeyKind): TInputEvent;
     function Ch(const AText: string): TInputEvent;
@@ -61,6 +63,7 @@ type
     procedure TestApprovalModalResolvesGateAsk;
     procedure TestAsksDoNotStack;
     procedure TestOneFramePerStep;
+    procedure TestRenderHistoryRestoresToolBlocks;
   end;
 
 implementation
@@ -87,6 +90,12 @@ begin
   FSurface := nil;
   FSession.Free;
   FFake.Free;
+  if FStorePath <> '' then
+  begin
+    DeleteFile(FStorePath);
+    DeleteFile(FStorePath + '-wal');
+    DeleteFile(FStorePath + '-shm');
+  end;
   if DirectoryExists(FDir) then
     RemoveDir(FDir);
 end;
@@ -105,6 +114,7 @@ begin
   FDir := IncludeTrailingPathDelimiter(GetTempDir) + 'hh-app-' +
     IntToStr(Random(1000000));
   ForceDirectories(FDir);
+  FStorePath := '';
   FFake := TFakeTransport.Create;
   FSurface := TSurfaceMemory.Create(40, 12);
   FInput := TInputSourceScripted.Create;
@@ -357,6 +367,100 @@ begin
   FSession.Queue.Push(AssistantEvent('x'));
   FApp.Step;
   AssertEquals('one flush per step', 1, FSurface.FlushCount - Before);
+end;
+
+procedure THarnessAppTest.TestRenderHistoryRestoresToolBlocks;
+var
+  Store: TSqliteStore;
+  StoreCfg: TStoreConfig;
+  StoreErr: TStoreError;
+  Cfg: THarnessSessionConfig;
+  WorkspaceId: Integer;
+  Sid: string;
+  TurnId: Int64;
+  Rec: TMessageRecord;
+  Err: string;
+  SawReasoning, SawTool, SawResult, SawAssistant, SawError: Boolean;
+  I: Integer;
+
+  procedure Add(ARole: TMessageRole; const AContent, AToolCallId,
+    AToolName, AToolArgs, AToolReason: string; AToolOk: Boolean);
+  begin
+    Rec := Default(TMessageRecord);
+    Rec.SessionId := Sid;
+    Rec.TurnId := TurnId;
+    Rec.Role := ARole;
+    Rec.Content := AContent;
+    Rec.ToolCallId := AToolCallId;
+    Rec.ToolName := AToolName;
+    Rec.ToolArguments := AToolArgs;
+    Rec.ToolReason := AToolReason;
+    Rec.ToolOk := AToolOk;
+    Store.AppendMessage(Rec, StoreErr);
+  end;
+
+begin
+  FDir := IncludeTrailingPathDelimiter(GetTempDir) + 'hh-app-' +
+    IntToStr(Random(1000000));
+  ForceDirectories(FDir);
+  FStorePath := IncludeTrailingPathDelimiter(FDir) + 'store.db';
+
+  StoreCfg.DatabasePath := FStorePath;
+  StoreCfg.BusyTimeoutMs := 5000;
+  Store := TSqliteStore.Create(StoreCfg);
+  try
+    AssertTrue('open store', Store.Open(StoreErr));
+    Store.EnsureWorkspace(FDir, WorkspaceId, StoreErr);
+    Store.CreateSession(WorkspaceId, Sid, StoreErr);
+    Store.BeginTurn(Sid, TurnId, StoreErr);
+    Add(mrUser, 'do it', '', '', '', '', False);
+    Add(mrReasoning, 'why not', '', '', '', '', False);
+    Add(mrToolCall, '', 'c1', 'run_command', '{"command":"date"}',
+      'check the date', False);
+    Add(mrTool, 'noon', 'c1', 'run_command', '', '', True);
+    Add(mrAssistant, 'done', '', '', '', '', False);
+    Add(mrError, 'boom', '', '', '', '', False);
+  finally
+    Store.Free;
+  end;
+
+  FFake := TFakeTransport.Create;
+  FSurface := TSurfaceMemory.Create(60, 20);
+  FInput := TInputSourceScripted.Create;
+  Cfg := Config;
+  Cfg.StorePath := FStorePath;
+  Cfg.SessionId := Sid;
+  Cfg.Resume := True;
+  FSession := THarnessSession.Open(Cfg, Err);
+  AssertTrue('resumed: ' + Err, FSession <> nil);
+  FApp := THarnessApp.Create(FSurface, FInput, FSession);
+  FApp.Step;
+
+  SawReasoning := False;
+  SawTool := False;
+  SawResult := False;
+  SawAssistant := False;
+  SawError := False;
+  for I := 0 to BlockCount - 1 do
+  begin
+    if (BlockKind(I) = ckThought) and (Pos('why not', BlockText(I)) > 0) then
+      SawReasoning := True;
+    if (BlockKind(I) = ckTool) and (BlockLabel(I) = 'check the date') and
+      (Pos('run_command', BlockText(I)) > 0) then
+      SawTool := True;
+    if (BlockKind(I) = ckTool) and (Pos('[ok] noon', BlockText(I)) > 0) then
+      SawResult := True;
+    if (BlockKind(I) = ckAssistant) and (Pos('done', BlockText(I)) > 0) then
+      SawAssistant := True;
+    if (BlockKind(I) = ckError) and (Pos('boom', BlockText(I)) > 0) then
+      SawError := True;
+  end;
+  AssertTrue('user bubble restored', FindText(ckUser, 'do it'));
+  AssertTrue('reasoning block restored', SawReasoning);
+  AssertTrue('tool block titled by reason', SawTool);
+  AssertTrue('tool result paired into the block', SawResult);
+  AssertTrue('assistant block restored', SawAssistant);
+  AssertTrue('error block restored', SawError);
 end;
 
 initialization

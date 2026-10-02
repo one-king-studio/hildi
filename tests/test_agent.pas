@@ -7,7 +7,8 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry, fpjson, jsonparser,
-  hildegard.helper.llm, hildegard.helper.agent, llm_fakes;
+  hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.session,
+  llm_fakes;
 
 type
   TTextSink = class
@@ -66,7 +67,45 @@ type
     procedure Append(const AMessage: TChatMessage);
     function Messages: TChatMessageArray;
     procedure Clear;
+    procedure AppendReasoning(const AText: string);
+    procedure AppendError(const AMessage, ADetail: string);
+    function BeginTurn: Int64;
+    function BeginRequest(ATurnId: Int64; const AModel: string;
+      AMessageCount: Integer): Int64;
+    procedure FinishRequest(ARequestId: Int64; const AOutcome: TRequestOutcome);
+    procedure FinishTurn(ATurnId: Int64; const AOutcome: TTurnOutcome);
     property Appends: Integer read FAppends;
+  end;
+
+  { Records the audit seam so a test can assert what the loop reported. }
+  TRecordingStore = class(TInterfacedObject, IConversationStore)
+  private
+    FInner: TMemoryConversationStore;
+  public
+    BeginTurns: Integer;
+    BeginRequests: Integer;
+    FinishRequests: Integer;
+    FinishTurns: Integer;
+    LastTurnStatus: TTurnStatus;
+    LastRequestModel: string;
+    LastRequestMessages: Integer;
+    LastOutcome: TRequestOutcome;
+    Reasoning: string;
+    LastError: string;
+    LastErrorDetail: string;
+    LastTool: TChatMessage;
+    constructor Create;
+    destructor Destroy; override;
+    procedure Append(const AMessage: TChatMessage);
+    function Messages: TChatMessageArray;
+    procedure Clear;
+    procedure AppendReasoning(const AText: string);
+    procedure AppendError(const AMessage, ADetail: string);
+    function BeginTurn: Int64;
+    function BeginRequest(ATurnId: Int64; const AModel: string;
+      AMessageCount: Integer): Int64;
+    procedure FinishRequest(ARequestId: Int64; const AOutcome: TRequestOutcome);
+    procedure FinishTurn(ATurnId: Int64; const AOutcome: TTurnOutcome);
   end;
 
   TAgentLoopTest = class(TTestCase)
@@ -77,7 +116,9 @@ type
     FTools: TToolRegistry;
     FLoop: TAgentLoop;
     FFailTools: TFailTools;
+    FRecorder: TRecordingStore;
     function BuildLoop(const APrompt: string; AMaxIters: Integer): TAgentLoop;
+    function BuildLoopRecording: TRecordingStore;
     function MessageCount(const ABody: string): Integer;
     function RoleAt(const ABody: string; AIndex: Integer): string;
     function ToolCallIdAt(const ABody: string; AIndex: Integer): string;
@@ -120,6 +161,11 @@ type
     procedure TestHandlerReceivesFullArgumentsIncludingReason;
     procedure TestToolCallEventCarriesReason;
     procedure TestPromptAdvertisesReasonRequired;
+    procedure TestSendOpensAndClosesATurn;
+    procedure TestSendRecordsRequestOutcome;
+    procedure TestSendRecordsReasoning;
+    procedure TestSendRecordsErrorAndFailedTurn;
+    procedure TestToolResultCarriesNameOkAndDuration;
   end;
 
 implementation
@@ -242,6 +288,110 @@ begin
   FInner.Clear;
 end;
 
+procedure TCountingStore.AppendReasoning(const AText: string);
+begin
+  FInner.AppendReasoning(AText);
+end;
+
+procedure TCountingStore.AppendError(const AMessage, ADetail: string);
+begin
+  FInner.AppendError(AMessage, ADetail);
+end;
+
+function TCountingStore.BeginTurn: Int64;
+begin
+  Result := FInner.BeginTurn;
+end;
+
+function TCountingStore.BeginRequest(ATurnId: Int64; const AModel: string;
+  AMessageCount: Integer): Int64;
+begin
+  Result := FInner.BeginRequest(ATurnId, AModel, AMessageCount);
+end;
+
+procedure TCountingStore.FinishRequest(ARequestId: Int64;
+  const AOutcome: TRequestOutcome);
+begin
+  FInner.FinishRequest(ARequestId, AOutcome);
+end;
+
+procedure TCountingStore.FinishTurn(ATurnId: Int64;
+  const AOutcome: TTurnOutcome);
+begin
+  FInner.FinishTurn(ATurnId, AOutcome);
+end;
+
+{ TRecordingStore }
+
+constructor TRecordingStore.Create;
+begin
+  inherited Create;
+  FInner := TMemoryConversationStore.Create;
+end;
+
+destructor TRecordingStore.Destroy;
+begin
+  FInner.Free;
+  inherited Destroy;
+end;
+
+procedure TRecordingStore.Append(const AMessage: TChatMessage);
+begin
+  if AMessage.Role = crTool then
+    LastTool := AMessage;
+  FInner.Append(AMessage);
+end;
+
+function TRecordingStore.Messages: TChatMessageArray;
+begin
+  Result := FInner.Messages;
+end;
+
+procedure TRecordingStore.Clear;
+begin
+  FInner.Clear;
+end;
+
+procedure TRecordingStore.AppendReasoning(const AText: string);
+begin
+  Reasoning := Reasoning + AText;
+end;
+
+procedure TRecordingStore.AppendError(const AMessage, ADetail: string);
+begin
+  LastError := AMessage;
+  LastErrorDetail := ADetail;
+end;
+
+function TRecordingStore.BeginTurn: Int64;
+begin
+  Inc(BeginTurns);
+  Result := 1;
+end;
+
+function TRecordingStore.BeginRequest(ATurnId: Int64; const AModel: string;
+  AMessageCount: Integer): Int64;
+begin
+  Inc(BeginRequests);
+  LastRequestModel := AModel;
+  LastRequestMessages := AMessageCount;
+  Result := 1;
+end;
+
+procedure TRecordingStore.FinishRequest(ARequestId: Int64;
+  const AOutcome: TRequestOutcome);
+begin
+  Inc(FinishRequests);
+  LastOutcome := AOutcome;
+end;
+
+procedure TRecordingStore.FinishTurn(ATurnId: Int64;
+  const AOutcome: TTurnOutcome);
+begin
+  Inc(FinishTurns);
+  LastTurnStatus := AOutcome.Status;
+end;
+
 { TAgentLoopTest }
 
 procedure TAgentLoopTest.TearDown;
@@ -249,6 +399,7 @@ begin
   FLoop.Free;
   FTools.Free;
   FStore := nil;
+  FRecorder := nil;
   FClient.Free;
   FFake.Free;
   FFailTools.Free;
@@ -279,6 +430,29 @@ begin
   ACfg.MaxToolIterations := AMaxIters;
   FLoop := TAgentLoop.Create(FClient, FStore, FTools, ACfg);
   Result := FLoop;
+end;
+
+function TAgentLoopTest.BuildLoopRecording: TRecordingStore;
+var
+  Cfg: TLLMConfig;
+  ACfg: TAgentConfig;
+begin
+  Cfg.Endpoint := 'https://example.test/v1/chat/completions';
+  Cfg.Model := 'm';
+  Cfg.ApiKey := 'k';
+  Cfg.ConnectTimeoutMs := 1000;
+  Cfg.ReadTimeoutMs := 5000;
+  FFake := TFakeTransport.Create;
+  FClient := TLLMClient.Create(Cfg, FFake);
+  FRecorder := TRecordingStore.Create;
+  FStore := FRecorder;
+  FTools := TToolRegistry.Create;
+  RegisterDefaultTools(FTools);
+  FFailTools := TFailTools.Create;
+  ACfg.SystemPrompt := '';
+  ACfg.MaxToolIterations := 8;
+  FLoop := TAgentLoop.Create(FClient, FStore, FTools, ACfg);
+  Result := FRecorder;
 end;
 
 function TAgentLoopTest.MessageCount(const ABody: string): Integer;
@@ -1040,6 +1214,83 @@ begin
   finally
     Root.Free;
   end;
+end;
+
+procedure TAgentLoopTest.TestSendOpensAndClosesATurn;
+var
+  Rec: TRecordingStore;
+  Answer: string;
+  Err: TLLMError;
+begin
+  Rec := BuildLoopRecording;
+  FFake.AddResponse([TextDelta('hi'), FinishFrame('stop'), DoneFrame]);
+  AssertTrue('send ok', FLoop.Send('hello', nil, Answer, Err));
+  AssertEquals('one turn opened', 1, Rec.BeginTurns);
+  AssertEquals('one turn closed', 1, Rec.FinishTurns);
+  AssertEquals('completed', Ord(tsCompleted), Ord(Rec.LastTurnStatus));
+  AssertEquals('one request opened', 1, Rec.BeginRequests);
+  AssertEquals('one request closed', 1, Rec.FinishRequests);
+end;
+
+procedure TAgentLoopTest.TestSendRecordsRequestOutcome;
+var
+  Rec: TRecordingStore;
+  Answer: string;
+  Err: TLLMError;
+begin
+  Rec := BuildLoopRecording;
+  FFake.AddResponse([TextDelta('hi'),
+    UsageFrame('{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7}'),
+    FinishFrame('stop'), DoneFrame]);
+  AssertTrue('send ok', FLoop.Send('hello', nil, Answer, Err));
+  AssertEquals('model recorded', 'm', Rec.LastRequestModel);
+  AssertTrue('message count recorded', Rec.LastRequestMessages > 0);
+  AssertTrue('outcome ok', Rec.LastOutcome.Ok);
+  AssertEquals('finish reason', Ord(frStop), Ord(Rec.LastOutcome.FinishReason));
+  AssertEquals('usage total', 7, Rec.LastOutcome.Usage.TotalTokens);
+  AssertTrue('duration measured', Rec.LastOutcome.DurationMs >= 0);
+end;
+
+procedure TAgentLoopTest.TestSendRecordsReasoning;
+var
+  Rec: TRecordingStore;
+  Answer: string;
+  Err: TLLMError;
+begin
+  Rec := BuildLoopRecording;
+  FFake.AddResponse([ReasoningDelta('let me think'),
+    TextDelta('answer'), FinishFrame('stop'), DoneFrame]);
+  AssertTrue('send ok', FLoop.Send('hello', nil, Answer, Err));
+  AssertEquals('reasoning recorded', 'let me think', Rec.Reasoning);
+end;
+
+procedure TAgentLoopTest.TestSendRecordsErrorAndFailedTurn;
+var
+  Rec: TRecordingStore;
+  Answer: string;
+  Err: TLLMError;
+begin
+  Rec := BuildLoopRecording;
+  FFake.FailNetwork := True;
+  AssertFalse('send fails', FLoop.Send('hello', nil, Answer, Err));
+  AssertEquals('failed', Ord(tsFailed), Ord(Rec.LastTurnStatus));
+  AssertTrue('error recorded', Rec.LastError <> '');
+end;
+
+procedure TAgentLoopTest.TestToolResultCarriesNameOkAndDuration;
+var
+  Rec: TRecordingStore;
+  Answer: string;
+  Err: TLLMError;
+begin
+  Rec := BuildLoopRecording;
+  FFake.AddResponse([ToolNameFrame(0, 'call_1', 'get_system_time'),
+    ToolArgsFrame(0, '{"reason":"test"}'), FinishFrame('tool_calls'), DoneFrame]);
+  FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
+  AssertTrue('send ok', FLoop.Send('time?', nil, Answer, Err));
+  AssertEquals('tool role', Ord(crTool), Ord(Rec.LastTool.Role));
+  AssertEquals('tool name', 'get_system_time', Rec.LastTool.ToolName);
+  AssertTrue('tool ok', Rec.LastTool.ToolOk);
 end;
 
 initialization

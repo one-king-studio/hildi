@@ -1,7 +1,11 @@
 unit hildegard.helper.session;
-{ Session identity and ledger record model. A session id is a random 128-bit
-  value rendered as 32 lowercase hex characters. The ledger is an append-only
-  sequence of typed records (messages, reasoning, tool calls/results, errors).
+{ Session identity and the persisted history model. A session id is a random
+  128-bit value rendered as 32 lowercase hex characters.
+
+  A session is a sequence of turns (loops): one user prompt pushed to the LLM
+  until it returns a proper stop reason. A turn is made of requests (one LLM
+  call each) and produces messages - the user prompt, assistant text, reasoning,
+  tool calls, tool results, and errors - in chronological order.
 
   The record model lives here, free of the store, so both the store (which
   persists records) and the conversation adapter (which maps chat messages) can
@@ -12,31 +16,82 @@ unit hildegard.helper.session;
 interface
 
 uses
-  SysUtils;
+  SysUtils, hildegard.helper.llm;
 
 type
-  TSessionRecordKind = (
-    srkSystemMessage, srkUserMessage, srkAssistantMessage,
-    srkReasoning, srkToolCall, srkToolResult, srkError, srkEvent);
+  { One block in a session's history. Tool calls are messages in their own
+    right, so a tool call and its result are separate, ordered rows. }
+  TMessageRole = (
+    mrSystem, mrUser, mrAssistant, mrReasoning, mrToolCall, mrTool, mrError);
 
-  TSessionRecord = record
+  TTurnStatus = (tsRunning, tsCompleted, tsFailed);
+
+  TMessageRecord = record
+    Id: Int64;
+    SessionId: string;
+    TurnId: Int64;          // 0 when not part of a turn (the system prompt)
+    RequestId: Int64;       // 0 when not produced by a request
+    Seq: Int64;
+    Role: TMessageRole;
+    Content: string;
+    ToolCallId: string;
+    ToolName: string;
+    ToolArguments: string;
+    ToolReason: string;
+    ToolOk: Boolean;
+    CreatedAtMs: Int64;
+    DurationMs: Int64;
+  end;
+
+  TMessageRecordArray = array of TMessageRecord;
+
+  TRequestRecord = record
+    Id: Int64;
+    TurnId: Int64;
+    Seq: Int64;
+    Model: string;
+    MessageCount: Integer;
+    FinishReason: string;
+    Ok: Boolean;
+    ErrorCode: Integer;
+    ErrorMessage: string;
+    ErrorDetail: string;
+    Usage: TTokenUsage;
+    CreatedAtMs: Int64;
+    FinishedAtMs: Int64;
+    DurationMs: Int64;
+    FirstTokenMs: Int64;
+  end;
+
+  TRequestRecordArray = array of TRequestRecord;
+
+  TTurnRecord = record
     Id: Int64;
     SessionId: string;
     Seq: Int64;
-    Kind: TSessionRecordKind;
-    Content: string;      // text payload (message text, result text)
-    DataJson: string;     // structured payload (tool name/id, arguments, ...)
+    Status: TTurnStatus;
+    Prompt: string;         // derived: the turn's first user message
+    FinishReason: string;
+    ErrorCode: Integer;
+    ErrorMessage: string;
+    ErrorDetail: string;
+    RequestCount: Integer;
+    MessageCount: Integer;
+    Usage: TTokenUsage;     // rolled up from the turn's requests
     CreatedAtMs: Int64;
+    FinishedAtMs: Int64;
+    DurationMs: Int64;
   end;
 
-  TSessionRecordArray = array of TSessionRecord;
+  TTurnRecordArray = array of TTurnRecord;
 
   { A session listing entry. }
   TSessionSummary = record
     Id: string;
     CreatedAtMs: Int64;
     UpdatedAtMs: Int64;
-    RecordCount: Integer;
+    MessageCount: Integer;
+    TurnCount: Integer;
   end;
 
   TSessionSummaryArray = array of TSessionSummary;

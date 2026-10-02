@@ -234,7 +234,7 @@ begin
         WriteLn(Summaries[I].Id, '  ',
           FormatDateTime('yyyy-mm-dd hh:nn',
             UnixToDateTime(Summaries[I].UpdatedAtMs div 1000)),
-          '  ', Summaries[I].RecordCount, ' records');
+          '  ', Summaries[I].MessageCount, ' messages');
     SqliteStore.Close;
     SqliteStore.Free;
     Workspace.Free;

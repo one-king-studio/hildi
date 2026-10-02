@@ -17,7 +17,8 @@ interface
 
 uses
   Classes, SysUtils, SyncObjs,
-  hildegard.helper.sqlite, hildegard.helper.approval, hildegard.helper.session;
+  hildegard.helper.sqlite, hildegard.helper.approval, hildegard.helper.llm,
+  hildegard.helper.session;
 
 type
   { Stable error codes. seOk is success. }
@@ -119,18 +120,40 @@ type
       out AError: TStoreError): Boolean;
     function TouchSession(const AId: string;
       out AError: TStoreError): Boolean;
-    { Appends a ledger record, assigning its per-session sequence. }
-    function AppendSessionRecord(const ARecord: TSessionRecord;
-      out AError: TStoreError): Boolean;
-    function QuerySessionRecords(const ASessionId: string; AUseKind: Boolean;
-      AKind: TSessionRecordKind; ALimit, AOffset: Integer;
-      out ARecords: TSessionRecordArray; out AError: TStoreError): Boolean;
     { Sessions for a workspace, newest updated first. }
     function ListSessions(AWorkspaceId: Integer;
       out AList: TSessionSummaryArray; out AError: TStoreError): Boolean;
     { The most recently updated session for a workspace; seNotFound if none. }
     function MostRecentSessionId(AWorkspaceId: Integer; out AId: string;
       out AError: TStoreError): Boolean;
+
+    { Opens a turn (loop) for a session, assigning its per-session sequence. }
+    function BeginTurn(const ASessionId: string; out ATurnId: Int64;
+      out AError: TStoreError): Boolean;
+    { Closes a turn and rolls its requests' metrics up onto it. }
+    function FinishTurn(ATurnId: Int64; AStatus: TTurnStatus;
+      const AFinishReason: string; AErrorCode: Integer;
+      const AErrorMessage, AErrorDetail: string;
+      out AError: TStoreError): Boolean;
+    function QueryTurns(const ASessionId: string; out ATurns: TTurnRecordArray;
+      out AError: TStoreError): Boolean;
+
+    { Opens an LLM request within a turn, assigning its per-turn sequence. }
+    function BeginRequest(ATurnId: Int64; const AModel: string;
+      AMessageCount: Integer; out ARequestId: Int64;
+      out AError: TStoreError): Boolean;
+    function FinishRequest(ARequestId: Int64; AOk: Boolean;
+      const AFinishReason: string; AErrorCode: Integer;
+      const AErrorMessage, AErrorDetail: string; const AUsage: TTokenUsage;
+      ADurationMs, AFirstTokenMs: Int64; out AError: TStoreError): Boolean;
+    function QueryRequests(ATurnId: Int64; out ARequests: TRequestRecordArray;
+      out AError: TStoreError): Boolean;
+
+    { Appends one history block, assigning its per-session sequence. }
+    function AppendMessage(const AMessage: TMessageRecord;
+      out AError: TStoreError): Boolean;
+    function QueryMessages(const ASessionId: string;
+      out AMessages: TMessageRecordArray; out AError: TStoreError): Boolean;
   end;
 
 function StoreSchemaVersion: Integer;
@@ -167,9 +190,9 @@ end;
 function DefaultMigrations: TMigrationArray;
 begin
   Result := nil;
-  SetLength(Result, 4);
+  SetLength(Result, 1);
   Result[0].Version := 1;
-  Result[0].Name := 'initial schema';
+  Result[0].Name := 'session history';
   Result[0].Statements := [
     'CREATE TABLE credentials (' +
       'id INTEGER PRIMARY KEY CHECK (id = 1), ' +
@@ -179,21 +202,11 @@ begin
       'account_id TEXT NOT NULL)',
     'CREATE TABLE settings (' +
       'key TEXT PRIMARY KEY, ' +
-      'value TEXT NOT NULL)'
-  ];
-
-  Result[1].Version := 2;
-  Result[1].Name := 'workspaces';
-  Result[1].Statements := [
+      'value TEXT NOT NULL)',
     'CREATE TABLE workspaces (' +
       'id INTEGER PRIMARY KEY AUTOINCREMENT, ' +
       'path TEXT NOT NULL UNIQUE, ' +
-      'created_at INTEGER NOT NULL)'
-  ];
-
-  Result[2].Version := 3;
-  Result[2].Name := 'approvals';
-  Result[2].Statements := [
+      'created_at INTEGER NOT NULL)',
     'CREATE TABLE approvals (' +
       'id INTEGER PRIMARY KEY AUTOINCREMENT, ' +
       'effect INTEGER NOT NULL, ' +
@@ -207,27 +220,75 @@ begin
       'UNIQUE (effect, scope, workspace_id, session_id, ref, params, ' +
       'any_params))',
     'CREATE INDEX idx_approvals_scope ON approvals (scope, workspace_id, ' +
-      'session_id)'
-  ];
-
-  Result[3].Version := 4;
-  Result[3].Name := 'sessions and ledger';
-  Result[3].Statements := [
+      'session_id)',
     'CREATE TABLE sessions (' +
       'id TEXT PRIMARY KEY, ' +
-      'workspace_id INTEGER NOT NULL, ' +
+      'workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ' +
+      'ON DELETE CASCADE, ' +
       'created_at INTEGER NOT NULL, ' +
       'updated_at INTEGER NOT NULL)',
-    'CREATE TABLE session_records (' +
+    'CREATE TABLE turns (' +
       'id INTEGER PRIMARY KEY AUTOINCREMENT, ' +
-      'session_id TEXT NOT NULL, ' +
+      'session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, ' +
       'seq INTEGER NOT NULL, ' +
-      'kind INTEGER NOT NULL, ' +
+      'status INTEGER NOT NULL, ' +
+      'finish_reason TEXT NOT NULL DEFAULT '''', ' +
+      'error_code INTEGER NOT NULL DEFAULT 0, ' +
+      'error_message TEXT NOT NULL DEFAULT '''', ' +
+      'error_detail TEXT NOT NULL DEFAULT '''', ' +
+      'request_count INTEGER NOT NULL DEFAULT 0, ' +
+      'message_count INTEGER NOT NULL DEFAULT 0, ' +
+      'prompt_tokens INTEGER NOT NULL DEFAULT 0, ' +
+      'completion_tokens INTEGER NOT NULL DEFAULT 0, ' +
+      'total_tokens INTEGER NOT NULL DEFAULT 0, ' +
+      'cached_tokens INTEGER NOT NULL DEFAULT 0, ' +
+      'reasoning_tokens INTEGER NOT NULL DEFAULT 0, ' +
+      'created_at INTEGER NOT NULL, ' +
+      'finished_at INTEGER NOT NULL DEFAULT 0, ' +
+      'duration_ms INTEGER NOT NULL DEFAULT 0, ' +
+      'UNIQUE (session_id, seq))',
+    'CREATE INDEX idx_turns_session ON turns (session_id, seq)',
+    'CREATE TABLE requests (' +
+      'id INTEGER PRIMARY KEY AUTOINCREMENT, ' +
+      'turn_id INTEGER NOT NULL REFERENCES turns(id) ON DELETE CASCADE, ' +
+      'seq INTEGER NOT NULL, ' +
+      'model TEXT NOT NULL DEFAULT '''', ' +
+      'message_count INTEGER NOT NULL DEFAULT 0, ' +
+      'finish_reason TEXT NOT NULL DEFAULT '''', ' +
+      'ok INTEGER NOT NULL DEFAULT 0, ' +
+      'error_code INTEGER NOT NULL DEFAULT 0, ' +
+      'error_message TEXT NOT NULL DEFAULT '''', ' +
+      'error_detail TEXT NOT NULL DEFAULT '''', ' +
+      'prompt_tokens INTEGER NOT NULL DEFAULT 0, ' +
+      'completion_tokens INTEGER NOT NULL DEFAULT 0, ' +
+      'total_tokens INTEGER NOT NULL DEFAULT 0, ' +
+      'cached_tokens INTEGER NOT NULL DEFAULT 0, ' +
+      'reasoning_tokens INTEGER NOT NULL DEFAULT 0, ' +
+      'created_at INTEGER NOT NULL, ' +
+      'finished_at INTEGER NOT NULL DEFAULT 0, ' +
+      'duration_ms INTEGER NOT NULL DEFAULT 0, ' +
+      'first_token_ms INTEGER NOT NULL DEFAULT 0, ' +
+      'UNIQUE (turn_id, seq))',
+    'CREATE INDEX idx_requests_turn ON requests (turn_id, seq)',
+    'CREATE TABLE messages (' +
+      'id INTEGER PRIMARY KEY AUTOINCREMENT, ' +
+      'session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, ' +
+      'turn_id INTEGER REFERENCES turns(id) ON DELETE CASCADE, ' +
+      'request_id INTEGER REFERENCES requests(id) ON DELETE CASCADE, ' +
+      'seq INTEGER NOT NULL, ' +
+      'role INTEGER NOT NULL, ' +
       'content TEXT NOT NULL DEFAULT '''', ' +
-      'data TEXT NOT NULL DEFAULT '''', ' +
-      'created_at INTEGER NOT NULL)',
-    'CREATE INDEX idx_session_records ON session_records (session_id, seq)',
-    'DROP TABLE IF EXISTS requests'
+      'tool_call_id TEXT NOT NULL DEFAULT '''', ' +
+      'tool_name TEXT NOT NULL DEFAULT '''', ' +
+      'tool_arguments TEXT NOT NULL DEFAULT '''', ' +
+      'tool_reason TEXT NOT NULL DEFAULT '''', ' +
+      'tool_ok INTEGER NOT NULL DEFAULT 0, ' +
+      'created_at INTEGER NOT NULL, ' +
+      'duration_ms INTEGER NOT NULL DEFAULT 0, ' +
+      'UNIQUE (session_id, seq))',
+    'CREATE INDEX idx_messages_session ON messages (session_id, seq)',
+    'CREATE INDEX idx_messages_turn ON messages (turn_id, seq)',
+    'CREATE INDEX idx_messages_request ON messages (request_id)'
   ];
 end;
 
@@ -428,6 +489,20 @@ begin
   AError := OkError;
   if not ReadUserVersion(Cur, AError) then
     Exit(False);
+
+  { A database written by a newer build cannot be understood; refuse it rather
+    than misbehave against a schema we do not know. This is a full reset, so a
+    database from an older (pre-reset) build is also rejected, because its
+    version is higher than the single fresh migration. }
+  V := 0;
+  for I := 0 to High(FMigrations) do
+    if FMigrations[I].Version > V then
+      V := FMigrations[I].Version;
+  if Cur > V then
+    Exit(Fail(AError, seMigrationFailed,
+      'database schema is newer than this build',
+      'found v' + IntToStr(Cur) + ', this build expects v' + IntToStr(V) +
+      '; delete ' + FConfig.DatabasePath + ' and retry'));
 
   for I := 0 to High(FMigrations) do
   begin
@@ -1072,7 +1147,53 @@ begin
   end;
 end;
 
-function TSqliteStore.AppendSessionRecord(const ARecord: TSessionRecord;
+function TSqliteStore.BeginTurn(const ASessionId: string; out ATurnId: Int64;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  ATurnId := 0;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    if ASessionId = '' then
+      Exit(Fail(AError, seInvalidArgument, 'session id is required', ''));
+    if not SessionExists(ASessionId, AError) then
+    begin
+      AError.Code := seNotFound;
+      AError.Message := 'session not found';
+      AError.Detail := ASessionId;
+      Exit(False);
+    end;
+    Stmt := TStmt.Create(FDb,
+      'INSERT INTO turns (session_id, seq, status, created_at) VALUES (' +
+      '?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM turns WHERE session_id = ?), ' +
+      '?, ?)');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not begin turn', DbErrorText));
+      Stmt.BindText(1, ASessionId);
+      Stmt.BindText(2, ASessionId);
+      Stmt.BindInt(3, Ord(tsRunning));
+      Stmt.BindInt64(4, NowMs);
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not begin turn', DbErrorText));
+    finally
+      Stmt.Free;
+    end;
+    ATurnId := sqlite3_last_insert_rowid(FDb);
+    TouchSession(ASessionId, AError);
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.FinishTurn(ATurnId: Int64; AStatus: TTurnStatus;
+  const AFinishReason: string; AErrorCode: Integer;
+  const AErrorMessage, AErrorDetail: string;
   out AError: TStoreError): Boolean;
 var
   Stmt: TStmt;
@@ -1082,32 +1203,43 @@ begin
   try
     if not EnsureOpen(AError) then
       Exit(False);
-    if ARecord.SessionId = '' then
-      Exit(Fail(AError, seInvalidArgument, 'session id is required', ''));
-
-    if not SessionExists(ARecord.SessionId, AError) then
-    begin
-      AError.Code := seNotFound;
-      AError.Message := 'session not found';
-      AError.Detail := ARecord.SessionId;
-      Exit(False);
-    end;
-
+    if ATurnId <= 0 then
+      Exit(Fail(AError, seInvalidArgument, 'turn id is required', ''));
+    { Roll the requests' metrics up in the same statement that closes the turn. }
     Stmt := TStmt.Create(FDb,
-      'INSERT INTO session_records (session_id, seq, kind, content, data, ' +
-      'created_at) VALUES (?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM ' +
-      'session_records WHERE session_id = ?), ?, ?, ?, ?)');
+      'UPDATE turns SET status = ?, finish_reason = ?, error_code = ?, ' +
+      'error_message = ?, error_detail = ?, finished_at = ?, ' +
+      'duration_ms = ? - created_at, ' +
+      'request_count = (SELECT COUNT(*) FROM requests r ' +
+        'WHERE r.turn_id = turns.id), ' +
+      'message_count = (SELECT COUNT(*) FROM messages m ' +
+        'WHERE m.turn_id = turns.id), ' +
+      'prompt_tokens = (SELECT COALESCE(SUM(r.prompt_tokens), 0) ' +
+        'FROM requests r WHERE r.turn_id = turns.id), ' +
+      'completion_tokens = (SELECT COALESCE(SUM(r.completion_tokens), 0) ' +
+        'FROM requests r WHERE r.turn_id = turns.id), ' +
+      'total_tokens = (SELECT COALESCE(SUM(r.total_tokens), 0) ' +
+        'FROM requests r WHERE r.turn_id = turns.id), ' +
+      'cached_tokens = (SELECT COALESCE(SUM(r.cached_tokens), 0) ' +
+        'FROM requests r WHERE r.turn_id = turns.id), ' +
+      'reasoning_tokens = (SELECT COALESCE(SUM(r.reasoning_tokens), 0) ' +
+        'FROM requests r WHERE r.turn_id = turns.id) ' +
+      'WHERE id = ?');
     try
       if not Stmt.Valid then
-        Exit(Fail(AError, seError, 'could not append record', DbErrorText));
-      Stmt.BindText(1, ARecord.SessionId);
-      Stmt.BindText(2, ARecord.SessionId);
-      Stmt.BindInt(3, Ord(ARecord.Kind));
-      Stmt.BindText(4, ARecord.Content);
-      Stmt.BindText(5, ARecord.DataJson);
+        Exit(Fail(AError, seError, 'could not finish turn', DbErrorText));
+      Stmt.BindInt(1, Ord(AStatus));
+      Stmt.BindText(2, AFinishReason);
+      Stmt.BindInt(3, AErrorCode);
+      Stmt.BindText(4, AErrorMessage);
+      Stmt.BindText(5, AErrorDetail);
       Stmt.BindInt64(6, NowMs);
+      Stmt.BindInt64(7, NowMs);
+      Stmt.BindInt64(8, ATurnId);
       if Stmt.Step <> SQLITE_DONE then
-        Exit(Fail(AError, seError, 'could not append record', DbErrorText));
+        Exit(Fail(AError, seError, 'could not finish turn', DbErrorText));
+      if sqlite3_changes(FDb) = 0 then
+        Exit(Fail(AError, seNotFound, 'turn not found', IntToStr(ATurnId)));
     finally
       Stmt.Free;
     end;
@@ -1117,57 +1249,321 @@ begin
   end;
 end;
 
-function TSqliteStore.QuerySessionRecords(const ASessionId: string;
-  AUseKind: Boolean; AKind: TSessionRecordKind; ALimit, AOffset: Integer;
-  out ARecords: TSessionRecordArray; out AError: TStoreError): Boolean;
+function TSqliteStore.QueryTurns(const ASessionId: string;
+  out ATurns: TTurnRecordArray; out AError: TStoreError): Boolean;
 var
   Stmt: TStmt;
-  SQL: string;
-  N, NextIndex: Integer;
-  Rec: TSessionRecord;
+  N: Integer;
+  Rec: TTurnRecord;
 begin
   AError := OkError;
-  ARecords := nil;
+  ATurns := nil;
   FLock.Acquire;
   try
     if not EnsureOpen(AError) then
       Exit(False);
-    SQL := 'SELECT id, session_id, seq, kind, content, data, created_at ' +
-      'FROM session_records WHERE session_id = ?';
-    if AUseKind then
-      SQL := SQL + ' AND kind = ?';
-    SQL := SQL + ' ORDER BY seq LIMIT ? OFFSET ?';
-    Stmt := TStmt.Create(FDb, SQL);
+    Stmt := TStmt.Create(FDb,
+      'SELECT t.id, t.session_id, t.seq, t.status, t.finish_reason, ' +
+      't.error_code, t.error_message, t.error_detail, t.request_count, ' +
+      't.message_count, t.prompt_tokens, t.completion_tokens, t.total_tokens, ' +
+      't.cached_tokens, t.reasoning_tokens, t.created_at, t.finished_at, ' +
+      't.duration_ms, ' +
+      'COALESCE((SELECT m.content FROM messages m WHERE m.turn_id = t.id ' +
+        'AND m.role = 1 ORDER BY m.seq LIMIT 1), '''') ' +
+      'FROM turns t WHERE t.session_id = ? ORDER BY t.seq');
     try
       if not Stmt.Valid then
-        Exit(Fail(AError, seError, 'could not query records', DbErrorText));
-      NextIndex := 1;
-      Stmt.BindText(NextIndex, ASessionId);
-      Inc(NextIndex);
-      if AUseKind then
-      begin
-        Stmt.BindInt(NextIndex, Ord(AKind));
-        Inc(NextIndex);
-      end;
-      if ALimit > 0 then
-        Stmt.BindInt(NextIndex, ALimit)
-      else
-        Stmt.BindInt(NextIndex, -1);   // SQLite: negative LIMIT means no limit
-      Inc(NextIndex);
-      Stmt.BindInt(NextIndex, AOffset);
+        Exit(Fail(AError, seError, 'could not query turns', DbErrorText));
+      Stmt.BindText(1, ASessionId);
       N := 0;
       while Stmt.Step = SQLITE_ROW do
       begin
-        Rec := Default(TSessionRecord);
+        Rec := Default(TTurnRecord);
         Rec.Id := Stmt.ColInt64(0);
         Rec.SessionId := Stmt.ColText(1);
         Rec.Seq := Stmt.ColInt64(2);
-        Rec.Kind := TSessionRecordKind(Stmt.ColInt(3));
-        Rec.Content := Stmt.ColText(4);
-        Rec.DataJson := Stmt.ColText(5);
-        Rec.CreatedAtMs := Stmt.ColInt64(6);
-        SetLength(ARecords, N + 1);
-        ARecords[N] := Rec;
+        Rec.Status := TTurnStatus(Stmt.ColInt(3));
+        Rec.FinishReason := Stmt.ColText(4);
+        Rec.ErrorCode := Stmt.ColInt(5);
+        Rec.ErrorMessage := Stmt.ColText(6);
+        Rec.ErrorDetail := Stmt.ColText(7);
+        Rec.RequestCount := Stmt.ColInt(8);
+        Rec.MessageCount := Stmt.ColInt(9);
+        Rec.Usage.PromptTokens := Stmt.ColInt(10);
+        Rec.Usage.CompletionTokens := Stmt.ColInt(11);
+        Rec.Usage.TotalTokens := Stmt.ColInt(12);
+        Rec.Usage.CachedTokens := Stmt.ColInt(13);
+        Rec.Usage.ReasoningTokens := Stmt.ColInt(14);
+        Rec.CreatedAtMs := Stmt.ColInt64(15);
+        Rec.FinishedAtMs := Stmt.ColInt64(16);
+        Rec.DurationMs := Stmt.ColInt64(17);
+        Rec.Prompt := Stmt.ColText(18);
+        SetLength(ATurns, N + 1);
+        ATurns[N] := Rec;
+        Inc(N);
+      end;
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.BeginRequest(ATurnId: Int64; const AModel: string;
+  AMessageCount: Integer; out ARequestId: Int64;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  ARequestId := 0;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    if ATurnId <= 0 then
+      Exit(Fail(AError, seInvalidArgument, 'turn id is required', ''));
+    Stmt := TStmt.Create(FDb, 'SELECT 1 FROM turns WHERE id = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not check turn', DbErrorText));
+      Stmt.BindInt64(1, ATurnId);
+      if Stmt.Step <> SQLITE_ROW then
+        Exit(Fail(AError, seNotFound, 'turn not found', IntToStr(ATurnId)));
+    finally
+      Stmt.Free;
+    end;
+    Stmt := TStmt.Create(FDb,
+      'INSERT INTO requests (turn_id, seq, model, message_count, created_at) ' +
+      'VALUES (?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM requests ' +
+      'WHERE turn_id = ?), ?, ?, ?)');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not begin request', DbErrorText));
+      Stmt.BindInt64(1, ATurnId);
+      Stmt.BindInt64(2, ATurnId);
+      Stmt.BindText(3, AModel);
+      Stmt.BindInt(4, AMessageCount);
+      Stmt.BindInt64(5, NowMs);
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not begin request', DbErrorText));
+    finally
+      Stmt.Free;
+    end;
+    ARequestId := sqlite3_last_insert_rowid(FDb);
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.FinishRequest(ARequestId: Int64; AOk: Boolean;
+  const AFinishReason: string; AErrorCode: Integer;
+  const AErrorMessage, AErrorDetail: string; const AUsage: TTokenUsage;
+  ADurationMs, AFirstTokenMs: Int64; out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    if ARequestId <= 0 then
+      Exit(Fail(AError, seInvalidArgument, 'request id is required', ''));
+    Stmt := TStmt.Create(FDb,
+      'UPDATE requests SET ok = ?, finish_reason = ?, error_code = ?, ' +
+      'error_message = ?, error_detail = ?, prompt_tokens = ?, ' +
+      'completion_tokens = ?, total_tokens = ?, cached_tokens = ?, ' +
+      'reasoning_tokens = ?, finished_at = ?, duration_ms = ?, ' +
+      'first_token_ms = ? WHERE id = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not finish request', DbErrorText));
+      Stmt.BindInt(1, Ord(AOk));
+      Stmt.BindText(2, AFinishReason);
+      Stmt.BindInt(3, AErrorCode);
+      Stmt.BindText(4, AErrorMessage);
+      Stmt.BindText(5, AErrorDetail);
+      Stmt.BindInt(6, AUsage.PromptTokens);
+      Stmt.BindInt(7, AUsage.CompletionTokens);
+      Stmt.BindInt(8, AUsage.TotalTokens);
+      Stmt.BindInt(9, AUsage.CachedTokens);
+      Stmt.BindInt(10, AUsage.ReasoningTokens);
+      Stmt.BindInt64(11, NowMs);
+      Stmt.BindInt64(12, ADurationMs);
+      Stmt.BindInt64(13, AFirstTokenMs);
+      Stmt.BindInt64(14, ARequestId);
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not finish request', DbErrorText));
+      if sqlite3_changes(FDb) = 0 then
+        Exit(Fail(AError, seNotFound, 'request not found',
+          IntToStr(ARequestId)));
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.QueryRequests(ATurnId: Int64;
+  out ARequests: TRequestRecordArray; out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+  N: Integer;
+  Rec: TRequestRecord;
+begin
+  AError := OkError;
+  ARequests := nil;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb,
+      'SELECT id, turn_id, seq, model, message_count, finish_reason, ok, ' +
+      'error_code, error_message, error_detail, prompt_tokens, ' +
+      'completion_tokens, total_tokens, cached_tokens, reasoning_tokens, ' +
+      'created_at, finished_at, duration_ms, first_token_ms ' +
+      'FROM requests WHERE turn_id = ? ORDER BY seq');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not query requests', DbErrorText));
+      Stmt.BindInt64(1, ATurnId);
+      N := 0;
+      while Stmt.Step = SQLITE_ROW do
+      begin
+        Rec := Default(TRequestRecord);
+        Rec.Id := Stmt.ColInt64(0);
+        Rec.TurnId := Stmt.ColInt64(1);
+        Rec.Seq := Stmt.ColInt64(2);
+        Rec.Model := Stmt.ColText(3);
+        Rec.MessageCount := Stmt.ColInt(4);
+        Rec.FinishReason := Stmt.ColText(5);
+        Rec.Ok := Stmt.ColInt(6) <> 0;
+        Rec.ErrorCode := Stmt.ColInt(7);
+        Rec.ErrorMessage := Stmt.ColText(8);
+        Rec.ErrorDetail := Stmt.ColText(9);
+        Rec.Usage.PromptTokens := Stmt.ColInt(10);
+        Rec.Usage.CompletionTokens := Stmt.ColInt(11);
+        Rec.Usage.TotalTokens := Stmt.ColInt(12);
+        Rec.Usage.CachedTokens := Stmt.ColInt(13);
+        Rec.Usage.ReasoningTokens := Stmt.ColInt(14);
+        Rec.CreatedAtMs := Stmt.ColInt64(15);
+        Rec.FinishedAtMs := Stmt.ColInt64(16);
+        Rec.DurationMs := Stmt.ColInt64(17);
+        Rec.FirstTokenMs := Stmt.ColInt64(18);
+        SetLength(ARequests, N + 1);
+        ARequests[N] := Rec;
+        Inc(N);
+      end;
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.AppendMessage(const AMessage: TMessageRecord;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    if AMessage.SessionId = '' then
+      Exit(Fail(AError, seInvalidArgument, 'session id is required', ''));
+    if not SessionExists(AMessage.SessionId, AError) then
+    begin
+      AError.Code := seNotFound;
+      AError.Message := 'session not found';
+      AError.Detail := AMessage.SessionId;
+      Exit(False);
+    end;
+    { A zero turn/request id means "none"; store NULL so the foreign key holds. }
+    Stmt := TStmt.Create(FDb,
+      'INSERT INTO messages (session_id, turn_id, request_id, seq, role, ' +
+      'content, tool_call_id, tool_name, tool_arguments, tool_reason, ' +
+      'tool_ok, created_at, duration_ms) VALUES (?, NULLIF(?, 0), ' +
+      'NULLIF(?, 0), (SELECT COALESCE(MAX(seq), 0) + 1 FROM messages ' +
+      'WHERE session_id = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not append message', DbErrorText));
+      Stmt.BindText(1, AMessage.SessionId);
+      Stmt.BindInt64(2, AMessage.TurnId);
+      Stmt.BindInt64(3, AMessage.RequestId);
+      Stmt.BindText(4, AMessage.SessionId);
+      Stmt.BindInt(5, Ord(AMessage.Role));
+      Stmt.BindText(6, AMessage.Content);
+      Stmt.BindText(7, AMessage.ToolCallId);
+      Stmt.BindText(8, AMessage.ToolName);
+      Stmt.BindText(9, AMessage.ToolArguments);
+      Stmt.BindText(10, AMessage.ToolReason);
+      Stmt.BindInt(11, Ord(AMessage.ToolOk));
+      Stmt.BindInt64(12, NowMs);
+      Stmt.BindInt64(13, AMessage.DurationMs);
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not append message', DbErrorText));
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.QueryMessages(const ASessionId: string;
+  out AMessages: TMessageRecordArray; out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+  N: Integer;
+  Rec: TMessageRecord;
+begin
+  AError := OkError;
+  AMessages := nil;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb,
+      'SELECT id, session_id, turn_id, request_id, seq, role, content, ' +
+      'tool_call_id, tool_name, tool_arguments, tool_reason, tool_ok, ' +
+      'created_at, duration_ms FROM messages WHERE session_id = ? ' +
+      'ORDER BY seq');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not query messages', DbErrorText));
+      Stmt.BindText(1, ASessionId);
+      N := 0;
+      while Stmt.Step = SQLITE_ROW do
+      begin
+        Rec := Default(TMessageRecord);
+        Rec.Id := Stmt.ColInt64(0);
+        Rec.SessionId := Stmt.ColText(1);
+        Rec.TurnId := Stmt.ColInt64(2);
+        Rec.RequestId := Stmt.ColInt64(3);
+        Rec.Seq := Stmt.ColInt64(4);
+        Rec.Role := TMessageRole(Stmt.ColInt(5));
+        Rec.Content := Stmt.ColText(6);
+        Rec.ToolCallId := Stmt.ColText(7);
+        Rec.ToolName := Stmt.ColText(8);
+        Rec.ToolArguments := Stmt.ColText(9);
+        Rec.ToolReason := Stmt.ColText(10);
+        Rec.ToolOk := Stmt.ColInt(11) <> 0;
+        Rec.CreatedAtMs := Stmt.ColInt64(12);
+        Rec.DurationMs := Stmt.ColInt64(13);
+        SetLength(AMessages, N + 1);
+        AMessages[N] := Rec;
         Inc(N);
       end;
     finally
@@ -1193,9 +1589,10 @@ begin
     if not EnsureOpen(AError) then
       Exit(False);
     Stmt := TStmt.Create(FDb,
-      'SELECT s.id, s.created_at, s.updated_at, COUNT(r.id) AS n ' +
-      'FROM sessions s LEFT JOIN session_records r ON r.session_id = s.id ' +
-      'WHERE s.workspace_id = ? GROUP BY s.id ' +
+      'SELECT s.id, s.created_at, s.updated_at, ' +
+      '(SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id), ' +
+      '(SELECT COUNT(*) FROM turns t WHERE t.session_id = s.id) ' +
+      'FROM sessions s WHERE s.workspace_id = ? ' +
       'ORDER BY s.updated_at DESC, s.rowid DESC');
     try
       if not Stmt.Valid then
@@ -1208,7 +1605,8 @@ begin
         Item.Id := Stmt.ColText(0);
         Item.CreatedAtMs := Stmt.ColInt64(1);
         Item.UpdatedAtMs := Stmt.ColInt64(2);
-        Item.RecordCount := Stmt.ColInt(3);
+        Item.MessageCount := Stmt.ColInt(3);
+        Item.TurnCount := Stmt.ColInt(4);
         SetLength(AList, N + 1);
         AList[N] := Item;
         Inc(N);

@@ -15,7 +15,8 @@ uses
   hildegard.helper.approval.store, hildegard.helper.command.tool,
   hildegard.helper.files,
   hildegard.helper.workspace, hildegard.helper.store,
-  hildegard.helper.session.store, hildegard.helper.harness.turn;
+  hildegard.helper.session, hildegard.helper.session.store,
+  hildegard.helper.harness.turn;
 
 type
   THarnessSessionConfig = record
@@ -49,7 +50,7 @@ type
     FSessionId: string;
     FWorkspaceRoot: string;
     FModel: string;
-    FHistory: TChatMessageArray;
+    FHistory: TMessageRecordArray;
     function Init(const AConfig: THarnessSessionConfig; out AError: string):
       Boolean;
   public
@@ -70,8 +71,8 @@ type
     property Model: string read FModel;
     property Store: TSqliteStore read FStore;   // nil when unconfigured
 
-    { Prior messages for the initial render (empty for a new session). }
-    function History: TChatMessageArray;
+    { Prior message blocks for the initial render (empty for a new session). }
+    function History: TMessageRecordArray;
 
     { Cancel pending approvals; frees owned objects. Idempotent. }
     procedure Close;
@@ -232,7 +233,9 @@ begin
     FConversation := TMemoryConversationStore.Create;
   end;
 
-  FHistory := FConversation.Messages;
+  { The full block history for the initial render; empty for a new session. }
+  if (FStore <> nil) and (FSessionId <> '') then
+    FStore.QueryMessages(FSessionId, FHistory, StoreErr);
   FQueue := TTurnQueue.Create;
   FGate := TApprovalGate.Create(FQueue);
 
@@ -265,7 +268,7 @@ begin
   Result := True;
 end;
 
-function THarnessSession.History: TChatMessageArray;
+function THarnessSession.History: TMessageRecordArray;
 begin
   Result := FHistory;
 end;

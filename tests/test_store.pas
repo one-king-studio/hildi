@@ -10,7 +10,7 @@ uses
   Classes, SysUtils, SyncObjs, fpcunit, testregistry,
   {$ifdef unix}BaseUnix,{$endif}
   hildegard.helper.sqlite,
-  hildegard.helper.store, hildegard.helper.session;
+  hildegard.helper.store, hildegard.helper.session, hildegard.helper.llm;
 
 type
   TStoreTest = class(TTestCase)
@@ -42,9 +42,16 @@ type
 
     procedure TestFailedMigrationRollsBackAndKeepsVersion;
     procedure TestConcurrentOperationsDoNotCorruptOrDeadlock;
-    procedure TestSchemaHasNoRequestsTable;
-    procedure TestSessionAndLedgerRoundTrip;
-    procedure TestListAndMostRecentSessions;
+    procedure TestSchemaHasTheSessionTables;
+    procedure TestTurnRequestMessageRoundTrip;
+    procedure TestTurnRollupSumsRequests;
+    procedure TestMessageSeqIsPerSession;
+    procedure TestRequestSeqIsPerTurn;
+    procedure TestBeginRequestUnknownTurnFails;
+    procedure TestAppendMessageUnknownSessionFails;
+    procedure TestQueryTurnsDerivesPrompt;
+    procedure TestNewerSchemaVersionIsRejected;
+    procedure TestListSessionsCountsMessagesAndTurns;
   end;
 
 implementation
@@ -460,7 +467,59 @@ begin
   sqlite3_close(Db);
 end;
 
-procedure TStoreTest.TestSchemaHasNoRequestsTable;
+{ Overwrites PRAGMA user_version through the static binding, to simulate a
+  database written by a different build. }
+procedure RawSetUserVersion(const APath: string; AVersion: Integer);
+var
+  Db: Psqlite3;
+  Stmt: Psqlite3_stmt;
+  S: AnsiString;
+begin
+  Db := nil;
+  if sqlite3_open(PAnsiChar(AnsiString(APath)), @Db) <> SQLITE_OK then
+  begin
+    if Db <> nil then
+      sqlite3_close(Db);
+    Exit;
+  end;
+  Stmt := nil;
+  S := 'PRAGMA user_version = ' + AnsiString(IntToStr(AVersion));
+  if sqlite3_prepare_v2(Db, PAnsiChar(S), -1, @Stmt, nil) = SQLITE_OK then
+  begin
+    sqlite3_step(Stmt);
+    sqlite3_finalize(Stmt);
+  end;
+  sqlite3_close(Db);
+end;
+
+function MakeMsg(const ASessionId: string; ARole: TMessageRole;
+  const AContent: string): TMessageRecord;
+begin
+  Result := Default(TMessageRecord);
+  Result.SessionId := ASessionId;
+  Result.Role := ARole;
+  Result.Content := AContent;
+end;
+
+function MakeTurnMsg(const ASessionId: string; ATurnId: Int64;
+  ARole: TMessageRole; const AContent: string): TMessageRecord;
+begin
+  Result := MakeMsg(ASessionId, ARole, AContent);
+  Result.TurnId := ATurnId;
+end;
+
+function MakeUsage(APrompt, ACompletion, ATotal, ACached,
+  AReasoning: Integer): TTokenUsage;
+begin
+  Result := Default(TTokenUsage);
+  Result.PromptTokens := APrompt;
+  Result.CompletionTokens := ACompletion;
+  Result.TotalTokens := ATotal;
+  Result.CachedTokens := ACached;
+  Result.ReasoningTokens := AReasoning;
+end;
+
+procedure TStoreTest.TestSchemaHasTheSessionTables;
 var
   S: TSqliteStore;
 begin
@@ -470,69 +529,268 @@ begin
     S.Free;
   end;
   AssertTrue('sessions table exists', RawTableExists(FDbPath, 'sessions'));
-  AssertTrue('session_records exists', RawTableExists(FDbPath, 'session_records'));
-  AssertFalse('requests dropped', RawTableExists(FDbPath, 'requests'));
+  AssertTrue('turns table exists', RawTableExists(FDbPath, 'turns'));
+  AssertTrue('requests table exists', RawTableExists(FDbPath, 'requests'));
+  AssertTrue('messages table exists', RawTableExists(FDbPath, 'messages'));
+  AssertFalse('session_records gone',
+    RawTableExists(FDbPath, 'session_records'));
 end;
 
-procedure TStoreTest.TestSessionAndLedgerRoundTrip;
+procedure TStoreTest.TestTurnRequestMessageRoundTrip;
 var
   S: TSqliteStore;
   Err: TStoreError;
-  Id, Id2: string;
-  Rec, Rec2, Rec3: TSessionRecord;
-  Rows: TSessionRecordArray;
-  WorkspaceId: Integer;
+  Ws: Integer;
+  Sid: string;
+  TurnId, ReqId: Int64;
+  Turns: TTurnRecordArray;
+  Reqs: TRequestRecordArray;
+  Msgs: TMessageRecordArray;
+  M: TMessageRecord;
 begin
   S := OpenStore;
   try
-    AssertTrue('workspace', S.EnsureWorkspace('/tmp', WorkspaceId, Err));
-    AssertTrue('create session', S.CreateSession(WorkspaceId, Id, Err));
-    AssertEquals('id length', 32, Length(Id));
-    AssertTrue('exists', S.SessionExists(Id, Err));
+    AssertTrue('workspace', S.EnsureWorkspace('/tmp', Ws, Err));
+    AssertTrue('create session', S.CreateSession(Ws, Sid, Err));
+    AssertEquals('id length', 32, Length(Sid));
+    AssertTrue('exists', S.SessionExists(Sid, Err));
 
-    Rec := Default(TSessionRecord);
-    Rec.SessionId := Id;
-    Rec.Kind := srkUserMessage;
-    Rec.Content := 'hello';
-    AssertTrue('append 1', S.AppendSessionRecord(Rec, Err));
-    Rec2 := Default(TSessionRecord);
-    Rec2.SessionId := Id;
-    Rec2.Kind := srkAssistantMessage;
-    Rec2.Content := 'hi';
-    AssertTrue('append 2', S.AppendSessionRecord(Rec2, Err));
+    AssertTrue('begin turn', S.BeginTurn(Sid, TurnId, Err));
+    AssertTrue('turn id assigned', TurnId > 0);
+    AssertTrue('append user',
+      S.AppendMessage(MakeTurnMsg(Sid, TurnId, mrUser, 'hi'), Err));
+    AssertTrue('begin request', S.BeginRequest(TurnId, 'model-x', 3, ReqId, Err));
+    AssertTrue('request id assigned', ReqId > 0);
+    M := MakeTurnMsg(Sid, TurnId, mrAssistant, 'yo');
+    M.RequestId := ReqId;
+    AssertTrue('append assistant', S.AppendMessage(M, Err));
+    AssertTrue('finish request', S.FinishRequest(ReqId, True, 'stop', 0, '', '',
+      MakeUsage(10, 20, 30, 4, 5), 120, 40, Err));
+    AssertTrue('finish turn',
+      S.FinishTurn(TurnId, tsCompleted, 'stop', 0, '', '', Err));
 
-    AssertTrue('query', S.QuerySessionRecords(Id, False, srkEvent, 0, 0, Rows,
-      Err));
-    AssertEquals('two records', 2, Length(Rows));
-    AssertEquals('ordered seq 1', 1, Rows[0].Seq);
-    AssertEquals('ordered seq 2', 2, Rows[1].Seq);
-    AssertEquals('first kind', Ord(srkUserMessage), Ord(Rows[0].Kind));
+    AssertTrue('query turns', S.QueryTurns(Sid, Turns, Err));
+    AssertEquals('one turn', 1, Length(Turns));
+    AssertEquals('turn seq', 1, Turns[0].Seq);
+    AssertEquals('completed', Ord(tsCompleted), Ord(Turns[0].Status));
+    AssertEquals('one request', 1, Turns[0].RequestCount);
+    AssertEquals('two messages', 2, Turns[0].MessageCount);
+    AssertEquals('rollup prompt tokens', 10, Turns[0].Usage.PromptTokens);
+    AssertEquals('rollup cached', 4, Turns[0].Usage.CachedTokens);
 
-    AssertTrue('query by kind', S.QuerySessionRecords(Id, True,
-      srkUserMessage, 0, 0, Rows, Err));
-    AssertEquals('one user record', 1, Length(Rows));
+    AssertTrue('query requests', S.QueryRequests(TurnId, Reqs, Err));
+    AssertEquals('one request', 1, Length(Reqs));
+    AssertEquals('request seq', 1, Reqs[0].Seq);
+    AssertEquals('model', 'model-x', Reqs[0].Model);
+    AssertEquals('message count', 3, Reqs[0].MessageCount);
+    AssertEquals('finish reason', 'stop', Reqs[0].FinishReason);
+    AssertTrue('ok', Reqs[0].Ok);
+    AssertEquals('prompt tokens', 10, Reqs[0].Usage.PromptTokens);
+    AssertEquals('cached tokens', 4, Reqs[0].Usage.CachedTokens);
+    AssertEquals('reasoning tokens', 5, Reqs[0].Usage.ReasoningTokens);
+    AssertEquals('duration', 120, Reqs[0].DurationMs);
+    AssertEquals('first token', 40, Reqs[0].FirstTokenMs);
 
-    Rec3 := Default(TSessionRecord);
-    Rec3.SessionId := 'nope';
-    AssertFalse('append unknown session', S.AppendSessionRecord(Rec3, Err));
-    AssertEquals('not found', Ord(seNotFound), Ord(Err.Code));
-
-    AssertTrue('touch', S.TouchSession(Id, Err));
-    AssertTrue('create 2', S.CreateSession(WorkspaceId, Id2, Err));
-    AssertTrue('ids differ', Id <> Id2);
+    AssertTrue('query messages', S.QueryMessages(Sid, Msgs, Err));
+    AssertEquals('two messages', 2, Length(Msgs));
+    AssertEquals('seq 1', 1, Msgs[0].Seq);
+    AssertEquals('seq 2', 2, Msgs[1].Seq);
+    AssertEquals('user role', Ord(mrUser), Ord(Msgs[0].Role));
+    AssertEquals('user turn link', TurnId, Msgs[0].TurnId);
+    AssertEquals('user has no request', 0, Msgs[0].RequestId);
+    AssertEquals('assistant request link', ReqId, Msgs[1].RequestId);
+    AssertEquals('content', 'hi', Msgs[0].Content);
   finally
     S.Free;
   end;
 end;
 
-procedure TStoreTest.TestListAndMostRecentSessions;
+procedure TStoreTest.TestTurnRollupSumsRequests;
 var
   S: TSqliteStore;
   Err: TStoreError;
-  W, IdA, IdB, Recent: string;
+  Ws: Integer;
+  Sid: string;
+  TurnId, R1, R2: Int64;
+  Turns: TTurnRecordArray;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, Sid, Err);
+    S.BeginTurn(Sid, TurnId, Err);
+    S.BeginRequest(TurnId, 'm', 1, R1, Err);
+    S.FinishRequest(R1, True, 'tool_calls', 0, '', '',
+      MakeUsage(10, 5, 15, 2, 1), 100, 30, Err);
+    S.BeginRequest(TurnId, 'm', 4, R2, Err);
+    S.FinishRequest(R2, True, 'stop', 0, '', '',
+      MakeUsage(20, 8, 28, 3, 2), 200, 50, Err);
+    S.FinishTurn(TurnId, tsCompleted, 'stop', 0, '', '', Err);
+
+    AssertTrue('query turns', S.QueryTurns(Sid, Turns, Err));
+    AssertEquals('two requests', 2, Turns[0].RequestCount);
+    AssertEquals('prompt summed', 30, Turns[0].Usage.PromptTokens);
+    AssertEquals('completion summed', 13, Turns[0].Usage.CompletionTokens);
+    AssertEquals('total summed', 43, Turns[0].Usage.TotalTokens);
+    AssertEquals('cached summed', 5, Turns[0].Usage.CachedTokens);
+    AssertEquals('reasoning summed', 3, Turns[0].Usage.ReasoningTokens);
+    AssertTrue('duration recorded', Turns[0].DurationMs >= 0);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestMessageSeqIsPerSession;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws: Integer;
+  Sid: string;
+  T1, T2: Int64;
+  Msgs: TMessageRecordArray;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, Sid, Err);
+    S.BeginTurn(Sid, T1, Err);
+    S.AppendMessage(MakeTurnMsg(Sid, T1, mrUser, 'a'), Err);
+    S.AppendMessage(MakeTurnMsg(Sid, T1, mrAssistant, 'b'), Err);
+    S.BeginTurn(Sid, T2, Err);
+    S.AppendMessage(MakeTurnMsg(Sid, T2, mrUser, 'c'), Err);
+
+    AssertTrue('query', S.QueryMessages(Sid, Msgs, Err));
+    AssertEquals('three messages', 3, Length(Msgs));
+    AssertEquals('seq 1', 1, Msgs[0].Seq);
+    AssertEquals('seq 2', 2, Msgs[1].Seq);
+    AssertEquals('seq 3', 3, Msgs[2].Seq);
+    AssertEquals('second turn link', T2, Msgs[2].TurnId);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestRequestSeqIsPerTurn;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws: Integer;
+  Sid: string;
+  T1, T2, R: Int64;
+  Reqs: TRequestRecordArray;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, Sid, Err);
+    S.BeginTurn(Sid, T1, Err);
+    S.BeginRequest(T1, 'm', 1, R, Err);
+    S.BeginRequest(T1, 'm', 2, R, Err);
+    S.BeginTurn(Sid, T2, Err);
+    S.BeginRequest(T2, 'm', 1, R, Err);
+
+    AssertTrue('turn 1 requests', S.QueryRequests(T1, Reqs, Err));
+    AssertEquals('two', 2, Length(Reqs));
+    AssertEquals('seq 1', 1, Reqs[0].Seq);
+    AssertEquals('seq 2', 2, Reqs[1].Seq);
+    AssertTrue('turn 2 requests', S.QueryRequests(T2, Reqs, Err));
+    AssertEquals('one', 1, Length(Reqs));
+    AssertEquals('restarts at 1', 1, Reqs[0].Seq);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestBeginRequestUnknownTurnFails;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  ReqId: Int64;
+begin
+  S := OpenStore;
+  try
+    AssertFalse('fails', S.BeginRequest(9999, 'm', 0, ReqId, Err));
+    AssertEquals('not found', Ord(seNotFound), Ord(Err.Code));
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestAppendMessageUnknownSessionFails;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+begin
+  S := OpenStore;
+  try
+    AssertFalse('fails', S.AppendMessage(MakeMsg('nope', mrUser, 'x'), Err));
+    AssertEquals('not found', Ord(seNotFound), Ord(Err.Code));
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestQueryTurnsDerivesPrompt;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws: Integer;
+  Sid: string;
+  TurnId: Int64;
+  Turns: TTurnRecordArray;
+  M: TMessageRecord;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, Sid, Err);
+    S.BeginTurn(Sid, TurnId, Err);
+    M := MakeMsg(Sid, mrUser, 'the prompt');
+    M.TurnId := TurnId;
+    S.AppendMessage(M, Err);
+    M := MakeMsg(Sid, mrAssistant, 'answer');
+    M.TurnId := TurnId;
+    S.AppendMessage(M, Err);
+    M := MakeMsg(Sid, mrUser, 'a later user message');
+    M.TurnId := TurnId;
+    S.AppendMessage(M, Err);
+    S.FinishTurn(TurnId, tsCompleted, 'stop', 0, '', '', Err);
+
+    AssertTrue('query', S.QueryTurns(Sid, Turns, Err));
+    AssertEquals('prompt is the first user message', 'the prompt',
+      Turns[0].Prompt);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestNewerSchemaVersionIsRejected;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+begin
+  S := OpenStore;      // creates the schema at the current version
+  S.Free;
+  RawSetUserVersion(FDbPath, StoreSchemaVersion + 1);
+
+  S := NewStore;
+  try
+    AssertFalse('open fails', S.Open(Err));
+    AssertEquals('migration failed', Ord(seMigrationFailed), Ord(Err.Code));
+    AssertTrue('message names the path', Pos(FDbPath, Err.Detail) > 0);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestListSessionsCountsMessagesAndTurns;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  IdA, IdB, Recent: string;
   WorkspaceId: Integer;
   List: TSessionSummaryArray;
-  Rec: TSessionRecord;
+  TurnId: Int64;
 begin
   S := OpenStore;
   try
@@ -540,19 +798,19 @@ begin
     S.CreateSession(WorkspaceId, IdA, Err);
     S.CreateSession(WorkspaceId, IdB, Err);
 
-    Rec := Default(TSessionRecord);
-    Rec.SessionId := IdA;
-    Rec.Kind := srkUserMessage;
-    Rec.Content := 'x';
-    S.AppendSessionRecord(Rec, Err);
+    S.BeginTurn(IdA, TurnId, Err);
+    S.AppendMessage(MakeTurnMsg(IdA, TurnId, mrUser, 'x'), Err);
+    S.AppendMessage(MakeTurnMsg(IdA, TurnId, mrAssistant, 'y'), Err);
+    S.FinishTurn(TurnId, tsCompleted, 'stop', 0, '', '', Err);
     Sleep(10);
     S.TouchSession(IdA, Err);   // A is now the most recently updated
 
     AssertTrue('list', S.ListSessions(WorkspaceId, List, Err));
     AssertEquals('two sessions', 2, Length(List));
     AssertEquals('newest first', IdA, List[0].Id);
-    AssertEquals('record count', 1, List[0].RecordCount);
-    AssertEquals('other empty', 0, List[1].RecordCount);
+    AssertEquals('message count', 2, List[0].MessageCount);
+    AssertEquals('turn count', 1, List[0].TurnCount);
+    AssertEquals('other empty', 0, List[1].MessageCount);
 
     AssertTrue('most recent', S.MostRecentSessionId(WorkspaceId, Recent, Err));
     AssertEquals('most recent id', IdA, Recent);

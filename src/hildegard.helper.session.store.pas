@@ -1,7 +1,8 @@
 unit hildegard.helper.session.store;
-{ SQLite-backed IConversationStore. Persists the loop's chat messages through
-  the session ledger and recomposes them on read, skipping non-essential
-  records (reasoning, errors, events). }
+{ SQLite-backed IConversationStore. Persists the loop's chat messages as history
+  blocks (user, assistant, reasoning, tool call, tool, error), tracks the
+  current turn/request so each block is linked, and recomposes the conversation
+  for the provider on read (reasoning and errors are never sent). }
 
 {$mode delphi}{$H+}
 
@@ -17,8 +18,11 @@ type
     FStore: TSqliteStore;
     FSessionId: string;
     FMaxMessages: Integer;   // 0 = all
-    procedure Write(const AKind: TSessionRecordKind; const AContent,
-      ADataJson: string);
+    FCurrentTurnId: Int64;
+    FCurrentRequestId: Int64;
+    procedure Write(const ARole: TMessageRole; const AContent,
+      AToolCallId, AToolName, AToolArguments, AToolReason: string;
+      AToolOk: Boolean; ADurationMs: Int64);
     function Compose: TChatMessageArray;
   public
     { AMaxMessages > 0 keeps only the most recent AMaxMessages messages (after
@@ -27,68 +31,21 @@ type
       AMaxMessages: Integer = 0);
     procedure Append(const AMessage: TChatMessage);
     function Messages: TChatMessageArray;
-    { The ledger is the durable record; clearing it here would defeat restore.
-      The loop never calls Clear; this is a no-op by design. }
+    { The history is durable; clearing it here would defeat restore. The loop
+      never calls Clear; this is a no-op by design. }
     procedure Clear;
+    procedure AppendReasoning(const AText: string);
+    procedure AppendError(const AMessage, ADetail: string);
+    function BeginTurn: Int64;
+    function BeginRequest(ATurnId: Int64; const AModel: string;
+      AMessageCount: Integer): Int64;
+    procedure FinishRequest(ARequestId: Int64; const AOutcome: TRequestOutcome);
+    procedure FinishTurn(ATurnId: Int64; const AOutcome: TTurnOutcome);
   end;
 
 implementation
 
-uses
-  fpjson, jsonparser;
-
-function ToolCallData(const ACall: TChatToolCall): string;
-var
-  Root: TJSONObject;
-begin
-  Root := TJSONObject.Create;
-  try
-    Root.Add('id', ACall.Id);
-    Root.Add('name', ACall.Name);
-    Root.Add('arguments', ACall.Arguments);
-    Result := Root.AsJSON;
-  finally
-    Root.Free;
-  end;
-end;
-
-function ToolResultData(const AToolCallId: string): string;
-var
-  Root: TJSONObject;
-begin
-  Root := TJSONObject.Create;
-  try
-    Root.Add('tool_call_id', AToolCallId);
-    Result := Root.AsJSON;
-  finally
-    Root.Free;
-  end;
-end;
-
-function FieldOf(const ADataJson, AName: string): string;
-var
-  Data: TJSONData;
-  Obj: TJSONObject;
-begin
-  Result := '';
-  Data := nil;
-  try
-    try
-      Data := GetJSON(ADataJson);
-    except
-      Exit;
-    end;
-    if Data is TJSONObject then
-    begin
-      Obj := TJSONObject(Data);
-      Result := Obj.Get(AName, '');
-    end;
-  finally
-    Data.Free;
-  end;
-end;
-
-procedure AppendMessage(var AList: TChatMessageArray;
+procedure AddMessage(var AList: TChatMessageArray;
   const AMessage: TChatMessage);
 begin
   SetLength(AList, Length(AList) + 1);
@@ -102,104 +59,181 @@ begin
   FStore := AStore;
   FSessionId := ASessionId;
   FMaxMessages := AMaxMessages;
+  FCurrentTurnId := 0;
+  FCurrentRequestId := 0;
 end;
 
-procedure TSqliteConversationStore.Write(const AKind: TSessionRecordKind;
-  const AContent, ADataJson: string);
+procedure TSqliteConversationStore.Write(const ARole: TMessageRole;
+  const AContent, AToolCallId, AToolName, AToolArguments, AToolReason: string;
+  AToolOk: Boolean; ADurationMs: Int64);
 var
-  Rec: TSessionRecord;
+  Rec: TMessageRecord;
   Err: TStoreError;
 begin
-  Rec := Default(TSessionRecord);
+  Rec := Default(TMessageRecord);
   Rec.SessionId := FSessionId;
-  Rec.Kind := AKind;
+  Rec.TurnId := FCurrentTurnId;
+  Rec.RequestId := FCurrentRequestId;
+  Rec.Role := ARole;
   Rec.Content := AContent;
-  Rec.DataJson := ADataJson;
+  Rec.ToolCallId := AToolCallId;
+  Rec.ToolName := AToolName;
+  Rec.ToolArguments := AToolArguments;
+  Rec.ToolReason := AToolReason;
+  Rec.ToolOk := AToolOk;
+  Rec.DurationMs := ADurationMs;
   { IConversationStore has no error channel; a failed append is dropped rather
     than raised into the loop. }
-  FStore.AppendSessionRecord(Rec, Err);
+  FStore.AppendMessage(Rec, Err);
 end;
 
 procedure TSqliteConversationStore.Append(const AMessage: TChatMessage);
 var
   I: Integer;
+  Reason, ReasonError: string;
 begin
   case AMessage.Role of
     crSystem:
-      Write(srkSystemMessage, AMessage.Content, '');
+      Write(mrSystem, AMessage.Content, '', '', '', '', False, 0);
     crUser:
-      Write(srkUserMessage, AMessage.Content, '');
+      Write(mrUser, AMessage.Content, '', '', '', '', False, 0);
     crAssistant:
       begin
-        Write(srkAssistantMessage, AMessage.Content, '');
+        Write(mrAssistant, AMessage.Content, '', '', '', '', False, 0);
         for I := 0 to High(AMessage.ToolCalls) do
-          Write(srkToolCall, '', ToolCallData(AMessage.ToolCalls[I]));
+        begin
+          Reason := '';
+          ExtractToolReason(AMessage.ToolCalls[I].Arguments, Reason,
+            ReasonError);
+          Write(mrToolCall, '', AMessage.ToolCalls[I].Id,
+            AMessage.ToolCalls[I].Name, AMessage.ToolCalls[I].Arguments,
+            Reason, False, 0);
+        end;
       end;
     crTool:
-      Write(srkToolResult, AMessage.Content,
-        ToolResultData(AMessage.ToolCallId));
+      Write(mrTool, AMessage.Content, AMessage.ToolCallId, AMessage.ToolName,
+        '', '', AMessage.ToolOk, AMessage.DurationMs);
   end;
+end;
+
+procedure TSqliteConversationStore.AppendReasoning(const AText: string);
+begin
+  if AText <> '' then
+    Write(mrReasoning, AText, '', '', '', '', False, 0);
+end;
+
+procedure TSqliteConversationStore.AppendError(const AMessage,
+  ADetail: string);
+begin
+  Write(mrError, AMessage, '', '', ADetail, '', False, 0);
+end;
+
+function TSqliteConversationStore.BeginTurn: Int64;
+var
+  Err: TStoreError;
+begin
+  Result := 0;
+  if FStore.BeginTurn(FSessionId, Result, Err) then
+    FCurrentTurnId := Result
+  else
+    FCurrentTurnId := 0;
+  FCurrentRequestId := 0;
+end;
+
+function TSqliteConversationStore.BeginRequest(ATurnId: Int64;
+  const AModel: string; AMessageCount: Integer): Int64;
+var
+  Err: TStoreError;
+begin
+  Result := 0;
+  if FStore.BeginRequest(ATurnId, AModel, AMessageCount, Result, Err) then
+    FCurrentRequestId := Result
+  else
+    FCurrentRequestId := 0;
+end;
+
+procedure TSqliteConversationStore.FinishRequest(ARequestId: Int64;
+  const AOutcome: TRequestOutcome);
+var
+  Err: TStoreError;
+begin
+  FStore.FinishRequest(ARequestId, AOutcome.Ok, AOutcome.RawFinishReason,
+    Ord(AOutcome.ErrorCode), AOutcome.ErrorMessage, AOutcome.ErrorDetail,
+    AOutcome.Usage, AOutcome.DurationMs, AOutcome.FirstTokenMs, Err);
+end;
+
+procedure TSqliteConversationStore.FinishTurn(ATurnId: Int64;
+  const AOutcome: TTurnOutcome);
+var
+  Err: TStoreError;
+begin
+  FStore.FinishTurn(ATurnId, AOutcome.Status, AOutcome.FinishReason,
+    Ord(AOutcome.ErrorCode), AOutcome.ErrorMessage, AOutcome.ErrorDetail, Err);
+  FCurrentTurnId := 0;
+  FCurrentRequestId := 0;
 end;
 
 function TSqliteConversationStore.Compose: TChatMessageArray;
 var
-  Records: TSessionRecordArray;
+  Msgs: TMessageRecordArray;
   Err: TStoreError;
   I, J: Integer;
   Msg: TChatMessage;
   Call: TChatToolCall;
 begin
   Result := nil;
-  if not FStore.QuerySessionRecords(FSessionId, False, srkEvent, 0, 0, Records,
-    Err) then
+  if not FStore.QueryMessages(FSessionId, Msgs, Err) then
     Exit;
   I := 0;
-  while I <= High(Records) do
+  while I <= High(Msgs) do
   begin
-    case Records[I].Kind of
-      srkSystemMessage:
+    case Msgs[I].Role of
+      mrSystem:
         begin
           Msg := Default(TChatMessage);
           Msg.Role := crSystem;
-          Msg.Content := Records[I].Content;
-          AppendMessage(Result, Msg);
+          Msg.Content := Msgs[I].Content;
+          AddMessage(Result, Msg);
         end;
-      srkUserMessage:
+      mrUser:
         begin
           Msg := Default(TChatMessage);
           Msg.Role := crUser;
-          Msg.Content := Records[I].Content;
-          AppendMessage(Result, Msg);
+          Msg.Content := Msgs[I].Content;
+          AddMessage(Result, Msg);
         end;
-      srkAssistantMessage:
+      mrAssistant:
         begin
           Msg := Default(TChatMessage);
           Msg.Role := crAssistant;
-          Msg.Content := Records[I].Content;
+          Msg.Content := Msgs[I].Content;
           J := I + 1;
-          while (J <= High(Records)) and (Records[J].Kind = srkToolCall) do
+          while (J <= High(Msgs)) and (Msgs[J].Role = mrToolCall) do
           begin
             Call := Default(TChatToolCall);
-            Call.Id := FieldOf(Records[J].DataJson, 'id');
-            Call.Name := FieldOf(Records[J].DataJson, 'name');
-            Call.Arguments := FieldOf(Records[J].DataJson, 'arguments');
+            Call.Id := Msgs[J].ToolCallId;
+            Call.Name := Msgs[J].ToolName;
+            Call.Arguments := Msgs[J].ToolArguments;
             SetLength(Msg.ToolCalls, Length(Msg.ToolCalls) + 1);
             Msg.ToolCalls[High(Msg.ToolCalls)] := Call;
             Inc(J);
           end;
-          AppendMessage(Result, Msg);
+          AddMessage(Result, Msg);
           I := J - 1;
         end;
-      srkToolResult:
+      mrTool:
         begin
           Msg := Default(TChatMessage);
           Msg.Role := crTool;
-          Msg.Content := Records[I].Content;
-          Msg.ToolCallId := FieldOf(Records[I].DataJson, 'tool_call_id');
-          AppendMessage(Result, Msg);
+          Msg.Content := Msgs[I].Content;
+          Msg.ToolCallId := Msgs[I].ToolCallId;
+          Msg.ToolName := Msgs[I].ToolName;
+          Msg.ToolOk := Msgs[I].ToolOk;
+          Msg.DurationMs := Msgs[I].DurationMs;
+          AddMessage(Result, Msg);
         end;
       { Tool calls are consumed with their assistant message above. }
-      srkToolCall, srkReasoning, srkError, srkEvent:
+      mrReasoning, mrError, mrToolCall:
         ;   // not part of the restored conversation
     end;
     Inc(I);
@@ -231,12 +265,12 @@ begin
 
   Result := Copy(All, 0, SysCount);
   for I := Start to High(All) do
-    AppendMessage(Result, All[I]);
+    AddMessage(Result, All[I]);
 end;
 
 procedure TSqliteConversationStore.Clear;
 begin
-  // no-op: the ledger is durable history, see the class comment
+  // no-op: the history is durable, see the class comment
 end;
 
 end.

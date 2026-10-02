@@ -66,6 +66,8 @@ function sqlite3_column_int64(stmt: Psqlite3_stmt; idx: cint): sqlite3_int64;
 function sqlite3_column_type(stmt: Psqlite3_stmt; idx: cint): cint;
   cdecl; external 'sqlite3';
 function sqlite3_changes(db: Psqlite3): cint; cdecl; external 'sqlite3';
+function sqlite3_last_insert_rowid(db: Psqlite3): sqlite3_int64;
+  cdecl; external 'sqlite3';
 function sqlite3_busy_timeout(db: Psqlite3; ms: cint): cint;
   cdecl; external 'sqlite3';
 function sqlite3_libversion: PAnsiChar; cdecl; external 'sqlite3';

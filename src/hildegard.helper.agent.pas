@@ -9,13 +9,48 @@ unit hildegard.helper.agent;
 interface
 
 uses
-  Classes, SysUtils, hildegard.helper.llm;
+  Classes, SysUtils, hildegard.helper.llm, hildegard.helper.session;
 
 type
+  { The outcome of one LLM request, for the audit/metrics seam. }
+  TRequestOutcome = record
+    Ok: Boolean;
+    FinishReason: TFinishReason;
+    RawFinishReason: string;
+    ErrorCode: TLLMErrorCode;
+    ErrorMessage: string;
+    ErrorDetail: string;
+    Usage: TTokenUsage;
+    DurationMs: Int64;
+    FirstTokenMs: Int64;
+  end;
+
+  { The outcome of one turn (loop), for the audit/metrics seam. }
+  TTurnOutcome = record
+    Status: TTurnStatus;
+    FinishReason: string;
+    ErrorCode: TLLMErrorCode;
+    ErrorMessage: string;
+    ErrorDetail: string;
+  end;
+
+  { The loop's persistence seam: the conversation it replays, the display-only
+    blocks it produces, and the turn/request audit. An implementation that does
+    not persist (in-memory) ignores the audit calls and returns 0 for the ids. }
   IConversationStore = interface
     procedure Append(const AMessage: TChatMessage);
     function Messages: TChatMessageArray;
     procedure Clear;
+    { Display-only blocks: persisted for restore, never sent to the provider. }
+    procedure AppendReasoning(const AText: string);
+    procedure AppendError(const AMessage, ADetail: string);
+    { Turn/request audit. BeginTurn opens a loop; the user prompt is appended
+      separately, linked to the open turn. Ids are 0 when not persisted. }
+    function BeginTurn: Int64;
+    function BeginRequest(ATurnId: Int64; const AModel: string;
+      AMessageCount: Integer): Int64;
+    procedure FinishRequest(ARequestId: Int64; const AOutcome: TRequestOutcome);
+    procedure FinishTurn(ATurnId: Int64; const AOutcome: TTurnOutcome);
   end;
 
   TMemoryConversationStore = class(TInterfacedObject, IConversationStore)
@@ -25,6 +60,13 @@ type
     procedure Append(const AMessage: TChatMessage);
     function Messages: TChatMessageArray;
     procedure Clear;
+    procedure AppendReasoning(const AText: string);
+    procedure AppendError(const AMessage, ADetail: string);
+    function BeginTurn: Int64;
+    function BeginRequest(ATurnId: Int64; const AModel: string;
+      AMessageCount: Integer): Int64;
+    procedure FinishRequest(ARequestId: Int64; const AOutcome: TRequestOutcome);
+    procedure FinishTurn(ATurnId: Int64; const AOutcome: TTurnOutcome);
   end;
 
   { Receives the raw JSON arguments string and returns a text result. On failure
@@ -296,6 +338,39 @@ begin
   FItems := nil;
 end;
 
+procedure TMemoryConversationStore.AppendReasoning(const AText: string);
+begin
+  // in-memory: display blocks are not kept
+end;
+
+procedure TMemoryConversationStore.AppendError(const AMessage, ADetail: string);
+begin
+  // in-memory: display blocks are not kept
+end;
+
+function TMemoryConversationStore.BeginTurn: Int64;
+begin
+  Result := 0;
+end;
+
+function TMemoryConversationStore.BeginRequest(ATurnId: Int64;
+  const AModel: string; AMessageCount: Integer): Int64;
+begin
+  Result := 0;
+end;
+
+procedure TMemoryConversationStore.FinishRequest(ARequestId: Int64;
+  const AOutcome: TRequestOutcome);
+begin
+  // no-op
+end;
+
+procedure TMemoryConversationStore.FinishTurn(ATurnId: Int64;
+  const AOutcome: TTurnOutcome);
+begin
+  // no-op
+end;
+
 { --- TToolRegistry ------------------------------------------------------ }
 
 procedure TToolRegistry.Add(const ASpec: TToolSpec; AHandler: TToolHandler);
@@ -378,6 +453,7 @@ var
   ResultText, HandlerError, Reason, ReasonError: string;
   HandlerOk, ReasonOk: Boolean;
   Msg: TChatMessage;
+  StartMs: Int64;
 begin
   AAllOk := True;
   for I := 0 to High(ACalls) do
@@ -391,6 +467,7 @@ begin
 
     ResultText := '';
     HandlerOk := False;
+    StartMs := GetTickCount64;
     if not ReasonOk then
       ResultText := 'error: tool "' + ACalls[I].Name + '" ' + ReasonError
     else if (FTools = nil) or not FTools.Find(ACalls[I].Name, Tool) then
@@ -421,6 +498,9 @@ begin
     Msg.Role := crTool;
     Msg.ToolCallId := ACalls[I].Id;
     Msg.Content := ResultText;
+    Msg.ToolName := ACalls[I].Name;
+    Msg.ToolOk := HandlerOk;
+    Msg.DurationMs := Int64(GetTickCount64 - StartMs);
     FStore.Append(Msg);
   end;
 end;
@@ -462,6 +542,25 @@ var
   ChatResult: TChatResult;
   UserMsg, SystemMsg: TChatMessage;
   AllOk: Boolean;
+  TurnId, RequestId: Int64;
+  StartMs: Int64;
+  Outcome: TRequestOutcome;
+  TurnOutcome: TTurnOutcome;
+
+  procedure FailTurn(ACode: TLLMErrorCode; const AMessage, ADetail,
+    AFinishReason: string);
+  begin
+    AError := AgentError(ACode, AMessage, ADetail);
+    FStore.AppendError(AMessage, ADetail);
+    TurnOutcome := Default(TTurnOutcome);
+    TurnOutcome.Status := tsFailed;
+    TurnOutcome.FinishReason := AFinishReason;
+    TurnOutcome.ErrorCode := ACode;
+    TurnOutcome.ErrorMessage := AMessage;
+    TurnOutcome.ErrorDetail := ADetail;
+    FStore.FinishTurn(TurnId, TurnOutcome);
+  end;
+
 begin
   AAnswer := '';
   AError := AgentOk;
@@ -474,6 +573,9 @@ begin
     FStore.Append(SystemMsg);
   end;
 
+  { Open the loop before appending the prompt, so the prompt is linked to it. }
+  TurnId := FStore.BeginTurn;
+
   UserMsg := Default(TChatMessage);
   UserMsg.Role := crUser;
   UserMsg.Content := AUserText;
@@ -483,15 +585,42 @@ begin
   while True do
   begin
     Request := BuildRequest;
+    RequestId := FStore.BeginRequest(TurnId, FClient.Model,
+      Length(Request.Messages));
+    StartMs := GetTickCount64;
+    Outcome := Default(TRequestOutcome);
+
     if not FClient.Complete(Request, AEvents.OnText, AEvents.OnReasoning,
       ChatResult, AError) then
+    begin
+      Outcome.Ok := False;
+      Outcome.ErrorCode := AError.Code;
+      Outcome.ErrorMessage := AError.Message;
+      Outcome.ErrorDetail := AError.Detail;
+      Outcome.DurationMs := Int64(GetTickCount64 - StartMs);
+      FStore.FinishRequest(RequestId, Outcome);
+      FailTurn(AError.Code, AError.Message, AError.Detail, '');
       Exit(False);
+    end;
 
+    Outcome.Ok := True;
+    Outcome.FinishReason := ChatResult.FinishReason;
+    Outcome.RawFinishReason := ChatResult.RawFinishReason;
+    Outcome.Usage := ChatResult.Usage;
+    Outcome.FirstTokenMs := ChatResult.FirstTokenMs;
+    Outcome.DurationMs := Int64(GetTickCount64 - StartMs);
+
+    FStore.AppendReasoning(ChatResult.ReasoningContent);
     FStore.Append(ChatResult.Message);
+    FStore.FinishRequest(RequestId, Outcome);
 
     if ChatResult.FinishReason = frStop then
     begin
       AAnswer := ChatResult.Message.Content;
+      TurnOutcome := Default(TTurnOutcome);
+      TurnOutcome.Status := tsCompleted;
+      TurnOutcome.FinishReason := ChatResult.RawFinishReason;
+      FStore.FinishTurn(TurnId, TurnOutcome);
       Exit(True);
     end;
 
@@ -500,8 +629,8 @@ begin
       Inc(Iterations);
       if Iterations > FConfig.MaxToolIterations then
       begin
-        AError := AgentError(leProvider, 'tool iteration limit reached',
-          IntToStr(FConfig.MaxToolIterations));
+        FailTurn(leProvider, 'tool iteration limit reached',
+          IntToStr(FConfig.MaxToolIterations), ChatResult.RawFinishReason);
         Exit(False);
       end;
       ExecuteToolCalls(ChatResult.Message.ToolCalls, AEvents, AllOk);
@@ -509,6 +638,8 @@ begin
     end;
 
     AError := FinishError(ChatResult);
+    FailTurn(AError.Code, AError.Message, AError.Detail,
+      ChatResult.RawFinishReason);
     Exit(False);
   end;
 end;

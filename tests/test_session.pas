@@ -1,6 +1,7 @@
 unit test_session;
 { fpcunit tests for hildegard.helper.session and the SQLite conversation
-  adapter: session ids, the ledger round trip, and restore. }
+  adapter: session ids, the history round trip, the turn/request audit, and
+  restore. }
 
 {$mode delphi}{$H+}
 
@@ -30,6 +31,9 @@ type
     procedure TestRestoreAfterReopen;
     procedure TestTailKeepsSystemAndRecent;
     procedure TestTailDropsOrphanTools;
+    procedure TestAppendMapsRolesAndToolFields;
+    procedure TestQueryMessagesReturnsAllBlocks;
+    procedure TestBeginFinishTurnAndRequestRecorded;
   end;
 
 implementation
@@ -81,12 +85,12 @@ begin
   Result.Content := AText;
   Call.Id := 'call_1';
   Call.Name := 'get_system_time';
-  Call.Arguments := '{"reason":"r"}';
+  Call.Arguments := '{"reason":"check the time"}';
   SetLength(Result.ToolCalls, 1);
   Result.ToolCalls[0] := Call;
   Call.Id := 'call_2';
   Call.Name := 'run_command';
-  Call.Arguments := '{"command":"date","reason":"r"}';
+  Call.Arguments := '{"command":"date","reason":"run it"}';
   SetLength(Result.ToolCalls, 2);
   Result.ToolCalls[1] := Call;
 end;
@@ -97,6 +101,9 @@ begin
   Result.Role := crTool;
   Result.ToolCallId := AId;
   Result.Content := AText;
+  Result.ToolName := 'get_system_time';
+  Result.ToolOk := True;
+  Result.DurationMs := 7;
 end;
 
 procedure TSessionTest.TestNewSessionIdIs32LowercaseHex;
@@ -157,6 +164,9 @@ begin
     AssertEquals('call name', 'get_system_time', Msgs[1].ToolCalls[0].Name);
     AssertEquals('tool 1', Ord(crTool), Ord(Msgs[2].Role));
     AssertEquals('tool id', 'call_1', Msgs[2].ToolCallId);
+    AssertEquals('tool name restored', 'get_system_time', Msgs[2].ToolName);
+    AssertTrue('tool ok restored', Msgs[2].ToolOk);
+    AssertEquals('tool duration restored', 7, Msgs[2].DurationMs);
     AssertEquals('tool id 2', 'call_2', Msgs[3].ToolCallId);
   finally
     S.Free;
@@ -171,7 +181,6 @@ var
   WorkspaceId: Integer;
   Conv: IConversationStore;
   Msgs: TChatMessageArray;
-  Rec: TSessionRecord;
 begin
   S := OpenStore;
   try
@@ -179,16 +188,8 @@ begin
     S.CreateSession(WorkspaceId, SessionId, Err);
     Conv := TSqliteConversationStore.Create(S, SessionId);
     Conv.Append(UserMsg('hello'));
-
-    Rec := Default(TSessionRecord);
-    Rec.SessionId := SessionId;
-    Rec.Kind := srkReasoning;
-    Rec.Content := 'thinking...';
-    S.AppendSessionRecord(Rec, Err);
-    Rec.Kind := srkError;
-    Rec.Content := 'boom';
-    S.AppendSessionRecord(Rec, Err);
-
+    Conv.AppendReasoning('thinking...');
+    Conv.AppendError('boom', 'detail');
     Conv.Append(UserMsg('again'));
     Msgs := Conv.Messages;
     AssertEquals('two messages', 2, Length(Msgs));
@@ -289,6 +290,135 @@ begin
     Msgs := Conv.Messages;
     AssertEquals('one message', 1, Length(Msgs));
     AssertEquals('user x', 'x', Msgs[0].Content);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TSessionTest.TestAppendMapsRolesAndToolFields;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  SessionId: string;
+  WorkspaceId: Integer;
+  Conv: IConversationStore;
+  Records: TMessageRecordArray;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', WorkspaceId, Err);
+    S.CreateSession(WorkspaceId, SessionId, Err);
+    Conv := TSqliteConversationStore.Create(S, SessionId);
+    Conv.Append(UserMsg('hello'));
+    Conv.Append(AssistantMsg('calling'));
+    Conv.Append(ToolMsg('call_1', 'the time is noon'));
+
+    AssertTrue('query', S.QueryMessages(SessionId, Records, Err));
+    AssertEquals('five rows (user, assistant, 2 calls, tool)', 5,
+      Length(Records));
+    AssertEquals('user role', Ord(mrUser), Ord(Records[0].Role));
+    AssertEquals('assistant role', Ord(mrAssistant), Ord(Records[1].Role));
+    AssertEquals('first call role', Ord(mrToolCall), Ord(Records[2].Role));
+    AssertEquals('call id', 'call_1', Records[2].ToolCallId);
+    AssertEquals('call name', 'get_system_time', Records[2].ToolName);
+    AssertEquals('call reason extracted', 'check the time',
+      Records[2].ToolReason);
+    AssertEquals('tool role', Ord(mrTool), Ord(Records[4].Role));
+    AssertEquals('tool result content', 'the time is noon',
+      Records[4].Content);
+    AssertEquals('tool result name', 'get_system_time', Records[4].ToolName);
+    AssertTrue('tool result ok', Records[4].ToolOk);
+    AssertEquals('tool result duration', 7, Records[4].DurationMs);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TSessionTest.TestQueryMessagesReturnsAllBlocks;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  SessionId: string;
+  WorkspaceId: Integer;
+  Conv: IConversationStore;
+  Records: TMessageRecordArray;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', WorkspaceId, Err);
+    S.CreateSession(WorkspaceId, SessionId, Err);
+    Conv := TSqliteConversationStore.Create(S, SessionId);
+    Conv.Append(UserMsg('hi'));
+    Conv.AppendReasoning('why');
+    Conv.AppendError('bad', 'details');
+
+    AssertTrue('query', S.QueryMessages(SessionId, Records, Err));
+    AssertEquals('three blocks', 3, Length(Records));
+    AssertEquals('reasoning role', Ord(mrReasoning), Ord(Records[1].Role));
+    AssertEquals('reasoning content', 'why', Records[1].Content);
+    AssertEquals('error role', Ord(mrError), Ord(Records[2].Role));
+    AssertEquals('error content', 'bad', Records[2].Content);
+    AssertEquals('error detail', 'details', Records[2].ToolArguments);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TSessionTest.TestBeginFinishTurnAndRequestRecorded;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  SessionId: string;
+  WorkspaceId: Integer;
+  Conv: IConversationStore;
+  TurnId, ReqId: Int64;
+  Turns: TTurnRecordArray;
+  Reqs: TRequestRecordArray;
+  ReqOutcome: TRequestOutcome;
+  TurnOutcome: TTurnOutcome;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', WorkspaceId, Err);
+    S.CreateSession(WorkspaceId, SessionId, Err);
+    Conv := TSqliteConversationStore.Create(S, SessionId);
+
+    TurnId := Conv.BeginTurn;
+    AssertTrue('turn opened', TurnId > 0);
+    ReqId := Conv.BeginRequest(TurnId, 'model-x', 2);
+    AssertTrue('request opened', ReqId > 0);
+    Conv.Append(UserMsg('hi'));
+    Conv.Append(AssistantMsg('calling'));
+
+    ReqOutcome := Default(TRequestOutcome);
+    ReqOutcome.Ok := True;
+    ReqOutcome.RawFinishReason := 'tool_calls';
+    ReqOutcome.Usage.PromptTokens := 10;
+    ReqOutcome.Usage.CompletionTokens := 5;
+    ReqOutcome.Usage.TotalTokens := 15;
+    ReqOutcome.DurationMs := 111;
+    ReqOutcome.FirstTokenMs := 33;
+    Conv.FinishRequest(ReqId, ReqOutcome);
+
+    TurnOutcome := Default(TTurnOutcome);
+    TurnOutcome.Status := tsCompleted;
+    TurnOutcome.FinishReason := 'tool_calls';
+    Conv.FinishTurn(TurnId, TurnOutcome);
+
+    AssertTrue('query turns', S.QueryTurns(SessionId, Turns, Err));
+    AssertEquals('one turn', 1, Length(Turns));
+    AssertEquals('completed', Ord(tsCompleted), Ord(Turns[0].Status));
+    AssertEquals('one request', 1, Turns[0].RequestCount);
+    AssertEquals('prompt is the user message', 'hi', Turns[0].Prompt);
+    AssertEquals('rollup tokens', 15, Turns[0].Usage.TotalTokens);
+
+    AssertTrue('query requests', S.QueryRequests(TurnId, Reqs, Err));
+    AssertEquals('one request', 1, Length(Reqs));
+    AssertEquals('model', 'model-x', Reqs[0].Model);
+    AssertEquals('message count', 2, Reqs[0].MessageCount);
+    AssertEquals('finish', 'tool_calls', Reqs[0].FinishReason);
+    AssertEquals('duration', 111, Reqs[0].DurationMs);
+    AssertEquals('first token', 33, Reqs[0].FirstTokenMs);
   finally
     S.Free;
   end;

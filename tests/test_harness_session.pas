@@ -27,6 +27,7 @@ type
   published
     procedure TestInMemoryBuildsLoopAndTools;
     procedure TestStoreCreatesSessionAndHistoryRoundTrips;
+    procedure TestHistoryRestoresBlocks;
     procedure TestResumeUnknownSessionFails;
     procedure TestMissingWorkspaceFails;
   end;
@@ -87,8 +88,8 @@ var
   Session: THarnessSession;
   Err, Sid: string;
   StoreErr: TStoreError;
-  Rec: TSessionRecord;
-  History: TChatMessageArray;
+  Rec: TMessageRecord;
+  History: TMessageRecordArray;
 begin
   Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
   AssertTrue('opened: ' + Err, Session <> nil);
@@ -97,12 +98,12 @@ begin
     AssertEquals('session id is 32 hex', 32, Length(Session.SessionId));
     Sid := Session.SessionId;
 
-    Rec := Default(TSessionRecord);
+    Rec := Default(TMessageRecord);
     Rec.SessionId := Sid;
-    Rec.Kind := srkUserMessage;
+    Rec.Role := mrUser;
     Rec.Content := 'hello from a previous run';
-    AssertTrue('append record',
-      Session.Store.AppendSessionRecord(Rec, StoreErr));
+    AssertTrue('append block',
+      Session.Store.AppendMessage(Rec, StoreErr));
   finally
     Session.Free;
   end;
@@ -114,6 +115,59 @@ begin
     AssertEquals('history restored', 1, Length(History));
     AssertEquals('history content', 'hello from a previous run',
       History[0].Content);
+  finally
+    Session.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestHistoryRestoresBlocks;
+var
+  Session: THarnessSession;
+  Err, Sid: string;
+  StoreErr: TStoreError;
+  TurnId: Int64;
+  Rec: TMessageRecord;
+  History: TMessageRecordArray;
+begin
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    Sid := Session.SessionId;
+    AssertTrue('begin turn', Session.Store.BeginTurn(Sid, TurnId, StoreErr));
+    Rec := Default(TMessageRecord);
+    Rec.SessionId := Sid;
+    Rec.TurnId := TurnId;
+    Rec.Role := mrUser;
+    Rec.Content := 'do it';
+    AssertTrue('user', Session.Store.AppendMessage(Rec, StoreErr));
+    Rec := Default(TMessageRecord);
+    Rec.SessionId := Sid;
+    Rec.TurnId := TurnId;
+    Rec.Role := mrReasoning;
+    Rec.Content := 'thinking';
+    AssertTrue('reasoning', Session.Store.AppendMessage(Rec, StoreErr));
+    Rec := Default(TMessageRecord);
+    Rec.SessionId := Sid;
+    Rec.TurnId := TurnId;
+    Rec.Role := mrToolCall;
+    Rec.ToolCallId := 'c1';
+    Rec.ToolName := 'run_command';
+    Rec.ToolArguments := '{"command":"date"}';
+    Rec.ToolReason := 'check the date';
+    AssertTrue('tool call', Session.Store.AppendMessage(Rec, StoreErr));
+  finally
+    Session.Free;
+  end;
+
+  Session := THarnessSession.Open(Config(FStorePath, Sid, True), Err);
+  AssertTrue('reopened: ' + Err, Session <> nil);
+  try
+    History := Session.History;
+    AssertEquals('three blocks', 3, Length(History));
+    AssertEquals('user', Ord(mrUser), Ord(History[0].Role));
+    AssertEquals('reasoning', Ord(mrReasoning), Ord(History[1].Role));
+    AssertEquals('tool call', Ord(mrToolCall), Ord(History[2].Role));
+    AssertEquals('reason restored', 'check the date', History[2].ToolReason);
   finally
     Session.Free;
   end;

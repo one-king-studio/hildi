@@ -20,7 +20,7 @@ uses
   hildegard.helper.tui.approvalmodal,
   hildegard.helper.tui.panel, hildegard.helper.tui.theme,
   hildegard.helper.tui.app, hildegard.helper.harness.turn,
-  hildegard.helper.harness.session;
+  hildegard.helper.harness.session, hildegard.helper.session;
 
 type
   { Builds the tree and owns the TTuiApp and the current worker. The session is
@@ -213,23 +213,58 @@ end;
 
 procedure THarnessApp.RenderHistory;
 var
-  History: TChatMessageArray;
-  I: Integer;
-  Msg: TChatMessage;
+  History: TMessageRecordArray;
+  I, Head: Integer;
+  Rec: TMessageRecord;
+  ToolBlocks: array of TChatItem;
+  Block: TChatItem;
 begin
   History := FSession.History;
+  Head := 0;
+  ToolBlocks := nil;
   for I := 0 to High(History) do
   begin
-    Msg := History[I];
-    case Msg.Role of
-      crUser:
-        FPanel.Stream.Add(ckUser, '', Msg.Content);
-      crTool:
-        FPanel.Stream.Add(ckTool, 'result', Msg.Content);
-      crSystem:
-        FPanel.Stream.Add(ckThought, 'system', Msg.Content);
-    else
-      FPanel.Stream.Add(ckAssistant, '', Msg.Content);
+    Rec := History[I];
+    case Rec.Role of
+      mrUser:
+        FPanel.Stream.Add(ckUser, '', Rec.Content);
+      mrAssistant:
+        { An intermediate assistant row can be empty (it only carried tool
+          calls), so do not draw an empty bubble. }
+        if Rec.Content <> '' then
+          FPanel.Stream.Add(ckAssistant, '', Rec.Content);
+      mrReasoning:
+        FPanel.Stream.Add(ckThought, 'Thought', Rec.Content);
+      mrToolCall:
+        begin
+          if Rec.ToolReason <> '' then
+            Block := FPanel.Stream.Add(ckTool, Rec.ToolReason,
+              Rec.ToolName + '  ' + Rec.ToolArguments)
+          else
+            Block := FPanel.Stream.Add(ckTool, Rec.ToolName,
+              Rec.ToolArguments);
+          Block.Expanded := False;
+          SetLength(ToolBlocks, Length(ToolBlocks) + 1);
+          ToolBlocks[High(ToolBlocks)] := Block;
+        end;
+      mrTool:
+        { Results follow their calls in order; pair them, and fall back to a
+          standalone block when the call was trimmed from the history. }
+        if Head <= High(ToolBlocks) then
+        begin
+          Block := ToolBlocks[Head];
+          Inc(Head);
+          if Rec.ToolOk then
+            Block.AppendText(#10 + #10 + '[ok] ' + Rec.Content)
+          else
+            Block.AppendText(#10 + #10 + '[failed] ' + Rec.Content);
+        end
+        else
+          FPanel.Stream.Add(ckTool, Rec.ToolName, Rec.Content);
+      mrError:
+        FPanel.Stream.Add(ckError, '', Rec.Content);
+      mrSystem:
+        FPanel.Stream.Add(ckThought, 'system', Rec.Content);
     end;
   end;
 end;
