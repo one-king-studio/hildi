@@ -44,6 +44,20 @@ type
       encoder's cursor/attribute state. }
     function Encode(const APrev, ACur: array of TCell;
       AWidth, AHeight: Integer; AForce: Boolean): RawByteString;
+    { Erase from column AX to the end of each of AHeight rows, in AAttr. Some
+      terminals keep columns at the right edge that TIOCGWINSZ does not report
+      (the macOS overlay scrollbar strip), so a resize leaves stale cells there
+      that no in-bounds paint can reach; EL reaches them without touching the
+      cells to the left. Emit it before a full repaint: where the terminal has no
+      extra columns the cursor clamps to the last reported cell and the repaint
+      that follows rewrites it. }
+    function ClearOverflowColumn(AX, AHeight: Integer;
+      const AAttr: TAttr): RawByteString;
+    { Erase the whole display in AAttr. Used on a resize, where a full repaint
+      follows anyway, so it costs nothing visually but guarantees no stale cell
+      survives anywhere the terminal's grid reaches - including columns and rows
+      it never reports. }
+    function ClearDisplay(const AAttr: TAttr): RawByteString;
   end;
 
 { Display width of a cluster: 2 for East Asian wide/fullwidth, 1 otherwise
@@ -240,6 +254,34 @@ begin
     else
       Inc(I);
   end;
+  Result := FBuf;
+end;
+
+function TCellEncoder.ClearOverflowColumn(AX, AHeight: Integer;
+  const AAttr: TAttr): RawByteString;
+var
+  Y: Integer;
+begin
+  FBuf := '';
+  if (AX < 0) or (AHeight <= 0) then
+    Exit('');
+  for Y := 0 to AHeight - 1 do
+  begin
+    MoveTo(AX, Y);
+    ApplyAttr(AAttr);
+    { EL: erase from the cursor to the end of the line, however wide the
+      terminal's line really is. }
+    Out(#27'[K');
+    FCurX := AX;
+  end;
+  Result := FBuf;
+end;
+
+function TCellEncoder.ClearDisplay(const AAttr: TAttr): RawByteString;
+begin
+  FBuf := '';
+  ApplyAttr(AAttr);
+  Out(#27'[2J');
   Result := FBuf;
 end;
 

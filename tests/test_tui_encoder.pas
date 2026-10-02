@@ -29,6 +29,9 @@ type
     procedure TestWideClusterAtRightEdgeBecomesSpace;
     procedure TestRemovingWideClusterEmitsLead;
     procedure TestControlCharsSanitized;
+    procedure TestOverflowColumnErasesToEndOfLine;
+    procedure TestOverflowColumnEmptyForNoRows;
+    procedure TestClearDisplayErasesWholeScreen;
   end;
 
 implementation
@@ -269,6 +272,58 @@ begin
       Contains(OutBytes, #27'[2J'));
     AssertTrue('replacement char shown',
       Contains(OutBytes, UTF8Encode(WideChar($FFFD))));
+  finally
+    Enc.Free;
+  end;
+end;
+
+procedure TTuiEncoderTest.TestOverflowColumnErasesToEndOfLine;
+var
+  Enc: TCellEncoder;
+  OutBytes: RawByteString;
+  I, Erases: Integer;
+begin
+  Enc := TCellEncoder.Create;
+  try
+    OutBytes := Enc.ClearOverflowColumn(3, 2, DefaultAttr);
+    { Row 0, column 4 (1-based), then EL; then row 1, column 4, then EL. }
+    AssertTrue('positions row 1 at the overflow column',
+      Contains(OutBytes, #27'[1;4H'));
+    AssertTrue('positions row 2 at the overflow column',
+      Contains(OutBytes, #27'[2;4H'));
+    Erases := 0;
+    for I := 1 to Length(OutBytes) - 2 do
+      if Copy(OutBytes, I, 3) = #27'[K' then
+        Inc(Erases);
+    AssertEquals('one erase per row', 2, Erases);
+  finally
+    Enc.Free;
+  end;
+end;
+
+procedure TTuiEncoderTest.TestOverflowColumnEmptyForNoRows;
+var
+  Enc: TCellEncoder;
+begin
+  Enc := TCellEncoder.Create;
+  try
+    AssertEquals('no rows, no bytes', 0,
+      Length(Enc.ClearOverflowColumn(3, 0, DefaultAttr)));
+    AssertEquals('negative column, no bytes', 0,
+      Length(Enc.ClearOverflowColumn(-1, 5, DefaultAttr)));
+  finally
+    Enc.Free;
+  end;
+end;
+
+procedure TTuiEncoderTest.TestClearDisplayErasesWholeScreen;
+var
+  Enc: TCellEncoder;
+begin
+  Enc := TCellEncoder.Create;
+  try
+    AssertTrue('erases the display', Contains(Enc.ClearDisplay(DefaultAttr),
+      #27'[2J'));
   finally
     Enc.Free;
   end;
