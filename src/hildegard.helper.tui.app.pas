@@ -277,7 +277,9 @@ begin
   case E.Kind of
     ikResize:
       begin
-        { Re-arrange every plane (base and any modal) to the new size. }
+        { Adopt the settled size before laying out, so the layout and the surface
+          always agree; the surface no longer polls the terminal itself. }
+        FSurface.Resize(E.NewSize.W, E.NewSize.H);
         ArrangePlanes;
         FLayoutDirty := False;
       end;

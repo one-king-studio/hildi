@@ -21,6 +21,11 @@ type
   ISurface = interface
     function Width: Integer;
     function Height: Integer;
+    { Adopt a new size and request a full repaint. The app calls this when the
+      input source reports a settled terminal resize, so the surface never polls
+      the terminal itself and a window drag cannot repaint every intermediate
+      size. }
+    procedure Resize(AWidth, AHeight: Integer);
     procedure Clear(const AAttr: TAttr);
     procedure Put(X, Y: Integer; const ACell: TCell);
     procedure FillRect(const R: TRect; const AAttr: TAttr);

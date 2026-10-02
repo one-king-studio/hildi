@@ -40,6 +40,10 @@ type
     procedure TestParseOsc11Background;
     procedure TestDecodeShiftEnter;
     procedure TestDecodeAltBackspace;
+    { Resize debounce. }
+    procedure TestResizeSettlerWaitsForAPause;
+    procedure TestResizeSettlerRestartsWhileMoving;
+    procedure TestResizeSettlerIgnoresTheCurrentSize;
   end;
 
 implementation
@@ -545,6 +549,49 @@ begin
   finally
     D.Free;
   end;
+end;
+
+procedure TTuiInputTest.TestResizeSettlerWaitsForAPause;
+var
+  S: TResizeSettler;
+  C, R: Integer;
+begin
+  S.Init(100, 24);
+  AssertFalse('a change is not reported at once',
+    S.Feed(80, 24, 1000, 80, C, R));
+  AssertTrue('and is pending', S.Pending);
+  AssertFalse('nor before the pause has elapsed',
+    S.Feed(80, 24, 1050, 80, C, R));
+  AssertTrue('reported once it has settled', S.Feed(80, 24, 1080, 80, C, R));
+  AssertEquals('settled columns', 80, C);
+  AssertEquals('settled rows', 24, R);
+  AssertFalse('nothing left pending', S.Pending);
+end;
+
+procedure TTUiInputTest.TestResizeSettlerRestartsWhileMoving;
+var
+  S: TResizeSettler;
+  C, R: Integer;
+begin
+  S.Init(100, 24);
+  AssertFalse('first step', S.Feed(90, 24, 1000, 80, C, R));
+  AssertFalse('second step restarts the timer', S.Feed(80, 24, 1050, 80, C, R));
+  AssertFalse('still inside the second pause',
+    S.Feed(80, 24, 1100, 80, C, R));
+  AssertTrue('reported after the second pause',
+    S.Feed(80, 24, 1130, 80, C, R));
+  AssertEquals('only the final size is reported', 80, C);
+end;
+
+procedure TTUiInputTest.TestResizeSettlerIgnoresTheCurrentSize;
+var
+  S: TResizeSettler;
+  C, R: Integer;
+begin
+  S.Init(100, 24);
+  AssertFalse('the current size is not a resize',
+    S.Feed(100, 24, 5000, 80, C, R));
+  AssertFalse('and leaves nothing pending', S.Pending);
 end;
 
 initialization

@@ -27,8 +27,9 @@ type
     FClips: array of TRect;
     FClipCount: Integer;
     FNeedFullRepaint: Boolean;
+    FSizeChanged: Boolean;
     FEncoder: TCellEncoder;
-    procedure SyncSize;
+    procedure InitSize;
     procedure WriteOut(const AData: RawByteString);
     function EffectiveClip: TRect;
     function Intersect(const A, B: TRect): TRect;
@@ -46,6 +47,7 @@ type
     procedure PushClip(const R: TRect);
     procedure PopClip;
     procedure Invalidate;
+    procedure Resize(AWidth, AHeight: Integer);
     procedure SetScreenBg(AIndex: Byte);
     procedure Flush;
   end;
@@ -98,7 +100,8 @@ begin
   SetCursorType(crHidden);
   WriteOut(#27'[?7l');          { autowrap off: we always position explicitly }
   FNeedFullRepaint := True;
-  SyncSize;
+  FSizeChanged := False;
+  InitSize;
 end;
 
 destructor TSurfaceVideo.Destroy;
@@ -126,32 +129,45 @@ begin
   end;
 end;
 
-procedure TSurfaceVideo.SyncSize;
+procedure TSurfaceVideo.InitSize;
 {$ifdef unix}
 var
   WS: TWinsize;
 {$endif}
 begin
+  { Read the terminal size once, at startup. Later resizes arrive through Resize,
+    so the surface never adopts an intermediate size in the middle of a drag. }
   {$ifdef unix}
   FillChar(WS, SizeOf(WS), 0);
   if (fpioctl(0, TIOCGWINSZ, @WS) = 0) and (WS.ws_col > 0) and
-    (WS.ws_row > 0) and ((WS.ws_col <> FWidth) or (WS.ws_row <> FHeight)) then
+    (WS.ws_row > 0) then
   begin
     FWidth := WS.ws_col;
     FHeight := WS.ws_row;
-    SetLength(FCells, FWidth * FHeight);
-    SetLength(FPrev, FWidth * FHeight);
-    FNeedFullRepaint := True;
   end;
   {$endif}
   if (FWidth <= 0) or (FHeight <= 0) then
   begin
     FWidth := 80;
     FHeight := 25;
-    SetLength(FCells, FWidth * FHeight);
-    SetLength(FPrev, FWidth * FHeight);
-    FNeedFullRepaint := True;
   end;
+  SetLength(FCells, FWidth * FHeight);
+  SetLength(FPrev, FWidth * FHeight);
+  FNeedFullRepaint := True;
+end;
+
+procedure TSurfaceVideo.Resize(AWidth, AHeight: Integer);
+begin
+  if (AWidth <= 0) or (AHeight <= 0) then
+    Exit;
+  if (AWidth = FWidth) and (AHeight = FHeight) then
+    Exit;
+  FWidth := AWidth;
+  FHeight := AHeight;
+  SetLength(FCells, FWidth * FHeight);
+  SetLength(FPrev, FWidth * FHeight);
+  FNeedFullRepaint := True;
+  FSizeChanged := True;
 end;
 
 function TSurfaceVideo.IndexOf(X, Y: Integer): Integer;
@@ -208,13 +224,11 @@ end;
 
 function TSurfaceVideo.Width: Integer;
 begin
-  SyncSize;
   Result := FWidth;
 end;
 
 function TSurfaceVideo.Height: Integer;
 begin
-  SyncSize;
   Result := FHeight;
 end;
 
@@ -301,12 +315,19 @@ var
   Full: Boolean;
   I: Integer;
 begin
-  SyncSize;
   Full := FNeedFullRepaint;
   if Full then
     FEncoder.Reset;
-  Data := FEncoder.Encode(FPrev, FCells, FWidth, FHeight, Full);
+  { Erase the terminal's own columns just past the width we paint, and the whole
+    display, before the repaint, so the encoder's state stays in step. }
+  if FSizeChanged then
+    Data := FEncoder.ClearDisplay(DefaultAttr) +
+      FEncoder.ClearOverflowColumn(FWidth, FHeight, DefaultAttr)
+  else
+    Data := '';
+  Data := Data + FEncoder.Encode(FPrev, FCells, FWidth, FHeight, Full);
   FNeedFullRepaint := False;
+  FSizeChanged := False;
   WriteOut(Data);
   for I := 0 to High(FCells) do
     FPrev[I] := FCells[I];

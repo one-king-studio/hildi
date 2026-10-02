@@ -13,14 +13,14 @@ unit hildegard.helper.tui.input.terminal;
 interface
 
 uses
-  termio,
+  termio, hildegard.helper.tui.clock,
   hildegard.helper.tui.base, hildegard.helper.tui.input,
   hildegard.helper.tui.input.decode;
 
 type
   TInputSourceTerminal = class(TInterfacedObject, IInputSource)
   private
-    FLastCol, FLastRow: Integer;
+    FResize: TResizeSettler;
     FInputFd: Integer;
     FOpenedTty: Boolean;
     FOldTio: termios;
@@ -113,15 +113,9 @@ begin
   FillChar(WS, SizeOf(WS), 0);
   if (fpioctl(FInputFd, TIOCGWINSZ, @WS) = 0) and (WS.ws_col > 0) and
     (WS.ws_row > 0) then
-  begin
-    FLastCol := WS.ws_col;
-    FLastRow := WS.ws_row;
-  end
+    FResize.Init(WS.ws_col, WS.ws_row)
   else
-  begin
-    FLastCol := 80;
-    FLastRow := 25;
-  end;
+    FResize.Init(80, 25);
 end;
 
 destructor TInputSourceTerminal.Destroy;
@@ -237,23 +231,28 @@ begin
 end;
 
 function TInputSourceTerminal.ResizeEvent(out AEvent: TInputEvent): Boolean;
+const
+  { Report a resize only once the size has held still this long, so dragging a
+    window edge does not re-lay-out and repaint on every intermediate size. }
+  SettleMs = 80;
 var
   WS: TWinsize;
+  Cols, Rows: Integer;
 begin
   AEvent := Default(TInputEvent);
   Result := False;
   FillChar(WS, SizeOf(WS), 0);
   if fpioctl(FInputFd, TIOCGWINSZ, @WS) <> 0 then
     Exit;
-  if (WS.ws_col <= 0) or (WS.ws_row <= 0) then
+  Cols := WS.ws_col;
+  Rows := WS.ws_row;
+  if (Cols <= 0) or (Rows <= 0) then
     Exit;
-  if (WS.ws_col <> FLastCol) or (WS.ws_row <> FLastRow) then
+  if FResize.Feed(Cols, Rows, MonotonicMs, SettleMs, Cols, Rows) then
   begin
-    FLastCol := WS.ws_col;
-    FLastRow := WS.ws_row;
     AEvent.Kind := ikResize;
-    AEvent.NewSize.W := WS.ws_col;
-    AEvent.NewSize.H := WS.ws_row;
+    AEvent.NewSize.W := Cols;
+    AEvent.NewSize.H := Rows;
     Result := True;
   end;
 end;
@@ -320,6 +319,10 @@ begin
     laggy UI; select wakes the moment a key arrives. }
   fpFD_ZERO(Fds);
   fpFD_SET(FInputFd, Fds);
+  { While a resize is settling, wake at least that often so the settle is
+    reported promptly even when the app is idle. }
+  if FResize.Pending and ((ATimeoutMs < 0) or (ATimeoutMs > 80)) then
+    ATimeoutMs := 80;
   if ATimeoutMs < 0 then
     fpSelect(FInputFd + 1, @Fds, nil, nil, nil)
   else
