@@ -1,10 +1,13 @@
 unit hildegard.helper.tui.chatpanel;
 { The chat column: a bordered messages panel holding a TChatStream, a compose
-  box that overlays it as it grows, a CTA strip above the compose, and a status
-  line below.
+  box that overlays it as it grows, a toolbar strip above the compose, and a
+  two-part status line below.
 
   The compose overlays rather than reflows, so growing the input never moves the
-  conversation. }
+  conversation. The toolbar and the status line are each left/right split: the
+  run state and the workspace on the left, the interaction hints and the metrics
+  on the right. Both are inset by inline padding so their content does not touch
+  the panel edges. }
 
 {$mode delphi}{$H+}{$codepage utf8}
 
@@ -20,21 +23,32 @@ uses
   hildegard.helper.tui.compose;
 
 type
+  { What the run is doing, shown at the left of the toolbar. psThinking and
+    psTool animate the sparkle; the others are static icons. }
+  TPanelState = (psReady, psThinking, psTool, psApproval, psError);
+
   TChatPanel = class(TWidget)
   private
     FTheme: TTheme;
     FMessages: TPanel;
     FStream: TChatStream;
     FCta: TPanel;
-    FCtaText: TTextBlock;
+    FCtaRow: TContainer;
+    FStateBlock: TTextBlock;
+    FHintsBlock: TTextBlock;
     FCompose: TComposeBox;
     FStatus: TTextBlock;
     FStats: TTextBlock;
     FStatusText: string;
     FStatsText: string;
+    FStateKind: TPanelState;
+    FStateLabel: string;
+    FStateSpans: array[0..1] of TSpan;
+    FSpark: UnicodeString;
+    procedure RenderState;
     procedure FitStatus;
   public
-    constructor Create(const ATheme: TTheme; const AInfo, ACta: string);
+    constructor Create(const ATheme: TTheme; const AInfo, AHints: string);
     destructor Destroy; override;
     function Measure(const AAvail: TSize): TSize; override;
     procedure Arrange(const ABounds: TRect); override;
@@ -44,10 +58,14 @@ type
     function Animating: Boolean; override;
     property Stream: TChatStream read FStream;
     property Compose: TComposeBox read FCompose;
+    { The left part of the status row (the workspace). }
     procedure SetStatus(const AText: string);
     { The right-aligned metrics line, sharing the status row. }
     procedure SetStats(const AText: string);
-    procedure SetCta(const AText: string);
+    { The left of the toolbar: what the run is doing. }
+    procedure SetState(AKind: TPanelState; const ALabel: string);
+    { The right of the toolbar: the interaction hints. }
+    procedure SetHints(const AText: string);
     { Disable input while a turn runs, keeping whatever was typed. }
     procedure SetComposeActive(AValue: Boolean);
   end;
@@ -57,6 +75,9 @@ implementation
 const
   { The compose never takes more than this share of the panel height. }
   MaxComposePercent = 60;
+  { Inline padding for the toolbar and the status row, so their content does not
+    touch the panel edges. }
+  ChromePad = 2;
 
 function Rc(AX, AY, AW, AH: Integer): TRect;
 begin
@@ -65,6 +86,39 @@ begin
   Result.Y := AY;
   Result.W := AW;
   Result.H := AH;
+end;
+
+function StateIcon(AKind: TPanelState): UnicodeString;
+begin
+  case AKind of
+    psReady:
+      Result := '✓';
+    psApproval:
+      Result := '?';
+    psError:
+      Result := '✗';
+  else
+    Result := '';   // the animated states show the sparkle instead
+  end;
+end;
+
+function StateAttr(const ATheme: TTheme; AKind: TPanelState): TAttr;
+begin
+  case AKind of
+    psReady:
+      Result := ATheme.Success;
+    psApproval:
+      Result := ATheme.Warn;
+    psError:
+      Result := ATheme.Error;
+  else
+    Result := ATheme.Accent;
+  end;
+end;
+
+function StateAnimated(AKind: TPanelState): Boolean;
+begin
+  Result := AKind in [psThinking, psTool];
 end;
 
 { The first whole clusters of AText that fit in AMax display columns. }
@@ -88,7 +142,7 @@ begin
   end;
 end;
 
-constructor TChatPanel.Create(const ATheme: TTheme; const AInfo, ACta: string);
+constructor TChatPanel.Create(const ATheme: TTheme; const AInfo, AHints: string);
 var
   Style: TBoxStyle;
 begin
@@ -105,21 +159,32 @@ begin
   Style.Padding := 0;
   FMessages := TPanel.Create(FStream, ATheme, Style);
 
-  { The CTA/stats strip above the compose: filled, no border, inside the
-    messages panel's borders. }
-  FCtaText := TTextBlock.Create([], wmNone);
-  FCtaText.SetText(ACta, ATheme.Muted);
+  { The toolbar: the run state on the left, the hints on the right, split by a
+    two-column grid (auto | fill). The right cell is full width, so the hints
+    block right-aligns within it. }
+  FStateBlock := TTextBlock.Create([], wmNone);
+  FHintsBlock := TTextBlock.Create([], wmNone);
+  FHintsBlock.Align := taRight;
+  FCtaRow := TContainer.Create([Auto, Fill(1)], [Auto]);
+  FCtaRow.Add(FStateBlock, 0, 0);
+  FCtaRow.Add(FHintsBlock, 1, 0);
   Style := DefaultBoxStyle;
   Style.Title := '';
   Style.Border := False;
   Style.Padding := 0;
-  FCta := TPanel.Create(FCtaText, ATheme, Style);
+  FCta := TPanel.Create(FCtaRow, ATheme, Style);
 
   FCompose := TComposeBox.Create(ATheme, AInfo);
 
   FStatus := TTextBlock.Create([], wmNone);
   FStats := TTextBlock.Create([], wmNone);
   FStats.Align := taRight;
+
+  FStateKind := psReady;
+  FStateLabel := 'ready';
+  FSpark := ThinkingSparkle(0);
+  RenderState;
+  SetHints(AHints);
 end;
 
 destructor TChatPanel.Destroy;
@@ -132,6 +197,18 @@ begin
   inherited Destroy;
 end;
 
+procedure TChatPanel.RenderState;
+begin
+  if StateAnimated(FStateKind) then
+    FStateSpans[0].Text := FSpark
+  else
+    FStateSpans[0].Text := StateIcon(FStateKind);
+  FStateSpans[0].Attr := StateAttr(FTheme, FStateKind);
+  FStateSpans[1].Text := UnicodeString(' ' + FStateLabel);
+  FStateSpans[1].Attr := FTheme.Muted;
+  FStateBlock.SetSpans(FStateSpans);
+end;
+
 function TChatPanel.Measure(const AAvail: TSize): TSize;
 begin
   Result := AAvail;
@@ -139,7 +216,7 @@ end;
 
 procedure TChatPanel.Arrange(const ABounds: TRect);
 var
-  MessagesH, ComposeH, MaxH, ComposeY: Integer;
+  MessagesH, ComposeH, MaxH, ComposeY, ChromeW, ChromeX: Integer;
 begin
   inherited Arrange(ABounds);
   MessagesH := ABounds.H - 1;   { the status line }
@@ -165,12 +242,16 @@ begin
   FStream.BottomInset := ABounds.Y + MessagesH - ComposeY;
 
   FMessages.Arrange(Rc(ABounds.X, ABounds.Y, ABounds.W, MessagesH));
-  FStatus.Arrange(Rc(ABounds.X + 1, ABounds.Y + ABounds.H - 1, ABounds.W - 2, 1));
-  FStats.Arrange(Rc(ABounds.X + 1, ABounds.Y + ABounds.H - 1, ABounds.W - 2, 1));
   FCompose.Arrange(Rc(ABounds.X, ComposeY, ABounds.W, ComposeH));
-  { The CTA strip sits above the compose, inside the messages panel's borders
-    and short of the scrollbar column, so those borders are not overwritten. }
-  FCta.Arrange(Rc(ABounds.X + 1, ComposeY - 1, ABounds.W - 3, 1));
+  { The toolbar and the status row share the same inset, so their content lines
+    up and neither touches the panel edge. }
+  ChromeX := ABounds.X + ChromePad;
+  ChromeW := ABounds.W - 2 * ChromePad;
+  if ChromeW < 1 then
+    ChromeW := 1;
+  FCta.Arrange(Rc(ChromeX, ComposeY - 1, ChromeW, 1));
+  FStatus.Arrange(Rc(ChromeX, ABounds.Y + ABounds.H - 1, ChromeW, 1));
+  FStats.Arrange(Rc(ChromeX, ABounds.Y + ABounds.H - 1, ChromeW, 1));
   FitStatus;
 end;
 
@@ -195,15 +276,28 @@ begin
 end;
 
 function TChatPanel.Advance(const ANowMs: Int64): Boolean;
+var
+  NewSpark: UnicodeString;
 begin
   Result := FCompose.Advance(ANowMs);
   if FMessages.Advance(ANowMs) then
     Result := True;
+  if StateAnimated(FStateKind) then
+  begin
+    NewSpark := ThinkingSparkle(ANowMs);
+    if NewSpark <> FSpark then
+    begin
+      FSpark := NewSpark;
+      RenderState;
+      Result := True;
+    end;
+  end;
 end;
 
 function TChatPanel.Animating: Boolean;
 begin
-  Result := FCompose.Animating or FMessages.Animating;
+  Result := FCompose.Animating or FMessages.Animating or
+    StateAnimated(FStateKind);
 end;
 
 procedure TChatPanel.SetStatus(const AText: string);
@@ -220,6 +314,18 @@ begin
   FitStatus;
 end;
 
+procedure TChatPanel.SetState(AKind: TPanelState; const ALabel: string);
+begin
+  FStateKind := AKind;
+  FStateLabel := ALabel;
+  RenderState;
+end;
+
+procedure TChatPanel.SetHints(const AText: string);
+begin
+  FHintsBlock.SetText(AText, FTheme.Muted);
+end;
+
 { Keep the left status short of the right-aligned stats, so a long workspace
   path does not run into the metrics on a narrow terminal. }
 procedure TChatPanel.FitStatus;
@@ -228,18 +334,15 @@ var
 begin
   if FBounds.W <= 0 then
     Exit;
-  RowW := FBounds.W - 2;
+  RowW := FBounds.W - 2 * ChromePad;
+  if RowW < 1 then
+    RowW := 1;
   StatsW := StringWidth(UnicodeString(FStatsText));
   if StatsW >= RowW - 1 then
     FStatus.SetText('', FTheme.Muted)
   else
     FStatus.SetText(string(FitWidth(UnicodeString(FStatusText),
       RowW - StatsW - 2)), FTheme.Muted);
-end;
-
-procedure TChatPanel.SetCta(const AText: string);
-begin
-  FCtaText.SetText(AText, FTheme.Muted);
 end;
 
 procedure TChatPanel.SetComposeActive(AValue: Boolean);

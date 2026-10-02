@@ -26,6 +26,9 @@ type
     procedure TestStatusRendersOnTheLastRow;
     procedure TestStatsLineRendersRightAligned;
     procedure TestLongWorkspaceIsTrimmedForStats;
+    procedure TestToolbarSplitsStateAndHints;
+    procedure TestReadyStateShowsACheck;
+    procedure TestThinkingStateAnimates;
     procedure TestCtaRendersAboveTheCompose;
     procedure TestInactiveComposeIgnoresInput;
     procedure TestLastMessageKeepsTwoBlankRowsAboveTheCompose;
@@ -226,6 +229,83 @@ begin
       AssertEquals('and the row above that', '', S.CellAt(2, CtaRow - 2).Ch);
       AssertTrue('the last message sits above the pad',
         Pos('line 20', S.RowText(CtaRow - 3, 0, 40)) > 0);
+    finally
+      P.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatPanelTest.TestToolbarSplitsStateAndHints;
+var
+  P: TChatPanel;
+  S: TSurfaceMemory;
+begin
+  S := TSurfaceMemory.Create(60, 20);
+  try
+    P := TChatPanel.Create(FTheme, 'info', 'hints here');
+    try
+      P.SetState(psReady, 'ready');
+      P.Arrange(Rc(0, 0, 60, 20));
+      P.Render(S);
+      { The toolbar is on the row above the compose; the state is left, the
+        hints right. }
+      AssertTrue('state on the left',
+        Pos('ready', S.RowText(13, 0, 20)) > 0);
+      AssertTrue('hints on the right',
+        Pos('hints here', S.RowText(13, 48, 12)) > 0);
+    finally
+      P.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatPanelTest.TestReadyStateShowsACheck;
+var
+  P: TChatPanel;
+  S: TSurfaceMemory;
+begin
+  S := TSurfaceMemory.Create(40, 20);
+  try
+    P := TChatPanel.Create(FTheme, 'info', '');
+    try
+      P.SetState(psReady, 'ready');
+      P.Arrange(Rc(0, 0, 40, 20));
+      P.Render(S);
+      AssertTrue('green check glyph (U+2713)',
+        Ord(S.CellAt(2, 13).Ch[1]) = $2713);
+    finally
+      P.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatPanelTest.TestThinkingStateAnimates;
+var
+  P: TChatPanel;
+  S: TSurfaceMemory;
+  First: Integer;
+begin
+  S := TSurfaceMemory.Create(40, 20);
+  try
+    P := TChatPanel.Create(FTheme, 'info', '');
+    try
+      P.SetState(psThinking, 'thinking');
+      AssertTrue('animating while thinking', P.Animating);
+      P.Arrange(Rc(0, 0, 40, 20));
+      P.Advance(0);
+      P.Render(S);
+      First := Ord(S.CellAt(2, 13).Ch[1]);
+      AssertTrue('a sparkle, not a space', First <> Ord(' '));
+      P.Advance(90);
+      P.Render(S);
+      AssertTrue('the sparkle advanced',
+        Ord(S.CellAt(2, 13).Ch[1]) <> First);
     finally
       P.Free;
     end;

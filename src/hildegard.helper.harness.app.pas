@@ -42,9 +42,9 @@ type
     FAskQueue: array of TTurnEvent;
     FStatusText: string;
     FStatsText: string;
-    FCtaText: string;
+    FHintsText: string;
+    FStateLabel: string;
     { The blocks of the turn in flight, so deltas land in the right one. }
-    FThinking: TChatItem;
     FAssistant: TChatItem;
     FThought: TChatItem;
     FTool: TChatItem;
@@ -52,14 +52,13 @@ type
     procedure Submit(const AText: string);
     procedure DrainQueue;
     procedure HandleTurnEvent(const E: TTurnEvent);
-    procedure DropThinking;
     procedure EnqueueAsk(const E: TTurnEvent);
     procedure ShowNextAsk;
     procedure ShowApproval(const E: TTurnEvent);
     procedure OnApprovalChosen(const AChoice: TApprovalChoice);
     procedure CloseModal;
-    procedure FinishTurn;
-    procedure SetState(const AText: string);
+    procedure FinishTurn(AState: TPanelState; const ALabel: string);
+    procedure SetState(AKind: TPanelState; const ALabel: string);
     procedure UpdateStats;
     procedure AppendUser(const AText: string);
     procedure AppendError(const AText: string);
@@ -96,8 +95,10 @@ type
     property StatusText: string read FStatusText;
     { The status bar's right part (the latest turn's metrics). }
     property StatsText: string read FStatsText;
-    { The CTA toolbar: the state and the interaction hints. }
-    property CtaText: string read FCtaText;
+    { The toolbar's left part: the run state's label. }
+    property StateText: string read FStateLabel;
+    { The toolbar's right part: the interaction hints. }
+    property HintsText: string read FHintsText;
     function ConversationText: string;
   end;
 
@@ -165,7 +166,7 @@ begin
   FApp := TTuiApp.Create(ASurface, AInput, BuildTree);
   FApp.ScreenBg := FTheme.Bg;
   RenderHistory;
-  SetState('ready');
+  SetState(psReady, 'ready');
   UpdateStats;
 end;
 
@@ -198,9 +199,11 @@ begin
   FPanel.Compose.OnSubmit := Submit;
   FPanel.Compose.OnChange := Invalidate;
   { The status bar is two parts: the workspace on the left, the metrics on the
-    right. }
+    right. The toolbar holds the run state and the hints. }
   FStatusText := FSession.WorkspaceRoot;
   FPanel.SetStatus(FStatusText);
+  FHintsText := CtaHints;
+  FPanel.SetHints(FHintsText);
   Result := TAppShell.Create(FPanel, Quit);
 end;
 
@@ -226,12 +229,12 @@ begin
   FApp.Invalidate;
 end;
 
-procedure THarnessApp.SetState(const AText: string);
+procedure THarnessApp.SetState(AKind: TPanelState; const ALabel: string);
 begin
-  { The state is context, so it lives in the CTA toolbar with the hints; the
-    status bar keeps the workspace and the metrics. }
-  FCtaText := AText + '   ' + CtaHints;
-  FPanel.SetCta(FCtaText);
+  { The state is context, so it lives at the left of the CTA toolbar; the hints
+    are at its right and the status bar keeps the workspace and the metrics. }
+  FStateLabel := ALabel;
+  FPanel.SetState(AKind, ALabel);
   FApp.Invalidate;
 end;
 
@@ -310,23 +313,12 @@ begin
   FPanel.SetComposeActive(False);
   FBusy := True;
   SyncBusy;
-  SetState('thinking...');
+  SetState(psThinking, 'thinking');
   FAssistant := nil;
   FThought := nil;
   FTool := nil;
-  FThinking := FPanel.Stream.Add(ckThinking, '', '');
   FWorker := TTurnWorker.Create(FSession.Loop, FSession.Queue, AText);
   FWorker.Start;
-end;
-
-procedure THarnessApp.DropThinking;
-begin
-  if FThinking <> nil then
-  begin
-    FPanel.Stream.Remove(FThinking);
-    FThinking := nil;
-    FApp.Invalidate;
-  end;
 end;
 
 procedure THarnessApp.HandleTurnEvent(const E: TTurnEvent);
@@ -334,21 +326,21 @@ begin
   case E.Kind of
     teAssistantDelta:
       begin
-        DropThinking;
         if FAssistant = nil then
           FAssistant := FPanel.Stream.Add(ckAssistant, '', '');
         FAssistant.AppendText(E.Text);
       end;
     teReasoningDelta:
       begin
-        DropThinking;
         if FThought = nil then
           FThought := FPanel.Stream.Add(ckThought, 'Thought', '');
         FThought.AppendText(E.Text);
       end;
     teToolCall:
       begin
-        DropThinking;
+        { A tool is running; the sparkle keeps animating because the turn is
+          still in flight. }
+        SetState(psTool, 'running ' + E.ToolName);
         { The reason is the block's title, so collapsed tool lines read as the
           story of the agent's decisions; the tool name and arguments are the
           body, visible when expanded. }
@@ -373,19 +365,20 @@ begin
           FPanel.Stream.Add(ckTool, E.ToolName,
             E.Text);
         { The tools are done, so the next deltas belong to the following message:
-          start fresh blocks, after the tool lines. }
+          start fresh blocks, after the tool lines. The turn is still in flight,
+          so the state returns to thinking. }
+        SetState(psThinking, 'thinking');
         FAssistant := nil;
         FThought := nil;
       end;
     teApprovalAsk:
       EnqueueAsk(E);
     teDone:
-      FinishTurn;
+      FinishTurn(psReady, 'ready');
     teError:
       begin
-        DropThinking;
         AppendError(E.Text);
-        FinishTurn;
+        FinishTurn(psError, 'error');
       end;
   else
     ;
@@ -434,7 +427,7 @@ begin
   R.H := FSurface.Height;
   Wrap.Arrange(R);
   FApp.PushPlane(TPlane.Create(Wrap, True, True));
-  SetState('approval needed');
+  SetState(psApproval, 'approval needed');
 end;
 
 procedure THarnessApp.OnApprovalChosen(const AChoice: TApprovalChoice);
@@ -452,10 +445,13 @@ begin
     FApp.PopPlane;
   FModal := nil;
   FCloseModal := False;
+  { The turn resumes once the ask is answered. }
+  if FBusy then
+    SetState(psThinking, 'thinking');
   ShowNextAsk;
 end;
 
-procedure THarnessApp.FinishTurn;
+procedure THarnessApp.FinishTurn(AState: TPanelState; const ALabel: string);
 begin
   if FWorker <> nil then
   begin
@@ -464,13 +460,12 @@ begin
     FWorker.Free;
     FWorker := nil;
   end;
-  DropThinking;
   FBusy := False;
   FAssistant := nil;
   FThought := nil;
   FTool := nil;
   FPanel.SetComposeActive(True);
-  SetState('ready');
+  SetState(AState, ALabel);
   UpdateStats;
   SyncBusy;
 end;

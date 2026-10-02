@@ -9,8 +9,13 @@ and request count - in the status bar, and make the resumed view **identical** t
 the live one: the same turn metrics appear in the same place, so an operator who
 resumes a session picks up exactly where they left off.
 
-The interaction hints move out of the status bar into the CTA strip above the
-compose, which becomes the context toolbar.
+The status bar is two parts (workspace left, metrics right) and the toolbar above
+the compose is two parts (run state left, interaction hints right). The animated
+thinking sparkle moves out of the message stream and into the toolbar, so it
+animates for the whole turn in one fixed place.
+
+The interaction hints move out of the status bar into the toolbar, which becomes
+the context toolbar.
 
 ## Requirements
 
@@ -31,6 +36,18 @@ compose, which becomes the context toolbar.
 - [ ] The status bar keeps the workspace and the state on the left; the CTA strip
       holds the hints.
 - [ ] The CTA's newline hint reads `⇧+↵` (was `⇧↵`).
+
+Toolbar
+
+- [ ] The toolbar is left/right split: the run state on the left, the
+      interaction hints on the right.
+- [ ] The state shows an icon and a label, coloured by role: a green `✓` for
+      ready, the animated sparkle while a turn is in flight, a warn `?` for an
+      approval, and an error `✗` for a failed turn.
+- [ ] The sparkle moves out of the message stream into the toolbar and keeps
+      animating for the whole turn, including while a tool runs.
+- [ ] The toolbar and the status row are inset by inline padding so their
+      content does not touch the panel edges.
 
 ### Non-Functional
 
@@ -72,12 +89,30 @@ function FormatTurnStats(const ATurn: TTurnRecord): string;
 
 ```pascal
 type
+  { What the run is doing, shown at the left of the toolbar. }
+  TPanelState = (psReady, psThinking, psTool, psApproval, psError);
+
   TChatPanel = class(TWidget)
     ...
-    procedure SetStatus(const AText: string);   // left: workspace + state
+    procedure SetStatus(const AText: string);   // left: the workspace
     procedure SetStats(const AText: string);    // right: the turn metrics
+    procedure SetState(AKind: TPanelState; const ALabel: string);  // left
+    procedure SetHints(const AText: string);                       // right
   end;
 ```
+
+### State table
+
+| `TPanelState` | Icon | Colour | Animates | Label |
+| --- | --- | --- | --- | --- |
+| `psReady` | `✓` | `Success` (green) | no | `ready` |
+| `psThinking` | sparkle | `Accent` | yes | `thinking` |
+| `psTool` | sparkle | `Accent` | yes | `running <tool>` |
+| `psApproval` | `?` | `Warn` | no | `approval needed` |
+| `psError` | `✗` | `Error` | no | `error` |
+
+The sparkle cycles every 90 ms (`ThinkingSparkle`), so the toolbar reports a
+live turn and never the stream's transient block.
 
 ### Data Contracts
 

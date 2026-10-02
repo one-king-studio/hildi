@@ -421,7 +421,7 @@ begin
     'Final assistant message. The scrollbar is the same character but rendered ' +
     'in different colors: a darker track and a lighter thumb.' + #10 + '' + #10 +
     'A multi-paragraph response simply applies a gap between paragraphs.');
-  ChatPanel.Stream.Add(ckThinking, '', '');
+  ChatPanel.SetState(psThinking, 'thinking');
   ChatPanel.SetStatus(GetCurrentDir);
   ChatPanel.SetStats('1.2k in · 310 out · 92% cached · 3.4s · 2 req');
 

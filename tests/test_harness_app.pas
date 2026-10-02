@@ -68,6 +68,9 @@ type
     procedure TestStatusShowsStatsAfterATurn;
     procedure TestResumeStatusMatchesLive;
     procedure TestCtaHoldsTheHints;
+    procedure TestThinkingStateDuringATurn;
+    procedure TestReadyStateAfterATurn;
+    procedure TestErrorStateAfterAFailedTurn;
   end;
 
 implementation
@@ -546,11 +549,54 @@ end;
 procedure THarnessAppTest.TestCtaHoldsTheHints;
 begin
   Build;
-  AssertTrue('send hint', Pos('send', FApp.CtaText) > 0);
-  AssertTrue('shift+enter hint', Pos('⇧+↵ newline', FApp.CtaText) > 0);
-  AssertTrue('expand hint', Pos('click a block to expand', FApp.CtaText) > 0);
+  AssertTrue('send hint', Pos('send', FApp.HintsText) > 0);
+  AssertTrue('shift+enter hint', Pos('⇧+↵ newline', FApp.HintsText) > 0);
+  AssertTrue('expand hint', Pos('click a block to expand', FApp.HintsText) > 0);
   AssertFalse('hints are not in the status bar',
     Pos('newline', FApp.StatusText) > 0);
+end;
+
+procedure THarnessAppTest.TestThinkingStateDuringATurn;
+var
+  I: Integer;
+  Seen: Boolean;
+begin
+  Build;
+  FFake.AddChunk(TextDelta('hi'));
+  FFake.AddChunk(FinishFrame('stop'));
+  FFake.AddChunk(DoneFrame);
+  SubmitPrompt('hello');
+  Seen := False;
+  for I := 1 to 300 do
+  begin
+    FApp.Step;
+    if FApp.Busy then
+    begin
+      Seen := True;
+      AssertEquals('thinking while busy', 'thinking', FApp.StateText);
+      Break;
+    end;
+    Sleep(2);
+  end;
+  AssertTrue('the turn started', Seen);
+end;
+
+procedure THarnessAppTest.TestReadyStateAfterATurn;
+begin
+  Build;
+  FFake.AddResponse([TextDelta('hi'), FinishFrame('stop'), DoneFrame]);
+  SubmitPrompt('hello');
+  AssertTrue('turn finished', Pump(300));
+  AssertEquals('ready state', 'ready', FApp.StateText);
+end;
+
+procedure THarnessAppTest.TestErrorStateAfterAFailedTurn;
+begin
+  Build;
+  FFake.FailNetwork := True;
+  SubmitPrompt('hi');
+  AssertTrue('turn finished', Pump(300));
+  AssertEquals('error state', 'error', FApp.StateText);
 end;
 
 initialization

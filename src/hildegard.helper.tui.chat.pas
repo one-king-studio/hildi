@@ -136,6 +136,10 @@ type
     property BottomInset: Integer read FBottomInset write SetBottomInset;
   end;
 
+{ The sparkle glyph for the thinking indicator at time ANowMs: a burst that
+  cycles every 90 ms. Shared by the stream's indicator and the toolbar. }
+function ThinkingSparkle(ANowMs: Int64): UnicodeString;
+
 implementation
 
 const
@@ -163,6 +167,11 @@ begin
   Result := '';
   for I := 1 to ACount do
     Result := Result + ACh;
+end;
+
+function ThinkingSparkle(ANowMs: Int64): UnicodeString;
+begin
+  Result := Sparkles[(ANowMs div 90) mod Length(Sparkles)];
 end;
 
 { TChatItem }

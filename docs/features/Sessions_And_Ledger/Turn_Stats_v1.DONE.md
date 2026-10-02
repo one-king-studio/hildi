@@ -103,3 +103,19 @@ Deviations from the specification, and why:
   the project's `string` is `AnsiString`, and the directive forces
   `AnsiString`↔`UnicodeString` warnings-as-errors. The `·` literal is stored as
   its UTF-8 bytes, matching the existing TUI units.
+
+### Toolbar follow-on
+
+After the first cut, the operator asked for the toolbar to be left/right split
+too, and for the thinking sparkle to move there:
+
+- **The toolbar is `Auto | Fill`**: the run state left, the hints right.
+- **The sparkle moved out of the stream** into the toolbar and animates for the
+  whole turn (including tool execution); `THarnessApp` no longer adds a
+  `ckThinking` block. `ThinkingSparkle` is exported from `tui.chat` so the
+  stream indicator and the toolbar share one cycle.
+- **The states** are `psReady` (green `✓`), `psThinking`/`psTool` (sparkle),
+  `psApproval` (warn `?`), and `psError` (error `✗`); the state is set on
+  submit, on each tool call, on an approval, and on the turn's outcome.
+- **Inline padding** (`ChromePad = 2`) insets the toolbar and the status row so
+  their content does not touch the panel edges.
