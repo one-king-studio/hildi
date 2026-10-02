@@ -641,6 +641,16 @@ begin
       Drop(FinalIdx + 1);
       Exit(Next(AEvent));
     end;
+    if (FBuf[1] = 8) or (FBuf[1] = 127) then
+    begin
+      { A terminal without the kitty keyboard protocol reports Alt+Backspace as
+        ESC DEL (or ESC BS); map it to the modified key so word deletion works. }
+      AEvent.Kind := ikKey;
+      AEvent.Key.Kind := kkBackspace;
+      Include(AEvent.Key.Mods, moAlt);
+      Drop(2);
+      Exit(True);
+    end;
     AEvent.Kind := ikKey;
     AEvent.Key.Kind := kkEscape;
     Drop(1);

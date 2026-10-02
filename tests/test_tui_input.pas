@@ -39,6 +39,7 @@ type
     procedure TestDecodeConsumesOscReply;
     procedure TestParseOsc11Background;
     procedure TestDecodeShiftEnter;
+    procedure TestDecodeAltBackspace;
   end;
 
 implementation
@@ -516,6 +517,31 @@ begin
     D.Feed(Data);
     AssertTrue('shift+enter is enter', D.Next(E) and (E.Key.Kind = kkEnter));
     AssertTrue('with the shift modifier', moShift in E.Key.Mods);
+  finally
+    D.Free;
+  end;
+end;
+
+procedure TTuiInputTest.TestDecodeAltBackspace;
+var
+  D: TKeyDecoder;
+  E: TInputEvent;
+  S: AnsiString;
+  I: Integer;
+  Data: array of Byte;
+begin
+  { A plain terminal sends ESC DEL for Alt+Backspace; both bytes are consumed. }
+  D := TKeyDecoder.Create;
+  try
+    S := #27#127;
+    SetLength(Data, Length(S));
+    for I := 1 to Length(S) do
+      Data[I - 1] := Ord(S[I]);
+    D.Feed(Data);
+    AssertTrue('alt+backspace decoded', D.Next(E));
+    AssertTrue('is a backspace', E.Key.Kind = kkBackspace);
+    AssertTrue('with the alt modifier', moAlt in E.Key.Mods);
+    AssertFalse('and nothing is left behind', D.Next(E));
   finally
     D.Free;
   end;
