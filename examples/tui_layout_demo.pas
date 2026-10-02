@@ -49,6 +49,7 @@ const
   FooterHeight = 1;
   MaxComposePercent = 60;  // the input box never exceeds this share of the height
   CollapsedLines = 3;
+  ContentBottomPad = 2;    // blank rows kept below the last message block
   Sparkles: array[0..12] of UnicodeString =
     ('∙', '•', '●', '◉', '❂', '✴', '✵', '✶', '✷', '✸', '✹', '✺', '❋');
 
@@ -448,7 +449,7 @@ begin
     ckUser:
       begin
         BodyRows(AAvail.W, TextRows, Lines);
-        Result.H := TextRows + 3;   { top border, body, blank, heavy bottom }
+        Result.H := TextRows + 2;   { top border, body, heavy bottom }
       end;
     ckAssistant:
       begin
@@ -704,7 +705,7 @@ begin
     if I < Count - 1 then
       Inc(H, FGap);
   end;
-  Result.H := H;
+  Result.H := H + ContentBottomPad;
 end;
 
 procedure TChatStack.Arrange(const ABounds: TRect);
@@ -774,6 +775,10 @@ begin
   FFollow := True;
   FStack := TChatStack.Create(ATheme);
   FScroll := TScrollContainer.Create(FStack, smAuto, smNever);
+  { The scrollbar sits in the messages panel's right border column, so its
+    track must not be painted: the border reads as the track and only the thumb
+    shows. }
+  FScroll.TrackVisible := False;
 end;
 
 destructor TChatStream.Destroy;
@@ -801,9 +806,16 @@ begin
 end;
 
 procedure TChatStream.Arrange(const ABounds: TRect);
+var
+  B: TRect;
 begin
   inherited Arrange(ABounds);
-  FScroll.Arrange(ABounds);
+  { Bleed one column into the messages panel's right border so the scrollbar
+    lands in that border column (the panel has no padding, so the column just
+    past the content is the border). }
+  B := ABounds;
+  Inc(B.W);
+  FScroll.Arrange(B);
   if FFollow then
     FScroll.ScrollY := High(Integer);
 end;
