@@ -45,6 +45,7 @@ function TextDelta(const AText: string): RawByteString;
 function ReasoningDelta(const AText: string): RawByteString;
 function AlsoReasoningDelta(const AText: string): RawByteString;
 function FinishFrame(const AReason: string): RawByteString;
+function UsageFrame(const AUsageJson: string): RawByteString;
 function ToolNameFrame(AIndex: Integer; const AId, AName: string): RawByteString;
 function ToolArgsFrame(AIndex: Integer; const AArgs: string): RawByteString;
 function DoneFrame: RawByteString;
@@ -214,6 +215,22 @@ begin
   Choice.Add('finish_reason', AReason);
   Choices.Add(Choice);
   Root.Add('choices', Choices);
+  try
+    Result := SSE(Root.AsJSON);
+  finally
+    Root.Free;
+  end;
+end;
+
+function UsageFrame(const AUsageJson: string): RawByteString;
+var
+  Root: TJSONObject;
+  Choices: TJSONArray;
+begin
+  Root := TJSONObject.Create;
+  Choices := TJSONArray.Create;      // the usage-only chunk has no choices
+  Root.Add('choices', Choices);
+  Root.Add('usage', GetJSON(AUsageJson));
   try
     Result := SSE(Root.AsJSON);
   finally

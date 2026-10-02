@@ -25,6 +25,17 @@ type
     property SawTextAfterFirstChunk: Boolean read FSawTextAfterFirstChunk;
   end;
 
+  { Sleeps once, after the first chunk, so a timing test can measure a
+    non-zero time-to-first-token deterministically. }
+  TDelayAfterFirstChunk = class
+  private
+    FMs: Integer;
+    FSlept: Boolean;
+  public
+    constructor Create(AMs: Integer);
+    procedure AfterChunk(Sender: TObject);
+  end;
+
   TLLMClientTest = class(TTestCase)
   private
     function MakeClient(out AFake: TFakeTransport;
@@ -60,6 +71,14 @@ type
     procedure TestReasoningNotInMessageContent;
     procedure TestReasoningContentPreferredOverReasoning;
     procedure TestV1CompleteOverloadStillWorks;
+    procedure TestParsesOpenAIUsage;
+    procedure TestParsesDeepSeekUsage;
+    procedure TestParsesAnthropicUsageSpellings;
+    procedure TestUsageAbsentIsZero;
+    procedure TestFirstTokenMsSetOnFirstDelta;
+    procedure TestFirstTokenMsZeroWithoutContent;
+    procedure TestRequestAsksForUsage;
+    procedure TestClientExposesResolvedModel;
   end;
 
 implementation
@@ -94,6 +113,24 @@ begin
   Inc(FChunkCount);
   if FChunkCount = 1 then
     FSawTextAfterFirstChunk := FSawText;
+end;
+
+{ TDelayAfterFirstChunk }
+
+constructor TDelayAfterFirstChunk.Create(AMs: Integer);
+begin
+  inherited Create;
+  FMs := AMs;
+  FSlept := False;
+end;
+
+procedure TDelayAfterFirstChunk.AfterChunk(Sender: TObject);
+begin
+  if not FSlept then
+  begin
+    FSlept := True;
+    Sleep(FMs);
+  end;
 end;
 
 { TLLMClientTest }
@@ -748,6 +785,190 @@ begin
     AssertEquals('answer', 'ok', Res.Message.Content);
   finally
     C.Free;
+    Client.Free;
+    Fake.Free;
+  end;
+end;
+
+procedure TLLMClientTest.TestParsesOpenAIUsage;
+var
+  Fake: TFakeTransport;
+  Client: TLLMClient;
+  Res: TChatResult;
+  Err: TLLMError;
+begin
+  Client := MakeClient(Fake, 'm', 'k');
+  try
+    Fake.AddChunk(TextDelta('hi'));
+    Fake.AddChunk(UsageFrame('{"prompt_tokens":10,"completion_tokens":20,' +
+      '"total_tokens":30,"prompt_tokens_details":{"cached_tokens":4}}'));
+    Fake.AddChunk(FinishFrame('stop'));
+    Fake.AddChunk(DoneFrame);
+    AssertTrue('complete', Client.Complete(UserRequest('hi'), nil, Res, Err));
+    AssertEquals('prompt', 10, Res.Usage.PromptTokens);
+    AssertEquals('completion', 20, Res.Usage.CompletionTokens);
+    AssertEquals('total', 30, Res.Usage.TotalTokens);
+    AssertEquals('cached', 4, Res.Usage.CachedTokens);
+    AssertEquals('no reasoning', 0, Res.Usage.ReasoningTokens);
+  finally
+    Client.Free;
+    Fake.Free;
+  end;
+end;
+
+procedure TLLMClientTest.TestParsesDeepSeekUsage;
+var
+  Fake: TFakeTransport;
+  Client: TLLMClient;
+  Res: TChatResult;
+  Err: TLLMError;
+begin
+  Client := MakeClient(Fake, 'm', 'k');
+  try
+    Fake.AddChunk(UsageFrame('{"prompt_tokens":10,"completion_tokens":20,' +
+      '"total_tokens":30,"prompt_cache_hit_tokens":6,' +
+      '"completion_tokens_details":{"reasoning_tokens":7}}'));
+    Fake.AddChunk(FinishFrame('stop'));
+    Fake.AddChunk(DoneFrame);
+    AssertTrue('complete', Client.Complete(UserRequest('hi'), nil, Res, Err));
+    AssertEquals('cached from cache hit', 6, Res.Usage.CachedTokens);
+    AssertEquals('reasoning tokens', 7, Res.Usage.ReasoningTokens);
+  finally
+    Client.Free;
+    Fake.Free;
+  end;
+end;
+
+procedure TLLMClientTest.TestParsesAnthropicUsageSpellings;
+var
+  Fake: TFakeTransport;
+  Client: TLLMClient;
+  Res: TChatResult;
+  Err: TLLMError;
+begin
+  Client := MakeClient(Fake, 'm', 'k');
+  try
+    Fake.AddChunk(UsageFrame('{"input_tokens":11,"output_tokens":22,' +
+      '"cache_read_input_tokens":3,"cache_creation_input_tokens":5}'));
+    Fake.AddChunk(FinishFrame('stop'));
+    Fake.AddChunk(DoneFrame);
+    AssertTrue('complete', Client.Complete(UserRequest('hi'), nil, Res, Err));
+    AssertEquals('prompt from input', 11, Res.Usage.PromptTokens);
+    AssertEquals('completion from output', 22, Res.Usage.CompletionTokens);
+    AssertEquals('total derived', 33, Res.Usage.TotalTokens);
+    AssertEquals('cached from cache read', 3, Res.Usage.CachedTokens);
+  finally
+    Client.Free;
+    Fake.Free;
+  end;
+end;
+
+procedure TLLMClientTest.TestUsageAbsentIsZero;
+var
+  Fake: TFakeTransport;
+  Client: TLLMClient;
+  Res: TChatResult;
+  Err: TLLMError;
+begin
+  Client := MakeClient(Fake, 'm', 'k');
+  try
+    Fake.AddChunk(TextDelta('hi'));
+    Fake.AddChunk(FinishFrame('stop'));
+    Fake.AddChunk(DoneFrame);
+    AssertTrue('complete', Client.Complete(UserRequest('hi'), nil, Res, Err));
+    AssertEquals('prompt zero', 0, Res.Usage.PromptTokens);
+    AssertEquals('completion zero', 0, Res.Usage.CompletionTokens);
+    AssertEquals('total zero', 0, Res.Usage.TotalTokens);
+    AssertEquals('cached zero', 0, Res.Usage.CachedTokens);
+    AssertEquals('reasoning zero', 0, Res.Usage.ReasoningTokens);
+  finally
+    Client.Free;
+    Fake.Free;
+  end;
+end;
+
+procedure TLLMClientTest.TestFirstTokenMsSetOnFirstDelta;
+var
+  Fake: TFakeTransport;
+  Client: TLLMClient;
+  Res: TChatResult;
+  Err: TLLMError;
+  Delay: TDelayAfterFirstChunk;
+begin
+  Client := MakeClient(Fake, 'm', 'k');
+  Delay := TDelayAfterFirstChunk.Create(25);
+  try
+    { A no-content warm-up chunk, then a delay before the first content. }
+    Fake.AddChunk(': keep-alive' + SSEBlank);
+    Fake.AddChunk(TextDelta('hi'));
+    Fake.AddChunk(FinishFrame('stop'));
+    Fake.AddChunk(DoneFrame);
+    Fake.AfterChunk := Delay.AfterChunk;
+    AssertTrue('complete', Client.Complete(UserRequest('hi'), nil, Res, Err));
+    AssertTrue('first token measured after the delay',
+      Res.FirstTokenMs >= 20);
+  finally
+    Delay.Free;
+    Client.Free;
+    Fake.Free;
+  end;
+end;
+
+procedure TLLMClientTest.TestFirstTokenMsZeroWithoutContent;
+var
+  Fake: TFakeTransport;
+  Client: TLLMClient;
+  Res: TChatResult;
+  Err: TLLMError;
+begin
+  Client := MakeClient(Fake, 'm', 'k');
+  try
+    Fake.AddChunk(FinishFrame('stop'));
+    Fake.AddChunk(DoneFrame);
+    AssertTrue('complete', Client.Complete(UserRequest('hi'), nil, Res, Err));
+    AssertEquals('no content means no first token', 0, Res.FirstTokenMs);
+  finally
+    Client.Free;
+    Fake.Free;
+  end;
+end;
+
+procedure TLLMClientTest.TestRequestAsksForUsage;
+var
+  Fake: TFakeTransport;
+  Client: TLLMClient;
+  Res: TChatResult;
+  Err: TLLMError;
+  Root, Opts: TJSONObject;
+begin
+  Client := MakeClient(Fake, 'm', 'k');
+  try
+    Fake.AddChunk(FinishFrame('stop'));
+    Fake.AddChunk(DoneFrame);
+    AssertTrue('complete', Client.Complete(UserRequest('hi'), nil, Res, Err));
+    Root := TJSONObject(GetJSON(Fake.LastBody));
+    try
+      Opts := TJSONObject(Root.Find('stream_options'));
+      AssertTrue('stream_options present', Opts <> nil);
+      AssertTrue('include_usage', Opts.Get('include_usage', False));
+    finally
+      Root.Free;
+    end;
+  finally
+    Client.Free;
+    Fake.Free;
+  end;
+end;
+
+procedure TLLMClientTest.TestClientExposesResolvedModel;
+var
+  Fake: TFakeTransport;
+  Client: TLLMClient;
+begin
+  Client := MakeClient(Fake, 'the-model', 'k');
+  try
+    AssertEquals('resolved model exposed', 'the-model', Client.Model);
+  finally
     Client.Free;
     Fake.Free;
   end;

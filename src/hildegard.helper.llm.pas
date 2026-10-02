@@ -26,6 +26,10 @@ type
     Content: string;
     ToolCallId: string;
     ToolCalls: array of TChatToolCall;
+    { crTool-only display/audit metadata; never sent to the provider. }
+    ToolName: string;       // the tool a tool result came from
+    ToolOk: Boolean;        // whether it succeeded
+    DurationMs: Int64;      // tool execution time
   end;
 
   TChatMessageArray = array of TChatMessage;
@@ -41,6 +45,20 @@ type
 
   TFinishReason = (frStop, frToolCalls, frLength, frContentFilter, frUnknown);
 
+  { Normalised token accounting: one shape across the provider spellings
+    (OpenAI/Fireworks, DeepSeek, Anthropic-style gateways). Absent usage is all
+    zeros. }
+  TTokenUsage = record
+    PromptTokens: Integer;       // prompt_tokens | input_tokens
+    CompletionTokens: Integer;   // completion_tokens | output_tokens
+    TotalTokens: Integer;        // total_tokens, else prompt + completion
+    CachedTokens: Integer;       // prompt_tokens_details.cached_tokens
+                                 //   | prompt_cache_hit_tokens
+                                 //   | cache_read_input_tokens
+    ReasoningTokens: Integer;    // completion_tokens_details.reasoning_tokens
+                                 //   | reasoning_tokens
+  end;
+
   TChatRequest = record
     Messages: TChatMessageArray;
     Tools: TToolSpecArray;
@@ -51,6 +69,8 @@ type
     FinishReason: TFinishReason;
     RawFinishReason: string;
     ReasoningContent: string;   // display-only; not part of the message
+    Usage: TTokenUsage;         // provider usage; zeros when absent
+    FirstTokenMs: Int64;        // time to the first content/reasoning delta
   end;
 
   TLLMErrorCode = (
@@ -99,6 +119,7 @@ type
     FTransport: TLLMTransport;
     FOwnsTransport: Boolean;
     function Endpoint: string;
+    function GetModel: string;
   public
     constructor Create(const AConfig: TLLMConfig; ATransport: TLLMTransport);
     destructor Destroy; override;
@@ -107,6 +128,8 @@ type
     function Complete(const ARequest: TChatRequest; AOnText: TLLMTextEvent;
       AOnReasoning: TLLMReasoningEvent;
       out AResult: TChatResult; out AError: TLLMError): Boolean; overload;
+    { The resolved model name, for recording on a request. }
+    property Model: string read GetModel;
   end;
 
 function ResolveLLMConfig(const AConfig: TLLMConfig): TLLMConfig;
@@ -152,11 +175,15 @@ type
     FDone: Boolean;
     FMalformed: Boolean;
     FProviderError: string;
+    FStartMs: QWord;
+    FMarked: Boolean;
     procedure ProcessLine(const ALine: string);
     procedure FlushEvent;
     procedure HandleData(const AData: RawByteString);
     procedure HandleJson(const AJson: TJSONObject);
     procedure AccumulateToolCalls(const ADelta: TJSONObject);
+    procedure ReadUsage(const AUsage: TJSONObject);
+    procedure MarkFirstToken;
     procedure SetFinish(const AReason: string);
   public
     constructor Create(AOnText: TLLMTextEvent;
@@ -313,6 +340,8 @@ begin
   FDone := False;
   FMalformed := False;
   FProviderError := '';
+  FStartMs := GetTickCount64;
+  FMarked := False;
   FResult := Default(TChatResult);
   FResult.Message.Role := crAssistant;
 end;
@@ -403,6 +432,7 @@ var
   Content: TJSONData;
   Reasoning: TJSONData;
   Finish: TJSONData;
+  Usage: TJSONData;
 begin
   if AJson = nil then
     Exit;
@@ -418,6 +448,12 @@ begin
       Exit;
     end;
 
+    { Usage arrives on a chunk with no choices (OpenAI's include_usage) or on
+      the final chunk (DeepSeek), so read it before the choices guard. }
+    Usage := AJson.Find('usage');
+    if Usage is TJSONObject then
+      ReadUsage(TJSONObject(Usage));
+
     Choices := AJson.Find('choices');
     if (Choices = nil) or not (Choices is TJSONArray) then
       Exit;
@@ -432,6 +468,7 @@ begin
       if (Content <> nil) and (Content.JSONType = jtString) and
         (Content.AsString <> '') then
       begin
+        MarkFirstToken;
         FResult.Message.Content := FResult.Message.Content + Content.AsString;
         if Assigned(FOnText) then
           FOnText(Content.AsString);
@@ -443,6 +480,7 @@ begin
       if (Reasoning <> nil) and (Reasoning.JSONType = jtString) and
         (Reasoning.AsString <> '') then
       begin
+        MarkFirstToken;
         FResult.ReasoningContent :=
           FResult.ReasoningContent + Reasoning.AsString;
         if Assigned(FOnReasoning) then
@@ -499,6 +537,63 @@ begin
   end;
 end;
 
+procedure TSSEParser.ReadUsage(const AUsage: TJSONObject);
+var
+  V: TJSONData;
+  Details: TJSONObject;
+begin
+  V := AUsage.Find('prompt_tokens');
+  if V = nil then
+    V := AUsage.Find('input_tokens');
+  if (V <> nil) and (V.JSONType = jtNumber) then
+    FResult.Usage.PromptTokens := V.AsInteger;
+
+  V := AUsage.Find('completion_tokens');
+  if V = nil then
+    V := AUsage.Find('output_tokens');
+  if (V <> nil) and (V.JSONType = jtNumber) then
+    FResult.Usage.CompletionTokens := V.AsInteger;
+
+  V := AUsage.Find('total_tokens');
+  if (V <> nil) and (V.JSONType = jtNumber) then
+    FResult.Usage.TotalTokens := V.AsInteger
+  else
+    FResult.Usage.TotalTokens := FResult.Usage.PromptTokens +
+      FResult.Usage.CompletionTokens;
+
+  V := nil;
+  Details := nil;
+  if AUsage.Find('prompt_tokens_details') is TJSONObject then
+    Details := TJSONObject(AUsage.Find('prompt_tokens_details'));
+  if Details <> nil then
+    V := Details.Find('cached_tokens');
+  if V = nil then
+    V := AUsage.Find('prompt_cache_hit_tokens');
+  if V = nil then
+    V := AUsage.Find('cache_read_input_tokens');
+  if (V <> nil) and (V.JSONType = jtNumber) then
+    FResult.Usage.CachedTokens := V.AsInteger;
+
+  V := nil;
+  Details := nil;
+  if AUsage.Find('completion_tokens_details') is TJSONObject then
+    Details := TJSONObject(AUsage.Find('completion_tokens_details'));
+  if Details <> nil then
+    V := Details.Find('reasoning_tokens');
+  if V = nil then
+    V := AUsage.Find('reasoning_tokens');
+  if (V <> nil) and (V.JSONType = jtNumber) then
+    FResult.Usage.ReasoningTokens := V.AsInteger;
+end;
+
+procedure TSSEParser.MarkFirstToken;
+begin
+  if FMarked then
+    Exit;
+  FMarked := True;
+  FResult.FirstTokenMs := Int64(GetTickCount64 - FStartMs);
+end;
+
 procedure TSSEParser.SetFinish(const AReason: string);
 begin
   FResult.RawFinishReason := AReason;
@@ -530,7 +625,7 @@ var
   Root: TJSONObject;
   Msgs: TJSONArray;
   Tools: TJSONArray;
-  MObj, TObj, FnObj: TJSONObject;
+  MObj, TObj, FnObj, Opts: TJSONObject;
   CallObj: TJSONArray;
   I, J: Integer;
   Params: TJSONData;
@@ -539,6 +634,11 @@ begin
   try
     Root.Add('model', AConfig.Model);
     Root.Add('stream', True);
+    { Ask the provider to send a final usage chunk; providers that ignore it
+      simply leave the usage zeros. }
+    Opts := TJSONObject.Create;
+    Opts.Add('include_usage', True);
+    Root.Add('stream_options', Opts);
 
     Msgs := TJSONArray.Create;
     for I := 0 to High(ARequest.Messages) do
@@ -622,6 +722,11 @@ end;
 function TLLMClient.Endpoint: string;
 begin
   Result := FConfig.Endpoint;
+end;
+
+function TLLMClient.GetModel: string;
+begin
+  Result := FConfig.Model;
 end;
 
 function TLLMClient.Complete(const ARequest: TChatRequest;
