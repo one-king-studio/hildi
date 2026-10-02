@@ -40,6 +40,7 @@ type
     FFake: TFakeTransport;
     FStorePath: string;
     procedure Build;
+    procedure BuildWithStore;
     function Key(AKind: TKeyKind): TInputEvent;
     function Ch(const AText: string): TInputEvent;
     procedure SubmitPrompt(const AText: string);
@@ -64,6 +65,9 @@ type
     procedure TestAsksDoNotStack;
     procedure TestOneFramePerStep;
     procedure TestRenderHistoryRestoresToolBlocks;
+    procedure TestStatusShowsStatsAfterATurn;
+    procedure TestResumeStatusMatchesLive;
+    procedure TestCtaHoldsTheHints;
   end;
 
 implementation
@@ -122,6 +126,26 @@ begin
   AssertTrue('session opened: ' + Err, FSession <> nil);
   FApp := THarnessApp.Create(FSurface, FInput, FSession);
   FApp.Step;   // initial layout/render
+end;
+
+procedure THarnessAppTest.BuildWithStore;
+var
+  Err: string;
+  Cfg: THarnessSessionConfig;
+begin
+  FDir := IncludeTrailingPathDelimiter(GetTempDir) + 'hh-app-' +
+    IntToStr(Random(1000000));
+  ForceDirectories(FDir);
+  FStorePath := IncludeTrailingPathDelimiter(FDir) + 'store.db';
+  FFake := TFakeTransport.Create;
+  FSurface := TSurfaceMemory.Create(60, 20);
+  FInput := TInputSourceScripted.Create;
+  Cfg := Config;
+  Cfg.StorePath := FStorePath;
+  FSession := THarnessSession.Open(Cfg, Err);
+  AssertTrue('session opened: ' + Err, FSession <> nil);
+  FApp := THarnessApp.Create(FSurface, FInput, FSession);
+  FApp.Step;
 end;
 
 function THarnessAppTest.Key(AKind: TKeyKind): TInputEvent;
@@ -461,6 +485,72 @@ begin
   AssertTrue('tool result paired into the block', SawResult);
   AssertTrue('assistant block restored', SawAssistant);
   AssertTrue('error block restored', SawError);
+end;
+
+procedure THarnessAppTest.TestStatusShowsStatsAfterATurn;
+begin
+  BuildWithStore;
+  FFake.AddResponse([TextDelta('hi'),
+    UsageFrame('{"prompt_tokens":1200,"completion_tokens":310,' +
+      '"total_tokens":1510,"prompt_tokens_details":{"cached_tokens":1100}}'),
+    FinishFrame('stop'), DoneFrame]);
+  SubmitPrompt('hello');
+  AssertTrue('turn finished', Pump(300));
+
+  AssertEquals('workspace on the left', FDir, FApp.StatusText);
+  AssertTrue('tokens in the stats', Pos('1.2k in', FApp.StatsText) > 0);
+  AssertTrue('cache in the stats', Pos('92% cached', FApp.StatsText) > 0);
+end;
+
+procedure THarnessAppTest.TestResumeStatusMatchesLive;
+var
+  Live, Sid: string;
+  Cfg: THarnessSessionConfig;
+  Err: string;
+begin
+  BuildWithStore;
+  FFake.AddResponse([TextDelta('hi'),
+    UsageFrame('{"prompt_tokens":1200,"completion_tokens":310,' +
+      '"total_tokens":1510,"prompt_tokens_details":{"cached_tokens":1100}}'),
+    FinishFrame('stop'), DoneFrame]);
+  SubmitPrompt('hello');
+  AssertTrue('turn finished', Pump(300));
+  Live := FApp.StatsText;
+  AssertTrue('live stats present', Live <> '');
+  Sid := FSession.SessionId;
+
+  { Drop the live app but keep the store, then resume the same session. }
+  FApp.Free;
+  FApp := nil;
+  FInput := nil;
+  FSurface := nil;
+  FSession.Free;
+  FSession := nil;
+  FFake.Free;
+
+  FFake := TFakeTransport.Create;
+  FSurface := TSurfaceMemory.Create(60, 20);
+  FInput := TInputSourceScripted.Create;
+  Cfg := Config;
+  Cfg.StorePath := FStorePath;
+  Cfg.SessionId := Sid;
+  Cfg.Resume := True;
+  FSession := THarnessSession.Open(Cfg, Err);
+  AssertTrue('resumed: ' + Err, FSession <> nil);
+  FApp := THarnessApp.Create(FSurface, FInput, FSession);
+  FApp.Step;
+
+  AssertEquals('resumed stats identical to live', Live, FApp.StatsText);
+end;
+
+procedure THarnessAppTest.TestCtaHoldsTheHints;
+begin
+  Build;
+  AssertTrue('send hint', Pos('send', FApp.CtaText) > 0);
+  AssertTrue('shift+enter hint', Pos('⇧+↵ newline', FApp.CtaText) > 0);
+  AssertTrue('expand hint', Pos('click a block to expand', FApp.CtaText) > 0);
+  AssertFalse('hints are not in the status bar',
+    Pos('newline', FApp.StatusText) > 0);
 end;
 
 initialization

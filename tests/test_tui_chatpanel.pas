@@ -24,6 +24,8 @@ type
     procedure TestStreamIsExposed;
     procedure TestComposeOverlaysWithoutReflowingMessages;
     procedure TestStatusRendersOnTheLastRow;
+    procedure TestStatsLineRendersRightAligned;
+    procedure TestLongWorkspaceIsTrimmedForStats;
     procedure TestCtaRendersAboveTheCompose;
     procedure TestInactiveComposeIgnoresInput;
     procedure TestLastMessageKeepsTwoBlankRowsAboveTheCompose;
@@ -132,6 +134,31 @@ begin
   end;
 end;
 
+procedure TTuiChatPanelTest.TestStatsLineRendersRightAligned;
+var
+  P: TChatPanel;
+  S: TSurfaceMemory;
+begin
+  S := TSurfaceMemory.Create(40, 20);
+  try
+    P := TChatPanel.Create(FTheme, 'info', 'cta');
+    try
+      P.SetStatus('/tmp/project');
+      P.SetStats('1.2k in');
+      P.Arrange(Rc(0, 0, 40, 20));
+      P.Render(S);
+      AssertTrue('workspace on the left',
+        Pos('/tmp/project', S.RowText(19, 0, 20)) > 0);
+      AssertTrue('stats on the right',
+        Pos('1.2k in', S.RowText(19, 28, 12)) > 0);
+    finally
+      P.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
 procedure TTuiChatPanelTest.TestInactiveComposeIgnoresInput;
 var
   P: TChatPanel;
@@ -147,6 +174,30 @@ begin
     AssertEquals('typing accepted when active', 'y', string(P.Compose.Text));
   finally
     P.Free;
+  end;
+end;
+
+procedure TTuiChatPanelTest.TestLongWorkspaceIsTrimmedForStats;
+var
+  P: TChatPanel;
+  S: TSurfaceMemory;
+begin
+  S := TSurfaceMemory.Create(40, 20);
+  try
+    P := TChatPanel.Create(FTheme, 'info', 'cta');
+    try
+      P.SetStatus('/Users/very/long/workspace/path/that/overflows');
+      P.SetStats('1.2k in');
+      P.Arrange(Rc(0, 0, 40, 20));
+      P.Render(S);
+      AssertTrue('stats intact', Pos('1.2k in', S.RowText(19, 28, 12)) > 0);
+      AssertTrue('workspace trimmed before the stats',
+        Pos('overflows', S.RowText(19, 0, 40)) = 0);
+    finally
+      P.Free;
+    end;
+  finally
+    S.Free;
   end;
 end;
 

@@ -212,7 +212,8 @@ Store API
 ## Out of Scope
 
 - Migrating pre-v2 databases.
-- Displaying the collected metrics (collected now, shown later).
+- Displaying the metrics beyond the status line (per-block durations, a full
+  stats view).
 - Context budgeting, output spilling, and a recall tool (see below).
 - Server-side session sync (Remote Agent Link, later).
 - Compaction, retention, or summarization of old records.

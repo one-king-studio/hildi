@@ -33,6 +33,7 @@ type
     procedure TestMissingWorkspaceFails;
     procedure TestRecallToolRegisteredWithStore;
     procedure TestRecallToolAbsentWithoutStore;
+    procedure TestLastTurnEmptyWithoutTurns;
   end;
 
 implementation
@@ -227,6 +228,22 @@ begin
   try
     AssertFalse('no artifacts without a store, so no recall tool',
       Session.Tools.Find(RecallToolName, Tool));
+  finally
+    Session.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestLastTurnEmptyWithoutTurns;
+var
+  Session: THarnessSession;
+  Err: string;
+  Turn: TTurnRecord;
+begin
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    Turn := Session.LastTurn;
+    AssertEquals('no turns yet', 0, Turn.Id);
   finally
     Session.Free;
   end;

@@ -400,7 +400,8 @@ begin
   EditorPanel := TPanel.Create(EditorText, Theme, Style);
 
   ChatPanel := TChatPanel.Create(Theme, 'Hildegard · Model v1 Fireworks · low',
-    ' ↵ send   ⇧↵ newline   click a block to expand');
+    '↵ send   ⇧+↵ newline   click a block to expand   ' +
+    'ctrl+p commands   ctrl+b sidebar');
   ChatPanel.Stream.Add(ckUser, '',
     'This is the user''s message. It should be rendered with a slightly lighter ' +
     'background to distinguish it from the rest of the content. Make the border ' +
@@ -421,7 +422,8 @@ begin
     'in different colors: a darker track and a lighter thumb.' + #10 + '' + #10 +
     'A multi-paragraph response simply applies a gap between paragraphs.');
   ChatPanel.Stream.Add(ckThinking, '', '');
-  ChatPanel.SetStatus(GetCurrentDir + '   ctrl+p commands   ctrl+b sidebar');
+  ChatPanel.SetStatus(GetCurrentDir);
+  ChatPanel.SetStats('1.2k in · 310 out · 92% cached · 3.4s · 2 req');
 
   SideText := TTextBlock.Create([], wmNone);
   SideText.SetText(

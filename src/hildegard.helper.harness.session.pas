@@ -78,6 +78,10 @@ type
     { Prior message blocks for the initial render (empty for a new session). }
     function History: TMessageRecordArray;
 
+    { The latest turn's metrics for the status bar; a zero record when the
+      session has no store or no turns. }
+    function LastTurn: TTurnRecord;
+
     { Cancel pending approvals; frees owned objects. Idempotent. }
     procedure Close;
   end;
@@ -289,6 +293,15 @@ end;
 function THarnessSession.History: TMessageRecordArray;
 begin
   Result := FHistory;
+end;
+
+function THarnessSession.LastTurn: TTurnRecord;
+var
+  Err: TStoreError;
+begin
+  Result := Default(TTurnRecord);
+  if (FStore <> nil) and (FSessionId <> '') then
+    FStore.MostRecentTurn(FSessionId, Result, Err);
 end;
 
 end.

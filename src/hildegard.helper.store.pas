@@ -137,6 +137,9 @@ type
       out AError: TStoreError): Boolean;
     function QueryTurns(const ASessionId: string; out ATurns: TTurnRecordArray;
       out AError: TStoreError): Boolean;
+    { The session's latest turn; seNotFound when there are none. }
+    function MostRecentTurn(const ASessionId: string;
+      out ATurn: TTurnRecord; out AError: TStoreError): Boolean;
 
     { Opens an LLM request within a turn, assigning its per-turn sequence. }
     function BeginRequest(ATurnId: Int64; const AModel: string;
@@ -1305,6 +1308,60 @@ begin
         ATurns[N] := Rec;
         Inc(N);
       end;
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.MostRecentTurn(const ASessionId: string;
+  out ATurn: TTurnRecord; out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  ATurn := Default(TTurnRecord);
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb,
+      'SELECT t.id, t.session_id, t.seq, t.status, t.finish_reason, ' +
+      't.error_code, t.error_message, t.error_detail, t.request_count, ' +
+      't.message_count, t.prompt_tokens, t.completion_tokens, t.total_tokens, ' +
+      't.cached_tokens, t.reasoning_tokens, t.created_at, t.finished_at, ' +
+      't.duration_ms, ' +
+      'COALESCE((SELECT m.content FROM messages m WHERE m.turn_id = t.id ' +
+        'AND m.role = 1 ORDER BY m.seq LIMIT 1), '''') ' +
+      'FROM turns t WHERE t.session_id = ? ORDER BY t.seq DESC LIMIT 1');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not query turn', DbErrorText));
+      Stmt.BindText(1, ASessionId);
+      if Stmt.Step <> SQLITE_ROW then
+        Exit(Fail(AError, seNotFound, 'no turn for session', ASessionId));
+      ATurn.Id := Stmt.ColInt64(0);
+      ATurn.SessionId := Stmt.ColText(1);
+      ATurn.Seq := Stmt.ColInt64(2);
+      ATurn.Status := TTurnStatus(Stmt.ColInt(3));
+      ATurn.FinishReason := Stmt.ColText(4);
+      ATurn.ErrorCode := Stmt.ColInt(5);
+      ATurn.ErrorMessage := Stmt.ColText(6);
+      ATurn.ErrorDetail := Stmt.ColText(7);
+      ATurn.RequestCount := Stmt.ColInt(8);
+      ATurn.MessageCount := Stmt.ColInt(9);
+      ATurn.Usage.PromptTokens := Stmt.ColInt(10);
+      ATurn.Usage.CompletionTokens := Stmt.ColInt(11);
+      ATurn.Usage.TotalTokens := Stmt.ColInt(12);
+      ATurn.Usage.CachedTokens := Stmt.ColInt(13);
+      ATurn.Usage.ReasoningTokens := Stmt.ColInt(14);
+      ATurn.CreatedAtMs := Stmt.ColInt64(15);
+      ATurn.FinishedAtMs := Stmt.ColInt64(16);
+      ATurn.DurationMs := Stmt.ColInt64(17);
+      ATurn.Prompt := Stmt.ColText(18);
     finally
       Stmt.Free;
     end;

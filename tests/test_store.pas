@@ -52,6 +52,8 @@ type
     procedure TestQueryTurnsDerivesPrompt;
     procedure TestNewerSchemaVersionIsRejected;
     procedure TestListSessionsCountsMessagesAndTurns;
+    procedure TestMostRecentTurnReturnsLatest;
+    procedure TestMostRecentTurnNotFound;
   end;
 
 implementation
@@ -818,6 +820,53 @@ begin
     AssertTrue('no sessions for other workspace',
       S.MostRecentSessionId(WorkspaceId + 999, Recent, Err) = False);
     AssertEquals('not found', Ord(seNotFound), Ord(Err.Code));
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestMostRecentTurnReturnsLatest;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws: Integer;
+  Sid: string;
+  T1, T2: Int64;
+  Turn: TTurnRecord;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, Sid, Err);
+    S.BeginTurn(Sid, T1, Err);
+    S.FinishTurn(T1, tsCompleted, 'stop', 0, '', '', Err);
+    S.BeginTurn(Sid, T2, Err);
+    S.FinishTurn(T2, tsFailed, '', 1, 'boom', '', Err);
+
+    AssertTrue('found', S.MostRecentTurn(Sid, Turn, Err));
+    AssertEquals('latest turn', T2, Turn.Id);
+    AssertEquals('status', Ord(tsFailed), Ord(Turn.Status));
+    AssertEquals('error message', 'boom', Turn.ErrorMessage);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestMostRecentTurnNotFound;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws: Integer;
+  Sid: string;
+  Turn: TTurnRecord;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, Sid, Err);
+    AssertFalse('none', S.MostRecentTurn(Sid, Turn, Err));
+    AssertEquals('not found', Ord(seNotFound), Ord(Err.Code));
+    AssertEquals('zero record', 0, Turn.Id);
   finally
     S.Free;
   end;

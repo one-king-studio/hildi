@@ -20,7 +20,8 @@ uses
   hildegard.helper.tui.approvalmodal,
   hildegard.helper.tui.panel, hildegard.helper.tui.theme,
   hildegard.helper.tui.app, hildegard.helper.harness.turn,
-  hildegard.helper.harness.session, hildegard.helper.session;
+  hildegard.helper.harness.session, hildegard.helper.harness.stats,
+  hildegard.helper.session;
 
 type
   { Builds the tree and owns the TTuiApp and the current worker. The session is
@@ -39,6 +40,9 @@ type
     FPendingRequest: Integer;
     FCloseModal: Boolean;
     FAskQueue: array of TTurnEvent;
+    FStatusText: string;
+    FStatsText: string;
+    FCtaText: string;
     { The blocks of the turn in flight, so deltas land in the right one. }
     FThinking: TChatItem;
     FAssistant: TChatItem;
@@ -55,7 +59,8 @@ type
     procedure OnApprovalChosen(const AChoice: TApprovalChoice);
     procedure CloseModal;
     procedure FinishTurn;
-    procedure SetStatus(const AText: string);
+    procedure SetState(const AText: string);
+    procedure UpdateStats;
     procedure AppendUser(const AText: string);
     procedure AppendError(const AText: string);
     procedure RenderHistory;
@@ -87,10 +92,21 @@ type
     property ModalActive: Boolean read GetModalActive;
     { The stream, for tests: block count, kinds and text. }
     property Panel: TChatPanel read FPanel;
+    { The status bar's left part (the workspace). }
+    property StatusText: string read FStatusText;
+    { The status bar's right part (the latest turn's metrics). }
+    property StatsText: string read FStatsText;
+    { The CTA toolbar: the state and the interaction hints. }
+    property CtaText: string read FCtaText;
     function ConversationText: string;
   end;
 
 implementation
+
+const
+  { The interaction hints live in the CTA strip, which acts as a context
+    toolbar; the status bar is reserved for the workspace and the metrics. }
+  CtaHints = '↵ send   ⇧+↵ newline   click a block to expand';
 
 type
   { Wraps the root so global quit keys (Ctrl-C/Ctrl-D) are handled before the
@@ -149,7 +165,8 @@ begin
   FApp := TTuiApp.Create(ASurface, AInput, BuildTree);
   FApp.ScreenBg := FTheme.Bg;
   RenderHistory;
-  SetStatus('ready');
+  SetState('ready');
+  UpdateStats;
 end;
 
 destructor THarnessApp.Destroy;
@@ -175,11 +192,15 @@ end;
 function THarnessApp.BuildTree: TWidget;
 begin
   FPanel := TChatPanel.Create(FTheme, 'Hildegard · ' + FSession.Model,
-    ' ↵ send   ⇧↵ newline   click a block to expand');
+    CtaHints);
   FPanel.Stream.OnToggle := Invalidate;
   FPanel.Stream.OnChange := Invalidate;
   FPanel.Compose.OnSubmit := Submit;
   FPanel.Compose.OnChange := Invalidate;
+  { The status bar is two parts: the workspace on the left, the metrics on the
+    right. }
+  FStatusText := FSession.WorkspaceRoot;
+  FPanel.SetStatus(FStatusText);
   Result := TAppShell.Create(FPanel, Quit);
 end;
 
@@ -205,9 +226,21 @@ begin
   FApp.Invalidate;
 end;
 
-procedure THarnessApp.SetStatus(const AText: string);
+procedure THarnessApp.SetState(const AText: string);
 begin
-  FPanel.SetStatus(FSession.WorkspaceRoot + '   ' + AText);
+  { The state is context, so it lives in the CTA toolbar with the hints; the
+    status bar keeps the workspace and the metrics. }
+  FCtaText := AText + '   ' + CtaHints;
+  FPanel.SetCta(FCtaText);
+  FApp.Invalidate;
+end;
+
+procedure THarnessApp.UpdateStats;
+begin
+  { Read the persisted turn, so a live turn and a resumed one show the same
+    line. }
+  FStatsText := FormatTurnStats(FSession.LastTurn);
+  FPanel.SetStats(FStatsText);
   FApp.Invalidate;
 end;
 
@@ -277,7 +310,7 @@ begin
   FPanel.SetComposeActive(False);
   FBusy := True;
   SyncBusy;
-  SetStatus('thinking...');
+  SetState('thinking...');
   FAssistant := nil;
   FThought := nil;
   FTool := nil;
@@ -401,7 +434,7 @@ begin
   R.H := FSurface.Height;
   Wrap.Arrange(R);
   FApp.PushPlane(TPlane.Create(Wrap, True, True));
-  SetStatus('approval needed');
+  SetState('approval needed');
 end;
 
 procedure THarnessApp.OnApprovalChosen(const AChoice: TApprovalChoice);
@@ -437,7 +470,8 @@ begin
   FThought := nil;
   FTool := nil;
   FPanel.SetComposeActive(True);
-  SetStatus('ready');
+  SetState('ready');
+  UpdateStats;
   SyncBusy;
 end;
 
