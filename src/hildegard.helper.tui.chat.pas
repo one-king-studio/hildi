@@ -23,7 +23,9 @@ uses
 type
   TChatKind = (ckUser, ckAssistant, ckError, ckThought, ckTool, ckThinking);
 
-  { One block in the stream. Mutable, so a stream can append into it. }
+  { One block in the stream. Mutable, so a stream can append into it. Its
+    measured height is memoized per width and invalidated when the text or the
+    expansion changes, so a layout pass does not re-measure unchanged blocks. }
   TChatItem = class(TWidget)
   private
     FKind: TChatKind;
@@ -35,11 +37,17 @@ type
     FOnToggle: TNotifyEvent;
     FOnChange: TNotifyEvent;
     FSpark: Integer;
+    FHeightValid: Boolean;
+    FHeightWidth: Integer;
+    FHeight: Integer;
+    FMeasureCount: Integer;
     function Inset: Integer;
     function BodyAttr: TAttr;
     procedure Rebuild;
     procedure BodyRows(AWidth: Integer; out ATextRows, ALines: Integer);
     function Boxed: Boolean;
+    procedure InvalidateHeight;
+    procedure SetExpanded(AValue: Boolean);
   public
     constructor Create(AKind: TChatKind; const ALabel, AText: string;
       const ATheme: TTheme);
@@ -56,15 +64,23 @@ type
     function Animating: Boolean; override;
     property Kind: TChatKind read FKind;
     property Label_: string read FLabel write FLabel;
-    property Expanded: Boolean read FExpanded write FExpanded;
+    { Collapsed or expanded; changing it invalidates the height and fires
+      OnChange. }
+    property Expanded: Boolean read FExpanded write SetExpanded;
     property OnToggle: TNotifyEvent read FOnToggle write FOnToggle;
     property OnChange: TNotifyEvent read FOnChange write FOnChange;
     { Diagnostic: how many times this block's body text has been laid out. A
       steady-state render/scroll must not increase it. }
     function LayoutBuilds: Integer;
+    { Diagnostic: how many times this block was actually measured (not served
+      from the height memo). }
+    function MeasureCount: Integer;
   end;
 
-  { A vertical stack of blocks, measured at the available width. }
+  { A vertical stack of blocks, measured at the available width. It memoizes
+    each block's height and the running offsets, rebuilt only when a block
+    changes (its generation) or the width changes, so a scroll re-uses the
+    layout instead of re-measuring every block. }
   TChatStack = class(TWidget)
   private
     FItems: array of TChatItem;
@@ -73,12 +89,23 @@ type
     FBottomInset: Integer;
     FOnToggle: TNotifyEvent;
     FOnChange: TNotifyEvent;
+    FGeneration: Integer;
+    FLayoutValid: Boolean;
+    FLayoutWidth: Integer;
+    FLayoutGeneration: Integer;
+    FLayoutTotal: Integer;
+    FLayoutY: array of Integer;   { each block's top, relative to the stack }
+    FLayoutH: array of Integer;   { each block's height }
     function Count: Integer;
     function ItemAt(AIndex: Integer): TChatItem;
     { The width an item is measured and arranged at: the stack's width less the
       one-column inset on each side. Measure and Arrange must agree, or the text
       layout cache thrashes between two widths. }
     function ItemWidth(AStackWidth: Integer): Integer;
+    procedure BumpGeneration;
+    procedure EnsureLayout(AItemWidth: Integer);
+    procedure ItemChanged(Sender: TObject);
+    procedure ItemToggled(Sender: TObject);
   public
     constructor Create(const ATheme: TTheme);
     destructor Destroy; override;
@@ -193,6 +220,9 @@ begin
   FTheme := ATheme;
   FExpanded := (AKind = ckUser) or (AKind = ckAssistant) or
     (AKind = ckError) or (AKind = ckThinking);
+  FHeightValid := False;
+  FHeightWidth := 0;
+  FHeight := 0;
   FText := TTextBlock.Create([], wmWord);
   Rebuild;
 end;
@@ -229,11 +259,27 @@ begin
   FText.SetSpans([One]);
 end;
 
+procedure TChatItem.InvalidateHeight;
+begin
+  FHeightValid := False;
+end;
+
+procedure TChatItem.SetExpanded(AValue: Boolean);
+begin
+  if AValue = FExpanded then
+    Exit;
+  FExpanded := AValue;
+  InvalidateHeight;
+  if Assigned(FOnChange) then
+    FOnChange(Self);
+end;
+
 procedure TChatItem.SetText(const AText: string);
 begin
   if AText = FBody then
     Exit;
   FBody := AText;
+  InvalidateHeight;
   Rebuild;
   if Assigned(FOnChange) then
     FOnChange(Self);
@@ -244,6 +290,7 @@ begin
   if AText = '' then
     Exit;
   FBody := FBody + AText;
+  InvalidateHeight;
   Rebuild;
   if Assigned(FOnChange) then
     FOnChange(Self);
@@ -257,6 +304,11 @@ end;
 function TChatItem.LayoutBuilds: Integer;
 begin
   Result := FText.LayoutBuilds;
+end;
+
+function TChatItem.MeasureCount: Integer;
+begin
+  Result := FMeasureCount;
 end;
 
 function TChatItem.Inset: Integer;
@@ -297,6 +349,13 @@ begin
   Result.W := AAvail.W;
   if AAvail.W < 1 then
     Exit;
+  { Memoized per width; invalidated when the text or the expansion changes. }
+  if FHeightValid and (FHeightWidth = AAvail.W) then
+  begin
+    Result.H := FHeight;
+    Exit;
+  end;
+  Inc(FMeasureCount);
   case FKind of
     ckUser:
       begin
@@ -321,6 +380,9 @@ begin
   end;
   if Result.H < 1 then
     Result.H := 1;
+  FHeight := Result.H;
+  FHeightWidth := AAvail.W;
+  FHeightValid := True;
 end;
 
 procedure TChatItem.Arrange(const ABounds: TRect);
@@ -482,6 +544,7 @@ begin
   then
   begin
     FExpanded := not FExpanded;
+    InvalidateHeight;
     if Assigned(FOnToggle) then
       FOnToggle(Self);
     Exit(True);
@@ -511,6 +574,8 @@ begin
   inherited Create;
   FTheme := ATheme;
   FGap := 1;
+  FGeneration := 0;
+  FLayoutValid := False;
 end;
 
 destructor TChatStack.Destroy;
@@ -543,9 +608,10 @@ function TChatStack.Add(AKind: TChatKind; const ALabel, AText: string): TChatIte
 begin
   SetLength(FItems, Length(FItems) + 1);
   Result := TChatItem.Create(AKind, ALabel, AText, FTheme);
-  Result.OnToggle := FOnToggle;
-  Result.OnChange := FOnChange;
+  Result.OnToggle := ItemToggled;
+  Result.OnChange := ItemChanged;
   FItems[High(FItems)] := Result;
+  BumpGeneration;
 end;
 
 procedure TChatStack.Clear;
@@ -555,6 +621,7 @@ begin
   for I := 0 to High(FItems) do
     FItems[I].Free;
   FItems := nil;
+  BumpGeneration;
 end;
 
 procedure TChatStack.Remove(AItem: TChatItem);
@@ -568,6 +635,7 @@ begin
       for J := I to High(FItems) - 1 do
         FItems[J] := FItems[J + 1];
       SetLength(FItems, Length(FItems) - 1);
+      BumpGeneration;
       Exit;
     end;
 end;
@@ -578,7 +646,7 @@ var
 begin
   FOnToggle := AValue;
   for I := 0 to High(FItems) do
-    FItems[I].OnToggle := AValue;
+    FItems[I].OnToggle := ItemToggled;
 end;
 
 procedure TChatStack.SetOnChange(AValue: TNotifyEvent);
@@ -587,62 +655,100 @@ var
 begin
   FOnChange := AValue;
   for I := 0 to High(FItems) do
-    FItems[I].OnChange := AValue;
+    FItems[I].OnChange := ItemChanged;
+end;
+
+procedure TChatStack.BumpGeneration;
+begin
+  Inc(FGeneration);
+  FLayoutValid := False;
+end;
+
+procedure TChatStack.ItemChanged(Sender: TObject);
+begin
+  { A block's text or expansion changed: its memoized height is stale. }
+  BumpGeneration;
+  if Assigned(FOnChange) then
+    FOnChange(Self);
+end;
+
+procedure TChatStack.ItemToggled(Sender: TObject);
+begin
+  BumpGeneration;
+  if Assigned(FOnToggle) then
+    FOnToggle(Self);
+end;
+
+procedure TChatStack.EnsureLayout(AItemWidth: Integer);
+var
+  I, Y: Integer;
+  Sz: TSize;
+begin
+  if FLayoutValid and (FLayoutWidth = AItemWidth) and
+    (FLayoutGeneration = FGeneration) and (Length(FLayoutY) = Count) then
+    Exit;
+  SetLength(FLayoutY, Count);
+  SetLength(FLayoutH, Count);
+  Sz := Default(TSize);
+  Sz.W := AItemWidth;
+  Y := 0;
+  for I := 0 to Count - 1 do
+  begin
+    FLayoutY[I] := Y;
+    FLayoutH[I] := ItemAt(I).Measure(Sz).H;
+    Inc(Y, FLayoutH[I] + FGap);
+  end;
+  if Count > 0 then
+    Dec(Y, FGap);
+  FLayoutTotal := Y;
+  FLayoutWidth := AItemWidth;
+  FLayoutGeneration := FGeneration;
+  FLayoutValid := True;
 end;
 
 function TChatStack.Measure(const AAvail: TSize): TSize;
-var
-  I, H: Integer;
-  Avail: TSize;
 begin
   Result := Default(TSize);
   Result.W := AAvail.W - 1;   { reserve the scrollbar column }
   if Result.W < 1 then
     Result.W := 1;
-  Avail.W := ItemWidth(Result.W);
-  Avail.H := AAvail.H;
-  H := 0;
-  for I := 0 to Count - 1 do
-  begin
-    Inc(H, ItemAt(I).Measure(Avail).H);
-    if I < Count - 1 then
-      Inc(H, FGap);
-  end;
-  Result.H := H + ContentBottomPad + FBottomInset;
+  EnsureLayout(ItemWidth(Result.W));
+  Result.H := FLayoutTotal + ContentBottomPad + FBottomInset;
 end;
 
 procedure TChatStack.Arrange(const ABounds: TRect);
 var
-  I, Y, H: Integer;
-  Avail: TSize;
+  I, ItemW: Integer;
 begin
   inherited Arrange(ABounds);
-  Avail.W := ItemWidth(ABounds.W);
-  Avail.H := ABounds.H;
-  Y := ABounds.Y;
+  ItemW := ItemWidth(ABounds.W);
+  EnsureLayout(ItemW);
   for I := 0 to Count - 1 do
-  begin
-    H := ItemAt(I).Measure(Avail).H;
     { Inset by one column on each side: the panel shows
       border | space | content | space | scrollbar | border. }
-    ItemAt(I).Arrange(Rc(ABounds.X + 1, Y, Avail.W, H));
-    Inc(Y, H + FGap);
-  end;
+    ItemAt(I).Arrange(Rc(ABounds.X + 1, ABounds.Y + FLayoutY[I], ItemW,
+      FLayoutH[I]));
 end;
 
 procedure TChatStack.Render(const S: ISurface);
 var
-  I: Integer;
+  I, Top, Bottom: Integer;
   Clip: TRect;
 begin
   S.PushClip(FBounds);
   Clip := S.ClipRect;
+  EnsureLayout(ItemWidth(FBounds.W));
+  Top := Clip.Y - FBounds.Y;
+  Bottom := Clip.Y + Clip.H - FBounds.Y;
+  { The layout is ordered, so the first block past the clip ends the scan and
+    only the visible blocks are drawn. }
   for I := 0 to Count - 1 do
-    { Skip blocks the clip discards: a large expanded block below the viewport
-      would otherwise draw every one of its rows. }
-    if (ItemAt(I).Bounds.Y < Clip.Y + Clip.H) and
-      (ItemAt(I).Bounds.Y + ItemAt(I).Bounds.H > Clip.Y) then
+  begin
+    if FLayoutY[I] >= Bottom then
+      Break;
+    if FLayoutY[I] + FLayoutH[I] > Top then
       ItemAt(I).Render(S);
+  end;
   S.PopClip;
 end;
 

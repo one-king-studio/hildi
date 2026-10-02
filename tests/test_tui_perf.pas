@@ -43,6 +43,8 @@ type
     procedure TestLargeBlockLayoutIsCachedOnce;
     procedure TestScrolledBlockDrawsOnlyTheViewport;
     procedure TestScrolledBlockRendersTheVisibleRows;
+    procedure TestScrolledChatDrawsOnlyVisibleBlocks;
+    procedure TestScrollingDoesNotRemeasureBlocks;
     procedure TestScrollingDoesNotRebuildTheLayout;
     procedure TestModalToggleChangesOnlyOverlayAndDimmedRegion;
   end;
@@ -273,6 +275,85 @@ begin
       AssertEquals('last visible row', 'row906', string(S.RowText(5, 0, 6)));
     finally
       Scroll.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiPerfTest.TestScrolledChatDrawsOnlyVisibleBlocks;
+var
+  S: TSurfaceMemory;
+  Stream: TChatStream;
+  Text: string;
+  I: Integer;
+begin
+  Text := 'one' + #10 + 'two' + #10 + 'three';
+  S := TSurfaceMemory.Create(40, 12);
+  try
+    Stream := TChatStream.Create(DarkTheme);
+    try
+      for I := 1 to 50 do
+        Stream.Add(ckAssistant, '', Text);
+      { Add follows the bottom, so most of the fifty blocks are above the
+        viewport. }
+      Stream.Arrange(Rc(0, 0, 40, 12));
+      S.Clear(DefaultAttr);
+      S.ResetFrameStats;
+      Stream.Render(S);
+      AssertTrue('draws bounded by the viewport, not the block count',
+        S.PutCount < 40 * 12);
+    finally
+      Stream.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiPerfTest.TestScrollingDoesNotRemeasureBlocks;
+var
+  S: TSurfaceMemory;
+  Stream: TChatStream;
+  Item: TChatItem;
+  Text: string;
+  I, Before: Integer;
+  Ev: TInputEvent;
+begin
+  Text := '';
+  for I := 1 to 200 do
+    Text := Text + 'line ' + IntToStr(I) + ' of a large tool result' + #10;
+
+  S := TSurfaceMemory.Create(40, 12);
+  try
+    Stream := TChatStream.Create(DarkTheme);
+    try
+      for I := 1 to 4 do
+      begin
+        Item := Stream.Add(ckTool, 'reason ' + IntToStr(I), Text);
+        Item.Expanded := True;
+      end;
+      Stream.Arrange(Rc(0, 0, 40, 12));
+      S.Clear(DefaultAttr);
+      Stream.Render(S);
+      Before := Item.MeasureCount;
+
+      Ev := Default(TInputEvent);
+      Ev.Kind := ikMouse;
+      Ev.Mouse.Button := mbWheelUp;
+      Ev.Mouse.X := 5;
+      Ev.Mouse.Y := 5;
+      for I := 1 to 10 do
+      begin
+        Stream.HandleEvent(Ev);
+        Stream.Arrange(Rc(0, 0, 40, 12));
+        S.Clear(DefaultAttr);
+        Stream.Render(S);
+      end;
+      AssertEquals('a scroll does not re-measure unchanged blocks', Before,
+        Item.MeasureCount);
+    finally
+      Stream.Free;
     end;
   finally
     S.Free;
