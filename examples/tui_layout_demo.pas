@@ -43,7 +43,8 @@ uses
   hildegard.helper.tui.surface.video, hildegard.helper.tui.input.terminal,
   hildegard.helper.tui.theme, hildegard.helper.tui.panel,
   hildegard.helper.tui.list, hildegard.helper.tui.scroll,
-  hildegard.helper.tui.edit;
+  hildegard.helper.tui.chat, hildegard.helper.tui.compose,
+  hildegard.helper.tui.chatpanel;
 
 const
   WideThreshold = 180;     // two columns appear above this width
@@ -61,139 +62,11 @@ var
   QuitRequested: Boolean = False;
 
 type
-  TSubmitEvent = procedure(const AText: string) of object;
 
   { Wraps the root so Ctrl-C/Ctrl-D quit. }
   TQuitShell = class(TSingleChild)
   public
     function HandleEvent(const E: TInputEvent): Boolean; override;
-  end;
-
-  TChatKind = (ckUser, ckAssistant, ckThought, ckTool, ckThinking);
-
-  { One item in the chat stream. }
-  TChatItem = class(TWidget)
-  private
-    FKind: TChatKind;
-    FLabel: string;
-    FText: TTextBlock;
-    FExpanded: Boolean;
-    FTheme: TTheme;
-    FOnToggle: TNotifyEvent;
-    FStartMs: Int64;
-    FSpark: Integer;
-    function Inset: Integer;
-    function BodyAttr: TAttr;
-    procedure SetBody(const AText: string);
-    procedure BodyRows(AWidth: Integer; out ATextRows, ALines: Integer);
-    function Boxed: Boolean;
-  public
-    constructor Create(AKind: TChatKind; const ALabel, AText: string;
-      const ATheme: TTheme);
-    destructor Destroy; override;
-    function Measure(const AAvail: TSize): TSize; override;
-    procedure Arrange(const ABounds: TRect); override;
-    procedure Render(const S: ISurface); override;
-    function HandleEvent(const E: TInputEvent): Boolean; override;
-    function Advance(const ANowMs: Int64): Boolean; override;
-    function Animating: Boolean; override;
-    property Expanded: Boolean read FExpanded;
-    property OnToggle: TNotifyEvent read FOnToggle write FOnToggle;
-  end;
-
-  { A vertical stack of chat items, measured at the available width. }
-  TChatStack = class(TWidget)
-  private
-    FItems: array of TChatItem;
-    FTheme: TTheme;
-    FGap: Integer;
-    function Count: Integer;
-    function ItemAt(AIndex: Integer): TChatItem;
-  public
-    constructor Create(const ATheme: TTheme);
-    destructor Destroy; override;
-    function Add(AKind: TChatKind; const ALabel, AText: string): TChatItem;
-    { Assign the toggle callback to every item (including ones added earlier). }
-    procedure SetOnToggle(AValue: TNotifyEvent);
-    function Measure(const AAvail: TSize): TSize; override;
-    procedure Arrange(const ABounds: TRect); override;
-    procedure Render(const S: ISurface); override;
-    function HandleEvent(const E: TInputEvent): Boolean; override;
-    function Advance(const ANowMs: Int64): Boolean; override;
-    function Animating: Boolean; override;
-  end;
-
-  { The scrolling stream of chat items, sticky to the bottom. }
-  TChatStream = class(TWidget)
-  private
-    FStack: TChatStack;
-    FScroll: TScrollContainer;
-    FFollow: Boolean;
-    FOnToggle: TNotifyEvent;
-    procedure SetOnToggle(AValue: TNotifyEvent);
-  public
-    constructor Create(const ATheme: TTheme);
-    destructor Destroy; override;
-    function Add(AKind: TChatKind; const ALabel, AText: string): TChatItem;
-    function Measure(const AAvail: TSize): TSize; override;
-    procedure Arrange(const ABounds: TRect); override;
-    procedure Render(const S: ISurface); override;
-    function HandleEvent(const E: TInputEvent): Boolean; override;
-    function Advance(const ANowMs: Int64): Boolean; override;
-    function Animating: Boolean; override;
-    property OnToggle: TNotifyEvent read FOnToggle write SetOnToggle;
-  end;
-
-  { The input box: a raised, heavy-bordered box wrapping a TTextEdit, which
-    tracks the caret through edits and wraps. Enter sends, Shift+Enter adds a
-    line. }
-  TComposeBox = class(TWidget)
-  private
-    FTheme: TTheme;
-    FInfo: string;
-    FEdit: TTextEdit;
-    FOnSubmit: TSubmitEvent;
-    FOnChange: TNotifyEvent;
-    function GetText: UnicodeString;
-    procedure Changed(Sender: TObject);
-  public
-    constructor Create(const ATheme: TTheme; const AInfo: string);
-    destructor Destroy; override;
-    procedure Clear;
-    function NeededHeight(AWidth: Integer): Integer;
-    function Measure(const AAvail: TSize): TSize; override;
-    procedure Arrange(const ABounds: TRect); override;
-    procedure Render(const S: ISurface); override;
-    function HandleEvent(const E: TInputEvent): Boolean; override;
-    function Advance(const ANowMs: Int64): Boolean; override;
-    function Animating: Boolean; override;
-    property Text: UnicodeString read GetText;
-    property OnSubmit: TSubmitEvent read FOnSubmit write FOnSubmit;
-    { Fired when the text or the caret changes, so the app re-arranges. }
-    property OnChange: TNotifyEvent read FOnChange write FOnChange;
-  end;
-
-  { The chat column: a bordered messages panel with a separate full-width compose
-    panel below it (aligned to the messages panel's borders), a CTA line above
-    the compose and a status line below it. The compose overlays the messages
-    panel as it grows. }
-  TChatColumn = class(TWidget)
-  private
-    FMessages: TPanel;
-    FCta: TWidget;
-    FCompose: TComposeBox;
-    FStatus: TWidget;
-  public
-    constructor Create(AMessages: TPanel; ACta: TWidget; ACompose: TComposeBox;
-      AStatus: TWidget);
-    destructor Destroy; override;
-    function Measure(const AAvail: TSize): TSize; override;
-    procedure Arrange(const ABounds: TRect); override;
-    procedure Render(const S: ISurface); override;
-    function HandleEvent(const E: TInputEvent): Boolean; override;
-    function Advance(const ANowMs: Int64): Boolean; override;
-    function Animating: Boolean; override;
-    property Compose: TComposeBox read FCompose;
   end;
 
   { The responsive layout. }
@@ -220,11 +93,10 @@ type
 
   TDemo = class
   private
-    FStream: TChatStream;
-    FCompose: TComposeBox;
+    FPanel: TChatPanel;
     FApp: TTuiApp;
   public
-    constructor Create(AStream: TChatStream; ACompose: TComposeBox);
+    constructor Create(APanel: TChatPanel);
     procedure SetApp(AApp: TTuiApp);
     procedure OnSubmit(const AText: string);
     procedure OnToggle(Sender: TObject);
@@ -279,707 +151,6 @@ begin
     Exit(True);
   end;
   Result := inherited HandleEvent(E);
-end;
-
-{ TChatItem }
-
-constructor TChatItem.Create(AKind: TChatKind; const ALabel, AText: string;
-  const ATheme: TTheme);
-begin
-  inherited Create;
-  FKind := AKind;
-  FLabel := ALabel;
-  FTheme := ATheme;
-  FExpanded := AKind <> ckThought;
-  FSpark := 0;
-  FStartMs := 0;
-  FText := TTextBlock.Create([], wmWord);
-  SetBody(AText);
-end;
-
-destructor TChatItem.Destroy;
-begin
-  FText.Free;
-  inherited Destroy;
-end;
-
-function TChatItem.BodyAttr: TAttr;
-begin
-  case FKind of
-    ckUser:
-      Result := OnBg(FTheme.Text, FTheme.RaisedBg);
-    ckTool:
-      Result := OnBg(FTheme.Text, FTheme.SunkenBg);
-    ckThought:
-      Result := FTheme.Muted;
-  else
-    Result := FTheme.Text;
-  end;
-end;
-
-procedure TChatItem.SetBody(const AText: string);
-var
-  One: TSpan;
-begin
-  One := Default(TSpan);
-  One.Text := UnicodeString(AText);
-  One.Attr := BodyAttr;
-  FText.SetSpans([One]);
-end;
-
-function TChatItem.Inset: Integer;
-begin
-  if (FKind = ckUser) or ((FKind in [ckThought, ckTool]) and FExpanded) then
-    Result := 4
-  else if FKind = ckAssistant then
-    Result := 1
-  else
-    Result := 0;
-end;
-
-function TChatItem.Boxed: Boolean;
-begin
-  Result := (FKind = ckUser) or ((FKind in [ckThought, ckTool]) and FExpanded);
-end;
-
-procedure TChatItem.BodyRows(AWidth: Integer; out ATextRows, ALines: Integer);
-var
-  InnerW: Integer;
-begin
-  InnerW := AWidth - Inset;
-  if InnerW < 1 then
-    InnerW := 1;
-  FText.WrapWidth := InnerW;
-  ALines := FText.Measure(Default(TSize)).H;
-  if (not FExpanded) and (ALines > CollapsedLines) then
-    ATextRows := CollapsedLines
-  else
-    ATextRows := ALines;
-end;
-
-function TChatItem.Measure(const AAvail: TSize): TSize;
-var
-  TextRows, Lines: Integer;
-begin
-  Result := Default(TSize);
-  Result.W := AAvail.W;
-  if AAvail.W < 1 then
-    Exit;
-  case FKind of
-    ckUser:
-      begin
-        BodyRows(AAvail.W, TextRows, Lines);
-        Result.H := TextRows + 2;   { top border, body, heavy bottom }
-      end;
-    ckAssistant:
-      begin
-        BodyRows(AAvail.W, TextRows, Lines);
-        Result.H := TextRows;
-      end;
-    ckThinking:
-      Result.H := 1;
-    ckThought, ckTool:
-      if FExpanded then
-      begin
-        BodyRows(AAvail.W, TextRows, Lines);
-        Result.H := TextRows + 2;   { top border, body, bottom border }
-      end
-      else
-        Result.H := 1;              { collapsed rule line }
-  end;
-  if Result.H < 1 then
-    Result.H := 1;
-end;
-
-procedure TChatItem.Arrange(const ABounds: TRect);
-var
-  TextRows, Lines, InnerW: Integer;
-begin
-  inherited Arrange(ABounds);
-  if Boxed then
-  begin
-    InnerW := ABounds.W - 4;
-    if InnerW < 1 then
-      InnerW := 1;
-    BodyRows(ABounds.W, TextRows, Lines);
-    if TextRows > ABounds.H - 2 then
-      TextRows := ABounds.H - 2;
-    FText.Arrange(Rc(ABounds.X + 2, ABounds.Y + 1, InnerW, TextRows));
-  end
-  else
-    FText.Arrange(Rc(ABounds.X + Inset, ABounds.Y, ABounds.W - Inset, ABounds.H));
-end;
-
-procedure TChatItem.Render(const S: ISurface);
-var
-  L, R, T, B, TextRows, Lines, X, I: Integer;
-  InnerW: Integer;
-  Border, SurfaceAttr: TAttr;
-  Title: UnicodeString;
-  RuleCh, MarkCh: UnicodeString;
-begin
-  if (FBounds.W < 1) or (FBounds.H < 1) then
-    Exit;
-
-  case FKind of
-    ckAssistant:
-      begin
-        FText.Render(S);
-        Exit;
-      end;
-    ckThinking:
-      begin
-        PutText(S, FBounds.X + 1, FBounds.Y, Sparkles[FSpark], FTheme.Accent);
-        PutText(S, FBounds.X + 3, FBounds.Y, 'Thinking', FTheme.Muted);
-        Exit;
-      end;
-  else
-    ;
-  end;
-
-  L := FBounds.X;
-  R := FBounds.X + FBounds.W - 1;
-  T := FBounds.Y;
-  B := FBounds.Y + FBounds.H - 1;
-  BodyRows(FBounds.W, TextRows, Lines);
-
-  if (FKind = ckThought) and (not FExpanded) then
-  begin
-    RuleCh := '─';
-    MarkCh := '▼';
-  end
-  else if (FKind = ckTool) and (not FExpanded) then
-  begin
-    RuleCh := '═';
-    MarkCh := '▼';
-  end
-  else
-  begin
-    RuleCh := '';
-    MarkCh := '▲';
-  end;
-
-  { Collapsed rule line: ' ─ Label ───── ▼ ─', one leading space, running to the
-    item's right edge (a space remains before the scrollbar column). }
-  if RuleCh <> '' then
-  begin
-    Title := ' ' + RuleCh + ' ' + UnicodeString(FLabel) + ' ';
-    I := FBounds.W - Length(Title) - 5;
-    if I < 1 then
-      I := 1;
-    PutText(S, L, T, Title + Rep(RuleCh, I) + ' ' + MarkCh + ' ' + RuleCh,
-      FTheme.Muted);
-    Exit;
-  end;
-
-  { Boxed kinds. }
-  if FKind = ckUser then
-  begin
-    SurfaceAttr := OnBg(FTheme.Text, FTheme.RaisedBg);
-    Border := OnBg(WithStyle(FTheme.Accent, [sfDim]), FTheme.RaisedBg);
-  end
-  else if FKind = ckTool then
-  begin
-    SurfaceAttr := OnBg(FTheme.Text, FTheme.SunkenBg);
-    Border := OnBg(FTheme.Border, FTheme.SunkenBg);
-  end
-  else
-  begin
-    SurfaceAttr := FTheme.Base;
-    Border := FTheme.Border;
-  end;
-
-  S.FillRect(FBounds, SurfaceAttr);
-
-  if FKind = ckUser then
-  begin
-    PutCh(S, L, T, '╭', Border);
-    PutCh(S, R, T, '╮', Border);
-    PutCh(S, L, B, '╰', Border);
-    PutCh(S, R, B, '┘', Border);
-    for X := L + 1 to R - 1 do
-      PutCh(S, X, T, '─', Border);
-    for X := L + 1 to R - 1 do
-      PutCh(S, X, B, '═', Border);
-    for I := T + 1 to B - 1 do
-    begin
-      PutCh(S, L, I, '│', Border);
-      PutCh(S, R, I, '│', Border);
-    end;
-  end
-  else
-  begin
-    { ┌─ Label ───── ▲ ─┐ }
-    InnerW := FBounds.W - 4;
-    if InnerW < 1 then
-      InnerW := 1;
-    Title := '┌─ ' + UnicodeString(FLabel) + ' ';
-    I := FBounds.W - Length(Title) - 5;
-    if I < 1 then
-      I := 1;
-    PutText(S, L, T, Title + Rep('─', I) + ' ▲ ─┐', Border);
-    PutCh(S, L, B, '└', Border);
-    PutCh(S, R, B, '┘', Border);
-    for X := L + 1 to R - 1 do
-      PutCh(S, X, B, '─', Border);
-    for I := T + 1 to B - 1 do
-    begin
-      PutCh(S, L, I, '│', Border);
-      PutCh(S, R, I, '│', Border);
-    end;
-  end;
-
-  FText.Render(S);
-end;
-
-function TChatItem.HandleEvent(const E: TInputEvent): Boolean;
-begin
-  Result := False;
-  if not (FKind in [ckThought, ckTool]) then
-    Exit;
-  if (E.Kind = ikMouse) and (E.Mouse.Button = mbLeft) and
-    (E.Mouse.X >= FBounds.X) and (E.Mouse.Y >= FBounds.Y) and
-    (E.Mouse.X < FBounds.X + FBounds.W) and (E.Mouse.Y < FBounds.Y + FBounds.H) then
-  begin
-    FExpanded := not FExpanded;
-    if Assigned(FOnToggle) then
-      FOnToggle(Self);
-    Exit(True);
-  end;
-end;
-
-function TChatItem.Advance(const ANowMs: Int64): Boolean;
-var
-  NewSpark: Integer;
-begin
-  if FKind <> ckThinking then
-    Exit(False);
-  NewSpark := (ANowMs div 90) mod Length(Sparkles);
-  Result := NewSpark <> FSpark;
-  FSpark := NewSpark;
-end;
-
-function TChatItem.Animating: Boolean;
-begin
-  Result := FKind = ckThinking;
-end;
-
-{ TChatStack }
-
-constructor TChatStack.Create(const ATheme: TTheme);
-begin
-  inherited Create;
-  FTheme := ATheme;
-  FGap := 1;
-end;
-
-destructor TChatStack.Destroy;
-var
-  I: Integer;
-begin
-  for I := 0 to High(FItems) do
-    FItems[I].Free;
-  inherited Destroy;
-end;
-
-function TChatStack.Count: Integer;
-begin
-  Result := Length(FItems);
-end;
-
-function TChatStack.ItemAt(AIndex: Integer): TChatItem;
-begin
-  Result := FItems[AIndex];
-end;
-
-function TChatStack.Add(AKind: TChatKind; const ALabel, AText: string): TChatItem;
-begin
-  SetLength(FItems, Length(FItems) + 1);
-  Result := TChatItem.Create(AKind, ALabel, AText, FTheme);
-  FItems[High(FItems)] := Result;
-end;
-
-procedure TChatStack.SetOnToggle(AValue: TNotifyEvent);
-var
-  I: Integer;
-begin
-  for I := 0 to Count - 1 do
-    ItemAt(I).OnToggle := AValue;
-end;
-
-function TChatStack.Measure(const AAvail: TSize): TSize;
-var
-  I, H: Integer;
-  Avail: TSize;
-begin
-  Result := Default(TSize);
-  Result.W := AAvail.W - 1;   { reserve the scrollbar column }
-  if Result.W < 1 then
-    Result.W := 1;
-  Avail.W := Result.W;
-  Avail.H := AAvail.H;
-  H := 0;
-  for I := 0 to Count - 1 do
-  begin
-    Inc(H, ItemAt(I).Measure(Avail).H);
-    if I < Count - 1 then
-      Inc(H, FGap);
-  end;
-  Result.H := H + ContentBottomPad;
-end;
-
-procedure TChatStack.Arrange(const ABounds: TRect);
-var
-  I, Y, H: Integer;
-  Avail: TSize;
-begin
-  inherited Arrange(ABounds);
-  Avail.W := ABounds.W;
-  Avail.H := ABounds.H;
-  Y := ABounds.Y;
-  for I := 0 to Count - 1 do
-  begin
-    H := ItemAt(I).Measure(Avail).H;
-    { Inset by one column on each side: the panel shows
-      border | space | content | space | scrollbar | border. }
-    ItemAt(I).Arrange(Rc(ABounds.X + 1, Y, ABounds.W - 2, H));
-    Inc(Y, H + FGap);
-  end;
-end;
-
-procedure TChatStack.Render(const S: ISurface);
-var
-  I: Integer;
-begin
-  S.PushClip(FBounds);
-  for I := 0 to Count - 1 do
-    ItemAt(I).Render(S);
-  S.PopClip;
-end;
-
-function TChatStack.HandleEvent(const E: TInputEvent): Boolean;
-var
-  I: Integer;
-begin
-  for I := 0 to Count - 1 do
-    if ItemAt(I).HandleEvent(E) then
-      Exit(True);
-  Result := False;
-end;
-
-function TChatStack.Advance(const ANowMs: Int64): Boolean;
-var
-  I: Integer;
-begin
-  Result := False;
-  for I := 0 to Count - 1 do
-    if ItemAt(I).Advance(ANowMs) then
-      Result := True;
-end;
-
-function TChatStack.Animating: Boolean;
-var
-  I: Integer;
-begin
-  for I := 0 to Count - 1 do
-    if ItemAt(I).Animating then
-      Exit(True);
-  Result := False;
-end;
-
-{ TChatStream }
-
-constructor TChatStream.Create(const ATheme: TTheme);
-begin
-  inherited Create;
-  FFollow := True;
-  FStack := TChatStack.Create(ATheme);
-  FScroll := TScrollContainer.Create(FStack, smAuto, smNever);
-  { The scrollbar sits in the messages panel's right border column, so its
-    track must not be painted: the border reads as the track and only the thumb
-    shows. }
-  FScroll.TrackVisible := False;
-end;
-
-destructor TChatStream.Destroy;
-begin
-  FScroll.Free;
-  inherited Destroy;
-end;
-
-function TChatStream.Add(AKind: TChatKind; const ALabel, AText: string): TChatItem;
-begin
-  Result := FStack.Add(AKind, ALabel, AText);
-  Result.OnToggle := FOnToggle;
-  FFollow := True;
-end;
-
-procedure TChatStream.SetOnToggle(AValue: TNotifyEvent);
-begin
-  FOnToggle := AValue;
-  FStack.SetOnToggle(AValue);
-end;
-
-function TChatStream.Measure(const AAvail: TSize): TSize;
-begin
-  Result := AAvail;
-end;
-
-procedure TChatStream.Arrange(const ABounds: TRect);
-var
-  B: TRect;
-begin
-  inherited Arrange(ABounds);
-  { Bleed one column into the messages panel's right border so the scrollbar
-    lands in that border column (the panel has no padding, so the column just
-    past the content is the border). }
-  B := ABounds;
-  Inc(B.W);
-  FScroll.Arrange(B);
-  if FFollow then
-    FScroll.ScrollY := High(Integer);
-end;
-
-procedure TChatStream.Render(const S: ISurface);
-begin
-  FScroll.Render(S);
-end;
-
-function TChatStream.HandleEvent(const E: TInputEvent): Boolean;
-begin
-  Result := FScroll.HandleEvent(E);
-  if Result then
-    FFollow := FScroll.ScrollY >= FScroll.MaxScrollY;
-end;
-
-function TChatStream.Advance(const ANowMs: Int64): Boolean;
-begin
-  Result := FStack.Advance(ANowMs);
-end;
-
-function TChatStream.Animating: Boolean;
-begin
-  Result := FStack.Animating;
-end;
-
-{ TComposeBox }
-
-constructor TComposeBox.Create(const ATheme: TTheme; const AInfo: string);
-begin
-  inherited Create;
-  FTheme := ATheme;
-  FInfo := AInfo;
-  FEdit := TTextEdit.Create(wmWord);
-  FEdit.Attr := OnBg(FTheme.Text, FTheme.RaisedBg);
-  FEdit.CaretAttr := OnBg(WithStyle(FTheme.Accent, [sfBold]), FTheme.RaisedBg);
-  FEdit.SelAttr := FEdit.CaretOverlay;
-  FEdit.OnChange := Changed;
-end;
-
-destructor TComposeBox.Destroy;
-begin
-  FEdit.Free;
-  inherited Destroy;
-end;
-
-function TComposeBox.GetText: UnicodeString;
-begin
-  Result := FEdit.Text;
-end;
-
-procedure TComposeBox.Changed(Sender: TObject);
-begin
-  if Assigned(FOnChange) then
-    FOnChange(Self);
-end;
-
-procedure TComposeBox.Clear;
-begin
-  FEdit.Clear;
-end;
-
-function TComposeBox.NeededHeight(AWidth: Integer): Integer;
-var
-  InnerW: Integer;
-begin
-  InnerW := AWidth - 4;
-  if InnerW < 1 then
-    InnerW := 1;
-  { Top and bottom borders, the text rows, a blank, and the info line. }
-  Result := Length(FEdit.Rows(InnerW)) + 4;
-end;
-
-function TComposeBox.Measure(const AAvail: TSize): TSize;
-begin
-  Result := Default(TSize);
-  Result.W := AAvail.W;
-  Result.H := NeededHeight(AAvail.W);
-end;
-
-procedure TComposeBox.Arrange(const ABounds: TRect);
-var
-  TextRows: Integer;
-begin
-  inherited Arrange(ABounds);
-  TextRows := ABounds.H - 4;
-  if TextRows < 1 then
-    TextRows := 1;
-  FEdit.Arrange(Rc(ABounds.X + 2, ABounds.Y + 1, ABounds.W - 4, TextRows));
-end;
-
-procedure TComposeBox.Render(const S: ISurface);
-var
-  L, R, T, B, X, I: Integer;
-  SurfaceAttr, Border: TAttr;
-begin
-  if (FBounds.W < 4) or (FBounds.H < 4) then
-    Exit;
-  L := FBounds.X;
-  R := FBounds.X + FBounds.W - 1;
-  T := FBounds.Y;
-  B := FBounds.Y + FBounds.H - 1;
-
-  SurfaceAttr := OnBg(FTheme.Text, FTheme.RaisedBg);
-  Border := OnBg(WithStyle(FTheme.Accent, [sfDim]), FTheme.RaisedBg);
-
-  S.FillRect(FBounds, SurfaceAttr);
-
-  { Heavy top, single bottom, light sides. }
-  PutCh(S, L, T, '╭', Border);
-  PutCh(S, R, T, '╮', Border);
-  PutCh(S, L, B, '╰', Border);
-  PutCh(S, R, B, '╯', Border);
-  for X := L + 1 to R - 1 do
-  begin
-    PutCh(S, X, T, '═', Border);
-    PutCh(S, X, B, '─', Border);
-  end;
-  for I := T + 1 to B - 1 do
-  begin
-    PutCh(S, L, I, '│', Border);
-    PutCh(S, R, I, '│', Border);
-  end;
-
-  FEdit.Render(S);
-
-  { Info line. }
-  PutText(S, L + 2, B - 1, UnicodeString(FInfo),
-    OnBg(FTheme.Muted, FTheme.RaisedBg));
-end;
-
-function TComposeBox.HandleEvent(const E: TInputEvent): Boolean;
-begin
-  Result := False;
-  if E.Kind <> ikKey then
-    Exit;
-  { A plain Enter submits; everything else, including Shift+Enter, belongs to
-    the editor. }
-  if (E.Key.Kind = kkEnter) and (not (moShift in E.Key.Mods)) then
-  begin
-    if Assigned(FOnSubmit) and (Trim(string(FEdit.Text)) <> '') then
-    begin
-      FOnSubmit(string(FEdit.Text));
-      FEdit.Clear;
-    end;
-    Exit(True);
-  end;
-  Result := FEdit.HandleEvent(E);
-end;
-
-function TComposeBox.Advance(const ANowMs: Int64): Boolean;
-begin
-  Result := FEdit.Advance(ANowMs);
-end;
-
-function TComposeBox.Animating: Boolean;
-begin
-  Result := FEdit.Animating;
-end;
-
-{ TChatColumn }
-
-constructor TChatColumn.Create(AMessages: TPanel; ACta: TWidget;
-  ACompose: TComposeBox; AStatus: TWidget);
-begin
-  inherited Create;
-  FMessages := AMessages;
-  FCta := ACta;
-  FCompose := ACompose;
-  FStatus := AStatus;
-end;
-
-destructor TChatColumn.Destroy;
-begin
-  FMessages.Free;
-  FCta.Free;
-  FCompose.Free;
-  FStatus.Free;
-  inherited Destroy;
-end;
-
-function TChatColumn.Measure(const AAvail: TSize): TSize;
-begin
-  Result := AAvail;
-end;
-
-procedure TChatColumn.Arrange(const ABounds: TRect);
-var
-  MessagesH, ComposeH, MaxH, ComposeY: Integer;
-begin
-  inherited Arrange(ABounds);
-  MessagesH := ABounds.H - 1;   { the status line }
-  if MessagesH < 1 then
-    MessagesH := 1;
-
-  { The compose is an overlay: it grows upward over the messages panel, which
-    keeps its full size, so the message content and its scroll do not reflow. }
-  ComposeH := FCompose.NeededHeight(ABounds.W);
-  MaxH := (ABounds.H * MaxComposePercent) div 100;
-  if ComposeH > MaxH then
-    ComposeH := MaxH;
-  if ComposeH < 4 then
-    ComposeH := 4;
-  ComposeY := ABounds.Y + MessagesH - ComposeH;
-  if ComposeY < ABounds.Y then
-    ComposeY := ABounds.Y;
-
-  FMessages.Arrange(Rc(ABounds.X, ABounds.Y, ABounds.W, MessagesH));
-  FStatus.Arrange(Rc(ABounds.X + 1, ABounds.Y + ABounds.H - 1, ABounds.W - 2, 1));
-  FCompose.Arrange(Rc(ABounds.X, ComposeY, ABounds.W, ComposeH));
-  { The CTA strip sits above the compose, inside the messages panel's borders and
-    short of the scrollbar column, so those borders are not overwritten. }
-  FCta.Arrange(Rc(ABounds.X + 1, ComposeY - 1, ABounds.W - 3, 1));
-end;
-
-procedure TChatColumn.Render(const S: ISurface);
-begin
-  FMessages.Render(S);
-  FCta.Render(S);
-  FCompose.Render(S);
-  FStatus.Render(S);
-end;
-
-function TChatColumn.HandleEvent(const E: TInputEvent): Boolean;
-begin
-  if FCompose.HandleEvent(E) then
-    Exit(True);
-  if FMessages.HandleEvent(E) then
-    Exit(True);
-  if FStatus.HandleEvent(E) then
-    Exit(True);
-  Result := False;
-end;
-
-function TChatColumn.Advance(const ANowMs: Int64): Boolean;
-begin
-  Result := FCompose.Advance(ANowMs);
-  if FMessages.Advance(ANowMs) then
-    Result := True;
-end;
-
-function TChatColumn.Animating: Boolean;
-begin
-  Result := FCompose.Animating or FMessages.Animating;
 end;
 
 { TResponsiveLayout }
@@ -1125,11 +296,10 @@ end;
 
 { TDemo }
 
-constructor TDemo.Create(AStream: TChatStream; ACompose: TComposeBox);
+constructor TDemo.Create(APanel: TChatPanel);
 begin
   inherited Create;
-  FStream := AStream;
-  FCompose := ACompose;
+  FPanel := APanel;
 end;
 
 procedure TDemo.SetApp(AApp: TTuiApp);
@@ -1139,7 +309,7 @@ end;
 
 procedure TDemo.OnSubmit(const AText: string);
 begin
-  FStream.Add(ckUser, '', AText);
+  FPanel.Stream.Add(ckUser, '', AText);
   if FApp <> nil then
     FApp.Invalidate;
 end;
@@ -1157,14 +327,7 @@ var
   Theme: TTheme;
   Files: TListView;
   EditorText, SideText: TTextBlock;
-  StatusLeft, StatusRight: TTextBlock;
-  Status: TContainer;
-  CtaText: TTextBlock;
-  Cta: TPanel;
-  ChatStream: TChatStream;
-  Compose: TComposeBox;
-  ChatColumn: TChatColumn;
-  MessagesPanel: TPanel;
+  ChatPanel: TChatPanel;
   FilesPanel, EditorPanel, SidePanel: TPanel;
   Layout: TResponsiveLayout;
   Demo: TDemo;
@@ -1236,58 +399,29 @@ begin
   Style.Title := 'Editor';
   EditorPanel := TPanel.Create(EditorText, Theme, Style);
 
-  ChatStream := TChatStream.Create(Theme);
-  ChatStream.Add(ckUser, '',
+  ChatPanel := TChatPanel.Create(Theme, 'Hildegard · Model v1 Fireworks · low',
+    ' ↵ send   ⇧↵ newline   click a block to expand');
+  ChatPanel.Stream.Add(ckUser, '',
     'This is the user''s message. It should be rendered with a slightly lighter ' +
     'background to distinguish it from the rest of the content. Make the border ' +
     'be a dimmed accent color to not make it too distracting.');
-  ChatStream.Add(ckThought, 'Thought · 8.2s',
+  ChatPanel.Stream.Add(ckThought, 'Thought · 8.2s',
     'This is an expanded thought block. The entire block is clickable even when ' +
     'collapsed, and clicking toggles between expanded and collapsed. The borders ' +
     'and text in this block are rendered with a dimmed color on the default ' +
     'background.');
-  ChatStream.Add(ckAssistant, '',
+  ChatPanel.Stream.Add(ckAssistant, '',
     'Assistant message between thoughts.');
-  ChatStream.Add(ckTool, 'Reason for tool call',
-    '$ ls .' + #10 + '' + #10 +
+  ChatPanel.Stream.Add(ckTool, 'looking for the build file',
+    'glob  {"pattern":"Makefile"}' + #10 + '' + #10 +
     'AGENTS.md  Makefile   deps       examples   src' + #10 +
-    'this entire block is a darker color with full contrast text');
-  ChatStream.Add(ckAssistant, '',
+    'the reason is the title; expand for the tool and its output');
+  ChatPanel.Stream.Add(ckAssistant, '',
     'Final assistant message. The scrollbar is the same character but rendered ' +
     'in different colors: a darker track and a lighter thumb.' + #10 + '' + #10 +
     'A multi-paragraph response simply applies a gap between paragraphs.');
-  ChatStream.Add(ckThinking, '', '');
-
-  Compose := TComposeBox.Create(Theme, 'Hildegard · Model v1 Fireworks · low');
-
-  { The messages panel: a rounded, bordered panel that keeps its full size while
-    the compose overlays it. }
-  Style := DefaultBoxStyle;
-  Style.Title := '';
-  Style.Rounded := True;
-  Style.Padding := 0;
-  MessagesPanel := TPanel.Create(ChatStream, Theme, Style);
-
-  { A CTA/stats line above the compose: a filled strip inside the messages
-    panel's borders (border off, no padding, so it paints its own background). }
-  CtaText := TTextBlock.Create([], wmNone);
-  CtaText.SetText(' ↵ send   ⇧↵ newline   click a block to expand', Theme.Muted);
-  Style := DefaultBoxStyle;
-  Style.Title := '';
-  Style.Border := False;
-  Style.Padding := 0;
-  Cta := TPanel.Create(CtaText, Theme, Style);
-
-  { The status line below the compose. }
-  StatusLeft := TTextBlock.Create([], wmNone);
-  StatusLeft.SetText(GetCurrentDir, Theme.Muted);
-  StatusRight := TTextBlock.Create([], wmNone);
-  StatusRight.SetText('ctrl+p commands  ctrl+b sidebar  ctrl+/ help', Theme.Muted);
-  Status := TContainer.Create([Auto, Fill(1), Auto], [Fixed(1)]);
-  Status.Add(StatusLeft, 0, 0);
-  Status.Add(StatusRight, 2, 0);
-
-  ChatColumn := TChatColumn.Create(MessagesPanel, Cta, Compose, Status);
+  ChatPanel.Stream.Add(ckThinking, '', '');
+  ChatPanel.SetStatus(GetCurrentDir + '   ctrl+p commands   ctrl+b sidebar');
 
   SideText := TTextBlock.Create([], wmNone);
   SideText.SetText(
@@ -1304,12 +438,12 @@ begin
   Style.Title := 'Tools';
   SidePanel := TPanel.Create(SideText, Theme, Style);
 
-  Demo := TDemo.Create(ChatStream, Compose);
-  ChatStream.OnToggle := Demo.OnToggle;
-  Compose.OnSubmit := Demo.OnSubmit;
-  Compose.OnChange := Demo.OnToggle;
+  Demo := TDemo.Create(ChatPanel);
+  ChatPanel.Stream.OnToggle := Demo.OnToggle;
+  ChatPanel.Compose.OnSubmit := Demo.OnSubmit;
+  ChatPanel.Compose.OnChange := Demo.OnToggle;
 
-  Layout := TResponsiveLayout.Create(FilesPanel, EditorPanel, ChatColumn,
+  Layout := TResponsiveLayout.Create(FilesPanel, EditorPanel, ChatPanel,
     SidePanel);
 
   App := TTuiApp.Create(Surface, Input, TQuitShell.Create(Layout));

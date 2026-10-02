@@ -369,7 +369,10 @@ Persistence and configuration
 
 - `Harness_UI_v1`: the real application - conversation pane, file/diff viewport,
   status line, approval modal - bound to `TAgentLoop` (specified in
-  `Harness_UI_v1.SPEC.md`).
+  `Harness_UI_v1.SPEC.md`). **Implemented.**
+- `Chat_Panel_v1`: the designed conversation view (message blocks, overlay
+  compose, stats/status lines) bound to `TTurnEvent`, replacing the plain
+  transcript (specified in `Chat_Panel_v1.SPEC.md`). **Implemented.**
 - Editable text: reuse FPC's gap-buffer editor model (`packages/fv/src/editors`)
   rather than writing one.
 - A terminal pane that hosts a real command via a pty, rendering through
