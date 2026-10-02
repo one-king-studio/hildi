@@ -59,6 +59,9 @@ type
     property Expanded: Boolean read FExpanded write FExpanded;
     property OnToggle: TNotifyEvent read FOnToggle write FOnToggle;
     property OnChange: TNotifyEvent read FOnChange write FOnChange;
+    { Diagnostic: how many times this block's body text has been laid out. A
+      steady-state render/scroll must not increase it. }
+    function LayoutBuilds: Integer;
   end;
 
   { A vertical stack of blocks, measured at the available width. }
@@ -72,6 +75,10 @@ type
     FOnChange: TNotifyEvent;
     function Count: Integer;
     function ItemAt(AIndex: Integer): TChatItem;
+    { The width an item is measured and arranged at: the stack's width less the
+      one-column inset on each side. Measure and Arrange must agree, or the text
+      layout cache thrashes between two widths. }
+    function ItemWidth(AStackWidth: Integer): Integer;
   public
     constructor Create(const ATheme: TTheme);
     destructor Destroy; override;
@@ -247,6 +254,11 @@ begin
   Result := FBody;
 end;
 
+function TChatItem.LayoutBuilds: Integer;
+begin
+  Result := FText.LayoutBuilds;
+end;
+
 function TChatItem.Inset: Integer;
 begin
   if (FKind = ckUser) or ((FKind in [ckThought, ckTool]) and FExpanded) then
@@ -336,6 +348,7 @@ var
   L, R, T, B, TextRows, Lines, X, I: Integer;
   InnerW: Integer;
   Border, SurfaceAttr: TAttr;
+  Clip: TRect;
   Title: UnicodeString;
   RuleCh, MarkCh: UnicodeString;
 begin
@@ -423,11 +436,13 @@ begin
       PutCh(S, X, T, '─', Border);
     for X := L + 1 to R - 1 do
       PutCh(S, X, B, '═', Border);
+    Clip := S.ClipRect;
     for I := T + 1 to B - 1 do
-    begin
-      PutCh(S, L, I, '│', Border);
-      PutCh(S, R, I, '│', Border);
-    end;
+      if (I >= Clip.Y) and (I < Clip.Y + Clip.H) then
+      begin
+        PutCh(S, L, I, '│', Border);
+        PutCh(S, R, I, '│', Border);
+      end;
   end
   else
   begin
@@ -444,11 +459,13 @@ begin
     PutCh(S, R, B, '┘', Border);
     for X := L + 1 to R - 1 do
       PutCh(S, X, B, '─', Border);
+    Clip := S.ClipRect;
     for I := T + 1 to B - 1 do
-    begin
-      PutCh(S, L, I, '│', Border);
-      PutCh(S, R, I, '│', Border);
-    end;
+      if (I >= Clip.Y) and (I < Clip.Y + Clip.H) then
+      begin
+        PutCh(S, L, I, '│', Border);
+        PutCh(S, R, I, '│', Border);
+      end;
   end;
 
   FText.Render(S);
@@ -515,6 +532,13 @@ begin
   Result := FItems[AIndex];
 end;
 
+function TChatStack.ItemWidth(AStackWidth: Integer): Integer;
+begin
+  Result := AStackWidth - 2;
+  if Result < 1 then
+    Result := 1;
+end;
+
 function TChatStack.Add(AKind: TChatKind; const ALabel, AText: string): TChatItem;
 begin
   SetLength(FItems, Length(FItems) + 1);
@@ -575,7 +599,7 @@ begin
   Result.W := AAvail.W - 1;   { reserve the scrollbar column }
   if Result.W < 1 then
     Result.W := 1;
-  Avail.W := Result.W;
+  Avail.W := ItemWidth(Result.W);
   Avail.H := AAvail.H;
   H := 0;
   for I := 0 to Count - 1 do
@@ -593,7 +617,7 @@ var
   Avail: TSize;
 begin
   inherited Arrange(ABounds);
-  Avail.W := ABounds.W;
+  Avail.W := ItemWidth(ABounds.W);
   Avail.H := ABounds.H;
   Y := ABounds.Y;
   for I := 0 to Count - 1 do
@@ -601,7 +625,7 @@ begin
     H := ItemAt(I).Measure(Avail).H;
     { Inset by one column on each side: the panel shows
       border | space | content | space | scrollbar | border. }
-    ItemAt(I).Arrange(Rc(ABounds.X + 1, Y, ABounds.W - 2, H));
+    ItemAt(I).Arrange(Rc(ABounds.X + 1, Y, Avail.W, H));
     Inc(Y, H + FGap);
   end;
 end;
@@ -609,10 +633,16 @@ end;
 procedure TChatStack.Render(const S: ISurface);
 var
   I: Integer;
+  Clip: TRect;
 begin
   S.PushClip(FBounds);
+  Clip := S.ClipRect;
   for I := 0 to Count - 1 do
-    ItemAt(I).Render(S);
+    { Skip blocks the clip discards: a large expanded block below the viewport
+      would otherwise draw every one of its rows. }
+    if (ItemAt(I).Bounds.Y < Clip.Y + Clip.H) and
+      (ItemAt(I).Bounds.Y + ItemAt(I).Bounds.H > Clip.Y) then
+      ItemAt(I).Render(S);
   S.PopClip;
 end;
 

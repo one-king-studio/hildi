@@ -296,16 +296,27 @@ procedure TTextBlock.Render(const S: ISurface);
 var
   Lines: TStyledLines;
   Row, I, X, LW, Offset, CW: Integer;
+  Clip: TRect;
+  FirstRow, LastRow: Integer;
   Cell: TCell;
 begin
   if (FBounds.W <= 0) or (FBounds.H <= 0) then
     Exit;
   Lines := CachedLines(FBounds.W);
   S.PushClip(FBounds);
-  for Row := 0 to High(Lines) do
+  { Only draw the rows the clip can show: a tall block that is scrolled mostly
+    off-screen would otherwise walk every row. }
+  Clip := S.ClipRect;
+  FirstRow := Clip.Y - FBounds.Y;
+  if FirstRow < 0 then
+    FirstRow := 0;
+  LastRow := Clip.Y + Clip.H - 1 - FBounds.Y;
+  if LastRow > FBounds.H - 1 then
+    LastRow := FBounds.H - 1;
+  if LastRow > High(Lines) then
+    LastRow := High(Lines);
+  for Row := FirstRow to LastRow do
   begin
-    if Row >= FBounds.H then
-      Break;
     LW := LineWidth(Lines[Row]);
     case FAlign of
       taCenter:

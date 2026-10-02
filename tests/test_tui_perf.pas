@@ -14,6 +14,7 @@ uses
   hildegard.helper.tui.base, hildegard.helper.tui.input,
   hildegard.helper.tui.surface, hildegard.helper.tui.widget,
   hildegard.helper.tui.text, hildegard.helper.tui.scroll,
+  hildegard.helper.tui.theme, hildegard.helper.tui.chat,
   hildegard.helper.tui.app;
 
 type
@@ -40,6 +41,9 @@ type
     procedure TestScrollChangesOnlyViewportRows;
     procedure TestLayoutRunsOnlyWhenDirty;
     procedure TestLargeBlockLayoutIsCachedOnce;
+    procedure TestScrolledBlockDrawsOnlyTheViewport;
+    procedure TestScrolledBlockRendersTheVisibleRows;
+    procedure TestScrollingDoesNotRebuildTheLayout;
     procedure TestModalToggleChangesOnlyOverlayAndDimmedRegion;
   end;
 
@@ -199,6 +203,125 @@ begin
         Block.LayoutBuilds);
     finally
       Block.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiPerfTest.TestScrolledBlockDrawsOnlyTheViewport;
+var
+  S: TSurfaceMemory;
+  Block: TTextBlock;
+  Scroll: TScrollContainer;
+  Text: string;
+  I: Integer;
+begin
+  Text := '';
+  for I := 1 to 1000 do
+  begin
+    if I > 0 then
+      Text := Text + #10;
+    Text := Text + 'row' + IntToStr(I);
+  end;
+
+  S := TSurfaceMemory.Create(20, 6);
+  try
+    Block := TTextBlock.Create([SpanOf(UnicodeString(Text))], wmNone);
+    Scroll := TScrollContainer.Create(Block, smNever, smNever);
+    try
+      Scroll.Arrange(Rc(0, 0, 20, 6));
+      Scroll.ScrollTo(0, 900);
+      S.Clear(DefaultAttr);
+      S.ResetFrameStats;
+      Scroll.Render(S);
+      { Only the six visible rows are drawn, not the thousand in the block. }
+      AssertTrue('draws bounded by the viewport, not the block',
+        S.PutCount <= 20 * 6);
+    finally
+      Scroll.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiPerfTest.TestScrolledBlockRendersTheVisibleRows;
+var
+  S: TSurfaceMemory;
+  Block: TTextBlock;
+  Scroll: TScrollContainer;
+  Text: string;
+  I: Integer;
+begin
+  Text := 'row1';
+  for I := 2 to 1000 do
+    Text := Text + #10 + 'row' + IntToStr(I);
+
+  S := TSurfaceMemory.Create(20, 6);
+  try
+    Block := TTextBlock.Create([SpanOf(UnicodeString(Text))], wmNone);
+    Scroll := TScrollContainer.Create(Block, smNever, smNever);
+    try
+      Scroll.Arrange(Rc(0, 0, 20, 6));
+      Scroll.ScrollTo(0, 900);
+      S.Clear(DefaultAttr);
+      Scroll.Render(S);
+      { The culled render still draws the rows the clip shows: scrolled to 900,
+        surface row 0 is the block's row 900 ('row901'). }
+      AssertEquals('first visible row', 'row901', string(S.RowText(0, 0, 6)));
+      AssertEquals('last visible row', 'row906', string(S.RowText(5, 0, 6)));
+    finally
+      Scroll.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiPerfTest.TestScrollingDoesNotRebuildTheLayout;
+var
+  S: TSurfaceMemory;
+  Stream: TChatStream;
+  Item: TChatItem;
+  Text: string;
+  I, Before: Integer;
+  Ev: TInputEvent;
+begin
+  Text := '';
+  for I := 1 to 200 do
+    Text := Text + 'line ' + IntToStr(I) + ' of a large tool result' + #10;
+
+  S := TSurfaceMemory.Create(40, 12);
+  try
+    Stream := TChatStream.Create(DarkTheme);
+    try
+      for I := 1 to 4 do
+      begin
+        Item := Stream.Add(ckTool, 'reason ' + IntToStr(I), Text);
+        Item.Expanded := True;
+      end;
+      Stream.Arrange(Rc(0, 0, 40, 12));
+      S.Clear(DefaultAttr);
+      Stream.Render(S);
+      Before := Item.LayoutBuilds;
+
+      Ev := Default(TInputEvent);
+      Ev.Kind := ikMouse;
+      Ev.Mouse.Button := mbWheelDown;
+      Ev.Mouse.X := 5;
+      Ev.Mouse.Y := 5;
+      for I := 1 to 10 do
+      begin
+        Stream.HandleEvent(Ev);
+        Stream.Arrange(Rc(0, 0, 40, 12));
+        S.Clear(DefaultAttr);
+        Stream.Render(S);
+      end;
+      AssertEquals('scroll does not rebuild the text layout', Before,
+        Item.LayoutBuilds);
+    finally
+      Stream.Free;
     end;
   finally
     S.Free;

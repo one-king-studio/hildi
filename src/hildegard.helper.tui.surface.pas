@@ -32,6 +32,9 @@ type
     procedure DimRect(const R: TRect);
     procedure PushClip(const R: TRect);
     procedure PopClip;
+    { The current effective clip (the intersection of every pushed clip), so a
+      widget can skip work the clip would discard. }
+    function ClipRect: TRect;
     { Request a full repaint on the next Flush: every cell is re-emitted rather
       than diffed. Used after interaction to guarantee a clean screen when the
       terminal's own diffing can leave stale cells (e.g. wide-character edges). }
@@ -54,6 +57,7 @@ type
     FClipCount: Integer;
     FFlushCount: Integer;
     FChanged: Integer;
+    FPuts: Integer;
     FFirstFlush: Boolean;
     FForceFull: Boolean;
     FInvalidations: Integer;
@@ -69,6 +73,9 @@ type
     function FlushCount: Integer;
     function LastFrameChangedCells: Integer;
     function Invalidations: Integer;
+    { Diagnostic: total Put calls, so a test can prove off-screen content is
+      culled rather than drawn and clipped. }
+    function PutCount: Integer;
     function RowText(Y, X, Len: Integer): UnicodeString;
     procedure ResetFrameStats;
     procedure Resize(AWidth, AHeight: Integer);
@@ -81,6 +88,7 @@ type
     procedure DimRect(const R: TRect);
     procedure PushClip(const R: TRect);
     procedure PopClip;
+    function ClipRect: TRect;
     procedure Invalidate;
     procedure SetScreenBg(AIndex: Byte);
     procedure Flush;
@@ -214,6 +222,7 @@ end;
 
 procedure TSurfaceMemory.Put(X, Y: Integer; const ACell: TCell);
 begin
+  Inc(FPuts);
   if not InClip(X, Y) then
     Exit;
   FCells[IndexOf(X, Y)] := ACell;
@@ -257,6 +266,11 @@ procedure TSurfaceMemory.PopClip;
 begin
   if FClipCount > 0 then
     Dec(FClipCount);
+end;
+
+function TSurfaceMemory.ClipRect: TRect;
+begin
+  Result := EffectiveClip;
 end;
 
 procedure TSurfaceMemory.Invalidate;
@@ -320,6 +334,11 @@ begin
   Result := FInvalidations;
 end;
 
+function TSurfaceMemory.PutCount: Integer;
+begin
+  Result := FPuts;
+end;
+
 function TSurfaceMemory.RowText(Y, X, Len: Integer): UnicodeString;
 var
   I, CX: Integer;
@@ -339,6 +358,7 @@ procedure TSurfaceMemory.ResetFrameStats;
 begin
   FFlushCount := 0;
   FChanged := 0;
+  FPuts := 0;
 end;
 
 procedure TSurfaceMemory.Resize(AWidth, AHeight: Integer);

@@ -46,6 +46,7 @@ type
     procedure DimRect(const R: TRect);
     procedure PushClip(const R: TRect);
     procedure PopClip;
+    function ClipRect: TRect;
     procedure Invalidate;
     procedure Resize(AWidth, AHeight: Integer);
     procedure SetScreenBg(AIndex: Byte);
@@ -297,6 +298,11 @@ procedure TSurfaceVideo.PopClip;
 begin
   if FClipCount > 0 then
     Dec(FClipCount);
+end;
+
+function TSurfaceVideo.ClipRect: TRect;
+begin
+  Result := EffectiveClip;
 end;
 
 procedure TSurfaceVideo.Invalidate;
