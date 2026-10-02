@@ -11,6 +11,7 @@ uses
   Classes, SysUtils, fpcunit, testregistry, Generics.Collections,
   hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.session,
   hildegard.helper.store, hildegard.helper.workspace,
+  hildegard.helper.recall.tool,
   hildegard.helper.harness.session, llm_fakes;
 
 type
@@ -30,6 +31,8 @@ type
     procedure TestHistoryRestoresBlocks;
     procedure TestResumeUnknownSessionFails;
     procedure TestMissingWorkspaceFails;
+    procedure TestRecallToolRegisteredWithStore;
+    procedure TestRecallToolAbsentWithoutStore;
   end;
 
 implementation
@@ -195,6 +198,38 @@ begin
   Session := THarnessSession.Open(Cfg, Err);
   AssertTrue('not opened', Session = nil);
   AssertTrue('error set', Err <> '');
+end;
+
+procedure THarnessSessionTest.TestRecallToolRegisteredWithStore;
+var
+  Session: THarnessSession;
+  Err: string;
+  Tool: TRegisteredTool;
+begin
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    AssertTrue('recall tool registered',
+      Session.Tools.Find(RecallToolName, Tool));
+  finally
+    Session.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestRecallToolAbsentWithoutStore;
+var
+  Session: THarnessSession;
+  Err: string;
+  Tool: TRegisteredTool;
+begin
+  Session := THarnessSession.Open(Config('', '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    AssertFalse('no artifacts without a store, so no recall tool',
+      Session.Tools.Find(RecallToolName, Tool));
+  finally
+    Session.Free;
+  end;
 end;
 
 initialization

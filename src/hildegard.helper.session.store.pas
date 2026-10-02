@@ -10,7 +10,8 @@ interface
 
 uses
   SysUtils, hildegard.helper.agent, hildegard.helper.llm,
-  hildegard.helper.store, hildegard.helper.session;
+  hildegard.helper.store, hildegard.helper.session,
+  hildegard.helper.recall.tool;
 
 type
   TSqliteConversationStore = class(TInterfacedObject, IConversationStore)
@@ -18,11 +19,13 @@ type
     FStore: TSqliteStore;
     FSessionId: string;
     FMaxMessages: Integer;   // 0 = all
+    FToolResultCap: Integer; // 0 = no cap
     FCurrentTurnId: Int64;
     FCurrentRequestId: Int64;
     procedure Write(const ARole: TMessageRole; const AContent,
       AToolCallId, AToolName, AToolArguments, AToolReason: string;
       AToolOk: Boolean; ADurationMs: Int64);
+    function CapToolResult(const ARec: TMessageRecord): string;
     function Compose: TChatMessageArray;
   public
     { AMaxMessages > 0 keeps only the most recent AMaxMessages messages (after
@@ -41,6 +44,10 @@ type
       AMessageCount: Integer): Int64;
     procedure FinishRequest(ARequestId: Int64; const AOutcome: TRequestOutcome);
     procedure FinishTurn(ATurnId: Int64; const AOutcome: TTurnOutcome);
+    { Bytes a tool result may contribute to the prompt; over the cap the prompt
+      carries a head plus a marker naming the artifact and the recall tool. 0
+      (or less) leaves tool results uncapped. Storage is never affected. }
+    property ToolResultCap: Integer read FToolResultCap write FToolResultCap;
   end;
 
 implementation
@@ -59,8 +66,19 @@ begin
   FStore := AStore;
   FSessionId := ASessionId;
   FMaxMessages := AMaxMessages;
+  FToolResultCap := 0;
   FCurrentTurnId := 0;
   FCurrentRequestId := 0;
+end;
+
+function TSqliteConversationStore.CapToolResult(
+  const ARec: TMessageRecord): string;
+begin
+  Result := ARec.Content;
+  if (FToolResultCap <= 0) or (Length(Result) <= FToolResultCap) then
+    Exit;
+  Result := Copy(Result, 1, FToolResultCap) + LineEnding +
+    ToolResultTruncationMarker(ARec.Id, Length(ARec.Content));
 end;
 
 procedure TSqliteConversationStore.Write(const ARole: TMessageRole;
@@ -225,7 +243,7 @@ begin
         begin
           Msg := Default(TChatMessage);
           Msg.Role := crTool;
-          Msg.Content := Msgs[I].Content;
+          Msg.Content := CapToolResult(Msgs[I]);
           Msg.ToolCallId := Msgs[I].ToolCallId;
           Msg.ToolName := Msgs[I].ToolName;
           Msg.ToolOk := Msgs[I].ToolOk;

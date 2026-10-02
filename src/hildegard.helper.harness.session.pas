@@ -16,7 +16,7 @@ uses
   hildegard.helper.files,
   hildegard.helper.workspace, hildegard.helper.store,
   hildegard.helper.session, hildegard.helper.session.store,
-  hildegard.helper.harness.turn;
+  hildegard.helper.recall.tool, hildegard.helper.harness.turn;
 
 type
   THarnessSessionConfig = record
@@ -28,6 +28,9 @@ type
     Endpoint: string;             // '' => resolved from env/.env
     SystemPrompt: string;         // '' => env HILDEGARD_SYSTEM_PROMPT, else default
     MaxToolIterations: Integer;   // 0 => DefaultMaxToolIterations
+    { Bytes a tool result may contribute to the prompt; 0 => default, negative
+      => uncapped. }
+    ToolResultCap: Integer;
     { Optional test seam: when set, the client uses this transport instead of
       the real HTTP transport. }
     Transport: TLLMTransport;
@@ -44,6 +47,7 @@ type
     FTools: TToolRegistry;
     FCommandTool: TCommandTool;
     FFileTool: TFileTool;
+    FRecallTool: TRecallTool;
     FLoop: TAgentLoop;
     FQueue: TTurnQueue;
     FGate: TApprovalGate;
@@ -100,6 +104,8 @@ begin
   FCommandTool := nil;
   FFileTool.Free;
   FFileTool := nil;
+  FRecallTool.Free;
+  FRecallTool := nil;
   FTools.Free;
   FTools := nil;
   FClient.Free;
@@ -154,6 +160,8 @@ var
   ToolConfig: TCommandToolConfig;
   FileConfig: TFileToolConfig;
   AgentConfig: TAgentConfig;
+  Conv: TSqliteConversationStore;
+  Cap: Integer;
 begin
   Result := False;
   LoadDotEnvFile('.env');            // optional; shell env wins
@@ -169,6 +177,7 @@ begin
   end;
   FWorkspaceRoot := FWorkspace.Root;
   FModel := AConfig.Model;
+  Cap := ResolveToolResultCap(AConfig.ToolResultCap);
 
   LlmConfig := Default(TLLMConfig);
   LlmConfig := ResolveLLMConfig(LlmConfig);
@@ -225,7 +234,9 @@ begin
       Exit;
     end;
     ApprovalStore := TStoreApprovalStore.Create(FStore);
-    FConversation := TSqliteConversationStore.Create(FStore, FSessionId, 0);
+    Conv := TSqliteConversationStore.Create(FStore, FSessionId, 0);
+    Conv.ToolResultCap := Cap;
+    FConversation := Conv;
   end
   else
   begin
@@ -253,6 +264,13 @@ begin
   FileConfig.Root := FWorkspaceRoot;
   FFileTool := TFileTool.Create(FileConfig, ApprovalService);
   FFileTool.Register(FTools);
+
+  { The recall tool reads stored artifacts; without a store there are none. }
+  if FStore <> nil then
+  begin
+    FRecallTool := TRecallTool.Create(FStore, FSessionId, Cap);
+    FRecallTool.Register(FTools);
+  end;
 
   AgentConfig := Default(TAgentConfig);
   AgentConfig.SystemPrompt := AConfig.SystemPrompt;

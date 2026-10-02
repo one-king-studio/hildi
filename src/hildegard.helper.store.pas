@@ -154,6 +154,9 @@ type
       out AError: TStoreError): Boolean;
     function QueryMessages(const ASessionId: string;
       out AMessages: TMessageRecordArray; out AError: TStoreError): Boolean;
+    { One message by id, scoped to a session; seNotFound if absent. }
+    function QueryMessage(const ASessionId: string; AId: Int64;
+      out AMessage: TMessageRecord; out AError: TStoreError): Boolean;
   end;
 
 function StoreSchemaVersion: Integer;
@@ -1566,6 +1569,51 @@ begin
         AMessages[N] := Rec;
         Inc(N);
       end;
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.QueryMessage(const ASessionId: string; AId: Int64;
+  out AMessage: TMessageRecord; out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  AMessage := Default(TMessageRecord);
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb,
+      'SELECT id, session_id, turn_id, request_id, seq, role, content, ' +
+      'tool_call_id, tool_name, tool_arguments, tool_reason, tool_ok, ' +
+      'created_at, duration_ms FROM messages WHERE id = ? AND session_id = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not query message', DbErrorText));
+      Stmt.BindInt64(1, AId);
+      Stmt.BindText(2, ASessionId);
+      if Stmt.Step <> SQLITE_ROW then
+        Exit(Fail(AError, seNotFound, 'message not found', IntToStr(AId)));
+      AMessage.Id := Stmt.ColInt64(0);
+      AMessage.SessionId := Stmt.ColText(1);
+      AMessage.TurnId := Stmt.ColInt64(2);
+      AMessage.RequestId := Stmt.ColInt64(3);
+      AMessage.Seq := Stmt.ColInt64(4);
+      AMessage.Role := TMessageRole(Stmt.ColInt(5));
+      AMessage.Content := Stmt.ColText(6);
+      AMessage.ToolCallId := Stmt.ColText(7);
+      AMessage.ToolName := Stmt.ColText(8);
+      AMessage.ToolArguments := Stmt.ColText(9);
+      AMessage.ToolReason := Stmt.ColText(10);
+      AMessage.ToolOk := Stmt.ColInt(11) <> 0;
+      AMessage.CreatedAtMs := Stmt.ColInt64(12);
+      AMessage.DurationMs := Stmt.ColInt64(13);
     finally
       Stmt.Free;
     end;

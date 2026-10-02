@@ -25,6 +25,7 @@ uses
   hildegard.helper.files,
   hildegard.helper.approval, hildegard.helper.approval.store,
   hildegard.helper.session, hildegard.helper.session.store,
+  hildegard.helper.recall.tool,
   hildegard.helper.store, hildegard.helper.workspace;
 
 {$ifdef unix}
@@ -149,6 +150,9 @@ var
   Err: TLLMError;
   I: Integer;
   SqliteStore: TSqliteStore;
+  RecallTool: TRecallTool;
+  Conv: TSqliteConversationStore;
+  ToolResultCap: Integer;
   ApprovalStore: IApprovalStore;
   ApprovalService: IApprovalService;
   Approver: TConsoleApprover;
@@ -322,7 +326,10 @@ begin
     else
       TailCount := Opts.SessionTail;
     Store := nil;
-    Store := TSqliteConversationStore.Create(SqliteStore, SessionId, TailCount);
+    Conv := TSqliteConversationStore.Create(SqliteStore, SessionId, TailCount);
+    ToolResultCap := ResolveToolResultCap(0);
+    Conv.ToolResultCap := ToolResultCap;
+    Store := Conv;
   end
   else
   begin
@@ -356,6 +363,13 @@ begin
   FileToolConfig.Root := Workspace.Root;
   FileTool := TFileTool.Create(FileToolConfig, ApprovalService);
   FileTool.Register(Tools);
+
+  { The recall tool reads stored artifacts; without a store there are none. }
+  if SqliteStore <> nil then
+  begin
+    RecallTool := TRecallTool.Create(SqliteStore, SessionId, ToolResultCap);
+    RecallTool.Register(Tools);
+  end;
 
   Loop := TAgentLoop.Create(Client, Store, Tools, AgentConfig);
 
@@ -445,6 +459,7 @@ begin
     OutStream.Free;
     Loop.Free;
     FileTool.Free;
+    RecallTool.Free;
     CommandTool.Free;
     Approver.Free;
     Tools.Free;

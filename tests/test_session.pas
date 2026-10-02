@@ -10,7 +10,8 @@ interface
 uses
   Classes, SysUtils, fpcunit, testregistry,
   hildegard.helper.store, hildegard.helper.session,
-  hildegard.helper.session.store, hildegard.helper.llm, hildegard.helper.agent;
+  hildegard.helper.session.store, hildegard.helper.llm, hildegard.helper.agent,
+  hildegard.helper.recall.tool;
 
 type
   TSessionTest = class(TTestCase)
@@ -34,6 +35,10 @@ type
     procedure TestAppendMapsRolesAndToolFields;
     procedure TestQueryMessagesReturnsAllBlocks;
     procedure TestBeginFinishTurnAndRequestRecorded;
+    procedure TestPromptCapsLargeToolResult;
+    procedure TestPromptLeavesSmallToolResultIntact;
+    procedure TestCapZeroDisablesTruncation;
+    procedure TestRenderStillShowsFullResult;
   end;
 
 implementation
@@ -419,6 +424,130 @@ begin
     AssertEquals('finish', 'tool_calls', Reqs[0].FinishReason);
     AssertEquals('duration', 111, Reqs[0].DurationMs);
     AssertEquals('first token', 33, Reqs[0].FirstTokenMs);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TSessionTest.TestPromptCapsLargeToolResult;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  SessionId: string;
+  WorkspaceId: Integer;
+  Conv: TSqliteConversationStore;
+  Msgs: TChatMessageArray;
+  Records: TMessageRecordArray;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', WorkspaceId, Err);
+    S.CreateSession(WorkspaceId, SessionId, Err);
+    Conv := TSqliteConversationStore.Create(S, SessionId);
+    try
+      Conv.ToolResultCap := 10;
+      Conv.Append(ToolMsg('c1', StringOfChar('x', 50)));
+      Msgs := Conv.Messages;
+      AssertEquals('one message', 1, Length(Msgs));
+      AssertEquals('capped head', StringOfChar('x', 10),
+        Copy(Msgs[0].Content, 1, 10));
+      AssertTrue('marker present',
+        Pos('output truncated', Msgs[0].Content) > 0);
+      AssertTrue('names the recall tool',
+        Pos(RecallToolName, Msgs[0].Content) > 0);
+      S.QueryMessages(SessionId, Records, Err);
+      AssertTrue('names the message id',
+        Pos('message_id=' + IntToStr(Records[0].Id), Msgs[0].Content) > 0);
+    finally
+      Conv.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TSessionTest.TestPromptLeavesSmallToolResultIntact;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  SessionId: string;
+  WorkspaceId: Integer;
+  Conv: TSqliteConversationStore;
+  Msgs: TChatMessageArray;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', WorkspaceId, Err);
+    S.CreateSession(WorkspaceId, SessionId, Err);
+    Conv := TSqliteConversationStore.Create(S, SessionId);
+    try
+      Conv.ToolResultCap := 100;
+      Conv.Append(ToolMsg('c1', 'short output'));
+      Msgs := Conv.Messages;
+      AssertEquals('unchanged', 'short output', Msgs[0].Content);
+      AssertTrue('no marker', Pos('output truncated', Msgs[0].Content) = 0);
+    finally
+      Conv.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TSessionTest.TestCapZeroDisablesTruncation;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  SessionId: string;
+  WorkspaceId: Integer;
+  Conv: TSqliteConversationStore;
+  Msgs: TChatMessageArray;
+  Content: string;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', WorkspaceId, Err);
+    S.CreateSession(WorkspaceId, SessionId, Err);
+    Conv := TSqliteConversationStore.Create(S, SessionId);
+    try
+      Conv.ToolResultCap := 0;
+      Content := StringOfChar('y', 500);
+      Conv.Append(ToolMsg('c1', Content));
+      Msgs := Conv.Messages;
+      AssertEquals('full content', Content, Msgs[0].Content);
+    finally
+      Conv.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TSessionTest.TestRenderStillShowsFullResult;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  SessionId: string;
+  WorkspaceId: Integer;
+  Conv: TSqliteConversationStore;
+  Records: TMessageRecordArray;
+  Content: string;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', WorkspaceId, Err);
+    S.CreateSession(WorkspaceId, SessionId, Err);
+    Conv := TSqliteConversationStore.Create(S, SessionId);
+    try
+      Conv.ToolResultCap := 10;
+      Content := StringOfChar('z', 50);
+      Conv.Append(ToolMsg('c1', Content));
+      { The prompt view is capped, but the stored block is untouched. }
+      S.QueryMessages(SessionId, Records, Err);
+      AssertEquals('stored in full', Content, Records[0].Content);
+    finally
+      Conv.Free;
+    end;
   finally
     S.Free;
   end;
