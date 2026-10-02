@@ -16,13 +16,16 @@ program tui_layout_demo;
     - tool reason/output blocks: collapsed to a heavy rule, expanded to a sunken
       (darker) box with full-contrast text;
     - an animated thinking indicator (a sparkle burst);
-    - a scrollbar with a dim track and a brighter thumb (same glyph).
+    - a scrollbar whose track is the panel's right border and whose thumb is the
+      brighter thick bar.
   The input box shares the user bubble's raised background and border, grows with
-  the text, and overlays the stream up to 60% of the height. Enter sends;
+  the text, and overlays the stream up to 60% of the height. It is a TTextEdit,
+  so the caret is tracked through edits, wraps, and scrolling. Enter sends;
   Shift+Enter adds a line.
 
   Keys: Ctrl-C / Ctrl-D quit; Ctrl-B toggles the side panel; Enter send;
-  Shift+Enter newline; wheel / Up / Down scroll; click a block to expand it.
+  Shift+Enter newline; arrows / Home / End move the caret in the input; wheel
+  scrolls the stream; click a block to expand it.
 
   Theme: --theme=dark|light|auto (or HILDEGARD_THEME); auto detects the
   terminal's own background. We always paint our own background.
@@ -39,7 +42,8 @@ uses
   hildegard.helper.tui.text, hildegard.helper.tui.app,
   hildegard.helper.tui.surface.video, hildegard.helper.tui.input.terminal,
   hildegard.helper.tui.theme, hildegard.helper.tui.panel,
-  hildegard.helper.tui.list, hildegard.helper.tui.scroll;
+  hildegard.helper.tui.list, hildegard.helper.tui.scroll,
+  hildegard.helper.tui.edit;
 
 const
   WideThreshold = 180;     // two columns appear above this width
@@ -57,7 +61,6 @@ var
   QuitRequested: Boolean = False;
 
 type
-  TLineArray = array of UnicodeString;
   TSubmitEvent = procedure(const AText: string) of object;
 
   { Wraps the root so Ctrl-C/Ctrl-D quit. }
@@ -141,21 +144,21 @@ type
     property OnToggle: TNotifyEvent read FOnToggle write SetOnToggle;
   end;
 
-  { The input box: a raised, heavy-bordered box that grows with the text. Enter
-    sends, Shift+Enter adds a line; the cursor blinks. }
+  { The input box: a raised, heavy-bordered box wrapping a TTextEdit, which
+    tracks the caret through edits and wraps. Enter sends, Shift+Enter adds a
+    line. }
   TComposeBox = class(TWidget)
   private
     FTheme: TTheme;
-    FText: UnicodeString;
     FInfo: string;
-    FBlinkOn: Boolean;
+    FEdit: TTextEdit;
     FOnSubmit: TSubmitEvent;
     FOnChange: TNotifyEvent;
-    procedure Backspace;
-    procedure InsertText(const S: UnicodeString);
-    procedure Wrap(AWidth: Integer; out ALines: TLineArray);
+    function GetText: UnicodeString;
+    procedure Changed(Sender: TObject);
   public
     constructor Create(const ATheme: TTheme; const AInfo: string);
+    destructor Destroy; override;
     procedure Clear;
     function NeededHeight(AWidth: Integer): Integer;
     function Measure(const AAvail: TSize): TSize; override;
@@ -164,9 +167,9 @@ type
     function HandleEvent(const E: TInputEvent): Boolean; override;
     function Advance(const ANowMs: Int64): Boolean; override;
     function Animating: Boolean; override;
-    property Text: UnicodeString read FText;
+    property Text: UnicodeString read GetText;
     property OnSubmit: TSubmitEvent read FOnSubmit write FOnSubmit;
-    { Fired when the text changes, so the app re-arranges (the box grows). }
+    { Fired when the text or the caret changes, so the app re-arranges. }
     property OnChange: TNotifyEvent read FOnChange write FOnChange;
   end;
 
@@ -263,89 +266,6 @@ var
 begin
   for I := 1 to Length(AText) do
     PutCh(S, X + I - 1, Y, UnicodeString(AText[I]), AAttr);
-end;
-
-{ Split text into wrapped display lines at AWidth (greedy, word boundaries). }
-procedure WrapText(const AText: UnicodeString; AWidth: Integer;
-  out ALines: TLineArray);
-
-  procedure AddLine(const L: UnicodeString);
-  begin
-    SetLength(ALines, Length(ALines) + 1);
-    ALines[High(ALines)] := L;
-  end;
-
-  procedure WrapPara(const P: UnicodeString);
-  var
-    Words: array of UnicodeString;
-    I, N: Integer;
-    W, Line: UnicodeString;
-    function Break(W2: UnicodeString): UnicodeString;
-    begin
-      while Length(W2) > AWidth do
-      begin
-        AddLine(Copy(W2, 1, AWidth));
-        W2 := Copy(W2, AWidth + 1, MaxInt);
-      end;
-      Result := W2;
-    end;
-  begin
-    Words := nil;
-    N := 0;
-    W := '';
-    for I := 1 to Length(P) do
-      if P[I] = ' ' then
-      begin
-        SetLength(Words, N + 1);
-        Words[N] := W;
-        Inc(N);
-        W := '';
-      end
-      else
-        W := W + P[I];
-    SetLength(Words, N + 1);
-    Words[N] := W;
-    Line := '';
-    for I := 0 to High(Words) do
-    begin
-      W := Words[I];
-      if W = '' then
-        Continue;
-      if Line = '' then
-        Line := Break(W)
-      else if Length(Line) + 1 + Length(W) <= AWidth then
-        Line := Line + ' ' + W
-      else
-      begin
-        AddLine(Line);
-        Line := Break(W);
-      end;
-    end;
-    AddLine(Line);
-  end;
-
-var
-  Rest, Para: UnicodeString;
-  P: Integer;
-begin
-  ALines := nil;
-  if AWidth < 1 then
-    AWidth := 1;
-  Rest := AText;
-  repeat
-    P := Pos(#10, Rest);
-    if P > 0 then
-    begin
-      Para := Copy(Rest, 1, P - 1);
-      Rest := Copy(Rest, P + 1, MaxInt);
-    end
-    else
-    begin
-      Para := Rest;
-      Rest := '';
-    end;
-    WrapPara(Para);
-  until Rest = '';
 end;
 
 { TQuitShell }
@@ -849,46 +769,44 @@ begin
   inherited Create;
   FTheme := ATheme;
   FInfo := AInfo;
-  FText := '';
-  FBlinkOn := True;
+  FEdit := TTextEdit.Create(wmWord);
+  FEdit.Attr := OnBg(FTheme.Text, FTheme.RaisedBg);
+  FEdit.CaretAttr := OnBg(WithStyle(FTheme.Accent, [sfBold]), FTheme.RaisedBg);
+  FEdit.SelAttr := FEdit.CaretOverlay;
+  FEdit.OnChange := Changed;
 end;
 
-procedure TComposeBox.Clear;
+destructor TComposeBox.Destroy;
 begin
-  FText := '';
+  FEdit.Free;
+  inherited Destroy;
 end;
 
-procedure TComposeBox.InsertText(const S: UnicodeString);
+function TComposeBox.GetText: UnicodeString;
 begin
-  FText := FText + S;
+  Result := FEdit.Text;
+end;
+
+procedure TComposeBox.Changed(Sender: TObject);
+begin
   if Assigned(FOnChange) then
     FOnChange(Self);
 end;
 
-procedure TComposeBox.Backspace;
+procedure TComposeBox.Clear;
 begin
-  if Length(FText) > 0 then
-  begin
-    SetLength(FText, Length(FText) - 1);
-    if Assigned(FOnChange) then
-      FOnChange(Self);
-  end;
-end;
-
-procedure TComposeBox.Wrap(AWidth: Integer; out ALines: TLineArray);
-begin
-  if AWidth < 1 then
-    AWidth := 1;
-  WrapText(FText, AWidth, ALines);
+  FEdit.Clear;
 end;
 
 function TComposeBox.NeededHeight(AWidth: Integer): Integer;
 var
-  Lines: TLineArray;
+  InnerW: Integer;
 begin
-  Wrap(AWidth - 4, Lines);
-  { Rounded top and bottom borders, the text lines, a blank, and the info line. }
-  Result := Length(Lines) + 4;
+  InnerW := AWidth - 4;
+  if InnerW < 1 then
+    InnerW := 1;
+  { Top and bottom borders, the text rows, a blank, and the info line. }
+  Result := Length(FEdit.Rows(InnerW)) + 4;
 end;
 
 function TComposeBox.Measure(const AAvail: TSize): TSize;
@@ -899,15 +817,20 @@ begin
 end;
 
 procedure TComposeBox.Arrange(const ABounds: TRect);
+var
+  TextRows: Integer;
 begin
   inherited Arrange(ABounds);
+  TextRows := ABounds.H - 4;
+  if TextRows < 1 then
+    TextRows := 1;
+  FEdit.Arrange(Rc(ABounds.X + 2, ABounds.Y + 1, ABounds.W - 4, TextRows));
 end;
 
 procedure TComposeBox.Render(const S: ISurface);
 var
-  L, R, T, B, I, InnerW, TextRows, First, Col, X: Integer;
-  Lines: TLineArray;
-  SurfaceAttr, Border, BodyAttr, CursorAttr: TAttr;
+  L, R, T, B, X, I: Integer;
+  SurfaceAttr, Border: TAttr;
 begin
   if (FBounds.W < 4) or (FBounds.H < 4) then
     Exit;
@@ -915,14 +838,9 @@ begin
   R := FBounds.X + FBounds.W - 1;
   T := FBounds.Y;
   B := FBounds.Y + FBounds.H - 1;
-  InnerW := FBounds.W - 4;
-  if InnerW < 1 then
-    InnerW := 1;
 
   SurfaceAttr := OnBg(FTheme.Text, FTheme.RaisedBg);
   Border := OnBg(WithStyle(FTheme.Accent, [sfDim]), FTheme.RaisedBg);
-  BodyAttr := SurfaceAttr;
-  CursorAttr := OnBg(WithStyle(FTheme.Accent, [sfBold]), FTheme.RaisedBg);
 
   S.FillRect(FBounds, SurfaceAttr);
 
@@ -942,34 +860,11 @@ begin
     PutCh(S, R, I, '│', Border);
   end;
 
-  Wrap(InnerW, Lines);
-  TextRows := FBounds.H - 4;
-  if TextRows < 1 then
-    TextRows := 1;
-  First := 0;
-  if Length(Lines) > TextRows then
-    First := Length(Lines) - TextRows;   { keep the tail (the cursor) visible }
-
-  for I := 0 to TextRows - 1 do
-  begin
-    if First + I > High(Lines) then
-      Break;
-    PutText(S, L + 2, T + 1 + I, Lines[First + I], BodyAttr);
-  end;
-
-  { Blinking block cursor after the last line's text (which starts at L+2). }
-  if FBlinkOn then
-  begin
-    I := High(Lines) - First;
-    if I < 0 then
-      I := 0;
-    Col := 2 + Length(Lines[High(Lines)]);
-    if Col < FBounds.W - 2 then
-      PutCh(S, L + Col, T + 1 + I, '█', CursorAttr);
-  end;
+  FEdit.Render(S);
 
   { Info line. }
-  PutText(S, L + 2, B - 1, UnicodeString(FInfo), OnBg(FTheme.Muted, FTheme.RaisedBg));
+  PutText(S, L + 2, B - 1, UnicodeString(FInfo),
+    OnBg(FTheme.Muted, FTheme.RaisedBg));
 end;
 
 function TComposeBox.HandleEvent(const E: TInputEvent): Boolean;
@@ -977,48 +872,28 @@ begin
   Result := False;
   if E.Kind <> ikKey then
     Exit;
-  case E.Key.Kind of
-    kkChar:
-      begin
-        InsertText(E.Key.Ch);
-        Exit(True);
-      end;
-    kkBackspace:
-      begin
-        Backspace;
-        Exit(True);
-      end;
-    kkEnter:
-      begin
-        if moShift in E.Key.Mods then
-          InsertText(#10)                 { Shift+Enter: a new line }
-        else
-        begin
-          if Assigned(FOnSubmit) and (Trim(string(FText)) <> '') then
-          begin
-            FOnSubmit(string(FText));
-            Clear;
-          end;
-        end;
-        Exit(True);
-      end;
-  else
-    ;
+  { A plain Enter submits; everything else, including Shift+Enter, belongs to
+    the editor. }
+  if (E.Key.Kind = kkEnter) and (not (moShift in E.Key.Mods)) then
+  begin
+    if Assigned(FOnSubmit) and (Trim(string(FEdit.Text)) <> '') then
+    begin
+      FOnSubmit(string(FEdit.Text));
+      FEdit.Clear;
+    end;
+    Exit(True);
   end;
+  Result := FEdit.HandleEvent(E);
 end;
 
 function TComposeBox.Advance(const ANowMs: Int64): Boolean;
-var
-  On2: Boolean;
 begin
-  On2 := ((ANowMs div 530) mod 2) = 0;
-  Result := On2 <> FBlinkOn;
-  FBlinkOn := On2;
+  Result := FEdit.Advance(ANowMs);
 end;
 
 function TComposeBox.Animating: Boolean;
 begin
-  Result := True;
+  Result := FEdit.Animating;
 end;
 
 { TChatColumn }
