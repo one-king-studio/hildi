@@ -13,6 +13,7 @@ uses
   hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.approval,
   hildegard.helper.tui.base, hildegard.helper.tui.input,
   hildegard.helper.tui.surface, hildegard.helper.tui.widget,
+  hildegard.helper.tui.chat,
   hildegard.helper.harness.turn, hildegard.helper.harness.session,
   hildegard.helper.harness.app, llm_fakes;
 
@@ -42,6 +43,11 @@ type
     procedure SubmitPrompt(const AText: string);
     function Pump(AMax: Integer): Boolean;
     function MakeAsk: TApprovalAsk;
+    function BlockCount: Integer;
+    function BlockKind(AIndex: Integer): TChatKind;
+    function BlockLabel(AIndex: Integer): string;
+    function BlockText(AIndex: Integer): string;
+    function FindText(AKind: TChatKind; const ANeedle: string): Boolean;
     function AssistantEvent(const AText: string): TTurnEvent;
     function ApprovalEvent(ARequestId: Integer;
       const AAsk: TApprovalAsk): TTurnEvent;
@@ -166,6 +172,36 @@ begin
   Result.Ask := AAsk;
 end;
 
+function THarnessAppTest.BlockCount: Integer;
+begin
+  Result := FApp.Panel.Stream.Count;
+end;
+
+function THarnessAppTest.BlockKind(AIndex: Integer): TChatKind;
+begin
+  Result := FApp.Panel.Stream.ItemAt(AIndex).Kind;
+end;
+
+function THarnessAppTest.BlockLabel(AIndex: Integer): string;
+begin
+  Result := FApp.Panel.Stream.ItemAt(AIndex).Label_;
+end;
+
+function THarnessAppTest.BlockText(AIndex: Integer): string;
+begin
+  Result := FApp.Panel.Stream.ItemAt(AIndex).Text;
+end;
+
+function THarnessAppTest.FindText(AKind: TChatKind; const ANeedle: string): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 0 to BlockCount - 1 do
+    if (BlockKind(I) = AKind) and (Pos(ANeedle, BlockText(I)) > 0) then
+      Exit(True);
+end;
+
 function THarnessAppTest.MakeAsk: TApprovalAsk;
 var
   Option: TApprovalOption;
@@ -184,8 +220,6 @@ begin
 end;
 
 procedure THarnessAppTest.TestStreamedTurnRendersAndReenables;
-var
-  Text: string;
 begin
   Build;
   FFake.AddChunk(TextDelta('hello '));
@@ -195,42 +229,66 @@ begin
   SubmitPrompt('hi');
   AssertTrue('turn finished', Pump(300));
 
-  Text := FApp.ConversationText;
-  AssertTrue('prompt echoed', Pos('> hi', Text) > 0);
-  AssertTrue('assistant streamed', Pos('hello world', Text) > 0);
+  AssertEquals('user bubble plus assistant block', 2, BlockCount);
+  AssertTrue('first block is the user bubble', BlockKind(0) = ckUser);
+  AssertEquals('prompt echoed', 'hi', BlockText(0));
+  AssertTrue('assistant streamed', FindText(ckAssistant, 'hello world'));
+  AssertTrue('thinking indicator removed',
+    not FindText(ckThinking, 'Thinking'));
   AssertTrue('prompt re-enabled', FApp.PromptActive);
   AssertFalse('not busy', FApp.Busy);
 end;
 
 procedure THarnessAppTest.TestToolLineAppears;
 var
-  Text: string;
+  I: Integer;
+  ToolSeen: Boolean;
 begin
   Build;
-  FFake.AddResponse([ToolNameFrame(0, 'c1', 'get_system_time'),
+  FFake.AddResponse([TextDelta('let me check '),
+    ToolNameFrame(0, 'c1', 'get_system_time'),
     ToolArgsFrame(0, '{"reason":"checking"}'), FinishFrame('tool_calls'),
     DoneFrame]);
   FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
   SubmitPrompt('time?');
   AssertTrue('turn finished', Pump(300));
 
-  Text := FApp.ConversationText;
-  AssertTrue('tool call line', Pos('[tool] get_system_time', Text) > 0);
-  AssertTrue('tool reason', Pos('checking', Text) > 0);
-  AssertTrue('tool result line', Pos('[result] get_system_time: ok', Text) > 0);
+  AssertTrue('tool block titled with the reason',
+    FindText(ckTool, 'checking'));
+  AssertTrue('tool result in the body', FindText(ckTool, '[ok]'));
+  AssertTrue('assistant text followed', FindText(ckAssistant, 'done'));
+  ToolSeen := False;
+  for I := 0 to BlockCount - 1 do
+    if (BlockKind(I) = ckTool) and (BlockLabel(I) = 'checking') and
+      (Pos('get_system_time', BlockText(I)) > 0) then
+      ToolSeen := True;
+  AssertTrue('reason is the title, the tool name is the body', ToolSeen);
+  { The text that accompanied the call stays before it; the answer that follows
+    the tools is its own block, after them. }
+  AssertEquals('four blocks', 4, BlockCount);
+  AssertTrue('user first', BlockKind(0) = ckUser);
+  AssertTrue('lead-in second', BlockKind(1) = ckAssistant);
+  AssertTrue('tool third', BlockKind(2) = ckTool);
+  AssertTrue('answer last', BlockKind(3) = ckAssistant);
+  AssertEquals('answer text', 'done', BlockText(3));
+  AssertEquals('lead-in text', 'let me check ', BlockText(1));
 end;
 
 procedure THarnessAppTest.TestErrorLineAppears;
 var
-  Text: string;
+  I: Integer;
+  ErrSeen: Boolean;
 begin
   Build;
   FFake.FailNetwork := True;
   SubmitPrompt('hi');
   AssertTrue('turn finished', Pump(300));
 
-  Text := FApp.ConversationText;
-  AssertTrue('error line', Pos('[error]', Text) > 0);
+  ErrSeen := False;
+  for I := 0 to BlockCount - 1 do
+    if (BlockKind(I) = ckError) and (BlockText(I) <> '') then
+      ErrSeen := True;
+  AssertTrue('an error block with text exists', ErrSeen);
   AssertTrue('prompt re-enabled', FApp.PromptActive);
 end;
 

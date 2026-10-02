@@ -15,8 +15,9 @@ uses
   hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.approval,
   hildegard.helper.tui.base, hildegard.helper.tui.input,
   hildegard.helper.tui.surface, hildegard.helper.tui.widget,
-  hildegard.helper.tui.text, hildegard.helper.tui.conversation,
-  hildegard.helper.tui.prompt, hildegard.helper.tui.approvalmodal,
+  hildegard.helper.tui.text, hildegard.helper.tui.chat,
+  hildegard.helper.tui.compose, hildegard.helper.tui.chatpanel,
+  hildegard.helper.tui.approvalmodal,
   hildegard.helper.tui.panel, hildegard.helper.tui.theme,
   hildegard.helper.tui.app, hildegard.helper.harness.turn,
   hildegard.helper.harness.session;
@@ -31,31 +32,36 @@ type
     FSession: THarnessSession;
     FApp: TTuiApp;
     FTheme: TTheme;
-    FConversation: TConversationView;
-    FStatus: TTextBlock;
-    FPrompt: TPromptLine;
+    FPanel: TChatPanel;
     FWorker: TTurnWorker;
     FBusy: Boolean;
     FModal: TApprovalModal;
     FPendingRequest: Integer;
     FCloseModal: Boolean;
     FAskQueue: array of TTurnEvent;
+    { The blocks of the turn in flight, so deltas land in the right one. }
+    FThinking: TChatItem;
+    FAssistant: TChatItem;
+    FThought: TChatItem;
+    FTool: TChatItem;
     function BuildTree: TWidget;
     procedure Submit(const AText: string);
     procedure DrainQueue;
     procedure HandleTurnEvent(const E: TTurnEvent);
+    procedure DropThinking;
     procedure EnqueueAsk(const E: TTurnEvent);
     procedure ShowNextAsk;
     procedure ShowApproval(const E: TTurnEvent);
     procedure OnApprovalChosen(const AChoice: TApprovalChoice);
     procedure CloseModal;
     procedure FinishTurn;
-    procedure SetStatus(const AText: string; const AAttr: TAttr);
-    procedure AppendLine(const AText: string; const AAttr: TAttr);
+    procedure SetStatus(const AText: string);
+    procedure AppendUser(const AText: string);
+    procedure AppendError(const AText: string);
     procedure RenderHistory;
     procedure SyncBusy;
     procedure OnLoop;
-    function AssistantAttr: TAttr;
+    procedure Invalidate(Sender: TObject);
     function GetModalActive: Boolean;
     function GetPromptActive: Boolean;
     procedure Quit(Sender: TObject);
@@ -79,6 +85,8 @@ type
     property Busy: Boolean read FBusy;
     property PromptActive: Boolean read GetPromptActive;
     property ModalActive: Boolean read GetModalActive;
+    { The stream, for tests: block count, kinds and text. }
+    property Panel: TChatPanel read FPanel;
     function ConversationText: string;
   end;
 
@@ -141,13 +149,7 @@ begin
   FApp := TTuiApp.Create(ASurface, AInput, BuildTree);
   FApp.ScreenBg := FTheme.Bg;
   RenderHistory;
-  AppendLine('workspace: ' + FSession.WorkspaceRoot, FTheme.Muted);
-  if FSession.SessionId <> '' then
-    AppendLine('session: ' + FSession.SessionId, FTheme.Muted)
-  else
-    AppendLine('session: (in memory; no store)', FTheme.Muted);
-  AppendLine('', FTheme.Muted);
-  SetStatus('ready  [Enter] send  [q/Ctrl-C] quit', FTheme.Muted);
+  SetStatus('ready');
 end;
 
 destructor THarnessApp.Destroy;
@@ -171,19 +173,14 @@ begin
 end;
 
 function THarnessApp.BuildTree: TWidget;
-var
-  Root: TContainer;
 begin
-  Root := TContainer.Create([Fill(1)], [Fill(1), Fixed(1), Fixed(1)]);
-  FConversation := TConversationView.Create;
-  FStatus := TTextBlock.Create([], wmNone);
-  FPrompt := TPromptLine.Create('> ');
-  FPrompt.Attr := FTheme.Text;
-  FPrompt.OnSubmit := Submit;
-  Root.Add(FConversation, 0, 0);
-  Root.Add(FStatus, 0, 1);
-  Root.Add(FPrompt, 0, 2);
-  Result := TAppShell.Create(Root, Quit);
+  FPanel := TChatPanel.Create(FTheme, 'Hildegard · ' + FSession.Model,
+    ' ↵ send   ⇧↵ newline   click a block to expand');
+  FPanel.Stream.OnToggle := Invalidate;
+  FPanel.Stream.OnChange := Invalidate;
+  FPanel.Compose.OnSubmit := Submit;
+  FPanel.Compose.OnChange := Invalidate;
+  Result := TAppShell.Create(FPanel, Quit);
 end;
 
 procedure THarnessApp.Quit(Sender: TObject);
@@ -191,20 +188,26 @@ begin
   FApp.Stop;
 end;
 
-function THarnessApp.AssistantAttr: TAttr;
+procedure THarnessApp.Invalidate(Sender: TObject);
 begin
-  Result := FTheme.Text;
-end;
-
-procedure THarnessApp.AppendLine(const AText: string; const AAttr: TAttr);
-begin
-  FConversation.Append(UnicodeString(AText + #10), AAttr);
   FApp.Invalidate;
 end;
 
-procedure THarnessApp.SetStatus(const AText: string; const AAttr: TAttr);
+procedure THarnessApp.AppendUser(const AText: string);
 begin
-  FStatus.SetText(AText, AAttr);
+  FPanel.Stream.Add(ckUser, '', AText);
+  FApp.Invalidate;
+end;
+
+procedure THarnessApp.AppendError(const AText: string);
+begin
+  FPanel.Stream.Add(ckError, '', AText);
+  FApp.Invalidate;
+end;
+
+procedure THarnessApp.SetStatus(const AText: string);
+begin
+  FPanel.SetStatus(FSession.WorkspaceRoot + '   ' + AText);
   FApp.Invalidate;
 end;
 
@@ -213,7 +216,6 @@ var
   History: TChatMessageArray;
   I: Integer;
   Msg: TChatMessage;
-  A: TAttr;
 begin
   History := FSession.History;
   for I := 0 to High(History) do
@@ -221,15 +223,14 @@ begin
     Msg := History[I];
     case Msg.Role of
       crUser:
-        A := FTheme.Accent;
+        FPanel.Stream.Add(ckUser, '', Msg.Content);
       crTool:
-        A := FTheme.Warn;
+        FPanel.Stream.Add(ckTool, 'result', Msg.Content);
       crSystem:
-        A := FTheme.Muted;
+        FPanel.Stream.Add(ckThought, 'system', Msg.Content);
     else
-      A := AssistantAttr;
+      FPanel.Stream.Add(ckAssistant, '', Msg.Content);
     end;
-    AppendLine(RoleLabel(Msg.Role) + Msg.Content, A);
   end;
 end;
 
@@ -237,13 +238,27 @@ procedure THarnessApp.Submit(const AText: string);
 begin
   if FBusy then
     Exit;
-  AppendLine('> ' + AText, FTheme.Accent);
-  FPrompt.Active := False;
+  AppendUser(AText);
+  FPanel.SetComposeActive(False);
   FBusy := True;
   SyncBusy;
-  SetStatus('thinking...', FTheme.Muted);
+  SetStatus('thinking...');
+  FAssistant := nil;
+  FThought := nil;
+  FTool := nil;
+  FThinking := FPanel.Stream.Add(ckThinking, '', '');
   FWorker := TTurnWorker.Create(FSession.Loop, FSession.Queue, AText);
   FWorker.Start;
+end;
+
+procedure THarnessApp.DropThinking;
+begin
+  if FThinking <> nil then
+  begin
+    FPanel.Stream.Remove(FThinking);
+    FThinking := nil;
+    FApp.Invalidate;
+  end;
 end;
 
 procedure THarnessApp.HandleTurnEvent(const E: TTurnEvent);
@@ -251,40 +266,57 @@ begin
   case E.Kind of
     teAssistantDelta:
       begin
-        FConversation.Append(UnicodeString(E.Text), AssistantAttr);
-        FApp.Invalidate;
+        DropThinking;
+        if FAssistant = nil then
+          FAssistant := FPanel.Stream.Add(ckAssistant, '', '');
+        FAssistant.AppendText(E.Text);
       end;
     teReasoningDelta:
       begin
-        FConversation.Append(UnicodeString(E.Text), FTheme.Muted);
-        FApp.Invalidate;
+        DropThinking;
+        if FThought = nil then
+          FThought := FPanel.Stream.Add(ckThought, 'Thought', '');
+        FThought.AppendText(E.Text);
       end;
     teToolCall:
       begin
-        AppendLine(#10 + '[tool] ' + E.ToolName + '  (' + E.ToolReason + ')',
-          FTheme.Warn);
-        if E.ToolArguments <> '' then
-          AppendLine('  ' + E.ToolArguments, FTheme.Muted);
+        DropThinking;
+        { The reason is the block's title, so collapsed tool lines read as the
+          story of the agent's decisions; the tool name and arguments are the
+          body, visible when expanded. }
+        if E.ToolReason <> '' then
+          FTool := FPanel.Stream.Add(ckTool, E.ToolReason,
+            E.ToolName + '  ' + E.ToolArguments)
+        else
+          FTool := FPanel.Stream.Add(ckTool, E.ToolName, E.ToolArguments);
+        FTool.Expanded := False;
       end;
     teToolResult:
       begin
-        if E.ToolOk then
-          AppendLine('[result] ' + E.ToolName + ': ok', FTheme.Warn)
+        if FTool <> nil then
+        begin
+          if E.ToolOk then
+            FTool.AppendText(#10 + #10 + '[ok] ' + E.Text)
+          else
+            FTool.AppendText(#10 + #10 + '[failed] ' + E.Text);
+          FTool := nil;
+        end
         else
-          AppendLine('[result] ' + E.ToolName + ': failed', FTheme.Error);
-        if E.Text <> '' then
-          AppendLine('  ' + E.Text, FTheme.Muted);
+          FPanel.Stream.Add(ckTool, E.ToolName,
+            E.Text);
+        { The tools are done, so the next deltas belong to the following message:
+          start fresh blocks, after the tool lines. }
+        FAssistant := nil;
+        FThought := nil;
       end;
     teApprovalAsk:
       EnqueueAsk(E);
     teDone:
-      begin
-        AppendLine('', AssistantAttr);
-        FinishTurn;
-      end;
+      FinishTurn;
     teError:
       begin
-        AppendLine('[error] ' + E.Text, FTheme.Error);
+        DropThinking;
+        AppendError(E.Text);
         FinishTurn;
       end;
   else
@@ -334,7 +366,7 @@ begin
   R.H := FSurface.Height;
   Wrap.Arrange(R);
   FApp.PushPlane(TPlane.Create(Wrap, True, True));
-  SetStatus('approval needed', FTheme.Warn);
+  SetStatus('approval needed');
 end;
 
 procedure THarnessApp.OnApprovalChosen(const AChoice: TApprovalChoice);
@@ -364,9 +396,13 @@ begin
     FWorker.Free;
     FWorker := nil;
   end;
+  DropThinking;
   FBusy := False;
-  FPrompt.Active := True;
-  SetStatus('ready', FTheme.Muted);
+  FAssistant := nil;
+  FThought := nil;
+  FTool := nil;
+  FPanel.SetComposeActive(True);
+  SetStatus('ready');
   SyncBusy;
 end;
 
@@ -418,12 +454,16 @@ end;
 
 function THarnessApp.GetPromptActive: Boolean;
 begin
-  Result := FPrompt.Active;
+  Result := FPanel.Compose.Edit.Active;
 end;
 
 function THarnessApp.ConversationText: string;
+var
+  I: Integer;
 begin
-  Result := string(FConversation.Text);
+  Result := '';
+  for I := 0 to FPanel.Stream.Count - 1 do
+    Result := Result + FPanel.Stream.ItemAt(I).Text + #10;
 end;
 
 end.

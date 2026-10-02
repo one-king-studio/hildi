@@ -48,6 +48,7 @@ type
     FGate: TApprovalGate;
     FSessionId: string;
     FWorkspaceRoot: string;
+    FModel: string;
     FHistory: TChatMessageArray;
     function Init(const AConfig: THarnessSessionConfig; out AError: string):
       Boolean;
@@ -65,6 +66,8 @@ type
     property Gate: TApprovalGate read FGate;
     property SessionId: string read FSessionId;
     property WorkspaceRoot: string read FWorkspaceRoot;
+    { The model the session is configured with, for the UI. }
+    property Model: string read FModel;
     property Store: TSqliteStore read FStore;   // nil when unconfigured
 
     { Prior messages for the initial render (empty for a new session). }
@@ -164,6 +167,7 @@ begin
     Exit;
   end;
   FWorkspaceRoot := FWorkspace.Root;
+  FModel := AConfig.Model;
 
   LlmConfig := Default(TLLMConfig);
   LlmConfig := ResolveLLMConfig(LlmConfig);
