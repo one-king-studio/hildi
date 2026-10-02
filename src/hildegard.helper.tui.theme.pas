@@ -17,6 +17,8 @@ uses
 type
   TTheme = record
     Bg: Byte;         // the app background painted for sfScreenBg cells
+    RaisedBg: Byte;   // slightly lighter: user bubble, input box
+    SunkenBg: Byte;   // slightly darker: tool output
     Base: TAttr;      // screen background
     Panel: TAttr;     // panel / box background
     Border: TAttr;    // box-drawing frame
@@ -47,6 +49,12 @@ function SelectTheme(AMode: TThemeMode; ALightDetected: Boolean): TTheme;
 function ThemeModeFromString(const S: string): TThemeMode;
 function ThemeModeName(AMode: TThemeMode): string;
 
+{ Move a role onto an explicit background (a raised or sunken surface) instead
+  of the app's screen background. }
+function OnBg(const AAttr: TAttr; ABg: Byte): TAttr;
+{ Add rendition flags to a role. }
+function WithStyle(const AAttr: TAttr; AStyle: TStyle): TAttr;
+
 implementation
 
 uses
@@ -64,6 +72,8 @@ end;
 function DarkTheme: TTheme;
 begin
   Result.Bg := DarkBg;
+  Result.RaisedBg := 235;
+  Result.SunkenBg := 233;
   Result.Base := MakeAttr(252);
   Result.Panel := MakeAttr(252);
   Result.Border := MakeAttr(240);
@@ -79,6 +89,8 @@ end;
 function LightTheme: TTheme;
 begin
   Result.Bg := LightBg;
+  Result.RaisedBg := 254;
+  Result.SunkenBg := 252;
   Result.Base := MakeAttr(235);
   Result.Panel := MakeAttr(235);
   Result.Border := MakeAttr(245);
@@ -126,6 +138,21 @@ begin
   else
     Result := 'auto';
   end;
+end;
+
+function OnBg(const AAttr: TAttr; ABg: Byte): TAttr;
+begin
+  { Move a role onto an explicit background (a raised or sunken surface) instead
+    of the app's screen background. }
+  Result := AAttr;
+  Exclude(Result.Style, sfScreenBg);
+  Result.Bg := ABg;
+end;
+
+function WithStyle(const AAttr: TAttr; AStyle: TStyle): TAttr;
+begin
+  Result := AAttr;
+  Result.Style := Result.Style + AStyle;
 end;
 
 end.

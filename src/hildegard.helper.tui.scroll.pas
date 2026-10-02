@@ -6,7 +6,7 @@ unit hildegard.helper.tui.scroll;
   vertical scrollbar appears per VertScrollBar (never/auto/always); v1 scrolls
   by keyboard. TScrollBar is display plus geometry. }
 
-{$mode delphi}{$H+}
+{$mode delphi}{$H+}{$codepage utf8}
 
 interface
 
@@ -188,12 +188,14 @@ var
 begin
   if (FBounds.W <= 0) or (FBounds.H <= 0) then
     Exit;
+  { Same glyph (a thick bar) for the track and the thumb; only the attribute
+    differs: a dim (darker) track and a brighter thumb. }
   TrackCell := Default(TCell);
-  TrackCell.Ch := '|';
+  TrackCell.Ch := '┃';
   TrackCell.Attr := DefaultAttr;
   TrackCell.Attr.Style := [sfDim, sfScreenBg];
   ThumbCell := Default(TCell);
-  ThumbCell.Ch := '#';
+  ThumbCell.Ch := '┃';
   ThumbCell.Attr := DefaultAttr;
   TStart := ThumbStart;
   TSize := ThumbSize;
@@ -364,7 +366,10 @@ begin
         ScrollBy(0, 3);
       Exit(True);
     end;
-    Exit(False);
+    { Any other mouse event (a left click on an interactive child): forward it
+      when it is inside the viewport, so a child can react. }
+    if not PointInside(E.Mouse.X, E.Mouse.Y) then
+      Exit(False);
   end;
   if E.Kind = ikKey then
   begin

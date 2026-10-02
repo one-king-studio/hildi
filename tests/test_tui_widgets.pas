@@ -185,6 +185,8 @@ begin
   AssertTrue('text uses the screen background', sfScreenBg in D.Text.Style);
   AssertTrue('dark background set', D.Bg = DarkBg);
   AssertTrue('light background set', L.Bg = LightBg);
+  AssertTrue('raised background set', D.RaisedBg <> D.Bg);
+  AssertTrue('sunken background set', D.SunkenBg <> D.Bg);
   AssertTrue('warn role set', D.Warn.Fg <> 0);
   { Forcing a mode ignores the detected terminal background. }
   AssertTrue('forced dark', SelectTheme(tmDark, True).Bg = DarkBg);

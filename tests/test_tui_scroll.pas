@@ -17,8 +17,10 @@ type
   private
     FW, FH: Integer;
   public
+    MouseHits: Integer;
     constructor Create(AW, AH: Integer);
     function Measure(const AAvail: TSize): TSize; override;
+    function HandleEvent(const E: TInputEvent): Boolean; override;
   end;
 
   TTuiScrollTest = class(TTestCase)
@@ -36,6 +38,7 @@ type
     procedure TestScrollbarThumbGeometry;
     procedure TestScrollbarThumbTracksScroll;
     procedure TestScrollbarDragScrolls;
+    procedure TestClickInsideViewportReachesChild;
   end;
 
 implementation
@@ -52,6 +55,16 @@ begin
   Result := Default(TSize);
   Result.W := FW;
   Result.H := FH;
+end;
+
+function TScrollProbe.HandleEvent(const E: TInputEvent): Boolean;
+begin
+  Result := False;
+  if (E.Kind = ikMouse) and (E.Mouse.Button = mbLeft) then
+  begin
+    Inc(MouseHits);
+    Result := True;
+  end;
 end;
 
 function TTuiScrollTest.Rc(AX, AY, AW, AH: Integer): TRect;
@@ -216,14 +229,14 @@ begin
       S.Clear(DefaultAttr);
       C.Render(S);
       S.Flush;
-      AssertEquals('thumb at top', '#', S.CellAt(9, 0).Ch);
+      AssertEquals('thumb at top', '┃', S.CellAt(9, 0).Ch);
 
       C.ScrollTo(0, 90);
       S.Clear(DefaultAttr);
       C.Render(S);
       S.Flush;
-      AssertEquals('thumb moved to bottom', '#', S.CellAt(9, 9).Ch);
-      AssertEquals('track left behind', '|', S.CellAt(9, 0).Ch);
+      AssertEquals('thumb moved to bottom', '┃', S.CellAt(9, 9).Ch);
+      AssertEquals('track left behind', '┃', S.CellAt(9, 0).Ch);
     finally
       C.Free;
     end;
@@ -253,6 +266,26 @@ begin
     AssertTrue('wheel handled',
       C.HandleEvent(MouseEvent(3, 4, mbWheelUp)));
     AssertEquals('wheel scrolled up by three', 37, C.ScrollY);
+  finally
+    C.Free;
+  end;
+end;
+
+procedure TTuiScrollTest.TestClickInsideViewportReachesChild;
+var
+  Probe: TScrollProbe;
+  C: TScrollContainer;
+begin
+  Probe := TScrollProbe.Create(10, 100);   { taller than the viewport }
+  C := TScrollContainer.Create(Probe, smAuto, smNever);
+  try
+    C.Arrange(Rc(0, 0, 10, 10));
+    AssertTrue('click inside the viewport reaches the child',
+      C.HandleEvent(MouseEvent(3, 2, mbLeft)));
+    AssertEquals('child saw the click', 1, Probe.MouseHits);
+    AssertFalse('click outside the viewport is not forwarded',
+      C.HandleEvent(MouseEvent(50, 50, mbLeft)));
+    AssertEquals('child saw nothing more', 1, Probe.MouseHits);
   finally
     C.Free;
   end;

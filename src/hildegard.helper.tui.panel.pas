@@ -32,6 +32,7 @@ type
 
   TBoxStyle = record
     Border: Boolean;
+    Rounded: Boolean;
     Title: string;
     Padding: Integer;
   end;
@@ -62,6 +63,7 @@ function DefaultBoxStyle: TBoxStyle;
 begin
   Result := Default(TBoxStyle);
   Result.Border := True;
+  Result.Rounded := False;
   Result.Title := '';
   Result.Padding := 1;
 end;
@@ -206,10 +208,20 @@ begin
     R := FBounds.X + FBounds.W - 1;
     T := FBounds.Y;
     B := FBounds.Y + FBounds.H - 1;
-    PutCh(S, L, T, UnicodeString(WideChar($250C)), FTheme.Border);
-    PutCh(S, R, T, UnicodeString(WideChar($2510)), FTheme.Border);
-    PutCh(S, L, B, UnicodeString(WideChar($2514)), FTheme.Border);
-    PutCh(S, R, B, UnicodeString(WideChar($2518)), FTheme.Border);
+    if FStyle.Rounded then
+    begin
+      PutCh(S, L, T, UnicodeString(WideChar($256D)), FTheme.Border);
+      PutCh(S, R, T, UnicodeString(WideChar($256E)), FTheme.Border);
+      PutCh(S, L, B, UnicodeString(WideChar($2570)), FTheme.Border);
+      PutCh(S, R, B, UnicodeString(WideChar($256F)), FTheme.Border);
+    end
+    else
+    begin
+      PutCh(S, L, T, UnicodeString(WideChar($250C)), FTheme.Border);
+      PutCh(S, R, T, UnicodeString(WideChar($2510)), FTheme.Border);
+      PutCh(S, L, B, UnicodeString(WideChar($2514)), FTheme.Border);
+      PutCh(S, R, B, UnicodeString(WideChar($2518)), FTheme.Border);
+    end;
     for X := L + 1 to R - 1 do
     begin
       PutCh(S, X, T, UnicodeString(WideChar($2500)), FTheme.Border);
