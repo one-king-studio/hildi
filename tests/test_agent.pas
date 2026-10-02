@@ -108,6 +108,16 @@ type
     procedure FinishTurn(ATurnId: Int64; const AOutcome: TTurnOutcome);
   end;
 
+  { Reports cancelled from the Nth check on, for the loop's cancel seam. }
+  TCancelAfter = class
+  private
+    FAfter: Integer;
+    FCalls: Integer;
+  public
+    constructor Create(AAfter: Integer);
+    function Check: Boolean;
+  end;
+
   TAgentLoopTest = class(TTestCase)
   private
     FFake: TFakeTransport;
@@ -166,6 +176,7 @@ type
     procedure TestSendRecordsReasoning;
     procedure TestSendRecordsErrorAndFailedTurn;
     procedure TestToolResultCarriesNameOkAndDuration;
+    procedure TestLoopStopsWhenCancelled;
   end;
 
 implementation
@@ -390,6 +401,21 @@ procedure TRecordingStore.FinishTurn(ATurnId: Int64;
 begin
   Inc(FinishTurns);
   LastTurnStatus := AOutcome.Status;
+end;
+
+{ TCancelAfter }
+
+constructor TCancelAfter.Create(AAfter: Integer);
+begin
+  inherited Create;
+  FAfter := AAfter;
+  FCalls := 0;
+end;
+
+function TCancelAfter.Check: Boolean;
+begin
+  Inc(FCalls);
+  Result := FCalls > FAfter;
 end;
 
 { TAgentLoopTest }
@@ -1291,6 +1317,30 @@ begin
   AssertEquals('tool role', Ord(crTool), Ord(Rec.LastTool.Role));
   AssertEquals('tool name', 'get_system_time', Rec.LastTool.ToolName);
   AssertTrue('tool ok', Rec.LastTool.ToolOk);
+end;
+
+procedure TAgentLoopTest.TestLoopStopsWhenCancelled;
+var
+  Rec: TRecordingStore;
+  Cancel: TCancelAfter;
+  Answer: string;
+  Err: TLLMError;
+begin
+  Rec := BuildLoopRecording;
+  Cancel := TCancelAfter.Create(1);
+  try
+    FLoop.CancelCheck := Cancel.Check;
+    FFake.AddResponse([ToolNameFrame(0, 'c1', 'get_system_time'),
+      ToolArgsFrame(0, '{"reason":"r"}'), FinishFrame('tool_calls'),
+      DoneFrame]);
+    FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
+    AssertFalse('send cancelled', FLoop.Send('go', nil, Answer, Err));
+    AssertEquals('cancelled code', Ord(leCancelled), Ord(Err.Code));
+    AssertEquals('only the first request ran', 1, FFake.Calls);
+    AssertEquals('turn cancelled', Ord(tsCancelled), Ord(Rec.LastTurnStatus));
+  finally
+    Cancel.Free;
+  end;
 end;
 
 initialization

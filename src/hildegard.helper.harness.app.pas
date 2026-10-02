@@ -44,6 +44,8 @@ type
     FStatsText: string;
     FHintsText: string;
     FStateLabel: string;
+    FInterruptPending: Boolean;
+    FInterruptAt: Int64;
     { The blocks of the turn in flight, so deltas land in the right one. }
     FAssistant: TChatItem;
     FThought: TChatItem;
@@ -60,6 +62,10 @@ type
     procedure FinishTurn(AState: TPanelState; const ALabel: string);
     procedure SetState(AKind: TPanelState; const ALabel: string);
     procedure UpdateStats;
+    procedure HandleEscape(Sender: TObject);
+    function ComposeIsEmpty: Boolean;
+    procedure InterruptTurn;
+    procedure CheckInterruptWindow;
     procedure AppendUser(const AText: string);
     procedure AppendError(const AText: string);
     procedure RenderHistory;
@@ -99,6 +105,8 @@ type
     property StateText: string read FStateLabel;
     { The toolbar's right part: the interaction hints. }
     property HintsText: string read FHintsText;
+    { True once the first Escape has armed the interrupt. }
+    property InterruptArmed: Boolean read FInterruptPending;
     function ConversationText: string;
   end;
 
@@ -108,16 +116,26 @@ const
   { The interaction hints live in the CTA strip, which acts as a context
     toolbar; the status bar is reserved for the workspace and the metrics. }
   CtaHints = '↵ send   ⇧+↵ newline   click a block to expand';
+  { How long the first Escape stays armed before the interrupt prompt expires. }
+  InterruptWindowMs = 2000;
 
 type
-  { Wraps the root so global quit keys (Ctrl-C/Ctrl-D) are handled before the
-    prompt, which otherwise consumes every printable character. Extends
-    TSingleChild so Advance/Animating reach the tree. }
+  { A yes/no query, e.g. "may I quit?". }
+  TQueryEvent = function: Boolean of object;
+
+  { Wraps the root so global keys (Ctrl-C/Ctrl-D quit, Escape interrupts) are
+    handled before the prompt, which otherwise consumes every printable
+    character. Ctrl-C is refused while the compose holds text, so it can never
+    discard typed input. Extends TSingleChild so Advance/Animating reach the
+    tree. }
   TAppShell = class(TSingleChild)
   private
     FOnQuit: TNotifyEvent;
+    FOnEscape: TNotifyEvent;
+    FCanQuit: TQueryEvent;
   public
-    constructor Create(AChild: TWidget; AOnQuit: TNotifyEvent);
+    constructor Create(AChild: TWidget; AOnQuit, AOnEscape: TNotifyEvent;
+      ACanQuit: TQueryEvent);
     function HandleEvent(const E: TInputEvent): Boolean; override;
   end;
 
@@ -137,19 +155,42 @@ end;
 
 { TAppShell }
 
-constructor TAppShell.Create(AChild: TWidget; AOnQuit: TNotifyEvent);
+constructor TAppShell.Create(AChild: TWidget; AOnQuit, AOnEscape: TNotifyEvent;
+  ACanQuit: TQueryEvent);
 begin
   inherited Create(AChild);
   FOnQuit := AOnQuit;
+  FOnEscape := AOnEscape;
+  FCanQuit := ACanQuit;
 end;
 
 function TAppShell.HandleEvent(const E: TInputEvent): Boolean;
 begin
-  if (E.Kind = ikKey) and (E.Key.Kind = kkChar) and (moCtrl in E.Key.Mods) and
-    ((E.Key.Ch = 'c') or (E.Key.Ch = 'd')) then
+  if (E.Kind = ikKey) and (E.Key.Kind = kkChar) and (moCtrl in E.Key.Mods) then
   begin
-    if Assigned(FOnQuit) then
-      FOnQuit(Self);
+    if (E.Key.Ch = 'c') or (E.Key.Ch = 'C') then
+    begin
+      { Ctrl-C clears a non-empty compose; only an empty one quits. }
+      if Assigned(FCanQuit) and not FCanQuit() then
+      begin
+        inherited HandleEvent(E);
+        Exit(True);
+      end;
+      if Assigned(FOnQuit) then
+        FOnQuit(Self);
+      Exit(True);
+    end;
+    if (E.Key.Ch = 'd') or (E.Key.Ch = 'D') then
+    begin
+      if Assigned(FOnQuit) then
+        FOnQuit(Self);
+      Exit(True);
+    end;
+  end;
+  if (E.Kind = ikKey) and (E.Key.Kind = kkEscape) then
+  begin
+    if Assigned(FOnEscape) then
+      FOnEscape(Self);
     Exit(True);
   end;
   Result := inherited HandleEvent(E);
@@ -204,7 +245,7 @@ begin
   FPanel.SetStatus(FStatusText);
   FHintsText := CtaHints;
   FPanel.SetHints(FHintsText);
-  Result := TAppShell.Create(FPanel, Quit);
+  Result := TAppShell.Create(FPanel, Quit, HandleEscape, ComposeIsEmpty);
 end;
 
 procedure THarnessApp.Quit(Sender: TObject);
@@ -245,6 +286,49 @@ begin
   FStatsText := FormatTurnStats(FSession.LastTurn);
   FPanel.SetStats(FStatsText);
   FApp.Invalidate;
+end;
+
+function THarnessApp.ComposeIsEmpty: Boolean;
+begin
+  Result := FPanel.Compose.Text = '';
+end;
+
+procedure THarnessApp.HandleEscape(Sender: TObject);
+begin
+  if not FBusy then
+    Exit;
+  if FInterruptPending then
+  begin
+    FInterruptPending := False;
+    InterruptTurn;
+  end
+  else
+  begin
+    { Arm the interrupt; a second Escape within the window cancels the turn. }
+    FInterruptPending := True;
+    FInterruptAt := GetTickCount64;
+    SetState(psInterrupt, 'press esc again to cancel');
+  end;
+end;
+
+procedure THarnessApp.InterruptTurn;
+begin
+  if FWorker <> nil then
+  begin
+    FWorker.RequestCancel;
+    SetState(psThinking, 'cancelling');
+  end;
+end;
+
+procedure THarnessApp.CheckInterruptWindow;
+begin
+  if not FInterruptPending then
+    Exit;
+  if GetTickCount64 - FInterruptAt < InterruptWindowMs then
+    Exit;
+  FInterruptPending := False;
+  if FBusy then
+    SetState(psThinking, 'thinking');
 end;
 
 procedure THarnessApp.RenderHistory;
@@ -376,6 +460,10 @@ begin
     teDone:
       FinishTurn(psReady, 'ready');
     teError:
+      if E.ErrorCode = leCancelled then
+        { A user interrupt is not an error; do not draw an error block. }
+        FinishTurn(psReady, 'cancelled')
+      else
       begin
         AppendError(E.Text);
         FinishTurn(psError, 'error');
@@ -461,6 +549,7 @@ begin
     FWorker := nil;
   end;
   FBusy := False;
+  FInterruptPending := False;
   FAssistant := nil;
   FThought := nil;
   FTool := nil;
@@ -488,6 +577,7 @@ begin
   { Drain each iteration, then reflect the resulting busy state so Run picks the
     frame cadence (not the idle wait) while a turn is streaming. }
   CloseModal;
+  CheckInterruptWindow;
   DrainQueue;
   SyncBusy;
 end;
@@ -497,6 +587,7 @@ begin
   { Pop an answered modal (and show the next queued ask) before draining, so a
     fresh ask is never stacked on top of one still being answered. }
   CloseModal;
+  CheckInterruptWindow;
   DrainQueue;
   Result := FApp.Step;
 end;

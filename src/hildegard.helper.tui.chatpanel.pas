@@ -25,7 +25,7 @@ uses
 type
   { What the run is doing, shown at the left of the toolbar. psThinking and
     psTool animate the sparkle; the others are static icons. }
-  TPanelState = (psReady, psThinking, psTool, psApproval, psError);
+  TPanelState = (psReady, psThinking, psTool, psApproval, psError, psInterrupt);
 
   TChatPanel = class(TWidget)
   private
@@ -97,6 +97,8 @@ begin
       Result := '?';
     psError:
       Result := '✗';
+    psInterrupt:
+      Result := '!';
   else
     Result := '';   // the animated states show the sparkle instead
   end;
@@ -107,7 +109,7 @@ begin
   case AKind of
     psReady:
       Result := ATheme.Success;
-    psApproval:
+    psApproval, psInterrupt:
       Result := ATheme.Warn;
     psError:
       Result := ATheme.Error;

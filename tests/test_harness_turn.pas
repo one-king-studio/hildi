@@ -474,7 +474,9 @@ begin
   Worker.Start;
   Worker.WaitFor;
   try
-    AssertEquals('cancelled', 'E:7:cancelled|', Drain);
+    { The loop's first boundary check sees the flag, so the turn is cancelled
+      before any request is sent (leCancelled = 8). }
+    AssertEquals('cancelled', 'E:8:cancelled|', Drain);
   finally
     Worker.Free;
   end;

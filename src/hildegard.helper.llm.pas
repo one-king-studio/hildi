@@ -75,7 +75,7 @@ type
 
   TLLMErrorCode = (
     leOk, leConfig, leNetwork, leHttpStatus, leAuth, leRateLimit,
-    leMalformedStream, leProvider
+    leMalformedStream, leProvider, leCancelled
   );
 
   TLLMError = record

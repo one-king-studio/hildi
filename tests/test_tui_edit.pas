@@ -37,6 +37,11 @@ type
     procedure TestDeleteForwardDeletesClusterAtCaret;
     procedure TestDeleteForwardAtEndDoesNothing;
     procedure TestClearEmptiesBufferAndCaret;
+    procedure TestClearLineClearsTheCaretLine;
+    procedure TestClearLineOnEmptyLineIsNoOp;
+    procedure TestCtrlUClearsTheLine;
+    procedure TestCtrlCClearsTheBufferAndReportsHandled;
+    procedure TestCtrlCOnEmptyBufferReportsUnhandled;
     procedure TestSetCaretClampsToBuffer;
     procedure TestOnChangeFiresOnEveryMutation;
     { Display rows and navigation. }
@@ -781,6 +786,76 @@ begin
     AssertEquals('delete forward at the end is a no-op', 'a', string(E.Text));
     Ev.Key.Kind := kkTab;
     AssertFalse('unmapped key ignored', E.HandleEvent(Ev));
+  finally
+    E.Free;
+  end;
+end;
+
+procedure TTuiEditTest.TestClearLineClearsTheCaretLine;
+var
+  E: TTextEdit;
+begin
+  E := Editor(20, 'first' + #10 + 'second' + #10 + 'third');
+  try
+    E.MoveHome;   { caret on the third line }
+    E.ClearLine;
+    AssertEquals('third line cleared',
+      'first' + #10 + 'second' + #10, string(E.Text));
+    AssertEquals('caret at the line start', 13, E.CaretIndex);
+  finally
+    E.Free;
+  end;
+end;
+
+procedure TTuiEditTest.TestClearLineOnEmptyLineIsNoOp;
+var
+  E: TTextEdit;
+begin
+  E := Editor(20, 'a' + #10 + #10 + 'b');
+  try
+    E.SetCaret(2);   { the empty middle line }
+    E.ClearLine;
+    AssertEquals('unchanged', 'a' + #10 + #10 + 'b', string(E.Text));
+  finally
+    E.Free;
+  end;
+end;
+
+procedure TTuiEditTest.TestCtrlUClearsTheLine;
+var
+  E: TTextEdit;
+begin
+  E := Editor(20, 'hello world');
+  try
+    AssertTrue('ctrl+u handled', E.HandleEvent(CharKey('u', [moCtrl])));
+    AssertEquals('line cleared', '', string(E.Text));
+    AssertEquals('caret at the start', 0, E.CaretIndex);
+  finally
+    E.Free;
+  end;
+end;
+
+procedure TTuiEditTest.TestCtrlCClearsTheBufferAndReportsHandled;
+var
+  E: TTextEdit;
+begin
+  E := Editor(20, 'abc');
+  try
+    AssertTrue('ctrl+c handled', E.HandleEvent(CharKey('c', [moCtrl])));
+    AssertEquals('buffer cleared', '', string(E.Text));
+  finally
+    E.Free;
+  end;
+end;
+
+procedure TTuiEditTest.TestCtrlCOnEmptyBufferReportsUnhandled;
+var
+  E: TTextEdit;
+begin
+  E := Editor(20, '');
+  try
+    AssertFalse('ctrl+c falls through when empty',
+      E.HandleEvent(CharKey('c', [moCtrl])));
   finally
     E.Free;
   end;

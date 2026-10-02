@@ -34,6 +34,9 @@ type
     ErrorDetail: string;
   end;
 
+  { Consulted at each loop boundary; True stops the turn as cancelled. }
+  TAgentCancelCheck = function: Boolean of object;
+
   { The loop's persistence seam: the conversation it replays, the display-only
     blocks it produces, and the turn/request audit. An implementation that does
     not persist (in-memory) ignores the audit calls and returns 0 for the ids. }
@@ -115,6 +118,7 @@ type
     FStore: IConversationStore;
     FTools: TToolRegistry;
     FConfig: TAgentConfig;
+    FCancel: TAgentCancelCheck;
     function BuildRequest: TChatRequest;
     procedure ExecuteToolCalls(const ACalls: TChatToolCallArray;
       const AEvents: TAgentEvents; out AAllOk: Boolean);
@@ -128,6 +132,9 @@ type
       out AAnswer: string; out AError: TLLMError): Boolean; overload;
     function Send(const AUserText: string; const AEvents: TAgentEvents;
       out AAnswer: string; out AError: TLLMError): Boolean; overload;
+    { Consulted at each loop boundary (before building a request); True closes
+      the turn as cancelled. Never breaks a tool batch part-way. }
+    property CancelCheck: TAgentCancelCheck read FCancel write FCancel;
   end;
 
 procedure RegisterDefaultTools(ATools: TToolRegistry);
@@ -554,6 +561,8 @@ var
     FStore.AppendError(AMessage, ADetail);
     TurnOutcome := Default(TTurnOutcome);
     TurnOutcome.Status := tsFailed;
+    if ACode = leCancelled then
+      TurnOutcome.Status := tsCancelled;
     TurnOutcome.FinishReason := AFinishReason;
     TurnOutcome.ErrorCode := ACode;
     TurnOutcome.ErrorMessage := AMessage;
@@ -584,6 +593,13 @@ begin
   Iterations := 0;
   while True do
   begin
+    { A cancel between requests stops the loop; a tool batch is never broken
+      part-way, so its calls and results stay paired. }
+    if Assigned(FCancel) and FCancel() then
+    begin
+      FailTurn(leCancelled, 'cancelled', '', '');
+      Exit(False);
+    end;
     Request := BuildRequest;
     RequestId := FStore.BeginRequest(TurnId, FClient.Model,
       Length(Request.Messages));

@@ -30,6 +30,16 @@ type
     procedure Execute; override;
   end;
 
+  { Sleeps after every stream chunk, so a turn stays in flight long enough for
+    the test to press Escape at it. }
+  TSlowChunks = class
+  private
+    FMs: Integer;
+  public
+    constructor Create(AMs: Integer);
+    procedure AfterChunk(Sender: TObject);
+  end;
+
   THarnessAppTest = class(TTestCase)
   private
     FDir: string;
@@ -43,6 +53,7 @@ type
     procedure BuildWithStore;
     function Key(AKind: TKeyKind): TInputEvent;
     function Ch(const AText: string): TInputEvent;
+    function Ctrl(const ACh: string): TInputEvent;
     procedure SubmitPrompt(const AText: string);
     function Pump(AMax: Integer): Boolean;
     function MakeAsk: TApprovalAsk;
@@ -71,6 +82,8 @@ type
     procedure TestThinkingStateDuringATurn;
     procedure TestReadyStateAfterATurn;
     procedure TestErrorStateAfterAFailedTurn;
+    procedure TestEscapeArmsThenCancels;
+    procedure TestCtrlCQuitsOnlyWhenComposeIsEmpty;
   end;
 
 implementation
@@ -86,6 +99,19 @@ end;
 procedure TGateAskThread.Execute;
 begin
   Choice := FGate.Ask(FAsk);
+end;
+
+{ TSlowChunks }
+
+constructor TSlowChunks.Create(AMs: Integer);
+begin
+  inherited Create;
+  FMs := AMs;
+end;
+
+procedure TSlowChunks.AfterChunk(Sender: TObject);
+begin
+  Sleep(FMs);
 end;
 
 { THarnessAppTest }
@@ -164,6 +190,12 @@ begin
   Result.Kind := ikKey;
   Result.Key.Kind := kkChar;
   Result.Key.Ch := UnicodeString(AText);
+end;
+
+function THarnessAppTest.Ctrl(const ACh: string): TInputEvent;
+begin
+  Result := Ch(ACh);
+  Result.Key.Mods := [moCtrl];
 end;
 
 procedure THarnessAppTest.SubmitPrompt(const AText: string);
@@ -597,6 +629,65 @@ begin
   SubmitPrompt('hi');
   AssertTrue('turn finished', Pump(300));
   AssertEquals('error state', 'error', FApp.StateText);
+end;
+
+procedure THarnessAppTest.TestEscapeArmsThenCancels;
+var
+  Slow: TSlowChunks;
+  I: Integer;
+begin
+  Build;
+  Slow := TSlowChunks.Create(80);
+  try
+    FFake.AfterChunk := Slow.AfterChunk;
+    { Two requests, so the loop reaches a boundary where the cancel is seen. }
+    FFake.AddResponse([TextDelta('working'),
+      ToolNameFrame(0, 'c1', 'get_system_time'),
+      ToolArgsFrame(0, '{"reason":"r"}'),
+      FinishFrame('tool_calls'), DoneFrame]);
+    FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
+    SubmitPrompt('hello');
+    for I := 1 to 300 do
+    begin
+      FApp.Step;
+      if FApp.Busy then
+        Break;
+      Sleep(2);
+    end;
+    AssertTrue('turn in flight', FApp.Busy);
+
+    FInput.Push(Key(kkEscape));
+    FApp.Step;
+    AssertTrue('first escape arms', FApp.InterruptArmed);
+    AssertEquals('prompt shown', 'press esc again to cancel', FApp.StateText);
+
+    FInput.Push(Key(kkEscape));
+    FApp.Step;
+    AssertFalse('second escape disarms', FApp.InterruptArmed);
+    AssertEquals('cancelling', 'cancelling', FApp.StateText);
+
+    AssertTrue('turn finished', Pump(600));
+    AssertEquals('cancelled state', 'cancelled', FApp.StateText);
+  finally
+    Slow.Free;
+  end;
+end;
+
+procedure THarnessAppTest.TestCtrlCQuitsOnlyWhenComposeIsEmpty;
+begin
+  Build;
+  FInput.Push(Ch('h'));
+  FInput.Push(Ch('i'));
+  FApp.Step;
+  FApp.Step;
+  AssertEquals('compose has text', 'hi', string(FApp.Panel.Compose.Text));
+
+  FInput.Push(Ctrl('c'));
+  AssertTrue('ctrl+c with text does not quit', FApp.Step);
+  AssertEquals('compose cleared', '', string(FApp.Panel.Compose.Text));
+
+  FInput.Push(Ctrl('c'));
+  AssertFalse('ctrl+c on an empty compose quits', FApp.Step);
 end;
 
 initialization

@@ -24,7 +24,7 @@ type
   TMessageRole = (
     mrSystem, mrUser, mrAssistant, mrReasoning, mrToolCall, mrTool, mrError);
 
-  TTurnStatus = (tsRunning, tsCompleted, tsFailed);
+  TTurnStatus = (tsRunning, tsCompleted, tsFailed, tsCancelled);
 
   TMessageRecord = record
     Id: Int64;

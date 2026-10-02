@@ -145,7 +145,16 @@ end;
 function TQuitShell.HandleEvent(const E: TInputEvent): Boolean;
 begin
   if (E.Kind = ikKey) and (E.Key.Kind = kkChar) and (moCtrl in E.Key.Mods) and
-    ((E.Key.Ch = 'c') or (E.Key.Ch = 'd')) then
+    ((E.Key.Ch = 'c') or (E.Key.Ch = 'C')) then
+  begin
+    { Ctrl-C clears a non-empty compose first; only an empty one quits. }
+    if inherited HandleEvent(E) then
+      Exit(True);
+    QuitRequested := True;
+    Exit(True);
+  end;
+  if (E.Kind = ikKey) and (E.Key.Kind = kkChar) and (moCtrl in E.Key.Mods) and
+    ((E.Key.Ch = 'd') or (E.Key.Ch = 'D')) then
   begin
     QuitRequested := True;
     Exit(True);

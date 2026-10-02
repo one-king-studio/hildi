@@ -69,6 +69,8 @@ type
     procedure Backspace;        { delete the cluster before the caret }
     procedure DeleteForward;    { delete the cluster at the caret }
     procedure Clear;
+    { Clear the logical line the caret is on; no-op on an empty line. }
+    procedure ClearLine;
 
     { Caret movement. All of these fire OnChange. AExtend keeps (or starts) a
       selection from the anchor instead of dropping it. }
@@ -335,6 +337,29 @@ begin
   FCaret := 0;
   FGoalCol := -1;
   FTopRow := 0;
+  Changed;
+end;
+
+procedure TTextEdit.ClearLine;
+var
+  C: TClusterArray;
+  I, N, LineStart, LineEnd: Integer;
+begin
+  C := Clusters(FText);
+  N := Length(C);
+  LineStart := FCaret;
+  while (LineStart > 0) and (C[LineStart - 1] <> #10) do
+    Dec(LineStart);
+  LineEnd := FCaret;
+  while (LineEnd < N) and (C[LineEnd] <> #10) do
+    Inc(LineEnd);
+  if LineEnd <= LineStart then
+    Exit;   { the line is already empty }
+  DeleteRange(LineStart, LineEnd);
+  FCaret := LineStart;
+  FSelAnchor := -1;
+  FGoalCol := -1;
+  FGoalEnd := False;
   Changed;
 end;
 
@@ -798,6 +823,22 @@ begin
     begin
       SelectAll;
       Exit(True);
+    end;
+    if (E.Key.Ch = 'u') or (E.Key.Ch = 'U') then
+    begin
+      ClearLine;
+      Exit(True);
+    end;
+    if (E.Key.Ch = 'c') or (E.Key.Ch = 'C') then
+    begin
+      { Clear the box, but report unhandled when it is already empty, so the
+        shell's Ctrl+C falls through to quit. }
+      if FText <> '' then
+      begin
+        Clear;
+        Exit(True);
+      end;
+      Exit(False);
     end;
     Exit(False);
   end;

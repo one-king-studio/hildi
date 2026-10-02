@@ -106,6 +106,7 @@ type
     FError: TLLMError;
     FStart: TDateTime;
     function ElapsedMs: Int64;
+    function Cancelled: Boolean;
     procedure Emit(const AEvent: TTurnEvent);
     procedure EmitError(ACode: TLLMErrorCode; const AMessage, ADetail: string);
     procedure OnText(const AText: string);
@@ -117,8 +118,8 @@ type
   public
     constructor Create(ALoop: TAgentLoop; AQueue: TTurnQueue;
       const AUserText: string);
-    { UI thread. Best-effort: the loop is synchronous and the transport has no
-      cancel hook, so the worker stops after the current stream completes. }
+    { UI thread. The loop consults the flag between requests, so the turn stops
+      at the next boundary; an in-flight stream finishes first. }
     procedure RequestCancel;
     property Answer: string read FAnswer;
     property Error: TLLMError read FError;
@@ -300,6 +301,11 @@ begin
   Result := MilliSecondsBetween(Now, FStart);
 end;
 
+function TTurnWorker.Cancelled: Boolean;
+begin
+  Result := FCancelled;
+end;
+
 procedure TTurnWorker.Emit(const AEvent: TTurnEvent);
 begin
   FQueue.Push(AEvent);
@@ -372,32 +378,33 @@ var
   Event: TTurnEvent;
 begin
   FStart := Now;
-  if FCancelled then
-  begin
-    EmitError(leProvider, 'cancelled', '');
-    Exit;
-  end;
-
   Events := Default(TAgentEvents);
   Events.OnText := OnText;
   Events.OnReasoning := OnReasoning;
   Events.OnToolCall := OnToolCall;
   Events.OnToolResult := OnToolResult;
 
+  { The loop consults this between requests, so a cancel stops the turn at the
+    next boundary and an in-flight stream still finishes. }
+  FLoop.CancelCheck := Cancelled;
   try
-    if FLoop.Send(FUserText, Events, FAnswer, FError) then
-    begin
-      Event := Default(TTurnEvent);
-      Event.Kind := teDone;
-      Event.Answer := FAnswer;
-      Event.ElapsedMs := ElapsedMs;
-      Emit(Event);
-    end
-    else
-      EmitError(FError.Code, FError.Message, FError.Detail);
-  except
-    on E: Exception do
-      EmitError(leProvider, E.Message, '');
+    try
+      if FLoop.Send(FUserText, Events, FAnswer, FError) then
+      begin
+        Event := Default(TTurnEvent);
+        Event.Kind := teDone;
+        Event.Answer := FAnswer;
+        Event.ElapsedMs := ElapsedMs;
+        Emit(Event);
+      end
+      else
+        EmitError(FError.Code, FError.Message, FError.Detail);
+    except
+      on E: Exception do
+        EmitError(leProvider, E.Message, '');
+    end;
+  finally
+    FLoop.CancelCheck := nil;
   end;
 end;
 
