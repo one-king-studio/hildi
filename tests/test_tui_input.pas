@@ -38,6 +38,7 @@ type
     procedure TestDecodeKittyEventTypes;
     procedure TestDecodeConsumesOscReply;
     procedure TestParseOsc11Background;
+    procedure TestDecodeShiftEnter;
   end;
 
 implementation
@@ -496,6 +497,28 @@ begin
   AssertEquals('short blue', 128, Integer(B));
   AssertFalse('not a reply', ParseOsc11Background(']11;rgb:zz', R, G, B));
   AssertFalse('not present', ParseOsc11Background('rgb:ff/ff/ff', R, G, B));
+end;
+
+procedure TTuiInputTest.TestDecodeShiftEnter;
+var
+  D: TKeyDecoder;
+  E: TInputEvent;
+  S: AnsiString;
+  I: Integer;
+  Data: array of Byte;
+begin
+  D := TKeyDecoder.Create;
+  try
+    S := #27'[13;2u';
+    SetLength(Data, Length(S));
+    for I := 1 to Length(S) do
+      Data[I - 1] := Ord(S[I]);
+    D.Feed(Data);
+    AssertTrue('shift+enter is enter', D.Next(E) and (E.Key.Kind = kkEnter));
+    AssertTrue('with the shift modifier', moShift in E.Key.Mods);
+  finally
+    D.Free;
+  end;
 end;
 
 initialization
