@@ -61,38 +61,14 @@ function SameCell(const A, B: TCell): Boolean;
 implementation
 
 uses
-  eastasianwidth;
-
-function FirstCodePoint(const ACluster: UnicodeString): UCS4Char;
-var
-  C1, C2: UCS4Char;
-begin
-  Result := 0;
-  if Length(ACluster) = 0 then
-    Exit;
-  C1 := UCS4Char(ACluster[1]);
-  if (C1 >= $D800) and (C1 <= $DBFF) and (Length(ACluster) >= 2) then
-  begin
-    C2 := UCS4Char(ACluster[2]);
-    if (C2 >= $DC00) and (C2 <= $DFFF) then
-      Result := $10000 + ((C1 - $D800) shl 10) or (C2 - $DC00)
-    else
-      Result := C1;
-  end
-  else
-    Result := C1;
-end;
+  hildegard.helper.tui.grapheme;
 
 function ClusterDisplayWidth(const ACh: UnicodeString): Integer;
 begin
+  { An empty cell still advances the terminal cursor by one. }
   if Length(ACh) = 0 then
     Exit(1);
-  case GetEastAsianWidth(FirstCodePoint(ACh)) of
-    eawW, eawF:
-      Result := 2;
-  else
-    Result := 1;
-  end;
+  Result := ClusterWidth(ACh);
 end;
 
 function SameCell(const A, B: TCell): Boolean;

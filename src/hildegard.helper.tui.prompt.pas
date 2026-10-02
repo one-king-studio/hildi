@@ -8,12 +8,12 @@ unit hildegard.helper.tui.prompt;
 interface
 
 uses
-  hildegard.helper.tui.base, hildegard.helper.tui.input,
-  hildegard.helper.tui.surface, hildegard.helper.tui.widget;
+  hildegard.helper.tui.base, hildegard.helper.tui.grapheme,
+  hildegard.helper.tui.input, hildegard.helper.tui.surface,
+  hildegard.helper.tui.widget;
 
 type
   TPromptSubmittedEvent = procedure(const AText: string) of object;
-  TPromptIntArray = array of Integer;
 
   { A leaf widget: a prompt marker followed by an editable line. The cursor
     position is a grapheme-cluster index; the view scrolls horizontally so the
@@ -30,7 +30,6 @@ type
     FAttr: TAttr;
     FOnSubmit: TPromptSubmittedEvent;
     procedure SetActive(AValue: Boolean);
-    function ClusterStarts: TPromptIntArray;
     procedure InsertText(const ACh: UnicodeString);
     procedure Backspace;
     procedure DeleteForward;
@@ -57,53 +56,7 @@ type
 implementation
 
 uses
-  SysUtils, graphemebreakproperty, eastasianwidth;
-
-function FirstCodePoint(const ACluster: UnicodeString): UCS4Char;
-var
-  C1, C2: UCS4Char;
-begin
-  Result := 0;
-  if Length(ACluster) = 0 then
-    Exit;
-  C1 := UCS4Char(ACluster[1]);
-  if (C1 >= $D800) and (C1 <= $DBFF) and (Length(ACluster) >= 2) then
-  begin
-    C2 := UCS4Char(ACluster[2]);
-    if (C2 >= $DC00) and (C2 <= $DFFF) then
-      Result := $10000 + ((C1 - $D800) shl 10) or (C2 - $DC00)
-    else
-      Result := C1;
-  end
-  else
-    Result := C1;
-end;
-
-function ClusterWidth(const ACluster: UnicodeString): Integer;
-begin
-  if Length(ACluster) = 0 then
-    Exit(0);
-  case GetEastAsianWidth(FirstCodePoint(ACluster)) of
-    eawW, eawF:
-      Result := 2;
-  else
-    Result := 1;
-  end;
-end;
-
-function StringWidth(const S: UnicodeString): Integer;
-var
-  E: TUnicodeStringExtendedGraphemeClustersEnumerator;
-begin
-  Result := 0;
-  E := TUnicodeStringExtendedGraphemeClustersEnumerator.Create(S);
-  try
-    while E.MoveNext do
-      Inc(Result, ClusterWidth(E.Current));
-  finally
-    E.Free;
-  end;
-end;
+  SysUtils;
 
 type
   TPromptCell = record
@@ -123,22 +76,19 @@ end;
 procedure AddCells(var ACells: TPromptCellArray; const S: UnicodeString;
   const AAttr: TAttr);
 var
-  E: TUnicodeStringExtendedGraphemeClustersEnumerator;
+  C: TClusterArray;
+  I: Integer;
   Cell: TPromptCell;
 begin
-  E := TUnicodeStringExtendedGraphemeClustersEnumerator.Create(S);
-  try
-    while E.MoveNext do
-    begin
-      Cell := Default(TPromptCell);
-      Cell.Ch := E.Current;
-      Cell.Attr := AAttr;
-      Cell.Width := ClusterWidth(E.Current);
-      SetLength(ACells, Length(ACells) + 1);
-      ACells[High(ACells)] := Cell;
-    end;
-  finally
-    E.Free;
+  C := Clusters(S);
+  for I := 0 to High(C) do
+  begin
+    Cell := Default(TPromptCell);
+    Cell.Ch := C[I];
+    Cell.Attr := AAttr;
+    Cell.Width := ClusterWidth(C[I]);
+    SetLength(ACells, Length(ACells) + 1);
+    ACells[High(ACells)] := Cell;
   end;
 end;
 
@@ -180,32 +130,12 @@ begin
   FHistoryDraft := '';
 end;
 
-function TPromptLine.ClusterStarts: TPromptIntArray;
-var
-  E: TUnicodeStringExtendedGraphemeClustersEnumerator;
-  Pos: Integer;
-begin
-  Result := nil;
-  Pos := 1;
-  E := TUnicodeStringExtendedGraphemeClustersEnumerator.Create(FText);
-  try
-    while E.MoveNext do
-    begin
-      SetLength(Result, Length(Result) + 1);
-      Result[High(Result)] := Pos;
-      Inc(Pos, Length(E.Current));
-    end;
-  finally
-    E.Free;
-  end;
-end;
-
 procedure TPromptLine.InsertText(const ACh: UnicodeString);
 var
-  Starts: TPromptIntArray;
+  Starts: TClusterOffsetArray;
   CodePos: Integer;
 begin
-  Starts := ClusterStarts;
+  Starts := ClusterStarts(FText);
   if FCursor < Length(Starts) then
     CodePos := Starts[FCursor]
   else
@@ -217,12 +147,12 @@ end;
 
 procedure TPromptLine.Backspace;
 var
-  Starts: TPromptIntArray;
+  Starts: TClusterOffsetArray;
   StartPos, EndPos: Integer;
 begin
   if FCursor <= 0 then
     Exit;
-  Starts := ClusterStarts;
+  Starts := ClusterStarts(FText);
   StartPos := Starts[FCursor - 1];
   if FCursor < Length(Starts) then
     EndPos := Starts[FCursor]
@@ -235,10 +165,10 @@ end;
 
 procedure TPromptLine.DeleteForward;
 var
-  Starts: TPromptIntArray;
+  Starts: TClusterOffsetArray;
   StartPos, EndPos: Integer;
 begin
-  Starts := ClusterStarts;
+  Starts := ClusterStarts(FText);
   if FCursor >= Length(Starts) then
     Exit;
   StartPos := Starts[FCursor];
@@ -258,7 +188,7 @@ end;
 
 procedure TPromptLine.MoveRight;
 begin
-  if FCursor < Length(ClusterStarts) then
+  if FCursor < Length(ClusterStarts(FText)) then
     Inc(FCursor);
 end;
 
@@ -282,7 +212,7 @@ begin
   else
     FText := UnicodeString(FHistory[NewPos]);
   FHistoryPos := NewPos;
-  FCursor := Length(ClusterStarts);
+  FCursor := Length(ClusterStarts(FText));
 end;
 
 procedure TPromptLine.Submit;
@@ -420,7 +350,7 @@ begin
       end;
     kkEnd:
       begin
-        FCursor := Length(ClusterStarts);
+        FCursor := Length(ClusterStarts(FText));
         Exit(True);
       end;
     kkUp:

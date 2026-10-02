@@ -12,8 +12,8 @@ unit hildegard.helper.tui.text;
 interface
 
 uses
-  hildegard.helper.tui.base, hildegard.helper.tui.widget,
-  hildegard.helper.tui.surface;
+  hildegard.helper.tui.base, hildegard.helper.tui.grapheme,
+  hildegard.helper.tui.widget, hildegard.helper.tui.surface;
 
 type
   TSpan = record
@@ -47,50 +47,15 @@ type
 
 implementation
 
-uses
-  graphemebreakproperty, eastasianwidth;
-
 type
   TStyledCluster = record
     Ch: UnicodeString;
     Attr: TAttr;
   end;
-  TClusterArray = array of TStyledCluster;
-  TLineArray = array of TClusterArray;
+  TStyledClusters = array of TStyledCluster;
+  TStyledLines = array of TStyledClusters;
 
-function FirstCodePoint(const ACluster: UnicodeString): UCS4Char;
-var
-  C1, C2: UCS4Char;
-begin
-  Result := 0;
-  if Length(ACluster) = 0 then
-    Exit;
-  C1 := UCS4Char(ACluster[1]);
-  if (C1 >= $D800) and (C1 <= $DBFF) and (Length(ACluster) >= 2) then
-  begin
-    C2 := UCS4Char(ACluster[2]);
-    if (C2 >= $DC00) and (C2 <= $DFFF) then
-      Result := $10000 + ((C1 - $D800) shl 10) or (C2 - $DC00)
-    else
-      Result := C1;
-  end
-  else
-    Result := C1;
-end;
-
-function ClusterWidth(const ACluster: UnicodeString): Integer;
-begin
-  if Length(ACluster) = 0 then
-    Exit(0);
-  case GetEastAsianWidth(FirstCodePoint(ACluster)) of
-    eawW, eawF:
-      Result := 2;
-  else
-    Result := 1;
-  end;
-end;
-
-function LineWidth(const ALine: TClusterArray): Integer;
+function LineWidth(const ALine: TStyledClusters): Integer;
 var
   I: Integer;
 begin
@@ -99,7 +64,7 @@ begin
     Inc(Result, ClusterWidth(ALine[I].Ch));
 end;
 
-function LongestWordWidth(const AClusters: TClusterArray): Integer;
+function LongestWordWidth(const AClusters: TStyledClusters): Integer;
 var
   I, W: Integer;
 begin
@@ -124,39 +89,35 @@ begin
     Result := W;
 end;
 
-function BuildClusters(const ASpans: array of TSpan): TClusterArray;
+function BuildClusters(const ASpans: array of TSpan): TStyledClusters;
 var
-  I, N: Integer;
-  E: TUnicodeStringExtendedGraphemeClustersEnumerator;
-  C: TStyledCluster;
+  I, J, N: Integer;
+  { The grapheme helper's plain cluster array (styled clusters are local). }
+  C: hildegard.helper.tui.grapheme.TClusterArray;
+  Sc: TStyledCluster;
 begin
   Result := nil;
   N := 0;
   for I := 0 to High(ASpans) do
   begin
-    E := TUnicodeStringExtendedGraphemeClustersEnumerator.Create(
-      ASpans[I].Text);
-    try
-      while E.MoveNext do
-      begin
-        C := Default(TStyledCluster);
-        C.Ch := E.Current;
-        C.Attr := ASpans[I].Attr;
-        SetLength(Result, N + 1);
-        Result[N] := C;
-        Inc(N);
-      end;
-    finally
-      E.Free;
+    C := hildegard.helper.tui.grapheme.Clusters(ASpans[I].Text);
+    for J := 0 to High(C) do
+    begin
+      Sc := Default(TStyledCluster);
+      Sc.Ch := C[J];
+      Sc.Attr := ASpans[I].Attr;
+      SetLength(Result, N + 1);
+      Result[N] := Sc;
+      Inc(N);
     end;
   end;
 end;
 
-function WrapClusters(const AClusters: TClusterArray; AWidth: Integer;
-  AMode: TWrapMode): TLineArray;
+function WrapClusters(const AClusters: TStyledClusters; AWidth: Integer;
+  AMode: TWrapMode): TStyledLines;
 var
   I, J, K, N, W, CurW, BS: Integer;
-  Cur, Line, Rem: TClusterArray;
+  Cur, Line, Rem: TStyledClusters;
   Cluster: TStyledCluster;
 begin
   Result := nil;
@@ -263,8 +224,8 @@ end;
 
 function TTextBlock.Measure(const AAvail: TSize): TSize;
 var
-  Clusters: TClusterArray;
-  Lines: TLineArray;
+  Clusters: TStyledClusters;
+  Lines: TStyledLines;
   I, LW: Integer;
 begin
   Result := Default(TSize);
@@ -296,8 +257,8 @@ end;
 
 procedure TTextBlock.Render(const S: ISurface);
 var
-  Clusters: TClusterArray;
-  Lines: TLineArray;
+  Clusters: TStyledClusters;
+  Lines: TStyledLines;
   Row, I, X, LW, Offset, CW: Integer;
   Cell: TCell;
 begin
