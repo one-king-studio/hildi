@@ -27,7 +27,6 @@ type
     Model: string;                // '' => resolved from env/.env
     Endpoint: string;             // '' => resolved from env/.env
     SystemPrompt: string;         // '' => env HILDEGARD_SYSTEM_PROMPT, else default
-    MaxToolIterations: Integer;   // 0 => DefaultMaxToolIterations
     { Bytes a tool result may contribute to the prompt; 0 => default, negative
       => uncapped. }
     ToolResultCap: Integer;
@@ -282,9 +281,7 @@ begin
     AgentConfig.SystemPrompt := GetEnvironmentVariable('HILDEGARD_SYSTEM_PROMPT');
   if AgentConfig.SystemPrompt = '' then
     AgentConfig.SystemPrompt := DefaultSystemPrompt;
-  AgentConfig.MaxToolIterations := AConfig.MaxToolIterations;
-  if AgentConfig.MaxToolIterations <= 0 then
-    AgentConfig.MaxToolIterations := DefaultMaxToolIterations;
+  { The tool-call budget and context cap keep their agent defaults here. }
 
   FLoop := TAgentLoop.Create(FClient, FConversation, FTools, AgentConfig);
   Result := True;

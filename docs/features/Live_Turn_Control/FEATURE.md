@@ -172,6 +172,21 @@ Live thinking
       collapsed `Thought` block, matching what a resumed session shows.
 - [ ] The live block cannot be toggled; the settled `Thought` block can.
 
+Tool-call budget and context guard
+
+- [ ] A turn may make at most 50 tool calls; the soft limit is 30.
+- [ ] At 30, and every 5 calls after (35, 40, 45), the call is **intercepted**
+      (not executed) and the model is told the limit was reached and that it
+      may continue by resubmitting the tool request.
+- [ ] At 50 the model is **locked down**: the call is intercepted and it is
+      told no further calls are permitted and to answer with what it has.
+- [ ] If it makes one more call after the lockdown, the turn ends with a loop
+      error (`leLoop`).
+- [ ] The running context (the latest request's prompt tokens) is capped; a
+      turn whose context exceeds the cap ends with a loop error.
+- [ ] An intercepted call still gets a paired result in the ledger, so the
+      history stays valid.
+
 ### Non-Functional Requirements
 
 - [ ] Reliability: no leaks under the heaptrc gate; queue, cancel, and paste

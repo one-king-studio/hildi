@@ -129,6 +129,8 @@ type
     FRecorder: TRecordingStore;
     function BuildLoop(const APrompt: string; AMaxIters: Integer): TAgentLoop;
     function BuildLoopRecording: TRecordingStore;
+    function BuildLoopBudget(ASoft, AHard, AStep,
+      AMaxContext: Integer): TRecordingStore;
     function MessageCount(const ABody: string): Integer;
     function RoleAt(const ABody: string; AIndex: Integer): string;
     function ToolCallIdAt(const ABody: string; AIndex: Integer): string;
@@ -143,7 +145,10 @@ type
     procedure TestUnknownToolReturnsErrorResultAndContinues;
     procedure TestFailingHandlerReturnsErrorResultAndContinues;
     procedure TestRaisingHandlerIsCaughtAndReported;
-    procedure TestMaxToolIterationsAborts;
+    procedure TestToolCallLoopAbortsAtTheHardLimit;
+    procedure TestSoftLimitInterceptsTheCall;
+    procedure TestHardLimitLocksDownTheCall;
+    procedure TestContextLimitAborts;
     procedure TestLengthFinishReasonReported;
     procedure TestContentFilterFinishReasonReported;
     procedure TestConversationPersistsAcrossTurns;
@@ -452,8 +457,11 @@ begin
   FStore := TMemoryConversationStore.Create;
   FTools := TToolRegistry.Create;
   FFailTools := TFailTools.Create;
+  ACfg := Default(TAgentConfig);
   ACfg.SystemPrompt := APrompt;
-  ACfg.MaxToolIterations := AMaxIters;
+  { Give the budget headroom so most tests never hit an interception. }
+  ACfg.SoftToolLimit := AMaxIters;
+  ACfg.HardToolLimit := AMaxIters + 1;
   FLoop := TAgentLoop.Create(FClient, FStore, FTools, ACfg);
   Result := FLoop;
 end;
@@ -475,8 +483,35 @@ begin
   FTools := TToolRegistry.Create;
   RegisterDefaultTools(FTools);
   FFailTools := TFailTools.Create;
+  ACfg := Default(TAgentConfig);
   ACfg.SystemPrompt := '';
-  ACfg.MaxToolIterations := 8;
+  FLoop := TAgentLoop.Create(FClient, FStore, FTools, ACfg);
+  Result := FRecorder;
+end;
+
+function TAgentLoopTest.BuildLoopBudget(ASoft, AHard, AStep,
+  AMaxContext: Integer): TRecordingStore;
+var
+  Cfg: TLLMConfig;
+  ACfg: TAgentConfig;
+begin
+  Cfg.Endpoint := 'https://example.test/v1/chat/completions';
+  Cfg.Model := 'm';
+  Cfg.ApiKey := 'k';
+  Cfg.ConnectTimeoutMs := 1000;
+  Cfg.ReadTimeoutMs := 5000;
+  FFake := TFakeTransport.Create;
+  FClient := TLLMClient.Create(Cfg, FFake);
+  FRecorder := TRecordingStore.Create;
+  FStore := FRecorder;
+  FTools := TToolRegistry.Create;
+  RegisterDefaultTools(FTools);
+  FFailTools := TFailTools.Create;
+  ACfg := Default(TAgentConfig);
+  ACfg.SoftToolLimit := ASoft;
+  ACfg.HardToolLimit := AHard;
+  ACfg.ToolNoticeStep := AStep;
+  ACfg.MaxContextTokens := AMaxContext;
   FLoop := TAgentLoop.Create(FClient, FStore, FTools, ACfg);
   Result := FRecorder;
 end;
@@ -679,19 +714,71 @@ begin
   AssertTrue('exception reported', Pos('kaboom', FFake.LastBody) > 0);
 end;
 
-procedure TAgentLoopTest.TestMaxToolIterationsAborts;
+procedure TAgentLoopTest.TestToolCallLoopAbortsAtTheHardLimit;
 var
   Answer: string;
   Err: TLLMError;
 begin
+  { Soft 2, hard 3: the call is intercepted at 2 and 3, and the call after that
+    ends the turn as a loop error. }
   BuildLoop('', 2);
   RegisterDefaultTools(FTools);
   { A single response that always asks for a tool call; the fake repeats it. }
   FFake.AddResponse([ToolNameFrame(0, 'call_1', 'get_system_time'),
     ToolArgsFrame(0, '{"reason":"test"}'), FinishFrame('tool_calls'), DoneFrame]);
   AssertFalse('aborts', FLoop.Send('loop forever', nil, Answer, Err));
-  AssertEquals('provider error', Ord(leProvider), Ord(Err.Code));
-  AssertTrue('mentions limit', Pos('iteration limit', Err.Message) > 0);
+  AssertEquals('loop error', Ord(leLoop), Ord(Err.Code));
+  AssertTrue('mentions the loop', Pos('tool call loop', Err.Message) > 0);
+end;
+
+procedure TAgentLoopTest.TestSoftLimitInterceptsTheCall;
+var
+  Rec: TRecordingStore;
+  Answer: string;
+  Err: TLLMError;
+begin
+  { Soft 1, step 1: the very first call is intercepted and must be resubmitted. }
+  Rec := BuildLoopBudget(1, 100, 1, 0);
+  FFake.AddResponse([ToolNameFrame(0, 'call_1', 'get_system_time'),
+    ToolArgsFrame(0, '{"reason":"test"}'), FinishFrame('tool_calls'), DoneFrame]);
+  FFake.AddResponse([TextDelta('ok'), FinishFrame('stop'), DoneFrame]);
+  AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
+  AssertFalse('the call was not run', Rec.LastTool.ToolOk);
+  AssertTrue('a soft notice was returned',
+    Pos('tool call limit notice', Rec.LastTool.Content) > 0);
+end;
+
+procedure TAgentLoopTest.TestHardLimitLocksDownTheCall;
+var
+  Rec: TRecordingStore;
+  Answer: string;
+  Err: TLLMError;
+begin
+  { Soft 1, hard 2: round 1 nudges, round 2 locks down; then the model stops. }
+  Rec := BuildLoopBudget(1, 2, 5, 0);
+  FFake.AddResponse([ToolNameFrame(0, 'call_1', 'get_system_time'),
+    ToolArgsFrame(0, '{"reason":"test"}'), FinishFrame('tool_calls'), DoneFrame]);
+  FFake.AddResponse([ToolNameFrame(0, 'call_2', 'get_system_time'),
+    ToolArgsFrame(0, '{"reason":"test"}'), FinishFrame('tool_calls'), DoneFrame]);
+  FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
+  AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
+  AssertTrue('a lockdown notice was returned',
+    Pos('no further tool calls', Rec.LastTool.Content) > 0);
+end;
+
+procedure TAgentLoopTest.TestContextLimitAborts;
+var
+  Answer: string;
+  Err: TLLMError;
+begin
+  { The running context (prompt tokens) may not exceed the cap. }
+  BuildLoopBudget(100, 200, 5, 10);
+  FFake.AddResponse([TextDelta('hi'),
+    UsageFrame('{"prompt_tokens":50,"completion_tokens":1,"total_tokens":51}'),
+    FinishFrame('stop'), DoneFrame]);
+  AssertFalse('aborts', FLoop.Send('go', nil, Answer, Err));
+  AssertEquals('loop error', Ord(leLoop), Ord(Err.Code));
+  AssertTrue('mentions the context', Pos('context limit', Err.Message) > 0);
 end;
 
 procedure TAgentLoopTest.TestLengthFinishReasonReported;
@@ -771,8 +858,8 @@ begin
   CountStore := TCountingStore.Create;
   Store := CountStore;
   Tools := TToolRegistry.Create;
+  ACfg := Default(TAgentConfig);
   ACfg.SystemPrompt := '';
-  ACfg.MaxToolIterations := 8;
   Loop := TAgentLoop.Create(Client, Store, Tools, ACfg);
   try
     Fake.AddResponse([TextDelta('ok'), FinishFrame('stop'), DoneFrame]);

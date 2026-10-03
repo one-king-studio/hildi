@@ -109,7 +109,16 @@ type
 
   TAgentConfig = record
     SystemPrompt: string;
-    MaxToolIterations: Integer;
+    { Tool-call budget for one turn. From SoftToolLimit the model is nudged
+      every ToolNoticeStep calls (the call is intercepted and it must resubmit);
+      at HardToolLimit it is locked down; one call past that ends the turn as a
+      loop error. 0 fields take the defaults below. }
+    SoftToolLimit: Integer;
+    HardToolLimit: Integer;
+    ToolNoticeStep: Integer;
+    { Fail the turn once the running context (the latest request's prompt
+      tokens) exceeds this. 0 takes the default; negative disables. }
+    MaxContextTokens: Integer;
   end;
 
   TAgentLoop = class
@@ -122,6 +131,10 @@ type
     function BuildRequest: TChatRequest;
     procedure ExecuteToolCalls(const ACalls: TChatToolCallArray;
       const AEvents: TAgentEvents; out AAllOk: Boolean);
+    { Answer each call with a notice instead of running the tool, so the
+      assistant's tool_calls stay paired with results. }
+    procedure InterceptToolCalls(const ACalls: TChatToolCallArray;
+      const ANotice: string; const AEvents: TAgentEvents);
     function FinishError(const AResult: TChatResult): TLLMError;
     function DoSend(const AUserText: string; const AEvents: TAgentEvents;
       out AAnswer: string; out AError: TLLMError): Boolean;
@@ -144,7 +157,13 @@ function ExtractToolReason(const AArgumentsJson: string;
   out AReason: string; out AError: string): Boolean;
 
 const
-  DefaultMaxToolIterations = 8;
+  { Tool-call budget: nudge from 30, lock down at 50, and end the turn on the
+    next call after that. }
+  DefaultSoftToolLimit = 30;
+  DefaultHardToolLimit = 50;
+  DefaultToolNoticeStep = 5;
+  { The running context (latest prompt tokens) may not exceed this. }
+  DefaultMaxContextTokens = 120000;
   BuiltinGetSystemTimeName = 'get_system_time';
   ToolReasonParamName = 'reason';
   { The reason becomes a block title, so keep it a short label; the schema
@@ -447,8 +466,14 @@ begin
   FStore := AStore;
   FTools := ATools;
   FConfig := AConfig;
-  if FConfig.MaxToolIterations <= 0 then
-    FConfig.MaxToolIterations := DefaultMaxToolIterations;
+  if FConfig.SoftToolLimit <= 0 then
+    FConfig.SoftToolLimit := DefaultSoftToolLimit;
+  if FConfig.HardToolLimit <= 0 then
+    FConfig.HardToolLimit := DefaultHardToolLimit;
+  if FConfig.ToolNoticeStep <= 0 then
+    FConfig.ToolNoticeStep := DefaultToolNoticeStep;
+  if FConfig.MaxContextTokens = 0 then
+    FConfig.MaxContextTokens := DefaultMaxContextTokens;
 end;
 
 function TAgentLoop.BuildRequest: TChatRequest;
@@ -519,6 +544,53 @@ begin
   end;
 end;
 
+function ToolSoftNotice(ARound, AHard: Integer): string;
+begin
+  Result := Format('tool call limit notice: %d tool calls have been made this ' +
+    'turn (hard limit %d). You may continue, but reconsider whether the call ' +
+    'is still needed; if it is, resubmit the tool request now.',
+    [ARound, AHard]);
+end;
+
+function ToolHardNotice(ARound: Integer): string;
+begin
+  Result := Format('tool call limit reached (%d): no further tool calls are ' +
+    'permitted. Answer the user with what you have; another tool call will ' +
+    'end the turn with an error.', [ARound]);
+end;
+
+function ToolLoopNotice: string;
+begin
+  Result := 'tool call loop: the turn ended because the model kept calling ' +
+    'tools past the hard limit.';
+end;
+
+procedure TAgentLoop.InterceptToolCalls(const ACalls: TChatToolCallArray;
+  const ANotice: string; const AEvents: TAgentEvents);
+var
+  I: Integer;
+  Reason, ReasonError: string;
+  Msg: TChatMessage;
+begin
+  for I := 0 to High(ACalls) do
+  begin
+    Reason := '';
+    ExtractToolReason(ACalls[I].Arguments, Reason, ReasonError);
+    if Assigned(AEvents.OnToolCall) then
+      AEvents.OnToolCall(ACalls[I].Id, ACalls[I].Name, ACalls[I].Arguments,
+        Reason);
+    if Assigned(AEvents.OnToolResult) then
+      AEvents.OnToolResult(ACalls[I].Id, ACalls[I].Name, ANotice, False);
+    Msg := Default(TChatMessage);
+    Msg.Role := crTool;
+    Msg.ToolCallId := ACalls[I].Id;
+    Msg.Content := ANotice;
+    Msg.ToolName := ACalls[I].Name;
+    Msg.ToolOk := False;
+    FStore.Append(Msg);
+  end;
+end;
+
 function TAgentLoop.FinishError(const AResult: TChatResult): TLLMError;
 begin
   if AResult.FinishReason = frLength then
@@ -551,7 +623,7 @@ end;
 function TAgentLoop.DoSend(const AUserText: string; const AEvents: TAgentEvents;
   out AAnswer: string; out AError: TLLMError): Boolean;
 var
-  Iterations: Integer;
+  Rounds: Integer;
   Request: TChatRequest;
   ChatResult: TChatResult;
   UserMsg, SystemMsg: TChatMessage;
@@ -601,7 +673,7 @@ begin
   UserMsg.Content := AUserText;
   FStore.Append(UserMsg);
 
-  Iterations := 0;
+  Rounds := 0;
   while True do
   begin
     { A cancel between requests stops the loop; a tool batch is never broken
@@ -641,6 +713,17 @@ begin
     FStore.Append(ChatResult.Message);
     FStore.FinishRequest(RequestId, Outcome);
 
+    { Guard the running context: the next request would only be larger. }
+    if (FConfig.MaxContextTokens > 0) and
+      (ChatResult.Usage.PromptTokens > FConfig.MaxContextTokens) then
+    begin
+      FailTurn(leLoop, 'context limit reached',
+        Format('%d prompt tokens (limit %d)',
+        [ChatResult.Usage.PromptTokens, FConfig.MaxContextTokens]),
+        ChatResult.RawFinishReason);
+      Exit(False);
+    end;
+
     if ChatResult.FinishReason = frStop then
     begin
       AAnswer := ChatResult.Message.Content;
@@ -653,14 +736,30 @@ begin
 
     if ChatResult.FinishReason = frToolCalls then
     begin
-      Inc(Iterations);
-      if Iterations > FConfig.MaxToolIterations then
+      Inc(Rounds);
+      { One call past the hard limit: the model was already told to stop, so it
+        is now a loop error. }
+      if Rounds > FConfig.HardToolLimit then
       begin
-        FailTurn(leProvider, 'tool iteration limit reached',
-          IntToStr(FConfig.MaxToolIterations), ChatResult.RawFinishReason);
+        InterceptToolCalls(ChatResult.Message.ToolCalls, ToolLoopNotice,
+          AEvents);
+        FailTurn(leLoop, 'tool call loop',
+          Format('%d tool calls (hard limit %d)',
+          [Rounds, FConfig.HardToolLimit]), ChatResult.RawFinishReason);
         Exit(False);
       end;
-      ExecuteToolCalls(ChatResult.Message.ToolCalls, AEvents, AllOk);
+      { Lockdown at the hard limit, then a nudge every ToolNoticeStep calls from
+        the soft limit. An intercepted call is not run; the model must resubmit
+        it to proceed. }
+      if Rounds = FConfig.HardToolLimit then
+        InterceptToolCalls(ChatResult.Message.ToolCalls,
+          ToolHardNotice(Rounds), AEvents)
+      else if (Rounds >= FConfig.SoftToolLimit) and
+        ((Rounds - FConfig.SoftToolLimit) mod FConfig.ToolNoticeStep = 0) then
+        InterceptToolCalls(ChatResult.Message.ToolCalls,
+          ToolSoftNotice(Rounds, FConfig.HardToolLimit), AEvents)
+      else
+        ExecuteToolCalls(ChatResult.Message.ToolCalls, AEvents, AllOk);
       Continue;
     end;
 

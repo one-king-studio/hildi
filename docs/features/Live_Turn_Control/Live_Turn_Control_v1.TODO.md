@@ -65,6 +65,17 @@ independent; phase 3 builds on it; phases 4-5 touch the loop and land last.
       settles to a collapsed `Thought` when the next event arrives.
 - [x] Tests: schema cap, title truncation, live tail, tail helper, app settle.
 
+## Phase 7 - Tool-call budget and context guard - done
+
+- [x] `hildegard.helper.llm`: `leLoop` error code.
+- [x] `hildegard.helper.agent`: `SoftToolLimit`/`HardToolLimit`/
+      `ToolNoticeStep`/`MaxContextTokens` replace `MaxToolIterations`; the loop
+      intercepts calls from the soft limit, locks down at the hard limit, fails
+      one past it, and guards the running context.
+- [x] `hildegard.helper.harness.session` / `examples/agent_cli.pas`: drop the
+      old `MaxToolIterations` plumbing (defaults apply).
+- [x] Tests: soft intercept, hard lockdown, loop abort, context abort.
+
 ## Testing
 
 Each phase adds its `tests/test_*.pas` to `tests/hildegard_helper_tests.pas`

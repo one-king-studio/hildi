@@ -75,7 +75,10 @@ type
 
   TLLMErrorCode = (
     leOk, leConfig, leNetwork, leHttpStatus, leAuth, leRateLimit,
-    leMalformedStream, leProvider, leCancelled
+    leMalformedStream, leProvider, leCancelled,
+    { The agent loop stopped itself: a tool-call loop or an over-large context.
+      Appended last so stored ordinals are unchanged. }
+    leLoop
   );
 
   TLLMError = record

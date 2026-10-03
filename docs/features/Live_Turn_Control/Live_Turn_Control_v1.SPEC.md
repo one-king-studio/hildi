@@ -120,6 +120,32 @@ type
 const
   { Advertised as maxLength on every tool's reason property. }
   ToolReasonMaxLength = 120;
+  DefaultSoftToolLimit = 30;
+  DefaultHardToolLimit = 50;
+  DefaultToolNoticeStep = 5;
+  DefaultMaxContextTokens = 120000;
+
+type
+  TAgentConfig = record
+    ...
+    SoftToolLimit: Integer;     // nudge from here
+    HardToolLimit: Integer;     // lockdown at this many
+    ToolNoticeStep: Integer;    // nudge every this many after the soft limit
+    MaxContextTokens: Integer;  // latest prompt tokens; negative disables
+  end;
+```
+
+The loop counts tool-call rounds. At the soft limit and every `ToolNoticeStep`
+calls after it, and at the hard limit, it intercepts the round: it does not run
+the tools, answers each call with a paired notice result, and re-queries. One
+round past the hard limit fails the turn with `leLoop`. The running context (the
+latest request's prompt tokens) is checked each round.
+
+### LLM (`hildegard.helper.llm`)
+
+```pascal
+type
+  TLLMErrorCode = (..., leProvider, leCancelled, leLoop);
 ```
 
 ### Approval (`hildegard.helper.approval`)
