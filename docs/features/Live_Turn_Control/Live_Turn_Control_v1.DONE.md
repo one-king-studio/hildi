@@ -96,3 +96,12 @@ had no arm for `ikPaste`, so a decoded paste was dropped before it reached the
 widget tree. `ikPaste` now routes like a key (to the modal plane while one is
 up, else the base). Covered by `TestPasteIsDispatched` (app) and
 `TestPasteInsertsIntoTheCompose` (harness).
+
+## Follow-up: Cmd+Enter submit (2026-10-03)
+
+macOS terminals do not forward Cmd by default, so `TModifier` gained `moSuper`
+(kitty super bit 8; `CSI 13;9u`) and the compose submits on Cmd+Enter. It only
+fires when the terminal is configured to send that sequence (a VSCode
+`terminal.sendSequence` keybinding); Shift+Enter and Ctrl+Enter stay as
+fallbacks. The compose CTA advertises `⌘+enter send`. The toolbar hints default
+is blanked, but the hints component is unchanged and can be given text later.

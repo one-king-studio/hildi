@@ -2,9 +2,9 @@ unit hildegard.helper.tui.compose;
 { The chat input box: a raised, heavy-topped panel wrapping a TTextEdit, so the
   caret, wrapping, word motion and selection come from the editor.
 
-  Shift+Enter submits (Ctrl+Enter too, where the terminal cannot report a
-  shifted Enter); a plain Enter adds a line, so a multi-line paste is safe. The
-  info line carries a primary-action CTA at the right, opposite the label. }
+  Cmd+Enter or Shift+Enter submits (Ctrl+Enter too, where the terminal reports
+  neither); a plain Enter adds a line, so a multi-line paste is safe. The info
+  line carries a primary-action CTA at the right, opposite the label. }
 
 {$mode delphi}{$H+}{$codepage utf8}
 
@@ -176,7 +176,7 @@ begin
   begin
     if FCta = ckSend then
     begin
-      Key := 'shift+enter';
+      Key := '⌘+enter';
       Act := ' send';
     end
     else
@@ -201,11 +201,12 @@ begin
     Exit(FEdit.HandleEvent(E));
   if E.Kind <> ikKey then
     Exit;
-  { Shift+Enter submits; Ctrl+Enter is the fallback where the terminal cannot
-    report a shifted Enter. A plain Enter adds a line. }
+  { Cmd+Enter (moSuper) or Shift+Enter submits, with Ctrl+Enter as the fallback
+    where the terminal reports neither. A plain Enter adds a line. }
   if E.Key.Kind = kkEnter then
   begin
-    if (moShift in E.Key.Mods) or (moCtrl in E.Key.Mods) then
+    if (moSuper in E.Key.Mods) or (moShift in E.Key.Mods) or
+      (moCtrl in E.Key.Mods) then
     begin
       if Assigned(FOnSubmit) and (Trim(string(FEdit.Text)) <> '') then
       begin

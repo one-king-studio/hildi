@@ -131,7 +131,9 @@ implementation
 const
   { The interaction hints live in the CTA strip, which acts as a context
     toolbar; the status bar is reserved for the workspace and the metrics. }
-  CtaHints = '↵ send   ⇧+↵ newline   click a block to expand';
+  { The toolbar hints are blank for now; the compose CTA carries the primary
+    action. }
+  CtaHints = '';
   { How long the first Escape stays armed before the interrupt prompt expires. }
   InterruptWindowMs = 2000;
 

@@ -59,7 +59,10 @@ Compact content
 
 Compose
 
-- [ ] Shift+Enter or Ctrl+Enter submits; Enter inserts a newline.
+- [ ] Cmd+Enter, Shift+Enter, or Ctrl+Enter submits; Enter inserts a newline.
+      Cmd needs a terminal keybinding sending the kitty super+Enter sequence
+      (`CSI 13;9u`); `TModifier` gains `moSuper` and the decoder maps kitty's
+      super bit (8).
 - [ ] Bracketed paste is enabled for the run; a paste inserts literally and
       never submits.
 - [ ] The CTA at the bottom right reflects state (none / `shift+enter send` /

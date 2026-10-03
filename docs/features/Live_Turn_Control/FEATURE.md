@@ -145,9 +145,10 @@ Compact content helper
 
 Compose: submit, paste, CTA
 
-- [ ] The compose box submits on **Shift+Enter**, with **Ctrl+Enter** as a
-      fallback for terminals that cannot report Shift+Enter; plain Enter inserts
-      a newline.
+- [ ] The compose box submits on **Cmd+Enter** (the advertised primary, on
+      macOS), **Shift+Enter**, or **Ctrl+Enter**; plain Enter inserts a newline.
+      Cmd is not forwarded by terminals by default - it needs a terminal
+      keybinding that sends the kitty super+Enter sequence (`CSI 13;9u`).
 - [ ] Bracketed paste mode is enabled while the TUI runs and disabled on exit,
       so a pasted multi-line block is inserted as text and never submits.
 - [ ] A pasted block is inserted literally (newlines preserved) at the caret.

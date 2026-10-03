@@ -28,6 +28,7 @@ type
     procedure TestNeededHeightGrowsWithWrappedText;
     procedure TestShiftEnterSubmitsAndClears;
     procedure TestCtrlEnterSubmits;
+    procedure TestCmdEnterSubmits;
     procedure TestEnterAddsALine;
     procedure TestEmptySubmitIsIgnored;
     procedure TestPasteInsertsLiterallyWithoutSubmit;
@@ -131,6 +132,23 @@ begin
   end;
 end;
 
+procedure TTuiComposeTest.TestCmdEnterSubmits;
+var
+  C: TComposeBox;
+begin
+  C := TComposeBox.Create(FTheme, 'info');
+  try
+    C.OnSubmit := OnSubmit;
+    C.Arrange(Rc(0, 0, 30, 5));
+    C.HandleEvent(Ch('a'));
+    AssertTrue('cmd+enter handled', C.HandleEvent(Key(kkEnter, [moSuper])));
+    AssertEquals('submitted once', 1, FSubmits);
+    AssertEquals('submitted the text', 'a', FSubmitted);
+  finally
+    C.Free;
+  end;
+end;
+
 procedure TTuiComposeTest.TestEnterAddsALine;
 var
   C: TComposeBox;
@@ -206,7 +224,7 @@ begin
       C.Cta := ckSend;
       C.Render(S);
       AssertTrue('send CTA shown',
-        Pos('shift+enter send', S.RowText(3, 0, 40)) > 0);
+        Pos('⌘+enter send', S.RowText(3, 0, 40)) > 0);
 
       C.Cta := ckCancel;
       C.Render(S);

@@ -78,7 +78,7 @@ type
     procedure TestRenderHistoryRestoresToolBlocks;
     procedure TestStatusShowsStatsAfterATurn;
     procedure TestResumeStatusMatchesLive;
-    procedure TestCtaHoldsTheHints;
+    procedure TestCtaHintsAreBlank;
     procedure TestThinkingStateDuringATurn;
     procedure TestReasoningSettlesIntoAThoughtBlock;
     procedure TestReadyStateAfterATurn;
@@ -610,12 +610,11 @@ begin
   AssertEquals('resumed stats identical to live', Live, FApp.StatsText);
 end;
 
-procedure THarnessAppTest.TestCtaHoldsTheHints;
+procedure THarnessAppTest.TestCtaHintsAreBlank;
 begin
   Build;
-  AssertTrue('send hint', Pos('send', FApp.HintsText) > 0);
-  AssertTrue('shift+enter hint', Pos('⇧+↵ newline', FApp.HintsText) > 0);
-  AssertTrue('expand hint', Pos('click a block to expand', FApp.HintsText) > 0);
+  { The toolbar hints are intentionally blank for now. }
+  AssertEquals('hints blanked', '', FApp.HintsText);
   AssertFalse('hints are not in the status bar',
     Pos('newline', FApp.StatusText) > 0);
 end;

@@ -14,7 +14,9 @@ uses
   hildegard.helper.tui.base;
 
 type
-  TModifier = (moShift, moCtrl, moAlt);
+  { moSuper is Cmd on macOS. Terminals rarely forward it; a terminal can be
+    configured to send the kitty super bit (see MapCSIu). }
+  TModifier = (moShift, moCtrl, moAlt, moSuper);
   TModifiers = set of TModifier;
 
   TKeyKind = (kkNone, kkChar, kkEnter, kkEscape, kkTab, kkBackspace, kkDelete,

@@ -39,6 +39,7 @@ type
     procedure TestDecodeConsumesOscReply;
     procedure TestParseOsc11Background;
     procedure TestDecodeShiftEnter;
+    procedure TestDecodeCmdEnter;
     procedure TestDecodeBracketedPaste;
     procedure TestDecodeBracketedPasteBuffersUntilComplete;
     procedure TestDecodeBracketedPasteByteByByte;
@@ -525,6 +526,29 @@ begin
     D.Feed(Data);
     AssertTrue('shift+enter is enter', D.Next(E) and (E.Key.Kind = kkEnter));
     AssertTrue('with the shift modifier', moShift in E.Key.Mods);
+  finally
+    D.Free;
+  end;
+end;
+
+procedure TTuiInputTest.TestDecodeCmdEnter;
+var
+  D: TKeyDecoder;
+  E: TInputEvent;
+  S: AnsiString;
+  I: Integer;
+  Data: array of Byte;
+begin
+  D := TKeyDecoder.Create;
+  try
+    { The kitty form with the super bit: mods 9 = 1 (shift) + 8 (super). }
+    S := #27'[13;9u';
+    SetLength(Data, Length(S));
+    for I := 1 to Length(S) do
+      Data[I - 1] := Ord(S[I]);
+    D.Feed(Data);
+    AssertTrue('cmd+enter is enter', D.Next(E) and (E.Key.Kind = kkEnter));
+    AssertTrue('with the super modifier', moSuper in E.Key.Mods);
   finally
     D.Free;
   end;

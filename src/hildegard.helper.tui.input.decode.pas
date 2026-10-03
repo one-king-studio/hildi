@@ -170,6 +170,8 @@ begin
     Include(Result, moAlt);
   if (M and 4) <> 0 then
     Include(Result, moCtrl);
+  if (M and 8) <> 0 then
+    Include(Result, moSuper);
 end;
 
 { The kitty event type: `mods:event` in the modifier field (1 press, 2 repeat,
@@ -374,6 +376,8 @@ begin
     Include(AEvent.Key.Mods, moAlt);
   if (Mods and 4) <> 0 then
     Include(AEvent.Key.Mods, moCtrl);
+  if (Mods and 8) <> 0 then
+    Include(AEvent.Key.Mods, moSuper);
 
   { Special keys ignore any alternate/text fields. }
   case Base of
