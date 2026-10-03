@@ -103,5 +103,6 @@ macOS terminals do not forward Cmd by default, so `TModifier` gained `moSuper`
 (kitty super bit 8; `CSI 13;9u`) and the compose submits on Cmd+Enter. It only
 fires when the terminal is configured to send that sequence (a VSCode
 `terminal.sendSequence` keybinding); Shift+Enter and Ctrl+Enter stay as
-fallbacks. The compose CTA advertises `⌘+enter send`. The toolbar hints default
+fallbacks. The compose CTA advertises the platform's key: `⌘+enter send` on
+macOS, `ctrl+enter send` elsewhere (`SendCtaKey`). The toolbar hints default
 is blanked, but the hints component is unchanged and can be given text later.

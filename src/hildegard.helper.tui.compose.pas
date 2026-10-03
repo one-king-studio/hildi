@@ -17,6 +17,15 @@ uses
   hildegard.helper.tui.text, hildegard.helper.tui.edit,
   hildegard.helper.tui.grapheme, hildegard.helper.tui.theme;
 
+const
+  { The advertised submit key. Cmd is macOS-only (and even there it needs a
+    terminal keybinding to be forwarded); elsewhere Ctrl is the reliable one. }
+{$IFDEF DARWIN}
+  SendCtaKey = '⌘+enter';
+{$ELSE}
+  SendCtaKey = 'ctrl+enter';
+{$ENDIF}
+
 type
   TComposeSubmittedEvent = procedure(const AText: string) of object;
 
@@ -176,7 +185,7 @@ begin
   begin
     if FCta = ckSend then
     begin
-      Key := '⌘+enter';
+      Key := SendCtaKey;
       Act := ' send';
     end
     else

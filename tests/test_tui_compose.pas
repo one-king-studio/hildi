@@ -224,7 +224,7 @@ begin
       C.Cta := ckSend;
       C.Render(S);
       AssertTrue('send CTA shown',
-        Pos('⌘+enter send', S.RowText(3, 0, 40)) > 0);
+        Pos(SendCtaKey + ' send', S.RowText(3, 0, 40)) > 0);
 
       C.Cta := ckCancel;
       C.Render(S);
