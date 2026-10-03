@@ -148,13 +148,83 @@ the transport, and how CA trust is provided.
 - CA bundle handling must work with the platform's standard trust store or a
   bundled CA file; the SPEC decides which and records why.
 
-### Non-Goals
+### Business / Time
 
-- No Remote Agent Link protocol work — this feature only makes the transport
+- No external deadline. The work is gated by Remote Agent Link's need for a
+  deployable transport, not by a date.
+
+## Dependencies
+
+### Internal
+
+- `hildegard.helper.llm` - the `TLLMTransport` seam and `TFPHTTPTransport`;
+  `opensslsockets` is referenced in this one unit, so the blast radius is one
+  file.
+- The SQLite vendoring pattern - `scripts/fetch-sqlite.sh` (pinned version,
+  SHA3-256 check) and the `libsqlite` / static-archive targets in the Makefile.
+- FPC's HTTP composition hook - `OnGetSocketHandler` / `GetSocketHandler`
+  (`fphttpclient.pp`) and `TSSLSocketHandler` (`sslbase.pp`); a vendored
+  backend plugs in as a socket handler rather than replacing the HTTP client.
+
+### External
+
+- The mbedTLS source (pinned version, vendored under `deps/`).
+- A Pascal binding to the mbedTLS C API. FPC ships `packages/gnutls` but no
+  mbedTLS binding, so a thin binding - or a small C shim compiled by the
+  Makefile, as SQLite is - is part of this work.
+- A CA bundle or the platform trust store for certificate verification.
+
+## Risks
+
+- **No Pascal binding for mbedTLS exists.** Mitigation: keep the binding behind
+  the socket-handler seam and compile a small C shim in the Makefile if a
+  direct binding proves fragile.
+- **`TFPHTTPClient` composition is not plug-and-play.** Mitigation: use the
+  existing `OnGetSocketHandler` hook with a custom `TSSLSocketHandler`; if that
+  proves impractical, fall back to a minimal HTTP client behind the same
+  `TLLMTransport` seam.
+- **CA trust differs by platform.** Mitigation: the SPEC decides platform store
+  vs bundled CA; `leConfig` reports a missing or unreadable bundle as a
+  distinct, actionable error.
+- **License and notice obligations differ from SQLite.** SQLite is public
+  domain; mbedTLS is Apache-2.0. Mitigation: record the license and any NOTICE
+  alongside the vendored source under `deps/`.
+- **Binary size and build time grow.** Mitigation: record the before/after
+  release size in the DONE notes; the Makefile already compiles C for SQLite.
+- **The leak gate runs with a C library in the process.** Mitigation: free all
+  mbedTLS contexts in one place and keep them off every error path.
+
+## Out of Scope
+
+- Remote Agent Link protocol work — this feature only makes the transport
   foundation deployable; the link consumes it later.
-- No server-side TLS, no certificate issuance, no certificate pinning in v1
-  (pinning belongs to the Remote Agent Link spec if the threat model wants
-  it).
-- No Windows targets.
-- No replacement of `TFPHTTPClient` itself unless the vendored stack makes it
+- Server-side TLS, certificate issuance, and certificate pinning in v1
+  (pinning belongs to the Remote Agent Link spec if the threat model wants it).
+- Windows targets.
+- Replacing `TFPHTTPClient` itself unless the vendored stack makes it
   impossible; the SPEC decides transport composition and records why.
+- Reopening the library choice: mbedTLS is committed (see Decision).
+
+## Future Considerations
+
+- Client certificates / mTLS for Remote Agent Link.
+- Certificate pinning.
+- TLS session resumption for long-lived links.
+- A second backend (for example the FPC `gnutls` package) behind the same seam,
+  should mbedTLS prove unsuitable.
+- Automating the version bump (pin + checksum + rebuild) in the fetch script.
+
+## Notes
+
+- **ICE score: Impact 9, Confidence 6, Ease 4.** Impact is high: it is the
+  difference between a binary that works on a clean device and one that does
+  not, and every network feature inherits it. Confidence is moderate because
+  the mbedTLS/Pascal binding and `TFPHTTPClient` composition are unproven.
+  Ease is low: vendoring, a C-API binding, a socket handler, and CA handling
+  are all new.
+- **Decision recorded above (Committed):** dynamic OpenSSL via `opensslsockets`
+  is the rejected alternative, revisitable only if mbedTLS proves unworkable
+  with `TFPHTTPClient`.
+- **Reuse note (Ponytail):** the `TLLMTransport` seam and the SQLite vendoring
+  pattern exist; the new pieces are the vendored source, the binding, the
+  socket handler, and the CA configuration.
