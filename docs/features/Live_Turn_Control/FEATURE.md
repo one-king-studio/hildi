@@ -155,6 +155,23 @@ Compose: submit, paste, CTA
       in-flight with text shows `shift+enter send`.
 - [ ] The CTA updates as the operator types and as the turn starts and ends.
 
+Reason length
+
+- [ ] Every tool schema advertises a `maxLength` on its `reason` parameter
+      (`ToolReasonMaxLength`), so a reason stays a short label.
+- [ ] A tool/thought block title is truncated with an ellipsis when it does not
+      fit the block's width (a narrow terminal), so the rule and the collapse
+      mark stay visible.
+
+Live thinking
+
+- [ ] While reasoning streams, the block is titled `Thinking...` and shows the
+      tail of the reasoning: the last up to six lines, prefixed with a `...`
+      line when there is more above.
+- [ ] When the reasoning finishes and is persisted, the block settles into a
+      collapsed `Thought` block, matching what a resumed session shows.
+- [ ] The live block cannot be toggled; the settled `Thought` block can.
+
 ### Non-Functional Requirements
 
 - [ ] Reliability: no leaks under the heaptrc gate; queue, cancel, and paste

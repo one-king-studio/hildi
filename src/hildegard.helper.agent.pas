@@ -147,6 +147,9 @@ const
   DefaultMaxToolIterations = 8;
   BuiltinGetSystemTimeName = 'get_system_time';
   ToolReasonParamName = 'reason';
+  { The reason becomes a block title, so keep it a short label; the schema
+    advertises this cap and the dialog truncates further on a narrow terminal. }
+  ToolReasonMaxLength = 120;
   DefaultSystemPrompt =
     'You are a helpful assistant running inside hildegard-helper. ' +
     'Use the provided tools when they help answer the user.';
@@ -297,7 +300,11 @@ begin
       ReasonProp := TJSONObject.Create;
       ReasonProp.Add('type', 'string');
       Props.Add(ToolReasonParamName, ReasonProp);
-    end;
+    end
+    else
+      ReasonProp := TJSONObject(Existing);
+    ReasonProp.Delete('maxLength');
+    ReasonProp.Add('maxLength', ToolReasonMaxLength);
 
     Existing := Root.Find('required');
     if Existing is TJSONArray then

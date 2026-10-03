@@ -64,6 +64,11 @@
 Use the following character sequence: `∙ • ● ◉ ❂ ✴ ✵ ✶ ✷ ✸ ✹ ✺ ❋` for a burst
 of sparkles in a bright color.
 
+While the model reasons, a live block titled `Thinking...` shows the tail of the
+reasoning: the last up to six lines, prefixed with a `...` line when there is
+more above. It is not clickable. When the reasoning is done and persisted, it
+settles into a collapsed `Thought` block that expands like any other.
+
 ## Modals
 
 ```

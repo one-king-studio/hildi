@@ -63,6 +63,8 @@ type
     procedure SetState(AKind: TPanelState; const ALabel: string);
     { The compose's primary-action hint, from the run state and the box. }
     procedure UpdateCta;
+    { Settle the streaming thinking block into a persisted "Thought" block. }
+    procedure FinalizeThinking;
     procedure UpdateStats;
     procedure HandleEscape(Sender: TObject);
     function ComposeIsEmpty: Boolean;
@@ -420,8 +422,23 @@ begin
   FWorker.Start;
 end;
 
+procedure THarnessApp.FinalizeThinking;
+begin
+  if (FThought = nil) or (not FThought.Live) then
+    Exit;
+  { The reasoning has finished streaming; it is about to be persisted, so it
+    becomes a normal, collapsed "Thought" block. }
+  FThought.Live := False;
+  FThought.Label_ := 'Thought';
+  FThought.Expanded := False;
+  FThought := nil;
+end;
+
 procedure THarnessApp.HandleTurnEvent(const E: TTurnEvent);
 begin
+  { Anything that is not more reasoning means the reasoning stream has ended. }
+  if E.Kind <> teReasoningDelta then
+    FinalizeThinking;
   case E.Kind of
     teAssistantDelta:
       begin
@@ -432,7 +449,10 @@ begin
     teReasoningDelta:
       begin
         if FThought = nil then
-          FThought := FPanel.Stream.Add(ckThought, 'Thought', '');
+        begin
+          FThought := FPanel.Stream.Add(ckThought, 'Thinking...', '');
+          FThought.Live := True;
+        end;
         FThought.AppendText(E.Text);
       end;
     teToolCall:

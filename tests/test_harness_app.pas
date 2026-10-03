@@ -80,6 +80,7 @@ type
     procedure TestResumeStatusMatchesLive;
     procedure TestCtaHoldsTheHints;
     procedure TestThinkingStateDuringATurn;
+    procedure TestReasoningSettlesIntoAThoughtBlock;
     procedure TestReadyStateAfterATurn;
     procedure TestErrorStateAfterAFailedTurn;
     procedure TestEscapeArmsThenCancels;
@@ -311,6 +312,29 @@ begin
     not FindText(ckThinking, 'Thinking'));
   AssertTrue('prompt re-enabled', FApp.PromptActive);
   AssertFalse('not busy', FApp.Busy);
+end;
+
+procedure THarnessAppTest.TestReasoningSettlesIntoAThoughtBlock;
+var
+  I: Integer;
+  SawThought: Boolean;
+begin
+  Build;
+  FFake.AddChunk(ReasoningDelta('let me think'));
+  FFake.AddChunk(TextDelta('answer'));
+  FFake.AddChunk(FinishFrame('stop'));
+  FFake.AddChunk(DoneFrame);
+  SubmitPrompt('hi');
+  AssertTrue('turn finished', Pump(300));
+
+  { While it streamed it read as "Thinking..."; once persisted it is a
+    "Thought" block. }
+  SawThought := False;
+  for I := 0 to BlockCount - 1 do
+    if (BlockKind(I) = ckThought) and (BlockText(I) = 'let me think') and
+      (BlockLabel(I) = 'Thought') then
+      SawThought := True;
+  AssertTrue('reasoning settled into a Thought block', SawThought);
 end;
 
 procedure THarnessAppTest.TestToolLineAppears;

@@ -53,6 +53,18 @@ independent; phase 3 builds on it; phases 4-5 touch the loop and land last.
 - [ ] `hildegard.helper.harness.app`: Shift+Enter enqueues when busy.
 - [ ] Tests: drain, drop tool call, multi-prompt, next turn.
 
+## Phase 6 - Reason length and live thinking (trial follow-up) - done
+
+- [x] `hildegard.helper.agent`: `ToolReasonMaxLength`; `AugmentReasonParam`
+      advertises `maxLength` on the reason property.
+- [x] `hildegard.helper.tui.chat`: truncate a block title to the block width
+      with an ellipsis; add a live block mode that shows `TailLines(FBody, 6)`
+      and cannot be toggled.
+- [x] `hildegard.helper.tui.compact`: `TailLines`.
+- [x] `hildegard.helper.harness.app`: reasoning streams as `Thinking...` (live),
+      settles to a collapsed `Thought` when the next event arrives.
+- [x] Tests: schema cap, title truncation, live tail, tail helper, app settle.
+
 ## Testing
 
 Each phase adds its `tests/test_*.pas` to `tests/hildegard_helper_tests.pas`

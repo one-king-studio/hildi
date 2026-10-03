@@ -24,6 +24,9 @@ type
     procedure TestPreservesInteriorBlanks;
     procedure TestEmptyText;
     procedure TestCustomOptions;
+    procedure TestTailKeepsTheEnd;
+    procedure TestTailShortTextUnchanged;
+    procedure TestTailTrimsBlankEdges;
   end;
 
 implementation
@@ -107,6 +110,25 @@ begin
   Opts.TailLines := 1;
   AssertEquals('custom elision', Lines(['1', '...', '5']),
     CompactLines(Lines(['1', '2', '3', '4', '5']), Opts));
+end;
+
+procedure TCompactTest.TestTailKeepsTheEnd;
+begin
+  AssertEquals('last two lines behind an ellipsis',
+    Lines(['...', '4', '5']),
+    TailLines(Lines(['1', '2', '3', '4', '5']), 2));
+end;
+
+procedure TCompactTest.TestTailShortTextUnchanged;
+begin
+  AssertEquals('short text unchanged', Lines(['1', '2']),
+    TailLines(Lines(['1', '2']), 6));
+end;
+
+procedure TCompactTest.TestTailTrimsBlankEdges;
+begin
+  AssertEquals('blank edges trimmed', Lines(['a', 'b']),
+    TailLines(Lines(['', 'a', 'b', '']), 6));
 end;
 
 initialization

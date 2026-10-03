@@ -999,6 +999,8 @@ begin
       AssertTrue('has reason property', ReasonProp <> nil);
       AssertEquals('reason is string', 'string',
         ReasonProp.Get('type', ''));
+      AssertEquals('reason is capped', ToolReasonMaxLength,
+        ReasonProp.Get('maxLength', 0));
       Required := TJSONArray(Root.Find('required'));
       HasReason := False;
       for I := 0 to Required.Count - 1 do

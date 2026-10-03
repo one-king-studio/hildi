@@ -65,6 +65,15 @@ Compose
 - [ ] The CTA at the bottom right reflects state (none / `shift+enter send` /
       `esc cancel`) with the key muted and the action in the accent.
 
+Reason length and live thinking (trial follow-up)
+
+- [ ] Every tool schema advertises `maxLength` on the `reason` property.
+- [ ] A block title is truncated with an ellipsis when it does not fit, keeping
+      the rule and the collapse mark.
+- [ ] Streaming reasoning shows a live `Thinking...` block with the last six
+      lines (prefixed with `...` when longer); it settles to a collapsed
+      `Thought` block when the reasoning is done.
+
 ### Non-Functional
 
 - [ ] Leak-clean; `make check` green.
@@ -88,6 +97,29 @@ function DefaultCompactOptions: TCompactOptions;
   HeadLines, a '...' line, then TailLines. Otherwise return the trimmed text. }
 function CompactLines(const AText: UnicodeString;
   const AOptions: TCompactOptions): UnicodeString;
+
+{ Trim blank edges, then keep the last AMaxLines; a '...' line is prepended
+  when there is more above. }
+function TailLines(const AText: UnicodeString; AMaxLines: Integer): UnicodeString;
+```
+
+### Chat (`hildegard.helper.tui.chat`)
+
+```pascal
+type
+  TChatItem = class(TWidget)
+    { A live block shows TailLines(FBody, 6) and cannot be toggled; it settles
+      into a normal block when the stream ends. }
+    property Live: Boolean read FLive write SetLive;
+  end;
+```
+
+### Agent (`hildegard.helper.agent`)
+
+```pascal
+const
+  { Advertised as maxLength on every tool's reason property. }
+  ToolReasonMaxLength = 120;
 ```
 
 ### Approval (`hildegard.helper.approval`)

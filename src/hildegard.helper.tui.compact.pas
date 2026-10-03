@@ -1,7 +1,7 @@
 unit hildegard.helper.tui.compact;
-{ Compact long text for display: trim blank lines from the edges, then, when
-  more than MaxLines remain, keep the first HeadLines and the last TailLines
-  around a single '...' line. Pure; no widgets, no terminal. }
+{ Compact long text for display: trim blank lines from the edges, then elide.
+  CompactLines keeps the head and the tail around a '...' line; TailLines keeps
+  only the tail (for a live, growing stream). Pure; no widgets, no terminal. }
 
 {$mode delphi}{$H+}{$codepage utf8}
 
@@ -17,6 +17,8 @@ type
     TailLines: Integer;   // kept from the bottom when eliding (default 3)
   end;
 
+  TUnicodeLines = array of UnicodeString;
+
 function DefaultCompactOptions: TCompactOptions;
 
 { Trim leading and trailing blank lines (whitespace-only counts as blank).
@@ -24,6 +26,10 @@ function DefaultCompactOptions: TCompactOptions;
   Interior blank lines are preserved. }
 function CompactLines(const AText: UnicodeString;
   const AOptions: TCompactOptions): UnicodeString;
+
+{ Trim blank edges, then keep the last AMaxLines. When the text has more lines
+  than the window, a '...' line is prepended to signal what is above. }
+function TailLines(const AText: UnicodeString; AMaxLines: Integer): UnicodeString;
 
 implementation
 
@@ -45,47 +51,20 @@ begin
   Result := True;
 end;
 
-function CompactLines(const AText: UnicodeString;
-  const AOptions: TCompactOptions): UnicodeString;
+{ Split on LF, tolerating CRLF. }
+function SplitLines(const AText: UnicodeString): TUnicodeLines;
 var
-  Lines: array of UnicodeString;
-  I, First, Last, Count: Integer;
+  I: Integer;
   Buf: UnicodeString;
 
   procedure AddLine(const S: UnicodeString);
   begin
-    SetLength(Lines, Length(Lines) + 1);
-    Lines[High(Lines)] := S;
-  end;
-
-  function Joined(AFrom, ATo: Integer): UnicodeString;
-  var
-    J: Integer;
-  begin
-    Result := '';
-    for J := AFrom to ATo do
-    begin
-      if J > AFrom then
-        Result := Result + #10;
-      Result := Result + Lines[J];
-    end;
-  end;
-
-  function Elided: UnicodeString;
-  var
-    Head, Tail: UnicodeString;
-  begin
-    Head := '';
-    Tail := '';
-    if AOptions.HeadLines > 0 then
-      Head := Joined(First, First + AOptions.HeadLines - 1) + #10;
-    if AOptions.TailLines > 0 then
-      Tail := #10 + Joined(Last - AOptions.TailLines + 1, Last);
-    Result := Head + '...' + Tail;
+    SetLength(Result, Length(Result) + 1);
+    Result[High(Result)] := S;
   end;
 
 begin
-  { Split on LF, tolerating CRLF. }
+  Result := nil;
   Buf := '';
   for I := 1 to Length(AText) do
     if AText[I] = #10 then
@@ -96,22 +75,77 @@ begin
     else if AText[I] <> #13 then
       Buf := Buf + AText[I];
   AddLine(Buf);
+end;
 
-  { Trim blank edges. }
+{ Trim blank lines from both ends in place. False when nothing is left. }
+function TrimBlankEdges(var ALines: TUnicodeLines): Boolean;
+var
+  First, Last, I: Integer;
+  Kept: TUnicodeLines;
+begin
   First := 0;
-  Last := High(Lines);
-  while (First <= Last) and IsBlank(Lines[First]) do
+  Last := High(ALines);
+  while (First <= Last) and IsBlank(ALines[First]) do
     Inc(First);
-  while (Last >= First) and IsBlank(Lines[Last]) do
+  while (Last >= First) and IsBlank(ALines[Last]) do
     Dec(Last);
   if First > Last then
+    Exit(False);
+  SetLength(Kept, Last - First + 1);
+  for I := First to Last do
+    Kept[I - First] := ALines[I];
+  ALines := Kept;
+  Result := True;
+end;
+
+function Joined(const ALines: TUnicodeLines; AFrom, ATo: Integer): UnicodeString;
+var
+  J: Integer;
+begin
+  Result := '';
+  for J := AFrom to ATo do
+  begin
+    if J > AFrom then
+      Result := Result + #10;
+    Result := Result + ALines[J];
+  end;
+end;
+
+function CompactLines(const AText: UnicodeString;
+  const AOptions: TCompactOptions): UnicodeString;
+var
+  Lines: TUnicodeLines;
+  Head, Tail: UnicodeString;
+begin
+  Lines := SplitLines(AText);
+  if not TrimBlankEdges(Lines) then
     Exit('');
+  if Length(Lines) <= AOptions.MaxLines then
+    Exit(Joined(Lines, 0, High(Lines)));
 
-  Count := Last - First + 1;
-  if Count <= AOptions.MaxLines then
-    Exit(Joined(First, Last));
+  Head := '';
+  Tail := '';
+  if AOptions.HeadLines > 0 then
+    Head := Joined(Lines, 0, AOptions.HeadLines - 1) + #10;
+  if AOptions.TailLines > 0 then
+    Tail := #10 + Joined(Lines, Length(Lines) - AOptions.TailLines,
+      High(Lines));
+  Result := Head + '...' + Tail;
+end;
 
-  Result := Elided;
+function TailLines(const AText: UnicodeString; AMaxLines: Integer): UnicodeString;
+var
+  Lines: TUnicodeLines;
+begin
+  Lines := SplitLines(AText);
+  if not TrimBlankEdges(Lines) then
+    Exit('');
+  if AMaxLines < 1 then
+    AMaxLines := 1;
+  if Length(Lines) <= AMaxLines then
+    Exit(Joined(Lines, 0, High(Lines)));
+  Result := '...' + #10 + Joined(Lines, Length(Lines) - AMaxLines,
+    High(Lines));
 end;
 
 end.

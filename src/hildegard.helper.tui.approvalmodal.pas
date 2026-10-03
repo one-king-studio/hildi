@@ -84,9 +84,6 @@ uses
   SysUtils,
   hildegard.helper.tui.grapheme, hildegard.helper.tui.compact;
 
-type
-  TUnicodeLines = array of UnicodeString;
-
 const
   { Rows after the last option: a blank, the scope line, the separator, the
     footer, and the heavy bottom border. }

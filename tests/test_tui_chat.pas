@@ -34,6 +34,8 @@ type
     procedure TestAssistantRendersPlainText;
     procedure TestCollapsedThoughtDrawsADimmedRule;
     procedure TestCollapsedToolDrawsAThinFullContrastRule;
+    procedure TestLongToolTitleIsTruncated;
+    procedure TestLiveThoughtShowsTheTail;
     procedure TestExpandedThoughtDrawsABox;
     procedure TestThinkingIndicatorRenders;
     procedure TestThinkingAnimates;
@@ -234,18 +236,97 @@ var
   It: TChatItem;
   S: TSurfaceMemory;
 begin
-  S := TSurfaceMemory.Create(30, 1);
+  S := TSurfaceMemory.Create(60, 1);
   try
     It := TChatItem.Create(ckTool, 'looking for the build file', 'body', FTheme);
     try
       It.Expanded := False;
-      It.Arrange(Rc(0, 0, 30, 1));
+      It.Arrange(Rc(0, 0, 60, 1));
       It.Render(S);
       AssertEquals('thin rule at column 1', '─', S.CellAt(1, 0).Ch);
       AssertTrue('reason shown as the title',
-        Pos('looking for the build file', S.RowText(0, 0, 30)) > 0);
+        Pos('looking for the build file', S.RowText(0, 0, 60)) > 0);
       AssertTrue('full contrast, not dimmed',
         not (sfDim in S.CellAt(1, 0).Attr.Style));
+    finally
+      It.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestLongToolTitleIsTruncated;
+var
+  It: TChatItem;
+  S: TSurfaceMemory;
+  R: UnicodeString;
+begin
+  S := TSurfaceMemory.Create(30, 1);
+  try
+    It := TChatItem.Create(ckTool,
+      'a reason that is far too long to fit in this narrow block', 'body',
+      FTheme);
+    try
+      It.Arrange(Rc(0, 0, 30, 1));
+      It.Render(S);
+      R := S.RowText(0, 0, 30);
+      AssertTrue('title ends with an ellipsis', Pos('…', R) > 0);
+      { The rule and the mark still fit: the title cannot push them off. }
+      AssertTrue('the collapse mark survives', Pos('▼', R) > 0);
+    finally
+      It.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestLiveThoughtShowsTheTail;
+const
+  Tokens: array[0..9] of string =
+    ('aa', 'bb', 'cc', 'dd', 'ee', 'ff', 'gg', 'hh', 'ii', 'jj');
+var
+  It: TChatItem;
+  S: TSurfaceMemory;
+  I, H: Integer;
+  Body: string;
+  Full: UnicodeString;
+  Sz: TSize;
+begin
+  Body := '';
+  for I := 0 to 9 do
+  begin
+    if I > 0 then
+      Body := Body + #10;
+    Body := Body + Tokens[I];
+  end;
+  S := TSurfaceMemory.Create(40, 12);
+  try
+    It := TChatItem.Create(ckThought, 'Thinking...', Body, FTheme);
+    try
+      It.Live := True;
+      Sz := Default(TSize);
+      Sz.W := 40;
+      H := It.Measure(Sz).H;
+      It.Arrange(Rc(0, 0, 40, H));
+      It.Render(S);
+      Full := '';
+      for I := 0 to H - 1 do
+        Full := Full + S.RowText(I, 0, 40) + UnicodeString(#10);
+      AssertTrue('live title', Pos('Thinking...', Full) > 0);
+      AssertTrue('a leading ellipsis line', Pos('...', Full) > 0);
+      AssertTrue('the tail is shown', Pos('jj', Full) > 0);
+      AssertFalse('the head is dropped', Pos('aa', Full) > 0);
+
+      { On completion the app renames it and collapses it. }
+      It.Live := False;
+      It.Label_ := 'Thought';
+      It.Expanded := False;
+      It.Arrange(Rc(0, 0, 40, 1));
+      It.Render(S);
+      AssertTrue('settled into a Thought rule',
+        Pos('Thought', S.RowText(0, 0, 40)) > 0);
     finally
       It.Free;
     end;

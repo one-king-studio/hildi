@@ -17,7 +17,8 @@ uses
   Classes, SysUtils,
   hildegard.helper.tui.base, hildegard.helper.tui.input,
   hildegard.helper.tui.surface, hildegard.helper.tui.widget,
-  hildegard.helper.tui.text, hildegard.helper.tui.scroll,
+  hildegard.helper.tui.text, hildegard.helper.tui.grapheme,
+  hildegard.helper.tui.compact, hildegard.helper.tui.scroll,
   hildegard.helper.tui.theme;
 
 type
@@ -37,17 +38,21 @@ type
     FOnToggle: TNotifyEvent;
     FOnChange: TNotifyEvent;
     FSpark: Integer;
+    FLive: Boolean;
     FHeightValid: Boolean;
     FHeightWidth: Integer;
     FHeight: Integer;
     FMeasureCount: Integer;
     function Inset: Integer;
     function BodyAttr: TAttr;
+    function EffectiveExpanded: Boolean;
+    function DisplayBody: string;
     procedure Rebuild;
     procedure BodyRows(AWidth: Integer; out ATextRows, ALines: Integer);
     function Boxed: Boolean;
     procedure InvalidateHeight;
     procedure SetExpanded(AValue: Boolean);
+    procedure SetLive(AValue: Boolean);
   public
     constructor Create(AKind: TChatKind; const ALabel, AText: string;
       const ATheme: TTheme);
@@ -67,6 +72,9 @@ type
     { Collapsed or expanded; changing it invalidates the height and fires
       OnChange. }
     property Expanded: Boolean read FExpanded write SetExpanded;
+    { A live block (streaming reasoning) shows the tail of its body and cannot
+      be toggled; it becomes a normal block when the stream finishes. }
+    property Live: Boolean read FLive write SetLive;
     property OnToggle: TNotifyEvent read FOnToggle write FOnToggle;
     property OnChange: TNotifyEvent read FOnChange write FOnChange;
     { Diagnostic: how many times this block's body text has been laid out. A
@@ -179,6 +187,12 @@ implementation
 const
   { A collapsed thought or tool block shows this many body rows. }
   CollapsedLines = 3;
+  { A live (streaming) block shows this many tail lines, plus a '...' when the
+    body is longer. }
+  LiveTailLines = 6;
+  { Columns reserved at the right of a block title for the rule, the mark, and
+    the border. }
+  TitleChrome = 10;
   { Blank rows kept below the last block, so it does not sit flush against the
     compose overlay. }
   ContentBottomPad = 2;
@@ -252,12 +266,49 @@ begin
   end;
 end;
 
+{ Truncate a title to AMaxW columns, ending with an ellipsis. Cluster-aware. }
+function TruncateTitle(const AText: UnicodeString; AMaxW: Integer): UnicodeString;
+var
+  C: TClusterArray;
+  I, W, CW: Integer;
+begin
+  if AMaxW <= 0 then
+    Exit('');
+  if StringWidth(AText) <= AMaxW then
+    Exit(AText);
+  Result := '';
+  W := 0;
+  C := Clusters(AText);
+  for I := 0 to High(C) do
+  begin
+    CW := ClusterWidth(C[I]);
+    if W + CW > AMaxW - 1 then
+      Break;
+    Result := Result + C[I];
+    Inc(W, CW);
+  end;
+  Result := Result + '…';
+end;
+
+function TChatItem.EffectiveExpanded: Boolean;
+begin
+  Result := FExpanded or FLive;
+end;
+
+function TChatItem.DisplayBody: string;
+begin
+  if FLive then
+    Result := string(TailLines(UnicodeString(FBody), LiveTailLines))
+  else
+    Result := FBody;
+end;
+
 procedure TChatItem.Rebuild;
 var
   One: TSpan;
 begin
   One := Default(TSpan);
-  One.Text := UnicodeString(FBody);
+  One.Text := UnicodeString(DisplayBody);
   One.Attr := BodyAttr;
   FText.SetSpans([One]);
 end;
@@ -273,6 +324,17 @@ begin
     Exit;
   FExpanded := AValue;
   InvalidateHeight;
+  if Assigned(FOnChange) then
+    FOnChange(Self);
+end;
+
+procedure TChatItem.SetLive(AValue: Boolean);
+begin
+  if AValue = FLive then
+    Exit;
+  FLive := AValue;
+  InvalidateHeight;
+  Rebuild;
   if Assigned(FOnChange) then
     FOnChange(Self);
 end;
@@ -316,7 +378,7 @@ end;
 
 function TChatItem.Inset: Integer;
 begin
-  if (FKind = ckUser) or ((FKind in [ckThought, ckTool]) and FExpanded) then
+  if (FKind = ckUser) or ((FKind in [ckThought, ckTool]) and EffectiveExpanded) then
     Result := 4
   else if (FKind = ckAssistant) or (FKind = ckError) then
     Result := 1
@@ -326,7 +388,8 @@ end;
 
 function TChatItem.Boxed: Boolean;
 begin
-  Result := (FKind = ckUser) or ((FKind in [ckThought, ckTool]) and FExpanded);
+  Result := (FKind = ckUser) or
+    ((FKind in [ckThought, ckTool]) and EffectiveExpanded);
 end;
 
 procedure TChatItem.BodyRows(AWidth: Integer; out ATextRows, ALines: Integer);
@@ -338,7 +401,7 @@ begin
     InnerW := 1;
   FText.WrapWidth := InnerW;
   ALines := FText.Measure(Default(TSize)).H;
-  if (not FExpanded) and (ALines > CollapsedLines) then
+  if (not EffectiveExpanded) and (ALines > CollapsedLines) then
     ATextRows := CollapsedLines
   else
     ATextRows := ALines;
@@ -373,7 +436,7 @@ begin
     ckThinking:
       Result.H := 1;
     ckThought, ckTool:
-      if FExpanded then
+      if EffectiveExpanded then
       begin
         BodyRows(AAvail.W, TextRows, Lines);
         Result.H := TextRows + 2;   { top border, body, bottom border }
@@ -410,11 +473,11 @@ end;
 
 procedure TChatItem.Render(const S: ISurface);
 var
-  L, R, T, B, TextRows, Lines, X, I: Integer;
+  L, R, T, B, TextRows, Lines, X, I, TitleMaxW: Integer;
   InnerW: Integer;
   Border, SurfaceAttr: TAttr;
   Clip: TRect;
-  Title: UnicodeString;
+  Title, DispLabel: UnicodeString;
   RuleCh, MarkCh: UnicodeString;
 begin
   if (FBounds.W < 1) or (FBounds.H < 1) then
@@ -442,7 +505,14 @@ begin
   B := FBounds.Y + FBounds.H - 1;
   BodyRows(FBounds.W, TextRows, Lines);
 
-  if (not FExpanded) and (FKind in [ckThought, ckTool]) then
+  { Keep the title inside the block: a long reason is truncated with an
+    ellipsis rather than pushing the rule and mark off the edge. }
+  TitleMaxW := FBounds.W - TitleChrome;
+  if TitleMaxW < 1 then
+    TitleMaxW := 1;
+  DispLabel := TruncateTitle(UnicodeString(FLabel), TitleMaxW);
+
+  if (not EffectiveExpanded) and (FKind in [ckThought, ckTool]) then
   begin
     { Both collapse to a thin rule; a tool's is full contrast, so the reasons
       read as a story of the agent's decisions. }
@@ -459,8 +529,8 @@ begin
     block's right edge (a space remains before the scrollbar column). }
   if RuleCh <> '' then
   begin
-    Title := ' ' + RuleCh + ' ' + UnicodeString(FLabel) + ' ';
-    I := FBounds.W - Length(Title) - 5;
+    Title := ' ' + RuleCh + ' ' + DispLabel + ' ';
+    I := FBounds.W - StringWidth(Title) - 5;
     if I < 1 then
       I := 1;
     if FKind = ckTool then
@@ -515,8 +585,8 @@ begin
     InnerW := FBounds.W - 4;
     if InnerW < 1 then
       InnerW := 1;
-    Title := '┌─ ' + UnicodeString(FLabel) + ' ';
-    I := FBounds.W - Length(Title) - 5;
+    Title := '┌─ ' + DispLabel + ' ';
+    I := FBounds.W - StringWidth(Title) - 5;
     if I < 1 then
       I := 1;
     PutText(S, L, T, Title + Rep('─', I) + ' ▲ ─┐', Border);
@@ -541,6 +611,8 @@ begin
   Result := False;
   if not (FKind in [ckThought, ckTool]) then
     Exit;
+  if FLive then
+    Exit;   { a live block is not toggleable; it settles when the stream ends }
   if (E.Kind = ikMouse) and (E.Mouse.Button = mbLeft) and
     (E.Mouse.X >= FBounds.X) and (E.Mouse.Y >= FBounds.Y) and
     (E.Mouse.X < FBounds.X + FBounds.W) and (E.Mouse.Y < FBounds.Y + FBounds.H)
