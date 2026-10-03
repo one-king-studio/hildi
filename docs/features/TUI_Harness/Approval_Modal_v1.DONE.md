@@ -70,3 +70,20 @@ Deviations from the specification, and why:
 - **The screen background dims by swapping `sfScreenBg` for an explicit dimmed
   index.** Without that, only the text dimmed and a modal read as if it were
   behind the panel.
+
+### Follow-on
+
+The operator asked for a wider default, padding, a softer selection colour,
+mouse support, and for picking to be separate from accepting:
+
+- **`MinWidth = 55`** so a short ask still reads as a dialog, and
+  **`RightPad = 2`** keeps every right-aligned key clear of the border.
+- **`TTheme.AccentSoft`** was added (dark `74`, light `31`) and is used for the
+  selected option, the hovered option, and the active scope value; the bright
+  `Accent` was overwhelming.
+- **Digits now select** (`FSelected := N-1`) instead of accepting, matching
+  "the accept or deny actions must be the only exit".
+- **Mouse support**: motion over an option (or a footer action) sets `FHover`
+  and brightens it; a click on an option selects it; a click on the footer's
+  accept or deny acts. Hover and click both use `HitTest`, which shares the
+  geometry helpers with `Render` so the hit regions cannot drift.

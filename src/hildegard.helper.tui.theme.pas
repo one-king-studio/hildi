@@ -26,6 +26,7 @@ type
     Text: TAttr;      // primary text
     Muted: TAttr;     // secondary text
     Accent: TAttr;    // focus / selection
+    AccentSoft: TAttr; // a quieter accent, for large areas of selection
     Warn: TAttr;      // tool / caution
     Error: TAttr;
     Success: TAttr;
@@ -81,6 +82,7 @@ begin
   Result.Text := MakeAttr(252);
   Result.Muted := MakeAttr(244, [sfDim]);
   Result.Accent := MakeAttr(81, [sfBold]);
+  Result.AccentSoft := MakeAttr(74);
   Result.Warn := MakeAttr(215);
   Result.Error := MakeAttr(203, [sfBold]);
   Result.Success := MakeAttr(114, [sfBold]);
@@ -98,6 +100,7 @@ begin
   Result.Text := MakeAttr(235);
   Result.Muted := MakeAttr(242, [sfDim]);
   Result.Accent := MakeAttr(25, [sfBold]);
+  Result.AccentSoft := MakeAttr(31);
   Result.Warn := MakeAttr(130);
   Result.Error := MakeAttr(160, [sfBold]);
   Result.Success := MakeAttr(28, [sfBold]);

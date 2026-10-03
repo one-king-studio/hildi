@@ -2,24 +2,29 @@ unit hildegard.helper.tui.approvalmodal;
 { The approval dialog: a modal box for one TApprovalAsk, drawn to the design in
   docs/design/chat_panel_tui.md.
 
-    ╭─ Approval needed ───────────────────────────────╮
-    │ <details, sunken background>                    │
-    │                                                 │
-    │ → allow once                                  1 │
-    │ ◦ always this exact command                   2 │
-    │ ◦ always command with any arguments           3 │
-    │                                                 │
-    │ scope: workspace                    tab / g w s │
-    ├─────────────────────────────────────────────────┤
-    │                        enter accept  esc deny   │
-    ╰═════════════════════════════════════════════════╯
+    ╭─ Approval needed ─────────────────────────────────────────────╮
+    │ rm -rf build/                                                 │
+    │                                                               │
+    │ → allow once                                                1 │
+    │ ◦ always this exact command                                 2 │
+    │ ◦ always command with any arguments                         3 │
+    │                                                               │
+    │ scope: workspace                              tab / g w s     │
+    ├───────────────────────────────────────────────────────────────┤
+    │                             enter accept   esc deny           │
+    ╰═══════════════════════════════════════════════════════════════╯
 
   Three text roles only, from the theme: normal (labels and unselected values),
-  dimmed (bullets, the scope label, and every keybinding), and bright (the
-  selected option and the active scope value).
+  dimmed (bullets, the scope label, and every keybinding), and the soft accent
+  for the selected option and the active scope value.
 
-  Keys: arrows or digits pick, Enter accepts, Escape denies, Tab or g/w/s choose
-  the persistence scope (default workspace, as the CLI). }
+  Keys: arrows or digits pick an option, Enter accepts it, Escape denies, Tab or
+  g/w/s choose the persistence scope (default workspace, as the CLI). Picking is
+  never the same as accepting: only Enter/Escape - or a click on the footer's
+  accept/deny - leave the dialog.
+
+  Mouse: moving over an option brightens it, clicking one selects it, and
+  clicking the footer's accept or deny acts. }
 
 {$mode delphi}{$H+}{$codepage utf8}
 
@@ -43,6 +48,9 @@ type
     FAnswered: Boolean;
     FChoice: TApprovalChoice;
     FOnChoose: TApprovalChoiceEvent;
+    FHover: Integer;
+    function RightCol(const AText: UnicodeString): Integer;
+    function HitTest(AX, AY: Integer): Integer;
     procedure Choose(AIndex: Integer);
     procedure Deny;
     procedure CycleScope;
@@ -56,6 +64,8 @@ type
 
     property Ask: TApprovalAsk read FAsk;
     property Theme: TTheme read FTheme write FTheme;
+    { The option the arrow is on; accepting is a separate action. }
+    property Selected: Integer read FSelected;
     property Answered: Boolean read FAnswered;
     property Choice: TApprovalChoice read FChoice;
     property OnChoose: TApprovalChoiceEvent read FOnChoose write FOnChoose;
@@ -74,6 +84,15 @@ const
   { Rows after the last option: a blank, the scope line, the separator, the
     footer, and the heavy bottom border. }
   RowsAfterOptions = 5;
+  { The dialog is at least this wide, so a short ask still reads as a dialog. }
+  MinWidth = 55;
+  { Columns kept clear at the inner right edge, so right-aligned keys are not
+    tight against the border. }
+  RightPad = 2;
+  { What the pointer is over. }
+  HoverNone = -1;
+  HitAccept = -2;
+  HitDeny = -3;
 
 function ScopeName(AScope: TApprovalScope): string;
 begin
@@ -120,6 +139,37 @@ begin
   FSelected := 0;
   FScope := asWorkspace;
   FAnswered := False;
+  FHover := HoverNone;
+end;
+
+function TApprovalModal.RightCol(const AText: UnicodeString): Integer;
+begin
+  Result := FBounds.X + FBounds.W - 1 - 1 - RightPad - StringWidth(AText) + 1;
+end;
+
+function TApprovalModal.HitTest(AX, AY: Integer): Integer;
+var
+  N, L, R, T, B, X, FooterRow: Integer;
+begin
+  Result := HoverNone;
+  N := Length(FAsk.Options);
+  L := FBounds.X;
+  R := FBounds.X + FBounds.W - 1;
+  T := FBounds.Y;
+  B := FBounds.Y + FBounds.H - 1;
+  if (AX <= L + 1) or (AX >= R - 1) or (AY <= T) or (AY >= B) then
+    Exit;
+  if (AY >= T + RowOption0) and (AY < T + RowOption0 + N) then
+    Exit(AY - (T + RowOption0));
+  FooterRow := T + RowOption0 + N + 3;
+  if AY = FooterRow then
+  begin
+    X := RightCol(FooterKeys);
+    if (AX >= X) and (AX < X + 12) then
+      Exit(HitAccept);
+    if (AX >= X + 15) and (AX < X + 23) then
+      Exit(HitDeny);
+  end;
 end;
 
 function TApprovalModal.Measure(const AAvail: TSize): TSize;
@@ -146,7 +196,9 @@ begin
     W := OptW;
   if ScopeW > W then
     W := ScopeW;
-  Result.W := W + 4;   { two borders plus a space of padding each side }
+  Result.W := W + 4 + RightPad;   { borders plus padding each side }
+  if Result.W < MinWidth then
+    Result.W := MinWidth;
   if Result.W > AAvail.W then
     Result.W := AAvail.W;
   Result.H := RowOption0 + Length(FAsk.Options) + RowsAfterOptions;
@@ -157,7 +209,7 @@ end;
 procedure TApprovalModal.Render(const S: ISurface);
 var
   L, R, T, B, N, I, X, Y, InnerL, InnerR, Row: Integer;
-  Bg, BorderAttr, MutedAttr, BrightAttr, NormalAttr, DetailAttr: TAttr;
+  Bg, BorderAttr, MutedAttr, ActiveAttr, NormalAttr, DetailAttr: TAttr;
   Key: UnicodeString;
 
   procedure Text(ACol, ARow: Integer; const AText: UnicodeString;
@@ -166,9 +218,13 @@ var
     PutText(S, ACol, ARow, AText, AAttr);
   end;
 
-  function RightCol(const AText: UnicodeString): Integer;
+  procedure Action(ACol, ARow: Integer; const AText: UnicodeString;
+    AActive: Boolean);
   begin
-    Result := InnerR - StringWidth(AText) + 1;
+    if AActive then
+      Text(ACol, ARow, AText, ActiveAttr)
+    else
+      Text(ACol, ARow, AText, NormalAttr);
   end;
 
 begin
@@ -185,7 +241,7 @@ begin
   Bg := OnBg(FTheme.Text, FTheme.RaisedBg);
   BorderAttr := OnBg(FTheme.Border, FTheme.RaisedBg);
   MutedAttr := OnBg(FTheme.Muted, FTheme.RaisedBg);
-  BrightAttr := OnBg(FTheme.Accent, FTheme.RaisedBg);
+  ActiveAttr := OnBg(FTheme.AccentSoft, FTheme.RaisedBg);
   NormalAttr := OnBg(FTheme.Text, FTheme.RaisedBg);
 
   S.FillRect(FBounds, Bg);
@@ -215,32 +271,34 @@ begin
     Text(InnerL + 1, T + RowDetails, UnicodeString(FAsk.Summary), DetailAttr);
   end;
 
-  { Options: a bullet, the caption, and the numeric key right-aligned. }
+  { Options: a bullet, the caption, and the numeric key right-aligned. The
+    selected option, and whichever the pointer is over, use the soft accent. }
   for I := 0 to N - 1 do
   begin
     Row := T + RowOption0 + I;
     if Row >= B then
       Break;
     Key := UnicodeString(IntToStr(I + 1));
-    if I = FSelected then
-    begin
-      Text(InnerL + 1, Row, '→ ', MutedAttr);
-      Text(InnerL + 3, Row, UnicodeString(FAsk.Options[I].Caption), BrightAttr);
-    end
+    Text(InnerL + 1, Row, '◦ ', MutedAttr);
+    if (I = FSelected) or (I = FHover) then
+      Text(InnerL + 3, Row, UnicodeString(FAsk.Options[I].Caption), ActiveAttr)
     else
-    begin
-      Text(InnerL + 1, Row, '◦ ', MutedAttr);
       Text(InnerL + 3, Row, UnicodeString(FAsk.Options[I].Caption), NormalAttr);
-    end;
     Text(RightCol(Key), Row, Key, MutedAttr);
   end;
+  if (FSelected >= 0) and (FSelected < N) then
+  begin
+    Row := T + RowOption0 + FSelected;
+    if Row < B then
+      Text(InnerL + 1, Row, '→ ', MutedAttr);
+  end;
 
-  { Scope line: dimmed label, bright value, dimmed keys. }
+  { Scope line: dimmed label, soft-accent value, dimmed keys. }
   Row := T + RowOption0 + N + 1;
   if Row < B then
   begin
     Text(InnerL + 1, Row, 'scope: ', MutedAttr);
-    Text(InnerL + 8, Row, UnicodeString(ScopeName(FScope)), BrightAttr);
+    Text(InnerL + 8, Row, UnicodeString(ScopeName(FScope)), ActiveAttr);
     Text(RightCol(ScopeKeys), Row, ScopeKeys, MutedAttr);
   end;
 
@@ -254,20 +312,20 @@ begin
       PutCh(S, X, Row, '─', BorderAttr);
   end;
 
-  { Footer, right-aligned: keys dimmed, actions normal. }
+  { Footer, right-aligned: keys dimmed, actions normal, brighter on hover. }
   Row := T + RowOption0 + N + 3;
   if Row < B then
   begin
     X := RightCol(FooterKeys);
     Text(X, Row, 'enter', MutedAttr);
     Inc(X, StringWidth('enter'));
-    Text(X, Row, ' accept', NormalAttr);
+    Action(X, Row, ' accept', FHover = HitAccept);
     Inc(X, StringWidth(' accept'));
     Text(X, Row, '   ', NormalAttr);
     Inc(X, StringWidth('   '));
     Text(X, Row, 'esc', MutedAttr);
     Inc(X, StringWidth('esc'));
-    Text(X, Row, ' deny', NormalAttr);
+    Action(X, Row, ' deny', FHover = HitDeny);
   end;
 end;
 
@@ -306,10 +364,47 @@ end;
 
 function TApprovalModal.HandleEvent(const E: TInputEvent): Boolean;
 var
-  N: Integer;
+  N, Hit: Integer;
 begin
   if FAnswered then
     Exit(False);
+
+  if E.Kind = ikMouse then
+  begin
+    Hit := HitTest(E.Mouse.X, E.Mouse.Y);
+    if E.Mouse.Button = mbNone then
+    begin
+      { Motion (or a release): brighten whatever is under the pointer. }
+      if Hit = FHover then
+        Exit(False);
+      FHover := Hit;
+      Exit(True);
+    end;
+    if E.Mouse.Button = mbLeft then
+    begin
+      if Hit = HitAccept then
+      begin
+        if Length(FAsk.Options) = 0 then
+          Deny
+        else
+          Choose(FSelected);
+        Exit(True);
+      end;
+      if Hit = HitDeny then
+      begin
+        Deny;
+        Exit(True);
+      end;
+      if Hit >= 0 then
+      begin
+        { Selecting is not accepting; Enter (or the footer) is. }
+        FSelected := Hit;
+        Exit(True);
+      end;
+    end;
+    Exit(False);
+  end;
+
   if E.Kind <> ikKey then
     Exit(False);
   case E.Key.Kind of
@@ -363,7 +458,8 @@ begin
         N := StrToIntDef(string(E.Key.Ch), 0);
         if (N >= 1) and (N <= Length(FAsk.Options)) then
         begin
-          Choose(N - 1);
+          { A digit selects only; accepting stays a separate action. }
+          FSelected := N - 1;
           Exit(True);
         end;
         Exit(False);

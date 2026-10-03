@@ -27,8 +27,17 @@ shown the whole base screen - background included - is dimmed behind it.
       `tab / g w s` right-aligned and dimmed.
 - [ ] A separator rule divides the body from a footer holding
       `enter accept   esc deny`, with the keys dimmed and the actions normal.
-- [ ] Three text roles only: normal (labels/values), dimmed (keys/labels), bright
-      (active values), taken from the theme.
+- [ ] Three text roles only: normal (labels/values), dimmed (keys/labels), soft
+      accent (active values), taken from the theme.
+- [ ] The dialog is at least 55 columns wide, so a short ask still reads as a
+      dialog.
+- [ ] Right-aligned keys keep two columns clear of the right border.
+- [ ] The selected option and the active scope value use the theme's
+      `AccentSoft`, not the bright `Accent`.
+- [ ] A digit selects an option; it does not accept. Only Enter/Escape - or a
+      click on the footer's accept/deny - leave the dialog.
+- [ ] Mouse: moving over an option brightens its text, clicking one selects it,
+      and clicking the footer's accept or deny acts.
 
 ### Non-Functional
 
@@ -58,6 +67,9 @@ type
 { Map a 256-colour palette index to a darker one. }
 function DimPaletteIndex(AIndex: Byte): Byte;
 ```
+
+`TTheme` gains `AccentSoft: TAttr`, a quieter accent for large areas of
+selection (the selected option, the active scope value).
 
 `ISurface.DimRect(R)` then, for every cell in R:
 
@@ -115,12 +127,21 @@ function DimPaletteIndex(AIndex: Byte): Byte;
 - [ ] `TestDimRectDimsTheScreenBackground` - a `sfScreenBg` cell loses the flag
       and gains a darker `Bg`.
 - [ ] `TestModalTitlesAndBorders` - the title, rounded corners, heavy bottom.
-- [ ] `TestModalMarksTheSelectedChoice` - `→` on the selected, `◦` on others.
-- [ ] `TestModalKeybindingsAreRightAlignedAndDim` - the numeric keys sit at the
-      right edge in the muted attribute.
-- [ ] `TestModalShowsTheScopeAndFooter` - `scope: workspace` (value bright) and
+- [ ] `TestModalDefaultWidthIsWide` - a short ask measures 55 columns.
+- [ ] `TestModalMarksTheSelectedChoice` - `→` on the selected, `◦` on others,
+      and the soft accent on the selected caption.
+- [ ] `TestModalKeybindingsAreRightAlignedAndDim` - the numeric and scope keys
+      sit clear of the border in the muted attribute.
+- [ ] `TestModalShowsTheScopeAndFooter` - `scope: workspace` and
       `enter accept   esc deny`.
 - [ ] `TestModalDetailsUseTheSunkenBackground`.
+- [ ] `TestModalActionsKeepClearOfTheBorder` - two columns of right padding.
+- [ ] `TestNumberSelectsWithoutAccepting` - a digit moves the selection and
+      Enter then accepts.
+- [ ] `TestModalMouseHoverBrightens` - motion over an option switches its
+      caption to the soft accent.
+- [ ] `TestModalClickSelectsWithoutAccepting` - a click selects only.
+- [ ] `TestModalFooterClickAcceptsAndDenies` - the footer's accept/deny act.
 
 ### Integration Tests
 

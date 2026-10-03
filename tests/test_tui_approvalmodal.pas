@@ -28,18 +28,24 @@ type
     function Key(AKind: TKeyKind): TInputEvent;
     function Ch(const AText: string): TInputEvent;
     function Rc(AW, AH: Integer): TRect;
+    function Mouse(AX, AY: Integer; AButton: TMouseButton): TInputEvent;
   protected
     procedure SetUp; override;
     procedure TearDown; override;
   published
     procedure TestRendersSummaryAndOptions;
     procedure TestModalTitlesAndBorders;
+    procedure TestModalDefaultWidthIsWide;
+    procedure TestModalMouseHoverBrightens;
+    procedure TestModalClickSelectsWithoutAccepting;
+    procedure TestModalFooterClickAcceptsAndDenies;
+    procedure TestModalActionsKeepClearOfTheBorder;
     procedure TestModalMarksTheSelectedChoice;
     procedure TestModalKeybindingsAreRightAlignedAndDim;
     procedure TestModalShowsTheScopeAndFooter;
     procedure TestModalDetailsUseTheSunkenBackground;
     procedure TestArrowAndEnterChooses;
-    procedure TestNumberChooses;
+    procedure TestNumberSelectsWithoutAccepting;
     procedure TestEscapeDenies;
     procedure TestScopeKeyIsUsed;
     procedure TestTabCyclesScope;
@@ -106,6 +112,16 @@ begin
   Result.H := AH;
 end;
 
+function TApprovalModalTest.Mouse(AX, AY: Integer;
+  AButton: TMouseButton): TInputEvent;
+begin
+  Result := Default(TInputEvent);
+  Result.Kind := ikMouse;
+  Result.Mouse.X := AX;
+  Result.Mouse.Y := AY;
+  Result.Mouse.Button := AButton;
+end;
+
 procedure TApprovalModalTest.TestRendersSummaryAndOptions;
 var
   Modal: TApprovalModal;
@@ -136,8 +152,8 @@ begin
   try
     Modal.Arrange(Rc(40, 10));
     Modal.Render(Surface);
-    AssertEquals('title in the top border',
-      True, Pos('Approval needed', Surface.RowText(0, 0, 40)) > 0);
+    AssertTrue('title in the top border',
+      Pos('Approval needed', Surface.RowText(0, 0, 40)) > 0);
     AssertTrue('rounded top-left (U+256D)',
       Ord(Surface.CellAt(0, 0).Ch[1]) = $256D);
     AssertTrue('heavy bottom edge (U+2550)',
@@ -148,6 +164,113 @@ begin
   end;
 end;
 
+procedure TApprovalModalTest.TestModalDefaultWidthIsWide;
+var
+  Modal: TApprovalModal;
+  Sz: TSize;
+begin
+  Modal := TApprovalModal.Create(MakeAsk(1));
+  try
+    Sz := Default(TSize);
+    Sz.W := 200;
+    Sz.H := 40;
+    AssertEquals('a short ask still gets a 55-column dialog', 55,
+      Modal.Measure(Sz).W);
+  finally
+    Modal.Free;
+  end;
+end;
+
+procedure TApprovalModalTest.TestModalMouseHoverBrightens;
+var
+  Modal: TApprovalModal;
+  Surface: TSurfaceMemory;
+begin
+  Modal := TApprovalModal.Create(MakeAsk(2));
+  Surface := TSurfaceMemory.Create(40, 10);
+  try
+    Modal.Arrange(Rc(40, 10));
+    Modal.Render(Surface);
+    AssertEquals('unselected is normal', DarkTheme.Text.Fg,
+      Surface.CellAt(4, 4).Attr.Fg);
+
+    AssertTrue('hover handled', Modal.HandleEvent(Mouse(5, 4, mbNone)));
+    Modal.Render(Surface);
+    AssertEquals('hovered option brightens', DarkTheme.AccentSoft.Fg,
+      Surface.CellAt(4, 4).Attr.Fg);
+  finally
+    Modal.Free;
+    Surface.Free;
+  end;
+end;
+
+procedure TApprovalModalTest.TestModalClickSelectsWithoutAccepting;
+var
+  Modal: TApprovalModal;
+begin
+  Modal := TApprovalModal.Create(MakeAsk(3));
+  try
+    Modal.Arrange(Rc(40, 12));
+    Modal.OnChoose := FRecorder.OnChoose;
+    { Row 4 is the second option. }
+    AssertTrue('click handled', Modal.HandleEvent(Mouse(6, 4, mbLeft)));
+    AssertEquals('clicked option selected', 1, Modal.Selected);
+    AssertEquals('clicking does not accept', 0, FRecorder.Count);
+    AssertFalse('not answered', Modal.Answered);
+  finally
+    Modal.Free;
+  end;
+end;
+
+procedure TApprovalModalTest.TestModalFooterClickAcceptsAndDenies;
+var
+  Modal: TApprovalModal;
+begin
+  Modal := TApprovalModal.Create(MakeAsk(2));
+  try
+    Modal.Arrange(Rc(40, 10));
+    Modal.OnChoose := FRecorder.OnChoose;
+    { The footer is row 8: accept spans columns 14..25, deny 29..36. }
+    AssertTrue('accept click', Modal.HandleEvent(Mouse(18, 8, mbLeft)));
+    AssertEquals('accepted', 1, FRecorder.Count);
+    AssertTrue('allowed', FRecorder.Last.Allowed);
+  finally
+    Modal.Free;
+  end;
+
+  FRecorder.Count := 0;
+  Modal := TApprovalModal.Create(MakeAsk(2));
+  try
+    Modal.Arrange(Rc(40, 10));
+    Modal.OnChoose := FRecorder.OnChoose;
+    AssertTrue('deny click', Modal.HandleEvent(Mouse(32, 8, mbLeft)));
+    AssertEquals('denied', 1, FRecorder.Count);
+    AssertFalse('denied', FRecorder.Last.Allowed);
+  finally
+    Modal.Free;
+  end;
+end;
+
+procedure TApprovalModalTest.TestModalActionsKeepClearOfTheBorder;
+var
+  Modal: TApprovalModal;
+  Surface: TSurfaceMemory;
+begin
+  Modal := TApprovalModal.Create(MakeAsk(2));
+  Surface := TSurfaceMemory.Create(40, 10);
+  try
+    Modal.Arrange(Rc(40, 10));
+    Modal.Render(Surface);
+    { The footer ends two columns short of the border at column 39. }
+    AssertEquals('last action character', 'y',
+      string(Surface.CellAt(36, 8).Ch));
+    AssertEquals('one column clear', '', Surface.CellAt(37, 8).Ch);
+    AssertEquals('two columns clear', '', Surface.CellAt(38, 8).Ch);
+  finally
+    Modal.Free;
+    Surface.Free;
+  end;
+end;
 procedure TApprovalModalTest.TestModalMarksTheSelectedChoice;
 var
   Modal: TApprovalModal;
@@ -162,8 +285,8 @@ begin
       Pos('→ Option 1', Surface.RowText(3, 0, 40)) > 0);
     AssertTrue('unselected has a bullet',
       Pos('◦ Option 2', Surface.RowText(4, 0, 40)) > 0);
-    AssertTrue('selected text is bright',
-      sfBold in Surface.CellAt(4, 3).Attr.Style);
+    AssertEquals('selected text uses the soft accent', DarkTheme.AccentSoft.Fg,
+      Surface.CellAt(4, 3).Attr.Fg);
 
     Modal.HandleEvent(Key(kkDown));
     Modal.Render(Surface);
@@ -187,15 +310,15 @@ begin
   try
     Modal.Arrange(Rc(40, 10));
     Modal.Render(Surface);
-    { The box is 40 wide, so the inner right edge is column 38; the scope keys
-      ('tab / g w s', 11 columns) start at column 28. }
-    AssertEquals('option key at the right edge', '1',
-      string(Surface.CellAt(38, 3).Ch));
+    { The box is 40 wide and right-aligned keys keep two columns clear of the
+      border at 39, so the option key is at 36 and the scope keys start at 26. }
+    AssertEquals('option key right aligned', '1',
+      string(Surface.CellAt(36, 3).Ch));
     AssertTrue('option key is dim',
-      sfDim in Surface.CellAt(38, 3).Attr.Style);
+      sfDim in Surface.CellAt(36, 3).Attr.Style);
     AssertTrue('scope keys are right aligned and dim',
-      (Surface.CellAt(28, 6).Ch = 't') and
-      (sfDim in Surface.CellAt(28, 6).Attr.Style));
+      (Surface.CellAt(26, 6).Ch = 't') and
+      (sfDim in Surface.CellAt(26, 6).Attr.Style));
   finally
     Modal.Free;
     Surface.Free;
@@ -263,7 +386,7 @@ begin
   end;
 end;
 
-procedure TApprovalModalTest.TestNumberChooses;
+procedure TApprovalModalTest.TestNumberSelectsWithoutAccepting;
 var
   Modal: TApprovalModal;
 begin
@@ -271,6 +394,12 @@ begin
   try
     Modal.OnChoose := FRecorder.OnChoose;
     Modal.HandleEvent(Ch('2'));
+    { A digit moves the selection; accepting stays a separate action. }
+    AssertEquals('selected option 2', 1, Modal.Selected);
+    AssertEquals('not answered', 0, FRecorder.Count);
+    AssertFalse('not answered', Modal.Answered);
+
+    Modal.HandleEvent(Key(kkEnter));
     AssertEquals('chose once', 1, FRecorder.Count);
     AssertEquals('option 2', 'opt2', FRecorder.Last.OptionKey);
   finally
