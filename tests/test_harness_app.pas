@@ -354,16 +354,16 @@ begin
   SubmitPrompt('time?');
   AssertTrue('turn finished', Pump(300));
 
-  AssertTrue('tool result in the body', FindText(ckTool, '[ok]'));
   AssertTrue('assistant text followed', FindText(ckAssistant, 'done'));
   ToolSeen := False;
   for I := 0 to BlockCount - 1 do
     if (BlockKind(I) = ckTool) and (BlockLabel(I) = 'checking') and
-      (Pos('[ok]', BlockText(I)) > 0) then
+      (BlockText(I) <> '') then
       ToolSeen := True;
   AssertTrue('reason is the title, the result is the body', ToolSeen);
   AssertFalse('the raw call is not shown',
     FindText(ckTool, 'get_system_time'));
+  AssertFalse('no [ok] prefix', FindText(ckTool, '[ok]'));
   { The text that accompanied the call stays before it; the answer that follows
     the tools is its own block, after them. }
   AssertEquals('four blocks', 4, BlockCount);
@@ -538,7 +538,7 @@ begin
       SawReasoning := True;
     if (BlockKind(I) = ckTool) and (BlockLabel(I) = 'check the date') then
       SawTool := True;
-    if (BlockKind(I) = ckTool) and (Pos('[ok] noon', BlockText(I)) > 0) then
+    if (BlockKind(I) = ckTool) and (Pos('noon', BlockText(I)) > 0) then
       SawResult := True;
     if (BlockKind(I) = ckAssistant) and (Pos('done', BlockText(I)) > 0) then
       SawAssistant := True;

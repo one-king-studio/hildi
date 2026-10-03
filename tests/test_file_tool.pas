@@ -210,6 +210,7 @@ var
 begin
   WriteRaw(Full('a.txt'), 'alpha'#10'beta');
   AssertTrue('ok', FTool.ReadFile(Args(['path', 'a.txt', 'reason', 'r']), Res, Err));
+  AssertTrue('names the file', Pos('read a.txt', Res) > 0);
   AssertTrue('first line', Pos('alpha', Res) > 0);
   AssertTrue('second line', Pos('beta', Res) > 0);
   AssertFalse('no line-number prefix', Pos(#9, Res) > 0);

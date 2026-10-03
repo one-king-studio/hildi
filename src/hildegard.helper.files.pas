@@ -500,7 +500,8 @@ begin
       Exit(False);
     if Binary then
     begin
-      AResult := '[binary file: ' + IntToStr(FileBytes(Abs)) + ' bytes]';
+      AResult := 'read ' + Rel + LineEnding + LineEnding +
+        '[binary file: ' + IntToStr(FileBytes(Abs)) + ' bytes]';
       Exit(True);
     end;
     Offset := JsonInt(Root, 'offset', 1);
@@ -516,7 +517,10 @@ begin
         Break;
       OutLines.Add(Lines[I]);
     end;
-    AResult := CapText(OutLines.Text, MaxOutput);
+    { A header naming the file and its size, then the content, so the panel
+      reads without the tool needing a separate call-details line. }
+    AResult := 'read ' + Rel + ' (' + IntToStr(FileBytes(Abs)) + ' bytes)' +
+      LineEnding + LineEnding + CapText(OutLines.Text, MaxOutput);
     if Truncated then
       AResult := AResult + LineEnding + '[truncated: file larger than ' +
         IntToStr(MaxRead) + ' bytes]';

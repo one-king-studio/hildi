@@ -59,6 +59,7 @@ type
     procedure TestInvalidJsonFails;
     procedure TestMissingReasonNotExecuted;
     procedure TestAllowedByRuleExecutes;
+    procedure TestResultReadsLikeAShellTranscript;
     procedure TestDeniedByRuleDoesNotExecute;
     procedure TestAskWithNoPromptDenies;
     procedure TestPromptAllowOnceDoesNotPersist;
@@ -249,6 +250,24 @@ begin
     AssertTrue('output', Pos('hello', R) > 0);
     AssertEquals('cwd default', '', FExecutor.LastCwd);
     AssertEquals('timeout default', 1234, FExecutor.LastTimeoutMs);
+  finally
+    Tool.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestResultReadsLikeAShellTranscript;
+var
+  Tool: TCommandTool;
+  R, E: string;
+begin
+  AddRule(aeAllow, 'run_command:echo', [], True);
+  FExecutor.ResultExec.Output := 'hello' + LineEnding;
+  Tool := BuildTool(nil, 0);
+  try
+    AssertTrue('ok', Tool.Run('{"command":"echo hello","reason":"r"}', R, E));
+    AssertTrue('command line then blank line then output',
+      Pos('$ echo hello' + LineEnding + LineEnding + 'hello', R) > 0);
+    AssertFalse('no exit note on success', Pos('[exit', R) > 0);
   finally
     Tool.Free;
   end;
@@ -481,7 +500,7 @@ begin
   Tool := BuildTool(nil, 0);
   try
     AssertTrue('ok', Tool.Run('{"command":"sleep 9","reason":"r"}', R, E));
-    AssertTrue('reports 124', Pos('exit_code: 124', R) > 0);
+    AssertTrue('reports 124', Pos('[exit 124]', R) > 0);
   finally
     Tool.Free;
   end;

@@ -439,8 +439,11 @@ begin
         Exit(False);
       end;
 
+      { The result reads like a shell transcript: the command, a blank line,
+        then its output. A non-zero exit is noted so a failure is visible
+        without the panel prefixing every result with [ok]/[failed]. }
       Truncated := Length(Execution.Output) > FConfig.MaxOutputBytes;
-      AResult := 'exit_code: ' + IntToStr(Execution.ExitCode) + LineEnding;
+      AResult := '$ ' + Command + LineEnding + LineEnding;
       if Truncated then
         AResult := AResult + Copy(Execution.Output, 1, FConfig.MaxOutputBytes)
       else
@@ -448,6 +451,9 @@ begin
       if Truncated then
         AResult := AResult + LineEnding + '[output truncated at ' +
           IntToStr(FConfig.MaxOutputBytes) + ' bytes]';
+      if Execution.ExitCode <> 0 then
+        AResult := AResult + LineEnding + '[exit ' +
+          IntToStr(Execution.ExitCode) + ']';
       Result := True;
     finally
       Data.Free;

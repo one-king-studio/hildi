@@ -106,3 +106,12 @@ fires when the terminal is configured to send that sequence (a VSCode
 fallbacks. The compose CTA advertises the platform's key: `⌘+enter send` on
 macOS, `ctrl+enter send` elsewhere (`SendCtaKey`). The toolbar hints default
 is blanked, but the hints component is unchanged and can be given text later.
+
+## Follow-up: tool result output (2026-10-03)
+
+The tool panel no longer prefixes a result with `[ok]`/`[failed]`: the reason is
+the title and the result is the body. A tool that benefits from repeating part
+of its call puts it in the result itself - `run_command` now returns a
+shell-transcript form (`$ <command>`, a blank line, the output, and `[exit N]`
+when non-zero), and `read_file` names the file and its size above the content
+(or `[binary file: N bytes]` when it cannot read it).

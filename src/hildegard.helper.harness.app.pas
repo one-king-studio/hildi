@@ -68,10 +68,10 @@ type
     procedure UpdateCta;
     { Settle the streaming thinking block into a persisted "Thought" block. }
     procedure FinalizeThinking;
-    { Append a tool result to its block, marking ok/failed; no leading gap when
-      the block has no body yet. }
-    procedure AppendToolResult(ABlock: TChatItem; AOk: Boolean;
-      const AText: string);
+    { Append a tool result to its block; no leading gap when the block has no
+      body yet. The result speaks for itself (a tool adds its own call context
+      when that helps), so no [ok]/[failed] prefix is added. }
+    procedure AppendToolResult(ABlock: TChatItem; const AText: string);
     { Put text at the front of the compose box, keeping whatever is typed. }
     procedure PrependCompose(const AText: string);
     { Undo the current turn's UI after an early cancel and restore the prompt. }
@@ -399,7 +399,7 @@ begin
         begin
           Block := ToolBlocks[Head];
           Inc(Head);
-          AppendToolResult(Block, Rec.ToolOk, Rec.Content);
+          AppendToolResult(Block, Rec.Content);
         end
         else
           FPanel.Stream.Add(ckTool, Rec.ToolName, Rec.Content);
@@ -447,19 +447,12 @@ begin
   FThought := nil;
 end;
 
-procedure THarnessApp.AppendToolResult(ABlock: TChatItem; AOk: Boolean;
-  const AText: string);
-var
-  Line: string;
+procedure THarnessApp.AppendToolResult(ABlock: TChatItem; const AText: string);
 begin
-  if AOk then
-    Line := '[ok] ' + AText
-  else
-    Line := '[failed] ' + AText;
   if ABlock.Text = '' then
-    ABlock.SetText(Line)
+    ABlock.SetText(AText)
   else
-    ABlock.AppendText(#10 + #10 + Line);
+    ABlock.AppendText(#10 + #10 + AText);
 end;
 
 procedure THarnessApp.PrependCompose(const AText: string);
@@ -561,13 +554,13 @@ begin
       begin
         if FTool <> nil then
         begin
-          AppendToolResult(FTool, E.ToolOk, E.Text);
+          AppendToolResult(FTool, E.Text);
           FTool := nil;
         end
         else
         begin
           FTool := FPanel.Stream.Add(ckTool, E.ToolName, '');
-          AppendToolResult(FTool, E.ToolOk, E.Text);
+          AppendToolResult(FTool, E.Text);
           FTool := nil;
         end;
         { The tools are done, so the next deltas belong to the following message:
