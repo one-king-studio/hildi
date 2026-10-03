@@ -1338,6 +1338,8 @@ begin
     AssertEquals('cancelled code', Ord(leCancelled), Ord(Err.Code));
     AssertEquals('only the first request ran', 1, FFake.Calls);
     AssertEquals('turn cancelled', Ord(tsCancelled), Ord(Rec.LastTurnStatus));
+    { A cancel is not an error, so no error block is persisted for it. }
+    AssertEquals('no error block', '', Rec.LastError);
   finally
     Cancel.Free;
   end;

@@ -74,3 +74,8 @@ Deviations from the specification, and why:
 - **The loop only checks between requests**, as specced: an in-flight stream
   finishes first (the transport has no cancel hook), and a tool batch is never
   broken part-way so its calls and results stay paired.
+- **A cancel persists no error block** (follow-up fix). `FailTurn` appended an
+  `mrError` message for every failure, including `leCancelled`, which the TUI
+  recalled as a bright-red error block even though the live path draws none.
+  The turn row already records the cancelled status, so the append is skipped
+  for a cancel and the two paths match.

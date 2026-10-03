@@ -558,7 +558,11 @@ var
     AFinishReason: string);
   begin
     AError := AgentError(ACode, AMessage, ADetail);
-    FStore.AppendError(AMessage, ADetail);
+    { A user interrupt is not an error. The turn row records the cancelled
+      status, and the live UI draws no error block, so persisting one would make
+      a resumed session differ from what streamed. }
+    if ACode <> leCancelled then
+      FStore.AppendError(AMessage, ADetail);
     TurnOutcome := Default(TTurnOutcome);
     TurnOutcome.Status := tsFailed;
     if ACode = leCancelled then
