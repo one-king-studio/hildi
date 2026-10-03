@@ -144,6 +144,9 @@ type
     { Fail the turn once the running context (the latest request's prompt
       tokens) exceeds this. 0 takes the default; negative disables. }
     MaxContextTokens: Integer;
+    { Followup requests allowed for one truncated response before the turn fails
+      with leTruncated. 0 takes the default; negative disables continuation. }
+    MaxContinuations: Integer;
   end;
 
   TAgentLoop = class
@@ -155,7 +158,11 @@ type
     FCancel: TAgentCancelCheck;
     FPromptQueue: TPromptQueue;
     FLastTurnDropped: Boolean;
-    function BuildRequest: TChatRequest;
+    { Build the request. When AContinuing, overlay the pending assistant text
+      and the continuation instruction; both are request-only and never
+      persisted. }
+    function BuildRequest(const APendingContent: string;
+      AContinuing: Boolean): TChatRequest;
     procedure ExecuteToolCalls(const ACalls: TChatToolCallArray;
       const AEvents: TAgentEvents; out AAllOk: Boolean);
     { Answer each call with a notice instead of running the tool, so the
@@ -199,6 +206,18 @@ const
   DefaultToolNoticeStep = 5;
   { The running context (latest prompt tokens) may not exceed this. }
   DefaultMaxContextTokens = 120000;
+  { Followup requests allowed for one truncated response. }
+  DefaultMaxContinuations = 3;
+  { The user message that asks the model to resume a truncated response. It
+    exists only in the continuation request: never persisted, never drawn. }
+  ContinuationInstruction =
+    'Continue exactly from where you stopped. Do not repeat the previous text. ' +
+    'Finish the answer in the same language and format.';
+  { The paired tool result that answers a call dropped because the response was
+    cut off mid-call. }
+  TruncatedToolNotice =
+    'your tool call was cut off before it completed and was not run. ' +
+    'Resubmit it; if its arguments are large, split them across smaller calls.';
   BuiltinGetSystemTimeName = 'get_system_time';
   ToolReasonParamName = 'reason';
   { The reason becomes a block title, so keep it a short label; the schema
@@ -214,6 +233,13 @@ uses
   DateUtils, fpjson, jsonparser;
 
 type
+  { Loop-private: the response accumulated across continuation requests. It is
+    not persisted until a proper stop; on error it is discarded. }
+  TPendingResponse = record
+    Content: string;
+    Reasoning: string;
+  end;
+
   { Owns the built-in tool handlers. A singleton because TToolHandler is an
     "of object" method pointer that must outlive the registry. }
   TBuiltinTools = class
@@ -566,6 +592,8 @@ begin
     FConfig.ToolNoticeStep := DefaultToolNoticeStep;
   if FConfig.MaxContextTokens = 0 then
     FConfig.MaxContextTokens := DefaultMaxContextTokens;
+  if FConfig.MaxContinuations = 0 then
+    FConfig.MaxContinuations := DefaultMaxContinuations;
 end;
 
 destructor TAgentLoop.Destroy;
@@ -574,10 +602,35 @@ begin
   inherited Destroy;
 end;
 
-function TAgentLoop.BuildRequest: TChatRequest;
+function TAgentLoop.BuildRequest(const APendingContent: string;
+  AContinuing: Boolean): TChatRequest;
+var
+  N: Integer;
+  Msg: TChatMessage;
 begin
   Result := Default(TChatRequest);
   Result.Messages := FStore.Messages;
+  if AContinuing then
+  begin
+    { The pending fragment and the instruction are request-only: neither is
+      appended to the store, so the committed history stays one assistant
+      message. An empty fragment (a reasoning-only truncation) is not sent. }
+    if APendingContent <> '' then
+    begin
+      Msg := Default(TChatMessage);
+      Msg.Role := crAssistant;
+      Msg.Content := APendingContent;
+      N := Length(Result.Messages);
+      SetLength(Result.Messages, N + 1);
+      Result.Messages[N] := Msg;
+    end;
+    Msg := Default(TChatMessage);
+    Msg.Role := crUser;
+    Msg.Content := ContinuationInstruction;
+    N := Length(Result.Messages);
+    SetLength(Result.Messages, N + 1);
+    Result.Messages[N] := Msg;
+  end;
   if FTools <> nil then
     Result.Tools := FTools.Specs;
 end;
@@ -739,11 +792,12 @@ end;
 function TAgentLoop.DoSend(const AUserText: string; const AEvents: TAgentEvents;
   out AAnswer: string; out AError: TLLMError): Boolean;
 var
-  Rounds: Integer;
+  Rounds, Continuations: Integer;
   Request: TChatRequest;
   ChatResult: TChatResult;
   UserMsg, SystemMsg: TChatMessage;
-  AllOk, Committed: Boolean;
+  AllOk, Committed, Stop, TruncatedRound: Boolean;
+  Pending: TPendingResponse;
   TurnId, RequestId: Int64;
   StartMs: Int64;
   Outcome: TRequestOutcome;
@@ -769,11 +823,17 @@ var
     FStore.FinishTurn(TurnId, TurnOutcome);
   end;
 
-  { Persist the response being kept (reasoning block plus assistant message). }
-  procedure AppendResponse;
+  { Persist the pending response merged with the terminal response as one
+    reasoning block and one assistant message. Until now the pending was
+    request-only and is dropped on any error instead of committed. }
+  procedure CommitResponse(const APending: TPendingResponse);
+  var
+    Msg: TChatMessage;
   begin
-    FStore.AppendReasoning(ChatResult.ReasoningContent);
-    FStore.Append(ChatResult.Message);
+    FStore.AppendReasoning(APending.Reasoning + ChatResult.ReasoningContent);
+    Msg := ChatResult.Message;
+    Msg.Content := APending.Content + ChatResult.Message.Content;
+    FStore.Append(Msg);
   end;
 
 begin
@@ -818,56 +878,105 @@ begin
     { Inject any queued prompts before the next request. }
     DrainQueued(AEvents);
 
-    Request := BuildRequest;
-    RequestId := FStore.BeginRequest(TurnId, FClient.Model,
-      Length(Request.Messages));
-    StartMs := GetTickCount64;
-    Outcome := Default(TRequestOutcome);
+    { One response, possibly spanning several continuation requests. Nothing is
+      persisted until a proper stop; a truncated response is continued and a
+      truncated tool call is answered with a notice. }
+    Pending := Default(TPendingResponse);
+    Continuations := 0;
+    Stop := False;
+    TruncatedRound := False;
+    repeat
+      Request := BuildRequest(Pending.Content, Continuations > 0);
+      RequestId := FStore.BeginRequest(TurnId, FClient.Model,
+        Length(Request.Messages));
+      StartMs := GetTickCount64;
+      Outcome := Default(TRequestOutcome);
 
-    { The client consults the same check mid-stream, so a cancel aborts the
-      request itself rather than waiting for the provider to finish. }
-    FClient.CancelCheck := FCancel;
-    if not FClient.Complete(Request, AEvents.OnText, AEvents.OnReasoning,
-      ChatResult, AError) then
-    begin
-      Outcome.Ok := False;
-      Outcome.ErrorCode := AError.Code;
-      Outcome.ErrorMessage := AError.Message;
-      Outcome.ErrorDetail := AError.Detail;
+      { The client consults the same check mid-stream, so a cancel aborts the
+        request itself rather than waiting for the provider to finish. }
+      FClient.CancelCheck := FCancel;
+      if not FClient.Complete(Request, AEvents.OnText, AEvents.OnReasoning,
+        ChatResult, AError) then
+      begin
+        Outcome.Ok := False;
+        Outcome.ErrorCode := AError.Code;
+        Outcome.ErrorMessage := AError.Message;
+        Outcome.ErrorDetail := AError.Detail;
+        Outcome.DurationMs := Int64(GetTickCount64 - StartMs);
+        FStore.FinishRequest(RequestId, Outcome);
+        if (AError.Code = leCancelled) and (not Committed) then
+        begin
+          FStore.DropTurnMessages(TurnId);
+          FLastTurnDropped := True;
+        end;
+        FailTurn(AError.Code, AError.Message, AError.Detail, '');
+        Exit(False);
+      end;
+
+      Outcome.Ok := True;
+      Outcome.FinishReason := ChatResult.FinishReason;
+      Outcome.RawFinishReason := ChatResult.RawFinishReason;
+      Outcome.Usage := ChatResult.Usage;
+      Outcome.FirstTokenMs := ChatResult.FirstTokenMs;
       Outcome.DurationMs := Int64(GetTickCount64 - StartMs);
       FStore.FinishRequest(RequestId, Outcome);
-      if (AError.Code = leCancelled) and (not Committed) then
+
+      { Guard the running context: the next request would only be larger. }
+      if (FConfig.MaxContextTokens > 0) and
+        (ChatResult.Usage.PromptTokens > FConfig.MaxContextTokens) then
       begin
-        FStore.DropTurnMessages(TurnId);
-        FLastTurnDropped := True;
+        FailTurn(leLoop, 'context limit reached',
+          Format('%d prompt tokens (limit %d)',
+          [ChatResult.Usage.PromptTokens, FConfig.MaxContextTokens]),
+          ChatResult.RawFinishReason);
+        Exit(False);
       end;
-      FailTurn(AError.Code, AError.Message, AError.Detail, '');
-      Exit(False);
-    end;
 
-    Outcome.Ok := True;
-    Outcome.FinishReason := ChatResult.FinishReason;
-    Outcome.RawFinishReason := ChatResult.RawFinishReason;
-    Outcome.Usage := ChatResult.Usage;
-    Outcome.FirstTokenMs := ChatResult.FirstTokenMs;
-    Outcome.DurationMs := Int64(GetTickCount64 - StartMs);
-    FStore.FinishRequest(RequestId, Outcome);
+      if ChatResult.FinishReason = frLength then
+      begin
+        if Length(ChatResult.Message.ToolCalls) = 0 then
+        begin
+          { A text truncation: keep the fragment and ask for the rest. }
+          if Continuations >= FConfig.MaxContinuations then
+          begin
+            FailTurn(leTruncated, 'response truncated (length)',
+              Format('%d continuations (limit %d)',
+              [Continuations, FConfig.MaxContinuations]),
+              ChatResult.RawFinishReason);
+            Exit(False);
+          end;
+          Pending.Content := Pending.Content + ChatResult.Message.Content;
+          Pending.Reasoning := Pending.Reasoning + ChatResult.ReasoningContent;
+          Inc(Continuations);
+          Continue;
+        end;
+        { A cut-off tool call cannot be continued: fall through to the tool
+          round, where its calls are answered with a notice instead of run. }
+        TruncatedRound := True;
+        Break;
+      end;
 
-    { Guard the running context: the next request would only be larger. }
-    if (FConfig.MaxContextTokens > 0) and
-      (ChatResult.Usage.PromptTokens > FConfig.MaxContextTokens) then
+      if ChatResult.FinishReason = frStop then
+      begin
+        Stop := True;
+        Break;
+      end;
+
+      if ChatResult.FinishReason <> frToolCalls then
+      begin
+        AError := FinishError(ChatResult);
+        FailTurn(AError.Code, AError.Message, AError.Detail,
+          ChatResult.RawFinishReason);
+        Exit(False);
+      end;
+
+      Break;
+    until False;
+
+    if Stop then
     begin
-      FailTurn(leLoop, 'context limit reached',
-        Format('%d prompt tokens (limit %d)',
-        [ChatResult.Usage.PromptTokens, FConfig.MaxContextTokens]),
-        ChatResult.RawFinishReason);
-      Exit(False);
-    end;
-
-    if ChatResult.FinishReason = frStop then
-    begin
-      AppendResponse;
-      AAnswer := ChatResult.Message.Content;
+      CommitResponse(Pending);
+      AAnswer := Pending.Content + ChatResult.Message.Content;
       TurnOutcome := Default(TTurnOutcome);
       TurnOutcome.Status := tsCompleted;
       TurnOutcome.FinishReason := ChatResult.RawFinishReason;
@@ -883,49 +992,46 @@ begin
       Exit(True);
     end;
 
-    if ChatResult.FinishReason = frToolCalls then
+    { A tool round: a proper tool call, or a truncated one whose calls are
+      answered with a notice instead of run. }
+    Inc(Rounds);
+    { A queued prompt supersedes the tool call: keep no response for it and
+      inject the queued prompts instead, so the model reconsiders with the
+      new context. }
+    if (Rounds <= FConfig.HardToolLimit) and FPromptQueue.Pending then
     begin
-      Inc(Rounds);
-      { A queued prompt supersedes the tool call: keep no response for it and
-        inject the queued prompts instead, so the model reconsiders with the
-        new context. }
-      if (Rounds <= FConfig.HardToolLimit) and FPromptQueue.Pending then
-      begin
-        DrainQueued(AEvents);
-        Continue;
-      end;
-      AppendResponse;
-      Committed := True;
-      { One call past the hard limit: the model was already told to stop, so it
-        is now a loop error. }
-      if Rounds > FConfig.HardToolLimit then
-      begin
-        InterceptToolCalls(ChatResult.Message.ToolCalls, ToolLoopNotice,
-          AEvents);
-        FailTurn(leLoop, 'tool call loop',
-          Format('%d tool calls (hard limit %d)',
-          [Rounds, FConfig.HardToolLimit]), ChatResult.RawFinishReason);
-        Exit(False);
-      end;
-      { Lockdown at the hard limit, then a nudge every ToolNoticeStep calls from
-        the soft limit. An intercepted call is not run; the model must resubmit
-        it to proceed. }
-      if Rounds = FConfig.HardToolLimit then
-        InterceptToolCalls(ChatResult.Message.ToolCalls,
-          ToolHardNotice(Rounds), AEvents)
-      else if (Rounds >= FConfig.SoftToolLimit) and
-        ((Rounds - FConfig.SoftToolLimit) mod FConfig.ToolNoticeStep = 0) then
-        InterceptToolCalls(ChatResult.Message.ToolCalls,
-          ToolSoftNotice(Rounds, FConfig.HardToolLimit), AEvents)
-      else
-        ExecuteToolCalls(ChatResult.Message.ToolCalls, AEvents, AllOk);
+      DrainQueued(AEvents);
       Continue;
     end;
-
-    AError := FinishError(ChatResult);
-    FailTurn(AError.Code, AError.Message, AError.Detail,
-      ChatResult.RawFinishReason);
-    Exit(False);
+    CommitResponse(Pending);
+    Committed := True;
+    { One call past the hard limit: the model was already told to stop, so it
+      is now a loop error. }
+    if Rounds > FConfig.HardToolLimit then
+    begin
+      InterceptToolCalls(ChatResult.Message.ToolCalls, ToolLoopNotice,
+        AEvents);
+      FailTurn(leLoop, 'tool call loop',
+        Format('%d tool calls (hard limit %d)',
+        [Rounds, FConfig.HardToolLimit]), ChatResult.RawFinishReason);
+      Exit(False);
+    end;
+    { Lockdown at the hard limit, then a nudge every ToolNoticeStep calls from
+      the soft limit. An intercepted call is not run; the model must resubmit
+      it to proceed. A call cut off by truncation is always intercepted. }
+    if Rounds = FConfig.HardToolLimit then
+      InterceptToolCalls(ChatResult.Message.ToolCalls,
+        ToolHardNotice(Rounds), AEvents)
+    else if (Rounds >= FConfig.SoftToolLimit) and
+      ((Rounds - FConfig.SoftToolLimit) mod FConfig.ToolNoticeStep = 0) then
+      InterceptToolCalls(ChatResult.Message.ToolCalls,
+        ToolSoftNotice(Rounds, FConfig.HardToolLimit), AEvents)
+    else if TruncatedRound then
+      InterceptToolCalls(ChatResult.Message.ToolCalls,
+        TruncatedToolNotice, AEvents)
+    else
+      ExecuteToolCalls(ChatResult.Message.ToolCalls, AEvents, AllOk);
+    Continue;
   end;
 end;
 

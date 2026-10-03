@@ -60,6 +60,7 @@ type
     procedure TestMapsStopFinishReason;
     procedure TestMapsToolCallsFinishReason;
     procedure TestMapsUnknownFinishReason;
+    procedure TestErrorCodeOrdinalsStable;
     procedure TestHttpErrorStatusMapsToError;
     procedure TestAuthStatusMapsToAuthError;
     procedure TestRateLimitMapsToRateLimitError;
@@ -559,6 +560,16 @@ begin
     Client.Free;
     Fake.Free;
   end;
+end;
+
+procedure TLLMClientTest.TestErrorCodeOrdinalsStable;
+begin
+  { leTruncated is appended last so stored ordinals never shift. }
+  AssertEquals('ok', 0, Ord(leOk));
+  AssertEquals('provider', 7, Ord(leProvider));
+  AssertEquals('cancelled', 8, Ord(leCancelled));
+  AssertEquals('loop', 9, Ord(leLoop));
+  AssertEquals('truncated is last', Ord(leLoop) + 1, Ord(leTruncated));
 end;
 
 procedure TLLMClientTest.TestHttpErrorStatusMapsToError;

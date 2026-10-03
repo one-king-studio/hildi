@@ -78,7 +78,10 @@ type
     leMalformedStream, leProvider, leCancelled,
     { The agent loop stopped itself: a tool-call loop or an over-large context.
       Appended last so stored ordinals are unchanged. }
-    leLoop
+    leLoop,
+    { The response was truncated and could not be completed within the
+      continuation budget. Appended last so stored ordinals are unchanged. }
+    leTruncated
   );
 
   TLLMError = record

@@ -132,7 +132,7 @@ type
     FQueuedOnce: Boolean;
     procedure OnAfterChunk(Sender: TObject);
     function BuildLoop(const APrompt: string; AMaxIters: Integer): TAgentLoop;
-    function BuildLoopRecording: TRecordingStore;
+    function BuildLoopRecording(AMaxContinuations: Integer = 0): TRecordingStore;
     function BuildLoopBudget(ASoft, AHard, AStep,
       AMaxContext: Integer): TRecordingStore;
     function MessageCount(const ABody: string): Integer;
@@ -155,6 +155,18 @@ type
     procedure TestContextLimitAborts;
     procedure TestLengthFinishReasonReported;
     procedure TestContentFilterFinishReasonReported;
+    procedure TestTruncatedResponseContinuesToStop;
+    procedure TestContinuationCommitsOneMessage;
+    procedure TestContinuationMergesReasoning;
+    procedure TestContinuationRequestCarriesPending;
+    procedure TestEmptyContentTruncationContinues;
+    procedure TestContinuationCapFailsTurn;
+    procedure TestContinuationDisabledFailsImmediately;
+    procedure TestContinuationHonoursContextGuard;
+    procedure TestTruncatedToolCallIsNotExecuted;
+    procedure TestTruncatedToolCallGetsPairedNotice;
+    procedure TestNonContinuableErrorDiscardsPending;
+    procedure TestCommittedToolRoundSurvivesLaterTruncationError;
     procedure TestConversationPersistsAcrossTurns;
     procedure TestSystemPromptIncludedFirst;
     procedure TestStoreIsUsedThroughTheInterface;
@@ -485,7 +497,8 @@ begin
   Result := FLoop;
 end;
 
-function TAgentLoopTest.BuildLoopRecording: TRecordingStore;
+function TAgentLoopTest.BuildLoopRecording(
+  AMaxContinuations: Integer): TRecordingStore;
 var
   Cfg: TLLMConfig;
   ACfg: TAgentConfig;
@@ -504,6 +517,7 @@ begin
   FFailTools := TFailTools.Create;
   ACfg := Default(TAgentConfig);
   ACfg.SystemPrompt := '';
+  ACfg.MaxContinuations := AMaxContinuations;
   FLoop := TAgentLoop.Create(FClient, FStore, FTools, ACfg);
   Result := FRecorder;
 end;
@@ -923,10 +937,12 @@ var
   Err: TLLMError;
 begin
   BuildLoop('', 8);
+  { The fake repeats the last response, so every continuation is truncated too
+    and the budget runs out. }
   FFake.AddResponse([TextDelta('partial'), FinishFrame('length'), DoneFrame]);
   AssertFalse('fails', FLoop.Send('go', nil, Answer, Err));
-  AssertEquals('provider error', Ord(leProvider), Ord(Err.Code));
-  AssertTrue('mentions length', Pos('length', Err.Message) > 0);
+  AssertEquals('truncation error', Ord(leTruncated), Ord(Err.Code));
+  AssertTrue('mentions truncation', Pos('truncated', Err.Message) > 0);
 end;
 
 procedure TAgentLoopTest.TestContentFilterFinishReasonReported;
@@ -938,6 +954,216 @@ begin
   FFake.AddResponse([FinishFrame('content_filter'), DoneFrame]);
   AssertFalse('fails', FLoop.Send('go', nil, Answer, Err));
   AssertEquals('provider error', Ord(leProvider), Ord(Err.Code));
+end;
+
+procedure TAgentLoopTest.TestTruncatedResponseContinuesToStop;
+var
+  Answer: string;
+  Err: TLLMError;
+begin
+  BuildLoopRecording;
+  FFake.AddResponse([TextDelta('partial '), FinishFrame('length'), DoneFrame]);
+  FFake.AddResponse([TextDelta('answer'), FinishFrame('stop'), DoneFrame]);
+  AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
+  AssertEquals('the fragments are joined', 'partial answer', Answer);
+  AssertEquals('two requests', 2, FFake.Calls);
+end;
+
+procedure TAgentLoopTest.TestContinuationCommitsOneMessage;
+var
+  Rec: TRecordingStore;
+  Msgs: TChatMessageArray;
+  Answer: string;
+  Err: TLLMError;
+  Assistant, I: Integer;
+begin
+  Rec := BuildLoopRecording;
+  FFake.AddResponse([TextDelta('partial '), FinishFrame('length'), DoneFrame]);
+  FFake.AddResponse([TextDelta('answer'), FinishFrame('stop'), DoneFrame]);
+  AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
+
+  Msgs := Rec.Messages;
+  Assistant := 0;
+  for I := 0 to High(Msgs) do
+  begin
+    if Msgs[I].Role = crAssistant then
+    begin
+      Inc(Assistant);
+      AssertEquals('one merged message', 'partial answer', Msgs[I].Content);
+    end;
+    AssertFalse('the instruction was not persisted',
+      Pos(ContinuationInstruction, Msgs[I].Content) > 0);
+  end;
+  AssertEquals('exactly one assistant message', 1, Assistant);
+end;
+
+procedure TAgentLoopTest.TestContinuationMergesReasoning;
+var
+  Rec: TRecordingStore;
+  Answer: string;
+  Err: TLLMError;
+begin
+  Rec := BuildLoopRecording;
+  FFake.AddResponse([ReasoningDelta('think one '), TextDelta('partial '),
+    FinishFrame('length'), DoneFrame]);
+  FFake.AddResponse([ReasoningDelta('think two'), TextDelta('answer'),
+    FinishFrame('stop'), DoneFrame]);
+  AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
+  AssertEquals('reasoning is merged once', 'think one think two', Rec.Reasoning);
+end;
+
+procedure TAgentLoopTest.TestContinuationRequestCarriesPending;
+var
+  Answer: string;
+  Err: TLLMError;
+begin
+  BuildLoopRecording;
+  FFake.AddResponse([TextDelta('partial '), FinishFrame('length'), DoneFrame]);
+  FFake.AddResponse([TextDelta('answer'), FinishFrame('stop'), DoneFrame]);
+  AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
+  AssertTrue('the pending fragment is sent', Pos('partial', FFake.LastBody) > 0);
+  AssertTrue('the instruction is sent',
+    Pos('Continue exactly', FFake.LastBody) > 0);
+end;
+
+procedure TAgentLoopTest.TestEmptyContentTruncationContinues;
+var
+  Answer: string;
+  Err: TLLMError;
+begin
+  BuildLoopRecording;
+  { A reasoning model can spend its whole budget before any content. }
+  FFake.AddResponse([FinishFrame('length'), DoneFrame]);
+  FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
+  AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
+  AssertEquals('answer', 'done', Answer);
+  AssertEquals('two requests', 2, FFake.Calls);
+end;
+
+procedure TAgentLoopTest.TestContinuationCapFailsTurn;
+var
+  Answer: string;
+  Err: TLLMError;
+begin
+  BuildLoopRecording(2);
+  FFake.AddResponse([TextDelta('a'), FinishFrame('length'), DoneFrame]);
+  AssertFalse('fails', FLoop.Send('go', nil, Answer, Err));
+  AssertEquals('truncation error', Ord(leTruncated), Ord(Err.Code));
+  AssertEquals('the cap plus the original request', 3, FFake.Calls);
+end;
+
+procedure TAgentLoopTest.TestContinuationDisabledFailsImmediately;
+var
+  Answer: string;
+  Err: TLLMError;
+begin
+  BuildLoopRecording(-1);
+  FFake.AddResponse([TextDelta('a'), FinishFrame('length'), DoneFrame]);
+  AssertFalse('fails', FLoop.Send('go', nil, Answer, Err));
+  AssertEquals('truncation error', Ord(leTruncated), Ord(Err.Code));
+  AssertEquals('no continuation request', 1, FFake.Calls);
+end;
+
+procedure TAgentLoopTest.TestContinuationHonoursContextGuard;
+var
+  Answer: string;
+  Err: TLLMError;
+begin
+  { The prompt-token cap is checked before the finish reason, so an over-large
+    continuation prompt still fails the turn. }
+  BuildLoopBudget(100, 200, 5, 10);
+  FFake.AddResponse([TextDelta('a'),
+    UsageFrame('{"prompt_tokens":50,"completion_tokens":1,"total_tokens":51}'),
+    FinishFrame('length'), DoneFrame]);
+  AssertFalse('aborts', FLoop.Send('go', nil, Answer, Err));
+  AssertEquals('loop error', Ord(leLoop), Ord(Err.Code));
+end;
+
+procedure TAgentLoopTest.TestTruncatedToolCallIsNotExecuted;
+var
+  Capture: TCaptureTool;
+  Spec: TToolSpec;
+  Answer: string;
+  Err: TLLMError;
+begin
+  BuildLoop('', 8);
+  Capture := TCaptureTool.Create;
+  try
+    Spec.Name := 'capture';
+    Spec.Description := 'capture the call';
+    Spec.ParametersJson := '{"type":"object","properties":{}}';
+    FTools.Add(Spec, Capture.Handle);
+    { The arguments are cut off mid-JSON. }
+    FFake.AddResponse([ToolNameFrame(0, 'c1', 'capture'),
+      ToolArgsFrame(0, '{"reason":"r"'), FinishFrame('length'), DoneFrame]);
+    FFake.AddResponse([TextDelta('resubmitted'), FinishFrame('stop'),
+      DoneFrame]);
+    AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
+    AssertEquals('the cut-off call never ran', 0, Capture.Calls);
+    AssertEquals('the loop continued', 2, FFake.Calls);
+  finally
+    Capture.Free;
+  end;
+end;
+
+procedure TAgentLoopTest.TestTruncatedToolCallGetsPairedNotice;
+var
+  Rec: TRecordingStore;
+  Answer: string;
+  Err: TLLMError;
+begin
+  Rec := BuildLoopRecording;
+  FFake.AddResponse([ToolNameFrame(0, 'c1', 'get_system_time'),
+    ToolArgsFrame(0, '{"reason":"r"'), FinishFrame('length'), DoneFrame]);
+  FFake.AddResponse([TextDelta('ok'), FinishFrame('stop'), DoneFrame]);
+  AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
+  AssertEquals('the notice is paired to the call', 'c1', Rec.LastTool.ToolCallId);
+  AssertFalse('the notice is a failure result', Rec.LastTool.ToolOk);
+  AssertTrue('the notice explains the drop',
+    Pos('cut off', Rec.LastTool.Content) > 0);
+end;
+
+procedure TAgentLoopTest.TestNonContinuableErrorDiscardsPending;
+var
+  Rec: TRecordingStore;
+  Msgs: TChatMessageArray;
+  Answer: string;
+  Err: TLLMError;
+  I: Integer;
+begin
+  Rec := BuildLoopRecording;
+  FFake.AddResponse([TextDelta('partial'), FinishFrame('length'), DoneFrame]);
+  FFake.AddResponse([FinishFrame('content_filter'), DoneFrame]);
+  AssertFalse('fails', FLoop.Send('go', nil, Answer, Err));
+  AssertEquals('provider error', Ord(leProvider), Ord(Err.Code));
+
+  Msgs := Rec.Messages;
+  for I := 0 to High(Msgs) do
+    AssertTrue('no fragment was persisted', Msgs[I].Role <> crAssistant);
+end;
+
+procedure TAgentLoopTest.TestCommittedToolRoundSurvivesLaterTruncationError;
+var
+  Rec: TRecordingStore;
+  Msgs: TChatMessageArray;
+  Answer: string;
+  Err: TLLMError;
+  I: Integer;
+  SawTool: Boolean;
+begin
+  Rec := BuildLoopRecording;
+  FFake.AddResponse([ToolNameFrame(0, 'c1', 'get_system_time'),
+    ToolArgsFrame(0, '{"reason":"r"}'), FinishFrame('tool_calls'), DoneFrame]);
+  FFake.AddResponse([TextDelta('partial'), FinishFrame('length'), DoneFrame]);
+  FFake.AddResponse([FinishFrame('content_filter'), DoneFrame]);
+  AssertFalse('fails', FLoop.Send('go', nil, Answer, Err));
+
+  Msgs := Rec.Messages;
+  SawTool := False;
+  for I := 0 to High(Msgs) do
+    if Msgs[I].Role = crTool then
+      SawTool := True;
+  AssertTrue('the committed tool round survives', SawTool);
 end;
 
 procedure TAgentLoopTest.TestConversationPersistsAcrossTurns;
