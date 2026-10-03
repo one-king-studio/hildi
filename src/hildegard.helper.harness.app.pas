@@ -76,6 +76,9 @@ type
     procedure PrependCompose(const AText: string);
     { Undo the current turn's UI after an early cancel and restore the prompt. }
     procedure RollBackEarlyCancel;
+    { Drop the in-flight assistant/thinking blocks of a pending response that was
+      never persisted, so the live view matches a resumed session. }
+    procedure RollBackPendingResponse;
     { Show a prompt the loop injected, dropping the response it superseded. }
     procedure HandleQueuedPrompt(const AText: string);
     procedure UpdateStats;
@@ -406,7 +409,9 @@ begin
       mrError:
         FPanel.Stream.Add(ckError, '', Rec.Content);
       mrSystem:
-        FPanel.Stream.Add(ckThought, 'system', Rec.Content);
+        { The system prompt is never drawn live, so it is not drawn on resume
+          either; live and resume stay identical. }
+        ;
     end;
   end;
 end;
@@ -486,6 +491,24 @@ begin
     FUserBlock := nil;
   end;
   PrependCompose(FUserPrompt);
+  FApp.Invalidate;
+end;
+
+procedure THarnessApp.RollBackPendingResponse;
+begin
+  { The pending response was streamed but never persisted (it was truncated and
+    then failed, or superseded). Removing its blocks keeps the live view equal
+    to a resumed session. Committed tool rounds are not touched. }
+  if FAssistant <> nil then
+  begin
+    FPanel.Stream.Remove(FAssistant);
+    FAssistant := nil;
+  end;
+  if FThought <> nil then
+  begin
+    FPanel.Stream.Remove(FThought);
+    FThought := nil;
+  end;
   FApp.Invalidate;
 end;
 
@@ -586,6 +609,9 @@ begin
       end
       else
       begin
+        { The pending response was dropped by the loop, so drop its blocks here
+          too, then show the error. }
+        RollBackPendingResponse;
         AppendError(E.Text);
         FinishTurn(psError, 'error');
       end;

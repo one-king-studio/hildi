@@ -40,6 +40,16 @@ type
     procedure AfterChunk(Sender: TObject);
   end;
 
+  { Fails the next request after the first stream chunk, so a truncated
+    response's continuation hits a network error. }
+  TFailNetworkAfterChunk = class
+  private
+    FFake: TFakeTransport;
+  public
+    constructor Create(AFake: TFakeTransport);
+    procedure AfterChunk(Sender: TObject);
+  end;
+
   THarnessAppTest = class(TTestCase)
   private
     FDir: string;
@@ -62,6 +72,7 @@ type
     function BlockLabel(AIndex: Integer): string;
     function BlockText(AIndex: Integer): string;
     function FindText(AKind: TChatKind; const ANeedle: string): Boolean;
+    function BlockSignature: string;
     function AssistantEvent(const AText: string): TTurnEvent;
     function ApprovalEvent(ARequestId: Integer;
       const AAsk: TApprovalAsk): TTurnEvent;
@@ -83,6 +94,8 @@ type
     procedure TestReasoningSettlesIntoAThoughtBlock;
     procedure TestReadyStateAfterATurn;
     procedure TestErrorStateAfterAFailedTurn;
+    procedure TestErrorRollsBackStreamedBlocks;
+    procedure TestResumeMatchesLiveAfterTruncationError;
     procedure TestEscapeArmsThenCancels;
     procedure TestEarlyCancelRestoresThePrompt;
     procedure TestSubmitWhileBusyQueuesThePrompt;
@@ -117,6 +130,19 @@ end;
 procedure TSlowChunks.AfterChunk(Sender: TObject);
 begin
   Sleep(FMs);
+end;
+
+{ TFailNetworkAfterChunk }
+
+constructor TFailNetworkAfterChunk.Create(AFake: TFakeTransport);
+begin
+  inherited Create;
+  FFake := AFake;
+end;
+
+procedure TFailNetworkAfterChunk.AfterChunk(Sender: TObject);
+begin
+  FFake.FailNetwork := True;
 end;
 
 { THarnessAppTest }
@@ -280,6 +306,15 @@ begin
   for I := 0 to BlockCount - 1 do
     if (BlockKind(I) = AKind) and (Pos(ANeedle, BlockText(I)) > 0) then
       Exit(True);
+end;
+
+function THarnessAppTest.BlockSignature: string;
+var
+  I: Integer;
+begin
+  Result := '';
+  for I := 0 to BlockCount - 1 do
+    Result := Result + IntToStr(Ord(BlockKind(I))) + ':' + BlockText(I) + '|';
 end;
 
 function THarnessAppTest.MakeAsk: TApprovalAsk;
@@ -662,6 +697,72 @@ begin
   SubmitPrompt('hi');
   AssertTrue('turn finished', Pump(300));
   AssertEquals('error state', 'error', FApp.StateText);
+end;
+
+procedure THarnessAppTest.TestErrorRollsBackStreamedBlocks;
+var
+  Fail: TFailNetworkAfterChunk;
+begin
+  Build;
+  Fail := TFailNetworkAfterChunk.Create(FFake);
+  try
+    { The first response streams a fragment and is truncated; the continuation
+      then hits a network error, so the pending response is discarded. }
+    FFake.AfterChunk := Fail.AfterChunk;
+    FFake.AddResponse([TextDelta('partial answer'), FinishFrame('length'),
+      DoneFrame]);
+    SubmitPrompt('hi');
+    AssertTrue('turn finished', Pump(300));
+  finally
+    FFake.AfterChunk := nil;
+    Fail.Free;
+  end;
+
+  AssertFalse('the streamed fragment was rolled back',
+    FindText(ckAssistant, 'partial answer'));
+  AssertTrue('an error block exists', FindText(ckError, 'failed'));
+  AssertTrue('prompt re-enabled', FApp.PromptActive);
+end;
+
+procedure THarnessAppTest.TestResumeMatchesLiveAfterTruncationError;
+var
+  Live, Sid: string;
+  Cfg: THarnessSessionConfig;
+  Err: string;
+begin
+  BuildWithStore;
+  { A truncated fragment that the next request cannot complete. }
+  FFake.AddResponse([TextDelta('partial answer'), FinishFrame('length'),
+    DoneFrame]);
+  FFake.AddResponse([FinishFrame('content_filter'), DoneFrame]);
+  SubmitPrompt('hi');
+  AssertTrue('turn finished', Pump(300));
+  AssertFalse('no fragment live', FindText(ckAssistant, 'partial answer'));
+  Live := BlockSignature;
+  Sid := FSession.SessionId;
+
+  { Drop the live app but keep the store, then resume the same session. }
+  FApp.Free;
+  FApp := nil;
+  FInput := nil;
+  FSurface := nil;
+  FSession.Free;
+  FSession := nil;
+  FFake.Free;
+
+  FFake := TFakeTransport.Create;
+  FSurface := TSurfaceMemory.Create(60, 20);
+  FInput := TInputSourceScripted.Create;
+  Cfg := Config;
+  Cfg.StorePath := FStorePath;
+  Cfg.SessionId := Sid;
+  Cfg.Resume := True;
+  FSession := THarnessSession.Open(Cfg, Err);
+  AssertTrue('resumed: ' + Err, FSession <> nil);
+  FApp := THarnessApp.Create(FSurface, FInput, FSession);
+  FApp.Step;
+
+  AssertEquals('resumed blocks identical to live', Live, BlockSignature);
 end;
 
 procedure THarnessAppTest.TestEscapeArmsThenCancels;
