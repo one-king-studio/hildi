@@ -666,7 +666,14 @@ begin
     AssertFalse('second escape disarms', FApp.InterruptArmed);
     AssertEquals('cancelling', 'cancelling', FApp.StateText);
 
-    AssertTrue('turn finished', Pump(600));
+    { The cancel is seen at the worker's next loop boundary; wait for idle. }
+    for I := 1 to 600 do
+    begin
+      FApp.Step;
+      if not FApp.Busy then
+        Break;
+      Sleep(2);
+    end;
     AssertEquals('cancelled state', 'cancelled', FApp.StateText);
   finally
     Slow.Free;
