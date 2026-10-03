@@ -68,6 +68,8 @@ type
     procedure SetHints(const AText: string);
     { Disable input while a turn runs, keeping whatever was typed. }
     procedure SetComposeActive(AValue: Boolean);
+    { The compose's primary-action CTA (send / cancel / none). }
+    procedure SetCta(AKind: TCtaKind);
   end;
 
 implementation
@@ -350,6 +352,11 @@ end;
 procedure TChatPanel.SetComposeActive(AValue: Boolean);
 begin
   FCompose.Edit.Active := AValue;
+end;
+
+procedure TChatPanel.SetCta(AKind: TCtaKind);
+begin
+  FCompose.Cta := AKind;
 end;
 
 end.

@@ -576,6 +576,7 @@ var
   I, FinalIdx, N, CP, CP2: Integer;
   Params: string;
   Ch: UnicodeString;
+  Raw: RawByteString;
 begin
   AEvent := Default(TInputEvent);
   Result := False;
@@ -618,6 +619,35 @@ begin
     end;
     if (FBuf[1] = Ord('[')) or (FBuf[1] = Ord('O')) then
     begin
+      { Bracketed paste: ESC [ 200 ~ <raw text> ESC [ 201 ~. The payload is
+        handed over whole, so its newlines never decode as Enter and submit. }
+      if (FBuf[1] = Ord('[')) and (Length(FBuf) >= 6) and
+        (FBuf[2] = Ord('2')) and (FBuf[3] = Ord('0')) and
+        (FBuf[4] = Ord('0')) and (FBuf[5] = Ord('~')) then
+      begin
+        FinalIdx := -1;
+        I := 6;
+        while I + 5 <= High(FBuf) do
+        begin
+          if (FBuf[I] = 27) and (FBuf[I + 1] = Ord('[')) and
+            (FBuf[I + 2] = Ord('2')) and (FBuf[I + 3] = Ord('0')) and
+            (FBuf[I + 4] = Ord('1')) and (FBuf[I + 5] = Ord('~')) then
+          begin
+            FinalIdx := I;
+            Break;
+          end;
+          Inc(I);
+        end;
+        if FinalIdx < 0 then
+          Exit(False);   { wait for the paste to finish }
+        SetLength(Raw, FinalIdx - 6);
+        for I := 0 to FinalIdx - 7 do
+          Raw[I + 1] := AnsiChar(FBuf[6 + I]);
+        AEvent.Kind := ikPaste;
+        AEvent.Text := UTF8Decode(Raw);
+        Drop(FinalIdx + 6);
+        Exit(True);
+      end;
       FinalIdx := -1;
       for I := 2 to High(FBuf) do
         if (FBuf[I] >= $40) and (FBuf[I] <= $7E) then

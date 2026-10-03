@@ -35,13 +35,14 @@ type
     Mods: TModifiers;
   end;
 
-  TInputKind = (ikNone, ikKey, ikMouse, ikResize);
+  TInputKind = (ikNone, ikKey, ikMouse, ikResize, ikPaste);
 
   TInputEvent = record
     Kind: TInputKind;
     Key: TKeyEvent;
     Mouse: TMouseEvent;
     NewSize: TSize;      // when Kind = ikResize
+    Text: UnicodeString; // when Kind = ikPaste (a bracketed-paste payload)
   end;
 
   { A non-blocking source of input events. Poll returns False when no event is

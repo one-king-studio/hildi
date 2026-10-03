@@ -202,10 +202,14 @@ end;
 procedure THarnessAppTest.SubmitPrompt(const AText: string);
 var
   I: Integer;
+  E: TInputEvent;
 begin
   for I := 1 to Length(AText) do
     FInput.Push(Ch(AText[I]));
-  FInput.Push(Key(kkEnter));
+  { Shift+Enter submits now; a plain Enter adds a line. }
+  E := Key(kkEnter);
+  E.Key.Mods := [moShift];
+  FInput.Push(E);
 end;
 
 function THarnessAppTest.Pump(AMax: Integer): Boolean;

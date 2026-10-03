@@ -39,6 +39,8 @@ type
     procedure TestDecodeConsumesOscReply;
     procedure TestParseOsc11Background;
     procedure TestDecodeShiftEnter;
+    procedure TestDecodeBracketedPaste;
+    procedure TestDecodeBracketedPasteBuffersUntilComplete;
     procedure TestDecodeAltBackspace;
     { Resize debounce. }
     procedure TestResizeSettlerWaitsForAPause;
@@ -521,6 +523,60 @@ begin
     D.Feed(Data);
     AssertTrue('shift+enter is enter', D.Next(E) and (E.Key.Kind = kkEnter));
     AssertTrue('with the shift modifier', moShift in E.Key.Mods);
+  finally
+    D.Free;
+  end;
+end;
+
+procedure TTuiInputTest.TestDecodeBracketedPaste;
+var
+  D: TKeyDecoder;
+  E: TInputEvent;
+  S: AnsiString;
+  I: Integer;
+  Data: array of Byte;
+begin
+  D := TKeyDecoder.Create;
+  try
+    S := #27'[200~' + 'line one' + #10 + 'line two' + #27'[201~';
+    SetLength(Data, Length(S));
+    for I := 1 to Length(S) do
+      Data[I - 1] := Ord(S[I]);
+    D.Feed(Data);
+    AssertTrue('paste decoded', D.Next(E));
+    AssertEquals('paste kind', Ord(ikPaste), Ord(E.Kind));
+    AssertEquals('payload kept whole', 'line one' + #10 + 'line two',
+      string(E.Text));
+    AssertEquals('nothing left buffered', 0, D.Buffered);
+  finally
+    D.Free;
+  end;
+end;
+
+procedure TTuiInputTest.TestDecodeBracketedPasteBuffersUntilComplete;
+var
+  D: TKeyDecoder;
+  E: TInputEvent;
+  S: AnsiString;
+  I: Integer;
+  Data: array of Byte;
+begin
+  D := TKeyDecoder.Create;
+  try
+    S := #27'[200~abc';
+    SetLength(Data, Length(S));
+    for I := 1 to Length(S) do
+      Data[I - 1] := Ord(S[I]);
+    D.Feed(Data);
+    AssertFalse('incomplete paste waits', D.Next(E));
+
+    S := 'def' + #27'[201~';
+    SetLength(Data, Length(S));
+    for I := 1 to Length(S) do
+      Data[I - 1] := Ord(S[I]);
+    D.Feed(Data);
+    AssertTrue('paste completes', D.Next(E));
+    AssertEquals('payload', 'abcdef', string(E.Text));
   finally
     D.Free;
   end;

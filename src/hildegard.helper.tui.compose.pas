@@ -2,7 +2,9 @@ unit hildegard.helper.tui.compose;
 { The chat input box: a raised, heavy-topped panel wrapping a TTextEdit, so the
   caret, wrapping, word motion and selection come from the editor.
 
-  A plain Enter submits; Shift+Enter reaches the editor and adds a line. }
+  Shift+Enter submits (Ctrl+Enter too, where the terminal cannot report a
+  shifted Enter); a plain Enter adds a line, so a multi-line paste is safe. The
+  info line carries a primary-action CTA at the right, opposite the label. }
 
 {$mode delphi}{$H+}{$codepage utf8}
 
@@ -13,10 +15,13 @@ uses
   hildegard.helper.tui.base, hildegard.helper.tui.input,
   hildegard.helper.tui.surface, hildegard.helper.tui.widget,
   hildegard.helper.tui.text, hildegard.helper.tui.edit,
-  hildegard.helper.tui.theme;
+  hildegard.helper.tui.grapheme, hildegard.helper.tui.theme;
 
 type
   TComposeSubmittedEvent = procedure(const AText: string) of object;
+
+  { The primary action shown at the bottom right of the compose box. }
+  TCtaKind = (ckNone, ckSend, ckCancel);
 
   TComposeBox = class(TWidget)
   private
@@ -25,6 +30,7 @@ type
     FEdit: TTextEdit;
     FOnSubmit: TComposeSubmittedEvent;
     FOnChange: TNotifyEvent;
+    FCta: TCtaKind;
     function GetText: UnicodeString;
     procedure Changed(Sender: TObject);
   public
@@ -44,6 +50,9 @@ type
     property OnSubmit: TComposeSubmittedEvent read FOnSubmit write FOnSubmit;
     { Fired when the text or the caret changes, so the host re-arranges. }
     property OnChange: TNotifyEvent read FOnChange write FOnChange;
+    { The primary action to advertise; the host sets it from the run state and
+      whether the box has text. }
+    property Cta: TCtaKind read FCta write FCta;
   end;
 
 implementation
@@ -124,6 +133,7 @@ procedure TComposeBox.Render(const S: ISurface);
 var
   L, R, T, B, X, I: Integer;
   SurfaceAttr, Border: TAttr;
+  Key, Act: UnicodeString;
 begin
   if (FBounds.W < 4) or (FBounds.H < 4) then
     Exit;
@@ -158,23 +168,53 @@ begin
   { Info line. }
   PutText(S, L + 2, B - 1, UnicodeString(FInfo),
     OnBg(FTheme.Muted, FTheme.RaisedBg));
+
+  { Primary-action CTA at the right: the key dimmed, the action in the accent,
+    so it reads as the thing to press. Skipped when it would collide with the
+    label. }
+  if FCta <> ckNone then
+  begin
+    if FCta = ckSend then
+    begin
+      Key := 'shift+enter';
+      Act := ' send';
+    end
+    else
+    begin
+      Key := 'esc';
+      Act := ' cancel';
+    end;
+    X := R - 1 - (StringWidth(Key) + StringWidth(Act));
+    if X > L + 3 + StringWidth(UnicodeString(FInfo)) then
+    begin
+      PutText(S, X, B - 1, Key, OnBg(FTheme.Muted, FTheme.RaisedBg));
+      PutText(S, X + StringWidth(Key), B - 1, Act,
+        OnBg(FTheme.Accent, FTheme.RaisedBg));
+    end;
+  end;
 end;
 
 function TComposeBox.HandleEvent(const E: TInputEvent): Boolean;
 begin
   Result := False;
+  if E.Kind = ikPaste then
+    Exit(FEdit.HandleEvent(E));
   if E.Kind <> ikKey then
     Exit;
-  { A plain Enter submits; everything else, including Shift+Enter, belongs to
-    the editor. }
-  if (E.Key.Kind = kkEnter) and (not (moShift in E.Key.Mods)) then
+  { Shift+Enter submits; Ctrl+Enter is the fallback where the terminal cannot
+    report a shifted Enter. A plain Enter adds a line. }
+  if E.Key.Kind = kkEnter then
   begin
-    if Assigned(FOnSubmit) and (Trim(string(FEdit.Text)) <> '') then
+    if (moShift in E.Key.Mods) or (moCtrl in E.Key.Mods) then
     begin
-      FOnSubmit(string(FEdit.Text));
-      FEdit.Clear;
+      if Assigned(FOnSubmit) and (Trim(string(FEdit.Text)) <> '') then
+      begin
+        FOnSubmit(string(FEdit.Text));
+        FEdit.Clear;
+      end;
+      Exit(True);
     end;
-    Exit(True);
+    Exit(FEdit.HandleEvent(E));
   end;
   Result := FEdit.HandleEvent(E);
 end;

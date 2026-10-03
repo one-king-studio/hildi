@@ -82,6 +82,10 @@ const
   { Enable button-event and SGR-extended mouse reporting so clicks, wheel and
     drag motion reach the app instead of the terminal scrollback. }
   MouseOn = #27'[?1000h'#27'[?1002h'#27'[?1006h';
+  { Ask the terminal to wrap a paste in ESC [ 200 ~ ... ESC [ 201 ~ so a
+    multi-line paste is inserted literally instead of submitting on its first
+    newline. }
+  PasteOn = #27'[?2004h';
 var
   WS: TWinsize;
   Tio: termios;
@@ -106,6 +110,7 @@ begin
       FRawSet := True;
   end;
   fpWrite(1, MouseOn[1], Length(MouseOn));
+  fpWrite(1, PasteOn[1], Length(PasteOn));
   fpsignal(SIGTERM, @TermSignalHandler);
   fpsignal(SIGINT, @TermSignalHandler);
   fpsignal(SIGHUP, @TermSignalHandler);
@@ -124,7 +129,9 @@ const
     decode it, never push it, so a pop (CSI < u) would remove an entry owned by
     the shell and leave its keyboard state corrupted. }
   MouseOff = #27'[?1006l'#27'[?1002l'#27'[?1000l';
+  PasteOff = #27'[?2004l';
 begin
+  fpWrite(1, PasteOff[1], Length(PasteOff));
   fpWrite(1, MouseOff[1], Length(MouseOff));
   { Discard pending input (late key-release events, a late OSC reply) so it is
     not handed to the shell once we restore the terminal. }

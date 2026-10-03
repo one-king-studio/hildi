@@ -813,7 +813,16 @@ function TTextEdit.HandleEvent(const E: TInputEvent): Boolean;
 var
   Extend, Word: Boolean;
 begin
-  if (not FActive) or (E.Kind <> ikKey) then
+  if not FActive then
+    Exit(False);
+  if E.Kind = ikPaste then
+  begin
+    { A bracketed paste arrives whole; insert it literally, newlines and all. }
+    if E.Text <> '' then
+      InsertText(E.Text);
+    Exit(True);
+  end;
+  if E.Kind <> ikKey then
     Exit(False);
   Extend := moShift in E.Key.Mods;
   Word := moAlt in E.Key.Mods;

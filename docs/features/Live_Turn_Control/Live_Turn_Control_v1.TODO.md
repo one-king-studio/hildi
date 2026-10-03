@@ -5,33 +5,33 @@
 Phases are ordered so each can land and be tested on its own. Phase 1 is
 independent; phase 3 builds on it; phases 4-5 touch the loop and land last.
 
-## Phase 1 - Compact content (item 5)
+## Phase 1 - Compact content (item 5) - done
 
-- [ ] `src/hildegard.helper.tui.compact.pas`: `TCompactOptions`,
+- [x] `src/hildegard.helper.tui.compact.pas`: `TCompactOptions`,
       `DefaultCompactOptions`, `CompactLines`.
-- [ ] `tests/test_tui_compact.pas`: short text unchanged, long text elided
+- [x] `tests/test_tui_compact.pas`: short text unchanged, long text elided
       (2 + `...` + 3), blank edges trimmed, interior blanks kept.
-- [ ] Add the suite to `tests/hildegard_helper_tests.pas`.
+- [x] Add the suite to `tests/hildegard_helper_tests.pas`.
 
-## Phase 2 - Approval dialog: reason, wrapping, compaction (items 3, 4)
+## Phase 2 - Approval dialog: reason, wrapping, compaction (items 3, 4) - done
 
-- [ ] `hildegard.helper.approval`: add `TApprovalAsk.Reason`.
-- [ ] `hildegard.helper.command.tool` and `hildegard.helper.files`: fill
+- [x] `hildegard.helper.approval`: add `TApprovalAsk.Reason`.
+- [x] `hildegard.helper.command.tool` and `hildegard.helper.files`: fill
       `Reason` from the call's `reason` argument in `ApprovalAsks`.
-- [ ] `hildegard.helper.tui.approvalmodal`: draw `reason:` beneath the title;
+- [x] `hildegard.helper.tui.approvalmodal`: draw `reason:` beneath the title;
       wrap details; compact long details; clamp to `AAvail - 8`.
-- [ ] Tests: reason shown, details wrap, long details compact, edge padding.
+- [x] Tests: reason shown, details wrap, long details compact, edge padding.
 
-## Phase 3 - Compose: submit, paste, CTA (item 6)
+## Phase 3 - Compose: submit, paste, CTA (item 6) - done
 
-- [ ] `hildegard.helper.tui.input`: `ikPaste` kind and `Text` payload.
-- [ ] `hildegard.helper.tui.input.decode`: parse `ESC [ 200 ~ ... ESC [ 201 ~`.
-- [ ] `hildegard.helper.tui.input.terminal`: enable/disable bracketed paste
+- [x] `hildegard.helper.tui.input`: `ikPaste` kind and `Text` payload.
+- [x] `hildegard.helper.tui.input.decode`: parse `ESC [ 200 ~ ... ESC [ 201 ~`.
+- [x] `hildegard.helper.tui.input.terminal`: enable/disable bracketed paste
       around the run.
-- [ ] `hildegard.helper.tui.edit`: insert `ikPaste` text literally.
-- [ ] `hildegard.helper.tui.compose`: Shift+Enter/Ctrl+Enter submit; `Cta`.
-- [ ] `hildegard.helper.tui.chatpanel` / `harness.app`: set the CTA from state.
-- [ ] Tests: submit keys, newline, paste, CTA states, decoder paste.
+- [x] `hildegard.helper.tui.edit`: insert `ikPaste` text literally.
+- [x] `hildegard.helper.tui.compose`: Shift+Enter/Ctrl+Enter submit; `Cta`.
+- [x] `hildegard.helper.tui.chatpanel` / `harness.app`: set the CTA from state.
+- [x] Tests: submit keys, newline, paste, CTA states, decoder paste.
 
 ## Phase 4 - Immediate cancel (item 1)
 

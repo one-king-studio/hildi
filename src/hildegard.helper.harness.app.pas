@@ -61,6 +61,8 @@ type
     procedure CloseModal;
     procedure FinishTurn(AState: TPanelState; const ALabel: string);
     procedure SetState(AKind: TPanelState; const ALabel: string);
+    { The compose's primary-action hint, from the run state and the box. }
+    procedure UpdateCta;
     procedure UpdateStats;
     procedure HandleEscape(Sender: TObject);
     function ComposeIsEmpty: Boolean;
@@ -245,6 +247,7 @@ begin
   FPanel.SetStatus(FStatusText);
   FHintsText := CtaHints;
   FPanel.SetHints(FHintsText);
+  UpdateCta;
   Result := TAppShell.Create(FPanel, Quit, HandleEscape, ComposeIsEmpty);
 end;
 
@@ -255,6 +258,7 @@ end;
 
 procedure THarnessApp.Invalidate(Sender: TObject);
 begin
+  UpdateCta;
   FApp.Invalidate;
 end;
 
@@ -276,7 +280,18 @@ begin
     are at its right and the status bar keeps the workspace and the metrics. }
   FStateLabel := ALabel;
   FPanel.SetState(AKind, ALabel);
+  UpdateCta;
   FApp.Invalidate;
+end;
+
+procedure THarnessApp.UpdateCta;
+begin
+  if not ComposeIsEmpty then
+    FPanel.SetCta(ckSend)
+  else if FBusy then
+    FPanel.SetCta(ckCancel)
+  else
+    FPanel.SetCta(ckNone);
 end;
 
 procedure THarnessApp.UpdateStats;

@@ -26,9 +26,12 @@ type
     procedure SetUp; override;
   published
     procedure TestNeededHeightGrowsWithWrappedText;
-    procedure TestEnterSubmitsAndClears;
-    procedure TestShiftEnterAddsALine;
+    procedure TestShiftEnterSubmitsAndClears;
+    procedure TestCtrlEnterSubmits;
+    procedure TestEnterAddsALine;
     procedure TestEmptySubmitIsIgnored;
+    procedure TestPasteInsertsLiterallyWithoutSubmit;
+    procedure TestCtaShowsSendAndCancel;
     procedure TestInfoLineRenders;
     procedure TestCaretBlinkIsForwarded;
   end;
@@ -91,7 +94,7 @@ begin
   end;
 end;
 
-procedure TTuiComposeTest.TestEnterSubmitsAndClears;
+procedure TTuiComposeTest.TestShiftEnterSubmitsAndClears;
 var
   C: TComposeBox;
   I: Integer;
@@ -102,7 +105,7 @@ begin
     C.Arrange(Rc(0, 0, 30, 5));
     for I := 1 to 3 do
       C.HandleEvent(Ch('abc'[I]));
-    AssertTrue('enter handled', C.HandleEvent(Key(kkEnter)));
+    AssertTrue('shift+enter handled', C.HandleEvent(Key(kkEnter, [moShift])));
     AssertEquals('submitted once', 1, FSubmits);
     AssertEquals('submitted the text', 'abc', FSubmitted);
     AssertEquals('box cleared', '', string(C.Text));
@@ -111,7 +114,24 @@ begin
   end;
 end;
 
-procedure TTuiComposeTest.TestShiftEnterAddsALine;
+procedure TTuiComposeTest.TestCtrlEnterSubmits;
+var
+  C: TComposeBox;
+begin
+  C := TComposeBox.Create(FTheme, 'info');
+  try
+    C.OnSubmit := OnSubmit;
+    C.Arrange(Rc(0, 0, 30, 5));
+    C.HandleEvent(Ch('a'));
+    AssertTrue('ctrl+enter handled', C.HandleEvent(Key(kkEnter, [moCtrl])));
+    AssertEquals('submitted once', 1, FSubmits);
+    AssertEquals('submitted the text', 'a', FSubmitted);
+  finally
+    C.Free;
+  end;
+end;
+
+procedure TTuiComposeTest.TestEnterAddsALine;
 var
   C: TComposeBox;
   I: Integer;
@@ -122,7 +142,7 @@ begin
     C.Arrange(Rc(0, 0, 30, 5));
     for I := 1 to 2 do
       C.HandleEvent(Ch('ab'[I]));
-    AssertTrue('shift+enter handled', C.HandleEvent(Key(kkEnter, [moShift])));
+    AssertTrue('enter handled', C.HandleEvent(Key(kkEnter)));
     AssertEquals('not submitted', 0, FSubmits);
     AssertEquals('a line was added', 'ab' + #10, string(C.Text));
   finally
@@ -139,10 +159,64 @@ begin
     C.OnSubmit := OnSubmit;
     C.Arrange(Rc(0, 0, 30, 5));
     C.HandleEvent(Ch(' '));
-    C.HandleEvent(Key(kkEnter));
+    C.HandleEvent(Key(kkEnter, [moShift]));
     AssertEquals('whitespace-only is not submitted', 0, FSubmits);
   finally
     C.Free;
+  end;
+end;
+
+procedure TTuiComposeTest.TestPasteInsertsLiterallyWithoutSubmit;
+var
+  C: TComposeBox;
+  E: TInputEvent;
+begin
+  C := TComposeBox.Create(FTheme, 'info');
+  try
+    C.OnSubmit := OnSubmit;
+    C.Arrange(Rc(0, 0, 30, 8));
+    E := Default(TInputEvent);
+    E.Kind := ikPaste;
+    E.Text := 'line one' + #10 + 'line two';
+    AssertTrue('paste handled', C.HandleEvent(E));
+    AssertEquals('a paste never submits', 0, FSubmits);
+    AssertEquals('inserted literally', 'line one' + #10 + 'line two',
+      string(C.Text));
+  finally
+    C.Free;
+  end;
+end;
+
+procedure TTuiComposeTest.TestCtaShowsSendAndCancel;
+var
+  C: TComposeBox;
+  S: TSurfaceMemory;
+begin
+  S := TSurfaceMemory.Create(40, 5);
+  try
+    C := TComposeBox.Create(FTheme, 'Hildegard');
+    try
+      C.Arrange(Rc(0, 0, 40, 5));
+
+      C.Cta := ckNone;
+      C.Render(S);
+      AssertEquals('no CTA when idle and empty', False,
+        Pos('send', S.RowText(3, 0, 40)) > 0);
+
+      C.Cta := ckSend;
+      C.Render(S);
+      AssertTrue('send CTA shown',
+        Pos('shift+enter send', S.RowText(3, 0, 40)) > 0);
+
+      C.Cta := ckCancel;
+      C.Render(S);
+      AssertTrue('cancel CTA shown',
+        Pos('esc cancel', S.RowText(3, 0, 40)) > 0);
+    finally
+      C.Free;
+    end;
+  finally
+    S.Free;
   end;
 end;
 
