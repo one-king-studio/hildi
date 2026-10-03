@@ -80,27 +80,30 @@ Cancel (immediate, no trace)
       response.
 - [ ] A successful cancel persists **no message** for the aborted turn: the
       user prompt, any streamed assistant text, and any reasoning are not kept.
-- [ ] A successful cancel removes the aborted turn from the transcript; the
-      live view and a later resume agree that the turn never happened.
+- [ ] A successful cancel keeps the turn row, marked `tsCancelled`, with no
+      messages; the live view and a later resume agree there were no messages.
 - [ ] The cancelled turn's last user prompt is **prepended** to the current
       compose text (not appended, and not replacing what is already typed).
-- [ ] A cancel after a tool call has been made, or after the loop has concluded,
-      is not a "successful cancel" and must not corrupt the ledger (exact
-      behaviour decided in the SPEC; the paired tool call/result invariant
-      holds).
+- [ ] A cancel after a tool call has been made, or after the loop has
+      concluded, is not a "successful cancel": it falls back to stopping at the
+      next loop boundary, preserving the tool call/result pair and recording the
+      turn as cancelled.
+- [ ] The cancel sequence stays Esc-Esc ("press esc again to cancel"); the CTA
+      label is shorthand for it.
 - [ ] The cancel keybinding is shown in the CTA when a turn is in flight (see
       the compose CTA below).
 
 Prompt queue (inject context mid-flight)
 
-- [ ] While a turn is in flight, the operator can queue one or more prompts;
-      they are held until the loop reaches a boundary.
+- [ ] While a turn is in flight, the operator queues a prompt with Shift+Enter
+      (the same key that sends when idle); one or more prompts are held until
+      the loop reaches a boundary.
 - [ ] Queued prompts are drained at loop boundaries: before the next request to
       the provider, between reasoning and a request, and before tool calls.
-- [ ] When a queued prompt is present before a tool call, the tool-call request
-      is **dropped from the message payload** and the queued prompt is used
-      instead; the agent may re-issue the tool call in a later response if it
-      still judges it appropriate.
+- [ ] When a queued prompt is present before a tool call, the tool call is
+      dropped: the assistant's tool-call message is **deleted from the store**,
+      no tool is executed, and the queued prompt is used instead. The agent may
+      re-issue the call in a later response if it still judges it appropriate.
 - [ ] Multiple queued prompts are appended together, in order, as multiple user
       messages in one request.
 - [ ] If the loop concludes (a proper stop) with prompts still queued, those
@@ -137,7 +140,9 @@ Compact content helper
 
 Compose: submit, paste, CTA
 
-- [ ] The compose box submits on **Shift+Enter**; plain Enter inserts a newline.
+- [ ] The compose box submits on **Shift+Enter**, with **Ctrl+Enter** as a
+      fallback for terminals that cannot report Shift+Enter; plain Enter inserts
+      a newline.
 - [ ] Bracketed paste mode is enabled while the TUI runs and disabled on exit,
       so a pasted multi-line block is inserted as text and never submits.
 - [ ] A pasted block is inserted literally (newlines preserved) at the caret.
@@ -260,8 +265,9 @@ Compose: submit, paste, CTA
   approval modal, and `TTextEdit` exist. The new pieces are a mid-stream cancel
   check, a queue drain at those boundaries, one reason field, one compaction
   helper, bracketed paste, and a CTA label.
-- **Open questions** (see the operator): cancel behaviour once a tool call has
-  been made; whether a cancelled turn row is deleted or kept as `tsCancelled`
-  with no messages; the exact queue entry key while in-flight; whether a dropped
-  tool call is deleted from the store or only excluded from the request; and the
-  Shift+Enter fallback on terminals that cannot report it.
+- **Decisions:** a cancel after a tool call falls back to the next loop boundary
+  (the tool call/result pair is preserved); a successful early cancel keeps a
+  `tsCancelled` turn row with no messages; cancel stays Esc-Esc; Shift+Enter
+  queues while in-flight and sends when idle; a dropped tool call is deleted
+  from the store; Ctrl+Enter is the submit fallback where Shift+Enter cannot be
+  reported.

@@ -19,7 +19,8 @@ uses
   test_tui_approvalmodal, test_harness_session,
   test_harness_app, test_file_tool, test_tui_encoder, test_tui_widgets,
   test_tui_animation, test_tui_grapheme, test_tui_edit, test_tui_chat,
-  test_tui_compose, test_tui_chatpanel, test_recall_tool, test_harness_stats;
+  test_tui_compose, test_tui_chatpanel, test_recall_tool, test_harness_stats,
+  test_tui_compact;
 
 var
   Runner: TTestRunner;
