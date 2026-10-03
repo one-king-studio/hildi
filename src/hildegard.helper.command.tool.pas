@@ -324,7 +324,8 @@ function TCommandTool.ApprovalAsks(
 var
   Data: TJSONData;
   Root: TJSONObject;
-  Command: string;
+  Command, Reason, ReasonError: string;
+  I: Integer;
 begin
   Result := nil;
   Data := nil;
@@ -341,6 +342,12 @@ begin
       if not ReadStringArg(Root, 'command', Command) or (Trim(Command) = '') then
         Exit;
       Result := BuildAsks(Command, FConfig.Shell.Syntax);
+      { The reason is already in the call's arguments; carry it so the dialog
+        can show why the model wants to run this. }
+      Reason := '';
+      ExtractToolReason(AArgumentsJson, Reason, ReasonError);
+      for I := 0 to High(Result) do
+        Result[I].Reason := Reason;
     finally
       Data.Free;
     end;

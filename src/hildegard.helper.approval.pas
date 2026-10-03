@@ -54,6 +54,9 @@ type
 
   TApprovalAsk = record
     Summary: string;
+    { The model's stated reason for the call, shown in the dialog. '' when the
+      tool could not read one; the dialog then shows a placeholder. }
+    Reason: string;
     Subject: TApprovalSubject;
     Options: TApprovalOptionArray;
   end;

@@ -30,8 +30,8 @@ type
     FWorkspace: TWorkspace;
     function RelOf(const AAbs: string): string;
     function ResolveChecked(const ARel: string; out AAbs, AErr: string): Boolean;
-    function Approve(const ARef, ASummary: string; const AParams: TApprovalParams;
-      out AError: string): Boolean;
+    function Approve(const ARef, ASummary, AReason: string;
+      const AParams: TApprovalParams; out AError: string): Boolean;
     function ParseArgs(const AJson: string; out AData: TJSONData;
       out ARoot: TJSONObject; out AError: string): Boolean;
     function CapText(const AText: string; ALimit: Integer): string;
@@ -382,7 +382,17 @@ begin
   Result := True;
 end;
 
-function TFileTool.Approve(const ARef, ASummary: string;
+{ The model's stated reason for the call, read from its arguments. '' when the
+  tool cannot read one; the dialog then shows a placeholder. }
+function ToolReasonOf(const AJson: string): string;
+var
+  Err: string;
+begin
+  Result := '';
+  ExtractToolReason(AJson, Result, Err);
+end;
+
+function TFileTool.Approve(const ARef, ASummary, AReason: string;
   const AParams: TApprovalParams; out AError: string): Boolean;
 var
   Ask: TApprovalAsk;
@@ -415,6 +425,7 @@ begin
   end;
   Ask := Default(TApprovalAsk);
   Ask.Summary := ASummary;
+  Ask.Reason := AReason;
   Ask.Subject.Ref := ARef;
   Ask.Subject.Params := AParams;
   AddOption('once', 'allow once', False, nil, False);
@@ -472,7 +483,8 @@ begin
     if not ResolveChecked(PathArg, Abs, AError) then
       Exit(False);
     Rel := RelOf(Abs);
-    if not Approve('file:read', 'read ' + Rel, [Rel], AError) then
+    if not Approve('file:read', 'read ' + Rel, ToolReasonOf(AArgumentsJson),
+      [Rel], AError) then
       Exit(False);
     if DirectoryExists(Abs) then
     begin
@@ -544,7 +556,8 @@ begin
     if not ResolveChecked(PathArg, Abs, AError) then
       Exit(False);
     Rel := RelOf(Abs);
-    if not Approve('file:write', 'write ' + Rel, [Rel], AError) then
+    if not Approve('file:write', 'write ' + Rel, ToolReasonOf(AArgumentsJson),
+      [Rel], AError) then
       Exit(False);
     ForceDirectories(ExtractFileDir(Abs));
     if not WriteAtomic(Abs, Content, AError) then
@@ -593,7 +606,8 @@ begin
     if not ResolveChecked(PathArg, Abs, AError) then
       Exit(False);
     Rel := RelOf(Abs);
-    if not Approve('file:edit', 'edit ' + Rel, [Rel], AError) then
+    if not Approve('file:edit', 'edit ' + Rel, ToolReasonOf(AArgumentsJson),
+      [Rel], AError) then
       Exit(False);
     if not FileExists(Abs) then
     begin
@@ -675,7 +689,8 @@ begin
       Exit(False);
     Rel := RelOf(Abs);
     Recursive := JsonBool(Root, 'recursive', False);
-    if not Approve('file:list', 'list ' + Rel, [Rel], AError) then
+    if not Approve('file:list', 'list ' + Rel, ToolReasonOf(AArgumentsJson),
+      [Rel], AError) then
       Exit(False);
     if not DirectoryExists(Abs) then
     begin
@@ -726,7 +741,7 @@ begin
       Exit(False);
     Rel := RelOf(Abs);
     if not Approve('file:glob', 'glob ' + Pattern + ' in ' + Rel,
-      [Pattern, Rel], AError) then
+      ToolReasonOf(AArgumentsJson), [Pattern, Rel], AError) then
       Exit(False);
     if not DirectoryExists(Abs) then
     begin
@@ -789,7 +804,7 @@ begin
       Exit(False);
     Rel := RelOf(Abs);
     if not Approve('file:grep', 'grep ' + Pattern + ' in ' + Rel,
-      [Pattern, Rel], AError) then
+      ToolReasonOf(AArgumentsJson), [Pattern, Rel], AError) then
       Exit(False);
 
     Files := TStringList.Create;

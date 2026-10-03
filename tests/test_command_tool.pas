@@ -66,6 +66,7 @@ type
     procedure TestPromptAnyAllowsOtherArgs;
     procedure TestPromptPrefixScopesSubtree;
     procedure TestApprovalAsksPerSegment;
+    procedure TestApprovalAsksCarryTheReason;
     procedure TestOutputIsTruncatedWithMarker;
     procedure TestTimeoutReports124;
     procedure TestHandlerNeverRaises;
@@ -401,6 +402,23 @@ begin
     AssertEquals('second ref', 'run_command:uname', Asks[1].Subject.Ref);
     AssertEquals('second summary', 'uname -a', Asks[1].Summary);
     AssertTrue('has once option', Asks[0].Options[0].Key = 'once');
+  finally
+    Tool.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestApprovalAsksCarryTheReason;
+var
+  Tool: TCommandTool;
+  Asks: TApprovalAskArray;
+begin
+  Tool := BuildTool(nil, 0);
+  try
+    Asks := Tool.ApprovalAsks(
+      '{"command":"rm -rf build","reason":"free the build dir"}');
+    AssertEquals('one ask', 1, Length(Asks));
+    AssertEquals('reason carried into the ask', 'free the build dir',
+      Asks[0].Reason);
   finally
     Tool.Free;
   end;

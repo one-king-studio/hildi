@@ -68,6 +68,7 @@ of sparkles in a bright color.
 
 ```
 ╭─ Approval needed ───────────────────────────────────╮
+│ reason: free the build dir before the deploy        │
 │ tool details go here with darker background         │
 │                                                     │
 │ → allow once                                     1  │
@@ -89,8 +90,14 @@ The above example showcases the approval modal. A few things to note about it.
 5. The choice keybindings are right aligned and dimmed
 6. The bullets and the 'scope' label are dimmer than the choices
 7. The scope keybindings are right aligned and dimmed
+8. The model's `reason:` sits beneath the title, its label dimmed and its text
+   normal; when there is no reason the value is a dimmed placeholder
+9. The tool details sit on the darker (sunken) background, wrapped to the
+   dialog's width and compacted when long, so a big command cannot grow the
+   dialog without bound
+10. The dialog keeps four columns and four rows clear of the screen edge
 
 Overall there should be 3 font color choices
 1. normal for bullets and labels
 2. dimmed for keybindings
-3. bright for active values
+3. the soft accent for active values (a quieter blue, not the bright accent)
