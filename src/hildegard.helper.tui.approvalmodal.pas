@@ -97,6 +97,8 @@ const
   EdgePad = 4;
   { Width of the 'reason: ' label, before the reason text. }
   ReasonLabelW = 8;
+  { Inline padding inside the sunken details band, on each side. }
+  DetailPad = 2;
   { What the pointer is over. }
   HoverNone = -1;
   HitAccept = -2;
@@ -254,10 +256,10 @@ begin
 end;
 
 { The wrap widths for the reason text and the details band inside a box of
-  ABoxW columns. }
+  ABoxW columns. The details carry an inline pad on each side. }
 procedure ContentWidths(const ABoxW: Integer; out AReasonW, ADetailW: Integer);
 begin
-  ADetailW := ABoxW - 4;             // inner, minus a column each side
+  ADetailW := ABoxW - 4 - 2 * DetailPad;
   AReasonW := ABoxW - 4 - ReasonLabelW;
   if ADetailW < 1 then
     ADetailW := 1;
@@ -300,8 +302,8 @@ begin
     R := 1;
   if D < 1 then
     D := 1;
-  { Top border, the reason rows, the details rows, and one blank. }
-  Result := FBounds.Y + 1 + R + D + 1;
+  { Top border, the reason rows, a blank, the details rows, and one blank. }
+  Result := FBounds.Y + 1 + R + 1 + D + 1;
 end;
 
 function TApprovalModal.HitTest(AX, AY: Integer): Integer;
@@ -381,7 +383,7 @@ begin
     R := 1;
   if D < 1 then
     D := 1;
-  Result.H := R + D + Length(FAsk.Options) + RowsAfterOptions + 2;
+  Result.H := R + D + Length(FAsk.Options) + RowsAfterOptions + 3;
   MaxH := AAvail.H - 2 * EdgePad;
   if MaxH < 7 then
     MaxH := AAvail.H;
@@ -469,7 +471,9 @@ begin
     Inc(Row);
   end;
 
-  { Tool details on the sunken background, wrapped and compacted. }
+  { A blank line, then the tool details on the sunken background, wrapped and
+    compacted, with an inline pad on each side. }
+  Inc(Row);
   if Row < B then
   begin
     DetailAttr := OnBg(FTheme.Text, FTheme.SunkenBg);
@@ -478,7 +482,7 @@ begin
       if Row >= B then
         Break;
       S.FillRect(Rc(InnerL, Row, InnerR - InnerL + 1, 1), DetailAttr);
-      Text(InnerL + 1, Row, DetailLines[I], DetailAttr);
+      Text(InnerL + DetailPad, Row, DetailLines[I], DetailAttr);
       Inc(Row);
     end;
   end;

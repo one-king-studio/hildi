@@ -74,7 +74,8 @@ settles into a collapsed `Thought` block that expands like any other.
 ```
 ╭─ Approval needed ───────────────────────────────────╮
 │ reason: free the build dir before the deploy        │
-│ tool details go here with darker background         │
+│                                                     │
+│   tool details go here with darker background       │
 │                                                     │
 │ → allow once                                     1  │
 │ ◦ always this exact command                      2  │
@@ -100,7 +101,11 @@ The above example showcases the approval modal. A few things to note about it.
 9. The tool details sit on the darker (sunken) background, wrapped to the
    dialog's width and compacted when long, so a big command cannot grow the
    dialog without bound
-10. The dialog keeps four columns and four rows clear of the screen edge
+10. A blank line separates the reason from the details, and the details carry
+    inline padding on each side
+11. The dialog keeps four columns and four rows clear of the screen edge
+12. The details are the tool's own summary of the call (`read test.txt:5-30`),
+    not a generic dump
 
 Overall there should be 3 font color choices
 1. normal for bullets and labels

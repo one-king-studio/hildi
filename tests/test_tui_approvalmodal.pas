@@ -157,9 +157,9 @@ begin
     Modal.Arrange(Rc(40, MeasuredHeight(Modal)));
     Modal.Render(Surface);
     AssertTrue('summary in the details band',
-      Pos('rm -rf build/', Surface.RowText(2, 0, 40)) > 0);
-    AssertTrue('option 1 shown', Pos('Option 1', Surface.RowText(4, 0, 40)) > 0);
-    AssertTrue('option 2 shown', Pos('Option 2', Surface.RowText(5, 0, 40)) > 0);
+      Pos('rm -rf build/', Surface.RowText(3, 0, 40)) > 0);
+    AssertTrue('option 1 shown', Pos('Option 1', Surface.RowText(5, 0, 40)) > 0);
+    AssertTrue('option 2 shown', Pos('Option 2', Surface.RowText(6, 0, 40)) > 0);
   finally
     Modal.Free;
     Surface.Free;
@@ -181,7 +181,7 @@ begin
     AssertTrue('rounded top-left (U+256D)',
       Ord(Surface.CellAt(0, 0).Ch[1]) = $256D);
     AssertTrue('heavy bottom edge (U+2550)',
-      Ord(Surface.CellAt(10, 10).Ch[1]) = $2550);
+      Ord(Surface.CellAt(10, 11).Ch[1]) = $2550);
   finally
     Modal.Free;
     Surface.Free;
@@ -215,14 +215,14 @@ begin
   try
     Modal.Arrange(Rc(40, MeasuredHeight(Modal)));
     Modal.Render(Surface);
-    { Option 2 (row 5) is unselected and normal. }
+    { Option 2 (row 6) is unselected and normal. }
     AssertEquals('unselected is normal', DarkTheme.Text.Fg,
-      Surface.CellAt(4, 5).Attr.Fg);
+      Surface.CellAt(4, 6).Attr.Fg);
 
-    AssertTrue('hover handled', Modal.HandleEvent(Mouse(5, 5, mbNone)));
+    AssertTrue('hover handled', Modal.HandleEvent(Mouse(5, 6, mbNone)));
     Modal.Render(Surface);
     AssertEquals('hovered option brightens', DarkTheme.AccentSoft.Fg,
-      Surface.CellAt(4, 5).Attr.Fg);
+      Surface.CellAt(4, 6).Attr.Fg);
   finally
     Modal.Free;
     Surface.Free;
@@ -237,8 +237,8 @@ begin
   try
     Modal.Arrange(Rc(40, MeasuredHeight(Modal)));
     Modal.OnChoose := FRecorder.OnChoose;
-    { Row 5 is the second option. }
-    AssertTrue('click handled', Modal.HandleEvent(Mouse(6, 5, mbLeft)));
+    { Row 6 is the second option. }
+    AssertTrue('click handled', Modal.HandleEvent(Mouse(6, 6, mbLeft)));
     AssertEquals('clicked option selected', 1, Modal.Selected);
     AssertEquals('clicking does not accept', 0, FRecorder.Count);
     AssertFalse('not answered', Modal.Answered);
@@ -255,8 +255,8 @@ begin
   try
     Modal.Arrange(Rc(40, MeasuredHeight(Modal)));
     Modal.OnChoose := FRecorder.OnChoose;
-    { The footer is row 9: accept spans columns 14..25, deny 29..36. }
-    AssertTrue('accept click', Modal.HandleEvent(Mouse(18, 9, mbLeft)));
+    { The footer is row 10: accept spans columns 14..25, deny 29..36. }
+    AssertTrue('accept click', Modal.HandleEvent(Mouse(18, 10, mbLeft)));
     AssertEquals('accepted', 1, FRecorder.Count);
     AssertTrue('allowed', FRecorder.Last.Allowed);
   finally
@@ -268,7 +268,7 @@ begin
   try
     Modal.Arrange(Rc(40, MeasuredHeight(Modal)));
     Modal.OnChoose := FRecorder.OnChoose;
-    AssertTrue('deny click', Modal.HandleEvent(Mouse(32, 9, mbLeft)));
+    AssertTrue('deny click', Modal.HandleEvent(Mouse(32, 10, mbLeft)));
     AssertEquals('denied', 1, FRecorder.Count);
     AssertFalse('denied', FRecorder.Last.Allowed);
   finally
@@ -288,9 +288,9 @@ begin
     Modal.Render(Surface);
     { The footer ends two columns short of the border at column 39. }
     AssertEquals('last action character', 'y',
-      string(Surface.CellAt(36, 9).Ch));
-    AssertEquals('one column clear', '', Surface.CellAt(37, 9).Ch);
-    AssertEquals('two columns clear', '', Surface.CellAt(38, 9).Ch);
+      string(Surface.CellAt(36, 10).Ch));
+    AssertEquals('one column clear', '', Surface.CellAt(37, 10).Ch);
+    AssertEquals('two columns clear', '', Surface.CellAt(38, 10).Ch);
   finally
     Modal.Free;
     Surface.Free;
@@ -308,18 +308,18 @@ begin
     Modal.Arrange(Rc(40, MeasuredHeight(Modal)));
     Modal.Render(Surface);
     AssertTrue('selected has an arrow',
-      Pos('→ Option 1', Surface.RowText(4, 0, 40)) > 0);
+      Pos('→ Option 1', Surface.RowText(5, 0, 40)) > 0);
     AssertTrue('unselected has a bullet',
-      Pos('◦ Option 2', Surface.RowText(5, 0, 40)) > 0);
+      Pos('◦ Option 2', Surface.RowText(6, 0, 40)) > 0);
     AssertEquals('selected text uses the soft accent', DarkTheme.AccentSoft.Fg,
-      Surface.CellAt(4, 4).Attr.Fg);
+      Surface.CellAt(4, 5).Attr.Fg);
 
     Modal.HandleEvent(Key(kkDown));
     Modal.Render(Surface);
     AssertTrue('arrow moved',
-      Pos('→ Option 2', Surface.RowText(5, 0, 40)) > 0);
+      Pos('→ Option 2', Surface.RowText(6, 0, 40)) > 0);
     AssertTrue('the first is now a bullet',
-      Pos('◦ Option 1', Surface.RowText(4, 0, 40)) > 0);
+      Pos('◦ Option 1', Surface.RowText(5, 0, 40)) > 0);
   finally
     Modal.Free;
     Surface.Free;
@@ -339,12 +339,12 @@ begin
     { The box is 40 wide and right-aligned keys keep two columns clear of the
       border at 39, so the option key is at 36 and the scope keys start at 26. }
     AssertEquals('option key right aligned', '1',
-      string(Surface.CellAt(36, 4).Ch));
+      string(Surface.CellAt(36, 5).Ch));
     AssertTrue('option key is dim',
-      sfDim in Surface.CellAt(36, 4).Attr.Style);
+      sfDim in Surface.CellAt(36, 5).Attr.Style);
     AssertTrue('scope keys are right aligned and dim',
-      (Surface.CellAt(26, 7).Ch = 't') and
-      (sfDim in Surface.CellAt(26, 7).Attr.Style));
+      (Surface.CellAt(26, 8).Ch = 't') and
+      (sfDim in Surface.CellAt(26, 8).Attr.Style));
   finally
     Modal.Free;
     Surface.Free;
@@ -362,11 +362,11 @@ begin
     Modal.Arrange(Rc(40, MeasuredHeight(Modal)));
     Modal.Render(Surface);
     AssertTrue('scope line',
-      Pos('scope: workspace', Surface.RowText(7, 0, 40)) > 0);
+      Pos('scope: workspace', Surface.RowText(8, 0, 40)) > 0);
     AssertTrue('scope keys',
-      Pos('tab / g w s', Surface.RowText(7, 0, 40)) > 0);
-    AssertTrue('footer accept', Pos('enter accept', Surface.RowText(9, 0, 40)) > 0);
-    AssertTrue('footer deny', Pos('esc deny', Surface.RowText(9, 0, 40)) > 0);
+      Pos('tab / g w s', Surface.RowText(8, 0, 40)) > 0);
+    AssertTrue('footer accept', Pos('enter accept', Surface.RowText(10, 0, 40)) > 0);
+    AssertTrue('footer deny', Pos('esc deny', Surface.RowText(10, 0, 40)) > 0);
   finally
     Modal.Free;
     Surface.Free;
@@ -384,10 +384,10 @@ begin
     Modal.Arrange(Rc(40, MeasuredHeight(Modal)));
     Modal.Render(Surface);
     AssertEquals('details band on the sunken background',
-      DarkTheme.SunkenBg, Surface.CellAt(5, 2).Attr.Bg);
+      DarkTheme.SunkenBg, Surface.CellAt(5, 3).Attr.Bg);
     { The modal is drawn after the dim, so its own cells are not dimmed. }
     AssertFalse('the modal is not dimmed',
-      sfDim in Surface.CellAt(5, 2).Attr.Style);
+      sfDim in Surface.CellAt(5, 3).Attr.Style);
   finally
     Modal.Free;
     Surface.Free;
@@ -454,7 +454,7 @@ begin
       Pos('ffff gggg hhhh iiii jjjj', Surface.RowText(2, 0, 40)) > 0);
     { Two reason rows push the options down. }
     AssertTrue('options below the reason',
-      Pos('Option 1', Surface.RowText(5, 0, 40)) > 0);
+      Pos('Option 1', Surface.RowText(6, 0, 40)) > 0);
   finally
     Modal.Free;
     Surface.Free;
@@ -475,12 +475,12 @@ begin
     Modal.Arrange(Rc(40, MeasuredHeight(Modal)));
     Modal.Render(Surface);
     AssertTrue('first detail line',
-      Pos('aaaa bbbb cccc dddd eeee', Surface.RowText(2, 0, 40)) > 0);
+      Pos('aaaa bbbb cccc dddd eeee', Surface.RowText(3, 0, 40)) > 0);
     AssertTrue('wrapped detail line',
-      Pos('hhhh iiii jjjj', Surface.RowText(3, 0, 40)) > 0);
-    { Two detail rows: the first option is at row 5. }
+      Pos('hhhh iiii jjjj', Surface.RowText(4, 0, 40)) > 0);
+    { Two detail rows: the first option is at row 6. }
     AssertTrue('options below the details',
-      Pos('Option 1', Surface.RowText(5, 0, 40)) > 0);
+      Pos('Option 1', Surface.RowText(6, 0, 40)) > 0);
   finally
     Modal.Free;
     Surface.Free;
@@ -509,14 +509,14 @@ begin
   try
     Modal.Arrange(Rc(40, MeasuredHeight(Modal)));
     Modal.Render(Surface);
-    AssertTrue('first kept line', Pos('d1', Surface.RowText(2, 0, 40)) > 0);
-    AssertTrue('second kept line', Pos('d2', Surface.RowText(3, 0, 40)) > 0);
-    AssertTrue('ellipsis', Pos('...', Surface.RowText(4, 0, 40)) > 0);
-    AssertTrue('first tail line', Pos('d10', Surface.RowText(5, 0, 40)) > 0);
-    AssertTrue('last tail line', Pos('d12', Surface.RowText(7, 0, 40)) > 0);
-    { Six detail rows: the first option is at row 9. }
+    AssertTrue('first kept line', Pos('d1', Surface.RowText(3, 0, 40)) > 0);
+    AssertTrue('second kept line', Pos('d2', Surface.RowText(4, 0, 40)) > 0);
+    AssertTrue('ellipsis', Pos('...', Surface.RowText(5, 0, 40)) > 0);
+    AssertTrue('first tail line', Pos('d10', Surface.RowText(6, 0, 40)) > 0);
+    AssertTrue('last tail line', Pos('d12', Surface.RowText(8, 0, 40)) > 0);
+    { Six detail rows: the first option is at row 10. }
     AssertTrue('options below the details',
-      Pos('Option 1', Surface.RowText(9, 0, 40)) > 0);
+      Pos('Option 1', Surface.RowText(10, 0, 40)) > 0);
   finally
     Modal.Free;
     Surface.Free;

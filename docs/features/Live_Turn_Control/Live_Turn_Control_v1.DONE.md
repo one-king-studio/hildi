@@ -115,3 +115,9 @@ of its call puts it in the result itself - `run_command` now returns a
 shell-transcript form (`$ <command>`, a blank line, the output, and `[exit N]`
 when non-zero), and `read_file` names the file and its size above the content
 (or `[binary file: N bytes]` when it cannot read it).
+
+## Follow-up: approval ask presentation (2026-10-03)
+
+The approval dialog's details are the tool's own summary of the call, so
+`read_file` says `read test.txt:5-30` for a ranged read. A blank line now
+separates the reason from the details, and the details carry inline padding.

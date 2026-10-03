@@ -454,6 +454,17 @@ begin
     Result := AText;
 end;
 
+{ The ':start-end' suffix for a ranged read, or '' for the whole file. }
+function ReadRangeLabel(AOffset, ALimit: Integer): string;
+begin
+  if (AOffset <= 1) and (ALimit <= 0) then
+    Result := ''
+  else if ALimit > 0 then
+    Result := ':' + IntToStr(AOffset) + '-' + IntToStr(AOffset + ALimit - 1)
+  else
+    Result := ':' + IntToStr(AOffset) + '-';
+end;
+
 { --- read_file ---------------------------------------------------------- }
 
 function TFileTool.ReadFile(const AArgumentsJson: string;
@@ -483,8 +494,13 @@ begin
     if not ResolveChecked(PathArg, Abs, AError) then
       Exit(False);
     Rel := RelOf(Abs);
-    if not Approve('file:read', 'read ' + Rel, ToolReasonOf(AArgumentsJson),
-      [Rel], AError) then
+    Offset := JsonInt(Root, 'offset', 1);
+    if Offset < 1 then
+      Offset := 1;
+    Limit := JsonInt(Root, 'limit', 0);
+    { The tool defines how its ask reads, so a ranged read says so. }
+    if not Approve('file:read', 'read ' + Rel + ReadRangeLabel(Offset, Limit),
+      ToolReasonOf(AArgumentsJson), [Rel], AError) then
       Exit(False);
     if DirectoryExists(Abs) then
     begin
@@ -504,11 +520,6 @@ begin
         '[binary file: ' + IntToStr(FileBytes(Abs)) + ' bytes]';
       Exit(True);
     end;
-    Offset := JsonInt(Root, 'offset', 1);
-    if Offset < 1 then
-      Offset := 1;
-    Limit := JsonInt(Root, 'limit', 0);
-
     Lines := SplitLines(Text);
     OutLines := TStringList.Create;
     for I := Offset - 1 to Lines.Count - 1 do

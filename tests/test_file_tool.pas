@@ -18,6 +18,7 @@ type
     Allow: Boolean;
     Calls: Integer;
     LastRef: string;
+    LastSummary: string;
     function Resolve(const AAsks: TApprovalAskArray;
       out AResult: TApprovalBatchResult): Boolean;
   end;
@@ -74,7 +75,10 @@ begin
   Inc(Calls);
   AResult := Default(TApprovalBatchResult);
   if Length(AAsks) > 0 then
+  begin
     LastRef := AAsks[0].Subject.Ref;
+    LastSummary := AAsks[0].Summary;
+  end;
   if Allow then
     AResult.Allowed := True
   else
@@ -228,6 +232,9 @@ begin
   AssertTrue('has l3', Pos('l3', Res) > 0);
   AssertFalse('no l1', Pos('l1', Res) > 0);
   AssertFalse('no l4', Pos('l4', Res) > 0);
+  { The tool defines how its ask reads: a ranged read names the range. }
+  AssertEquals('summary names the range', 'read a.txt:2-3',
+    FApproval.LastSummary);
 end;
 
 procedure TFileToolTest.TestReadErrors;

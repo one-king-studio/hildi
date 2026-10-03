@@ -154,7 +154,9 @@ begin
   ForceDirectories(FDir);
   FStorePath := '';
   FFake := TFakeTransport.Create;
-  FSurface := TSurfaceMemory.Create(40, 12);
+  { Tall enough that the approval modal (which grew a row) leaves a margin to
+    dim above it. }
+  FSurface := TSurfaceMemory.Create(40, 20);
   FInput := TInputSourceScripted.Create;
   FSession := THarnessSession.Open(Config, Err);
   AssertTrue('session opened: ' + Err, FSession <> nil);
