@@ -67,6 +67,7 @@ type
     procedure TestPromptPrefixScopesSubtree;
     procedure TestApprovalAsksPerSegment;
     procedure TestApprovalAsksCarryTheReason;
+    procedure TestRunCarriesTheReasonIntoTheAsk;
     procedure TestOutputIsTruncatedWithMarker;
     procedure TestTimeoutReports124;
     procedure TestHandlerNeverRaises;
@@ -421,6 +422,32 @@ begin
       Asks[0].Reason);
   finally
     Tool.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestRunCarriesTheReasonIntoTheAsk;
+var
+  Tool: TCommandTool;
+  Prompt: TFakePrompt;
+  R, E: string;
+begin
+  { Run builds its own asks, so the reason must be set there too (the bug the
+    dialog exposed: the value never reached the modal). }
+  Prompt := TFakePrompt.Create;
+  try
+    Prompt.Allowed := True;
+    Prompt.OptionKey := 'once';
+    Tool := BuildTool(Prompt.Prompt, 0);
+    try
+      AssertTrue('ran', Tool.Run(
+        '{"command":"rm -rf build","reason":"free the build dir"}', R, E));
+      AssertEquals('reason reached the ask', 'free the build dir',
+        Prompt.LastAsk.Reason);
+    finally
+      Tool.Free;
+    end;
+  finally
+    Prompt.Free;
   end;
 end;
 

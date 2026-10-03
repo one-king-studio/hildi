@@ -365,6 +365,7 @@ var
   TimeoutMs: QWord;
   Plan: TCommandPlan;
   Asks: TApprovalAskArray;
+  I: Integer;
   Batch: TApprovalBatchResult;
   Execution: TCommandExecution;
   Truncated: Boolean;
@@ -414,6 +415,9 @@ begin
         Exit(False);
       end;
       Asks := BuildAsks(Command, FConfig.Shell.Syntax);
+      { Carry the model's reason into the ask so the dialog can show it. }
+      for I := 0 to High(Asks) do
+        Asks[I].Reason := Reason;
       if not FService.Resolve(Asks, Batch) then
       begin
         AError := 'approval error: ' + Batch.Reason;

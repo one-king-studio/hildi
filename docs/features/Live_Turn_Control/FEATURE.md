@@ -116,8 +116,13 @@ Approval dialog: reason
       labelled `reason:`, immediately beneath the title.
 - [ ] The reason is the reason carried with the tool call; when it is absent or
       invalid, the dialog shows a muted placeholder rather than a blank line.
+- [ ] Every path that builds an ask fills it (the command tool's run and
+      approval-ask paths, and the file tool), so the value reaches the dialog.
 - [ ] The dialog order is: reason, tool/command details, options, scope,
       actions.
+- [ ] The tool block in the transcript shows the reason as its title and the
+      result as its body; the raw tool name and arguments are not shown, live
+      or on resume.
 
 Approval dialog: wrapping, padding, compaction
 

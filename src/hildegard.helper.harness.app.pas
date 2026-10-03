@@ -65,6 +65,10 @@ type
     procedure UpdateCta;
     { Settle the streaming thinking block into a persisted "Thought" block. }
     procedure FinalizeThinking;
+    { Append a tool result to its block, marking ok/failed; no leading gap when
+      the block has no body yet. }
+    procedure AppendToolResult(ABlock: TChatItem; AOk: Boolean;
+      const AText: string);
     procedure UpdateStats;
     procedure HandleEscape(Sender: TObject);
     function ComposeIsEmpty: Boolean;
@@ -374,12 +378,12 @@ begin
         FPanel.Stream.Add(ckThought, 'Thought', Rec.Content);
       mrToolCall:
         begin
+          { The reason is the title; the raw call is not shown, so a resumed
+            session matches the live one. }
           if Rec.ToolReason <> '' then
-            Block := FPanel.Stream.Add(ckTool, Rec.ToolReason,
-              Rec.ToolName + '  ' + Rec.ToolArguments)
+            Block := FPanel.Stream.Add(ckTool, Rec.ToolReason, '')
           else
-            Block := FPanel.Stream.Add(ckTool, Rec.ToolName,
-              Rec.ToolArguments);
+            Block := FPanel.Stream.Add(ckTool, Rec.ToolName, '');
           Block.Expanded := False;
           SetLength(ToolBlocks, Length(ToolBlocks) + 1);
           ToolBlocks[High(ToolBlocks)] := Block;
@@ -391,10 +395,7 @@ begin
         begin
           Block := ToolBlocks[Head];
           Inc(Head);
-          if Rec.ToolOk then
-            Block.AppendText(#10 + #10 + '[ok] ' + Rec.Content)
-          else
-            Block.AppendText(#10 + #10 + '[failed] ' + Rec.Content);
+          AppendToolResult(Block, Rec.ToolOk, Rec.Content);
         end
         else
           FPanel.Stream.Add(ckTool, Rec.ToolName, Rec.Content);
@@ -434,6 +435,21 @@ begin
   FThought := nil;
 end;
 
+procedure THarnessApp.AppendToolResult(ABlock: TChatItem; AOk: Boolean;
+  const AText: string);
+var
+  Line: string;
+begin
+  if AOk then
+    Line := '[ok] ' + AText
+  else
+    Line := '[failed] ' + AText;
+  if ABlock.Text = '' then
+    ABlock.SetText(Line)
+  else
+    ABlock.AppendText(#10 + #10 + Line);
+end;
+
 procedure THarnessApp.HandleTurnEvent(const E: TTurnEvent);
 begin
   { Anything that is not more reasoning means the reasoning stream has ended. }
@@ -461,28 +477,27 @@ begin
           still in flight. }
         SetState(psTool, 'running ' + E.ToolName);
         { The reason is the block's title, so collapsed tool lines read as the
-          story of the agent's decisions; the tool name and arguments are the
-          body, visible when expanded. }
+          story of the agent's decisions. The raw call is not shown: the result
+          is the body, visible when the block is expanded. }
         if E.ToolReason <> '' then
-          FTool := FPanel.Stream.Add(ckTool, E.ToolReason,
-            E.ToolName + '  ' + E.ToolArguments)
+          FTool := FPanel.Stream.Add(ckTool, E.ToolReason, '')
         else
-          FTool := FPanel.Stream.Add(ckTool, E.ToolName, E.ToolArguments);
+          FTool := FPanel.Stream.Add(ckTool, E.ToolName, '');
         FTool.Expanded := False;
       end;
     teToolResult:
       begin
         if FTool <> nil then
         begin
-          if E.ToolOk then
-            FTool.AppendText(#10 + #10 + '[ok] ' + E.Text)
-          else
-            FTool.AppendText(#10 + #10 + '[failed] ' + E.Text);
+          AppendToolResult(FTool, E.ToolOk, E.Text);
           FTool := nil;
         end
         else
-          FPanel.Stream.Add(ckTool, E.ToolName,
-            E.Text);
+        begin
+          FTool := FPanel.Stream.Add(ckTool, E.ToolName, '');
+          AppendToolResult(FTool, E.ToolOk, E.Text);
+          FTool := nil;
+        end;
         { The tools are done, so the next deltas belong to the following message:
           start fresh blocks, after the tool lines. The turn is still in flight,
           so the state returns to thinking. }
