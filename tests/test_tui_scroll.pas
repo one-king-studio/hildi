@@ -36,6 +36,7 @@ type
     procedure TestKeyboardScrollKeysMoveViewport;
     procedure TestTwoContainersScrollIndependently;
     procedure TestScrollbarThumbGeometry;
+    procedure TestTrackInsetsKeepTheThumbAboveTheOverlay;
     procedure TestScrollbarThumbTracksScroll;
     procedure TestScrollbarDragScrolls;
     procedure TestHiddenTrackLeavesWhatIsBehind;
@@ -214,6 +215,43 @@ begin
     AssertEquals('full thumb at origin', 0, Bar.ThumbStart);
   finally
     Bar.Free;
+  end;
+end;
+
+procedure TTuiScrollTest.TestTrackInsetsKeepTheThumbAboveTheOverlay;
+var
+  C: TScrollContainer;
+  S: TSurfaceMemory;
+begin
+  S := TSurfaceMemory.Create(10, 12);
+  try
+    C := TScrollContainer.Create(TScrollProbe.Create(10, 100), smAuto, smNever);
+    try
+      { One row of gap below the top border, four rows covered by an overlay.
+        The container sits at row 2 so the bar's bounds are not at the origin
+        (which used to misplace the thumb). }
+      C.TrackTop := 1;
+      C.TrackBottom := 4;
+      C.Arrange(Rc(0, 2, 10, 10));
+      C.ScrollTo(0, 1000);   { clamp to the bottom }
+      S.Clear(DefaultAttr);
+      C.Render(S);
+      S.Flush;
+      { The bar is at column 9; the track runs rows 3..7. }
+      AssertEquals('gap above the track', '', S.CellAt(9, 2).Ch);
+      AssertEquals('track just below the gap', '┃', S.CellAt(9, 3).Ch);
+      AssertTrue('the track is dim', sfDim in S.CellAt(9, 3).Attr.Style);
+      AssertEquals('thumb at the track bottom, above the overlay', '┃',
+        S.CellAt(9, 7).Ch);
+      AssertFalse('the thumb is not dim',
+        sfDim in S.CellAt(9, 7).Attr.Style);
+      AssertEquals('nothing under the overlay', '', S.CellAt(9, 8).Ch);
+      AssertEquals('nothing in the overlay', '', S.CellAt(9, 11).Ch);
+    finally
+      C.Free;
+    end;
+  finally
+    S.Free;
   end;
 end;
 

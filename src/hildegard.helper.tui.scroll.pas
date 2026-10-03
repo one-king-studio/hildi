@@ -55,6 +55,7 @@ type
     FVBar, FHBar: TScrollBar;
     FBarDragging: Boolean;
     FTrackVisible: Boolean;
+    FTrackTop, FTrackBottom: Integer;
     function PointInside(AX, AY: Integer): Boolean;
     procedure SyncBars;
     procedure DragBarTo(AY: Integer);
@@ -80,6 +81,12 @@ type
     property HorzScrollBar: TScrollMode read FHorz write FHorz;
     { Paint the scrollbar track; set False when the bar sits on a border. }
     property TrackVisible: Boolean read FTrackVisible write FTrackVisible;
+    { Rows the vertical track skips at the top and bottom of the viewport, so it
+      does not run under a compose overlay or touch a rounded corner. The page
+      size stays the full viewport height, so the thumb still maps the whole
+      scroll range. }
+    property TrackTop: Integer read FTrackTop write FTrackTop;
+    property TrackBottom: Integer read FTrackBottom write FTrackBottom;
   end;
 
 implementation
@@ -191,7 +198,7 @@ end;
 
 procedure TScrollBar.Render(const S: ISurface);
 var
-  I, TStart, TSize: Integer;
+  I, P, TStart, TSize: Integer;
   TrackCell, ThumbCell: TCell;
 begin
   if (FBounds.W <= 0) or (FBounds.H <= 0) then
@@ -205,11 +212,18 @@ begin
   ThumbCell := Default(TCell);
   ThumbCell.Ch := '┃';
   ThumbCell.Attr := DefaultAttr;
+  { ThumbStart is surface-absolute; the loop index is track-relative, so compare
+    the absolute position, not I. }
   TStart := ThumbStart;
   TSize := ThumbSize;
   S.PushClip(FBounds);
   for I := 0 to TrackLength - 1 do
-    if (I >= TStart) and (I < TStart + TSize) then
+  begin
+    if FOrientation = soVertical then
+      P := FBounds.Y + I
+    else
+      P := FBounds.X + I;
+    if (P >= TStart) and (P < TStart + TSize) then
     begin
       if FOrientation = soVertical then
         S.Put(FBounds.X, FBounds.Y + I, ThumbCell)
@@ -221,6 +235,7 @@ begin
         S.Put(FBounds.X, FBounds.Y + I, TrackCell)
       else
         S.Put(FBounds.X + I, FBounds.Y, TrackCell);
+  end;
   S.PopClip;
 end;
 
@@ -238,6 +253,8 @@ begin
   FContentW := 0;
   FContentH := 0;
   FTrackVisible := True;
+  FTrackTop := 0;
+  FTrackBottom := 0;
 end;
 
 destructor TScrollContainer.Destroy;
@@ -428,7 +445,7 @@ end;
 procedure TScrollContainer.Arrange(const ABounds: TRect);
 var
   Avail, ContentSize: TSize;
-  VpW, VpH: Integer;
+  VpW, VpH, TrackY, TrackH: Integer;
   VertShown, HorzShown: Boolean;
 begin
   FBounds := ABounds;
@@ -465,7 +482,15 @@ begin
     if FVBar = nil then
       FVBar := TScrollBar.Create(soVertical);
     FVBar.TrackVisible := FTrackVisible;
-    FVBar.Arrange(Rect4(ABounds.X + ABounds.W - 1, ABounds.Y, 1, VpH));
+    { The track may be shorter than the viewport (a compose overlay covers the
+      bottom, a rounded corner the top), but Page stays the full viewport height
+      so the thumb still maps the whole scroll range and cannot run under the
+      overlay. }
+    TrackY := ABounds.Y + FTrackTop;
+    TrackH := VpH - FTrackTop - FTrackBottom;
+    if TrackH < 1 then
+      TrackH := 1;
+    FVBar.Arrange(Rect4(ABounds.X + ABounds.W - 1, TrackY, 1, TrackH));
     FVBar.Page := VpH;
     FVBar.Range := FContentH;
   end

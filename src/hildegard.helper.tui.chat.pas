@@ -182,6 +182,9 @@ const
   { Blank rows kept below the last block, so it does not sit flush against the
     compose overlay. }
   ContentBottomPad = 2;
+  { The scrollbar track starts this many rows below the panel's top border, so
+    it does not touch the rounded corner. }
+  ScrollTrackTopGap = 1;
   Sparkles: array[0..12] of UnicodeString =
     ('∙', '•', '●', '◉', '❂', '✴', '✵', '✶', '✷', '✸', '✹', '✺', '❋');
 
@@ -794,6 +797,9 @@ begin
     must not be painted: the border reads as the track and only the thumb
     shows. }
   FScroll.TrackVisible := False;
+  { The track starts below the rounded corner; the bottom is set from the
+    compose overlay's inset so the thumb never runs under it. }
+  FScroll.TrackTop := ScrollTrackTopGap;
   { Intercept block changes and toggles ourselves, so the host only sees the
     notification and the stream owns the scroll behaviour. }
   FStack.SetOnChange(ItemChanged);
@@ -873,6 +879,9 @@ begin
     AValue := 0;
   FBottomInset := AValue;
   FStack.BottomInset := AValue;
+  { The covered rows also shorten the scrollbar track, so a small thumb stays
+    above the overlay instead of sliding under it. }
+  FScroll.TrackBottom := AValue;
 end;
 
 procedure TChatStream.ItemChanged(Sender: TObject);
