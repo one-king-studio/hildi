@@ -33,25 +33,25 @@ independent; phase 3 builds on it; phases 4-5 touch the loop and land last.
 - [x] `hildegard.helper.tui.chatpanel` / `harness.app`: set the CTA from state.
 - [x] Tests: submit keys, newline, paste, CTA states, decoder paste.
 
-## Phase 4 - Immediate cancel (item 1)
+## Phase 4 - Immediate cancel (item 1) - done
 
-- [ ] `hildegard.helper.llm`: `TLLMCancelCheck`, `PostStream` `ACancelled`,
+- [x] `hildegard.helper.llm`: `TLLMCancelCheck`, `PostStream` `ACancelled`,
       `TLLMClient.CancelCheck`.
-- [ ] `hildegard.helper.agent`: consult the check mid-stream; on early cancel
+- [x] `hildegard.helper.agent`: consult the check mid-stream; on early cancel
       drop the turn's messages (keep the row); `leCancelled`.
-- [ ] `hildegard.helper.agent` / `session.store`: `DropLastResponse` and the
-      turn-message drop.
-- [ ] `hildegard.helper.harness.app`: remove the user block and prepend the
-      prompt to the compose on an early cancel.
-- [ ] Tests: mid-stream cancel, early vs late, restore.
+- [x] `hildegard.helper.store` / `session.store` / `agent`: `DropTurnMessages`.
+- [x] `hildegard.helper.harness.app`: remove the user block and prepend the
+      prompt to the compose on an early cancel (`Dropped`).
+- [x] Tests: mid-stream cancel, early vs late, restore.
 
-## Phase 5 - Prompt queue (item 2)
+## Phase 5 - Prompt queue (item 2) - done
 
-- [ ] `hildegard.helper.agent`: `TPromptQueue`; drain before each request; drop
+- [x] `hildegard.helper.agent`: `TPromptQueue`; drain before each request; drop
       a tool call in favour of queued prompts; start a new turn at the stop.
-- [ ] `hildegard.helper.harness.turn`: `TTurnWorker.QueuePrompt`.
-- [ ] `hildegard.helper.harness.app`: Shift+Enter enqueues when busy.
-- [ ] Tests: drain, drop tool call, multi-prompt, next turn.
+- [x] `hildegard.helper.harness.turn`: `TTurnWorker.QueuePrompt`; `tePromptQueued`.
+- [x] `hildegard.helper.harness.app`: a submit while busy enqueues; the compose
+      stays active so the operator can type mid-flight.
+- [x] Tests: drain, drop tool call, next turn, app queueing.
 
 ## Phase 6 - Reason length and live thinking (trial follow-up) - done
 

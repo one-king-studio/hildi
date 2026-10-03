@@ -155,6 +155,9 @@ type
     { Appends one history block, assigning its per-session sequence. }
     function AppendMessage(const AMessage: TMessageRecord;
       out AError: TStoreError): Boolean;
+    { Delete every message a turn appended; an early cancel leaves none. }
+    function DeleteTurnMessages(ATurnId: Int64;
+      out AError: TStoreError): Boolean;
     function QueryMessages(const ASessionId: string;
       out AMessages: TMessageRecordArray; out AError: TStoreError): Boolean;
     { One message by id, scoped to a session; seNotFound if absent. }
@@ -1573,6 +1576,34 @@ begin
       Stmt.BindInt64(13, AMessage.DurationMs);
       if Stmt.Step <> SQLITE_DONE then
         Exit(Fail(AError, seError, 'could not append message', DbErrorText));
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.DeleteTurnMessages(ATurnId: Int64;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    if ATurnId <= 0 then
+      Exit(Fail(AError, seInvalidArgument, 'turn id is required', ''));
+    Stmt := TStmt.Create(FDb, 'DELETE FROM messages WHERE turn_id = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not drop messages', DbErrorText));
+      Stmt.BindInt64(1, ATurnId);
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not drop messages', DbErrorText));
     finally
       Stmt.Free;
     end;

@@ -24,6 +24,7 @@ type
     teReasoningDelta,   // a chunk of reasoning text (display-only)
     teToolCall,         // a tool call was dispatched
     teToolResult,       // a tool returned
+    tePromptQueued,     // a queued prompt was injected into the loop
     teApprovalAsk,      // the worker is blocked awaiting an answer
     teDone,             // the turn completed successfully
     teError             // the turn failed
@@ -42,6 +43,7 @@ type
     RequestId: Integer;        // teApprovalAsk; 0 otherwise
     Ask: TApprovalAsk;         // teApprovalAsk
     ErrorCode: TLLMErrorCode;  // teError
+    Dropped: Boolean;          // teError: an early cancel dropped the turn
     ElapsedMs: Int64;          // teDone/teError
   end;
 
@@ -108,11 +110,13 @@ type
     function ElapsedMs: Int64;
     function Cancelled: Boolean;
     procedure Emit(const AEvent: TTurnEvent);
-    procedure EmitError(ACode: TLLMErrorCode; const AMessage, ADetail: string);
+    procedure EmitError(ACode: TLLMErrorCode; const AMessage, ADetail: string;
+      ADropped: Boolean = False);
     procedure OnText(const AText: string);
     procedure OnReasoning(const AText: string);
     procedure OnToolCall(const AId, AName, AArguments, AReason: string);
     procedure OnToolResult(const AId, AName, AResult: string; AOk: Boolean);
+    procedure OnUserQueued(const AText: string);
   protected
     procedure Execute; override;
   public
@@ -121,6 +125,9 @@ type
     { UI thread. The loop consults the flag between requests, so the turn stops
       at the next boundary; an in-flight stream finishes first. }
     procedure RequestCancel;
+    { UI thread. Hand the running loop another prompt; it is injected at the
+      next boundary. }
+    procedure QueuePrompt(const AText: string);
     property Answer: string read FAnswer;
     property Error: TLLMError read FError;
   end;
@@ -296,6 +303,11 @@ begin
   FCancelled := True;
 end;
 
+procedure TTurnWorker.QueuePrompt(const AText: string);
+begin
+  FLoop.PromptQueue.Push(AText);
+end;
+
 function TTurnWorker.ElapsedMs: Int64;
 begin
   Result := MilliSecondsBetween(Now, FStart);
@@ -312,7 +324,7 @@ begin
 end;
 
 procedure TTurnWorker.EmitError(ACode: TLLMErrorCode;
-  const AMessage, ADetail: string);
+  const AMessage, ADetail: string; ADropped: Boolean);
 var
   Event: TTurnEvent;
 begin
@@ -321,7 +333,18 @@ begin
   Event.ErrorCode := ACode;
   Event.Text := AMessage;
   Event.Detail := ADetail;
+  Event.Dropped := ADropped;
   Event.ElapsedMs := ElapsedMs;
+  Emit(Event);
+end;
+
+procedure TTurnWorker.OnUserQueued(const AText: string);
+var
+  Event: TTurnEvent;
+begin
+  Event := Default(TTurnEvent);
+  Event.Kind := tePromptQueued;
+  Event.Text := AText;
   Emit(Event);
 end;
 
@@ -383,6 +406,7 @@ begin
   Events.OnReasoning := OnReasoning;
   Events.OnToolCall := OnToolCall;
   Events.OnToolResult := OnToolResult;
+  Events.OnUserQueued := OnUserQueued;
 
   { The loop consults this between requests, so a cancel stops the turn at the
     next boundary and an in-flight stream still finishes. }
@@ -398,7 +422,8 @@ begin
         Emit(Event);
       end
       else
-        EmitError(FError.Code, FError.Message, FError.Detail);
+        EmitError(FError.Code, FError.Message, FError.Detail,
+          FLoop.LastTurnDropped);
     except
       on E: Exception do
         EmitError(leProvider, E.Message, '');

@@ -9,7 +9,7 @@ unit hildegard.helper.agent;
 interface
 
 uses
-  Classes, SysUtils, hildegard.helper.llm, hildegard.helper.session;
+  Classes, SysUtils, SyncObjs, hildegard.helper.llm, hildegard.helper.session;
 
 type
   { The outcome of one LLM request, for the audit/metrics seam. }
@@ -54,11 +54,15 @@ type
       AMessageCount: Integer): Int64;
     procedure FinishRequest(ARequestId: Int64; const AOutcome: TRequestOutcome);
     procedure FinishTurn(ATurnId: Int64; const AOutcome: TTurnOutcome);
+    { Drop every message the open turn appended, keeping the turn row. An early
+      cancel leaves no trace. }
+    procedure DropTurnMessages(ATurnId: Int64);
   end;
 
   TMemoryConversationStore = class(TInterfacedObject, IConversationStore)
   private
     FItems: TChatMessageArray;
+    FTurnMark: Integer;
   public
     procedure Append(const AMessage: TChatMessage);
     function Messages: TChatMessageArray;
@@ -70,6 +74,7 @@ type
       AMessageCount: Integer): Int64;
     procedure FinishRequest(ARequestId: Int64; const AOutcome: TRequestOutcome);
     procedure FinishTurn(ATurnId: Int64; const AOutcome: TTurnOutcome);
+    procedure DropTurnMessages(ATurnId: Int64);
   end;
 
   { Receives the raw JSON arguments string and returns a text result. On failure
@@ -83,12 +88,32 @@ type
     of object;
   TToolResultEvent = procedure(const AId, AName, AResult: string;
     AOk: Boolean) of object;
+  { A queued prompt was injected into the running loop. }
+  TUserQueuedEvent = procedure(const AText: string) of object;
 
   TAgentEvents = record
     OnText: TLLMTextEvent;
     OnReasoning: TLLMReasoningEvent;
     OnToolCall: TToolCallEvent;
     OnToolResult: TToolResultEvent;
+    OnUserQueued: TUserQueuedEvent;
+  end;
+
+  TPromptArray = array of string;
+
+  { Prompts the operator injects into a running turn, drained at loop
+    boundaries. Safe to Push from the UI thread while the worker drains it. }
+  TPromptQueue = class
+  private
+    FLock: TCriticalSection;
+    FItems: TPromptArray;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    procedure Push(const AText: string);
+    { Remove and return every queued prompt, in order. }
+    function Drain: TPromptArray;
+    function Pending: Boolean;
   end;
 
   TRegisteredTool = record
@@ -128,6 +153,8 @@ type
     FTools: TToolRegistry;
     FConfig: TAgentConfig;
     FCancel: TAgentCancelCheck;
+    FPromptQueue: TPromptQueue;
+    FLastTurnDropped: Boolean;
     function BuildRequest: TChatRequest;
     procedure ExecuteToolCalls(const ACalls: TChatToolCallArray;
       const AEvents: TAgentEvents; out AAllOk: Boolean);
@@ -135,12 +162,15 @@ type
       assistant's tool_calls stay paired with results. }
     procedure InterceptToolCalls(const ACalls: TChatToolCallArray;
       const ANotice: string; const AEvents: TAgentEvents);
+    { Append every queued prompt as a user message and tell the UI. }
+    procedure DrainQueued(const AEvents: TAgentEvents);
     function FinishError(const AResult: TChatResult): TLLMError;
     function DoSend(const AUserText: string; const AEvents: TAgentEvents;
       out AAnswer: string; out AError: TLLMError): Boolean;
   public
     constructor Create(AClient: TLLMClient; AStore: IConversationStore;
       ATools: TToolRegistry; const AConfig: TAgentConfig);
+    destructor Destroy; override;
     function Send(const AUserText: string; AOnText: TLLMTextEvent;
       out AAnswer: string; out AError: TLLMError): Boolean; overload;
     function Send(const AUserText: string; const AEvents: TAgentEvents;
@@ -148,6 +178,11 @@ type
     { Consulted at each loop boundary (before building a request); True closes
       the turn as cancelled. Never breaks a tool batch part-way. }
     property CancelCheck: TAgentCancelCheck read FCancel write FCancel;
+    { Prompts the operator injects into a running turn. }
+    property PromptQueue: TPromptQueue read FPromptQueue;
+    { True when the last turn was cancelled before any response was committed,
+      so its messages were dropped. }
+    property LastTurnDropped: Boolean read FLastTurnDropped;
   end;
 
 procedure RegisterDefaultTools(ATools: TToolRegistry);
@@ -383,6 +418,7 @@ end;
 
 function TMemoryConversationStore.BeginTurn: Int64;
 begin
+  FTurnMark := Length(FItems);
   Result := 0;
 end;
 
@@ -402,6 +438,60 @@ procedure TMemoryConversationStore.FinishTurn(ATurnId: Int64;
   const AOutcome: TTurnOutcome);
 begin
   // no-op
+end;
+
+procedure TMemoryConversationStore.DropTurnMessages(ATurnId: Int64);
+begin
+  SetLength(FItems, FTurnMark);
+end;
+
+{ --- TPromptQueue ------------------------------------------------------- }
+
+constructor TPromptQueue.Create;
+begin
+  inherited Create;
+  FLock := TCriticalSection.Create;
+  FItems := nil;
+end;
+
+destructor TPromptQueue.Destroy;
+begin
+  FLock.Free;
+  inherited Destroy;
+end;
+
+procedure TPromptQueue.Push(const AText: string);
+begin
+  if Trim(AText) = '' then
+    Exit;
+  FLock.Acquire;
+  try
+    SetLength(FItems, Length(FItems) + 1);
+    FItems[High(FItems)] := AText;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TPromptQueue.Drain: TPromptArray;
+begin
+  FLock.Acquire;
+  try
+    Result := FItems;
+    FItems := nil;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TPromptQueue.Pending: Boolean;
+begin
+  FLock.Acquire;
+  try
+    Result := Length(FItems) > 0;
+  finally
+    FLock.Release;
+  end;
 end;
 
 { --- TToolRegistry ------------------------------------------------------ }
@@ -466,6 +556,8 @@ begin
   FStore := AStore;
   FTools := ATools;
   FConfig := AConfig;
+  FPromptQueue := TPromptQueue.Create;
+  FLastTurnDropped := False;
   if FConfig.SoftToolLimit <= 0 then
     FConfig.SoftToolLimit := DefaultSoftToolLimit;
   if FConfig.HardToolLimit <= 0 then
@@ -474,6 +566,12 @@ begin
     FConfig.ToolNoticeStep := DefaultToolNoticeStep;
   if FConfig.MaxContextTokens = 0 then
     FConfig.MaxContextTokens := DefaultMaxContextTokens;
+end;
+
+destructor TAgentLoop.Destroy;
+begin
+  FPromptQueue.Free;
+  inherited Destroy;
 end;
 
 function TAgentLoop.BuildRequest: TChatRequest;
@@ -620,6 +718,24 @@ begin
   Result := DoSend(AUserText, AEvents, AAnswer, AError);
 end;
 
+procedure TAgentLoop.DrainQueued(const AEvents: TAgentEvents);
+var
+  Prompts: TPromptArray;
+  I: Integer;
+  Msg: TChatMessage;
+begin
+  Prompts := FPromptQueue.Drain;
+  for I := 0 to High(Prompts) do
+  begin
+    Msg := Default(TChatMessage);
+    Msg.Role := crUser;
+    Msg.Content := Prompts[I];
+    FStore.Append(Msg);
+    if Assigned(AEvents.OnUserQueued) then
+      AEvents.OnUserQueued(Prompts[I]);
+  end;
+end;
+
 function TAgentLoop.DoSend(const AUserText: string; const AEvents: TAgentEvents;
   out AAnswer: string; out AError: TLLMError): Boolean;
 var
@@ -627,7 +743,7 @@ var
   Request: TChatRequest;
   ChatResult: TChatResult;
   UserMsg, SystemMsg: TChatMessage;
-  AllOk: Boolean;
+  AllOk, Committed: Boolean;
   TurnId, RequestId: Int64;
   StartMs: Int64;
   Outcome: TRequestOutcome;
@@ -653,9 +769,18 @@ var
     FStore.FinishTurn(TurnId, TurnOutcome);
   end;
 
+  { Persist the response being kept (reasoning block plus assistant message). }
+  procedure AppendResponse;
+  begin
+    FStore.AppendReasoning(ChatResult.ReasoningContent);
+    FStore.Append(ChatResult.Message);
+  end;
+
 begin
   AAnswer := '';
   AError := AgentOk;
+  FLastTurnDropped := False;
+  Committed := False;
 
   if (FStore.Messages = nil) and (FConfig.SystemPrompt <> '') then
   begin
@@ -680,15 +805,28 @@ begin
       part-way, so its calls and results stay paired. }
     if Assigned(FCancel) and FCancel() then
     begin
+      { Nothing committed this turn: drop the prompt so it leaves no trace. }
+      if not Committed then
+      begin
+        FStore.DropTurnMessages(TurnId);
+        FLastTurnDropped := True;
+      end;
       FailTurn(leCancelled, 'cancelled', '', '');
       Exit(False);
     end;
+
+    { Inject any queued prompts before the next request. }
+    DrainQueued(AEvents);
+
     Request := BuildRequest;
     RequestId := FStore.BeginRequest(TurnId, FClient.Model,
       Length(Request.Messages));
     StartMs := GetTickCount64;
     Outcome := Default(TRequestOutcome);
 
+    { The client consults the same check mid-stream, so a cancel aborts the
+      request itself rather than waiting for the provider to finish. }
+    FClient.CancelCheck := FCancel;
     if not FClient.Complete(Request, AEvents.OnText, AEvents.OnReasoning,
       ChatResult, AError) then
     begin
@@ -698,6 +836,11 @@ begin
       Outcome.ErrorDetail := AError.Detail;
       Outcome.DurationMs := Int64(GetTickCount64 - StartMs);
       FStore.FinishRequest(RequestId, Outcome);
+      if (AError.Code = leCancelled) and (not Committed) then
+      begin
+        FStore.DropTurnMessages(TurnId);
+        FLastTurnDropped := True;
+      end;
       FailTurn(AError.Code, AError.Message, AError.Detail, '');
       Exit(False);
     end;
@@ -708,9 +851,6 @@ begin
     Outcome.Usage := ChatResult.Usage;
     Outcome.FirstTokenMs := ChatResult.FirstTokenMs;
     Outcome.DurationMs := Int64(GetTickCount64 - StartMs);
-
-    FStore.AppendReasoning(ChatResult.ReasoningContent);
-    FStore.Append(ChatResult.Message);
     FStore.FinishRequest(RequestId, Outcome);
 
     { Guard the running context: the next request would only be larger. }
@@ -726,17 +866,36 @@ begin
 
     if ChatResult.FinishReason = frStop then
     begin
+      AppendResponse;
       AAnswer := ChatResult.Message.Content;
       TurnOutcome := Default(TTurnOutcome);
       TurnOutcome.Status := tsCompleted;
       TurnOutcome.FinishReason := ChatResult.RawFinishReason;
       FStore.FinishTurn(TurnId, TurnOutcome);
+      { Prompts queued before the stop start the next turn immediately. }
+      if FPromptQueue.Pending then
+      begin
+        TurnId := FStore.BeginTurn;
+        Committed := False;
+        Rounds := 0;
+        Continue;
+      end;
       Exit(True);
     end;
 
     if ChatResult.FinishReason = frToolCalls then
     begin
       Inc(Rounds);
+      { A queued prompt supersedes the tool call: keep no response for it and
+        inject the queued prompts instead, so the model reconsiders with the
+        new context. }
+      if (Rounds <= FConfig.HardToolLimit) and FPromptQueue.Pending then
+      begin
+        DrainQueued(AEvents);
+        Continue;
+      end;
+      AppendResponse;
+      Committed := True;
       { One call past the hard limit: the model was already told to stop, so it
         is now a loop error. }
       if Rounds > FConfig.HardToolLimit then

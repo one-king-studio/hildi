@@ -74,6 +74,7 @@ type
       AMessageCount: Integer): Int64;
     procedure FinishRequest(ARequestId: Int64; const AOutcome: TRequestOutcome);
     procedure FinishTurn(ATurnId: Int64; const AOutcome: TTurnOutcome);
+    procedure DropTurnMessages(ATurnId: Int64);
     property Appends: Integer read FAppends;
   end;
 
@@ -106,6 +107,7 @@ type
       AMessageCount: Integer): Int64;
     procedure FinishRequest(ARequestId: Int64; const AOutcome: TRequestOutcome);
     procedure FinishTurn(ATurnId: Int64; const AOutcome: TTurnOutcome);
+    procedure DropTurnMessages(ATurnId: Int64);
   end;
 
   { Reports cancelled from the Nth check on, for the loop's cancel seam. }
@@ -127,6 +129,8 @@ type
     FLoop: TAgentLoop;
     FFailTools: TFailTools;
     FRecorder: TRecordingStore;
+    FQueuedOnce: Boolean;
+    procedure OnAfterChunk(Sender: TObject);
     function BuildLoop(const APrompt: string; AMaxIters: Integer): TAgentLoop;
     function BuildLoopRecording: TRecordingStore;
     function BuildLoopBudget(ASoft, AHard, AStep,
@@ -182,6 +186,11 @@ type
     procedure TestSendRecordsErrorAndFailedTurn;
     procedure TestToolResultCarriesNameOkAndDuration;
     procedure TestLoopStopsWhenCancelled;
+    procedure TestEarlyCancelDropsTheTurn;
+    procedure TestLateCancelKeepsTheTurn;
+    procedure TestQueuedPromptIsInjected;
+    procedure TestQueuedPromptSupersedesAToolCall;
+    procedure TestQueuedPromptsStartTheNextTurn;
   end;
 
 implementation
@@ -337,6 +346,11 @@ begin
   FInner.FinishTurn(ATurnId, AOutcome);
 end;
 
+procedure TCountingStore.DropTurnMessages(ATurnId: Int64);
+begin
+  FInner.DropTurnMessages(ATurnId);
+end;
+
 { TRecordingStore }
 
 constructor TRecordingStore.Create;
@@ -406,6 +420,11 @@ procedure TRecordingStore.FinishTurn(ATurnId: Int64;
 begin
   Inc(FinishTurns);
   LastTurnStatus := AOutcome.Status;
+end;
+
+procedure TRecordingStore.DropTurnMessages(ATurnId: Int64);
+begin
+  FInner.DropTurnMessages(ATurnId);
 end;
 
 { TCancelAfter }
@@ -779,6 +798,123 @@ begin
   AssertFalse('aborts', FLoop.Send('go', nil, Answer, Err));
   AssertEquals('loop error', Ord(leLoop), Ord(Err.Code));
   AssertTrue('mentions the context', Pos('context limit', Err.Message) > 0);
+end;
+
+procedure TAgentLoopTest.OnAfterChunk(Sender: TObject);
+begin
+  if not FQueuedOnce then
+  begin
+    FQueuedOnce := True;
+    FLoop.PromptQueue.Push('more context');
+  end;
+end;
+
+procedure TAgentLoopTest.TestQueuedPromptIsInjected;
+var
+  Answer: string;
+  Err: TLLMError;
+begin
+  BuildLoopRecording;
+  FLoop.PromptQueue.Push('more context');
+  FFake.AddResponse([TextDelta('ok'), FinishFrame('stop'), DoneFrame]);
+  AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
+  AssertTrue('the queued prompt reached the payload',
+    Pos('more context', FFake.LastBody) > 0);
+end;
+
+procedure TAgentLoopTest.TestQueuedPromptSupersedesAToolCall;
+var
+  Rec: TRecordingStore;
+  Msgs: TChatMessageArray;
+  Answer: string;
+  Err: TLLMError;
+  I: Integer;
+  SawTool: Boolean;
+begin
+  Rec := BuildLoopRecording;
+  FQueuedOnce := False;
+  FFake.AfterChunk := OnAfterChunk;
+  FFake.AddResponse([ToolNameFrame(0, 'c1', 'get_system_time'),
+    ToolArgsFrame(0, '{"reason":"r"}'), FinishFrame('tool_calls'),
+    DoneFrame]);
+  FFake.AddResponse([TextDelta('ok'), FinishFrame('stop'), DoneFrame]);
+  AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
+
+  { The tool call was dropped, not run. }
+  Msgs := Rec.Messages;
+  SawTool := False;
+  for I := 0 to High(Msgs) do
+    if Msgs[I].Role = crTool then
+      SawTool := True;
+  AssertFalse('the tool call was dropped', SawTool);
+  { The queued prompt reached the second request. }
+  AssertTrue('the queued prompt reached the payload',
+    Pos('more context', FFake.LastBody) > 0);
+end;
+
+procedure TAgentLoopTest.TestQueuedPromptsStartTheNextTurn;
+var
+  Answer: string;
+  Err: TLLMError;
+begin
+  BuildLoopRecording;
+  FQueuedOnce := False;
+  FFake.AfterChunk := OnAfterChunk;
+  FFake.AddResponse([TextDelta('one'), FinishFrame('stop'), DoneFrame]);
+  FFake.AddResponse([TextDelta('two'), FinishFrame('stop'), DoneFrame]);
+  AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
+  AssertEquals('the queued prompt started a second turn', 2, FFake.Calls);
+  AssertEquals('the last turn answered', 'two', Answer);
+end;
+
+procedure TAgentLoopTest.TestEarlyCancelDropsTheTurn;
+var
+  Rec: TRecordingStore;
+  Cancel: TCancelAfter;
+  Answer: string;
+  Err: TLLMError;
+begin
+  Rec := BuildLoopRecording;
+  { The fake consults the check between chunks, so the first request is aborted
+    mid-stream. }
+  Cancel := TCancelAfter.Create(1);
+  try
+    FLoop.CancelCheck := Cancel.Check;
+    FFake.AddResponse([TextDelta('partial'), FinishFrame('stop'), DoneFrame]);
+    AssertFalse('send cancelled', FLoop.Send('go', nil, Answer, Err));
+    AssertEquals('cancelled', Ord(leCancelled), Ord(Err.Code));
+    AssertTrue('the turn was dropped', FLoop.LastTurnDropped);
+    AssertEquals('no messages kept', 0, Length(Rec.Messages));
+    AssertEquals('turn row still cancelled', Ord(tsCancelled),
+      Ord(Rec.LastTurnStatus));
+  finally
+    Cancel.Free;
+  end;
+end;
+
+procedure TAgentLoopTest.TestLateCancelKeepsTheTurn;
+var
+  Rec: TRecordingStore;
+  Cancel: TCancelAfter;
+  Answer: string;
+  Err: TLLMError;
+begin
+  Rec := BuildLoopRecording;
+  { Fires on the second request's first chunk, after a tool call has committed. }
+  Cancel := TCancelAfter.Create(6);
+  try
+    FLoop.CancelCheck := Cancel.Check;
+    FFake.AddResponse([ToolNameFrame(0, 'c1', 'get_system_time'),
+      ToolArgsFrame(0, '{"reason":"r"}'), FinishFrame('tool_calls'),
+      DoneFrame]);
+    FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
+    AssertFalse('send cancelled', FLoop.Send('go', nil, Answer, Err));
+    AssertEquals('cancelled', Ord(leCancelled), Ord(Err.Code));
+    AssertFalse('the turn was kept', FLoop.LastTurnDropped);
+    AssertTrue('messages kept', Length(Rec.Messages) >= 3);
+  finally
+    Cancel.Free;
+  end;
 end;
 
 procedure TAgentLoopTest.TestLengthFinishReasonReported;

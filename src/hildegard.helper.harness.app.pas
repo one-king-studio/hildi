@@ -50,6 +50,9 @@ type
     FAssistant: TChatItem;
     FThought: TChatItem;
     FTool: TChatItem;
+    { The submitted prompt and its block, so an early cancel can undo them. }
+    FUserPrompt: string;
+    FUserBlock: TChatItem;
     function BuildTree: TWidget;
     procedure Submit(const AText: string);
     procedure DrainQueue;
@@ -69,12 +72,17 @@ type
       the block has no body yet. }
     procedure AppendToolResult(ABlock: TChatItem; AOk: Boolean;
       const AText: string);
+    { Put text at the front of the compose box, keeping whatever is typed. }
+    procedure PrependCompose(const AText: string);
+    { Undo the current turn's UI after an early cancel and restore the prompt. }
+    procedure RollBackEarlyCancel;
+    { Show a prompt the loop injected, dropping the response it superseded. }
+    procedure HandleQueuedPrompt(const AText: string);
     procedure UpdateStats;
     procedure HandleEscape(Sender: TObject);
     function ComposeIsEmpty: Boolean;
     procedure InterruptTurn;
     procedure CheckInterruptWindow;
-    procedure AppendUser(const AText: string);
     procedure AppendError(const AText: string);
     procedure RenderHistory;
     procedure SyncBusy;
@@ -268,12 +276,6 @@ begin
   FApp.Invalidate;
 end;
 
-procedure THarnessApp.AppendUser(const AText: string);
-begin
-  FPanel.Stream.Add(ckUser, '', AText);
-  FApp.Invalidate;
-end;
-
 procedure THarnessApp.AppendError(const AText: string);
 begin
   FPanel.Stream.Add(ckError, '', AText);
@@ -410,9 +412,17 @@ end;
 procedure THarnessApp.Submit(const AText: string);
 begin
   if FBusy then
+  begin
+    { A turn is in flight: hand the prompt to the running loop, which injects
+      it at its next boundary. }
+    if FWorker <> nil then
+      FWorker.QueuePrompt(AText);
     Exit;
-  AppendUser(AText);
-  FPanel.SetComposeActive(False);
+  end;
+  FUserPrompt := AText;
+  FUserBlock := FPanel.Stream.Add(ckUser, '', AText);
+  { The compose stays active while a turn runs, so the operator can type the
+    next prompt to inject mid-flight. }
   FBusy := True;
   SyncBusy;
   SetState(psThinking, 'thinking');
@@ -450,8 +460,68 @@ begin
     ABlock.AppendText(#10 + #10 + Line);
 end;
 
+procedure THarnessApp.PrependCompose(const AText: string);
+var
+  Existing: UnicodeString;
+begin
+  if AText = '' then
+    Exit;
+  Existing := FPanel.Compose.Edit.Text;
+  if Existing = '' then
+    FPanel.Compose.Edit.SetText(UnicodeString(AText))
+  else
+    FPanel.Compose.Edit.SetText(UnicodeString(AText) + #10 + Existing);
+end;
+
+procedure THarnessApp.RollBackEarlyCancel;
+begin
+  if FAssistant <> nil then
+  begin
+    FPanel.Stream.Remove(FAssistant);
+    FAssistant := nil;
+  end;
+  if FThought <> nil then
+  begin
+    FPanel.Stream.Remove(FThought);
+    FThought := nil;
+  end;
+  if FUserBlock <> nil then
+  begin
+    FPanel.Stream.Remove(FUserBlock);
+    FUserBlock := nil;
+  end;
+  PrependCompose(FUserPrompt);
+  FApp.Invalidate;
+end;
+
+procedure THarnessApp.HandleQueuedPrompt(const AText: string);
+begin
+  { A queued prompt supersedes whatever was streaming: drop those blocks and
+    show the prompt as the next user turn. }
+  if FAssistant <> nil then
+  begin
+    FPanel.Stream.Remove(FAssistant);
+    FAssistant := nil;
+  end;
+  if FThought <> nil then
+  begin
+    FPanel.Stream.Remove(FThought);
+    FThought := nil;
+  end;
+  FTool := nil;
+  FPanel.Stream.Add(ckUser, '', AText);
+  FApp.Invalidate;
+end;
+
 procedure THarnessApp.HandleTurnEvent(const E: TTurnEvent);
 begin
+  { A queued prompt supersedes the response that was streaming; handle it before
+    anything settles that response. }
+  if E.Kind = tePromptQueued then
+  begin
+    HandleQueuedPrompt(E.Text);
+    Exit;
+  end;
   { Anything that is not more reasoning means the reasoning stream has ended. }
   if E.Kind <> teReasoningDelta then
     FinalizeThinking;
@@ -511,8 +581,14 @@ begin
       FinishTurn(psReady, 'ready');
     teError:
       if E.ErrorCode = leCancelled then
-        { A user interrupt is not an error; do not draw an error block. }
-        FinishTurn(psReady, 'cancelled')
+      begin
+        { A user interrupt is not an error; do not draw an error block. An
+          early cancel also drops the prompt from the transcript and gives it
+          back to the operator. }
+        if E.Dropped then
+          RollBackEarlyCancel;
+        FinishTurn(psReady, 'cancelled');
+      end
       else
       begin
         AppendError(E.Text);

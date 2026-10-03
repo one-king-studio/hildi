@@ -90,6 +90,8 @@ type
   TLLMTextEvent = procedure(const AText: string) of object;
   TLLMReasoningEvent = procedure(const AText: string) of object;
   TLLMChunkEvent = procedure(const AData: RawByteString) of object;
+  { Consulted between stream reads; True abandons the request as cancelled. }
+  TLLMCancelCheck = function: Boolean of object;
 
   TLLMConfig = record
     Endpoint: string;
@@ -101,19 +103,25 @@ type
 
   TLLMTransport = class
   public
+    { Consulted between stream reads; when it fires the request is abandoned
+      and PostStream returns with ACancelled = True. }
+    CancelCheck: TLLMCancelCheck;
     { Returns True when an HTTP response was received (even non-2xx). False on a
       transport/network failure with AStatusCode = 0. On non-2xx, AError carries
-      the response body for error mapping; on 2xx it is ''. }
+      the response body for error mapping; on 2xx it is ''. ACancelled is True
+      when the read was abandoned by CancelCheck. }
     function PostStream(const AURL: string; const ABody: string;
       const AHeaders: TStringList; AOnChunk: TLLMChunkEvent;
-      out AStatusCode: Integer; out AError: string): Boolean; virtual; abstract;
+      out AStatusCode: Integer; out AError: string;
+      out ACancelled: Boolean): Boolean; virtual; abstract;
   end;
 
   TFPHTTPTransport = class(TLLMTransport)
   public
     function PostStream(const AURL: string; const ABody: string;
       const AHeaders: TStringList; AOnChunk: TLLMChunkEvent;
-      out AStatusCode: Integer; out AError: string): Boolean; override;
+      out AStatusCode: Integer; out AError: string;
+      out ACancelled: Boolean): Boolean; override;
   end;
 
   TLLMClient = class
@@ -121,6 +129,7 @@ type
     FConfig: TLLMConfig;
     FTransport: TLLMTransport;
     FOwnsTransport: Boolean;
+    FCancel: TLLMCancelCheck;
     function Endpoint: string;
     function GetModel: string;
   public
@@ -133,6 +142,8 @@ type
       out AResult: TChatResult; out AError: TLLMError): Boolean; overload;
     { The resolved model name, for recording on a request. }
     property Model: string read GetModel;
+    { Consulted mid-stream; when it fires, Complete returns leCancelled. }
+    property CancelCheck: TLLMCancelCheck read FCancel write FCancel;
   end;
 
 function ResolveLLMConfig(const AConfig: TLLMConfig): TLLMConfig;
@@ -151,12 +162,17 @@ uses
 type
   { Forwards each response-body chunk to a callback while capturing a bounded
     prefix, so non-2xx bodies can be reported. }
+  { Raised inside a stream write when the cancel check fires, to unwind out of
+    the HTTP read. Caught by PostStream, which reports ACancelled. }
+  ECancelledStream = class(Exception);
+
   TChunkProxyStream = class(TStream)
   private
     FOnChunk: TLLMChunkEvent;
+    FCancel: TLLMCancelCheck;
     FCapture: RawByteString;
   public
-    constructor Create(AOnChunk: TLLMChunkEvent);
+    constructor Create(AOnChunk: TLLMChunkEvent; ACancel: TLLMCancelCheck);
     function Write(const Buffer; Count: LongInt): LongInt; override;
     function Read(var Buffer; Count: LongInt): LongInt; override;
     function Seek(const Offset: Int64; Origin: TSeekOrigin): Int64; override;
@@ -252,10 +268,12 @@ end;
 
 { --- TChunkProxyStream -------------------------------------------------- }
 
-constructor TChunkProxyStream.Create(AOnChunk: TLLMChunkEvent);
+constructor TChunkProxyStream.Create(AOnChunk: TLLMChunkEvent;
+  ACancel: TLLMCancelCheck);
 begin
   inherited Create;
   FOnChunk := AOnChunk;
+  FCancel := ACancel;
   FCapture := '';
 end;
 
@@ -265,6 +283,9 @@ var
 begin
   if Count <= 0 then
     Exit(0);
+  { Between reads: abandon the request as soon as the caller asks. }
+  if Assigned(FCancel) and FCancel() then
+    raise ECancelledStream.Create('cancelled');
   SetString(S, PAnsiChar(@Buffer), Count);
   if Assigned(FOnChunk) then
     FOnChunk(S);
@@ -288,7 +309,8 @@ end;
 
 function TFPHTTPTransport.PostStream(const AURL: string; const ABody: string;
   const AHeaders: TStringList; AOnChunk: TLLMChunkEvent;
-  out AStatusCode: Integer; out AError: string): Boolean;
+  out AStatusCode: Integer; out AError: string;
+  out ACancelled: Boolean): Boolean;
 var
   Client: TFPHTTPClient;
   Body: TStringStream;
@@ -298,9 +320,10 @@ begin
   Result := False;
   AStatusCode := 0;
   AError := '';
+  ACancelled := False;
   Client := TFPHTTPClient.Create(nil);
   Body := TStringStream.Create(ABody);
-  Proxy := TChunkProxyStream.Create(AOnChunk);
+  Proxy := TChunkProxyStream.Create(AOnChunk, CancelCheck);
   try
     Client.ConnectTimeout := DefaultConnectTimeoutMs;
     Client.IOTimeout := DefaultReadTimeoutMs;
@@ -315,6 +338,12 @@ begin
         AError := Proxy.Capture;
       Result := True;
     except
+      on E: ECancelledStream do
+      begin
+        ACancelled := True;
+        AError := 'cancelled';
+        Result := False;
+      end;
       on E: Exception do
       begin
         AError := E.Message;
@@ -748,7 +777,7 @@ var
   Parser: TSSEParser;
   Status: Integer;
   TransportError: string;
-  SinkOk: Boolean;
+  SinkOk, Cancelled: Boolean;
 begin
   AResult := Default(TChatResult);
   AError := OkLLM;
@@ -771,8 +800,15 @@ begin
     Headers.Values['Content-Type'] := 'application/json';
     Headers.Values['Accept'] := 'text/event-stream';
 
+    FTransport.CancelCheck := FCancel;
+    Cancelled := False;
     SinkOk := FTransport.PostStream(Endpoint, Body, Headers, Parser.Feed,
-      Status, TransportError);
+      Status, TransportError, Cancelled);
+    if Cancelled then
+    begin
+      AError := ErrLLM(leCancelled, 'cancelled', '');
+      Exit(False);
+    end;
     if not SinkOk then
     begin
       AError := ErrLLM(leNetwork, 'request failed', TransportError);

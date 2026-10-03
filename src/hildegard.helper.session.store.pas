@@ -44,6 +44,7 @@ type
       AMessageCount: Integer): Int64;
     procedure FinishRequest(ARequestId: Int64; const AOutcome: TRequestOutcome);
     procedure FinishTurn(ATurnId: Int64; const AOutcome: TTurnOutcome);
+    procedure DropTurnMessages(ATurnId: Int64);
     { Bytes a tool result may contribute to the prompt; over the cap the prompt
       carries a head plus a marker naming the artifact and the recall tool. 0
       (or less) leaves tool results uncapped. Storage is never affected. }
@@ -189,6 +190,14 @@ begin
     Ord(AOutcome.ErrorCode), AOutcome.ErrorMessage, AOutcome.ErrorDetail, Err);
   FCurrentTurnId := 0;
   FCurrentRequestId := 0;
+end;
+
+procedure TSqliteConversationStore.DropTurnMessages(ATurnId: Int64);
+var
+  Err: TStoreError;
+begin
+  if ATurnId > 0 then
+    FStore.DeleteTurnMessages(ATurnId, Err);
 end;
 
 function TSqliteConversationStore.Compose: TChatMessageArray;

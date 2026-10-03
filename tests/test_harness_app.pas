@@ -84,6 +84,8 @@ type
     procedure TestReadyStateAfterATurn;
     procedure TestErrorStateAfterAFailedTurn;
     procedure TestEscapeArmsThenCancels;
+    procedure TestEarlyCancelRestoresThePrompt;
+    procedure TestSubmitWhileBusyQueuesThePrompt;
     procedure TestCtrlCQuitsOnlyWhenComposeIsEmpty;
     procedure TestApprovalDimsTheBackground;
   end;
@@ -704,6 +706,85 @@ begin
       Sleep(2);
     end;
     AssertEquals('cancelled state', 'cancelled', FApp.StateText);
+  finally
+    Slow.Free;
+  end;
+end;
+
+procedure THarnessAppTest.TestEarlyCancelRestoresThePrompt;
+var
+  Slow: TSlowChunks;
+  I: Integer;
+begin
+  Build;
+  Slow := TSlowChunks.Create(80);
+  try
+    FFake.AfterChunk := Slow.AfterChunk;
+    FFake.AddResponse([TextDelta('working'), FinishFrame('stop'), DoneFrame]);
+    SubmitPrompt('hello');
+    for I := 1 to 300 do
+    begin
+      FApp.Step;
+      if FApp.Busy then
+        Break;
+      Sleep(2);
+    end;
+    AssertTrue('turn in flight', FApp.Busy);
+
+    FInput.Push(Key(kkEscape));
+    FApp.Step;
+    FInput.Push(Key(kkEscape));
+    FApp.Step;
+    for I := 1 to 800 do
+    begin
+      FApp.Step;
+      if not FApp.Busy then
+        Break;
+      Sleep(2);
+    end;
+
+    AssertEquals('cancelled', 'cancelled', FApp.StateText);
+    AssertEquals('the prompt came back', 'hello',
+      string(FApp.Panel.Compose.Text));
+    AssertEquals('the aborted turn left no block', 0, BlockCount);
+  finally
+    Slow.Free;
+  end;
+end;
+
+procedure THarnessAppTest.TestSubmitWhileBusyQueuesThePrompt;
+var
+  Slow: TSlowChunks;
+  I: Integer;
+begin
+  Build;
+  Slow := TSlowChunks.Create(80);
+  try
+    FFake.AfterChunk := Slow.AfterChunk;
+    FFake.AddResponse([TextDelta('one'), FinishFrame('stop'), DoneFrame]);
+    FFake.AddResponse([TextDelta('two'), FinishFrame('stop'), DoneFrame]);
+    SubmitPrompt('first');
+    for I := 1 to 300 do
+    begin
+      FApp.Step;
+      if FApp.Busy then
+        Break;
+      Sleep(2);
+    end;
+    AssertTrue('turn in flight', FApp.Busy);
+
+    { A second submit while busy is queued, not dropped. }
+    SubmitPrompt('second');
+    for I := 1 to 1200 do
+    begin
+      FApp.Step;
+      if not FApp.Busy then
+        Break;
+      Sleep(2);
+    end;
+    AssertEquals('the queued prompt started the next turn', 2, FFake.Calls);
+    AssertTrue('the queued prompt is in the transcript',
+      FindText(ckUser, 'second'));
   finally
     Slow.Free;
   end;

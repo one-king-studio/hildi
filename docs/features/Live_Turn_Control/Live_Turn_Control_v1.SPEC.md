@@ -218,14 +218,15 @@ type
 
   IConversationStore = interface
     ...
-    { Drop the last assistant message and the reasoning block before it. }
-    procedure DropLastResponse;
+    { Drop every message the open turn appended, keeping the turn row. }
+    procedure DropTurnMessages(ATurnId: Int64);
   end;
 ```
 
-`DoSend` becomes a loop over turns: drain before each request; after a response
-with tool calls, drop it and re-request when the queue is non-empty; after a
-stop, begin a new turn if the queue is non-empty.
+`DoSend` becomes a loop over turns: drain before each request; when a response
+with tool calls arrives and the queue is non-empty, keep no response for it and
+drain instead (the tool call is superseded); after a stop, begin a new turn if
+the queue is non-empty.
 
 ### Cancel (`hildegard.helper.llm`)
 
@@ -244,7 +245,13 @@ type
 ```
 
 The transport checks the callback between stream reads; when it fires it returns
-`ACancelled = True` and the client returns `leCancelled`.
+`ACancelled = True` and the client returns `leCancelled`. The loop sets
+`FClient.CancelCheck` before each request.
+
+When the cancel lands before any response has been committed, the loop drops the
+turn's messages (keeping the `tsCancelled` row) and records `LastTurnDropped`;
+the worker puts that on the `teError` event as `Dropped`. A queued prompt
+injected mid-flight is reported as `tePromptQueued`.
 
 ### Turn worker / app (`hildegard.helper.harness.turn` / `.harness.app`)
 

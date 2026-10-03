@@ -31,7 +31,8 @@ type
     procedure AddResponse(const AChunks: array of RawByteString);
     function PostStream(const AURL: string; const ABody: string;
       const AHeaders: TStringList; AOnChunk: TLLMChunkEvent;
-      out AStatusCode: Integer; out AError: string): Boolean; override;
+      out AStatusCode: Integer; out AError: string;
+      out ACancelled: Boolean): Boolean; override;
   end;
 
 const
@@ -92,7 +93,8 @@ end;
 
 function TFakeTransport.PostStream(const AURL: string; const ABody: string;
   const AHeaders: TStringList; AOnChunk: TLLMChunkEvent;
-  out AStatusCode: Integer; out AError: string): Boolean;
+  out AStatusCode: Integer; out AError: string;
+  out ACancelled: Boolean): Boolean;
 var
   I, Idx: Integer;
   Chunks: TStringList;
@@ -102,6 +104,7 @@ begin
   LastBody := ABody;
   LastHeaders.Assign(AHeaders);
   AError := '';
+  ACancelled := False;
   if FailNetwork then
   begin
     AStatusCode := 0;
@@ -121,6 +124,13 @@ begin
 
   for I := 0 to Chunks.Count - 1 do
   begin
+    { Consult the cancel check between chunks, like the real transport. }
+    if Assigned(CancelCheck) and CancelCheck() then
+    begin
+      ACancelled := True;
+      AError := 'cancelled';
+      Exit(False);
+    end;
     if Assigned(AOnChunk) then
       AOnChunk(RawByteString(Chunks[I]));
     if Assigned(AfterChunk) then

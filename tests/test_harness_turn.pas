@@ -387,6 +387,8 @@ begin
           BoolToStr(Event.ToolOk, True) + ':' + Event.Text + '|';
       teUserMessage:
         Result := Result + 'U:' + Event.Text + '|';
+      tePromptQueued:
+        Result := Result + 'Q:' + Event.Text + '|';
       teApprovalAsk:
         Result := Result + 'A:' + IntToStr(Event.RequestId) + '|';
       teDone:
