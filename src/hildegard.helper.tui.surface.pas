@@ -246,12 +246,25 @@ end;
 procedure TSurfaceMemory.DimRect(const R: TRect);
 var
   C: TRect;
-  X, Y: Integer;
+  X, Y, I: Integer;
 begin
   C := Intersect(R, EffectiveClip);
   for Y := C.Y to C.Y + C.H - 1 do
     for X := C.X to C.X + C.W - 1 do
-      Include(FCells[IndexOf(X, Y)].Attr.Style, sfDim);
+    begin
+      I := IndexOf(X, Y);
+      { Mirror the video surface: darken the palette, and give a screen-bg cell
+        an explicit dimmed background so the whole screen dims, not just text. }
+      if sfScreenBg in FCells[I].Attr.Style then
+      begin
+        Exclude(FCells[I].Attr.Style, sfScreenBg);
+        FCells[I].Attr.Bg := DimPaletteIndex(FScreenBg);
+      end
+      else
+        FCells[I].Attr.Bg := DimPaletteIndex(FCells[I].Attr.Bg);
+      FCells[I].Attr.Fg := DimPaletteIndex(FCells[I].Attr.Fg);
+      Include(FCells[I].Attr.Style, sfDim);
+    end;
 end;
 
 procedure TSurfaceMemory.PushClip(const R: TRect);

@@ -49,6 +49,41 @@ const
   DefaultAttr: TAttr = (Fg: 7; Bg: 0; Style: [sfScreenBg]);
   ErasedChar = '';
 
+{ Map a 256-colour palette index to a darker one, for a modal's dimmed
+  background. Base colours drop to black, the cube steps each channel down, and
+  the greyscale ramp drops about a third. }
+function DimPaletteIndex(AIndex: Byte): Byte;
+
 implementation
+
+function DimPaletteIndex(AIndex: Byte): Byte;
+var
+  R, G, B: Integer;
+begin
+  if AIndex < 8 then
+    Result := 0
+  else if AIndex < 16 then
+    Result := AIndex - 8
+  else if AIndex < 232 then
+  begin
+    R := (AIndex - 16) div 36;
+    G := ((AIndex - 16) mod 36) div 6;
+    B := (AIndex - 16) mod 6;
+    if R > 0 then
+      Dec(R);
+    if G > 0 then
+      Dec(G);
+    if B > 0 then
+      Dec(B);
+    Result := 16 + R * 36 + G * 6 + B;
+  end
+  else
+  begin
+    if AIndex > 232 + 8 then
+      Result := AIndex - 8
+    else
+      Result := 232;
+  end;
+end;
 
 end.

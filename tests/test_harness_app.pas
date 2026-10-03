@@ -84,6 +84,7 @@ type
     procedure TestErrorStateAfterAFailedTurn;
     procedure TestEscapeArmsThenCancels;
     procedure TestCtrlCQuitsOnlyWhenComposeIsEmpty;
+    procedure TestApprovalDimsTheBackground;
   end;
 
 implementation
@@ -695,6 +696,18 @@ begin
 
   FInput.Push(Ctrl('c'));
   AssertFalse('ctrl+c on an empty compose quits', FApp.Step);
+end;
+
+procedure THarnessAppTest.TestApprovalDimsTheBackground;
+begin
+  Build;
+  FSession.Queue.Push(ApprovalEvent(1, MakeAsk));
+  FApp.Step;   // drain the ask -> show the modal
+  FApp.Step;   // render it
+  AssertTrue('modal shown', FApp.ModalActive);
+  { A cell above the modal (the panel's top border) is dimmed. }
+  AssertTrue('the background is dimmed',
+    sfDim in FSurface.CellAt(20, 0).Attr.Style);
 end;
 
 initialization

@@ -505,7 +505,7 @@ var
   Wrap: TContainer;
   R: TRect;
 begin
-  FModal := TApprovalModal.Create(E.Ask, FTheme.Text);
+  FModal := TApprovalModal.Create(E.Ask, FTheme);
   FModal.OnChoose := OnApprovalChosen;
   FPendingRequest := E.RequestId;
   Wrap := TContainer.Create([Fill(1), Auto, Fill(1)], [Fill(1), Auto, Fill(1)]);

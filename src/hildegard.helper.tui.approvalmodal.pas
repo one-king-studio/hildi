@@ -1,15 +1,34 @@
 unit hildegard.helper.tui.approvalmodal;
-{ A modal widget for one TApprovalAsk. It mirrors the CLI's choices: pick an
-  option (number or arrows + Enter) to allow, Escape to deny. Scope keys g/w/s
-  choose where a persisting option is saved (default workspace, as the CLI). }
+{ The approval dialog: a modal box for one TApprovalAsk, drawn to the design in
+  docs/design/chat_panel_tui.md.
 
-{$mode delphi}{$H+}
+    ╭─ Approval needed ───────────────────────────────╮
+    │ <details, sunken background>                    │
+    │                                                 │
+    │ → allow once                                  1 │
+    │ ◦ always this exact command                   2 │
+    │ ◦ always command with any arguments           3 │
+    │                                                 │
+    │ scope: workspace                    tab / g w s │
+    ├─────────────────────────────────────────────────┤
+    │                        enter accept  esc deny   │
+    ╰═════════════════════════════════════════════════╯
+
+  Three text roles only, from the theme: normal (labels and unselected values),
+  dimmed (bullets, the scope label, and every keybinding), and bright (the
+  selected option and the active scope value).
+
+  Keys: arrows or digits pick, Enter accepts, Escape denies, Tab or g/w/s choose
+  the persistence scope (default workspace, as the CLI). }
+
+{$mode delphi}{$H+}{$codepage utf8}
 
 interface
 
 uses
   hildegard.helper.tui.base, hildegard.helper.tui.input,
   hildegard.helper.tui.surface, hildegard.helper.tui.widget,
+  hildegard.helper.tui.theme,
   hildegard.helper.approval;
 
 type
@@ -18,28 +37,27 @@ type
   TApprovalModal = class(TWidget)
   private
     FAsk: TApprovalAsk;
+    FTheme: TTheme;
     FSelected: Integer;
     FScope: TApprovalScope;
     FAnswered: Boolean;
     FChoice: TApprovalChoice;
     FOnChoose: TApprovalChoiceEvent;
-    FAttr: TAttr;
     procedure Choose(AIndex: Integer);
     procedure Deny;
     procedure CycleScope;
-    function LineAt(AIndex: Integer): string;
-    function LineCount: Integer;
   public
     constructor Create(const AAsk: TApprovalAsk); overload;
-    constructor Create(const AAsk: TApprovalAsk; const AAttr: TAttr); overload;
+    constructor Create(const AAsk: TApprovalAsk;
+      const ATheme: TTheme); overload;
     function Measure(const AAvail: TSize): TSize; override;
     procedure Render(const S: ISurface); override;
     function HandleEvent(const E: TInputEvent): Boolean; override;
 
     property Ask: TApprovalAsk read FAsk;
+    property Theme: TTheme read FTheme write FTheme;
     property Answered: Boolean read FAnswered;
     property Choice: TApprovalChoice read FChoice;
-    property Attr: TAttr read FAttr write FAttr;
     property OnChoose: TApprovalChoiceEvent read FOnChoose write FOnChoose;
   end;
 
@@ -47,7 +65,15 @@ implementation
 
 uses
   SysUtils,
-  hildegard.helper.tui.text;
+  hildegard.helper.tui.grapheme;
+
+const
+  { Row offsets from the box's top: the details band, then the first option. }
+  RowDetails = 1;
+  RowOption0 = 3;
+  { Rows after the last option: a blank, the scope line, the separator, the
+    footer, and the heavy bottom border. }
+  RowsAfterOptions = 5;
 
 function ScopeName(AScope: TApprovalScope): string;
 begin
@@ -61,119 +87,187 @@ begin
   end;
 end;
 
+function ScopeKeys: UnicodeString;
+begin
+  Result := 'tab / g w s';
+end;
+
+function FooterKeys: UnicodeString;
+begin
+  Result := 'enter accept   esc deny';
+end;
+
+function Rc(AX, AY, AW, AH: Integer): TRect;
+begin
+  Result := Default(TRect);
+  Result.X := AX;
+  Result.Y := AY;
+  Result.W := AW;
+  Result.H := AH;
+end;
+
 constructor TApprovalModal.Create(const AAsk: TApprovalAsk);
 begin
-  Create(AAsk, DefaultAttr);
+  Create(AAsk, DarkTheme);
 end;
 
 constructor TApprovalModal.Create(const AAsk: TApprovalAsk;
-  const AAttr: TAttr);
+  const ATheme: TTheme);
 begin
   inherited Create;
   FAsk := AAsk;
+  FTheme := ATheme;
   FSelected := 0;
   FScope := asWorkspace;
   FAnswered := False;
-  FAttr := AAttr;
-end;
-
-function TApprovalModal.LineCount: Integer;
-begin
-  Result := 3 + Length(FAsk.Options) + 2;
-end;
-
-function TApprovalModal.LineAt(AIndex: Integer): string;
-var
-  I: Integer;
-begin
-  if AIndex = 0 then
-  begin
-    Result := 'Approval needed';
-    Exit;
-  end;
-  if AIndex = 1 then
-  begin
-    Result := '  ' + FAsk.Summary;
-    Exit;
-  end;
-  if AIndex = 2 then
-  begin
-    Result := '';
-    Exit;
-  end;
-  I := AIndex - 3;
-  if I < Length(FAsk.Options) then
-  begin
-    Result := Format('  %d) %s', [I + 1, FAsk.Options[I].Caption]);
-    Exit;
-  end;
-  if AIndex = 3 + Length(FAsk.Options) then
-  begin
-    Result := '';
-    Exit;
-  end;
-  Result := Format('  scope: %s  [Tab / g w s]   Up/Down or 1-9   Enter accept   Esc deny',
-    [ScopeName(FScope)]);
 end;
 
 function TApprovalModal.Measure(const AAvail: TSize): TSize;
 var
-  I, W: Integer;
-  Block: TTextBlock;
+  I, W, OptW, InnerW: Integer;
+  DetailW, ScopeW: Integer;
 begin
   Result := Default(TSize);
-  W := 0;
-  Block := TTextBlock.Create([], wmNone);
-  try
-    for I := 0 to LineCount - 1 do
-    begin
-      Block.SetText(LineAt(I), DefaultAttr);
-      if Block.Measure(Default(TSize)).W > W then
-        W := Block.Measure(Default(TSize)).W;
-    end;
-  finally
-    Block.Free;
+  DetailW := StringWidth(UnicodeString(FAsk.Summary));
+  ScopeW := StringWidth(UnicodeString('scope: ') +
+    UnicodeString(ScopeName(FScope))) + 2 + StringWidth(ScopeKeys);
+  if StringWidth(FooterKeys) > ScopeW then
+    ScopeW := StringWidth(FooterKeys);
+  OptW := 0;
+  for I := 0 to High(FAsk.Options) do
+  begin
+    InnerW := 2 + StringWidth(UnicodeString(FAsk.Options[I].Caption)) + 2 +
+      StringWidth(UnicodeString(IntToStr(I + 1)));
+    if InnerW > OptW then
+      OptW := InnerW;
   end;
-  Result.W := W + 4;
+  W := DetailW;
+  if OptW > W then
+    W := OptW;
+  if ScopeW > W then
+    W := ScopeW;
+  Result.W := W + 4;   { two borders plus a space of padding each side }
   if Result.W > AAvail.W then
     Result.W := AAvail.W;
-  Result.H := LineCount + 2;
+  Result.H := RowOption0 + Length(FAsk.Options) + RowsAfterOptions;
   if Result.H > AAvail.H then
     Result.H := AAvail.H;
 end;
 
 procedure TApprovalModal.Render(const S: ISurface);
 var
-  Bg, Reverse: TAttr;
-  I, X: Integer;
-  Line: string;
-  Cell: TCell;
+  L, R, T, B, N, I, X, Y, InnerL, InnerR, Row: Integer;
+  Bg, BorderAttr, MutedAttr, BrightAttr, NormalAttr, DetailAttr: TAttr;
+  Key: UnicodeString;
+
+  procedure Text(ACol, ARow: Integer; const AText: UnicodeString;
+    const AAttr: TAttr);
+  begin
+    PutText(S, ACol, ARow, AText, AAttr);
+  end;
+
+  function RightCol(const AText: UnicodeString): Integer;
+  begin
+    Result := InnerR - StringWidth(AText) + 1;
+  end;
+
 begin
-  if (FBounds.W <= 0) or (FBounds.H <= 0) then
+  if (FBounds.W < 4) or (FBounds.H < 4) then
     Exit;
-  Bg := FAttr;
+  N := Length(FAsk.Options);
+  L := FBounds.X;
+  R := FBounds.X + FBounds.W - 1;
+  T := FBounds.Y;
+  B := FBounds.Y + FBounds.H - 1;
+  InnerL := L + 1;
+  InnerR := R - 1;
+
+  Bg := OnBg(FTheme.Text, FTheme.RaisedBg);
+  BorderAttr := OnBg(FTheme.Border, FTheme.RaisedBg);
+  MutedAttr := OnBg(FTheme.Muted, FTheme.RaisedBg);
+  BrightAttr := OnBg(FTheme.Accent, FTheme.RaisedBg);
+  NormalAttr := OnBg(FTheme.Text, FTheme.RaisedBg);
+
   S.FillRect(FBounds, Bg);
 
-  for I := 0 to LineCount - 1 do
+  { Rounded top with the title, a heavy bottom edge, and side borders. }
+  PutCh(S, L, T, '╭', BorderAttr);
+  PutCh(S, R, T, '╮', BorderAttr);
+  PutCh(S, L, B, '╰', BorderAttr);
+  PutCh(S, R, B, '╯', BorderAttr);
+  for X := L + 1 to R - 1 do
   begin
-    if I + 1 >= FBounds.H then
+    PutCh(S, X, T, '─', BorderAttr);
+    PutCh(S, X, B, '═', BorderAttr);
+  end;
+  for Y := T + 1 to B - 1 do
+  begin
+    PutCh(S, L, Y, '│', BorderAttr);
+    PutCh(S, R, Y, '│', BorderAttr);
+  end;
+  Text(L + 2, T, ' Approval needed ', OnBg(FTheme.Title, FTheme.RaisedBg));
+
+  { Tool details on the sunken background. }
+  if T + RowDetails < B then
+  begin
+    DetailAttr := OnBg(FTheme.Text, FTheme.SunkenBg);
+    S.FillRect(Rc(InnerL, T + RowDetails, InnerR - InnerL + 1, 1), DetailAttr);
+    Text(InnerL + 1, T + RowDetails, UnicodeString(FAsk.Summary), DetailAttr);
+  end;
+
+  { Options: a bullet, the caption, and the numeric key right-aligned. }
+  for I := 0 to N - 1 do
+  begin
+    Row := T + RowOption0 + I;
+    if Row >= B then
       Break;
-    Line := LineAt(I);
-    Reverse := Bg;
-    if (I >= 3) and (I - 3 = FSelected) and (I - 3 < Length(FAsk.Options)) then
-      Include(Reverse.Style, sfReverse);
-    for X := 1 to Length(Line) do
+    Key := UnicodeString(IntToStr(I + 1));
+    if I = FSelected then
     begin
-      if X - 1 >= FBounds.W then
-        Break;
-      Cell := Default(TCell);
-      Cell.Ch := UnicodeString(Line[X]);
-      if (I >= 3) and (I - 3 = FSelected) then
-        Cell.Attr := Reverse
-      else
-        Cell.Attr := Bg;
-      S.Put(FBounds.X + X - 1, FBounds.Y + I + 1, Cell);
+      Text(InnerL + 1, Row, '→ ', MutedAttr);
+      Text(InnerL + 3, Row, UnicodeString(FAsk.Options[I].Caption), BrightAttr);
+    end
+    else
+    begin
+      Text(InnerL + 1, Row, '◦ ', MutedAttr);
+      Text(InnerL + 3, Row, UnicodeString(FAsk.Options[I].Caption), NormalAttr);
     end;
+    Text(RightCol(Key), Row, Key, MutedAttr);
+  end;
+
+  { Scope line: dimmed label, bright value, dimmed keys. }
+  Row := T + RowOption0 + N + 1;
+  if Row < B then
+  begin
+    Text(InnerL + 1, Row, 'scope: ', MutedAttr);
+    Text(InnerL + 8, Row, UnicodeString(ScopeName(FScope)), BrightAttr);
+    Text(RightCol(ScopeKeys), Row, ScopeKeys, MutedAttr);
+  end;
+
+  { Separator. }
+  Row := T + RowOption0 + N + 2;
+  if Row < B then
+  begin
+    PutCh(S, L, Row, '├', BorderAttr);
+    PutCh(S, R, Row, '┤', BorderAttr);
+    for X := L + 1 to R - 1 do
+      PutCh(S, X, Row, '─', BorderAttr);
+  end;
+
+  { Footer, right-aligned: keys dimmed, actions normal. }
+  Row := T + RowOption0 + N + 3;
+  if Row < B then
+  begin
+    X := RightCol(FooterKeys);
+    Text(X, Row, 'enter', MutedAttr);
+    Inc(X, StringWidth('enter'));
+    Text(X, Row, ' accept', NormalAttr);
+    Inc(X, StringWidth(' accept'));
+    Text(X, Row, '   ', NormalAttr);
+    Inc(X, StringWidth('   '));
+    Text(X, Row, 'esc', MutedAttr);
+    Inc(X, StringWidth('esc'));
+    Text(X, Row, ' deny', NormalAttr);
   end;
 end;
 

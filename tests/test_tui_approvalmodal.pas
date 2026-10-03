@@ -10,6 +10,7 @@ uses
   SysUtils, fpcunit, testregistry,
   hildegard.helper.tui.base, hildegard.helper.tui.input,
   hildegard.helper.tui.surface, hildegard.helper.tui.widget,
+  hildegard.helper.tui.theme,
   hildegard.helper.approval, hildegard.helper.tui.approvalmodal;
 
 type
@@ -32,6 +33,11 @@ type
     procedure TearDown; override;
   published
     procedure TestRendersSummaryAndOptions;
+    procedure TestModalTitlesAndBorders;
+    procedure TestModalMarksTheSelectedChoice;
+    procedure TestModalKeybindingsAreRightAlignedAndDim;
+    procedure TestModalShowsTheScopeAndFooter;
+    procedure TestModalDetailsUseTheSunkenBackground;
     procedure TestArrowAndEnterChooses;
     procedure TestNumberChooses;
     procedure TestEscapeDenies;
@@ -110,9 +116,129 @@ begin
   try
     Modal.Arrange(Rc(40, 10));
     Modal.Render(Surface);
-    AssertTrue('summary shown', Pos('rm -rf build/', Surface.RowText(2, 0, 40)) > 0);
-    AssertTrue('option 1 shown', Pos('1) Option 1', Surface.RowText(4, 0, 40)) > 0);
-    AssertTrue('option 2 shown', Pos('2) Option 2', Surface.RowText(5, 0, 40)) > 0);
+    AssertTrue('summary in the details band',
+      Pos('rm -rf build/', Surface.RowText(1, 0, 40)) > 0);
+    AssertTrue('option 1 shown', Pos('Option 1', Surface.RowText(3, 0, 40)) > 0);
+    AssertTrue('option 2 shown', Pos('Option 2', Surface.RowText(4, 0, 40)) > 0);
+  finally
+    Modal.Free;
+    Surface.Free;
+  end;
+end;
+
+procedure TApprovalModalTest.TestModalTitlesAndBorders;
+var
+  Modal: TApprovalModal;
+  Surface: TSurfaceMemory;
+begin
+  Modal := TApprovalModal.Create(MakeAsk(2));
+  Surface := TSurfaceMemory.Create(40, 10);
+  try
+    Modal.Arrange(Rc(40, 10));
+    Modal.Render(Surface);
+    AssertEquals('title in the top border',
+      True, Pos('Approval needed', Surface.RowText(0, 0, 40)) > 0);
+    AssertTrue('rounded top-left (U+256D)',
+      Ord(Surface.CellAt(0, 0).Ch[1]) = $256D);
+    AssertTrue('heavy bottom edge (U+2550)',
+      Ord(Surface.CellAt(10, 9).Ch[1]) = $2550);
+  finally
+    Modal.Free;
+    Surface.Free;
+  end;
+end;
+
+procedure TApprovalModalTest.TestModalMarksTheSelectedChoice;
+var
+  Modal: TApprovalModal;
+  Surface: TSurfaceMemory;
+begin
+  Modal := TApprovalModal.Create(MakeAsk(2));
+  Surface := TSurfaceMemory.Create(40, 10);
+  try
+    Modal.Arrange(Rc(40, 10));
+    Modal.Render(Surface);
+    AssertTrue('selected has an arrow',
+      Pos('→ Option 1', Surface.RowText(3, 0, 40)) > 0);
+    AssertTrue('unselected has a bullet',
+      Pos('◦ Option 2', Surface.RowText(4, 0, 40)) > 0);
+    AssertTrue('selected text is bright',
+      sfBold in Surface.CellAt(4, 3).Attr.Style);
+
+    Modal.HandleEvent(Key(kkDown));
+    Modal.Render(Surface);
+    AssertTrue('arrow moved',
+      Pos('→ Option 2', Surface.RowText(4, 0, 40)) > 0);
+    AssertTrue('the first is now a bullet',
+      Pos('◦ Option 1', Surface.RowText(3, 0, 40)) > 0);
+  finally
+    Modal.Free;
+    Surface.Free;
+  end;
+end;
+
+procedure TApprovalModalTest.TestModalKeybindingsAreRightAlignedAndDim;
+var
+  Modal: TApprovalModal;
+  Surface: TSurfaceMemory;
+begin
+  Modal := TApprovalModal.Create(MakeAsk(2));
+  Surface := TSurfaceMemory.Create(40, 10);
+  try
+    Modal.Arrange(Rc(40, 10));
+    Modal.Render(Surface);
+    { The box is 40 wide, so the inner right edge is column 38; the scope keys
+      ('tab / g w s', 11 columns) start at column 28. }
+    AssertEquals('option key at the right edge', '1',
+      string(Surface.CellAt(38, 3).Ch));
+    AssertTrue('option key is dim',
+      sfDim in Surface.CellAt(38, 3).Attr.Style);
+    AssertTrue('scope keys are right aligned and dim',
+      (Surface.CellAt(28, 6).Ch = 't') and
+      (sfDim in Surface.CellAt(28, 6).Attr.Style));
+  finally
+    Modal.Free;
+    Surface.Free;
+  end;
+end;
+
+procedure TApprovalModalTest.TestModalShowsTheScopeAndFooter;
+var
+  Modal: TApprovalModal;
+  Surface: TSurfaceMemory;
+begin
+  Modal := TApprovalModal.Create(MakeAsk(2));
+  Surface := TSurfaceMemory.Create(40, 10);
+  try
+    Modal.Arrange(Rc(40, 10));
+    Modal.Render(Surface);
+    AssertTrue('scope line',
+      Pos('scope: workspace', Surface.RowText(6, 0, 40)) > 0);
+    AssertTrue('scope keys',
+      Pos('tab / g w s', Surface.RowText(6, 0, 40)) > 0);
+    AssertTrue('footer accept', Pos('enter accept', Surface.RowText(8, 0, 40)) > 0);
+    AssertTrue('footer deny', Pos('esc deny', Surface.RowText(8, 0, 40)) > 0);
+  finally
+    Modal.Free;
+    Surface.Free;
+  end;
+end;
+
+procedure TApprovalModalTest.TestModalDetailsUseTheSunkenBackground;
+var
+  Modal: TApprovalModal;
+  Surface: TSurfaceMemory;
+begin
+  Modal := TApprovalModal.Create(MakeAsk(2));
+  Surface := TSurfaceMemory.Create(40, 10);
+  try
+    Modal.Arrange(Rc(40, 10));
+    Modal.Render(Surface);
+    AssertEquals('details band on the sunken background',
+      DarkTheme.SunkenBg, Surface.CellAt(5, 1).Attr.Bg);
+    { The modal is drawn after the dim, so its own cells are not dimmed. }
+    AssertFalse('the modal is not dimmed',
+      sfDim in Surface.CellAt(5, 1).Attr.Style);
   finally
     Modal.Free;
     Surface.Free;

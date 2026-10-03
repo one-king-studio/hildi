@@ -28,6 +28,7 @@ type
     FClipCount: Integer;
     FNeedFullRepaint: Boolean;
     FSizeChanged: Boolean;
+    FScreenBg: Byte;
     FEncoder: TCellEncoder;
     procedure InitSize;
     procedure WriteOut(const AData: RawByteString);
@@ -57,38 +58,6 @@ implementation
 
 uses
   baseunix, termio, video;
-
-function DimIndex(AIndex: Byte): Byte;
-var
-  R, G, B: Integer;
-begin
-  if AIndex < 8 then
-    Result := 0
-  else if AIndex < 16 then
-    Result := AIndex - 8
-  else if AIndex < 232 then
-  begin
-    { 6x6x6 colour cube: step each channel down one level. }
-    R := (AIndex - 16) div 36;
-    G := ((AIndex - 16) mod 36) div 6;
-    B := (AIndex - 16) mod 6;
-    if R > 0 then
-      Dec(R);
-    if G > 0 then
-      Dec(G);
-    if B > 0 then
-      Dec(B);
-    Result := 16 + R * 36 + G * 6 + B;
-  end
-  else
-  begin
-    { greyscale ramp: drop ~1/3. }
-    if AIndex > 232 + 8 then
-      Result := AIndex - 8
-    else
-      Result := 232;
-  end;
-end;
 
 constructor TSurfaceVideo.Create;
 begin
@@ -279,9 +248,17 @@ begin
         Continue;
       I := IndexOf(X, Y);
       { Darken the palette as well as setting faint: many terminals ignore
-        SGR 2, so without the remap the dim would be invisible. }
-      FCells[I].Attr.Fg := DimIndex(FCells[I].Attr.Fg);
-      FCells[I].Attr.Bg := DimIndex(FCells[I].Attr.Bg);
+        SGR 2, so without the remap the dim would be invisible. A cell that
+        paints the screen background keeps that background in the encoder, so
+        swap it for an explicit dimmed index or only the text would dim. }
+      if sfScreenBg in FCells[I].Attr.Style then
+      begin
+        Exclude(FCells[I].Attr.Style, sfScreenBg);
+        FCells[I].Attr.Bg := DimPaletteIndex(FScreenBg);
+      end
+      else
+        FCells[I].Attr.Bg := DimPaletteIndex(FCells[I].Attr.Bg);
+      FCells[I].Attr.Fg := DimPaletteIndex(FCells[I].Attr.Fg);
       Include(FCells[I].Attr.Style, sfDim);
     end;
 end;
@@ -312,6 +289,7 @@ end;
 
 procedure TSurfaceVideo.SetScreenBg(AIndex: Byte);
 begin
+  FScreenBg := AIndex;
   FEncoder.SetScreenBg(AIndex);
 end;
 

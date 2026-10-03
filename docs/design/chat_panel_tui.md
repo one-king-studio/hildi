@@ -52,7 +52,7 @@
 │                                                                            │
 │  this line can additionally be used to display other stats, hints, or CTAs │
 ╭════════════════════════════════════════════════════════════════════════════╮
-│ › Make this cursor blink --> █                                             │
+│ Make this cursor blink --> █                                               │
 │                                                                            │
 │ Agent Name · Model v1 Provider · low                                       │
 ╰────────────────────────────────────────────────────────────────────────────╯
@@ -63,3 +63,34 @@
 
 Use the following character sequence: `∙ • ● ◉ ❂ ✴ ✵ ✶ ✷ ✸ ✹ ✺ ❋` for a burst
 of sparkles in a bright color.
+
+## Modals
+
+```
+╭─ Approval needed ───────────────────────────────────╮
+│ tool details go here with darker background         │
+│                                                     │
+│ → allow once                                     1  │
+│ ◦ always this exact command                      2  │
+│ ◦ always command with any arguements             3  │
+│                                                     │
+│ scope: workspace                         tab/g/w/s  │
+├─────────────────────────────────────────────────────┤ 
+│                           enter accept   esc deny   │
+╰═════════════════════════════════════════════════════╯
+```
+
+The above example showcases the approval modal. A few things to note about it.
+
+1. It has a specific section for the accept and deny actions
+2. The main actions should have the keybinding dimmer than the action
+3. The choices are left aligned with the current choice indicated with an arrow
+4. The current choice text is brighter than the unselected choice (maybe highlighted instead)
+5. The choice keybindings are right aligned and dimmed
+6. The bullets and the 'scope' label are dimmer than the choices
+7. The scope keybindings are right aligned and dimmed
+
+Overall there should be 3 font color choices
+1. normal for bullets and labels
+2. dimmed for keybindings
+3. bright for active values

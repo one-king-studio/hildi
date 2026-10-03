@@ -27,7 +27,7 @@ type
     procedure Test256ColorIndexRetainedInCell;
     procedure TestFlushIdempotent;
     procedure TestInvalidateForcesFullRepaint;
-    procedure TestDimAddsFaintButKeepsGlyphsAndColors;
+    procedure TestDimDarkensColorsAndAddsFaint;
     procedure TestPutChPlacesOneCell;
     procedure TestPutTextPlacesAString;
     procedure TestPutTextClipsAtBounds;
@@ -205,7 +205,7 @@ begin
   end;
 end;
 
-procedure TTuiSurfaceTest.TestDimAddsFaintButKeepsGlyphsAndColors;
+procedure TTuiSurfaceTest.TestDimDarkensColorsAndAddsFaint;
 var
   S: TSurfaceMemory;
   C: TCell;
@@ -218,11 +218,15 @@ begin
     S.Put(1, 1, C);
     S.DimRect(Rc(0, 0, 4, 2));
     AssertEquals('glyph kept', 'A', S.CellAt(1, 1).Ch);
-    AssertEquals('fg kept', 200, S.CellAt(1, 1).Attr.Fg);
-    AssertEquals('bg kept', 52, S.CellAt(1, 1).Attr.Bg);
+    AssertEquals('fg darkened', 163, S.CellAt(1, 1).Attr.Fg);
+    AssertEquals('bg darkened', 16, S.CellAt(1, 1).Attr.Bg);
     AssertTrue('dim added', sfDim in S.CellAt(1, 1).Attr.Style);
     AssertTrue('bold kept', sfBold in S.CellAt(1, 1).Attr.Style);
     AssertTrue('blank cell dimmed too', sfDim in S.CellAt(0, 0).Attr.Style);
+    { A cell painting the screen background gets an explicit dimmed one, so the
+      whole screen dims rather than just the text. }
+    AssertFalse('screen bg flag cleared',
+      sfScreenBg in S.CellAt(0, 0).Attr.Style);
   finally
     S.Free;
   end;
