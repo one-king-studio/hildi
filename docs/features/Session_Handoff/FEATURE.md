@@ -220,20 +220,97 @@ Multi-instance safety
 - Must reuse `hildegard.helper.session`/`.store` (ledger and restore),
   `harness.turn` (drain/interrupt), the approval engine, and the modal
   machinery; the protocol must not reimplement any of them.
-- Store changes must be an additive migration (v5) - `session_holders` and a
-  session event feed - with no reset of existing history; the store must
-  enable WAL and a busy timeout for multi-process use.
+- Store changes must be an additive migration (v2) - `session_holders` and a
+  session event feed - with no reset of existing history; the store already
+  enables WAL and a busy timeout (`DefaultBusyTimeoutMs`, `journal_mode=WAL`),
+  which multi-process use relies on.
 - Handoffs happen at turn boundaries; mid-stream takeover is expressly out of
   scope (force-interrupt is the escape hatch, via Interrupt v1).
 - No sockets, no daemon process, no network transport: the store is the only
   coordination mechanism in v1.
 
-### Non-Goals
+### Business / Time
+
+- No external deadline. This is a foundation feature, sequenced before Remote
+  Agent Link because the link adopts its driver abstraction, not because of a
+  date.
+
+## Dependencies
+
+### Internal
+
+- `hildegard.helper.store` - a new additive migration (v2) adding
+  `session_holders` and the per-session event feed; the existing WAL + busy
+  timeout.
+- `hildegard.helper.session` / `.store` - the ledger and the restore path the
+  requester adopts.
+- `hildegard.helper.harness.turn` - the turn worker and the drain/interrupt
+  semantics reused by the handoff.
+- The approval engine and the approval modal - the holder's accept/deny dialog.
+- `hildegard.helper.tui.app` / `harness.app` - the TUI holder and its blank
+  "session handed off" screen.
+
+### External
+
+- OS facilities to read a process start time (`BaseUnix` plus `sysctl`
+  `kinfo_proc` on macOS, `/proc/<pid>/stat` on Linux).
+- None beyond the existing vendored SQLite.
+
+## Risks
+
+- **Two acquirers both win the lease.** Mitigation: acquisition is a single
+  compare-and-set on the holder row, so exactly one wins.
+- **A reused PID impersonates a dead holder.** Mitigation: the lease binds
+  `(hostname, pid, process_start_time)`; liveness is heartbeat-based and the
+  start time is the impersonation guard.
+- **The heartbeat window is wrong.** Too short steals a live session; too long
+  strands a dead one. Mitigation: configurable interval and missed-heartbeat
+  allowance with documented defaults; a stale lease is recoverable.
+- **A same-user process seizes a headless session.** A headless holder
+  auto-accepts handoff because no user is present. Mitigation: the store file is
+  owner-only (`ChmodOwnerOnly`), the unattended approval policy is
+  deny-by-default, and every transition is recorded.
+- **Ledger writes while another holder owns the session.** Mitigation: the
+  driver refuses ledger writes without the lease; only the holder of record
+  writes.
+- **A long-lived headless feed grows without bound.** Mitigation: the feed is
+  capped and pruned on session exit.
+- **Store-as-broker polls.** Mitigation: a modest poll (target 250 ms) with
+  idle CPU near zero; no spin.
+- **Mid-turn handoff timing.** Mitigation: drain at the turn boundary reusing
+  Interrupt v1; force-interrupt is the escape hatch.
+
+## Out of Scope
 
 - Remote sessions over the network - that is Remote Agent Link, which should
   adopt the driver abstraction this feature introduces (one driver per
   session, observers read-only).
 - Multiple concurrent writers to one session, and any merge of divergent
   histories.
+- Mid-stream (non-boundary) takeover; force-interrupt via Interrupt v1 is the
+  escape hatch.
 - Windows support.
 - A session server or supervisor process.
+
+## Future Considerations
+
+- Push notification instead of polling (a store trigger or a lighter channel).
+- Cross-device handoff once Remote Agent Link exists.
+- A richer observer view (the full chat panel in read-only observe mode).
+- OS-keychain-backed holder identity.
+
+## Notes
+
+- **ICE score: Impact 8, Confidence 6, Ease 4.** Impact is high because
+  ownership, headless operation, and observe mode unblock the link and make
+  multi-instance use safe. Confidence is moderate because multi-process SQLite
+  timing and per-platform process start time need calibration. Ease is low:
+  lease, heartbeat, handoff state machine, event feed, and a headless entrypoint
+  are all new.
+- **Sequencing:** the driver abstraction (one driver, many observers) is
+  introduced here and adopted by Remote Agent Link, so this lands before the
+  link. It is independent of TLS Foundation.
+- **Reuse note (Ponytail):** the store, the ledger and restore path, the turn
+  worker with interrupt, and the approval modal all exist. The new pieces are
+  the holder/lease table, the handoff state machine, the event feed, and the
+  headless entrypoint.
