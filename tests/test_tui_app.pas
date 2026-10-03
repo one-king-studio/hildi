@@ -21,6 +21,8 @@ type
     Accept: Boolean;
     HandleCount: Integer;
     LastKeyKind: TKeyKind;
+    LastKind: TInputKind;
+    LastPaste: UnicodeString;
     ArrangeCalls: Integer;
     constructor Create(AW, AH: Integer; const AMarker: UnicodeString = '#');
     function Measure(const AAvail: TSize): TSize; override;
@@ -34,6 +36,7 @@ type
     function Rc(AX, AY, AW, AH: Integer): TRect;
     function KeyEvent(AKind: TKeyKind): TInputEvent;
     function ResizeEvent(AW, AH: Integer): TInputEvent;
+    function PasteEvent(const AText: string): TInputEvent;
   published
     procedure TestFrameRendersBaseThenModal;
     procedure TestModalDimsBackgroundButKeepsText;
@@ -42,6 +45,7 @@ type
     procedure TestPopModalRestoresBase;
     procedure TestResizeRelayoutsRoot;
     procedure TestStepProcessesOneEvent;
+    procedure TestPasteIsDispatched;
   end;
 
 implementation
@@ -85,6 +89,8 @@ function TAppProbe.HandleEvent(const E: TInputEvent): Boolean;
 begin
   Inc(HandleCount);
   LastKeyKind := E.Key.Kind;
+  LastKind := E.Kind;
+  LastPaste := E.Text;
   Result := Accept;
 end;
 
@@ -110,6 +116,36 @@ begin
   Result.Kind := ikResize;
   Result.NewSize.W := AW;
   Result.NewSize.H := AH;
+end;
+
+function TTuiAppTest.PasteEvent(const AText: string): TInputEvent;
+begin
+  Result := Default(TInputEvent);
+  Result.Kind := ikPaste;
+  Result.Text := UnicodeString(AText);
+end;
+
+procedure TTuiAppTest.TestPasteIsDispatched;
+var
+  S: TSurfaceMemory;
+  Src: TInputSourceScripted;
+  Base: TAppProbe;
+  App: TTuiApp;
+begin
+  S := TSurfaceMemory.Create(10, 4);
+  Src := TInputSourceScripted.Create;
+  Base := TAppProbe.Create(10, 4, 'B');
+  App := TTuiApp.Create(S, Src, Base);
+  try
+    { A paste must reach the widget tree, like a key or a mouse event. }
+    Src.Push(PasteEvent('hello' + #10 + 'world'));
+    App.Step;
+    AssertEquals('paste reached the root', Ord(ikPaste), Ord(Base.LastKind));
+    AssertEquals('payload intact', 'hello' + #10 + 'world',
+      string(Base.LastPaste));
+  finally
+    App.Free;
+  end;
 end;
 
 procedure TTuiAppTest.TestFrameRendersBaseThenModal;

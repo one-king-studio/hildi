@@ -283,11 +283,14 @@ begin
         ArrangePlanes;
         FLayoutDirty := False;
       end;
-    ikKey:
+    { A paste is text input, so it is routed like a key: to the modal plane
+      while one is up (which ignores it), otherwise to the base. Without this
+      arm a decoded paste was silently dropped. }
+    ikKey, ikPaste:
       if ModalActive then
       begin
         Handled := FPlanes[High(FPlanes)].Root.HandleEvent(E);
-        if (not Handled) and (E.Key.Kind = kkEscape) then
+        if (not Handled) and (E.Kind = ikKey) and (E.Key.Kind = kkEscape) then
           PopPlane;
       end
       else

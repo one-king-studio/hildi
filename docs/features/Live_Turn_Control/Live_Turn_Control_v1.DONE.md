@@ -83,5 +83,16 @@ and runs `make check` before moving on.
 
 ## Completion
 
-- [ ] `make check` green (functional + leak gate).
-- [ ] Rename this TODO to `Live_Turn_Control_v1.DONE.md` when all phases land.
+- [x] `make check` green (functional + leak gate).
+- [x] Renamed to `Live_Turn_Control_v1.DONE.md`.
+
+## Follow-up: paste dispatch fix (2026-10-03)
+
+Field report (VSCode, macOS): pasting into the compose did nothing. The decoder
+was not at fault - byte-by-byte and 64-byte-chunk delivery are now covered by
+`TestDecodeBracketedPasteByteByByte` / `...InSixtyFourByteChunks` and pass. The
+gap was `TTuiApp.DispatchEvent`: it switched on `ikResize`/`ikKey`/`ikMouse` and
+had no arm for `ikPaste`, so a decoded paste was dropped before it reached the
+widget tree. `ikPaste` now routes like a key (to the modal plane while one is
+up, else the base). Covered by `TestPasteIsDispatched` (app) and
+`TestPasteInsertsIntoTheCompose` (harness).

@@ -86,6 +86,7 @@ type
     procedure TestEscapeArmsThenCancels;
     procedure TestEarlyCancelRestoresThePrompt;
     procedure TestSubmitWhileBusyQueuesThePrompt;
+    procedure TestPasteInsertsIntoTheCompose;
     procedure TestCtrlCQuitsOnlyWhenComposeIsEmpty;
     procedure TestApprovalDimsTheBackground;
   end;
@@ -788,6 +789,22 @@ begin
   finally
     Slow.Free;
   end;
+end;
+
+procedure THarnessAppTest.TestPasteInsertsIntoTheCompose;
+var
+  E: TInputEvent;
+begin
+  Build;
+  E := Default(TInputEvent);
+  E.Kind := ikPaste;
+  E.Text := 'pasted' + #10 + 'text';
+  FInput.Push(E);
+  FApp.Step;
+
+  AssertEquals('pasted text inserted whole', 'pasted' + #10 + 'text',
+    string(FApp.Panel.Compose.Text));
+  AssertFalse('a paste never submits', FApp.Busy);
 end;
 
 procedure THarnessAppTest.TestCtrlCQuitsOnlyWhenComposeIsEmpty;

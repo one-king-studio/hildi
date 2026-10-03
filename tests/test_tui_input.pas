@@ -41,6 +41,8 @@ type
     procedure TestDecodeShiftEnter;
     procedure TestDecodeBracketedPaste;
     procedure TestDecodeBracketedPasteBuffersUntilComplete;
+    procedure TestDecodeBracketedPasteByteByByte;
+    procedure TestDecodeBracketedPasteInSixtyFourByteChunks;
     procedure TestDecodeAltBackspace;
     { Resize debounce. }
     procedure TestResizeSettlerWaitsForAPause;
@@ -548,6 +550,63 @@ begin
     AssertEquals('payload kept whole', 'line one' + #10 + 'line two',
       string(E.Text));
     AssertEquals('nothing left buffered', 0, D.Buffered);
+  finally
+    D.Free;
+  end;
+end;
+
+procedure TTuiInputTest.TestDecodeBracketedPasteByteByByte;
+var
+  D: TKeyDecoder;
+  E: TInputEvent;
+  S: AnsiString;
+  I: Integer;
+begin
+  D := TKeyDecoder.Create;
+  try
+    S := #27'[200~' + 'line one' + #10 + 'line two' + #27'[201~';
+    for I := 1 to Length(S) do
+      D.Feed([Ord(S[I])]);
+    AssertTrue('paste decoded one byte at a time', D.Next(E));
+    AssertEquals('paste kind', Ord(ikPaste), Ord(E.Kind));
+    AssertEquals('payload', 'line one' + #10 + 'line two', string(E.Text));
+  finally
+    D.Free;
+  end;
+end;
+
+procedure TTuiInputTest.TestDecodeBracketedPasteInSixtyFourByteChunks;
+var
+  D: TKeyDecoder;
+  E: TInputEvent;
+  S: AnsiString;
+  I, Start, N: Integer;
+  Chunk: array of Byte;
+begin
+  D := TKeyDecoder.Create;
+  try
+    { A long payload, delivered in the terminal source's 64-byte reads. }
+    S := #27'[200~';
+    for I := 1 to 200 do
+      S := S + 'x';
+    S := S + #10 + 'tail' + #27'[201~';
+
+    Start := 1;
+    while Start <= Length(S) do
+    begin
+      N := Length(S) - Start + 1;
+      if N > 64 then
+        N := 64;
+      SetLength(Chunk, N);
+      for I := 0 to N - 1 do
+        Chunk[I] := Ord(S[Start + I]);
+      D.Feed(Chunk);
+      Start := Start + N;
+    end;
+    AssertTrue('paste decoded from chunks', D.Next(E));
+    AssertEquals('paste kind', Ord(ikPaste), Ord(E.Kind));
+    AssertEquals('payload length', 205, Length(E.Text));
+    AssertTrue('payload tail', Pos('tail', string(E.Text)) > 0);
   finally
     D.Free;
   end;
