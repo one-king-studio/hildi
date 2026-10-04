@@ -25,12 +25,13 @@ the cause.
 
 The Makefile says the agent CLI release target is an "optimized, self-
 contained production binary (static SQLite, no runtime libs)". That is only
-half true: static SQLite, dynamic TLS. `hildegard.helper.llm` pulls in
-`opensslsockets`, so the binary resolves libssl/libcrypto from the host at
-launch. On a dev machine this is invisible. On the device the helper is meant
-for — clean macOS or Linux box, no Homebrew, no openssl package — the binary
-either fails to load or fails its first HTTPS call, and the error surfaces as
-an inscrutable runtime failure far from the cause.
+half true: static SQLite, runtime-loaded TLS. `hildegard.helper.llm` pulls in
+`opensslsockets`, whose `openssl` unit `dlopen`s libssl/libcrypto from the host
+on the **first HTTPS call** — not at launch, which is why `otool -L` already
+looks clean and hides the problem. On a dev machine this is invisible. On the
+device the helper is meant for — clean macOS or Linux box, no Homebrew, no
+openssl package — the binary fails its first HTTPS call, and the error surfaces
+as an inscrutable runtime failure far from the cause.
 
 Every planned feature that talks to a network leans on the same latent gap:
 Remote Agent Link holds an *authenticated, long-lived* TLS connection, where
@@ -123,8 +124,11 @@ the transport, and how CA trust is provided.
 
 - Release binary starts and completes a streamed HTTPS LLM turn on a host
   with no OpenSSL present — the deployment smoke that fails today.
-- Zero `dlopen`/link-time references to host libssl/libcrypto in the release
-  binary (`otool -L` / `ldd` shows none).
+- No `libssl`/`libcrypto`/`opensslsockets` reference remains, verified by
+  `strings`/`nm` on the release binary **and** by the runtime HTTPS smoke.
+  Note: `otool -L`/`ldd` is **not** a valid check — FPC `dlopen`s OpenSSL, so
+  the current binary already shows no TLS dylib at link time while failing at
+  the first HTTPS call.
 - No measurable regression in first-token latency or streaming throughput.
 
 ### Qualitative
@@ -162,9 +166,13 @@ the transport, and how CA trust is provided.
   file.
 - The SQLite vendoring pattern - `scripts/fetch-sqlite.sh` (pinned version,
   SHA3-256 check) and the `libsqlite` / static-archive targets in the Makefile.
-- FPC's HTTP composition hook - `OnGetSocketHandler` / `GetSocketHandler`
-  (`fphttpclient.pp`) and `TSSLSocketHandler` (`sslbase.pp`); a vendored
-  backend plugs in as a socket handler rather than replacing the HTTP client.
+- FPC's socket-handler seam: `TFPHTTPClient.GetSocketHandler` returns
+  `TSSLSocketHandler.GetDefaultHandler`, whose class is set by
+  `SetDefaultHandlerClass` (what `opensslsockets` does in its
+  `initialization`). A vendored backend is simply another `TSSLSocketHandler`
+  subclass, registered the same way - no HTTP-client fork.
+  `TInetSocket.Connect` calls the handler after the TCP connect and reports its
+  error description on failure.
 
 ### External
 
@@ -176,13 +184,13 @@ the transport, and how CA trust is provided.
 
 ## Risks
 
-- **No Pascal binding for mbedTLS exists.** Mitigation: keep the binding behind
-  the socket-handler seam and compile a small C shim in the Makefile if a
-  direct binding proves fragile.
-- **`TFPHTTPClient` composition is not plug-and-play.** Mitigation: use the
-  existing `OnGetSocketHandler` hook with a custom `TSSLSocketHandler`; if that
-  proves impractical, fall back to a minimal HTTP client behind the same
-  `TLLMTransport` seam.
+- **No Pascal binding for mbedTLS exists.** Mitigation: a small C shim compiled
+  into the vendored static archive exposes an opaque handle, so no mbedTLS
+  struct layout is mirrored in Pascal (settled in the SPEC).
+- **`TFPHTTPClient` composition** is retired as a risk: the seam is
+  `TSSLSocketHandler.SetDefaultHandlerClass`, exactly how `opensslsockets`
+  registers itself. The SPEC relies on it and tests it through a real
+  `TFPHTTPClient` GET over loopback.
 - **CA trust differs by platform.** Mitigation: the SPEC decides platform store
   vs bundled CA; `leConfig` reports a missing or unreadable bundle as a
   distinct, actionable error.
@@ -228,3 +236,8 @@ the transport, and how CA trust is provided.
 - **Reuse note (Ponytail):** the `TLLMTransport` seam and the SQLite vendoring
   pattern exist; the new pieces are the vendored source, the binding, the
   socket handler, and the CA configuration.
+- **Resolved by the SPEC** (`TLS_Foundation_v1.SPEC.md`): composition is FPC's
+  `TSSLSocketHandler.SetDefaultHandlerClass` registration (no HTTP-client fork);
+  the binding is a small C shim over an opaque handle; CA trust is a Mozilla
+  bundle embedded in the binary (`HILDEGARD_CA_BUNDLE` overrides); and the TLS
+  path is tested offline through a loopback handshake.
