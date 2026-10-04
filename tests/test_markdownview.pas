@@ -41,6 +41,13 @@ type
     procedure TestH4HasNoUnderline;
     procedure TestUnderlineMatchesTextWidth;
     procedure TestBodyIsDimmerThanHeadings;
+    procedure TestTableRendersGrid;
+    procedure TestTableIsContentWidth;
+    procedure TestTableCompressesAndWraps;
+    procedure TestTableAlignment;
+    procedure TestTableUsesTheThemeColours;
+    procedure TestTableBalancesForLeastHeight;
+    procedure TestTableCellsAreNotRebuilt;
   end;
 
 implementation
@@ -430,6 +437,164 @@ begin
   { Headings are the bold gold; the body is a dimmer grey. }
   AssertEquals('headings are gold', 222, Theme.Heading[1].Fg);
   AssertEquals('the body is a dimmer grey', 250, Theme.Paragraph.Fg);
+end;
+
+procedure TMarkdownViewTest.TestTableRendersGrid;
+var
+  S: TSurfaceMemory;
+begin
+  S := RenderSource('| A | B |' + #10 + '| --- | --- |' + #10 + '| 1 | 2 |',
+    30, 6);
+  try
+    AssertTrue('rounded top corner', S.CellAt(0, 0).Ch = '╭');
+    AssertTrue('the header cell', S.CellAt(2, 1).Ch = 'A');
+    AssertTrue('a rule between rows', S.CellAt(0, 2).Ch = '├');
+    AssertTrue('a vertical border', S.CellAt(0, 3).Ch = '│');
+    AssertTrue('the first body cell', S.CellAt(2, 3).Ch = '1');
+    AssertTrue('rounded bottom corner', S.CellAt(0, 4).Ch = '╰');
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TMarkdownViewTest.TestTableIsContentWidth;
+var
+  S: TSurfaceMemory;
+begin
+  S := RenderSource('| A | B | C |' + #10 + '| --- | --- | --- |' + #10 +
+    '| 1 | 2 | 3 |', 40, 6);
+  try
+    AssertTrue('the grid starts at the left', S.CellAt(0, 0).Ch = '╭');
+    { Three one-wide columns: 3 + 3*3 + 1 = 13 wide, well inside 40. }
+    AssertTrue('the top-right corner is at column 12', S.CellAt(12, 0).Ch = '╮');
+    AssertEquals('nothing is drawn past the grid', '',
+      string(S.CellAt(13, 0).Ch));
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TMarkdownViewTest.TestTableCompressesAndWraps;
+const
+  Md = '| Name | Description |' + #10 + '| --- | --- |' + #10 +
+    '| x | wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww |';
+var
+  S: TSurfaceMemory;
+  View: TMarkdownView;
+  Avail: TSize;
+begin
+  View := TMarkdownView.Create;
+  try
+    View.SetSource(Md);
+    Avail := Default(TSize);
+    Avail.W := 24;
+    Avail.H := 40;
+    { Wrapped, so taller than the five rows an unwrapped table would need. }
+    AssertTrue('the wide cell wraps', View.Measure(Avail).H > 5);
+  finally
+    View.Free;
+  end;
+  S := RenderSource(Md, 24, 40);
+  try
+    AssertTrue('the grid spans the container width', S.CellAt(23, 0).Ch = '╮');
+    AssertTrue('the body starts below the rule', S.CellAt(0, 3).Ch = '│');
+    AssertTrue('the wrapped cell continues on the next line',
+      S.CellAt(0, 4).Ch = '│');
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TMarkdownViewTest.TestTableAlignment;
+var
+  S: TSurfaceMemory;
+begin
+  { A right-aligned column pushes its value to the column's right edge. }
+  S := RenderSource('| Item | Qty |' + #10 + '| :--- | ---: |' + #10 +
+    '| x | 1 |', 30, 6);
+  try
+    AssertTrue('the right-aligned value sits at the right edge',
+      S.CellAt(11, 3).Ch = '1');
+  finally
+    S.Free;
+  end;
+
+  { A centre-aligned column centres its value. }
+  S := RenderSource('| Header |' + #10 + '| :----: |' + #10 + '| z |', 20, 5);
+  try
+    AssertTrue('the centred value', S.CellAt(4, 3).Ch = 'z');
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TMarkdownViewTest.TestTableUsesTheThemeColours;
+var
+  S: TSurfaceMemory;
+  Theme: TMdTheme;
+begin
+  Theme := DefaultMdTheme;
+  S := RenderSource('| A |' + #10 + '| --- |' + #10 + '| 1 |', 20, 5);
+  try
+    AssertEquals('the header is the bold gold', Theme.Bold.Fg,
+      S.CellAt(2, 1).Attr.Fg);
+    AssertTrue('the header is bold', sfBold in S.CellAt(2, 1).Attr.Style);
+    AssertEquals('the body is plain', Theme.Paragraph.Fg,
+      S.CellAt(2, 3).Attr.Fg);
+    AssertEquals('the border is the rule colour', Theme.Rule.Fg,
+      S.CellAt(0, 0).Attr.Fg);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TMarkdownViewTest.TestTableBalancesForLeastHeight;
+const
+  Md =
+    '| # | Notes | Detail |' + #10 +
+    '| --- | --- | --- |' + #10 +
+    '| 1 | alpha beta gamma delta epsilon zeta | a long detail string here ' +
+    'that spans many words and needs a lot of room to lay out |';
+var
+  View: TMarkdownView;
+  Avail: TSize;
+begin
+  View := TMarkdownView.Create;
+  try
+    View.SetSource(Md);
+    Avail := Default(TSize);
+    Avail.W := 52;
+    Avail.H := 20;
+    { The wide Detail column gives width back to the short-worded Notes column
+      instead of keeping it all, so the body row is four lines rather than the
+      six it would be at the Notes word floor. }
+    AssertEquals('the height is minimised', 8, View.Measure(Avail).H);
+  finally
+    View.Free;
+  end;
+end;
+
+procedure TMarkdownViewTest.TestTableCellsAreNotRebuilt;
+var
+  View: TMarkdownView;
+  Before: Integer;
+begin
+  View := TMarkdownView.Create;
+  try
+    View.AppendSource('| A | B |' + #10 + '| --- | --- |' + #10 + '| 1 | 2 |' +
+      #10 + #10);
+    AssertEquals('one finalised block', 1, View.BlockCount);
+    View.Arrange(Rect(30, 8));
+    Before := View.BlockLayoutBuilds(0);
+    AssertTrue('the table has been laid out', Before > 0);
+
+    View.AppendSource('tail');
+    View.Arrange(Rect(30, 8));
+    AssertEquals('the table cells were not rebuilt', Before,
+      View.BlockLayoutBuilds(0));
+  finally
+    View.Free;
+  end;
 end;
 
 initialization

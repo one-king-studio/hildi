@@ -57,6 +57,9 @@ type
     procedure SetSpans(const ASpans: array of TSpan);
     function Measure(const AAvail: TSize): TSize; override;
     procedure Render(const S: ISurface); override;
+    { The number of lines the block wraps to at AWidth, without disturbing the
+      cached layout. Used by callers that search over widths. }
+    function LineCountAt(AWidth: Integer): Integer;
     property Align: TTextAlign read FAlign write FAlign;
     { When > 0 and wrapping is on, Measure wraps at this many columns instead of
       max-content (the longest word). Callers in a fixed-size viewport set it so
@@ -290,6 +293,13 @@ begin
     Result.W := LongestWordWidth(CachedClusters);
     Result.H := Length(CachedLines(Result.W));
   end;
+end;
+
+function TTextBlock.LineCountAt(AWidth: Integer): Integer;
+begin
+  if AWidth < 1 then
+    AWidth := 1;
+  Result := Length(WrapClusters(CachedClusters, AWidth, FWrap));
 end;
 
 procedure TTextBlock.Render(const S: ISurface);
