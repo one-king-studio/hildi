@@ -160,7 +160,7 @@ const
 implementation
 
 uses
-  fpjson, jsonparser, fphttpclient, opensslsockets;
+  fpjson, jsonparser, fphttpclient, hildegard.helper.tls;
 
 type
   { Forwards each response-body chunk to a callback while capturing a bounded

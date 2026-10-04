@@ -26,8 +26,10 @@ SQLITE_AR       := $(SQLITE_LIBDIR)/libsqlite3.a
 UNAME_S         := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
 SQLITE_CCFLAGS  := -O2 -DSQLITE_THREADSAFE=1 -mmacosx-version-min=11.0
+MBEDTLS_CCFLAGS  := -O2 -mmacosx-version-min=11.0
 else
 SQLITE_CCFLAGS  := -O2 -fPIC -DSQLITE_THREADSAFE=1
+MBEDTLS_CCFLAGS  := -O2 -fPIC
 endif
 # Link the static archive explicitly (-k), so a system libsqlite3 is never used.
 SQLITE_LDFLAGS  := -k$(abspath $(SQLITE_AR))
@@ -42,10 +44,18 @@ MBEDTLS_AR        := $(LIBSTATIC)/libmbedtls.a
 MBEDTLS_X509_AR   := $(LIBSTATIC)/libmbedx509.a
 MBEDTLS_CRYPTO_AR := $(LIBSTATIC)/libmbedcrypto.a
 TLS_SHIM_OBJ      := $(LIBSTATIC)/hildegard_tls_shim.o
-# Link order matters for static archives: shim, then TLS, X.509, crypto.
-TLS_LDFLAGS       := -k$(abspath $(TLS_SHIM_OBJ)) -k$(abspath $(MBEDTLS_AR)) \
-                     -k$(abspath $(MBEDTLS_X509_AR)) -k$(abspath $(MBEDTLS_CRYPTO_AR))
+CACERT_PEM        := deps/cacert/cacert.pem
+CACERT_GEN_C      := $(BUILD)/gen/cacert_embedded.c
+CACERT_OBJ        := $(LIBSTATIC)/cacert_embedded.o
+TLS_TEST_SERVER_OBJ := $(LIBSTATIC)/tls_test_server.o
+# Link order matters for static archives: shim + CA, then TLS, X.509, crypto.
+TLS_LDFLAGS       := -k$(abspath $(TLS_SHIM_OBJ)) -k$(abspath $(CACERT_OBJ)) \
+                     -k$(abspath $(MBEDTLS_AR)) -k$(abspath $(MBEDTLS_X509_AR)) \
+                     -k$(abspath $(MBEDTLS_CRYPTO_AR))
 TLS_CCFLAGS       := -O2 -fPIC -I$(MBEDTLS_DIR)/include -I$(SRC)
+ifeq ($(UNAME_S),Darwin)
+TLS_CCFLAGS       += -mmacosx-version-min=11.0
+endif
 
 # Language and strictness. -Sew turns warnings into hard errors.
 MODE      := -Mdelphi -Sh
@@ -93,12 +103,12 @@ $(SQLITE_AR): $(SQLITE_DIR)/sqlite3.c
 $(SQLITE_DIR)/sqlite3.c:
 	@scripts/fetch-sqlite.sh
 
-# Build the vendored mbedTLS archives and the Pascal TLS shim.
-libmbedtls: $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
+# Build the vendored mbedTLS archives, the CA embed, and the Pascal TLS shim.
+libmbedtls: $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ)
 
 $(MBEDTLS_STAMP):
 	@scripts/fetch-mbedtls.sh
-	$(MAKE) -C $(MBEDTLS_DIR) -j4 lib
+	$(MAKE) -C $(MBEDTLS_DIR) -j4 lib CFLAGS='$(MBEDTLS_CCFLAGS)'
 	@mkdir -p $(LIBSTATIC)
 	cp $(MBEDTLS_DIR)/library/libmbedtls.a $(MBEDTLS_DIR)/library/libmbedx509.a $(MBEDTLS_DIR)/library/libmbedcrypto.a $(LIBSTATIC)/
 	@touch $@
@@ -106,6 +116,21 @@ $(MBEDTLS_STAMP):
 $(TLS_SHIM_OBJ): $(SRC)/hildegard_tls_shim.c $(SRC)/hildegard_tls_shim.h
 	@mkdir -p $(LIBSTATIC)
 	$(CC) $(TLS_CCFLAGS) -c -o $@ $(SRC)/hildegard_tls_shim.c
+
+$(CACERT_PEM):
+	@scripts/fetch-cacert.sh
+
+$(CACERT_GEN_C): $(CACERT_PEM) scripts/gen-cacert-embed.sh
+	@scripts/gen-cacert-embed.sh
+
+$(CACERT_OBJ): $(CACERT_GEN_C) $(SRC)/hildegard_tls_shim.h
+	@mkdir -p $(LIBSTATIC)
+	$(CC) $(TLS_CCFLAGS) -c -o $@ $(CACERT_GEN_C)
+
+# Test-only mbedTLS echo server; compiled into the test binaries only.
+$(TLS_TEST_SERVER_OBJ): $(TESTS)/tls_test_server.c $(TESTS)/tls_test_server.h
+	@mkdir -p $(LIBSTATIC)
+	$(CC) $(TLS_CCFLAGS) -I$(TESTS) -c -o $@ $(TESTS)/tls_test_server.c
 
 store-demo: libsqlite $(BIN)/hildegard-helper-store-demo
 
@@ -182,9 +207,9 @@ $(BIN)/hildegard-helper-tui-bench: $(EXAMPLES)/tui_bench.pas $(LIB_SRCS)
 test: libsqlite libmbedtls $(BIN)/hildegard-helper-tests
 	$(BIN)/hildegard-helper-tests $(TESTARGS)
 
-$(BIN)/hildegard-helper-tests: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
+$(BIN)/hildegard-helper-tests: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 test-leak: libsqlite libmbedtls $(BIN)/hildegard-helper-tests-leak
 	HEAPTRC=$(HEAPTRC) $(BIN)/hildegard-helper-tests-leak $(TESTARGS)
@@ -193,9 +218,9 @@ test-leak: libsqlite libmbedtls $(BIN)/hildegard-helper-tests-leak
 watch:
 	@scripts/watch.sh $(TARGET)
 
-$(BIN)/hildegard-helper-tests-leak: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
+$(BIN)/hildegard-helper-tests-leak: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
 	@mkdir -p $(BIN) $(LEAKUNITS)
-	$(FPC) $(LEAKFLAGS) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(TESTS) -FU$(LEAKUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(LEAKFLAGS) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(TESTS) -FU$(LEAKUNITS) -FE$(BIN) -o$@ $<
 
 # All quality gates, for CI: functional tests + leak check.
 check: test test-leak

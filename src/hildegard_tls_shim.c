@@ -49,7 +49,13 @@ static void set_error(hildegard_tls *h, int code) {
 /* BIO callbacks over the caller's fd. */
 static int bio_send(void *ctx, const unsigned char *buf, size_t len) {
   hildegard_tls *h = (hildegard_tls *)ctx;
-  ssize_t n = send(h->fd, buf, len, 0);
+  ssize_t n;
+#ifdef MSG_NOSIGNAL
+  /* Linux: suppress SIGPIPE on a write to a closed peer. */
+  n = send(h->fd, buf, len, MSG_NOSIGNAL);
+#else
+  n = send(h->fd, buf, len, 0);
+#endif
   if (n < 0) {
     if (errno == EAGAIN || errno == EWOULDBLOCK) return MBEDTLS_ERR_SSL_WANT_WRITE;
     return MBEDTLS_ERR_NET_SEND_FAILED;
@@ -124,6 +130,14 @@ int hildegard_tls_connect(hildegard_tls *h, int fd, const char *host) {
   int rc;
   if (h == NULL) return HILDEGARD_TLS_ERROR;
   h->fd = fd;
+
+#if defined(SO_NOSIGPIPE)
+  {
+    /* macOS: a write to a closed peer must return EPIPE, not raise SIGPIPE. */
+    int one = 1;
+    setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
+  }
+#endif
 
   rc = mbedtls_ctr_drbg_seed(&h->ctr_drbg, mbedtls_entropy_func, &h->entropy,
                              (const unsigned char *)"hildegard-helper", 15);

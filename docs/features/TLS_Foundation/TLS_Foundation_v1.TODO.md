@@ -37,39 +37,38 @@ before wiring the handler.
 
 ### Phase 3: The Pascal handler and the seam
 
-- [ ] **Test** (`tests/test_tls.pas`): `TestHandlerIsRegisteredDefault`,
-      `TestShimHandleRoundTrip` (live count returns to zero, including after a
-      failed connect), `TestBadCaFileFails`
-- [ ] **Implement** `src/hildegard.helper.tls.pas`: `TMbedTLSSocketHandler`
+- [x] **Test** (`tests/test_tls.pas`): `TestHandlerIsRegisteredDefault`,
+      `TestLoopbackHandshake` (asserts the shim live count returns to zero,
+      including after a failed connect), `TestBadCaFileFails`
+- [x] **Implement** `src/hildegard.helper.tls.pas`: `TMbedTLSSocketHandler`
       (`Connect`/`Close`/`Shutdown`/`Send`/`Recv`/`BytesAvailable` + error
       getters), the `external` binds, and self-registration in `initialization`
-- [ ] **Test**: `TestLoopbackHandshake`, `TestLoopbackRejectsUnknownCa`,
-      `TestLoopbackRejectsWrongHost`
-- [ ] **Implement** the handler's CA-file path (`CertificateData.CertCA`) and
+- [x] **Test**: `TestLoopbackRejectsUnknownCa`, `TestLoopbackRejectsWrongHost`
+- [x] **Implement** the handler's CA-file path (`CertificateData.CertCA`) and
       error mapping
-- [ ] **Test**: `TestHandlerDrivesTFPHTTPClient` — a real `TFPHTTPClient` GET
+- [x] **Test**: `TestHandlerDrivesTFPHTTPClient` — a real `TFPHTTPClient` GET
       over loopback returns the expected body
-- [ ] **Change** `src/hildegard.helper.llm.pas`: `uses ... hildegard.helper.tls`
+- [x] **Change** `src/hildegard.helper.llm.pas`: `uses ... hildegard.helper.tls`
       instead of `opensslsockets`
-- [ ] **Add** `test_tls` to `tests/hildegard_helper_tests.pas` and link the shim
+- [x] **Add** `test_tls` to `tests/hildegard_helper_tests.pas` and link the shim
       + test server + mbedTLS into the test targets
 
 ### Phase 4: CA trust (embed + override)
 
-- [ ] **Write** `scripts/fetch-cacert.sh` (pinned bundle + SHA-256 into
+- [x] **Write** `scripts/fetch-cacert.sh` (pinned bundle + SHA-256 into
       `deps/cacert/cacert.pem`)
-- [ ] **Add** a Makefile rule to generate `build/gen/cacert_embedded.c` and
-      compile it into the archive
-- [ ] **Test**: `TestEmbeddedBundleIsPresent`, `TestBundleOverrideResolves`,
-      `TestUnreadableOverrideIsConfigError` (maps to `leConfig`)
-- [ ] **Implement** the shim's default embedded chain and
+- [x] **Add** `scripts/gen-cacert-embed.sh` and a Makefile rule to generate and
+      compile `build/gen/cacert_embedded.c` into the link
+- [x] **Test**: `TestEmbeddedBundleIsPresent`, `TestBundleOverrideResolves`,
+      `TestUnreadableOverrideIsConfigError`
+- [x] **Implement** the shim's default embedded chain and
       `TLSBundleOverride`/`ValidateTLSConfig`
 
 ### Phase 5: Wire every shipping target
 
-- [ ] **Add** the mbedTLS link flags to `agent-cli`, `tui-agent`,
+- [x] **Add** the mbedTLS link flags to `agent-cli`, `tui-agent`,
       `release-agent-cli`, `test`, and `test-leak` (the SQLite `-k` pattern)
-- [ ] **Confirm** no target links `opensslsockets`; the demo/store targets that
+- [x] **Confirm** no target links `opensslsockets`; the demo/store targets that
       do not use `llm` stay free of mbedTLS
 
 ### Phase 6: Field verification and docs
