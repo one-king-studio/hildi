@@ -28,7 +28,8 @@ type
     mbListItem,
     mbCodeFence,
     mbQuote,
-    mbRule);
+    mbRule,
+    mbTable);      { a GFM pipe table }
 
   TMdInlineStyle = (misBold, misItalic, misCode, misStrike, misLink);
   TMdInlineStyles = set of TMdInlineStyle;
@@ -42,9 +43,19 @@ type
 
   TMdSpanArray = array of TMdSpan;
 
+  { A table column's alignment, from the delimiter row. }
+  TMdAlign = (maNone, maLeft, maCenter, maRight);
+  TMdAlignArray = array of TMdAlign;
+
+  { One table row: a run of spans per column. }
+  TMdTableRow = array of TMdSpanArray;
+  TMdTableRows = array of TMdTableRow;
+
   { A parsed block. Level is the heading level (1..6), list depth, or quote
     depth as applicable. Language is the code fence info string. Ordered and
-    Ordinal record an ordered list item's marker so it renders as written. }
+    Ordinal record an ordered list item's marker so it renders as written. Head,
+    Align, and Rows are set for mbTable only; every row carries exactly
+    Length(Align) cells. }
   TMdBlock = record
     Kind: TMdBlockKind;
     Level: Integer;
@@ -52,6 +63,9 @@ type
     Ordered: Boolean;
     Ordinal: Integer;
     Spans: TMdSpanArray;
+    Head: TMdTableRow;
+    Align: TMdAlignArray;
+    Rows: TMdTableRows;
   end;
 
   TMdBlockArray = array of TMdBlock;
@@ -391,6 +405,112 @@ begin
   Result := Copy(ALine, I, Length(ALine));
 end;
 
+{ --- table helpers ------------------------------------------------------- }
+
+{ True when the line contains a `|` that is not escaped with a backslash. }
+function HasUnescapedPipe(const ALine: UnicodeString): Boolean;
+var
+  I: Integer;
+begin
+  I := 1;
+  while I <= Length(ALine) do
+    if ALine[I] = '\' then
+      Inc(I, 2)
+    else if ALine[I] = '|' then
+      Exit(True)
+    else
+      Inc(I);
+  Result := False;
+end;
+
+{ Split a table row into trimmed cells: drop an optional leading and trailing
+  pipe and unescape `\|`. An all-pipe row still yields one (empty) cell. }
+function SplitCells(const ALine: UnicodeString): TUnicodeStringArray;
+var
+  I, N: Integer;
+  Cell, Line: UnicodeString;
+
+  procedure Flush;
+  begin
+    SetLength(Result, N + 1);
+    Result[N] := TrimU(Cell);
+    Inc(N);
+    Cell := '';
+  end;
+
+begin
+  Result := nil;
+  N := 0;
+  Line := TrimU(ALine);
+  I := 1;
+  if (I <= Length(Line)) and (Line[I] = '|') then
+    Inc(I);
+  while I <= Length(Line) do
+    if (Line[I] = '\') and (I < Length(Line)) and (Line[I + 1] = '|') then
+    begin
+      Cell := Cell + '|';
+      Inc(I, 2);
+    end
+    else if Line[I] = '|' then
+    begin
+      Flush;
+      Inc(I);
+    end
+    else
+    begin
+      Cell := Cell + Line[I];
+      Inc(I);
+    end;
+  if (Cell <> '') or (N = 0) then
+    Flush;
+end;
+
+{ Parse a delimiter row into per-column alignments. Requires a `|`, so a bare
+  `---` stays a thematic break rather than a one-column table. }
+function ParseDelimiter(const ALine: UnicodeString;
+  out AAligns: TMdAlignArray): Boolean;
+var
+  Cells: TUnicodeStringArray;
+  I, J: Integer;
+  S: UnicodeString;
+  Left, Right: Boolean;
+begin
+  Result := False;
+  AAligns := nil;
+  if not HasUnescapedPipe(ALine) then
+    Exit;
+  Cells := SplitCells(ALine);
+  if Length(Cells) = 0 then
+    Exit;
+  SetLength(AAligns, Length(Cells));
+  for I := 0 to High(Cells) do
+  begin
+    S := Cells[I];
+    if S = '' then
+      Exit;
+    Left := S[1] = ':';
+    if Left then
+      S := Copy(S, 2, Length(S));
+    Right := (S <> '') and (S[Length(S)] = ':');
+    if Right then
+      SetLength(S, Length(S) - 1);
+    if S = '' then
+      Exit;
+    for J := 1 to Length(S) do
+      if S[J] <> '-' then
+        Exit;
+    if Left and Right then
+      AAligns[I] := maCenter
+    else if Right then
+      AAligns[I] := maRight
+    else if Left then
+      AAligns[I] := maLeft
+    else
+      AAligns[I] := maNone;
+  end;
+  Result := True;
+end;
+
 { --- inline scanner ------------------------------------------------------ }
 
 const
@@ -624,6 +744,23 @@ begin
   Result := ScanInline(AText, 0);
 end;
 
+{ Turn one row line into exactly ACount inline-parsed cells, padding short rows
+  with empty cells and dropping any beyond ACount. }
+function TableRowCells(const ALine: UnicodeString; ACount: Integer): TMdTableRow;
+var
+  Cells: TUnicodeStringArray;
+  I: Integer;
+begin
+  Result := nil;
+  Cells := SplitCells(ALine);
+  SetLength(Result, ACount);
+  for I := 0 to ACount - 1 do
+    if I <= High(Cells) then
+      Result[I] := InlineSpans(CollapseWhitespace(Cells[I]))
+    else
+      Result[I] := nil;
+end;
+
 { --- theme --------------------------------------------------------------- }
 
 function MdAttr(AFg: Byte; AStyle: TStyle): TAttr;
@@ -755,7 +892,7 @@ end;
 procedure TMarkdownParser.FinalizeTail;
 var
   Lines: TUnicodeStringArray;
-  I, Depth, Ordinal: Integer;
+  I, Depth, Ordinal, N: Integer;
   Ordered: Boolean;
   B: TMdBlock;
   Text: UnicodeString;
@@ -771,6 +908,24 @@ begin
         SetLength(B.Spans, 1);
         B.Spans[0] := Default(TMdSpan);
         B.Spans[0].Text := DropFirstLine(FTail);
+        AddBlock(B);
+      end;
+    mbTable:
+      begin
+        { Line 0 is the header, line 1 the delimiter, the rest body rows. }
+        Lines := SplitLines(FTail);
+        B := Default(TMdBlock);
+        B.Kind := mbTable;
+        if (Length(Lines) >= 2) and ParseDelimiter(Lines[1], B.Align) then
+        begin
+          N := Length(B.Align);
+          B.Head := TableRowCells(Lines[0], N);
+          for I := 2 to High(Lines) do
+          begin
+            SetLength(B.Rows, Length(B.Rows) + 1);
+            B.Rows[High(B.Rows)] := TableRowCells(Lines[I], N);
+          end;
+        end;
         AddBlock(B);
       end;
     mbQuote:
@@ -824,6 +979,9 @@ var
   B: TMdBlock;
   Txt: UnicodeString;
   I, J: Integer;
+  Aligns: TMdAlignArray;
+  Lines: TUnicodeStringArray;
+  HeaderLine, Prefix: UnicodeString;
 begin
   { Inside a fence, only the closing fence ends it. }
   if FOpen and (FKind = mbCodeFence) then
@@ -833,6 +991,17 @@ begin
     else
       AppendTailLine(ALine);
     Exit;
+  end;
+
+  { A row with a pipe continues an open table; anything else ends it. }
+  if FOpen and (FKind = mbTable) then
+  begin
+    if (TrimU(ALine) <> '') and HasUnescapedPipe(ALine) then
+    begin
+      AppendTailLine(ALine);
+      Exit;
+    end;
+    FinalizeTail;
   end;
 
   if TrimU(ALine) = '' then
@@ -908,6 +1077,36 @@ begin
     end;
     AppendTailLine(ALine);
     Exit;
+  end;
+
+  { A delimiter row after a paragraph's last line opens a table. The last line
+    becomes the header; earlier lines of the paragraph finalise on their own. }
+  if FOpen and (FKind = mbParagraph) and ParseDelimiter(ALine, Aligns) then
+  begin
+    Lines := SplitLines(FTail);
+    HeaderLine := Lines[High(Lines)];
+    if HasUnescapedPipe(HeaderLine) and
+      (Length(SplitCells(HeaderLine)) = Length(Aligns)) then
+    begin
+      if Length(Lines) > 1 then
+      begin
+        Prefix := '';
+        for I := 0 to High(Lines) - 1 do
+        begin
+          if Prefix <> '' then
+            Prefix := Prefix + #10;
+          Prefix := Prefix + Lines[I];
+        end;
+        B := Default(TMdBlock);
+        B.Kind := mbParagraph;
+        B.Spans := InlineSpans(CollapseWhitespace(Prefix));
+        AddBlock(B);
+      end;
+      FKind := mbTable;
+      FTail := HeaderLine;
+      AppendTailLine(ALine);
+      Exit;
+    end;
   end;
 
   if not (FOpen and (FKind = mbParagraph)) then

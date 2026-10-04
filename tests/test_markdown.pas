@@ -58,6 +58,16 @@ type
     procedure TestNestedEmphasis;
     procedure TestStrayAsterisksAreLiteral;
     procedure TestEmphasisNestingIsBounded;
+    procedure TestTableDetected;
+    procedure TestTableAlignmentParsed;
+    procedure TestTableEscapedPipe;
+    procedure TestTablePadsAndTruncatesCells;
+    procedure TestTableInlineStylesInCells;
+    procedure TestTableEndsAtBlankLine;
+    procedure TestTableEndsAtNonRowLine;
+    procedure TestTableHeaderAfterParagraph;
+    procedure TestDelimiterWithoutPipeIsParagraph;
+    procedure TestIncrementalTableMatchesFullParse;
   end;
 
 implementation
@@ -499,7 +509,132 @@ begin
   AssertTrue('the text survives', Pos('x', JoinedText(0)) > 0);
 end;
 
+procedure TMarkdownTest.TestTableDetected;
+begin
+  FBlocks := Parse('| A | B |' + #10 + '| --- | --- |' + #10 + '| 1 | 2 |' +
+    #10 + '| 3 | 4 |');
+  AssertEquals('one block', 1, Length(FBlocks));
+  AssertTrue('a table', FBlocks[0].Kind = mbTable);
+  AssertEquals('two columns', 2, Length(FBlocks[0].Align));
+  AssertEquals('two header cells', 2, Length(FBlocks[0].Head));
+  AssertEquals('header text', 'A', string(FBlocks[0].Head[0][0].Text));
+  AssertEquals('two body rows', 2, Length(FBlocks[0].Rows));
+  AssertEquals('body cell', '3', string(FBlocks[0].Rows[1][0][0].Text));
+end;
+
+procedure TMarkdownTest.TestTableAlignmentParsed;
+begin
+  FBlocks := Parse('| L | C | R | D |' + #10 +
+    '| :--- | :---: | ---: | --- |' + #10 + '| a | b | c | d |');
+  AssertTrue('a table', FBlocks[0].Kind = mbTable);
+  AssertTrue('left', FBlocks[0].Align[0] = maLeft);
+  AssertTrue('centre', FBlocks[0].Align[1] = maCenter);
+  AssertTrue('right', FBlocks[0].Align[2] = maRight);
+  AssertTrue('default', FBlocks[0].Align[3] = maNone);
+end;
+
+procedure TMarkdownTest.TestTableEscapedPipe;
+begin
+  FBlocks := Parse('| A | B |' + #10 + '| --- | --- |' + #10 +
+    '| x \| y | z |');
+  AssertEquals('the escaped pipe is literal', 'x | y',
+    string(FBlocks[0].Rows[0][0][0].Text));
+  AssertEquals('still two columns', 2, Length(FBlocks[0].Rows[0]));
+end;
+
+procedure TMarkdownTest.TestTablePadsAndTruncatesCells;
+begin
+  FBlocks := Parse('| A | B | C |' + #10 + '| --- | --- | --- |' + #10 +
+    '| 1 |' + #10 + '| 1 | 2 | 3 | 4 |');
+  AssertEquals('short row padded to the header', 3, Length(FBlocks[0].Rows[0]));
+  AssertEquals('long row truncated', 3, Length(FBlocks[0].Rows[1]));
+  AssertEquals('the pad cell is empty', 0, Length(FBlocks[0].Rows[0][1]));
+end;
+
+procedure TMarkdownTest.TestTableInlineStylesInCells;
+begin
+  FBlocks := Parse('| A |' + #10 + '| --- |' + #10 + '| **bold** |');
+  AssertEquals('one cell span', 1, Length(FBlocks[0].Rows[0][0]));
+  AssertTrue('bold', misBold in FBlocks[0].Rows[0][0][0].Styles);
+  AssertEquals('text', 'bold', string(FBlocks[0].Rows[0][0][0].Text));
+end;
+
+procedure TMarkdownTest.TestTableEndsAtBlankLine;
+begin
+  FBlocks := Parse('| A |' + #10 + '| --- |' + #10 + '| 1 |' + #10 + #10 +
+    'after');
+  AssertEquals('table then paragraph', 2, Length(FBlocks));
+  AssertTrue('table', FBlocks[0].Kind = mbTable);
+  AssertEquals('one row', 1, Length(FBlocks[0].Rows));
+  AssertTrue('paragraph', FBlocks[1].Kind = mbParagraph);
+end;
+
+procedure TMarkdownTest.TestTableEndsAtNonRowLine;
+begin
+  FBlocks := Parse('| A |' + #10 + '| --- |' + #10 + '| 1 |' + #10 + 'plain');
+  AssertEquals('table then paragraph', 2, Length(FBlocks));
+  AssertTrue('table', FBlocks[0].Kind = mbTable);
+  AssertEquals('one row', 1, Length(FBlocks[0].Rows));
+  AssertEquals('text', 'plain', JoinedText(1));
+end;
+
+procedure TMarkdownTest.TestTableHeaderAfterParagraph;
+begin
+  FBlocks := Parse('intro' + #10 + '| A | B |' + #10 + '| --- | --- |' + #10 +
+    '| 1 | 2 |');
+  AssertEquals('paragraph then table', 2, Length(FBlocks));
+  AssertTrue('paragraph first', FBlocks[0].Kind = mbParagraph);
+  AssertEquals('intro text', 'intro', JoinedText(0));
+  AssertTrue('table second', FBlocks[1].Kind = mbTable);
+  AssertEquals('two columns', 2, Length(FBlocks[1].Align));
+end;
+
+procedure TMarkdownTest.TestDelimiterWithoutPipeIsParagraph;
+begin
+  { No pipe in the delimiter, so this stays a paragraph then a thematic break. }
+  FBlocks := Parse('Header' + #10 + '---');
+  AssertEquals('two blocks', 2, Length(FBlocks));
+  AssertTrue('not a table', FBlocks[0].Kind <> mbTable);
+  AssertTrue('a paragraph', FBlocks[0].Kind = mbParagraph);
+  AssertTrue('a rule', FBlocks[1].Kind = mbRule);
+end;
+
+procedure TMarkdownTest.TestIncrementalTableMatchesFullParse;
+const
+  Doc = '| A | B |' + #10 + '| --- | --- |' + #10 + '| 1 | 2 |' + #10 +
+    '| 3 | 4 |' + #10 + #10 + 'after';
+var
+  Full: TMarkdownParser;
+  FullBlocks, IncBlocks: TMdBlockArray;
+  I, Chunk: Integer;
+begin
+  Full := TMarkdownParser.Create;
+  try
+    FullBlocks := Full.Parse(Doc);
+  finally
+    Full.Free;
+  end;
+
+  FParser.Reset;
+  Chunk := 1;
+  while Chunk <= Length(Doc) do
+  begin
+    FParser.Append(Copy(Doc, Chunk, 5));
+    Inc(Chunk, 5);
+  end;
+  FParser.Finish;
+  IncBlocks := FParser.Blocks;
+
+  AssertEquals('same block count', Length(FullBlocks), Length(IncBlocks));
+  for I := 0 to High(FullBlocks) do
+  begin
+    AssertEquals('kind ' + IntToStr(I), Ord(FullBlocks[I].Kind),
+      Ord(IncBlocks[I].Kind));
+    AssertEquals('rows ' + IntToStr(I), Length(FullBlocks[I].Rows),
+      Length(IncBlocks[I].Rows));
+  end;
+end;
+
 initialization
   RegisterTest(TMarkdownTest);
-
 end.
