@@ -135,9 +135,11 @@ Modals
 Markdown
 
 - [ ] A supported subset of markdown (headings, paragraphs, lists, blockquotes,
-      fenced code, horizontal rules; inline bold, italic, code, links) parses to
-      blocks of styled spans.
+      fenced code, horizontal rules, GFM pipe tables; inline bold, italic, code,
+      links) parses to blocks of styled spans.
 - [ ] A theme maps block kinds and inline styles to text attributes.
+- [ ] A table is drawn at its content width when it fits the container, and
+      compresses and wraps its columns when the content is wider.
 - [ ] Unsupported syntax renders literally rather than erroring.
 - [ ] Incrementally appended text (streaming) does not require re-parsing
       completed blocks.
@@ -268,7 +270,8 @@ Demonstration
   features we deliberately do not adopt).
 - Multiple simultaneous modals beyond a simple stack (possible, not required).
 - Horizontal scrolling in v1 (vertical scroll is the requirement).
-- Full CommonMark: tables, reference links, HTML, nested list depth, setext.
+- Full CommonMark: reference links, HTML, nested list depth, setext (GFM pipe
+  tables are supported by Markdown Tables v1).
 - Wiring to the agent loop, approvals, or sessions (a follow-on spec).
 - Windows and other non-Unix targets.
 
