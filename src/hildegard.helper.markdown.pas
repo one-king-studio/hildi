@@ -57,19 +57,21 @@ type
   TMdBlockArray = array of TMdBlock;
 
   { Block kinds and inline styles mapped to cell attributes. Bold, Italic, and
-    Strike are attribute deltas applied on top of the block's base attribute. }
+    Strike carry the emphasis colour; Code carries the chip foreground (its
+    background comes from CodeBackdrop). }
   TMdTheme = record
     Heading: array[1..6] of TAttr;
     Paragraph: TAttr;
     ListBullet: TAttr;
     Quote: TAttr;
-    Code: TAttr;         { fenced and inline code foreground }
-    CodeBackdrop: TAttr; { fenced code block background }
+    Code: TAttr;         { inline code foreground; the chip bg is CodeBackdrop }
+    CodeBackdrop: TAttr; { fenced code surface, and the inline code chip }
     Link: TAttr;
     Rule: TAttr;
     Bold: TAttr;
     Italic: TAttr;
     Strike: TAttr;
+    Muted: TAttr;        { code fence language, and other quiet chrome }
   end;
 
   { The parser. Create once; Reset before a new document. }
@@ -634,41 +636,56 @@ end;
 function DefaultMdTheme: TMdTheme;
 begin
   Result := Default(TMdTheme);
-  { Headings are the brightest white and bold; the body is a step dimmer so the
-    brightness is reserved for headings. }
-  Result.Heading[1] := MdAttr(231, [sfBold]);
-  Result.Heading[2] := MdAttr(231, [sfBold]);
-  Result.Heading[3] := MdAttr(231, [sfBold]);
-  Result.Heading[4] := MdAttr(231, [sfBold]);
-  Result.Heading[5] := MdAttr(231, [sfBold]);
-  Result.Heading[6] := MdAttr(231, [sfBold]);
+  { Emphasis carries a colour so it survives a terminal that ignores italic or
+    maps bold to the bright colour: bold is gold, italic cyan, and bold+italic
+    takes the cool cyan in bold. Headings use the bold gold. Inline code is a
+    violet chip on the sunken surface; the tan is the list marker. }
+  Result.Heading[1] := MdAttr(222, [sfBold]);
+  Result.Heading[2] := MdAttr(222, [sfBold]);
+  Result.Heading[3] := MdAttr(222, [sfBold]);
+  Result.Heading[4] := MdAttr(222, [sfBold]);
+  Result.Heading[5] := MdAttr(222, [sfBold]);
+  Result.Heading[6] := MdAttr(222, [sfBold]);
   Result.Paragraph := MdAttr(250, []);
-  Result.ListBullet := MdAttr(245, []);
+  Result.ListBullet := MdAttr(180, []);
   Result.Quote := MdAttr(245, [sfDim]);
-  Result.Code := MdAttr(180, []);
+  Result.Code := MdAttr(140, []);
   Result.CodeBackdrop := MdAttr(252, []);
-  Result.CodeBackdrop.Bg := 234;
+  Result.CodeBackdrop.Bg := 233;
   Exclude(Result.CodeBackdrop.Style, sfScreenBg);
   Result.Link := MdAttr(75, [sfUnderline]);
   Result.Rule := MdAttr(240, []);
-  Result.Bold := MdAttr(252, [sfBold]);
-  Result.Italic := MdAttr(252, [sfItalic]);
-  Result.Strike := MdAttr(252, [sfStrike]);
+  Result.Bold := MdAttr(222, [sfBold]);
+  Result.Italic := MdAttr(116, [sfItalic]);
+  Result.Strike := MdAttr(250, [sfStrike]);
+  Result.Muted := MdAttr(245, []);
 end;
 
 function StyleFor(const AStyles: TMdInlineStyles; const ATheme: TMdTheme): TAttr;
 begin
-  Result := ATheme.Paragraph;
+  { Code and link replace the colour; code also carries the chip background.
+    Bold+italic takes the cool (italic) colour in bold, so it stays distinct
+    from plain bold even when the italic rendition is not available. }
   if misCode in AStyles then
+  begin
     Result := ATheme.Code;
-  if misLink in AStyles then
-    Result := ATheme.Link;
+    Result.Bg := ATheme.CodeBackdrop.Bg;
+    Exclude(Result.Style, sfScreenBg);
+  end
+  else if misLink in AStyles then
+    Result := ATheme.Link
+  else if misItalic in AStyles then
+    Result := ATheme.Italic
+  else if misBold in AStyles then
+    Result := ATheme.Bold
+  else
+    Result := ATheme.Paragraph;
   if misBold in AStyles then
-    Result.Style := Result.Style + ATheme.Bold.Style;
+    Result.Style := Result.Style + [sfBold];
   if misItalic in AStyles then
-    Result.Style := Result.Style + ATheme.Italic.Style;
+    Result.Style := Result.Style + [sfItalic];
   if misStrike in AStyles then
-    Result.Style := Result.Style + ATheme.Strike.Style;
+    Result.Style := Result.Style + [sfStrike];
 end;
 
 function BlockAttr(AKind: TMdBlockKind; ALevel: Integer;

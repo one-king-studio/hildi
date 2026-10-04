@@ -45,6 +45,8 @@ type
     procedure TestWhitespaceCollapsedInParagraph;
     procedure TestCodeBlocksCarryNoInlineStyles;
     procedure TestStyleForMapsEachInlineStyle;
+    procedure TestStyleForBoldItalicTakesTheCoolColour;
+    procedure TestStyleForCodeCarriesTheChipBackground;
     procedure TestBlockAttrMapsEachBlockKind;
     procedure TestHeadingAttrUsesTheLevel;
     procedure TestOpenTailIsPlainText;
@@ -272,6 +274,34 @@ begin
   AssertTrue('bold', sfBold in StyleFor([misBold], Theme).Style);
   AssertTrue('italic', sfItalic in StyleFor([misItalic], Theme).Style);
   AssertTrue('strike', sfStrike in StyleFor([misStrike], Theme).Style);
+end;
+
+procedure TMarkdownTest.TestStyleForBoldItalicTakesTheCoolColour;
+var
+  Theme: TMdTheme;
+  Attr: TAttr;
+begin
+  Theme := DefaultMdTheme;
+  Attr := StyleFor([misBold, misItalic], Theme);
+  { Bold+italic takes the italic (cool) colour, in bold, so it stays distinct
+    from plain bold when the italic rendition is unavailable. }
+  AssertEquals('the cool colour', Theme.Italic.Fg, Attr.Fg);
+  AssertTrue('in bold', sfBold in Attr.Style);
+  AssertEquals('plain bold is the warm colour', Theme.Bold.Fg,
+    StyleFor([misBold], Theme).Fg);
+end;
+
+procedure TMarkdownTest.TestStyleForCodeCarriesTheChipBackground;
+var
+  Theme: TMdTheme;
+  Attr: TAttr;
+begin
+  Theme := DefaultMdTheme;
+  Attr := StyleFor([misCode], Theme);
+  AssertEquals('the chip foreground', Theme.Code.Fg, Attr.Fg);
+  AssertEquals('the chip background', Theme.CodeBackdrop.Bg, Attr.Bg);
+  AssertFalse('the chip paints its own background',
+    sfScreenBg in Attr.Style);
 end;
 
 procedure TMarkdownTest.TestBlockAttrMapsEachBlockKind;
