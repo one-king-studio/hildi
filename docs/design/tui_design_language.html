@@ -82,6 +82,31 @@
   .mock .acc{color:#5fafff;font-weight:bold}
   .mock .sel{background:#5fafff;color:#101010}
   .mock .rev{background:#e4e4e4;color:#101010}
+  /* Markdown rendering (hildegard.helper.markdown DefaultMdTheme). Body is a
+     step dimmer than headings; bold and italic each carry a colour so emphasis
+     survives terminals that ignore italic or map bold to the bright colour.
+     Bold+italic takes the cool colour in bold, so it still reads if italic is
+     not rendered. A fenced block is a rounded thin box on the sunken surface,
+     full width, with its language on the top-right of the top border. */
+  .md-demo{background:#1c1c1c}
+  .md-plain{color:#bcbcbc}
+  .md-bold{color:#ffd787;font-weight:700}
+  .md-italic{color:#87d7d7;font-style:italic}
+  .md-both{color:#87d7d7;font-weight:700;font-style:italic}
+  .md-code{color:#af87d7;background:#121212;padding:0 1ch}
+  .md-link{color:#5fafff;text-decoration:underline}
+  .md-head{color:#ffd787;font-weight:700}
+  .md-bar{color:#585858}
+  .md-dim{color:#8a8a8a}
+  .md-bullet{color:#d7af87}
+  .md-quote{color:#8a8a8a}
+  .md-fbox{background:#121212;color:#d0d0d0}
+  .md-fborder{color:#585858}
+  .md-flang{color:#8a8a8a}
+  .md-fence{background:#121212;color:#d0d0d0}
+  .md-plain,.md-bold,.md-italic,.md-both,.md-code,.md-link,.md-head,.md-bar,.md-dim,.md-bullet,.md-quote,.md-fbox,.md-fborder,.md-flang,.md-fence{
+    font-family:var(--mono);font-variant-ligatures:none;letter-spacing:normal;
+  }
   /* A glyph with no 1-cell monospace font (e.g. braille, U+2139) is shown at a
      fixed cell width so it cannot shift the rest of the line. */
   .gw{display:inline-block;width:1.15em;text-align:center}
@@ -107,6 +132,7 @@
   <a href="#palette">Palette</a>
   <a href="#roles">Roles</a>
   <a href="#layout">Layouts</a>
+  <a href="#markdown">Markdown</a>
   <a href="#components">Components</a>
 </nav>
 
@@ -251,12 +277,136 @@ done         [██████████] 100%</pre>
   <pre class="mock" id="mock-modal"></pre>
 </section>
 
+<section id="markdown">
+  <h2>Markdown rendering</h2>
+  <p class="note">Model output in an assistant block. The body is a dim grey; <b>bold</b> is warm gold, <i>italic</i> is cyan, and <i><b>bold italic</b></i> is the cool cyan in bold — so emphasis stays visible even where a terminal ignores the italic rendition or maps bold to the bright colour. Headings use the bold gold. Inline code is violet on the sunken surface (a chip); links replace the colour; bold, italic, and strike only add weight.</p>
+
+  <h3>Rendered</h3>
+  <pre class="mock md-demo" id="mock-markdown"></pre>
+  <script>
+  (function markdownMock(){
+    const el = document.getElementById('mock-markdown');
+    if(!el) return;
+    const s = (cls, t) => '<span class="' + cls + '">' + t + '</span>';
+    const W = 60, label = ' pascal ';
+    const out = [];
+    out.push('This line is ' + s('md-bold','bold') + ', this is ' +
+      s('md-italic','italic') + ', this is ' + s('md-both','both') + ',');
+    out.push('this is ' + s('md-code','inline code') +
+      ', and this is a ' + s('md-link','link') + '.');
+    out.push('');
+    const head = (t, bar) => {
+      out.push(s('md-head', t));
+      out.push(s('md-bar', bar.repeat(t.length)));
+      out.push('');
+    };
+    head('This is H1 Title', '━');
+    head('This is H2 Title', '═');
+    head('This is H3 Title', '─');
+    out.push(s('md-head','This is H4 Title'));
+    out.push('');
+    out.push(s('md-bullet','•') + ' a bullet item');
+    out.push(s('md-bullet','1.') + ' an ordered item');
+    out.push(s('md-quote','│') + ' a quoted line');
+    out.push('');
+    /* A fenced block: a rounded thin box on the sunken surface, full width,
+       with the language on the top-right of the top border. */
+    const row = (inner) => '<span class="md-fbox">' + inner + '</span>';
+    out.push(row(s('md-fborder','╭' + '─'.repeat(W - 2 - label.length - 1)) +
+      s('md-flang', label) + s('md-fborder','─╮')));
+    const codeRow = (t) => row(s('md-fborder','│ ') +
+      t.padEnd(W - 4) + s('md-fborder',' │'));
+    out.push(codeRow('x := 1;'));
+    out.push(codeRow("writeln('hello');"));
+    out.push(row(s('md-fborder','╰' + '─'.repeat(W - 2) + '╯')));
+    el.innerHTML = out.join('\n');
+  })();
+  </script>
+
+  <h3>Formatting rules</h3>
+  <table>
+    <tr><th>Rule</th><th>Markdown</th><th>Colour</th><th>Weight</th><th>Preview</th></tr>
+    <tr><td>plain</td><td><code>text</code></td><td>250 · #bcbcbc</td><td>normal</td><td class="md-plain">text</td></tr>
+    <tr><td>bold</td><td><code>**text**</code></td><td>222 · #ffd787</td><td>bold</td><td class="md-bold">text</td></tr>
+    <tr><td>italic</td><td><code>*text*</code></td><td>116 · #87d7d7</td><td>italic</td><td class="md-italic">text</td></tr>
+    <tr><td>bold italic</td><td><code>***text***</code></td><td>116 · #87d7d7</td><td>bold</td><td class="md-both">text</td></tr>
+    <tr><td>inline code</td><td><code>`text`</code></td><td>140 · #af87d7 on 233 · #121212</td><td>normal</td><td class="md-code">text</td></tr>
+    <tr><td>link</td><td><code>[text](url)</code></td><td>75 · #5fafff</td><td>underlined</td><td class="md-link">text</td></tr>
+    <tr><td>strike</td><td><code>~~text~~</code></td><td>250 · #bcbcbc</td><td>strikethrough</td><td class="md-plain" style="text-decoration:line-through">text</td></tr>
+    <tr><td>heading (H1–H6)</td><td><code># text</code></td><td>222 · #ffd787</td><td>bold</td><td class="md-head">text</td></tr>
+    <tr><td>heading underline (H1–H3)</td><td>—</td><td>240 · #585858</td><td>—</td><td class="md-bar">━━━ ═══ ───</td></tr>
+    <tr><td>quote</td><td><code>&gt; text</code></td><td>245 · #8a8a8a</td><td>dim</td><td class="md-dim">│ text</td></tr>
+    <tr><td>list bullet / marker</td><td><code>- text</code></td><td>180 · #d7af87</td><td>—</td><td class="md-bullet">• 1.</td></tr>
+    <tr><td>thematic break</td><td><code>---</code></td><td>240 · #585858</td><td>—</td><td class="md-bar">──────────</td></tr>
+    <tr><td>fenced code</td><td><code>```lang</code></td><td>box: border 240 · #585858 on 233 · #121212</td><td>full width, rounded</td><td class="md-fence">code line</td></tr>
+  </table>
+
+  <h3>Emphasis palette</h3>
+  <p class="note">Bold is gold, italic is cyan, and bold+italic is cyan in bold — so it stays distinct from plain bold even when the terminal does not render italic. Headings take the bold gold.</p>
+  <div class="grid cols-2">
+    <div class="card"><h4>Emphasis <span class="tag">chosen</span></h4>
+      <pre class="mock">plain  <span class="md-plain">text</span>
+bold   <span class="md-bold">text</span>
+italic <span class="md-italic">text</span>
+both   <span class="md-both">text</span>
+code   <span class="md-code">text</span>
+link   <span class="md-link">text</span></pre>
+    </div>
+    <div class="card"><h4>Indices</h4>
+      <pre class="mock">plain   250 #bcbcbc
+bold    222 #ffd787  gold
+italic  116 #87d7d7  cyan
+both    116 #87d7d7  + bold
+code    140 #af87d7  violet on 233
+bullet  180 #d7af87  tan
+link     75 #5fafff</pre>
+    </div>
+  </div>
+
+  <h3>Bold colour</h3>
+  <p class="note">Gold is chosen. Italic stays cyan (<code>116</code> #87d7d7) and bold+italic stays cyan-in-bold; headings follow the bold colour. The others are kept for reference.</p>
+  <div class="grid cols-2">
+    <div class="card"><h4>Gold <span class="tag">chosen</span></h4>
+      <pre class="mock">222 #ffd787   <span class="md-bold">bold</span>  <span class="md-italic">italic</span>  <span class="md-head">heading</span>
+warm and classic; the warm hue is bold's alone</pre>
+    </div>
+    <div class="card"><h4>Magenta</h4>
+      <pre class="mock">213 #ff87ff   <span style="color:#ff87ff;font-weight:700">bold</span>  <span class="md-italic">italic</span>  <span style="color:#ff87ff;font-weight:700">heading</span>
+most vibrant; clear of cyan, tan, and blue</pre>
+    </div>
+    <div class="card"><h4>Violet</h4>
+      <pre class="mock">141 #af87ff   <span style="color:#af87ff;font-weight:700">bold</span>  <span class="md-italic">italic</span>  <span style="color:#af87ff;font-weight:700">heading</span>
+bright and calm; a touch near the link blue</pre>
+    </div>
+    <div class="card"><h4>Rose</h4>
+      <pre class="mock">211 #ff87af   <span style="color:#ff87af;font-weight:700">bold</span>  <span class="md-italic">italic</span>  <span style="color:#ff87af;font-weight:700">heading</span>
+warm pink, softer than magenta</pre>
+    </div>
+  </div>
+
+  <h3>Inline code and bullets</h3>
+  <p class="note">Inline code is violet on the sunken surface (<code>233</code> #121212) — the same chip the fenced block uses, so the two read as code — which also keeps it clear of the bold gold. It is padded with one space each side, so the chip stands out from the words around it. The tan moves to the list bullets and ordered markers, where it reads as a marker rather than emphasis.</p>
+  <div class="grid cols-2">
+    <div class="card"><h4>Inline code <span class="tag">violet chip</span></h4>
+      <pre class="mock">140 #af87d7 on 233 #121212
+here is <span class="md-code">inline code</span> and <span class="md-bold">bold</span> and <span class="md-italic">italic</span></pre>
+    </div>
+    <div class="card"><h4>Bullets <span class="tag">tan</span></h4>
+      <pre class="mock">180 #d7af87   <span class="md-bullet">•</span> item  <span class="md-bullet">1.</span> item
+a marker hue, no longer on code</pre>
+    </div>
+  </div>
+  <p class="note">Headings use the bold gold with the H1–H3 underline, so a heading is not confused with bold body text.</p>
+</section>
+
 <section id="components">
   <h2>Component status</h2>
   <table>
     <tr><th>Component</th><th>Status</th><th>Notes</th></tr>
     <tr><td><code>TPanel</code></td><td>implemented</td><td>border / title / padding</td></tr>
     <tr><td><code>TTextBlock</code></td><td>implemented</td><td>styled spans; clip by default</td></tr>
+    <tr><td><code>TMarkdownParser</code></td><td>implemented</td><td>markdown subset → styled blocks; inert streaming tail</td></tr>
+    <tr><td><code>TMarkdownView</code></td><td>implemented</td><td>blocks → styled text; bullets, quote bar, code backdrop, H1–H3 underlines</td></tr>
     <tr><td><code>TScrollContainer</code></td><td>implemented</td><td>clip + wheel/drag scrollbar</td></tr>
     <tr><td><code>TPromptLine</code></td><td>implemented</td><td>single-line editor, history</td></tr>
     <tr><td><code>TConversationView</code></td><td>implemented</td><td>sticky-to-bottom transcript</td></tr>
