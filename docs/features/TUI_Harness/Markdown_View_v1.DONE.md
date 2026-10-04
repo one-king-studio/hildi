@@ -7,7 +7,7 @@
 
 A widget that stacks a parsed `TMdBlockArray` as styled text blocks plus chrome
 (bullets, a quote bar, a code backdrop, a rule). Complete: `make check` green at
-663 tests, leak-clean.
+664 tests, leak-clean.
 
 ## Implementation Tasks
 
@@ -36,7 +36,14 @@ A widget that stacks a parsed `TMdBlockArray` as styled text blocks plus chrome
 - [x] **Test**: `TestFinishPromotesTheTail`
 - [x] **Implement**: `AppendSource`/`FinishSource` and the incremental child sync
 
-### Phase 4: Docs & validation
+### Phase 4: Chat panel integration
+
+- [x] **Test**: `TestAssistantRendersMarkdown` in `tests/test_tui_chat.pas`
+- [x] **Implement**: `TChatItem` uses a `TMarkdownView` for `ckAssistant` (lazily
+      created; `SetText` resets it, `AppendText` feeds it incrementally) and
+      branches in `BodyRows`/`Arrange`/`Render`/`LayoutBuilds`
+
+### Phase 5: Docs & validation
 
 - [x] **Update the SPEC** if the implemented behaviour diverged
 - [x] **Update** `docs/features/FEATURES.md`
@@ -49,6 +56,8 @@ A widget that stacks a parsed `TMdBlockArray` as styled text blocks plus chrome
 ```
 src/hildegard.helper.tui.markdownview.pas   (new)
 tests/test_markdownview.pas                 (new) 14 tests
+src/hildegard.helper.tui.chat.pas           (assistant blocks use the view)
+tests/test_tui_chat.pas                     (TestAssistantRendersMarkdown)
 tests/hildegard_helper_tests.pas            (add the test unit to uses)
 src/hildegard.helper.markdown.pas           (FinalizedCount/FinalizedBlock/TailText)
 docs/features/TUI_Harness/Markdown_View_v1.SPEC.md
@@ -69,9 +78,11 @@ HANDOFF.md
   item's `LayoutBuilds`, so a test can prove a finalised block is not rebuilt.
 - **Gap rule:** one blank row between blocks, except between two consecutive list
   items (a tight list), which get none.
-- **Not done (tracked in the SPEC's future considerations):** wiring the view
-  into the chat panel by replacing the assistant block's plain `TTextBlock`.
-  Until then the widget is exercised only by its own tests.
+- **Chat panel wiring is done.** `TChatItem` uses a `TMarkdownView` for
+  `ckAssistant` blocks (created lazily; `SetText` resets it, `AppendText` feeds
+  it incrementally) and branches in `BodyRows`/`Arrange`/`Render`/`LayoutBuilds`.
+  User, tool, thought, and error blocks keep the plain `TTextBlock`, so a tool
+  result is never parsed as markdown. Covered by `TestAssistantRendersMarkdown`.
 
 ## Success Criteria
 

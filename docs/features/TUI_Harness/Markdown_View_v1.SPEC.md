@@ -35,6 +35,9 @@ delta and reintroduce the O(n) per-chunk cost the parser was built to avoid.
 - [ ] **Incremental:** a finalised block's child text block is created once and
       is not rebuilt when a later chunk arrives; only the open tail is updated.
 - [ ] While streaming, the open tail is drawn as plain (unstyled) text.
+- [ ] The chat stream renders **assistant** blocks through the view, so model
+      output is styled. User, tool, thought, and error blocks stay plain text,
+      and a tool result is never parsed as markdown.
 
 ### Non-Functional
 
@@ -152,6 +155,11 @@ The gap: the per-block mapping (spans + chrome) and the vertical stack.
 - [ ] `TestFinishPromotesTheTail`
 - [ ] `TestNoLeaks` (enforced by `make test-leak`)
 
+### Integration Tests (`tests/test_tui_chat.pas`)
+
+- [ ] `TestAssistantRendersMarkdown`: an assistant `TChatItem` with bold text and
+      a list renders the bold styling and the bullet through the stream.
+
 ## Performance Targets
 
 - `AppendSource` is O(new blocks + tail), not O(document).
@@ -176,8 +184,6 @@ The gap: the per-block mapping (spans + chrome) and the vertical stack.
 
 ## Future Considerations
 
-- A `TMarkdownView` in the chat panel: replace the assistant block's plain
-  `TTextBlock` with this widget.
 - Collapsible code blocks, a copy affordance, and syntax highlighting (a
   separate tokenizer).
 - Tables and the wider GFM surface.
