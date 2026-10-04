@@ -28,8 +28,11 @@ re-parse completed content.
       with markup removed.
 - [ ] Map inline styles and block kinds to `TAttr` through a theme, with a
       default theme.
-- [ ] Support incremental append: completed blocks are final; only the trailing
-      unstable block is re-parsed.
+- [ ] Support incremental append: a closed block is final and never re-parsed.
+      The trailing open block is retained as **raw text** and is not parsed at
+      all until its terminator is seen or the stream ends (EOF); only then is it
+      classified and inline-parsed. An incomplete block therefore renders as
+      plain text while streaming.
 - [ ] Render unrecognised or malformed syntax literally rather than failing.
 
 ### Non-Functional
@@ -69,15 +72,18 @@ type
   TMdSpan = record
     Text: UnicodeString;
     Styles: TMdInlineStyles;
-    Link: string;
+    Link: UnicodeString;
   end;
 
   { A parsed block. Level is the heading level (1..6), list depth, or quote
-    depth as applicable. Language is the code fence info string. }
+    depth as applicable. Language is the code fence info string. Ordered and
+    Ordinal record an ordered list item's marker so it renders as written. }
   TMdBlock = record
     Kind: TMdBlockKind;
     Level: Integer;
-    Language: string;
+    Language: UnicodeString;
+    Ordered: Boolean;   { an ordered (numbered) list item }
+    Ordinal: Integer;   { the marker number for an ordered item, else 0 }
     Spans: array of TMdSpan;
   end;
 
@@ -107,12 +113,15 @@ type
     { Full parse of a complete document. }
     function Parse(const AText: string): TMdBlockArray;
 
-    { Incremental: append a chunk of streamed text. Completed blocks are
-      retained; only the trailing unstable block is re-parsed on access. }
+    { Incremental: append a chunk of streamed text. A closed block is final; the
+      open tail is retained as raw text and is not parsed. }
     procedure Append(const AChunk: string);
 
-    { All blocks known so far. The last block is "unstable" until the next
-      Append proves it complete (blank line, closing fence, EOF). }
+    { End of stream: finalise the open tail as the last block. }
+    procedure Finish;
+
+    { All blocks known so far, plus the open tail (including the pending partial
+      line) as one plain text block. }
     function Blocks: TMdBlockArray;
   end;
 
@@ -178,9 +187,27 @@ stability.
    literal text.
 4. **Mapping:** `BlockAttr` and `StyleFor` resolve attributes from the theme.
    The renderer combines block base attributes with span styles.
-5. **Incremental:** `Append` accumulates into a tail buffer. On `Blocks`, the tail
-   is re-parsed; a block is finalised when its terminator is seen (blank line for
-   paragraph/list/quote, closing fence for code, EOF for the last block).
+5. **Incremental:** `Append` accumulates new lines into the open **tail**, which
+   is retained as raw text and never parsed. A block finalises only when its
+   terminator is seen; the tail is then classified, inline-parsed, and appended
+   to the finalised blocks. At EOF the tail finalises as the last block.
+
+Block terminators (a block finalises when any of these is seen):
+
+| Open block | Terminator |
+| --- | --- |
+| Heading (ATX) / rule | immediately: a single line |
+| Fence | the closing fence, or EOF |
+| Paragraph | a blank line, or a line that opens a heading, rule, fence, or list |
+| List | a non-blank line that is not a list item, or EOF. Blank lines do **not** close a list, so a loose list is one block |
+| Quote | a line without a `>` marker, or EOF (a blank `>` line stays inside) |
+
+A list marker at the start of a line closes an open paragraph and opens a list,
+so `text` immediately followed by `- item` is two blocks. Deviations from
+CommonMark, accepted for v1 and recorded here: lazy continuation is not
+supported (an unindented line after a list item closes the list rather than
+continuing the item), and any ordered number may interrupt a paragraph (not just
+`1.`).
 
 ### Integration Patterns
 
@@ -198,6 +225,8 @@ stability.
 - A heading with more than six `#` is a paragraph.
 - Marker characters that are not at line start are literal text.
 - Empty input yields zero blocks.
+- A list stays open across blank lines, so a loose list is one block; an ordered
+  item's marker number is captured in `Ordinal`.
 
 ### Output Guarantees
 
@@ -257,8 +286,9 @@ blocks out.
 ## Performance Targets
 
 - Full parse is O(n) in input length for the supported subset.
-- Incremental `Append` re-parses only the trailing unstable block; appending k
-  chunks to build an n-character document is O(n), not O(n*k).
+- Incremental `Append` scans only the new lines and never re-parses a closed
+  block nor the open tail; appending k chunks to build an n-character document is
+  O(n), not O(n*k), even when the document is a single large block.
 
 ## Security Considerations
 
