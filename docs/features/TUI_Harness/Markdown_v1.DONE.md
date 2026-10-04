@@ -112,3 +112,16 @@ HANDOFF.md                          (state, test count)
 - [x] Every acceptance criterion maps to a passing test
 - [x] `make check` passes (tests + leak gate)
 - [x] Parser depends on the toolkit only through `TAttr`
+
+## Follow-up: nested emphasis and heading colours (2026-10-03)
+
+The inline scanner now re-scans a paired run and ORs the outer style into each
+inner span, so `***x***` is bold **and** italic and emphasis nests
+(`**bold *italic* bold**`). Previously `***x***` emitted a bold span with a
+stray leading `*` and leaked a `*`, which could turn unrelated text downstream
+italic. Nesting is depth-capped (`MaxInlineDepth = 16`) so untrusted input
+cannot blow the stack.
+
+`DefaultMdTheme` now sets every heading to the brightest white (231) and bold,
+and the body a step dimmer (250), reserving the brightest white for headings.
+H1-H3 also carry an underline (see the Markdown View DONE).

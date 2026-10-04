@@ -89,3 +89,10 @@ HANDOFF.md
 - [x] All tasks above checked
 - [x] Every acceptance criterion maps to a passing test
 - [x] `make check` passes (tests + leak gate)
+
+## Follow-up: heading underlines (2026-10-03)
+
+H1, H2, and H3 now draw an underline beneath the heading text (━ heavy, ═ double,
+─ light) in the dim rule colour, sized to the heading text width and capped at
+the block width. H4-H6 are bold and bright with no underline. The underline row
+is accounted for in `Measure`/`Arrange`.

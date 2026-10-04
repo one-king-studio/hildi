@@ -24,6 +24,11 @@ re-parse completed content.
       string), horizontal rules, and blank separation.
 - [ ] Parse inline within non-code blocks: bold, italic, inline code, strikethrough,
       and `[text](url)` links.
+- [ ] Inline emphasis nests: `***x***` is bold **and** italic, and
+      `**bold *italic* bold**` carries both styles on the inner run. A paired run
+      is re-scanned and the outer style is added to each inner span. Nesting is
+      depth-capped so untrusted input cannot blow the stack, and unpaired
+      delimiters render literally.
 - [ ] Produce blocks of styled spans (`TMdSpan`), preserving the literal text
       with markup removed.
 - [ ] Map inline styles and block kinds to `TAttr` through a theme, with a
@@ -152,6 +157,9 @@ type
   (`TUI_Core_v1.SPEC.md`).
 - `TMdBlock.Kind` and `Level` follow the semantics in the type comment; code
   blocks never carry inline styles (their `Spans` have empty `Styles`).
+- `DefaultMdTheme` sets every heading to the brightest white (231) and bold, and
+  the body a step dimmer (250), so the brightest white is reserved for headings.
+  H1-H3 also carry an underline (drawn by the view).
 - `TMdSpan.Text` is the literal text with markup tokens removed. Whitespace
   inside a paragraph is preserved as a single space on output.
 - `Blocks` returns blocks in document order. `mbBlank` is only emitted when it

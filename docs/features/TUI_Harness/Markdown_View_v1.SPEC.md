@@ -28,6 +28,10 @@ delta and reintroduce the O(n) per-chunk cost the parser was built to avoid.
       block's base attribute.
 - [ ] A list item is prefixed with a bullet; an ordered item with its marker
       number. A quote is prefixed with a bar. A rule is a full-width line.
+- [ ] Headings are bold and the brightest white. H1, H2, and H3 draw an underline
+      beneath the heading text (━ heavy, ═ double, ─ light) in the dim rule
+      colour; H4-H6 have no underline. The underline matches the heading text
+      width, capped at the block width.
 - [ ] A fenced code block's rows carry the code backdrop background across the
       full width, and its content is not inline-parsed.
 - [ ] One blank row separates blocks, except between consecutive list items
