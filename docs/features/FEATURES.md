@@ -37,19 +37,7 @@ in `../guidelines/spec-driven-development.md`:
 | [TUI Syntax Highlighting](TUI_Syntax_Highlighting/FEATURE.md) | Specified | Syntax Highlighting v1 | Lexical highlighting for fenced code blocks (Pascal/shell first, then Python/JSON/SQL): a pure-function tokenizer driven by per-language rule tables, computed once per immutable block, themed via `TMdTheme`, zero dependencies. Vim-style keyword+delimiter scanning, not LSP or a regex engine — rejected in doc with rationale, and SynEdit recorded as design-only prior art (MPL/GPL). |
 | [Approval Path Scoping](Approval_Path_Scoping/FEATURE.md) | Specified | Approval Path Scoping v1 | Extend the approval engine with directory (subtree-inclusive), extension, and combined (AND) match dimensions on file-tool rules — "allow .md writes under docs/" — plus a persistable `never` (deny). The tool declares the path on the subject; an additive v2 store migration rebuilds `approvals` for the extended UNIQUE; deny-wins preserved; session scope = per-agent gating. |
 | [TLS Foundation](TLS_Foundation/FEATURE.md) | Implemented (**critical**) | TLS Foundation v1 | Replace runtime-`dlopen`'d OpenSSL (`opensslsockets`) with a vendored, statically linked mbedTLS (the SQLite pattern) behind FPC's `TSSLSocketHandler` seam — a small C shim over an opaque handle, a CA bundle embedded in the binary, and an offline loopback handshake test. Verified: a live HTTPS turn with no libssl/libcrypto loaded. Prerequisite for Remote Agent Link. |
-
-## Planned (not yet specified)
-
-- **Sandboxed Script Compute** - embed [GocciaScript](https://github.com/frostney/GocciaScript)
-  (MIT, FPC-native JavaScript engine) as an in-process, capability-free compute
-  tier for model-authored scripts. Deliberately **no filesystem, network, or
-  system access** - the helper's shell path remains the privileged tier; scripts
-  are the safe, deterministic compute tier. Intended as an **internal compute
-  tool** for the helper first, with a possible future `run script` action over
-  the Remote Agent Link. Parked until a concrete need appears; when picked up,
-  the SPEC must nail down a hard per-execution timeout, a minimal builtin set,
-  in-memory-only module resolution (or no imports), output/memory caps, and
-  host-object isolation at the sandbox boundary.
+| [Sandboxed Script Compute](Sandboxed_Script_Compute/FEATURE.md) | Proposed | - | An in-process, capability-free compute tier: the model writes small scripts for deterministic data/text work between "think" and "act". Embeds GocciaScript (MIT, FPC-native ECMAScript) core-only with `TGocciaCapabilities.None`, caps, and a timeout — no filesystem, network, or exec. Sequenced after the critical path; the first task is a spike that measures the release-binary delta before a SPEC is written. |
 
 ## Existing Behaviour (to be documented)
 
