@@ -123,6 +123,15 @@ type
     { All blocks known so far, plus the open tail (including the pending partial
       line) as one plain text block. }
     function Blocks: TMdBlockArray;
+
+    { The number of finalised blocks so far; these never change. }
+    function FinalizedCount: Integer;
+
+    { The finalised block at AIndex (0..FinalizedCount-1), else an empty block. }
+    function FinalizedBlock(AIndex: Integer): TMdBlock;
+
+    { The open tail as raw text (including the pending partial line), or ''. }
+    function TailText: UnicodeString;
   end;
 
   { The default theme (no terminal dependency; caller may override). }
