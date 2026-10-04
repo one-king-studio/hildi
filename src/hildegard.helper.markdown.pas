@@ -100,6 +100,12 @@ type
     procedure Finish;
     { All blocks known so far, plus the open tail as one plain text block. }
     function Blocks: TMdBlockArray;
+    { The number of finalised blocks so far; these never change. }
+    function FinalizedCount: Integer;
+    { The finalised block at AIndex (0..FinalizedCount-1), else an empty block. }
+    function FinalizedBlock(AIndex: Integer): TMdBlock;
+    { The open tail as raw text (including the pending partial line), or ''. }
+    function TailText: UnicodeString;
   end;
 
 { The default theme (no terminal dependency; caller may override). }
@@ -900,12 +906,7 @@ begin
   { The open block is not parsed: it is shown as plain text until it closes. The
     pending partial line is included, so a streamed line shows before its
     newline arrives. }
-  Raw := FTail;
-  if FPartial <> '' then
-    if Raw <> '' then
-      Raw := Raw + #10 + FPartial
-    else
-      Raw := FPartial;
+  Raw := TailText;
   if Raw <> '' then
   begin
     B := Default(TMdBlock);
@@ -916,6 +917,29 @@ begin
     SetLength(Result, Length(Result) + 1);
     Result[High(Result)] := B;
   end;
+end;
+
+function TMarkdownParser.FinalizedCount: Integer;
+begin
+  Result := Length(FFinalized);
+end;
+
+function TMarkdownParser.FinalizedBlock(AIndex: Integer): TMdBlock;
+begin
+  if (AIndex >= 0) and (AIndex < Length(FFinalized)) then
+    Result := FFinalized[AIndex]
+  else
+    Result := Default(TMdBlock);
+end;
+
+function TMarkdownParser.TailText: UnicodeString;
+begin
+  Result := FTail;
+  if FPartial <> '' then
+    if Result <> '' then
+      Result := Result + #10 + FPartial
+    else
+      Result := FPartial;
 end;
 
 end.
