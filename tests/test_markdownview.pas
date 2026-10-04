@@ -27,7 +27,8 @@ type
     procedure TestOrderedPrefix;
     procedure TestQuoteBar;
     procedure TestRuleIsFullWidth;
-    procedure TestCodeBackdropFillsTheRow;
+    procedure TestCodeFenceIsBoxed;
+    procedure TestInlineCodeIsAPaddedChip;
     procedure TestBlocksAreSeparatedByABlankRow;
     procedure TestTightListHasNoGap;
     procedure TestStreamingTailIsPlainText;
@@ -179,18 +180,45 @@ begin
   end;
 end;
 
-procedure TMarkdownViewTest.TestCodeBackdropFillsTheRow;
+procedure TMarkdownViewTest.TestCodeFenceIsBoxed;
 var
   S: TSurfaceMemory;
   Theme: TMdTheme;
 begin
   Theme := DefaultMdTheme;
-  S := RenderSource('```' + #10 + 'code' + #10 + '```', 12, 3);
+  S := RenderSource('```pascal' + #10 + 'code' + #10 + '```', 30, 4);
   try
-    AssertEquals('code text drawn', 'code',
-      string(S.RowText(0, 0, 4)));
-    AssertEquals('backdrop to the edge', Theme.CodeBackdrop.Bg,
-      S.CellAt(11, 0).Attr.Bg);
+    { Row 0 is the top border, with the language right-aligned. }
+    AssertTrue('rounded corner', S.CellAt(0, 0).Ch = '╭');
+    AssertTrue('language on the top border',
+      Pos(UnicodeString(' pascal '), S.RowText(0, 0, 30)) > 0);
+    { Row 1 is the code, inset by the border and a space. }
+    AssertEquals('code text drawn', 'code', string(S.RowText(1, 2, 4)));
+    AssertTrue('right border', S.CellAt(29, 1).Ch = '│');
+    AssertEquals('the box surface is the sunken backdrop',
+      Theme.CodeBackdrop.Bg, S.CellAt(29, 1).Attr.Bg);
+    { Row 2 is the bottom border. }
+    AssertTrue('bottom corner', S.CellAt(0, 2).Ch = '╰');
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TMarkdownViewTest.TestInlineCodeIsAPaddedChip;
+var
+  S: TSurfaceMemory;
+  Theme: TMdTheme;
+begin
+  Theme := DefaultMdTheme;
+  { 'a ' then a padded chip ' x ' then ' b'. }
+  S := RenderSource('a `x` b', 20, 2);
+  try
+    AssertEquals('the chip text', 'x', string(S.CellAt(3, 0).Ch));
+    AssertEquals('the chip carries the sunken background',
+      Theme.CodeBackdrop.Bg, S.CellAt(3, 0).Attr.Bg);
+    AssertEquals('the leading pad is part of the chip',
+      Theme.CodeBackdrop.Bg, S.CellAt(2, 0).Attr.Bg);
+    AssertEquals('the chip foreground', Theme.Code.Fg, S.CellAt(3, 0).Attr.Fg);
   finally
     S.Free;
   end;
@@ -399,8 +427,8 @@ var
   Theme: TMdTheme;
 begin
   Theme := DefaultMdTheme;
-  { 231 is #ffffff; 250 is a dimmer grey in the 256-colour ramp. }
-  AssertEquals('headings are the brightest white', 231, Theme.Heading[1].Fg);
+  { Headings are the bold gold; the body is a dimmer grey. }
+  AssertEquals('headings are gold', 222, Theme.Heading[1].Fg);
   AssertEquals('the body is a dimmer grey', 250, Theme.Paragraph.Fg);
 end;
 

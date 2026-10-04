@@ -32,6 +32,7 @@ type
     FBlocks: array of TTextBlock;   { one per finalised block; a rule is a dummy }
     FKinds: array of TMdBlockKind;
     FRules: array of TBlockRule;
+    FLangs: array of UnicodeString;  { a code fence's language, else '' }
     FTail: TTextBlock;              { the open tail, or nil }
     FTailText: UnicodeString;
     function GetBlockCount: Integer;
@@ -144,6 +145,65 @@ begin
     Result[I + 1] := ASpans[I];
 end;
 
+{ The width available to code inside its box (a border column and a space each
+  side). }
+function CodeInnerWidth(AWidth: Integer): Integer;
+begin
+  Result := AWidth - 4;
+  if Result < 1 then
+    Result := 1;
+end;
+
+{ Move an attribute onto an explicit background (the sunken code surface). }
+function OnSurface(const AAttr: TAttr; ABg: Byte): TAttr;
+begin
+  Result := AAttr;
+  Result.Bg := ABg;
+  Exclude(Result.Style, sfScreenBg);
+end;
+
+{ Draw a fenced code block: a rounded thin box on the sunken surface, full
+  width, with the language right-aligned on the top border. }
+procedure DrawCodeBox(const S: ISurface; const R: TRect;
+  const ALanguage: UnicodeString; const ATheme: TMdTheme);
+var
+  L, Rt, T, Bt, I, Fill: Integer;
+  Border, Lang: TAttr;
+  LangTag: UnicodeString;
+begin
+  if (R.W < 2) or (R.H < 2) then
+    Exit;
+  L := R.X;
+  Rt := R.X + R.W - 1;
+  T := R.Y;
+  Bt := R.Y + R.H - 1;
+  S.FillRect(R, ATheme.CodeBackdrop);
+  Border := OnSurface(ATheme.Rule, ATheme.CodeBackdrop.Bg);
+  Lang := OnSurface(ATheme.Muted, ATheme.CodeBackdrop.Bg);
+  LangTag := '';
+  if ALanguage <> '' then
+    LangTag := UnicodeString(' ') + ALanguage + UnicodeString(' ');
+  if (LangTag <> '') and (StringWidth(LangTag) <= R.W - 4) then
+  begin
+    { ╭───── lang ─╮ }
+    Fill := R.W - 2 - StringWidth(LangTag) - 1;
+    PutText(S, L, T, UnicodeString('╭') + RepeatChar('─', Fill), Border);
+    PutText(S, L + 1 + Fill, T, LangTag, Lang);
+    PutText(S, L + 1 + Fill + StringWidth(LangTag), T,
+      UnicodeString('─╮'), Border);
+  end
+  else
+    PutText(S, L, T, UnicodeString('╭') + RepeatChar('─', R.W - 2) +
+      UnicodeString('╮'), Border);
+  PutText(S, L, Bt, UnicodeString('╰') + RepeatChar('─', R.W - 2) +
+    UnicodeString('╯'), Border);
+  for I := T + 1 to Bt - 1 do
+  begin
+    PutCh(S, L, I, UnicodeString('│'), Border);
+    PutCh(S, Rt, I, UnicodeString('│'), Border);
+  end;
+end;
+
 { --- TMarkdownView ------------------------------------------------------- }
 
 constructor TMarkdownView.Create(const ATheme: TMdTheme);
@@ -195,29 +255,31 @@ end;
 
 function TMarkdownView.Combine(const ABase: TAttr;
   const AStyles: TMdInlineStyles): TAttr;
-var
-  Span: TAttr;
 begin
-  Result := ABase;
+  { A styled run carries its own colour; an unstyled run takes the block's. }
   if AStyles = [] then
-    Exit;
-  Span := StyleFor(AStyles, FTheme);
-  Result.Style := Result.Style + Span.Style;
-  if (misCode in AStyles) or (misLink in AStyles) then
-    Result.Fg := Span.Fg;
+    Result := ABase
+  else
+    Result := StyleFor(AStyles, FTheme);
 end;
 
 function TMarkdownView.ConvertSpans(const ABlock: TMdBlock;
   const ABase: TAttr): TSpanList;
 var
   I: Integer;
+  Txt: UnicodeString;
 begin
   Result := nil;
   SetLength(Result, Length(ABlock.Spans));
   for I := 0 to High(ABlock.Spans) do
   begin
     Result[I] := Default(TSpan);
-    Result[I].Text := ABlock.Spans[I].Text;
+    Txt := ABlock.Spans[I].Text;
+    { A code chip is padded one space each side so it stands out from the words
+      around it. }
+    if misCode in ABlock.Spans[I].Styles then
+      Txt := UnicodeString(' ') + Txt + UnicodeString(' ');
+    Result[I].Text := Txt;
     Result[I].Attr := Combine(ABase, ABlock.Spans[I].Styles);
   end;
 end;
@@ -269,6 +331,7 @@ begin
   FBlocks := nil;
   FKinds := nil;
   FRules := nil;
+  FLangs := nil;
   if FTail <> nil then
     FTail.Free;
   FTail := nil;
@@ -291,9 +354,11 @@ begin
     SetLength(FBlocks, I + 1);
     SetLength(FKinds, I + 1);
     SetLength(FRules, I + 1);
+    SetLength(FLangs, I + 1);
     FKinds[I] := B.Kind;
     FBlocks[I] := MakeBlock(B);
     FRules[I] := Default(TBlockRule);
+    FLangs[I] := B.Language;
     if B.Kind = mbHeading then
     begin
       FRules[I].Glyph := HeadingRuleGlyph(B.Level);
@@ -352,7 +417,7 @@ end;
 
 function TMarkdownView.Measure(const AAvail: TSize): TSize;
 var
-  I, H: Integer;
+  I, H, Inner: Integer;
 begin
   Result := Default(TSize);
   if AAvail.W < 1 then
@@ -363,10 +428,19 @@ begin
   begin
     if I > 0 then
       Inc(H, GapBetween(I - 1, I));
-    FBlocks[I].WrapWidth := AAvail.W;
-    Inc(H, FBlocks[I].Measure(Default(TSize)).H);
-    if FRules[I].Glyph <> '' then
-      Inc(H, 1);   { the heading underline row }
+    if FKinds[I] = mbCodeFence then
+    begin
+      Inner := CodeInnerWidth(AAvail.W);
+      FBlocks[I].WrapWidth := Inner;
+      Inc(H, FBlocks[I].Measure(Default(TSize)).H + 2);  { the box borders }
+    end
+    else
+    begin
+      FBlocks[I].WrapWidth := AAvail.W;
+      Inc(H, FBlocks[I].Measure(Default(TSize)).H);
+      if FRules[I].Glyph <> '' then
+        Inc(H, 1);   { the heading underline row }
+    end;
   end;
   if (FTail <> nil) and (FTailText <> '') then
   begin
@@ -380,7 +454,7 @@ end;
 
 procedure TMarkdownView.Arrange(const ABounds: TRect);
 var
-  I, Y, RowH: Integer;
+  I, Y, RowH, Inner: Integer;
 begin
   inherited Arrange(ABounds);
   Y := ABounds.Y;
@@ -388,12 +462,23 @@ begin
   begin
     if I > 0 then
       Inc(Y, GapBetween(I - 1, I));
-    FBlocks[I].WrapWidth := ABounds.W;
-    RowH := FBlocks[I].Measure(Default(TSize)).H;
-    FBlocks[I].Arrange(Rc(ABounds.X, Y, ABounds.W, RowH));
-    Inc(Y, RowH);
-    if FRules[I].Glyph <> '' then
-      Inc(Y, 1);   { the heading underline row }
+    if FKinds[I] = mbCodeFence then
+    begin
+      Inner := CodeInnerWidth(ABounds.W);
+      FBlocks[I].WrapWidth := Inner;
+      RowH := FBlocks[I].Measure(Default(TSize)).H;
+      FBlocks[I].Arrange(Rc(ABounds.X + 2, Y + 1, Inner, RowH));
+      Inc(Y, RowH + 2);
+    end
+    else
+    begin
+      FBlocks[I].WrapWidth := ABounds.W;
+      RowH := FBlocks[I].Measure(Default(TSize)).H;
+      FBlocks[I].Arrange(Rc(ABounds.X, Y, ABounds.W, RowH));
+      Inc(Y, RowH);
+      if FRules[I].Glyph <> '' then
+        Inc(Y, 1);   { the heading underline row }
+    end;
   end;
   if (FTail <> nil) and (FTailText <> '') then
   begin
@@ -416,10 +501,15 @@ begin
     if FKinds[I] = mbRule then
       PutText(S, FBlocks[I].Bounds.X, FBlocks[I].Bounds.Y,
         RepeatChar('─', FBlocks[I].Bounds.W), FTheme.Rule)
+    else if FKinds[I] = mbCodeFence then
+    begin
+      { The box surrounds the inset text block. }
+      DrawCodeBox(S, Rc(FBlocks[I].Bounds.X - 2, FBlocks[I].Bounds.Y - 1,
+        FBlocks[I].Bounds.W + 4, FBlocks[I].Bounds.H + 2), FLangs[I], FTheme);
+      FBlocks[I].Render(S);
+    end
     else
     begin
-      if FKinds[I] = mbCodeFence then
-        S.FillRect(FBlocks[I].Bounds, FTheme.CodeBackdrop);
       FBlocks[I].Render(S);
       if FRules[I].Glyph <> '' then
       begin
