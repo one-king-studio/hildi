@@ -57,6 +57,8 @@ type
     { Instrumentation: the layout builds of the finalised block at AIndex, or -1.
       A finalised block's count does not change when a later chunk arrives. }
     function BlockLayoutBuilds(AIndex: Integer): Integer;
+    { Diagnostic: the total layout builds across the blocks and the tail. }
+    function LayoutBuilds: Integer;
   end;
 
 implementation
@@ -142,6 +144,17 @@ begin
     Result := FBlocks[AIndex].LayoutBuilds
   else
     Result := -1;
+end;
+
+function TMarkdownView.LayoutBuilds: Integer;
+var
+  I: Integer;
+begin
+  Result := 0;
+  for I := 0 to High(FBlocks) do
+    Inc(Result, FBlocks[I].LayoutBuilds);
+  if FTail <> nil then
+    Inc(Result, FTail.LayoutBuilds);
 end;
 
 function TMarkdownView.Combine(const ABase: TAttr;

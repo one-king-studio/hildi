@@ -32,6 +32,7 @@ type
     { Rendering. }
     procedure TestUserBubbleDrawsRaisedChrome;
     procedure TestAssistantRendersPlainText;
+    procedure TestAssistantRendersMarkdown;
     procedure TestCollapsedThoughtDrawsADimmedRule;
     procedure TestCollapsedToolDrawsAThinFullContrastRule;
     procedure TestLongToolTitleIsTruncated;
@@ -199,6 +200,32 @@ begin
       AssertEquals('text starts at column 1', 'p', S.CellAt(1, 0).Ch);
       AssertTrue('full text rendered', Pos('plain words', S.RowText(0, 0, 24)) > 0);
       AssertTrue('no bubble corner', S.CellAt(0, 0).Ch <> '╭');
+    finally
+      It.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestAssistantRendersMarkdown;
+var
+  It: TChatItem;
+  S: TSurfaceMemory;
+begin
+  S := TSurfaceMemory.Create(24, 5);
+  try
+    It := TChatItem.Create(ckAssistant, '', '**bold** and a list:' + #10 +
+      '- one', FTheme);
+    try
+      It.Arrange(Rc(0, 0, 24, It.Measure(Avail(24, 0)).H));
+      It.Render(S);
+      { Column 1 is the assistant inset. }
+      AssertTrue('the bold run is styled', sfBold in S.CellAt(1, 0).Attr.Style);
+      AssertFalse('the plain run is not bold',
+        sfBold in S.CellAt(6, 0).Attr.Style);
+      { The paragraph is row 0, a blank row separates it, the list is row 2. }
+      AssertTrue('the list bullet is drawn', S.CellAt(1, 2).Ch = '•');
     finally
       It.Free;
     end;

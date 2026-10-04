@@ -19,7 +19,7 @@ uses
   hildegard.helper.tui.surface, hildegard.helper.tui.widget,
   hildegard.helper.tui.text, hildegard.helper.tui.grapheme,
   hildegard.helper.tui.compact, hildegard.helper.tui.scroll,
-  hildegard.helper.tui.theme;
+  hildegard.helper.tui.theme, hildegard.helper.tui.markdownview;
 
 type
   TChatKind = (ckUser, ckAssistant, ckError, ckThought, ckTool, ckThinking);
@@ -33,6 +33,7 @@ type
     FLabel: string;
     FBody: string;
     FText: TTextBlock;
+    FMarkdown: TMarkdownView;   { assistant bodies only; nil otherwise }
     FExpanded: Boolean;
     FTheme: TTheme;
     FOnToggle: TNotifyEvent;
@@ -240,13 +241,23 @@ begin
   FHeightValid := False;
   FHeightWidth := 0;
   FHeight := 0;
-  FText := TTextBlock.Create([], wmWord);
+  if AKind = ckAssistant then
+  begin
+    FText := nil;
+    FMarkdown := TMarkdownView.Create;
+  end
+  else
+  begin
+    FMarkdown := nil;
+    FText := TTextBlock.Create([], wmWord);
+  end;
   Rebuild;
 end;
 
 destructor TChatItem.Destroy;
 begin
   FText.Free;
+  FMarkdown.Free;
   inherited Destroy;
 end;
 
@@ -307,6 +318,11 @@ procedure TChatItem.Rebuild;
 var
   One: TSpan;
 begin
+  if FMarkdown <> nil then
+  begin
+    FMarkdown.SetSource(DisplayBody);
+    Exit;
+  end;
   One := Default(TSpan);
   One.Text := UnicodeString(DisplayBody);
   One.Attr := BodyAttr;
@@ -345,7 +361,10 @@ begin
     Exit;
   FBody := AText;
   InvalidateHeight;
-  Rebuild;
+  if FMarkdown <> nil then
+    FMarkdown.SetSource(AText)
+  else
+    Rebuild;
   if Assigned(FOnChange) then
     FOnChange(Self);
 end;
@@ -356,7 +375,11 @@ begin
     Exit;
   FBody := FBody + AText;
   InvalidateHeight;
-  Rebuild;
+  { Feed the markdown parser incrementally; it never re-parses a closed block. }
+  if FMarkdown <> nil then
+    FMarkdown.AppendSource(AText)
+  else
+    Rebuild;
   if Assigned(FOnChange) then
     FOnChange(Self);
 end;
@@ -368,7 +391,12 @@ end;
 
 function TChatItem.LayoutBuilds: Integer;
 begin
-  Result := FText.LayoutBuilds;
+  if FText <> nil then
+    Result := FText.LayoutBuilds
+  else if FMarkdown <> nil then
+    Result := FMarkdown.LayoutBuilds
+  else
+    Result := 0;
 end;
 
 function TChatItem.MeasureCount: Integer;
@@ -395,12 +423,22 @@ end;
 procedure TChatItem.BodyRows(AWidth: Integer; out ATextRows, ALines: Integer);
 var
   InnerW: Integer;
+  Avail: TSize;
 begin
   InnerW := AWidth - Inset;
   if InnerW < 1 then
     InnerW := 1;
-  FText.WrapWidth := InnerW;
-  ALines := FText.Measure(Default(TSize)).H;
+  if FMarkdown <> nil then
+  begin
+    Avail := Default(TSize);
+    Avail.W := InnerW;
+    ALines := FMarkdown.Measure(Avail).H;
+  end
+  else
+  begin
+    FText.WrapWidth := InnerW;
+    ALines := FText.Measure(Default(TSize)).H;
+  end;
   if (not EffectiveExpanded) and (ALines > CollapsedLines) then
     ATextRows := CollapsedLines
   else
@@ -454,6 +492,7 @@ end;
 procedure TChatItem.Arrange(const ABounds: TRect);
 var
   TextRows, Lines, InnerW: Integer;
+  BodyR: TRect;
 begin
   inherited Arrange(ABounds);
   if Boxed then
@@ -464,11 +503,15 @@ begin
     BodyRows(ABounds.W, TextRows, Lines);
     if TextRows > ABounds.H - 2 then
       TextRows := ABounds.H - 2;
-    FText.Arrange(Rc(ABounds.X + 2, ABounds.Y + 1, InnerW, TextRows));
+    BodyR := Rc(ABounds.X + 2, ABounds.Y + 1, InnerW, TextRows);
   end
   else
-    FText.Arrange(Rc(ABounds.X + Inset, ABounds.Y, ABounds.W - Inset,
-      ABounds.H));
+    BodyR := Rc(ABounds.X + Inset, ABounds.Y, ABounds.W - Inset,
+      ABounds.H);
+  if FMarkdown <> nil then
+    FMarkdown.Arrange(BodyR)
+  else
+    FText.Arrange(BodyR);
 end;
 
 procedure TChatItem.Render(const S: ISurface);
@@ -484,7 +527,12 @@ begin
     Exit;
 
   case FKind of
-    ckAssistant, ckError:
+    ckAssistant:
+      begin
+        FMarkdown.Render(S);
+        Exit;
+      end;
+    ckError:
       begin
         FText.Render(S);
         Exit;
