@@ -92,19 +92,22 @@ type
     Spans: array of TMdSpan;
   end;
 
-  { Block kinds and inline styles mapped to cell attributes. }
+  { Block kinds and inline styles mapped to cell attributes. Bold, Italic, and
+    Strike carry the emphasis colour; Code carries the chip foreground (its
+    background comes from CodeBackdrop). }
   TMdTheme = record
     Heading: array[1..6] of TAttr;
     Paragraph: TAttr;
     ListBullet: TAttr;
     Quote: TAttr;
-    Code: TAttr;         { fenced and inline code foreground }
-    CodeBackdrop: TAttr; { fenced code block background }
+    Code: TAttr;         { inline code foreground; the chip bg is CodeBackdrop }
+    CodeBackdrop: TAttr; { fenced code surface, and the inline code chip }
     Link: TAttr;
     Rule: TAttr;
-    Bold: TAttr;         { attribute deltas applied on top of the base }
+    Bold: TAttr;
     Italic: TAttr;
     Strike: TAttr;
+    Muted: TAttr;        { code fence language, and other quiet chrome }
   end;
 
   { The parser. Create once; Reset before a new document. }
@@ -157,9 +160,15 @@ type
   (`TUI_Core_v1.SPEC.md`).
 - `TMdBlock.Kind` and `Level` follow the semantics in the type comment; code
   blocks never carry inline styles (their `Spans` have empty `Styles`).
-- `DefaultMdTheme` sets every heading to the brightest white (231) and bold, and
-  the body a step dimmer (250), so the brightest white is reserved for headings.
-  H1-H3 also carry an underline (drawn by the view).
+- `DefaultMdTheme` carries emphasis in colour so it survives a terminal that
+  ignores italic or maps bold to the bright colour: bold is gold (222), italic
+  cyan (116), and bold+italic takes the cool (italic) colour in bold. Headings
+  use the bold gold. Inline code is violet (140) on the sunken surface (233),
+  the same chip the fenced block uses; the tan (180) is the list marker.
+- `StyleFor` resolves a span: code and link replace the colour (code also
+  carries the chip background), italic and bold carry theirs, and bold+italic
+  takes the italic colour. The view's `Combine` uses the block base only for an
+  unstyled run, so a styled run never inherits a heading's weight.
 - `TMdSpan.Text` is the literal text with markup tokens removed. Whitespace
   inside a paragraph is preserved as a single space on output.
 - `Blocks` returns blocks in document order. `mbBlank` is only emitted when it

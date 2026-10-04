@@ -7,7 +7,7 @@
 `hildegard.helper.tui.markdownview` draws a `TMdBlockArray` (from
 `hildegard.helper.markdown`) as a vertical stack of styled text. It is the
 render half of the markdown work: the parser produces the AST, this widget maps
-it to `TTextBlock`s and block chrome (bullets, quote bars, a code backdrop, a
+it to `TTextBlock`s and block chrome (bullets, quote bars, a boxed code block, a
 rule line).
 
 It exists as a widget, not a helper that flattens to spans, because of
@@ -24,16 +24,19 @@ delta and reintroduce the O(n) per-chunk cost the parser was built to avoid.
       `AppendSource` feeds a streaming chunk, `FinishSource` ends the stream.
 - [ ] Render a paragraph, heading (levels 1-6), list item (bullet and ordered),
       blockquote, fenced code, and rule, with the theme's attributes.
-- [ ] Inline styles (bold, italic, code, strike, link) apply on top of the
-      block's base attribute.
+- [ ] Inline styles (bold, italic, code, strike, link) carry their own colour
+      from the theme; an unstyled run takes the block's base attribute. Inline
+      code is padded with one space each side so its chip stands out.
 - [ ] A list item is prefixed with a bullet; an ordered item with its marker
-      number. A quote is prefixed with a bar. A rule is a full-width line.
-- [ ] Headings are bold and the brightest white. H1, H2, and H3 draw an underline
-      beneath the heading text (━ heavy, ═ double, ─ light) in the dim rule
-      colour; H4-H6 have no underline. The underline matches the heading text
-      width, capped at the block width.
-- [ ] A fenced code block's rows carry the code backdrop background across the
-      full width, and its content is not inline-parsed.
+      number, both in the theme's list colour. A quote is prefixed with a bar. A
+      rule is a full-width line.
+- [ ] Headings are the bold gold. H1, H2, and H3 draw an underline beneath the
+      heading text (━ heavy, ═ double, ─ light) in the dim rule colour; H4-H6
+      have no underline. The underline matches the heading text width, capped at
+      the block width.
+- [ ] A fenced code block is a rounded thin box, full width, on the sunken
+      surface, with the language right-aligned on the top border and the code
+      text inset by the border; its content is not inline-parsed.
 - [ ] One blank row separates blocks, except between consecutive list items
       (a tight list).
 - [ ] **Incremental:** a finalised block's child text block is created once and
@@ -114,8 +117,8 @@ The gap: the per-block mapping (spans + chrome) and the vertical stack.
 3. `Measure` sets each child's `WrapWidth` to the available width and sums the
    heights plus the inter-block gaps.
 4. `Arrange` stacks the children top to bottom.
-5. `Render` fills a code block's rows with the backdrop and draws each child;
-   rules are drawn as a full-width line.
+5. `Render` fills a code block's box with the backdrop, draws its border and
+   language, and draws each child; rules are drawn as a full-width line.
 
 ### Integration Patterns
 
@@ -149,7 +152,8 @@ The gap: the per-block mapping (spans + chrome) and the vertical stack.
 - [ ] `TestOrderedPrefix`
 - [ ] `TestQuoteBar`
 - [ ] `TestRuleIsFullWidth`
-- [ ] `TestCodeBackdropFillsTheRow`
+- [ ] `TestCodeFenceIsBoxed`
+- [ ] `TestInlineCodeIsAPaddedChip`
 - [ ] `TestBlocksAreSeparatedByABlankRow`
 - [ ] `TestTightListHasNoGap`
 - [ ] `TestEmptySourceMeasuresZero`
