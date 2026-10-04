@@ -9,7 +9,7 @@ interface
 
 uses
   Classes, SysUtils, ctypes, fpcunit, testregistry,
-  sslsockets, ssockets, fphttpclient, hildegard.helper.tls;
+  sslsockets, ssockets, fphttpclient, hildegard.helper.tls, hildegard.helper.llm;
 
 type
   TTlsTest = class(TTestCase)
@@ -26,6 +26,7 @@ type
     procedure TestEmbeddedBundleIsPresent;
     procedure TestBundleOverrideResolves;
     procedure TestUnreadableOverrideIsConfigError;
+    procedure TestUnreadableOverrideFailsAsConfig;
     procedure TestLoopbackHandshake;
     procedure TestLoopbackRejectsUnknownCa;
     procedure TestLoopbackRejectsWrongHost;
@@ -157,6 +158,39 @@ begin
   try
     AssertFalse('unreadable override is rejected', ValidateTLSConfig(Err));
     AssertTrue('a distinct message is returned', Err <> '');
+  finally
+    ClearEnvVar(CAVar);
+  end;
+end;
+
+procedure TTlsTest.TestUnreadableOverrideFailsAsConfig;
+var
+  Config: TLLMConfig;
+  Client: TLLMClient;
+  Req: TChatRequest;
+  Res: TChatResult;
+  Err: TLLMError;
+  Msg: TChatMessage;
+begin
+  SetEnvVar(CAVar, '/no/such/hildegard/ca.pem');
+  try
+    Config := Default(TLLMConfig);
+    Config.Model := 'a-model';
+    Config.ApiKey := 'a-key';
+    Client := TLLMClient.Create(Config, nil);
+    try
+      Msg := Default(TChatMessage);
+      Msg.Role := crUser;
+      Msg.Content := 'hello';
+      SetLength(Req.Messages, 1);
+      Req.Messages[0] := Msg;
+      { The CA check happens before any transport call, so no network is used. }
+      AssertFalse('the turn fails', Client.Complete(Req, nil, Res, Err));
+      AssertEquals('reported as a config error', Ord(leConfig), Ord(Err.Code));
+      AssertTrue('with the CA detail', Pos('CA bundle', Err.Detail) > 0);
+    finally
+      Client.Free;
+    end;
   finally
     ClearEnvVar(CAVar);
   end;

@@ -780,6 +780,7 @@ var
   Parser: TSSEParser;
   Status: Integer;
   TransportError: string;
+  TLSError: string;
   SinkOk, Cancelled: Boolean;
 begin
   AResult := Default(TChatResult);
@@ -792,6 +793,13 @@ begin
   if (FConfig.Model = '') or (FConfig.ApiKey = '') then
   begin
     AError := ErrLLM(leConfig, 'model and API key are required', '');
+    Exit(False);
+  end;
+  { A missing or unreadable CA bundle is a configuration error, reported before
+    any network I/O. }
+  if not ValidateTLSConfig(TLSError) then
+  begin
+    AError := ErrLLM(leConfig, 'TLS configuration error', TLSError);
     Exit(False);
   end;
 
