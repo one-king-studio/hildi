@@ -73,12 +73,15 @@ before wiring the handler.
 
 ### Phase 6: Field verification and docs
 
-- [ ] **Run** `make check` (functional + leak gate)
-- [ ] **Verify** the release binary completes a streamed HTTPS turn with
-      OpenSSL absent (clean container or `DYLD_*` isolation)
-- [ ] **Verify** `strings`/`nm` show no `libssl`/`libcrypto`/`opensslsockets`
-- [ ] **Record** the release binary size delta
-- [ ] **Update** `HANDOFF.md`, `docs/features/FEATURES.md`, and rename this TODO
+- [x] **Run** `make check` (functional + leak gate) — 706 tests, leak-clean
+- [x] **Verify** the release binary completes a streamed HTTPS turn: a live
+      Fireworks turn returned the expected reply, and `DYLD_PRINT_LIBRARIES`
+      showed no `libssl`/`libcrypto` loaded during it
+- [x] **Verify** `strings`/`nm` show no `libssl`/`libcrypto`/`opensslsockets`
+      reference in the release binary (the mbedTLS stack is linked statically)
+- [x] **Record** the release binary size delta: 2,347,632 -> 2,995,616 bytes
+      (+648 KB: the mbedTLS archives plus the ~189 KB embedded CA bundle)
+- [x] **Update** `HANDOFF.md` and `docs/features/FEATURES.md`; rename this TODO
       to `TLS_Foundation_v1.DONE.md`
 
 ## Dependencies & Ordering
