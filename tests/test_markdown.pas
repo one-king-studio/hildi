@@ -51,6 +51,11 @@ type
     procedure TestIncrementalAppendMatchesFullParse;
     procedure TestAppendAfterReset;
     procedure TestStyledSpansFeedTextBlock;
+    procedure TestTripleEmphasisIsBoldItalic;
+    procedure TestTripleEmphasisDoesNotCorruptFollowingText;
+    procedure TestNestedEmphasis;
+    procedure TestStrayAsterisksAreLiteral;
+    procedure TestEmphasisNestingIsBounded;
   end;
 
 implementation
@@ -408,6 +413,60 @@ begin
   finally
     Blk.Free;
   end;
+end;
+
+procedure TMarkdownTest.TestTripleEmphasisIsBoldItalic;
+begin
+  FBlocks := Parse('***both***');
+  AssertEquals('one span', 1, Length(FBlocks[0].Spans));
+  AssertEquals('text preserved', 'both', string(FBlocks[0].Spans[0].Text));
+  AssertTrue('bold', misBold in FBlocks[0].Spans[0].Styles);
+  AssertTrue('italic', misItalic in FBlocks[0].Spans[0].Styles);
+end;
+
+procedure TMarkdownTest.TestTripleEmphasisDoesNotCorruptFollowingText;
+begin
+  FBlocks := Parse('***both*** and *x*');
+  AssertEquals('three spans', 3, Length(FBlocks[0].Spans));
+  AssertEquals('middle text', ' and ', string(FBlocks[0].Spans[1].Text));
+  AssertTrue('middle is plain', FBlocks[0].Spans[1].Styles = []);
+  AssertTrue('last is italic', misItalic in FBlocks[0].Spans[2].Styles);
+end;
+
+procedure TMarkdownTest.TestNestedEmphasis;
+begin
+  FBlocks := Parse('**bold and *italic* mixed**');
+  AssertEquals('three spans', 3, Length(FBlocks[0].Spans));
+  AssertTrue('first is bold', FBlocks[0].Spans[0].Styles = [misBold]);
+  AssertTrue('middle is bold and italic',
+    FBlocks[0].Spans[1].Styles = [misBold, misItalic]);
+  AssertEquals('middle text', 'italic', string(FBlocks[0].Spans[1].Text));
+  AssertTrue('last is bold', FBlocks[0].Spans[2].Styles = [misBold]);
+end;
+
+procedure TMarkdownTest.TestStrayAsterisksAreLiteral;
+begin
+  FBlocks := Parse('a * b');
+  AssertEquals('a lone asterisk is literal', 'a * b', JoinedText(0));
+  { Note: a bare '***' is a thematic break, not emphasis. }
+  FBlocks := Parse('a *** b');
+  AssertEquals('unpaired stars are literal', 'a *** b', JoinedText(0));
+end;
+
+procedure TMarkdownTest.TestEmphasisNestingIsBounded;
+var
+  S: string;
+  I: Integer;
+begin
+  { Deeply nested delimiters must not blow the stack, and must keep the text. }
+  S := '';
+  for I := 1 to 40 do
+    S := S + '**';
+  S := S + 'x';
+  for I := 1 to 40 do
+    S := S + '**';
+  FBlocks := Parse(S);
+  AssertTrue('the text survives', Pos('x', JoinedText(0)) > 0);
 end;
 
 initialization

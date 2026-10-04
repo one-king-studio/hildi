@@ -391,6 +391,11 @@ end;
 
 { --- inline scanner ------------------------------------------------------ }
 
+const
+  { Recursion cap for nested emphasis, so untrusted input cannot blow the stack;
+    beyond it, markup is emitted literally. }
+  MaxInlineDepth = 16;
+
 function IsWordChar(const Ch: UnicodeString): Boolean;
 begin
   if Ch = '' then
@@ -421,8 +426,10 @@ begin
   Result := 0;
 end;
 
-{ Scan inline markup into styled spans. Unmatched delimiters are literal. }
-function InlineSpans(const AText: UnicodeString): TMdSpanArray;
+{ Scan inline markup into styled spans. Unmatched delimiters are literal. A
+  paired run is re-scanned so emphasis nests; the outer style is ORed into each
+  inner span. }
+function ScanInline(const AText: UnicodeString; ADepth: Integer): TMdSpanArray;
 var
   I, ClosePos, UrlStart, UrlEnd, N: Integer;
   Plain: UnicodeString;
@@ -453,11 +460,29 @@ var
     Inc(N);
   end;
 
-  { Match a paired delimiter at I; on success emit the enclosed run. }
+  { Append already-scanned spans, adding AExtra to each one's styles. }
+  procedure AppendStyled(const AInner: TMdSpanArray;
+    AExtra: TMdInlineStyles);
+  var
+    K: Integer;
+  begin
+    for K := 0 to High(AInner) do
+    begin
+      Span := AInner[K];
+      Span.Styles := Span.Styles + AExtra;
+      SetLength(Result, N + 1);
+      Result[N] := Span;
+      Inc(N);
+    end;
+  end;
+
+  { Match a paired delimiter at I; on success emit the enclosed run, re-scanned
+    so nested emphasis works and the outer style is added to each inner span. }
   function Paired(const ADelim: UnicodeString;
     AStyles: TMdInlineStyles): Boolean;
   var
     Closing: Integer;
+    Inner: TMdSpanArray;
   begin
     Result := False;
     if Copy(AText, I, Length(ADelim)) <> ADelim then
@@ -468,8 +493,16 @@ var
     Closing := FindStr(AText, ADelim, I + Length(ADelim));
     if Closing = 0 then
       Exit;
-    Emit(Copy(AText, I + Length(ADelim),
-      Closing - I - Length(ADelim)), AStyles, '');
+    FlushPlain;
+    if ADepth >= MaxInlineDepth then
+      Emit(Copy(AText, I + Length(ADelim), Closing - I - Length(ADelim)),
+        AStyles, '')
+    else
+    begin
+      Inner := ScanInline(Copy(AText, I + Length(ADelim),
+        Closing - I - Length(ADelim)), ADepth + 1);
+      AppendStyled(Inner, AStyles);
+    end;
     I := Closing + Length(ADelim);
     Result := True;
   end;
@@ -501,6 +534,24 @@ begin
         Continue;
       end;
       Plain := Plain + AText[I];
+      Inc(I);
+      Continue;
+    end;
+
+    { ***bold italic*** / ___bold italic___: tried before ** and * }
+    if Copy(AText, I, 3) = '***' then
+    begin
+      if Paired('***', [misBold, misItalic]) then
+        Continue;
+      Plain := Plain + '*';
+      Inc(I);
+      Continue;
+    end;
+    if Copy(AText, I, 3) = '___' then
+    begin
+      if Paired('___', [misBold, misItalic]) then
+        Continue;
+      Plain := Plain + '_';
       Inc(I);
       Continue;
     end;
@@ -564,6 +615,11 @@ begin
     Inc(I);
   end;
   FlushPlain;
+end;
+
+function InlineSpans(const AText: UnicodeString): TMdSpanArray;
+begin
+  Result := ScanInline(AText, 0);
 end;
 
 { --- theme --------------------------------------------------------------- }
