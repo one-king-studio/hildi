@@ -33,6 +33,13 @@ type
     procedure TestStreamingTailIsPlainText;
     procedure TestFinalisedBlocksAreNotRebuilt;
     procedure TestFinishPromotesTheTail;
+    procedure TestHeadingsAreBrightAndBold;
+    procedure TestH1Underline;
+    procedure TestH2Underline;
+    procedure TestH3Underline;
+    procedure TestH4HasNoUnderline;
+    procedure TestUnderlineMatchesTextWidth;
+    procedure TestBodyIsDimmerThanHeadings;
   end;
 
 implementation
@@ -290,6 +297,111 @@ begin
   finally
     View.Free;
   end;
+end;
+
+procedure TMarkdownViewTest.TestHeadingsAreBrightAndBold;
+var
+  S: TSurfaceMemory;
+  Theme: TMdTheme;
+begin
+  Theme := DefaultMdTheme;
+  S := RenderSource('# Title', 20, 3);
+  try
+    AssertTrue('bold', sfBold in S.CellAt(0, 0).Attr.Style);
+    AssertEquals('bright', Theme.Heading[1].Fg, S.CellAt(0, 0).Attr.Fg);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TMarkdownViewTest.TestH1Underline;
+var
+  S: TSurfaceMemory;
+  Theme: TMdTheme;
+begin
+  Theme := DefaultMdTheme;
+  S := RenderSource('# Title', 20, 3);
+  try
+    AssertTrue('heavy underline drawn', S.CellAt(0, 1).Ch = '━');
+    AssertEquals('the underline is the dim colour', Theme.Rule.Fg,
+      S.CellAt(0, 1).Attr.Fg);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TMarkdownViewTest.TestH2Underline;
+var
+  S: TSurfaceMemory;
+begin
+  S := RenderSource('## Title', 20, 3);
+  try
+    AssertTrue('double underline drawn', S.CellAt(0, 1).Ch = '═');
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TMarkdownViewTest.TestH3Underline;
+var
+  S: TSurfaceMemory;
+begin
+  S := RenderSource('### Title', 20, 3);
+  try
+    AssertTrue('light underline drawn', S.CellAt(0, 1).Ch = '─');
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TMarkdownViewTest.TestH4HasNoUnderline;
+var
+  S: TSurfaceMemory;
+  View: TMarkdownView;
+  Avail: TSize;
+begin
+  S := RenderSource('#### Title', 20, 3);
+  try
+    AssertTrue('no heavy', S.CellAt(0, 1).Ch <> '━');
+    AssertTrue('no double', S.CellAt(0, 1).Ch <> '═');
+    AssertTrue('no light', S.CellAt(0, 1).Ch <> '─');
+  finally
+    S.Free;
+  end;
+  View := TMarkdownView.Create;
+  try
+    View.SetSource('#### Title');
+    Avail := Default(TSize);
+    Avail.W := 20;
+    AssertEquals('H4 is a single row', 1, View.Measure(Avail).H);
+  finally
+    View.Free;
+  end;
+end;
+
+procedure TMarkdownViewTest.TestUnderlineMatchesTextWidth;
+var
+  S: TSurfaceMemory;
+begin
+  { 'Title' is five columns, so the underline covers 0..4 and stops. }
+  S := RenderSource('# Title', 20, 3);
+  try
+    AssertTrue('starts under the text', S.CellAt(0, 1).Ch = '━');
+    AssertTrue('ends under the text', S.CellAt(4, 1).Ch = '━');
+    AssertTrue('stops at the text', S.CellAt(5, 1).Ch <> '━');
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TMarkdownViewTest.TestBodyIsDimmerThanHeadings;
+var
+  Theme: TMdTheme;
+begin
+  Theme := DefaultMdTheme;
+  { 231 is #ffffff; 250 is a dimmer grey in the 256-colour ramp. }
+  AssertEquals('headings are the brightest white', 231, Theme.Heading[1].Fg);
+  AssertEquals('the body is a dimmer grey', 250, Theme.Paragraph.Fg);
 end;
 
 initialization

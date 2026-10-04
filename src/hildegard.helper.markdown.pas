@@ -634,14 +634,16 @@ end;
 function DefaultMdTheme: TMdTheme;
 begin
   Result := Default(TMdTheme);
-  Result.Heading[1] := MdAttr(81, [sfBold]);
-  Result.Heading[2] := MdAttr(75, [sfBold]);
-  Result.Heading[3] := MdAttr(74, [sfBold]);
-  Result.Heading[4] := MdAttr(80, [sfBold]);
-  Result.Heading[5] := MdAttr(79, [sfBold]);
-  Result.Heading[6] := MdAttr(78, [sfBold]);
-  Result.Paragraph := MdAttr(252, []);
-  Result.ListBullet := MdAttr(252, []);
+  { Headings are the brightest white and bold; the body is a step dimmer so the
+    brightness is reserved for headings. }
+  Result.Heading[1] := MdAttr(231, [sfBold]);
+  Result.Heading[2] := MdAttr(231, [sfBold]);
+  Result.Heading[3] := MdAttr(231, [sfBold]);
+  Result.Heading[4] := MdAttr(231, [sfBold]);
+  Result.Heading[5] := MdAttr(231, [sfBold]);
+  Result.Heading[6] := MdAttr(231, [sfBold]);
+  Result.Paragraph := MdAttr(250, []);
+  Result.ListBullet := MdAttr(245, []);
   Result.Quote := MdAttr(245, [sfDim]);
   Result.Code := MdAttr(180, []);
   Result.CodeBackdrop := MdAttr(252, []);

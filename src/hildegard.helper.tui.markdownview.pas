@@ -13,10 +13,17 @@ interface
 uses
   hildegard.helper.markdown,
   hildegard.helper.tui.base, hildegard.helper.tui.widget,
-  hildegard.helper.tui.text, hildegard.helper.tui.surface;
+  hildegard.helper.tui.text, hildegard.helper.tui.surface,
+  hildegard.helper.tui.grapheme;
 
 type
   TSpanList = array of TSpan;
+
+  { A heading underline drawn beneath the heading text. }
+  TBlockRule = record
+    Glyph: UnicodeString;   { '' when the block has no underline }
+    Width: Integer;         { preferred width (the heading text width) }
+  end;
 
   TMarkdownView = class(TWidget)
   private
@@ -24,6 +31,7 @@ type
     FTheme: TMdTheme;
     FBlocks: array of TTextBlock;   { one per finalised block; a rule is a dummy }
     FKinds: array of TMdBlockKind;
+    FRules: array of TBlockRule;
     FTail: TTextBlock;              { the open tail, or nil }
     FTailText: UnicodeString;
     function GetBlockCount: Integer;
@@ -92,6 +100,34 @@ begin
     Result := ABlock.Spans[0].Text
   else
     Result := '';
+end;
+
+{ The underline glyph for a heading level, or '' when it has none. H1-H3 are
+  underlined; H4-H6 are just bold and bright. }
+function HeadingRuleGlyph(ALevel: Integer): UnicodeString;
+begin
+  case ALevel of
+    1:
+      Result := '━';
+    2:
+      Result := '═';
+    3:
+      Result := '─';
+  else
+    Result := '';
+  end;
+end;
+
+{ The display width of a block's text, used to size a heading underline. }
+function SpansWidth(const ASpans: TMdSpanArray): Integer;
+var
+  I: Integer;
+  T: UnicodeString;
+begin
+  T := '';
+  for I := 0 to High(ASpans) do
+    T := T + ASpans[I].Text;
+  Result := StringWidth(T);
 end;
 
 function PrependSpan(const ASpans: TSpanList; const AText: UnicodeString;
@@ -232,6 +268,7 @@ begin
     FBlocks[I].Free;
   FBlocks := nil;
   FKinds := nil;
+  FRules := nil;
   if FTail <> nil then
     FTail.Free;
   FTail := nil;
@@ -253,8 +290,15 @@ begin
     B := FParser.FinalizedBlock(I);
     SetLength(FBlocks, I + 1);
     SetLength(FKinds, I + 1);
+    SetLength(FRules, I + 1);
     FKinds[I] := B.Kind;
     FBlocks[I] := MakeBlock(B);
+    FRules[I] := Default(TBlockRule);
+    if B.Kind = mbHeading then
+    begin
+      FRules[I].Glyph := HeadingRuleGlyph(B.Level);
+      FRules[I].Width := SpansWidth(B.Spans);
+    end;
   end;
 
   { The open tail is one reused text block, redrawn as it grows. }
@@ -321,6 +365,8 @@ begin
       Inc(H, GapBetween(I - 1, I));
     FBlocks[I].WrapWidth := AAvail.W;
     Inc(H, FBlocks[I].Measure(Default(TSize)).H);
+    if FRules[I].Glyph <> '' then
+      Inc(H, 1);   { the heading underline row }
   end;
   if (FTail <> nil) and (FTailText <> '') then
   begin
@@ -346,6 +392,8 @@ begin
     RowH := FBlocks[I].Measure(Default(TSize)).H;
     FBlocks[I].Arrange(Rc(ABounds.X, Y, ABounds.W, RowH));
     Inc(Y, RowH);
+    if FRules[I].Glyph <> '' then
+      Inc(Y, 1);   { the heading underline row }
   end;
   if (FTail <> nil) and (FTailText <> '') then
   begin
@@ -359,7 +407,7 @@ end;
 
 procedure TMarkdownView.Render(const S: ISurface);
 var
-  I: Integer;
+  I, RuleW: Integer;
 begin
   if (FBounds.W < 1) or (FBounds.H < 1) then
     Exit;
@@ -373,6 +421,15 @@ begin
       if FKinds[I] = mbCodeFence then
         S.FillRect(FBlocks[I].Bounds, FTheme.CodeBackdrop);
       FBlocks[I].Render(S);
+      if FRules[I].Glyph <> '' then
+      begin
+        RuleW := FRules[I].Width;
+        if (RuleW < 1) or (RuleW > FBlocks[I].Bounds.W) then
+          RuleW := FBlocks[I].Bounds.W;
+        PutText(S, FBlocks[I].Bounds.X,
+          FBlocks[I].Bounds.Y + FBlocks[I].Bounds.H,
+          RepeatChar(FRules[I].Glyph, RuleW), FTheme.Rule);
+      end;
     end;
   if (FTail <> nil) and (FTailText <> '') then
     FTail.Render(S);
