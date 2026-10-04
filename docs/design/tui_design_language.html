@@ -339,6 +339,7 @@ done         [██████████] 100%</pre>
     <tr><td>list bullet / marker</td><td><code>- text</code></td><td>180 · #d7af87</td><td>—</td><td class="md-bullet">• 1.</td></tr>
     <tr><td>thematic break</td><td><code>---</code></td><td>240 · #585858</td><td>—</td><td class="md-bar">──────────</td></tr>
     <tr><td>fenced code</td><td><code>```lang</code></td><td>box: border 240 · #585858 on 233 · #121212</td><td>full width, rounded</td><td class="md-fence">code line</td></tr>
+    <tr><td>table</td><td><code>| a | b |</code></td><td>border 240 · #585858; header 222 · #ffd787; body 250 · #bcbcbc</td><td>content width, wraps</td><td><span class="md-fborder">╭─┬─╮</span></td></tr>
   </table>
 
   <h3>Emphasis palette</h3>
@@ -397,6 +398,240 @@ a marker hue, no longer on code</pre>
     </div>
   </div>
   <p class="note">Headings use the bold gold with the H1–H3 underline, so a heading is not confused with bold body text.</p>
+
+  <h3>Tables</h3>
+  <p class="note">A GFM pipe table: a header row, a delimiter row that sets each column's alignment (<code>:---</code> left, <code>:---:</code> centre, <code>---:</code> right), then body rows — a thin <code>├─┼─┤</code> rule between every row, so the grid is closed. The table is <b>sized to its content</b> — it never stretches to fill the container — and only when the content is wider than the container are columns compressed and their cell text wrapped. Borders are the dim rule colour (<code>240</code>); the header is the bold gold; the body is the plain grey. Cells keep inline styling (bold, code, links).</p>
+  <pre class="mock md-demo" id="mock-table"></pre>
+  <script>
+  (function tableMock(){
+    const el = document.getElementById('mock-table');
+    if(!el) return;
+    const esc = t => t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const B = t => '<span class="md-fborder">'+esc(t)+'</span>';
+    const H = t => '<span class="md-head">'+esc(t)+'</span>';
+    const P = t => '<span class="md-plain">'+esc(t)+'</span>';
+    const D = t => '<span class="md-dim">'+esc(t)+'</span>';
+    const sum = a => a.reduce((x,y)=>x+y,0);
+
+    /* Wrap a cell to W columns: word wrap, breaking a word only when it alone
+       exceeds the column. */
+    function wrap(text, w){
+      const words = text.split(/\s+/).filter(x=>x.length);
+      const lines=[]; let cur='';
+      for(const word of words){
+        if(cur==='') cur=word;
+        else if(cur.length+1+word.length<=w) cur+=' '+word;
+        else { lines.push(cur); cur=word; }
+        while(cur.length>w){ lines.push(cur.slice(0,w)); cur=cur.slice(w); }
+      }
+      lines.push(cur);
+      return lines;
+    }
+    function pad(t,w,al){
+      const extra=Math.max(0,w-t.length);
+      if(al==='center'){ const l=Math.floor(extra/2); return ' '.repeat(l)+t+' '.repeat(extra-l); }
+      if(al==='right') return ' '.repeat(extra)+t;
+      return t+' '.repeat(extra);
+    }
+    /* The previous policy, kept only to show the before/after: give the slack to
+       the column with the most headroom, which starves a short-content column. */
+    function widthsForOld(head, rows, maxW){
+      const n=head.length, all=[head].concat(rows), nat=[], floor=[];
+      for(let c=0;c<n;c++){
+        let w=0, m=1;
+        for(const r of all){
+          const t=(r[c]||'');
+          if(t.length>w) w=t.length;
+          for(const word of t.split(/\s+/)) if(word.length>m) m=word.length;
+        }
+        nat[c]=Math.max(1,w); floor[c]=Math.min(nat[c],Math.max(1,m));
+      }
+      const budget=Math.max(n, maxW-(3*n+1));
+      if(sum(nat)<=budget) return nat.slice();
+      const w=floor.slice();
+      if(sum(w)<=budget){
+        let rem=budget-sum(w);
+        while(rem>0){
+          let best=-1,room=0;
+          for(let c=0;c<n;c++){ const d=nat[c]-w[c]; if(d>room){room=d;best=c;} }
+          if(best<0) break;
+          w[best]++; rem--;
+        }
+      } else {
+        let over=sum(w)-budget;
+        while(over>0){
+          let best=-1,mx=0;
+          for(let c=0;c<n;c++) if(w[c]>mx){mx=w[c];best=c;}
+          if(best<0||mx<=1) break;
+          w[best]--; over--;
+        }
+      }
+      return w;
+    }
+
+    /* The width policy: natural (widest cell) when it fits, else find the
+       smallest per-row line budget H for which every cell fits — each column
+       then takes exactly the width it needs for H lines. Leftover width goes to
+       the drops that shrink the tallest rows. */
+    function widthsFor(head, rows, maxW){
+      const n=head.length, all=[head].concat(rows), nat=[], floor=[];
+      for(let c=0;c<n;c++){
+        let w=0, m=1;
+        for(const r of all){
+          const t=(r[c]||'');
+          if(t.length>w) w=t.length;
+          for(const word of t.split(/\s+/)) if(word.length>m) m=word.length;
+        }
+        nat[c]=Math.max(1,w); floor[c]=Math.min(nat[c],Math.max(1,m));
+      }
+      const budget=Math.max(n, maxW-(3*n+1));
+      const lines=(t,w)=>wrap(t,w).length;
+      const colHeight=(c,w)=>{ let h=1;
+        for(const r of all) h=Math.max(h,lines(r[c]||'',w)); return h; };
+      const colMinWidth=(c,H)=>{ let w=1;
+        for(const r of all){ const t=r[c]||''; let res=nat[c];
+          if(lines(t,floor[c])<=H) res=floor[c];
+          else { let lo=floor[c]+1, hi=nat[c];
+            while(lo<=hi){ const m=(lo+hi)>>1; if(lines(t,m)<=H){res=m;hi=m-1;} else lo=m+1; } }
+          if(res>w) w=res; }
+        return w; };
+      const total=(widths)=>{ let t=0;
+        for(const r of all){ let rh=1; for(let c=0;c<n;c++) rh=Math.max(rh,lines(r[c]||'',widths[c])); t+=rh; }
+        return t; };
+      if(sum(nat)<=budget) return nat.slice();
+      const w=floor.slice();
+      if(sum(w)>budget){
+        let over=sum(w)-budget;
+        while(over>0){
+          let b=-1,mx=0;
+          for(let c=0;c<n;c++) if(w[c]>mx){mx=w[c];b=c;}
+          if(b<0||mx<=1) break;
+          w[b]--; over--;
+        }
+        return w;
+      }
+      /* the smallest feasible per-row line budget H */
+      let maxH=1;
+      for(let c=0;c<n;c++) maxH=Math.max(maxH, colHeight(c,floor[c]));
+      let lo=1,hi=maxH,feasible=false,H=maxH;
+      while(lo<=hi){
+        const mid=(lo+hi)>>1; let sw=0;
+        for(let c=0;c<n;c++) sw+=colMinWidth(c,mid);
+        if(sw<=budget){feasible=true;H=mid;hi=mid-1;} else lo=mid+1;
+      }
+      for(let c=0;c<n;c++) w[c]=feasible?colMinWidth(c,H):floor[c];
+      /* spend the leftover on the drops that shrink the tallest rows */
+      let used=sum(w);
+      while(used<budget){
+        let bestC=-1,bestW=-1,bestGain=0;
+        for(let c=0;c<n;c++){
+          if(w[c]>=nat[c]) continue;
+          const ch=colHeight(c,w[c]);
+          let w2=w[c]+1; while(w2<=nat[c] && colHeight(c,w2)>=ch) w2++;
+          if(w2>nat[c]) continue;
+          const cost=w2-w[c]; if(used+cost>budget) continue;
+          const ww=w.slice(); ww[c]=w2;
+          const gain=total(w)-total(ww);
+          if(gain>bestGain || (gain===bestGain && gain>0)){ bestGain=gain; bestC=c; bestW=w2; }
+        }
+        if(bestC<0||bestGain<=0) break;
+        used+=bestW-w[bestC]; w[bestC]=bestW;
+      }
+      while(used<budget){
+        let b=-1,room=0;
+        for(let c=0;c<n;c++){ const d=nat[c]-w[c]; if(d>room){room=d;b=c;} }
+        if(b<0||room<=0) break;
+        w[b]++; used++;
+      }
+      return w;
+    }
+    function renderTable(head, rows, aligns, maxW, fixedW){
+      const n=head.length, w=fixedW||widthsFor(head,rows,maxW), out=[];
+      const bar=(l,m,r)=>B(l+w.map(x=>'─'.repeat(x+2)).join(m)+r);
+      out.push(bar('╭','┬','╮'));
+      const row=(cells,isHead)=>{
+        const wr=cells.map((t,c)=>wrap(t,w[c]));
+        let h=1;
+        for(const x of wr) if(x.length>h) h=x.length;
+        for(let i=0;i<h;i++){
+          let line=B('│');
+          for(let c=0;c<n;c++){
+            const t=wr[c][i]||'';
+            line += B(' ') + (isHead?H(pad(t,w[c],aligns[c])):P(pad(t,w[c],aligns[c]))) + B(' │');
+          }
+          out.push(line);
+        }
+      };
+      const all=[head].concat(rows);
+      for(let i=0;i<all.length;i++){
+        if(i>0) out.push(bar('├','┼','┤'));
+        row(all[i], i===0);
+      }
+      out.push(bar('╰','┴','╯'));
+      return out;
+    }
+
+    const parts=[];
+    parts.push(D('A table narrower than the container — sized to its content:'));
+    parts.push('');
+    parts.push.apply(parts, renderTable(
+      ['Language','Paradigm','Count'],
+      [['Pascal','imperative','1'],
+       ['Haskell','functional','22'],
+       ['Rust','systems','333']],
+      ['left','left','right'], 60));
+    parts.push('');
+    parts.push(D('The same container, with content wider than it — columns are compressed and wrap:'));
+    parts.push('');
+    parts.push.apply(parts, renderTable(
+      ['Tool','What it does','Approval'],
+      [['read_file','Read a file from the workspace, bounded by the output budget','yes'],
+       ['grep','Search file contents for a pattern, with a bounded result','no'],
+       ['run_command','Run a shell command in the workspace','yes']],
+      ['left','left','center'], 60));
+    const wideHead=['#','Notes','Detail'];
+    const wideRows=[['1','alpha beta gamma delta epsilon zeta',
+      'a long detail string here that spans many words and needs a lot of room to lay out']];
+    parts.push('');
+    parts.push(D('The old policy keeps the slack in the widest column, so Notes wraps to six lines:'));
+    parts.push('');
+    parts.push.apply(parts, renderTable(wideHead, wideRows, ['left','left','left'],
+      60, widthsForOld(wideHead, wideRows, 60)));
+    parts.push('');
+    parts.push(D('The height-minimising search shares the slack, so the same row is three lines, not six:'));
+    parts.push('');
+    parts.push.apply(parts, renderTable(wideHead, wideRows, ['left','left','left'], 60));
+    el.innerHTML = parts.join('\n');
+  })();
+  </script>
+
+  <div class="grid cols-2">
+    <div class="card"><h4>Width policy <span class="tag">least height</span></h4>
+      <pre class="mock">natural = widest cell in each column
+chrome  = 3n + 1  (border + a space each side)
+
+if sum(natural) <= avail:
+    use natural          → narrower than the container
+else:
+    H = smallest per-row line budget where
+        every cell fits the width
+        (a column takes the smallest width
+         that fits all its cells in H lines)
+    spend any leftover on the line drops that
+        shrink the tallest rows
+    if the word floors overflow:
+        squeeze the widest columns, break words;
+        a table narrower than its borders is clipped</pre>
+    </div>
+    <div class="card"><h4>Alignment</h4>
+      <pre class="mock">| Item | Qty | Price |
+| :--- | :-: | ----: |
+  left   centre   right
+
+| :--- | left      | ----: | right
+| :---: | centre   | ---   | default (left)</pre>
+    </div>
+  </div>
 </section>
 
 <section id="components">
@@ -407,6 +642,7 @@ a marker hue, no longer on code</pre>
     <tr><td><code>TTextBlock</code></td><td>implemented</td><td>styled spans; clip by default</td></tr>
     <tr><td><code>TMarkdownParser</code></td><td>implemented</td><td>markdown subset → styled blocks; inert streaming tail</td></tr>
     <tr><td><code>TMarkdownView</code></td><td>implemented</td><td>blocks → styled text; bullets, quote bar, code backdrop, H1–H3 underlines</td></tr>
+    <tr><td><code>TTableBlock</code></td><td>implemented</td><td>markdown tables; content width, wraps columns</td></tr>
     <tr><td><code>TScrollContainer</code></td><td>implemented</td><td>clip + wheel/drag scrollbar</td></tr>
     <tr><td><code>TPromptLine</code></td><td>implemented</td><td>single-line editor, history</td></tr>
     <tr><td><code>TConversationView</code></td><td>implemented</td><td>sticky-to-bottom transcript</td></tr>
