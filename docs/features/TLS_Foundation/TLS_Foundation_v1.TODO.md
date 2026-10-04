@@ -15,24 +15,23 @@ before wiring the handler.
 
 ### Phase 1: Vendor mbedTLS (build plumbing)
 
-- [ ] **Write** `scripts/fetch-mbedtls.sh` (pinned 3.6.x version, SHA-256
-      verify, extract into `deps/mbedtls/`; idempotent, like
-      `fetch-sqlite.sh`)
-- [ ] **Add** Makefile targets to build `libmbedtls.a`/`libmbedx509.a`/
+- [x] **Write** `scripts/fetch-mbedtls.sh` (pinned 3.6.7, SHA-256 verify, extract
+      into `deps/mbedtls/`; idempotent, like `fetch-sqlite.sh`)
+- [x] **Add** Makefile targets to build `libmbedtls.a`/`libmbedx509.a`/
       `libmbedcrypto.a` under `build/libstatic/`
-- [ ] **Verify**: a trivial C program links against the archives and calls
-      `mbedtls_version_get_string`
-- [ ] **Update** `.gitignore` for the fetched source
+- [x] **Verify**: a trivial C program links against the archives and calls
+      `mbedtls_version_get_string` (the Phase 2 spike links them for real)
+- [x] **Update** `.gitignore` for the fetched source
 
 ### Phase 2: The C shim (spike: real handshake)
 
-- [ ] **Write** `src/hildegard_tls_shim.h` / `.c`: opaque handle, `new`/`free`,
+- [x] **Write** `src/hildegard_tls_shim.h` / `.c`: opaque handle, `new`/`free`,
       `set_ca_mem`/`set_ca_file`, `connect`, `read`, `write`, `pending`,
       `close`, `last_error`, `live_count`; all contexts allocated and freed in
       one place
 - [ ] **Write** `tests/tls_test_server.c` / `.h` (test-only mbedTLS server) and
       a self-signed `localhost` fixture under `tests/fixtures/tls/`
-- [ ] **Spike**: a throwaway C program completes a client↔server handshake and
+- [x] **Spike**: a throwaway C program completes a client↔server handshake and
       round-trips bytes over loopback (proves the build + mbedTLS before Pascal
       is involved)
 

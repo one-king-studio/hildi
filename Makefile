@@ -20,7 +20,8 @@ LEAKUNITS:= $(BUILD)/units/leak
 # Vendored SQLite: the amalgamation is compiled into a STATIC archive and linked
 # into the binaries (no runtime .dylib/.so, no SQLDB). See scripts/fetch-sqlite.sh.
 SQLITE_DIR      := deps/sqlite3
-SQLITE_LIBDIR   := $(BUILD)/libstatic
+LIBSTATIC       := $(BUILD)/libstatic
+SQLITE_LIBDIR   := $(LIBSTATIC)
 SQLITE_AR       := $(SQLITE_LIBDIR)/libsqlite3.a
 UNAME_S         := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
@@ -32,6 +33,19 @@ endif
 SQLITE_LDFLAGS  := -k$(abspath $(SQLITE_AR))
 CC ?= cc
 AR ?= ar
+
+# Vendored mbedTLS: compiled into STATIC archives and linked into the binaries
+# that speak TLS, so no host OpenSSL is needed. See scripts/fetch-mbedtls.sh.
+MBEDTLS_DIR       := deps/mbedtls
+MBEDTLS_STAMP     := $(LIBSTATIC)/.mbedtls-built
+MBEDTLS_AR        := $(LIBSTATIC)/libmbedtls.a
+MBEDTLS_X509_AR   := $(LIBSTATIC)/libmbedx509.a
+MBEDTLS_CRYPTO_AR := $(LIBSTATIC)/libmbedcrypto.a
+TLS_SHIM_OBJ      := $(LIBSTATIC)/hildegard_tls_shim.o
+# Link order matters for static archives: shim, then TLS, X.509, crypto.
+TLS_LDFLAGS       := -k$(abspath $(TLS_SHIM_OBJ)) -k$(abspath $(MBEDTLS_AR)) \
+                     -k$(abspath $(MBEDTLS_X509_AR)) -k$(abspath $(MBEDTLS_CRYPTO_AR))
+TLS_CCFLAGS       := -O2 -fPIC -I$(MBEDTLS_DIR)/include -I$(SRC)
 
 # Language and strictness. -Sew turns warnings into hard errors.
 MODE      := -Mdelphi -Sh
@@ -62,7 +76,7 @@ endif
 LIB_SRCS  := $(wildcard $(SRC)/*.pas)
 TEST_SRCS := $(wildcard $(TESTS)/*.pas)
 
-.PHONY: all test test-leak watch check release clean help libsqlite \
+.PHONY: all test test-leak watch check release clean help libsqlite libmbedtls \
         store-demo agent-cli release-agent-cli tui-demo widgets-demo layout-demo \
         tui-agent bench perf
 
@@ -79,24 +93,38 @@ $(SQLITE_AR): $(SQLITE_DIR)/sqlite3.c
 $(SQLITE_DIR)/sqlite3.c:
 	@scripts/fetch-sqlite.sh
 
+# Build the vendored mbedTLS archives and the Pascal TLS shim.
+libmbedtls: $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
+
+$(MBEDTLS_STAMP):
+	@scripts/fetch-mbedtls.sh
+	$(MAKE) -C $(MBEDTLS_DIR) -j4 lib
+	@mkdir -p $(LIBSTATIC)
+	cp $(MBEDTLS_DIR)/library/libmbedtls.a $(MBEDTLS_DIR)/library/libmbedx509.a $(MBEDTLS_DIR)/library/libmbedcrypto.a $(LIBSTATIC)/
+	@touch $@
+
+$(TLS_SHIM_OBJ): $(SRC)/hildegard_tls_shim.c $(SRC)/hildegard_tls_shim.h
+	@mkdir -p $(LIBSTATIC)
+	$(CC) $(TLS_CCFLAGS) -c -o $@ $(SRC)/hildegard_tls_shim.c
+
 store-demo: libsqlite $(BIN)/hildegard-helper-store-demo
 
 $(BIN)/hildegard-helper-store-demo: $(EXAMPLES)/store_demo.pas $(LIB_SRCS) $(SQLITE_AR)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
-agent-cli: libsqlite $(BIN)/hildegard-helper-agent-cli
+agent-cli: libsqlite libmbedtls $(BIN)/hildegard-helper-agent-cli
 
-$(BIN)/hildegard-helper-agent-cli: $(EXAMPLES)/agent_cli.pas $(LIB_SRCS) $(SQLITE_AR)
+$(BIN)/hildegard-helper-agent-cli: $(EXAMPLES)/agent_cli.pas $(LIB_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Optimized, self-contained production binary (static SQLite, no runtime libs).
-release-agent-cli: libsqlite $(BIN)/hildegard-helper-agent-cli-release
+release-agent-cli: libsqlite libmbedtls $(BIN)/hildegard-helper-agent-cli-release
 
-$(BIN)/hildegard-helper-agent-cli-release: $(EXAMPLES)/agent_cli.pas $(LIB_SRCS) $(SQLITE_AR)
+$(BIN)/hildegard-helper-agent-cli-release: $(EXAMPLES)/agent_cli.pas $(LIB_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(BIN) $(RELUNITS)
-	$(FPC) $(RELEASE) $(SQLITE_LDFLAGS) -Fu$(SRC) -FU$(RELUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(RELEASE) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -FU$(RELUNITS) -FE$(BIN) -o$@ $<
 
 $(BIN)/hildegard-helper-demo: $(EXAMPLES)/demo_harness.pas $(LIB_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
@@ -132,12 +160,12 @@ $(BIN)/hildegard-helper-tui-layout-demo: $(EXAMPLES)/tui_layout_demo.pas $(LIB_S
 
 # Full-screen agent harness (conversation + approvals + sessions). Builds and
 # runs; Ctrl-C quits.
-tui-agent: libsqlite $(BIN)/hildegard-helper-tui-agent
+tui-agent: libsqlite libmbedtls $(BIN)/hildegard-helper-tui-agent
 	$(BIN)/hildegard-helper-tui-agent $(ARGS)
 
-$(BIN)/hildegard-helper-tui-agent: $(EXAMPLES)/tui_agent.pas $(LIB_SRCS) $(SQLITE_AR)
+$(BIN)/hildegard-helper-tui-agent: $(EXAMPLES)/tui_agent.pas $(LIB_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Printable wall-clock benchmark. `make bench ARGS=--real` measures the real
 # terminal; `make perf` asserts the budgets and is not part of `make check`.
@@ -151,23 +179,23 @@ $(BIN)/hildegard-helper-tui-bench: $(EXAMPLES)/tui_bench.pas $(LIB_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
-test: libsqlite $(BIN)/hildegard-helper-tests
+test: libsqlite libmbedtls $(BIN)/hildegard-helper-tests
 	$(BIN)/hildegard-helper-tests $(TESTARGS)
 
-$(BIN)/hildegard-helper-tests: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(SQLITE_AR)
+$(BIN)/hildegard-helper-tests: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -Fu$(SRC) -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
-test-leak: libsqlite $(BIN)/hildegard-helper-tests-leak
+test-leak: libsqlite libmbedtls $(BIN)/hildegard-helper-tests-leak
 	HEAPTRC=$(HEAPTRC) $(BIN)/hildegard-helper-tests-leak $(TESTARGS)
 
 # Auto-rerun TARGET (default: test) whenever sources change.
 watch:
 	@scripts/watch.sh $(TARGET)
 
-$(BIN)/hildegard-helper-tests-leak: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(SQLITE_AR)
+$(BIN)/hildegard-helper-tests-leak: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(BIN) $(LEAKUNITS)
-	$(FPC) $(LEAKFLAGS) $(SQLITE_LDFLAGS) -Fu$(SRC) -Fu$(TESTS) -FU$(LEAKUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(LEAKFLAGS) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(TESTS) -FU$(LEAKUNITS) -FE$(BIN) -o$@ $<
 
 # All quality gates, for CI: functional tests + leak check.
 check: test test-leak
