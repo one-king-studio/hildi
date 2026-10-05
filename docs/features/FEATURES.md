@@ -41,6 +41,17 @@ in `../guidelines/spec-driven-development.md`:
 | [TLS Foundation](TLS_Foundation/FEATURE.md) | Implemented (**critical**) | TLS Foundation v1 | Replace runtime-`dlopen`'d OpenSSL (`opensslsockets`) with a vendored, statically linked mbedTLS (the SQLite pattern) behind FPC's `TSSLSocketHandler` seam — a small C shim over an opaque handle, a CA bundle embedded in the binary, and an offline loopback handshake test. Verified: a live HTTPS turn with no libssl/libcrypto loaded. Prerequisite for Remote Agent Link. |
 | [Sandboxed Script Compute](Sandboxed_Script_Compute/FEATURE.md) | Proposed | - | An in-process, capability-free compute tier: the model writes small scripts for deterministic data/text work between "think" and "act". Embeds GocciaScript (MIT, FPC-native ECMAScript) core-only with `TGocciaCapabilities.None`, caps, and a timeout — no filesystem, network, or exec. Sequenced after the critical path; the first task is a spike that measures the release-binary delta before a SPEC is written. |
 
+## Parked (ideated, awaiting a need)
+
+- **Reasoning Doom Loop Detection** (`Doom_Loop_Detection/FEATURE.md`) — a
+  signal-only detector over the reasoning stream: deflate-style backwards
+  match pass of the tail against recent history, keeping the *parse*
+  (coverage, max run, dominant period) as the diagnosis, with
+  trend/period-band/arm-length false-positive guards. Soft response reuses
+  notice interception; hard response reuses Interrupt v1. Tool-call loop
+  detection (signature-based) is a separate, simpler future feature. Parked
+  with the full design sketch in the doc.
+
 ## Existing Behaviour (to be documented)
 
 The foundation below is implemented and tested, but predates this documentation
