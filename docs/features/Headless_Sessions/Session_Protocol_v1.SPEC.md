@@ -141,6 +141,9 @@ type
     Kind: TSessionEventKind;
     Text: string;               // message/delta/block/result text; error message
     Detail: string;             // error detail
+    LoopId: string;             // loop_started
+    SessionId: string;          // loop_started
+    TurnSeq: Int64;             // turn_started: the per-session turn sequence
     ToolId: string;
     ToolName: string;
     ToolArguments: string;      // raw JSON
@@ -152,9 +155,11 @@ type
     FinishReason: string;       // turn_finished
     Usage: TTokenUsage;         // turn_finished
     ElapsedMs: Int64;           // turn_finished
+    ErrorCode: string;          // error
     FromSeq: Int64;             // gap: first missing seq
     ToSeq: Int64;               // gap: last delivered seq
     Client: string;             // drive_*: client id
+    Reason: string;             // loop_exited
   end;
 
   TSessionCommandKind = (
@@ -205,7 +210,8 @@ type
     StoreHwm: Int64;
   end;
 
-  { Pure codec: record <-> one NDJSON line. No sockets, no state. }
+  { Pure codec: record <-> one NDJSON line. No sockets, no state. Encode returns
+    the line including its trailing '\n'; Decode tolerates one. }
   TSessionCodec = class
   public
     class function Encode(const AMessage: TSessionMessage): string;

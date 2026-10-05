@@ -64,8 +64,10 @@ client. The TUI's adoption (it currently *owns* the loop) is the next slice.
 
 - [ ] `agent-cli --attach <session-id>` attaches as an observer and renders the
       live turn plus ledger history.
-- [ ] A `prompt` from the CLI spawns or attaches to the runtime as the driver
-      and streams the turn.
+- [ ] `agent-cli --attach <session-id> --drive` attaches as the driver, spawns
+      or connects to the runtime, and streams the turn.
+- [ ] `RunSessionRuntime` (the `--session-runtime` argv) is the entry point a
+      client re-executes to spawn a detached runtime.
 
 ### Non-Functional
 
@@ -96,6 +98,20 @@ client. The TUI's adoption (it currently *owns* the loop) is the next slice.
 4. **Replay and reconciliation** are fixed in the protocol spec: the wire carries
    the live turn only; the `attached` reply carries `store_hwm`; the client
    composes ledger history up to `store_hwm` with replayed events.
+
+### Decisions added during implementation
+
+5. **The driver consents by releasing.** The command set has no explicit
+   `grant_drive`, so a `claim_drive` while the role is held marks the claimer
+   pending and notifies the driver (`drive_requested`); the driver promotes the
+   pending claimer by issuing `release_drive`. A pending claim times out after
+   `DefaultDriveRequestMs`. A driver is still never evicted without consent.
+6. **The runtime directory is `/tmp/hildegard-helper-<uid>/`** (mode `0700`),
+   short enough for the `AF_UNIX` path limit and never `$HOME`.
+7. **`HILDEGARD_RUNTIME_IDLE_MS`** overrides `DefaultIdleExitMs`, as Decision 1
+   requires.
+8. **The CLI's `--attach` is opt-in.** The existing in-process prompt path is
+   unchanged; routing it through the runtime is left for the TUI-adoption slice.
 
 ## Contracts & Interfaces
 
@@ -130,12 +146,14 @@ type
 
   TSessionClientConfig = record
     SessionId: string;
+    WorkspacePath: string;      // for spawning a runtime
     StorePath: string;
     Role: TSessionRole;
     FromSeq: Int64;             // 0 => the whole live turn
     Spawn: Boolean;             // connect-or-spawn
     SpawnTimeoutMs: Integer;    // 0 => default
     RuntimeCommand: string;     // the argv used to spawn a runtime
+    IdleExitMs: Integer;        // passed to a spawned runtime; 0 => default
   end;
 
   { The consumer's mapping target: the TUI/CLI implement this. }
@@ -163,6 +181,9 @@ type
 ```
 
 ### Data Contracts
+
+The runtime-row types live in `hildegard.helper.session` (the shared model unit)
+so both the store and the runtime can use them without a dependency cycle.
 
 ```pascal
 type
@@ -194,6 +215,10 @@ CREATE TABLE session_runtimes (
   started_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL);
 ```
+
+The runtime also needs the ledger's high-water mark for the `attached` reply;
+`MessageHighWaterMark(session_id)` returns the session's highest message `seq`
+(0 when empty) without reading every row.
 
 ### Event Contracts
 
