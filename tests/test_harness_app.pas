@@ -74,6 +74,8 @@ type
     function BlockText(AIndex: Integer): string;
     function FindText(AKind: TChatKind; const ANeedle: string): Boolean;
     function BlockSignature: string;
+    function DividerSignature: string;
+    function ThoughtLabel: string;
     function AssistantEvent(const AText: string): TTurnEvent;
     function ApprovalEvent(ARequestId: Integer;
       const AAsk: TApprovalAsk): TTurnEvent;
@@ -89,8 +91,14 @@ type
     procedure TestAsksDoNotStack;
     procedure TestOneFramePerStep;
     procedure TestRenderHistoryRestoresToolBlocks;
-    procedure TestStatusShowsStatsAfterATurn;
-    procedure TestResumeStatusMatchesLive;
+    procedure TestHeaderShowsSessionIdAndContext;
+    procedure TestStatusShowsWorkspaceAndConsumption;
+    procedure TestStatusSumsTurns;
+    procedure TestResumeHeaderMatchesLive;
+    procedure TestTurnDividerAfterSuccessfulTurn;
+    procedure TestNoDividerAfterFailedTurn;
+    procedure TestResumeRendersTurnDividers;
+    procedure TestThoughtShowsDuration;
     procedure TestCtaHintsAreBlank;
     procedure TestThinkingStateDuringATurn;
     procedure TestReasoningSettlesIntoAThoughtBlock;
@@ -171,6 +179,9 @@ begin
   Result := Default(THarnessSessionConfig);
   Result.WorkspacePath := FDir;
   Result.Transport := FFake;
+  { Pin the context limit so the header is deterministic (the environment may
+    set HILDEGARD_MAX_CONTEXT_TOKENS). }
+  Result.MaxContextTokens := 120000;
 end;
 
 procedure THarnessAppTest.Build;
@@ -319,6 +330,26 @@ begin
     Result := Result + IntToStr(Ord(BlockKind(I))) + ':' + BlockText(I) + '|';
 end;
 
+function THarnessAppTest.DividerSignature: string;
+var
+  I: Integer;
+begin
+  Result := '';
+  for I := 0 to BlockCount - 1 do
+    if BlockKind(I) = ckTurn then
+      Result := Result + BlockText(I) + '|';
+end;
+
+function THarnessAppTest.ThoughtLabel: string;
+var
+  I: Integer;
+begin
+  Result := '';
+  for I := 0 to BlockCount - 1 do
+    if BlockKind(I) = ckThought then
+      Exit(BlockLabel(I));
+end;
+
 function THarnessAppTest.MakeAsk: TApprovalAsk;
 var
   Option: TApprovalOption;
@@ -374,7 +405,7 @@ begin
   SawThought := False;
   for I := 0 to BlockCount - 1 do
     if (BlockKind(I) = ckThought) and (BlockText(I) = 'let me think') and
-      (BlockLabel(I) = 'Thought') then
+      (Pos('Thought', BlockLabel(I)) = 1) then
       SawThought := True;
   AssertTrue('reasoning settled into a Thought block', SawThought);
 end;
@@ -609,7 +640,7 @@ begin
   AssertTrue('error block restored', SawError);
 end;
 
-procedure THarnessAppTest.TestStatusShowsStatsAfterATurn;
+procedure THarnessAppTest.TestHeaderShowsSessionIdAndContext;
 begin
   BuildWithStore;
   FFake.AddResponse([TextDelta('hi'),
@@ -619,12 +650,20 @@ begin
   SubmitPrompt('hello');
   AssertTrue('turn finished', Pump(300));
 
-  AssertEquals('workspace on the left', FDir, FApp.StatusText);
-  AssertTrue('tokens in the stats', Pos('1.2k in', FApp.StatsText) > 0);
-  AssertTrue('cache in the stats', Pos('92% cached', FApp.StatsText) > 0);
+  { The id prefix is the left border title; the context the right. }
+  AssertEquals('session id on the left', Copy(FSession.SessionId, 1, 12),
+    FApp.Panel.HeaderLeft);
+  AssertTrue('context tokens in the header',
+    Pos('1.2k', FApp.Panel.HeaderRight) > 0);
+  { The pinned limit is 120k, so the context bar and percentage are shown. }
+  AssertTrue('context percentage in the header',
+    Pos('1%', FApp.Panel.HeaderRight) > 0);
+  { The consumption is on the status bar, not the header. }
+  AssertFalse('no consumption in the header',
+    Pos('cached', FApp.Panel.HeaderRight) > 0);
 end;
 
-procedure THarnessAppTest.TestResumeStatusMatchesLive;
+procedure THarnessAppTest.TestResumeHeaderMatchesLive;
 var
   Live, Sid: string;
   Cfg: THarnessSessionConfig;
@@ -637,8 +676,8 @@ begin
     FinishFrame('stop'), DoneFrame]);
   SubmitPrompt('hello');
   AssertTrue('turn finished', Pump(300));
-  Live := FApp.StatsText;
-  AssertTrue('live stats present', Live <> '');
+  Live := FApp.Panel.HeaderLeft + '|' + FApp.Panel.HeaderRight;
+  AssertTrue('live header present', FApp.Panel.HeaderRight <> '');
   Sid := FSession.SessionId;
 
   { Drop the live app but keep the store, then resume the same session. }
@@ -662,7 +701,163 @@ begin
   FApp := THarnessApp.Create(FSurface, FInput, FSession, LocalDriver(FSession));
   FApp.Step;
 
-  AssertEquals('resumed stats identical to live', Live, FApp.StatsText);
+  AssertEquals('resumed header identical to live', Live,
+    FApp.Panel.HeaderLeft + '|' + FApp.Panel.HeaderRight);
+end;
+
+procedure THarnessAppTest.TestStatusSumsTurns;
+begin
+  BuildWithStore;
+  FFake.AddResponse([TextDelta('one'),
+    UsageFrame('{"prompt_tokens":1000,"completion_tokens":100,' +
+      '"total_tokens":1100}'), FinishFrame('stop'), DoneFrame]);
+  FFake.AddResponse([TextDelta('two'),
+    UsageFrame('{"prompt_tokens":2000,"completion_tokens":200,' +
+      '"total_tokens":2200}'), FinishFrame('stop'), DoneFrame]);
+  SubmitPrompt('a');
+  AssertTrue('first turn finished', Pump(300));
+  SubmitPrompt('b');
+  AssertTrue('second turn finished', Pump(300));
+
+  { The status bar's consumption sums both turns: 3.0k in, 300 out, 2 req. }
+  AssertTrue('input summed', Pos('3.0k in', FApp.StatsText) > 0);
+  AssertTrue('output summed', Pos('300 out', FApp.StatsText) > 0);
+  AssertTrue('two requests', Pos('2 req', FApp.StatsText) > 0);
+end;
+
+procedure THarnessAppTest.TestStatusShowsWorkspaceAndConsumption;
+begin
+  BuildWithStore;
+  FFake.AddResponse([TextDelta('hi'),
+    UsageFrame('{"prompt_tokens":1200,"completion_tokens":310,' +
+      '"total_tokens":1510,"prompt_tokens_details":{"cached_tokens":1100}}'),
+    FinishFrame('stop'), DoneFrame]);
+  SubmitPrompt('hello');
+  AssertTrue('turn finished', Pump(300));
+
+  { The workspace stays on the left; the consumption is on the right. }
+  AssertEquals('workspace on the left', FDir, FApp.StatusText);
+  AssertTrue('input in the consumption', Pos('1.2k in', FApp.StatsText) > 0);
+  AssertTrue('output in the consumption', Pos('310 out', FApp.StatsText) > 0);
+  AssertTrue('cache in the consumption',
+    Pos('92% cached', FApp.StatsText) > 0);
+end;
+
+procedure THarnessAppTest.TestTurnDividerAfterSuccessfulTurn;
+var
+  I: Integer;
+  Saw: Boolean;
+begin
+  BuildWithStore;
+  FFake.AddResponse([TextDelta('hi'),
+    UsageFrame('{"prompt_tokens":1200,"completion_tokens":310,' +
+      '"total_tokens":1510,"prompt_tokens_details":{"cached_tokens":1100}}'),
+    FinishFrame('stop'), DoneFrame]);
+  SubmitPrompt('hello');
+  AssertTrue('turn finished', Pump(300));
+
+  Saw := False;
+  for I := 0 to BlockCount - 1 do
+    if (BlockKind(I) = ckTurn) and (Pos('1.2k in', BlockText(I)) > 0) then
+      Saw := True;
+  AssertTrue('a divider carries the loop stats', Saw);
+end;
+
+procedure THarnessAppTest.TestNoDividerAfterFailedTurn;
+var
+  I: Integer;
+begin
+  Build;
+  FFake.FailNetwork := True;
+  SubmitPrompt('hi');
+  AssertTrue('turn finished', Pump(300));
+  for I := 0 to BlockCount - 1 do
+    AssertFalse('no divider for a failed loop', BlockKind(I) = ckTurn);
+end;
+
+procedure THarnessAppTest.TestResumeRendersTurnDividers;
+var
+  Live, Sid: string;
+  Cfg: THarnessSessionConfig;
+  Err: string;
+begin
+  BuildWithStore;
+  FFake.AddResponse([TextDelta('hi'),
+    UsageFrame('{"prompt_tokens":1200,"completion_tokens":310,' +
+      '"total_tokens":1510,"prompt_tokens_details":{"cached_tokens":1100}}'),
+    FinishFrame('stop'), DoneFrame]);
+  SubmitPrompt('hello');
+  AssertTrue('turn finished', Pump(300));
+  Live := DividerSignature;
+  AssertTrue('a live divider exists', Live <> '');
+  Sid := FSession.SessionId;
+
+  FApp.Free;
+  FApp := nil;
+  FInput := nil;
+  FSurface := nil;
+  FSession.Free;
+  FSession := nil;
+  FFake.Free;
+
+  FFake := TFakeTransport.Create;
+  FSurface := TSurfaceMemory.Create(60, 20);
+  FInput := TInputSourceScripted.Create;
+  Cfg := Config;
+  Cfg.StorePath := FStorePath;
+  Cfg.SessionId := Sid;
+  Cfg.Resume := True;
+  FSession := THarnessSession.Open(Cfg, Err);
+  AssertTrue('resumed: ' + Err, FSession <> nil);
+  FApp := THarnessApp.Create(FSurface, FInput, FSession, LocalDriver(FSession));
+  FApp.Step;
+
+  AssertEquals('resumed dividers identical to live', Live, DividerSignature);
+end;
+
+procedure THarnessAppTest.TestThoughtShowsDuration;
+var
+  Delay: TSlowChunks;
+  Live, Sid: string;
+  Cfg: THarnessSessionConfig;
+  Err: string;
+begin
+  BuildWithStore;
+  Delay := TSlowChunks.Create(20);
+  try
+    FFake.AfterChunk := Delay.AfterChunk;
+    FFake.AddResponse([ReasoningDelta('think'), TextDelta('answer'),
+      FinishFrame('stop'), DoneFrame]);
+    SubmitPrompt('hi');
+    AssertTrue('turn finished', Pump(400));
+  finally
+    Delay.Free;
+  end;
+  Live := ThoughtLabel;
+  AssertTrue('thought shows its duration', Pos('Thought for ', Live) > 0);
+  Sid := FSession.SessionId;
+
+  FApp.Free;
+  FApp := nil;
+  FInput := nil;
+  FSurface := nil;
+  FSession.Free;
+  FSession := nil;
+  FFake.Free;
+
+  FFake := TFakeTransport.Create;
+  FSurface := TSurfaceMemory.Create(60, 20);
+  FInput := TInputSourceScripted.Create;
+  Cfg := Config;
+  Cfg.StorePath := FStorePath;
+  Cfg.SessionId := Sid;
+  Cfg.Resume := True;
+  FSession := THarnessSession.Open(Cfg, Err);
+  AssertTrue('resumed: ' + Err, FSession <> nil);
+  FApp := THarnessApp.Create(FSurface, FInput, FSession, LocalDriver(FSession));
+  FApp.Step;
+
+  AssertEquals('resumed thought label identical', Live, ThoughtLabel);
 end;
 
 procedure THarnessAppTest.TestCtaHintsAreBlank;

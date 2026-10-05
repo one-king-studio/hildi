@@ -48,6 +48,8 @@ type
   TPanelTest = class(TTestCase)
   published
     procedure TestBorderAndTitleRender;
+    procedure TestBorderDrawsRightTitle;
+    procedure TestRightTitleSkipsWhenTooNarrow;
     procedure TestPaddingInsetsChild;
     procedure TestBorderOffStillPads;
     procedure TestMeasureInflates;
@@ -242,6 +244,59 @@ begin
     AssertEquals('bottom-right corner', UnicodeString(WideChar($2518)),
       S.CellAt(11, 4).Ch);
     AssertTrue('title shown', Pos('Hi', S.RowText(0, 0, 12)) > 0);
+  finally
+    Panel.Free;
+    S.Free;
+  end;
+end;
+
+procedure TPanelTest.TestBorderDrawsRightTitle;
+var
+  Probe: TProbe;
+  Panel: TPanel;
+  Style: TBoxStyle;
+  S: TSurfaceMemory;
+begin
+  Probe := TProbe.Create(2, 1);
+  Style := DefaultBoxStyle;
+  Style.Title := 'left';
+  Style.TitleRight := 'right';
+  Panel := TPanel.Create(Probe, DarkTheme, Style);
+  S := TSurfaceMemory.Create(30, 5);
+  try
+    Panel.Arrange(MakeRect(0, 0, 30, 5));
+    Panel.Render(S);
+    AssertTrue('left title shown', Pos('left', S.RowText(0, 0, 30)) > 0);
+    AssertTrue('right title shown', Pos('right', S.RowText(0, 0, 30)) > 0);
+    AssertTrue('left before right',
+      Pos('left', S.RowText(0, 0, 30)) < Pos('right', S.RowText(0, 0, 30)));
+    AssertEquals('right title ends before the corner',
+      UnicodeString(WideChar($2510)), S.CellAt(29, 0).Ch);
+  finally
+    Panel.Free;
+    S.Free;
+  end;
+end;
+
+procedure TPanelTest.TestRightTitleSkipsWhenTooNarrow;
+var
+  Probe: TProbe;
+  Panel: TPanel;
+  Style: TBoxStyle;
+  S: TSurfaceMemory;
+begin
+  Probe := TProbe.Create(2, 1);
+  Style := DefaultBoxStyle;
+  Style.Title := 'left';
+  Style.TitleRight := 'right';
+  Panel := TPanel.Create(Probe, DarkTheme, Style);
+  S := TSurfaceMemory.Create(10, 5);
+  try
+    Panel.Arrange(MakeRect(0, 0, 10, 5));
+    Panel.Render(S);
+    AssertTrue('left title kept', Pos('left', S.RowText(0, 0, 10)) > 0);
+    AssertFalse('right title skipped',
+      Pos('right', S.RowText(0, 0, 10)) > 0);
   finally
     Panel.Free;
     S.Free;

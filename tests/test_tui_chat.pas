@@ -34,6 +34,7 @@ type
     procedure TestAssistantRendersPlainText;
     procedure TestAssistantRendersMarkdown;
     procedure TestCollapsedThoughtDrawsADimmedRule;
+    procedure TestTurnDividerDrawsRuleAndRightAlignedStats;
     procedure TestCollapsedToolDrawsAThinFullContrastRule;
     procedure TestLongToolTitleIsTruncated;
     procedure TestLiveThoughtShowsTheTail;
@@ -249,6 +250,30 @@ begin
       AssertEquals('rule starts at column 1', '─', S.CellAt(1, 0).Ch);
       AssertTrue('label shown', Pos('Thought', S.RowText(0, 0, 30)) > 0);
       AssertTrue('collapse marker shown', Pos('▼', S.RowText(0, 0, 30)) > 0);
+      AssertTrue('dimmed', sfDim in S.CellAt(1, 0).Attr.Style);
+    finally
+      It.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestTurnDividerDrawsRuleAndRightAlignedStats;
+var
+  It: TChatItem;
+  S: TSurfaceMemory;
+begin
+  S := TSurfaceMemory.Create(60, 1);
+  try
+    It := TChatItem.Create(ckTurn, '', '1.2k in 310 out 3.4s 2 req', FTheme);
+    try
+      It.Arrange(Rc(0, 0, 60, 1));
+      It.Render(S);
+      AssertEquals('rule starts at column 1', '─', S.CellAt(1, 0).Ch);
+      AssertTrue('stats shown', Pos('1.2k in', S.RowText(0, 0, 60)) > 0);
+      AssertEquals('one trailing rule at the right edge', '─',
+        S.CellAt(59, 0).Ch);
       AssertTrue('dimmed', sfDim in S.CellAt(1, 0).Attr.Style);
     finally
       It.Free;

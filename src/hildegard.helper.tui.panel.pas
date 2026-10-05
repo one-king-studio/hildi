@@ -33,7 +33,8 @@ type
   TBoxStyle = record
     Border: Boolean;
     Rounded: Boolean;
-    Title: string;
+    Title: string;        // left-aligned on the top border
+    TitleRight: string;   // right-aligned on the top border
     Padding: Integer;
   end;
 
@@ -195,8 +196,8 @@ end;
 procedure TPanel.Render(const S: ISurface);
 var
   L, R, T, B: Integer;
-  X, I, Tw: Integer;
-  Title: UnicodeString;
+  X, I, LeftW, RightW: Integer;
+  LeftTitle, RightTitle: UnicodeString;
 begin
   if (FBounds.W <= 0) or (FBounds.H <= 0) then
     Exit;
@@ -233,15 +234,32 @@ begin
       PutCh(S, R, X, UnicodeString(WideChar($2502)), FTheme.Border);
     end;
 
-    if (FStyle.Title <> '') and (FBounds.W > 4) then
+    { The two border titles: left after the corner, right before it. The right
+      one is skipped when it would run into the left. }
+    if FStyle.Title <> '' then
+      LeftTitle := UnicodeString(' ' + FStyle.Title + ' ')
+    else
+      LeftTitle := '';
+    if FStyle.TitleRight <> '' then
+      RightTitle := UnicodeString(' ' + FStyle.TitleRight + ' ')
+    else
+      RightTitle := '';
+    LeftW := Length(LeftTitle);
+    RightW := Length(RightTitle);
+
+    if (LeftW > 0) and (FBounds.W > 4) then
     begin
-      Title := UnicodeString(' ' + FStyle.Title + ' ');
-      Tw := Length(Title);
-      if Tw > FBounds.W - 2 then
-        Tw := FBounds.W - 2;
-      for I := 1 to Tw do
-        PutCh(S, L + I, T, UnicodeString(Title[I]), FTheme.Title);
+      if LeftW > FBounds.W - 2 then
+        LeftW := FBounds.W - 2;
+      for I := 1 to LeftW do
+        PutCh(S, L + I, T, UnicodeString(LeftTitle[I]), FTheme.Title);
     end;
+
+    if (RightW > 0) and (RightW <= FBounds.W - 2) and
+      ((R - RightW) > (L + LeftW)) then
+      for I := 1 to RightW do
+        PutCh(S, R - RightW + I - 1, T, UnicodeString(RightTitle[I]),
+          FTheme.Title);
   end;
 
   if FChild <> nil then

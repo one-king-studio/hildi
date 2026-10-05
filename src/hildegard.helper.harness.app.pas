@@ -50,6 +50,9 @@ type
     FAssistant: TChatItem;
     FThought: TChatItem;
     FTool: TChatItem;
+    { The reasoning phase's duration for the live thought block, set by
+      teReasoningDone and consumed when the block settles. }
+    FThoughtMs: Int64;
     { The submitted prompt and its block, so an early cancel can undo them. }
     FUserPrompt: string;
     FUserBlock: TChatItem;
@@ -75,6 +78,8 @@ type
     { A tool call whose result never arrived (interrupted, or a crash on resume)
       still gets an acknowledgement, so no tool block is ever blank. }
     procedure SettleOpenTool;
+    { End a completed loop with its metrics; a zero/absent turn draws nothing. }
+    procedure AddTurnDivider;
     { Put text at the front of the compose box, keeping whatever is typed. }
     procedure PrependCompose(const AText: string);
     { Undo the current turn's UI after an early cancel and restore the prompt. }
@@ -85,6 +90,9 @@ type
     { Show a user prompt (the turn's own, or a queued one that superseded the
       response that was streaming), dropping the response it superseded. }
     procedure HandleUserMessage(const AText: string);
+    { The messages panel's top border: the session id (left) and the session
+      stats (right). }
+    procedure UpdateHeader;
     procedure UpdateStats;
     procedure HandleEscape(Sender: TObject);
     function ComposeIsEmpty: Boolean;
@@ -262,8 +270,8 @@ begin
   FPanel.Stream.OnChange := Invalidate;
   FPanel.Compose.OnSubmit := Submit;
   FPanel.Compose.OnChange := Invalidate;
-  { The status bar is two parts: the workspace on the left, the metrics on the
-    right. The toolbar holds the run state and the hints. }
+  { The session id and stats live on the messages panel's top border; the status
+    bar keeps the workspace. The toolbar holds the run state and the hints. }
   FStatusText := FSession.WorkspaceRoot;
   FPanel.SetStatus(FStatusText);
   FHintsText := CtaHints;
@@ -309,12 +317,23 @@ begin
     FPanel.SetCta(ckNone);
 end;
 
+procedure THarnessApp.UpdateHeader;
+begin
+  { Read the persisted session, so a live session and a resumed one show the
+    same header. The header carries only the context; the consumption is on the
+    status bar. }
+  FPanel.SetHeader(Copy(FSession.SessionId, 1, 12),
+    FormatContextUsage(FSession.SessionTotals.ContextTokens,
+      FSession.MaxContextTokens));
+end;
+
 procedure THarnessApp.UpdateStats;
 begin
-  { Read the persisted turn, so a live turn and a resumed one show the same
-    line. }
-  FStatsText := FormatTurnStats(FSession.LastTurn);
+  { The session's consumption sits on the status bar's right; the header carries
+    the context. Read the persisted session, so live and resumed match. }
+  FStatsText := FormatSessionStats(FSession.SessionTotals);
   FPanel.SetStats(FStatsText);
+  UpdateHeader;
   FApp.Invalidate;
 end;
 
@@ -364,17 +383,43 @@ end;
 procedure THarnessApp.RenderHistory;
 var
   History: TMessageRecordArray;
-  I, Head: Integer;
+  Turns: TTurnRecordArray;
+  I, Head, CurrentTurn: Integer;
   Rec: TMessageRecord;
   ToolBlocks: array of TChatItem;
   Block: TChatItem;
+
+  { The divider a completed turn leaves after its messages; nothing for a turn
+    that failed, was cancelled, or is unknown. }
+  procedure DrawTurnDivider(const ATurns: TTurnRecordArray; ATurnId: Int64);
+  var
+    J: Integer;
+  begin
+    for J := 0 to High(ATurns) do
+      if (ATurns[J].Id = ATurnId) and (ATurns[J].Status = tsCompleted) then
+      begin
+        FPanel.Stream.Add(ckTurn, '', FormatTurnStats(ATurns[J]));
+        Exit;
+      end;
+  end;
+
 begin
   History := FSession.History;
+  Turns := FSession.Turns;
   Head := 0;
+  CurrentTurn := 0;
   ToolBlocks := nil;
   for I := 0 to High(History) do
   begin
     Rec := History[I];
+    { Messages are grouped by turn in order, so a change of turn means the
+      previous one ended: draw its divider before the next turn's first block. }
+    if Rec.TurnId <> CurrentTurn then
+    begin
+      if CurrentTurn <> 0 then
+        DrawTurnDivider(Turns, CurrentTurn);
+      CurrentTurn := Rec.TurnId;
+    end;
     case Rec.Role of
       mrUser:
         { A user row is never empty in practice; skip one that is rather than
@@ -387,7 +432,8 @@ begin
         if Rec.Content <> '' then
           FPanel.Stream.Add(ckAssistant, '', Rec.Content);
       mrReasoning:
-        FPanel.Stream.Add(ckThought, 'Thought', Rec.Content);
+        FPanel.Stream.Add(ckThought, FormatThoughtLabel(Rec.DurationMs),
+          Rec.Content);
       mrToolCall:
         begin
           { The reason is the title; the raw call is not shown, so a resumed
@@ -419,6 +465,9 @@ begin
         ;
     end;
   end;
+  { The final turn's divider. }
+  if CurrentTurn <> 0 then
+    DrawTurnDivider(Turns, CurrentTurn);
   { A tool call whose result was never recorded (a crash mid-tool) still gets an
     acknowledgement, so no tool block is blank. }
   for I := Head to High(ToolBlocks) do
@@ -453,14 +502,32 @@ end;
 
 procedure THarnessApp.FinalizeThinking;
 begin
-  if (FThought = nil) or (not FThought.Live) then
+  if (FThought <> nil) and FThought.Live then
+  begin
+    { The reasoning has finished streaming; it is about to be persisted, so it
+      becomes a normal, collapsed thought block carrying its duration. }
+    FThought.Live := False;
+    FThought.Label_ := FormatThoughtLabel(FThoughtMs);
+    FThought.Expanded := False;
+    FThought := nil;
+  end;
+  FThoughtMs := 0;
+end;
+
+procedure THarnessApp.AddTurnDivider;
+var
+  Turn: TTurnRecord;
+  Stats: string;
+begin
+  { Only a completed loop ends with a divider, matching the restore; a failed or
+    cancelled turn (and a store-less session, whose zero record is tsRunning)
+    draws none. }
+  Turn := FSession.LastTurn;
+  if Turn.Status <> tsCompleted then
     Exit;
-  { The reasoning has finished streaming; it is about to be persisted, so it
-    becomes a normal, collapsed "Thought" block. }
-  FThought.Live := False;
-  FThought.Label_ := 'Thought';
-  FThought.Expanded := False;
-  FThought := nil;
+  Stats := FormatTurnStats(Turn);
+  if Stats <> '' then
+    FPanel.Stream.Add(ckTurn, '', Stats);
 end;
 
 procedure THarnessApp.AppendToolResult(ABlock: TChatItem; const AText: string);
@@ -566,8 +633,9 @@ end;
 
 procedure THarnessApp.HandleTurnEvent(const E: TTurnEvent);
 begin
-  { Anything that is not more reasoning means the reasoning stream has ended. }
-  if E.Kind <> teReasoningDelta then
+  { Anything that is not more reasoning (or the reasoning-end marker, which
+    carries its duration) means the reasoning stream has ended. }
+  if not (E.Kind in [teReasoningDelta, teReasoningDone]) then
     FinalizeThinking;
   case E.Kind of
     teUserMessage:
@@ -587,6 +655,10 @@ begin
         end;
         FThought.AppendText(E.Text);
       end;
+    teReasoningDone:
+      { The reasoning phase ended; settle the thought block with its duration
+        when the next event arrives. }
+      FThoughtMs := E.ElapsedMs;
     teToolCall:
       begin
         { A tool is running; the sparkle keeps animating because the turn is
@@ -624,7 +696,11 @@ begin
     teApprovalAsk:
       EnqueueAsk(E);
     teDone:
-      FinishTurn(psReady, 'ready');
+      begin
+        { A successful loop ends with its metrics. }
+        AddTurnDivider;
+        FinishTurn(psReady, 'ready');
+      end;
     teError:
       if E.ErrorCode = leCancelled then
       begin

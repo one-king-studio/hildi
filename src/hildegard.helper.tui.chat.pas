@@ -22,7 +22,8 @@ uses
   hildegard.helper.tui.theme, hildegard.helper.tui.markdownview;
 
 type
-  TChatKind = (ckUser, ckAssistant, ckError, ckThought, ckTool, ckThinking);
+  TChatKind = (ckUser, ckAssistant, ckError, ckThought, ckTool, ckThinking,
+    ckTurn);
 
   { One block in the stream. Mutable, so a stream can append into it. Its
     measured height is memoized per width and invalidated when the text or the
@@ -224,6 +225,18 @@ end;
 function ThinkingSparkle(ANowMs: Int64): UnicodeString;
 begin
   Result := Sparkles[(ANowMs div 90) mod Length(Sparkles)];
+end;
+
+{ A loop divider: a thin rule with the loop's stats right-aligned and one
+  trailing rule, e.g. ` ─────────── 1.2k in · 310 out ─`. }
+function TurnDivider(const AStats: UnicodeString; AWidth: Integer): UnicodeString;
+var
+  Fill: Integer;
+begin
+  Fill := AWidth - StringWidth(AStats) - 4;
+  if Fill < 1 then
+    Fill := 1;
+  Result := ' ' + Rep('─', Fill) + ' ' + AStats + ' ─';
 end;
 
 { TChatItem }
@@ -471,7 +484,7 @@ begin
         BodyRows(AAvail.W, TextRows, Lines);
         Result.H := TextRows;
       end;
-    ckThinking:
+    ckThinking, ckTurn:
       Result.H := 1;
     ckThought, ckTool:
       if EffectiveExpanded then
@@ -541,6 +554,12 @@ begin
       begin
         PutText(S, FBounds.X + 1, FBounds.Y, Sparkles[FSpark], FTheme.Accent);
         PutText(S, FBounds.X + 3, FBounds.Y, 'Thinking', FTheme.Muted);
+        Exit;
+      end;
+    ckTurn:
+      begin
+        PutText(S, FBounds.X, FBounds.Y,
+          TurnDivider(UnicodeString(FBody), FBounds.W), FTheme.Muted);
         Exit;
       end;
   else

@@ -41,6 +41,8 @@ type
     FStats: TTextBlock;
     FStatusText: string;
     FStatsText: string;
+    FHeaderLeft: string;
+    FHeaderRight: string;
     FStateKind: TPanelState;
     FStateLabel: string;
     FStateSpans: array[0..1] of TSpan;
@@ -62,6 +64,11 @@ type
     procedure SetStatus(const AText: string);
     { The right-aligned metrics line, sharing the status row. }
     procedure SetStats(const AText: string);
+    { The messages panel's top border: the session id at the left, the session
+      stats at the right. }
+    procedure SetHeader(const ALeft, ARight: string);
+    property HeaderLeft: string read FHeaderLeft;
+    property HeaderRight: string read FHeaderRight;
     { The left of the toolbar: what the run is doing. }
     procedure SetState(AKind: TPanelState; const ALabel: string);
     { The right of the toolbar: the interaction hints. }
@@ -316,6 +323,18 @@ begin
   FStatsText := AText;
   FStats.SetText(AText, FTheme.Muted);
   FitStatus;
+end;
+
+procedure TChatPanel.SetHeader(const ALeft, ARight: string);
+var
+  Style: TBoxStyle;
+begin
+  FHeaderLeft := ALeft;
+  FHeaderRight := ARight;
+  Style := FMessages.Style;
+  Style.Title := ALeft;
+  Style.TitleRight := ARight;
+  FMessages.Style := Style;
 end;
 
 procedure TChatPanel.SetState(AKind: TPanelState; const ALabel: string);
