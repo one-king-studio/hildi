@@ -301,6 +301,11 @@ begin
   ToolConfig := Default(TCommandToolConfig);
   ToolConfig.Shell := DefaultShellProfile;
   ToolConfig.DefaultCwd := FWorkspaceRoot;
+  { Optional cap on the model's run_command timeout (ms); unset = the model
+    defines its own. }
+  EnvValue := GetEnvironmentVariable('HILDEGARD_COMMAND_TIMEOUT_MS');
+  if EnvValue <> '' then
+    ToolConfig.MaxTimeoutMs := StrToInt64Def(EnvValue, 0);
   FCommandTool := TCommandTool.Create(ToolConfig, ApprovalService);
   FCommandTool.Register(FTools);
 

@@ -32,6 +32,7 @@ type
     Shell: TShellProfile;
     DefaultCwd: string;        // '' => process cwd
     DefaultTimeoutMs: QWord;   // 0 => ProfileDefaultTimeoutMs
+    MaxTimeoutMs: QWord;       // 0 => no cap; >0 caps the model's timeout_ms
     MaxOutputBytes: Integer;   // 0 => DefaultMaxOutputBytes
   end;
 
@@ -45,18 +46,20 @@ type
   end;
 
   { Execution seam. The real implementation wraps TCommandRunner; tests use a
-    fake. Returns False only on infrastructure failure. }
+    fake. AObserver receives the command's output as it arrives (it may be nil).
+    Returns False only on infrastructure failure. }
   ICommandExecutor = interface
     function Execute(const AProfile: TShellProfile; const ACommand,
-      AWorkDir: string; ATimeoutMs: QWord;
+      AWorkDir: string; ATimeoutMs: QWord; AObserver: TToolObserver;
       out AExecution: TCommandExecution): Boolean;
   end;
 
-  { Runs one command through TCommandRunner, collecting combined output. }
+  { Runs one command through TCommandRunner, streaming its output to the
+    observer and collecting it for the result. }
   TProcessCommandExecutor = class(TInterfacedObject, ICommandExecutor)
   public
     function Execute(const AProfile: TShellProfile; const ACommand,
-      AWorkDir: string; ATimeoutMs: QWord;
+      AWorkDir: string; ATimeoutMs: QWord; AObserver: TToolObserver;
       out AExecution: TCommandExecution): Boolean;
   end;
 
@@ -72,7 +75,8 @@ type
     procedure Register(ATools: TToolRegistry);
     { Matches TToolHandler; registered by Register. Public for direct testing. }
     function Run(const AArgumentsJson: string;
-      out AResult: string; out AError: string): Boolean;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
     { One approval ask per parsed segment (IApprovableTool). }
     function ApprovalAsks(const AArgumentsJson: string): TApprovalAskArray;
   end;
@@ -192,26 +196,42 @@ end;
 { --- TProcessCommandExecutor -------------------------------------------- }
 
 type
-  { Collects runner output under a lock; the runner callback fires on its own
-    thread. The executor joins the runner before reading. }
+  { Collects runner output under a lock and forwards it to the observer; the
+    runner callback fires on its own thread. The executor joins the runner
+    before reading. }
   TOutputCollector = class
   private
     FLock: TCriticalSection;
+    FObserver: TToolObserver;
     FData: string;
     FExit: Integer;
     FTimedOut: Boolean;
   public
-    constructor Create;
+    constructor Create(AObserver: TToolObserver);
     destructor Destroy; override;
     procedure OnOutput(const AId: string; AKind: TOutputKind;
       const AText: string; AExitCode: Integer);
     function Take(out AExit: Integer; out ATimedOut: Boolean): string;
   end;
 
-constructor TOutputCollector.Create;
+  { Forwards chunks to an inner observer until AMaxChars characters have passed,
+    then drops later ones: the live body stays bounded by the result cap even
+    when a command streams without end. }
+  TCappedObserver = class(TToolObserver)
+  private
+    FInner: TToolObserver;
+    FRemaining: Integer;
+  public
+    constructor Create(AInner: TToolObserver; AMaxChars: Integer);
+    procedure Next(const AText: string); override;
+    procedure Complete; override;
+  end;
+
+constructor TOutputCollector.Create(AObserver: TToolObserver);
 begin
   inherited Create;
   FLock := TCriticalSection.Create;
+  FObserver := AObserver;
 end;
 
 destructor TOutputCollector.Destroy;
@@ -233,6 +253,9 @@ begin
   finally
     FLock.Release;
   end;
+  { Forward outside the lock: the observer may reach a UI queue. }
+  if (AKind in [okStdout, okStderr]) and (FObserver <> nil) then
+    FObserver.Next(AText);
 end;
 
 function TOutputCollector.Take(out AExit: Integer;
@@ -248,8 +271,37 @@ begin
   end;
 end;
 
+{ --- TCappedObserver ---------------------------------------------------- }
+
+constructor TCappedObserver.Create(AInner: TToolObserver; AMaxChars: Integer);
+begin
+  inherited Create;
+  FInner := AInner;
+  FRemaining := AMaxChars;
+end;
+
+procedure TCappedObserver.Next(const AText: string);
+var
+  Chunk: string;
+begin
+  if (FInner = nil) or (FRemaining <= 0) or (AText = '') then
+    Exit;
+  if Length(AText) <= FRemaining then
+    Chunk := AText
+  else
+    Chunk := Copy(AText, 1, FRemaining);
+  Dec(FRemaining, Length(Chunk));
+  FInner.Next(Chunk);
+end;
+
+procedure TCappedObserver.Complete;
+begin
+  if FInner <> nil then
+    FInner.Complete;
+end;
+
 function TProcessCommandExecutor.Execute(const AProfile: TShellProfile;
-  const ACommand, AWorkDir: string; ATimeoutMs: QWord;
+  const ACommand, AWorkDir: string; ATimeoutMs: QWord; AObserver: TToolObserver;
   out AExecution: TCommandExecution): Boolean;
 var
   Collector: TOutputCollector;
@@ -258,7 +310,7 @@ var
   TimedOut: Boolean;
 begin
   AExecution := Default(TCommandExecution);
-  Collector := TOutputCollector.Create;
+  Collector := TOutputCollector.Create(AObserver);
   try
     Runner := TCommandRunner.Create('cmd', ACommand, ATimeoutMs, AWorkDir,
       Collector.OnOutput, AProfile.Executable, AProfile.Switch);
@@ -314,7 +366,8 @@ begin
     '"command":{"type":"string","description":"Shell command to run."},' +
     '"reason":{"type":"string","description":"Short reason this command is needed."},' +
     '"cwd":{"type":"string","description":"Working directory."},' +
-    '"timeout_ms":{"type":"integer","description":"Timeout in ms (0 = default)."}' +
+    '"timeout_ms":{"type":"integer","description":"Timeout in ms; omit or 0 ' +
+    'for the default. Set higher for slow commands."}' +
     '},"required":["command","reason"]}';
   ATools.Add(Spec, Run);
 end;
@@ -357,7 +410,8 @@ begin
 end;
 
 function TCommandTool.Run(const AArgumentsJson: string;
-  out AResult: string; out AError: string): Boolean;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
 var
   Data: TJSONData;
   Root: TJSONObject;
@@ -369,6 +423,7 @@ var
   Batch: TApprovalBatchResult;
   Execution: TCommandExecution;
   Truncated: Boolean;
+  Stream: TCappedObserver;
 begin
   AResult := '';
   AError := '';
@@ -401,6 +456,10 @@ begin
       end;
       ReadStringArg(Root, 'cwd', Cwd);
       TimeoutMs := ReadOptionalUInt(Root, 'timeout_ms', FConfig.DefaultTimeoutMs);
+      { The model defines its own timeout. An operator may still impose a cap via
+        MaxTimeoutMs (0 = none). }
+      if (FConfig.MaxTimeoutMs > 0) and (TimeoutMs > FConfig.MaxTimeoutMs) then
+        TimeoutMs := FConfig.MaxTimeoutMs;
 
       Plan := ParseCommand(Command, FConfig.Shell.Syntax);
       if (Plan.ParseError <> '') or (Length(Plan.Segments) = 0) then
@@ -432,11 +491,18 @@ begin
       EffectiveCwd := Cwd;
       if EffectiveCwd = '' then
         EffectiveCwd := FConfig.DefaultCwd;
-      if not FExecutor.Execute(FConfig.Shell, Command, EffectiveCwd, TimeoutMs,
-        Execution) then
-      begin
-        AError := 'failed to execute: ' + Execution.Error;
-        Exit(False);
+      { Bound the live stream to the result cap so a chatty command cannot grow
+        the live block without end. }
+      Stream := TCappedObserver.Create(AObserver, FConfig.MaxOutputBytes);
+      try
+        if not FExecutor.Execute(FConfig.Shell, Command, EffectiveCwd,
+          TimeoutMs, Stream, Execution) then
+        begin
+          AError := 'failed to execute: ' + Execution.Error;
+          Exit(False);
+        end;
+      finally
+        Stream.Free;
       end;
 
       { The result reads like a shell transcript: the command, a blank line,

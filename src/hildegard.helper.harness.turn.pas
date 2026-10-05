@@ -28,7 +28,8 @@ type
     teApprovalAsk,      // the worker is blocked awaiting an answer
     teDone,             // the turn completed successfully
     teError,            // the turn failed
-    teReasoningDone     // the reasoning phase ended (ElapsedMs = its duration)
+    teReasoningDone,    // the reasoning phase ended (ElapsedMs = its duration)
+    teToolOutput        // a streamed chunk of a tool's output
   );
 
   TTurnEvent = record
@@ -119,6 +120,7 @@ type
     procedure OnReasoningDone(ADurationMs: Int64);
     procedure OnToolCall(const AId, AName, AArguments, AReason: string);
     procedure OnToolResult(const AId, AName, AResult: string; AOk: Boolean);
+    procedure OnToolOutput(const AId, AName, AText: string);
     procedure OnUserQueued(const AText: string);
   protected
     procedure Execute; override;
@@ -408,6 +410,18 @@ begin
   Emit(Event);
 end;
 
+procedure TTurnWorker.OnToolOutput(const AId, AName, AText: string);
+var
+  Event: TTurnEvent;
+begin
+  Event := Default(TTurnEvent);
+  Event.Kind := teToolOutput;
+  Event.ToolId := AId;
+  Event.ToolName := AName;
+  Event.Text := AText;
+  Emit(Event);
+end;
+
 procedure TTurnWorker.Execute;
 var
   Events: TAgentEvents;
@@ -420,6 +434,7 @@ begin
   Events.OnReasoningDone := OnReasoningDone;
   Events.OnToolCall := OnToolCall;
   Events.OnToolResult := OnToolResult;
+  Events.OnToolOutput := OnToolOutput;
   Events.OnUserQueued := OnUserQueued;
 
   { The loop consults this between requests, so a cancel stops the turn at the

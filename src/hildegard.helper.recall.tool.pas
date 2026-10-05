@@ -40,7 +40,8 @@ type
     constructor Create(AStore: TSqliteStore; const ASessionId: string;
       ACap: Integer);
     function Recall(const AArgumentsJson: string;
-      out AResult: string; out AError: string): Boolean;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
     procedure Register(ATools: TToolRegistry);
   end;
 
@@ -95,7 +96,8 @@ begin
 end;
 
 function TRecallTool.Recall(const AArgumentsJson: string;
-  out AResult: string; out AError: string): Boolean;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
 var
   Data: TJSONData;
   Root: TJSONObject;

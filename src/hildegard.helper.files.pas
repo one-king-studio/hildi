@@ -47,17 +47,23 @@ type
 
     { Handlers (public for direct testing). Each resolves approval first. }
     function ReadFile(const AArgumentsJson: string;
-      out AResult: string; out AError: string): Boolean;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
     function WriteFile(const AArgumentsJson: string;
-      out AResult: string; out AError: string): Boolean;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
     function EditFile(const AArgumentsJson: string;
-      out AResult: string; out AError: string): Boolean;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
     function ListDir(const AArgumentsJson: string;
-      out AResult: string; out AError: string): Boolean;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
     function Glob(const AArgumentsJson: string;
-      out AResult: string; out AError: string): Boolean;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
     function Grep(const AArgumentsJson: string;
-      out AResult: string; out AError: string): Boolean;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
   end;
 
 const
@@ -468,7 +474,8 @@ end;
 { --- read_file ---------------------------------------------------------- }
 
 function TFileTool.ReadFile(const AArgumentsJson: string;
-  out AResult: string; out AError: string): Boolean;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
 var
   Data: TJSONData;
   Root: TJSONObject;
@@ -546,7 +553,8 @@ end;
 { --- write_file --------------------------------------------------------- }
 
 function TFileTool.WriteFile(const AArgumentsJson: string;
-  out AResult: string; out AError: string): Boolean;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
 var
   Data: TJSONData;
   Root: TJSONObject;
@@ -587,7 +595,8 @@ end;
 { --- edit_file ---------------------------------------------------------- }
 
 function TFileTool.EditFile(const AArgumentsJson: string;
-  out AResult: string; out AError: string): Boolean;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
 var
   Data: TJSONData;
   Root: TJSONObject;
@@ -682,7 +691,8 @@ end;
 { --- list_dir ----------------------------------------------------------- }
 
 function TFileTool.ListDir(const AArgumentsJson: string;
-  out AResult: string; out AError: string): Boolean;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
 var
   Data: TJSONData;
   Root: TJSONObject;
@@ -728,7 +738,8 @@ end;
 { --- glob --------------------------------------------------------------- }
 
 function TFileTool.Glob(const AArgumentsJson: string;
-  out AResult: string; out AError: string): Boolean;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
 var
   Data: TJSONData;
   Root: TJSONObject;
@@ -785,7 +796,8 @@ end;
 { --- grep --------------------------------------------------------------- }
 
 function TFileTool.Grep(const AArgumentsJson: string;
-  out AResult: string; out AError: string): Boolean;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
 var
   Data: TJSONData;
   Root: TJSONObject;

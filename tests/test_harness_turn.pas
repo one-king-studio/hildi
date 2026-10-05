@@ -35,6 +35,14 @@ type
     procedure Execute; override;
   end;
 
+  { Emits one chunk through the observer, then returns a result. }
+  TStreamTool = class
+  public
+    function Handle(const AArgumentsJson: string;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
+  end;
+
   TTurnQueueTest = class(TTestCase)
   published
     procedure TestFifoOrderAndEmpty;
@@ -73,6 +81,7 @@ type
     procedure TestStreamsDeltasThenDone;
     procedure TestProviderErrorEmitsError;
     procedure TestToolEventsCarryNameReasonOk;
+    procedure TestWorkerEmitsToolOutput;
     procedure TestCancelBeforeStart;
   end;
 
@@ -116,6 +125,19 @@ begin
     Event.Text := IntToStr(I);
     FQueue.Push(Event);
   end;
+end;
+
+{ TStreamTool }
+
+function TStreamTool.Handle(const AArgumentsJson: string;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
+begin
+  if AObserver <> nil then
+    AObserver.Next('partial output');
+  AResult := 'partial output';
+  AError := '';
+  Result := True;
 end;
 
 { TTurnQueueTest }
@@ -385,6 +407,8 @@ begin
       teToolResult:
         Result := Result + 'X:' + Event.ToolName + ':' +
           BoolToStr(Event.ToolOk, True) + ':' + Event.Text + '|';
+      teToolOutput:
+        Result := Result + 'O:' + Event.ToolName + ':' + Event.Text + '|';
       teUserMessage:
         Result := Result + 'U:' + Event.Text + '|';
       tePromptQueued:
@@ -465,6 +489,45 @@ begin
       Pos('T:done|D:done|', Log) > 0);
   finally
     Worker.Free;
+  end;
+end;
+
+procedure TTurnWorkerTest.TestWorkerEmitsToolOutput;
+var
+  Worker: TTurnWorker;
+  StreamTool: TStreamTool;
+  Spec: TToolSpec;
+  Log: string;
+  OutputIdx, ResultIdx: Integer;
+begin
+  BuildLoop(True);
+  StreamTool := TStreamTool.Create;
+  try
+    Spec.Name := 'stream_tool';
+    Spec.Description := 'streams output';
+    Spec.ParametersJson := '{"type":"object","properties":{}}';
+    FTools.Add(Spec, StreamTool.Handle);
+    FFake.AddResponse([ToolNameFrame(0, 'call_1', 'stream_tool'),
+      ToolArgsFrame(0, '{"reason":"testing"}'), FinishFrame('tool_calls'),
+      DoneFrame]);
+    FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
+
+    Worker := TTurnWorker.Create(FLoop, FQueue, 'go');
+    Worker.Start;
+    Worker.WaitFor;
+    try
+      Log := Drain;
+      AssertTrue('streamed chunk',
+        Pos('O:stream_tool:partial output|', Log) > 0);
+      OutputIdx := Pos('O:stream_tool:', Log);
+      ResultIdx := Pos('X:stream_tool:', Log);
+      AssertTrue('chunk before result',
+        (OutputIdx > 0) and (ResultIdx > OutputIdx));
+    finally
+      Worker.Free;
+    end;
+  finally
+    StreamTool.Free;
   end;
 end;
 

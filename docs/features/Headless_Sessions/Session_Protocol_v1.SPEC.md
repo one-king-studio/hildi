@@ -261,6 +261,7 @@ Event payloads (the fields beyond `seq`/`ts`/`kind`):
 | `gap` | `from_seq`, `to_seq` |
 | `loop_exited` | `reason` |
 | `reasoning_done` | `elapsed_ms` (the reasoning phase's duration) |
+| `tool_output` | `tool_id`, `name`, `text` (a streamed chunk) |
 
 ### Event Contracts
 

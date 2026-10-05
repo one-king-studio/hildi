@@ -1182,6 +1182,14 @@ begin
         E.ToolOk := AEvent.ToolOk;
         Broadcast(E);
       end;
+    teToolOutput:
+      begin
+        E := EmitEvent(ekToolOutput);
+        E.ToolId := AEvent.ToolId;
+        E.ToolName := AEvent.ToolName;
+        E.Text := AEvent.Text;
+        Broadcast(E);
+      end;
     teApprovalAsk:
       begin
         E := EmitEvent(ekApprovalRequest);

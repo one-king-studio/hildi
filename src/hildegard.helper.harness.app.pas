@@ -538,7 +538,14 @@ begin
   Text := AText;
   if Text = '' then
     Text := '(no output)';
-  if ABlock.Text = '' then
+  if ABlock.Live then
+  begin
+    { The block streamed live; settle it and replace the streamed body with the
+      authoritative result, so the live view and a resumed view match. }
+    ABlock.Live := False;
+    ABlock.SetText(Text);
+  end
+  else if ABlock.Text = '' then
     ABlock.SetText(Text)
   else
     ABlock.AppendText(#10 + #10 + Text);
@@ -546,8 +553,12 @@ end;
 
 procedure THarnessApp.SettleOpenTool;
 begin
-  if (FTool <> nil) and (FTool.Text = '') then
-    FTool.SetText('(no result)');
+  if FTool <> nil then
+  begin
+    FTool.Live := False;
+    if FTool.Text = '' then
+      FTool.SetText('(no result)');
+  end;
   FTool := nil;
 end;
 
@@ -692,6 +703,15 @@ begin
         SetState(psThinking, 'thinking');
         FAssistant := nil;
         FThought := nil;
+      end;
+    teToolOutput:
+      begin
+        if FTool = nil then
+          FTool := FPanel.Stream.Add(ckTool, E.ToolName, '');
+        { Live shows the tail and auto-expands, so the operator can watch a long
+          command; the block settles back to collapsed when the result arrives. }
+        FTool.Live := True;
+        FTool.AppendText(E.Text);
       end;
     teApprovalAsk:
       EnqueueAsk(E);

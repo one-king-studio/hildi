@@ -78,10 +78,40 @@ type
     procedure DropTurnMessages(ATurnId: Int64);
   end;
 
-  { Receives the raw JSON arguments string and returns a text result. On failure
-    returns False with AError set; the loop turns that into an error tool result. }
+  { A tool's output observer, RxJS-shaped. A streaming tool calls Next for each
+    chunk (flushed immediately) and then returns its result; Complete ends the
+    stream. A single-shot tool never calls Next. Next may fire on another
+    thread (e.g. the process runner's), so an implementation must be
+    thread-safe. }
+  TToolObserver = class
+  public
+    procedure Next(const AText: string); virtual; abstract;
+    procedure Complete; virtual; abstract;
+  end;
+
+  { Fires for each streamed chunk of a tool's output. }
+  TToolOutputEvent = procedure(const AId, AName, AText: string) of object;
+
+  { Forwards a tool's chunks to a caller's OnToolOutput, capturing the call's
+    id and name. Chunks may arrive on the process runner's thread. Once Complete
+    is called, later chunks are dropped. }
+  TToolForwardObserver = class(TToolObserver)
+  private
+    FId, FName: string;
+    FOnOutput: TToolOutputEvent;
+    FDone: Boolean;
+  public
+    constructor Create(const AId, AName: string; AOnOutput: TToolOutputEvent);
+    procedure Next(const AText: string); override;
+    procedure Complete; override;
+  end;
+
+  { Receives the raw JSON arguments string and an output observer, and returns a
+    text result. On failure returns False with AError set; the loop turns that
+    into an error tool result. }
   TToolHandler = function(const AArgumentsJson: string;
-    out AResult: string; out AError: string): Boolean of object;
+    out AResult: string; out AError: string;
+    AObserver: TToolObserver = nil): Boolean of object;
 
   { Fires before dispatch. AReason is the model's stated reason for the call, or
     '' when the arguments had none or it was invalid. }
@@ -102,6 +132,7 @@ type
     OnReasoningDone: TReasoningDoneEvent;
     OnToolCall: TToolCallEvent;
     OnToolResult: TToolResultEvent;
+    OnToolOutput: TToolOutputEvent;
     OnUserQueued: TUserQueuedEvent;
   end;
 
@@ -263,7 +294,8 @@ type
   TBuiltinTools = class
   public
     function GetSystemTime(const AArgumentsJson: string;
-      out AResult: string; out AError: string): Boolean;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
   end;
 
 var
@@ -285,12 +317,38 @@ end;
 { --- TBuiltinTools ------------------------------------------------------ }
 
 function TBuiltinTools.GetSystemTime(const AArgumentsJson: string;
-  out AResult: string; out AError: string): Boolean;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
 begin
   AResult := FormatDateTime('yyyy-mm-dd"T"hh:nn:ss"Z"',
     LocalTimeToUniversal(Now));
   AError := '';
   Result := True;
+end;
+
+{ --- TToolForwardObserver ----------------------------------------------- }
+
+constructor TToolForwardObserver.Create(const AId, AName: string;
+  AOnOutput: TToolOutputEvent);
+begin
+  inherited Create;
+  FId := AId;
+  FName := AName;
+  FOnOutput := AOnOutput;
+  FDone := False;
+end;
+
+procedure TToolForwardObserver.Next(const AText: string);
+begin
+  if FDone or (AText = '') then
+    Exit;
+  if Assigned(FOnOutput) then
+    FOnOutput(FId, FName, AText);
+end;
+
+procedure TToolForwardObserver.Complete;
+begin
+  FDone := True;
 end;
 
 procedure RegisterDefaultTools(ATools: TToolRegistry);
@@ -689,6 +747,7 @@ var
   HandlerOk, ReasonOk: Boolean;
   Msg: TChatMessage;
   StartMs: Int64;
+  Observer: TToolForwardObserver;
 begin
   AAllOk := True;
   for I := 0 to High(ACalls) do
@@ -710,14 +769,23 @@ begin
     else
     begin
       HandlerError := '';
+      { A per-call observer forwards the tool's chunks to the caller's event. }
+      Observer := TToolForwardObserver.Create(ACalls[I].Id, ACalls[I].Name,
+        AEvents.OnToolOutput);
       try
-        HandlerOk := Tool.Handler(ACalls[I].Arguments, ResultText, HandlerError);
-      except
-        on E: Exception do
-        begin
-          HandlerOk := False;
-          HandlerError := E.Message;
+        try
+          HandlerOk := Tool.Handler(ACalls[I].Arguments, ResultText,
+            HandlerError, Observer);
+        except
+          on E: Exception do
+          begin
+            HandlerOk := False;
+            HandlerError := E.Message;
+          end;
         end;
+      finally
+        Observer.Complete;
+        Observer.Free;
       end;
       if not HandlerOk then
         ResultText := 'error: tool "' + ACalls[I].Name + '" failed: ' +

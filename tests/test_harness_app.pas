@@ -72,6 +72,7 @@ type
     function BlockKind(AIndex: Integer): TChatKind;
     function BlockLabel(AIndex: Integer): string;
     function BlockText(AIndex: Integer): string;
+    function BlockLive(AIndex: Integer): Boolean;
     function FindText(AKind: TChatKind; const ANeedle: string): Boolean;
     function BlockSignature: string;
     function DividerSignature: string;
@@ -86,6 +87,8 @@ type
     procedure TestStreamedTurnRendersAndReenables;
     procedure TestToolLineAppears;
     procedure TestEmptyToolResultShowsPlaceholder;
+    procedure TestAppStreamsToolOutput;
+    procedure TestResumeShowsTheResult;
     procedure TestErrorLineAppears;
     procedure TestApprovalModalResolvesGateAsk;
     procedure TestAsksDoNotStack;
@@ -311,6 +314,11 @@ begin
   Result := FApp.Panel.Stream.ItemAt(AIndex).Text;
 end;
 
+function THarnessAppTest.BlockLive(AIndex: Integer): Boolean;
+begin
+  Result := FApp.Panel.Stream.ItemAt(AIndex).Live;
+end;
+
 function THarnessAppTest.FindText(AKind: TChatKind; const ANeedle: string): Boolean;
 var
   I: Integer;
@@ -459,6 +467,84 @@ begin
   FSession.Queue.Push(E);
   FApp.Step;
   AssertTrue('placeholder shown', FindText(ckTool, '(no output)'));
+end;
+
+procedure THarnessAppTest.TestAppStreamsToolOutput;
+var
+  Call, Chunk, Res: TTurnEvent;
+begin
+  Build;
+  { A tool call opens the block; chunks stream into it and it reads as live. }
+  Call := Default(TTurnEvent);
+  Call.Kind := teToolCall;
+  Call.ToolId := 'call_1';
+  Call.ToolName := 'run_command';
+  Call.ToolReason := 'building';
+  FSession.Queue.Push(Call);
+
+  Chunk := Default(TTurnEvent);
+  Chunk.Kind := teToolOutput;
+  Chunk.ToolId := 'call_1';
+  Chunk.ToolName := 'run_command';
+  Chunk.Text := 'compiling ';
+  FSession.Queue.Push(Chunk);
+  Chunk.Text := 'done';
+  FSession.Queue.Push(Chunk);
+  FApp.Step;
+
+  AssertTrue('streamed body', FindText(ckTool, 'compiling done'));
+  AssertTrue('live while running', BlockLive(BlockCount - 1));
+  AssertEquals('reason is the title', 'building', BlockLabel(BlockCount - 1));
+
+  { The authoritative result replaces the streamed body on completion. }
+  Res := Default(TTurnEvent);
+  Res.Kind := teToolResult;
+  Res.ToolId := 'call_1';
+  Res.ToolName := 'run_command';
+  Res.Text := 'compiling done (exit 0)';
+  Res.ToolOk := True;
+  FSession.Queue.Push(Res);
+  FApp.Step;
+
+  AssertFalse('settled', BlockLive(BlockCount - 1));
+  AssertEquals('result replaced the stream', 'compiling done (exit 0)',
+    BlockText(BlockCount - 1));
+end;
+
+procedure THarnessAppTest.TestResumeShowsTheResult;
+var
+  Call, Chunk, Res: TTurnEvent;
+begin
+  Build;
+  { Stream a tool to completion, then check the settled body is exactly the
+    authoritative result: a resumed view renders the same ledger content, so
+    the two must match. }
+  Call := Default(TTurnEvent);
+  Call.Kind := teToolCall;
+  Call.ToolId := 'call_1';
+  Call.ToolName := 'run_command';
+  Call.ToolReason := 'building';
+  FSession.Queue.Push(Call);
+
+  Chunk := Default(TTurnEvent);
+  Chunk.Kind := teToolOutput;
+  Chunk.ToolId := 'call_1';
+  Chunk.ToolName := 'run_command';
+  Chunk.Text := 'partial';
+  FSession.Queue.Push(Chunk);
+
+  Res := Default(TTurnEvent);
+  Res.Kind := teToolResult;
+  Res.ToolId := 'call_1';
+  Res.ToolName := 'run_command';
+  Res.Text := 'the result';
+  Res.ToolOk := True;
+  FSession.Queue.Push(Res);
+  FApp.Step;
+
+  AssertEquals('live final body is the result', 'the result',
+    BlockText(BlockCount - 1));
+  AssertFalse('not live after settle', BlockLive(BlockCount - 1));
 end;
 
 procedure THarnessAppTest.TestErrorLineAppears;

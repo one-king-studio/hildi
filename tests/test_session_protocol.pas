@@ -129,6 +129,12 @@ begin
       AEvent.Reason := 'idle';
     ekReasoningDone:
       AEvent.ElapsedMs := 2300;
+    ekToolOutput:
+      begin
+        AEvent.ToolId := 'call_1';
+        AEvent.ToolName := 'run_command';
+        AEvent.Text := 'chunk';
+      end;
   end;
 end;
 

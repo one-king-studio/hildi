@@ -239,6 +239,13 @@ begin
         E.Text := AEvent.Text;
         E.ToolOk := AEvent.ToolOk;
       end;
+    ekToolOutput:
+      begin
+        E.Kind := teToolOutput;
+        E.ToolId := AEvent.ToolId;
+        E.ToolName := AEvent.ToolName;
+        E.Text := AEvent.Text;
+      end;
     ekApprovalRequest:
       begin
         E.Kind := teApprovalAsk;

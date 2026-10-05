@@ -31,7 +31,9 @@ type
     ekTurnFinished, ekError, ekGap, ekLoopExited,
     { The reasoning phase of a response ended; elapsed_ms is its duration.
       Appended last so stored ordinals are unchanged. }
-    ekReasoningDone);
+    ekReasoningDone,
+    { A streamed chunk of a tool's output. Appended last for the same reason. }
+    ekToolOutput);
 
   { One streamed event. A flat record with optional fields, the same shape as
     TTurnEvent: only the fields named by Kind are meaningful. }
@@ -155,7 +157,8 @@ const
     'tool_call', 'tool_result',
     'approval_request', 'approval_resolved',
     'drive_requested', 'drive_granted', 'drive_released',
-    'turn_finished', 'error', 'gap', 'loop_exited', 'reasoning_done');
+    'turn_finished', 'error', 'gap', 'loop_exited', 'reasoning_done',
+    'tool_output');
 
   MessageKindNames: array[TSessionMessageKind] of string = (
     'hello', 'attached', 'event', 'reply', 'detached', 'error',
@@ -521,6 +524,12 @@ begin
       PutStr(O, 'reason', E.Reason);
     ekReasoningDone:
       PutInt(O, 'elapsed_ms', E.ElapsedMs);
+    ekToolOutput:
+      begin
+        PutStr(O, 'tool_id', E.ToolId);
+        PutStr(O, 'name', E.ToolName);
+        PutStr(O, 'text', E.Text);
+      end;
   end;
 end;
 
@@ -604,6 +613,12 @@ begin
       E.Reason := OptStr(O, 'reason');
     ekReasoningDone:
       E.ElapsedMs := OptInt64(O, 'elapsed_ms', 0);
+    ekToolOutput:
+      begin
+        E.ToolId := OptStr(O, 'tool_id');
+        E.ToolName := OptStr(O, 'name');
+        E.Text := OptStr(O, 'text');
+      end;
   end;
   Result := True;
 end;

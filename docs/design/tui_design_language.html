@@ -135,6 +135,7 @@
   <a href="#markdown">Markdown</a>
   <a href="#turnstats">Turn stats</a>
   <a href="#sessionheader">Session header</a>
+  <a href="#toolstreaming">Tool streaming</a>
   <a href="#components">Components</a>
 </nav>
 
@@ -686,6 +687,27 @@ thought  Thought for &lt;duration&gt;   (0 → "Thought")</pre>
       <pre class="mock">id       first 12 hex
 context  final context [shades] pct%</pre>
       <p class="legend">The session's consumption (in/out/cached/time/req) is on the <a href="#turnstats">status bar</a>. Cost is omitted for now; it will be tracked per turn alongside the provider and model.</p>
+    </div>
+  </div>
+</section>
+
+<section id="toolstreaming">
+  <h2>Tool streaming</h2>
+  <p class="note">A tool's output is a stream: a tool may flush chunks as it produces them and then complete with its authoritative result. While it runs the tool block is <b>live</b> — auto-expanded, showing only its tail — and when the result arrives it settles back to a collapsed line whose body is the result, so a resumed session renders the same thing.</p>
+  <div class="grid cols-2">
+    <div class="card"><h4>While running</h4>
+      <pre class="mock"> <span class="m">─ building ─────────────────────────────────── ▼ ─</span>
+  <span class="m">npm warn deprecated inflight@1.0.6</span>
+  <span class="m">added 214 packages in 8s</span>
+  <span class="m">&gt; tsc -p .</span></pre>
+      <p class="legend">Live: the block auto-expands and shows only the last few lines (<code>LiveTailLines</code>), so a long build never pushes the transcript around.</p>
+    </div>
+    <div class="card"><h4>After completion</h4>
+      <pre class="mock"> <span class="m">─ building ─────────────────────────────────── ▶ ─</span>
+  <span class="m">$ npm install &amp;&amp; tsc -p .</span>
+  <span class="m">added 214 packages in 8s</span>
+  <span class="m">[exit 0]</span></pre>
+      <p class="legend">Settled: collapsed, body replaced by the authoritative result (the shell transcript, capped at 32&nbsp;KB) — identical to the resumed view. Only <code>run_command</code> streams today; the other tools are single-shot.</p>
     </div>
   </div>
 </section>

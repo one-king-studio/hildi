@@ -23,9 +23,10 @@ type
     LastCwd: string;
     LastTimeoutMs: QWord;
     ResultExec: TCommandExecution;
+    Chunks: array of string;   // forwarded to the observer, in order
     constructor Create;
     function Execute(const AProfile: TShellProfile; const ACommand,
-      AWorkDir: string; ATimeoutMs: QWord;
+      AWorkDir: string; ATimeoutMs: QWord; AObserver: TToolObserver;
       out AExecution: TCommandExecution): Boolean;
   end;
 
@@ -37,6 +38,13 @@ type
     Calls: Integer;
     LastAsk: TApprovalAsk;
     function Prompt(const AAsk: TApprovalAsk): TApprovalChoice;
+  end;
+
+  { Collects streamed chunks into one string. }
+  TChunkLog = class
+  public
+    Text: string;
+    procedure OnChunk(const AId, AName, AText: string);
   end;
 
   TCommandToolTest = class(TTestCase)
@@ -74,6 +82,9 @@ type
     procedure TestHandlerNeverRaises;
     procedure TestCommandPreservesUtf8;
     procedure TestProcessExecutorRunsCommand;
+    procedure TestRunCommandStreamsOutput;
+    procedure TestCommandTimeoutIsClampedToMax;
+    procedure TestTimeoutIsHonouredWithoutACap;
   end;
 
 implementation
@@ -89,8 +100,10 @@ begin
 end;
 
 function TFakeExecutor.Execute(const AProfile: TShellProfile;
-  const ACommand, AWorkDir: string; ATimeoutMs: QWord;
+  const ACommand, AWorkDir: string; ATimeoutMs: QWord; AObserver: TToolObserver;
   out AExecution: TCommandExecution): Boolean;
+var
+  I: Integer;
 begin
   if RaiseOnExecute then
     raise Exception.Create('executor boom');
@@ -98,6 +111,9 @@ begin
   LastCommand := ACommand;
   LastCwd := AWorkDir;
   LastTimeoutMs := ATimeoutMs;
+  for I := 0 to High(Chunks) do
+    if AObserver <> nil then
+      AObserver.Next(Chunks[I]);
   AExecution := ResultExec;
   Result := ReturnOk;
 end;
@@ -110,6 +126,11 @@ begin
   Result.Allowed := Allowed;
   Result.OptionKey := OptionKey;
   Result.Scope := Scope;
+end;
+
+procedure TChunkLog.OnChunk(const AId, AName, AText: string);
+begin
+  Text := Text + AText;
 end;
 
 procedure TCommandToolTest.SetUp;
@@ -548,10 +569,84 @@ var
 begin
   Exec := TProcessCommandExecutor.Create;
   AssertTrue('ok', Exec.Execute(DefaultShellProfile, 'printf hello', '', 5000,
-    ExecResult));
+    nil, ExecResult));
   AssertEquals('exit code', 0, ExecResult.ExitCode);
   AssertTrue('output captured', Pos('hello', ExecResult.Output) > 0);
   AssertFalse('not timed out', ExecResult.TimedOut);
+end;
+
+procedure TCommandToolTest.TestRunCommandStreamsOutput;
+var
+  Tool: TCommandTool;
+  R, E: string;
+  Log: TChunkLog;
+  Observer: TToolForwardObserver;
+begin
+  AddRule(aeAllow, 'run_command:echo', [], True);
+  FExecutor.ResultExec.Output := 'one two ';
+  SetLength(FExecutor.Chunks, 2);
+  FExecutor.Chunks[0] := 'one ';
+  FExecutor.Chunks[1] := 'two ';
+  Log := TChunkLog.Create;
+  try
+    Observer := TToolForwardObserver.Create('call_1', 'run_command',
+      Log.OnChunk);
+    try
+      Tool := BuildTool(nil, 0);
+      try
+        AssertTrue('ok', Tool.Run('{"command":"echo hi","reason":"r"}', R, E,
+          Observer));
+      finally
+        Tool.Free;
+      end;
+    finally
+      Observer.Free;
+    end;
+    AssertEquals('streamed chunks', 'one two ', Log.Text);
+  finally
+    Log.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestCommandTimeoutIsClampedToMax;
+var
+  Tool: TCommandTool;
+  R, E: string;
+  Config: TCommandToolConfig;
+begin
+  AddRule(aeAllow, 'run_command:echo', [], True);
+  Config := MakeConfig(0);
+  Config.MaxTimeoutMs := 5000;
+  Tool := TCommandTool.Create(Config, ServiceWith(nil), FExecutor);
+  try
+    AssertTrue('above cap', Tool.Run(
+      '{"command":"echo hi","reason":"r","timeout_ms":999999}', R, E));
+    AssertEquals('clamped to max', 5000, FExecutor.LastTimeoutMs);
+    AssertTrue('below cap', Tool.Run(
+      '{"command":"echo hi","reason":"r","timeout_ms":2000}', R, E));
+    AssertEquals('requested kept', 2000, FExecutor.LastTimeoutMs);
+  finally
+    Tool.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestTimeoutIsHonouredWithoutACap;
+var
+  Tool: TCommandTool;
+  R, E: string;
+begin
+  AddRule(aeAllow, 'run_command:echo', [], True);
+  { With no MaxTimeoutMs the model defines its own timeout, so a long request
+    passes through untouched. }
+  Tool := BuildTool(nil, 0);
+  try
+    AssertTrue('long request', Tool.Run(
+      '{"command":"echo hi","reason":"r","timeout_ms":1800000}', R, E));
+    AssertEquals('honoured as-is', Int64(1800000),
+      Int64(FExecutor.LastTimeoutMs));
+  finally
+    Tool.Free;
+  end;
 end;
 
 initialization

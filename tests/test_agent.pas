@@ -23,9 +23,11 @@ type
   TFailTools = class
   public
     function AlwaysFail(const AArgumentsJson: string;
-      out AResult: string; out AError: string): Boolean;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
     function AlwaysRaise(const AArgumentsJson: string;
-      out AResult: string; out AError: string): Boolean;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
   end;
 
   { Captures the raw arguments of each successful handler call. }
@@ -35,9 +37,18 @@ type
     FLastArgs: string;
   public
     function Handle(const AArgumentsJson: string;
-      out AResult: string; out AError: string): Boolean;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
     property Calls: Integer read FCalls;
     property LastArgs: string read FLastArgs;
+  end;
+
+  { Emits two chunks through the observer, then returns a joined result. }
+  TStreamTool = class
+  public
+    function Handle(const AArgumentsJson: string;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
   end;
 
   { Records every agent event as a line, to assert on ordering and content. }
@@ -52,6 +63,7 @@ type
     procedure OnReasoningDone(ADurationMs: Int64);
     procedure OnToolCall(const AId, AName, AArguments, AReason: string);
     procedure OnToolResult(const AId, AName, AResult: string; AOk: Boolean);
+    procedure OnToolOutput(const AId, AName, AText: string);
     function Has(const AFragment: string): Boolean;
     function IndexOfFragment(const AFragment: string): Integer;
   end;
@@ -190,6 +202,9 @@ type
     procedure TestToolResultEventFiresWithResult;
     procedure TestToolResultEventReportsFailure;
     procedure TestToolCallAndResultEventsAreInOrder;
+    procedure TestObserverForwardsChunks;
+    procedure TestSingleShotToolEmitsNoChunks;
+    procedure TestForwardObserverDropsChunksAfterComplete;
     procedure TestV1SendOverloadStillWorks;
     procedure TestRegistrationAddsRequiredReasonParam;
     procedure TestRegistrationPreservesExistingParams;
@@ -232,7 +247,8 @@ end;
 { TCaptureTool }
 
 function TCaptureTool.Handle(const AArgumentsJson: string;
-  out AResult: string; out AError: string): Boolean;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
 begin
   Inc(FCalls);
   FLastArgs := AArgumentsJson;
@@ -241,10 +257,27 @@ begin
   Result := True;
 end;
 
+{ TStreamTool }
+
+function TStreamTool.Handle(const AArgumentsJson: string;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
+begin
+  if AObserver <> nil then
+  begin
+    AObserver.Next('chunk-1');
+    AObserver.Next('chunk-2');
+  end;
+  AResult := 'chunk-1chunk-2';
+  AError := '';
+  Result := True;
+end;
+
 { TFailTools }
 
 function TFailTools.AlwaysFail(const AArgumentsJson: string;
-  out AResult: string; out AError: string): Boolean;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
 begin
   AResult := '';
   AError := 'boom';
@@ -291,6 +324,11 @@ begin
   FLog.Add('result:' + AId + ':' + BoolToStr(AOk, True) + ':' + AResult);
 end;
 
+procedure TEventLog.OnToolOutput(const AId, AName, AText: string);
+begin
+  FLog.Add('out:' + AId + ':' + AName + ':' + AText);
+end;
+
 function TEventLog.Has(const AFragment: string): Boolean;
 begin
   Result := IndexOfFragment(AFragment) >= 0;
@@ -320,7 +358,8 @@ begin
 end;
 
 function TFailTools.AlwaysRaise(const AArgumentsJson: string;
-  out AResult: string; out AError: string): Boolean;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
 begin
   AResult := '';
   AError := '';
@@ -1444,6 +1483,91 @@ begin
     CallIdx := Log.IndexOfFragment('call:call_1');
     ResultIdx := Log.IndexOfFragment('result:call_1');
     AssertTrue('call before result', (CallIdx >= 0) and (ResultIdx > CallIdx));
+  finally
+    Log.Free;
+  end;
+end;
+
+procedure TAgentLoopTest.TestObserverForwardsChunks;
+var
+  Log: TEventLog;
+  Events: TAgentEvents;
+  Answer: string;
+  Err: TLLMError;
+  Spec: TToolSpec;
+  StreamTool: TStreamTool;
+begin
+  BuildLoop('', 8);
+  StreamTool := TStreamTool.Create;
+  try
+    Spec.Name := 'stream_tool';
+    Spec.Description := 'streams output';
+    Spec.ParametersJson := '{"type":"object","properties":{}}';
+    FTools.Add(Spec, StreamTool.Handle);
+    Log := TEventLog.Create;
+    try
+      FFake.AddResponse([ToolNameFrame(0, 'call_1', 'stream_tool'),
+        ToolArgsFrame(0, '{"reason":"test"}'), FinishFrame('tool_calls'),
+        DoneFrame]);
+      FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
+      Events := Default(TAgentEvents);
+      Events.OnToolOutput := Log.OnToolOutput;
+      AssertTrue('send ok', FLoop.Send('go', Events, Answer, Err));
+      AssertTrue('first chunk',
+        Log.Has('out:call_1:stream_tool:chunk-1'));
+      AssertTrue('second chunk',
+        Log.Has('out:call_1:stream_tool:chunk-2'));
+    finally
+      Log.Free;
+    end;
+  finally
+    StreamTool.Free;
+  end;
+end;
+
+procedure TAgentLoopTest.TestSingleShotToolEmitsNoChunks;
+var
+  Log: TEventLog;
+  Events: TAgentEvents;
+  Answer: string;
+  Err: TLLMError;
+begin
+  BuildLoop('', 8);
+  RegisterDefaultTools(FTools);
+  Log := TEventLog.Create;
+  try
+    FFake.AddResponse([ToolNameFrame(0, 'call_1', 'get_system_time'),
+      ToolArgsFrame(0, '{"reason":"test"}'), FinishFrame('tool_calls'),
+      DoneFrame]);
+    FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
+    Events := Default(TAgentEvents);
+    Events.OnToolOutput := Log.OnToolOutput;
+    AssertTrue('send ok', FLoop.Send('go', Events, Answer, Err));
+    AssertEquals('no chunks', -1, Log.IndexOfFragment('out:'));
+  finally
+    Log.Free;
+  end;
+end;
+
+procedure TAgentLoopTest.TestForwardObserverDropsChunksAfterComplete;
+var
+  Log: TEventLog;
+  Observer: TToolForwardObserver;
+begin
+  Log := TEventLog.Create;
+  try
+    Observer := TToolForwardObserver.Create('id_1', 'stream_tool',
+      Log.OnToolOutput);
+    try
+      Observer.Next('before');
+      Observer.Complete;
+      Observer.Next('after');
+    finally
+      Observer.Free;
+    end;
+    AssertTrue('before complete', Log.Has('out:id_1:stream_tool:before'));
+    AssertEquals('after complete dropped', -1,
+      Log.IndexOfFragment('after'));
   finally
     Log.Free;
   end;
