@@ -20,8 +20,8 @@ uses
   hildegard.helper.tui.approvalmodal,
   hildegard.helper.tui.panel, hildegard.helper.tui.theme,
   hildegard.helper.tui.app, hildegard.helper.harness.turn,
-  hildegard.helper.harness.session, hildegard.helper.harness.stats,
-  hildegard.helper.session;
+  hildegard.helper.harness.driver, hildegard.helper.harness.session,
+  hildegard.helper.harness.stats, hildegard.helper.session;
 
 type
   { Builds the tree and owns the TTuiApp and the current worker. The session is
@@ -31,13 +31,13 @@ type
     FSurface: ISurface;
     FInput: IInputSource;
     FSession: THarnessSession;
+    FDriver: ISessionDriver;
     FApp: TTuiApp;
     FTheme: TTheme;
     FPanel: TChatPanel;
-    FWorker: TTurnWorker;
     FBusy: Boolean;
     FModal: TApprovalModal;
-    FPendingRequest: Integer;
+    FPendingAskRef: string;
     FCloseModal: Boolean;
     FAskQueue: array of TTurnEvent;
     FStatusText: string;
@@ -72,6 +72,9 @@ type
       body yet. The result speaks for itself (a tool adds its own call context
       when that helps), so no [ok]/[failed] prefix is added. }
     procedure AppendToolResult(ABlock: TChatItem; const AText: string);
+    { A tool call whose result never arrived (interrupted, or a crash on resume)
+      still gets an acknowledgement, so no tool block is ever blank. }
+    procedure SettleOpenTool;
     { Put text at the front of the compose box, keeping whatever is typed. }
     procedure PrependCompose(const AText: string);
     { Undo the current turn's UI after an early cancel and restore the prompt. }
@@ -79,8 +82,9 @@ type
     { Drop the in-flight assistant/thinking blocks of a pending response that was
       never persisted, so the live view matches a resumed session. }
     procedure RollBackPendingResponse;
-    { Show a prompt the loop injected, dropping the response it superseded. }
-    procedure HandleQueuedPrompt(const AText: string);
+    { Show a user prompt (the turn's own, or a queued one that superseded the
+      response that was streaming), dropping the response it superseded. }
+    procedure HandleUserMessage(const AText: string);
     procedure UpdateStats;
     procedure HandleEscape(Sender: TObject);
     function ComposeIsEmpty: Boolean;
@@ -96,8 +100,8 @@ type
     procedure Quit(Sender: TObject);
   public
     constructor Create(const ASurface: ISurface; const AInput: IInputSource;
-      ASession: THarnessSession; AMode: TThemeMode = tmAuto;
-      ALightDetected: Boolean = False);
+      ASession: THarnessSession; ADriver: ISessionDriver;
+      AMode: TThemeMode = tmAuto; ALightDetected: Boolean = False);
     destructor Destroy; override;
 
     { One iteration: drain the queue, resolve any answered approval modal, then
@@ -218,12 +222,14 @@ begin
 end;
 
 constructor THarnessApp.Create(const ASurface: ISurface; const AInput: IInputSource;
-  ASession: THarnessSession; AMode: TThemeMode; ALightDetected: Boolean);
+  ASession: THarnessSession; ADriver: ISessionDriver; AMode: TThemeMode;
+  ALightDetected: Boolean);
 begin
   inherited Create;
   FSurface := ASurface;
   FInput := AInput;
   FSession := ASession;
+  FDriver := ADriver;
   FTheme := SelectTheme(AMode, ALightDetected);
   FApp := TTuiApp.Create(ASurface, AInput, BuildTree);
   FApp.ScreenBg := FTheme.Bg;
@@ -241,14 +247,10 @@ end;
 
 procedure THarnessApp.CancelTurn;
 begin
-  if FWorker <> nil then
-  begin
-    FSession.Gate.Cancel;
-    if not FWorker.Finished then
-      FWorker.WaitFor;
-    FWorker.Free;
-    FWorker := nil;
-  end;
+  { Releasing the driver detaches from the runtime (which keeps the turn) or, on
+    the local driver, cancels and joins the worker. }
+  if FDriver <> nil then
+    FDriver.Close;
   FBusy := False;
 end;
 
@@ -341,9 +343,9 @@ end;
 
 procedure THarnessApp.InterruptTurn;
 begin
-  if FWorker <> nil then
+  if FDriver <> nil then
   begin
-    FWorker.RequestCancel;
+    FDriver.Interrupt;
     SetState(psThinking, 'cancelling');
   end;
 end;
@@ -375,7 +377,10 @@ begin
     Rec := History[I];
     case Rec.Role of
       mrUser:
-        FPanel.Stream.Add(ckUser, '', Rec.Content);
+        { A user row is never empty in practice; skip one that is rather than
+          draw a blank block. }
+        if Rec.Content <> '' then
+          FPanel.Stream.Add(ckUser, '', Rec.Content);
       mrAssistant:
         { An intermediate assistant row can be empty (it only carried tool
           calls), so do not draw an empty bubble. }
@@ -414,30 +419,36 @@ begin
         ;
     end;
   end;
+  { A tool call whose result was never recorded (a crash mid-tool) still gets an
+    acknowledgement, so no tool block is blank. }
+  for I := Head to High(ToolBlocks) do
+    if ToolBlocks[I].Text = '' then
+      ToolBlocks[I].SetText('(no result)');
 end;
 
 procedure THarnessApp.Submit(const AText: string);
 begin
   if FBusy then
   begin
-    { A turn is in flight: hand the prompt to the running loop, which injects
-      it at its next boundary. }
-    if FWorker <> nil then
-      FWorker.QueuePrompt(AText);
+    { A turn is in flight: hand the prompt to the driver, which injects it at
+      the runtime's next boundary. }
+    if FDriver <> nil then
+      FDriver.QueuePrompt(AText);
     Exit;
   end;
   FUserPrompt := AText;
-  FUserBlock := FPanel.Stream.Add(ckUser, '', AText);
+  FUserBlock := nil;
   { The compose stays active while a turn runs, so the operator can type the
-    next prompt to inject mid-flight. }
+    next prompt to inject mid-flight. The user block is added when the prompt is
+    echoed (teUserMessage), so live and replayed turns render identically. }
   FBusy := True;
   SyncBusy;
   SetState(psThinking, 'thinking');
   FAssistant := nil;
   FThought := nil;
   FTool := nil;
-  FWorker := TTurnWorker.Create(FSession.Loop, FSession.Queue, AText);
-  FWorker.Start;
+  if FDriver <> nil then
+    FDriver.StartTurn(AText);
 end;
 
 procedure THarnessApp.FinalizeThinking;
@@ -453,11 +464,24 @@ begin
 end;
 
 procedure THarnessApp.AppendToolResult(ABlock: TChatItem; const AText: string);
+var
+  Text: string;
 begin
+  { A tool that produced nothing still ran; show a marker rather than a blank. }
+  Text := AText;
+  if Text = '' then
+    Text := '(no output)';
   if ABlock.Text = '' then
-    ABlock.SetText(AText)
+    ABlock.SetText(Text)
   else
-    ABlock.AppendText(#10 + #10 + AText);
+    ABlock.AppendText(#10 + #10 + Text);
+end;
+
+procedure THarnessApp.SettleOpenTool;
+begin
+  if (FTool <> nil) and (FTool.Text = '') then
+    FTool.SetText('(no result)');
+  FTool := nil;
 end;
 
 procedure THarnessApp.PrependCompose(const AText: string);
@@ -512,8 +536,14 @@ begin
   FApp.Invalidate;
 end;
 
-procedure THarnessApp.HandleQueuedPrompt(const AText: string);
+procedure THarnessApp.HandleUserMessage(const AText: string);
+var
+  Block: TChatItem;
 begin
+  { An empty user message carries no information (and a mis-mapped event can
+    produce one); never draw a blank user block. }
+  if AText = '' then
+    Exit;
   { A queued prompt supersedes whatever was streaming: drop those blocks and
     show the prompt as the next user turn. }
   if FAssistant <> nil then
@@ -526,24 +556,22 @@ begin
     FPanel.Stream.Remove(FThought);
     FThought := nil;
   end;
-  FTool := nil;
-  FPanel.Stream.Add(ckUser, '', AText);
+  SettleOpenTool;
+  Block := FPanel.Stream.Add(ckUser, '', AText);
+  { The turn's first user message is the one an early cancel restores; a queued
+    prompt leaves the first block in place. }  if FUserBlock = nil then
+    FUserBlock := Block;
   FApp.Invalidate;
 end;
 
 procedure THarnessApp.HandleTurnEvent(const E: TTurnEvent);
 begin
-  { A queued prompt supersedes the response that was streaming; handle it before
-    anything settles that response. }
-  if E.Kind = tePromptQueued then
-  begin
-    HandleQueuedPrompt(E.Text);
-    Exit;
-  end;
   { Anything that is not more reasoning means the reasoning stream has ended. }
   if E.Kind <> teReasoningDelta then
     FinalizeThinking;
   case E.Kind of
+    teUserMessage:
+      HandleUserMessage(E.Text);
     teAssistantDelta:
       begin
         if FAssistant = nil then
@@ -654,7 +682,7 @@ var
 begin
   FModal := TApprovalModal.Create(E.Ask, FTheme);
   FModal.OnChoose := OnApprovalChosen;
-  FPendingRequest := E.RequestId;
+  FPendingAskRef := E.AskRef;
   Wrap := TContainer.Create([Fill(1), Auto, Fill(1)], [Fill(1), Auto, Fill(1)]);
   Wrap.Add(FModal, 1, 1);
   R := Default(TRect);
@@ -667,7 +695,8 @@ end;
 
 procedure THarnessApp.OnApprovalChosen(const AChoice: TApprovalChoice);
 begin
-  FSession.Gate.Answer(FPendingRequest, AChoice);
+  if FDriver <> nil then
+    FDriver.AnswerAsk(FPendingAskRef, AChoice);
   { Defer popping: we are inside the modal's own event handler. }
   FCloseModal := True;
 end;
@@ -688,18 +717,12 @@ end;
 
 procedure THarnessApp.FinishTurn(AState: TPanelState; const ALabel: string);
 begin
-  if FWorker <> nil then
-  begin
-    if not FWorker.Finished then
-      FWorker.WaitFor;
-    FWorker.Free;
-    FWorker := nil;
-  end;
   FBusy := False;
   FInterruptPending := False;
   FAssistant := nil;
   FThought := nil;
-  FTool := nil;
+  SettleOpenTool;
+  FUserBlock := nil;
   FPanel.SetComposeActive(True);
   SetState(AState, ALabel);
   UpdateStats;
@@ -710,7 +733,9 @@ procedure THarnessApp.DrainQueue;
 var
   E: TTurnEvent;
 begin
-  while FSession.Queue.Pop(E) do
+  if FDriver = nil then
+    Exit;
+  while FDriver.PopEvent(E) do
     HandleTurnEvent(E);
 end;
 

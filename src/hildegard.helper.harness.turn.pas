@@ -41,6 +41,7 @@ type
     ToolReason: string;        // the model's reason ('' when absent/invalid)
     ToolOk: Boolean;           // teToolResult
     RequestId: Integer;        // teApprovalAsk; 0 otherwise
+    AskRef: string;            // teApprovalAsk: the reference to answer by
     Ask: TApprovalAsk;         // teApprovalAsk
     ErrorCode: TLLMErrorCode;  // teError
     Dropped: Boolean;          // teError: an early cancel dropped the turn

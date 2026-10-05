@@ -30,6 +30,10 @@ type
     { Bytes a tool result may contribute to the prompt; 0 => default, negative
       => uncapped. }
     ToolResultCap: Integer;
+    { True for a headless *client*: open the workspace/store/session and load
+      history, but do not build the LLM client, tools, loop, gate, or queue.
+      The runtime owns the loop. }
+    NoLoop: Boolean;
     { Optional test seam: when set, the client uses this transport instead of
       the real HTTP transport. }
     Transport: TLLMTransport;
@@ -250,6 +254,15 @@ begin
   { The full block history for the initial render; empty for a new session. }
   if (FStore <> nil) and (FSessionId <> '') then
     FStore.QueryMessages(FSessionId, FHistory, StoreErr);
+
+  { A headless client needs only the store/workspace/session handle; the
+    runtime owns the loop. }
+  if AConfig.NoLoop then
+  begin
+    Result := True;
+    Exit;
+  end;
+
   FQueue := TTurnQueue.Create;
   FGate := TApprovalGate.Create(FQueue);
 

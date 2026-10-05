@@ -15,7 +15,8 @@ uses
   hildegard.helper.tui.surface, hildegard.helper.tui.widget,
   hildegard.helper.tui.chat,
   hildegard.helper.harness.turn, hildegard.helper.harness.session,
-  hildegard.helper.harness.app, hildegard.helper.store,
+  hildegard.helper.harness.driver, hildegard.helper.harness.app,
+  hildegard.helper.store,
   hildegard.helper.session, llm_fakes;
 
 type
@@ -82,6 +83,7 @@ type
   published
     procedure TestStreamedTurnRendersAndReenables;
     procedure TestToolLineAppears;
+    procedure TestEmptyToolResultShowsPlaceholder;
     procedure TestErrorLineAppears;
     procedure TestApprovalModalResolvesGateAsk;
     procedure TestAsksDoNotStack;
@@ -186,7 +188,7 @@ begin
   FInput := TInputSourceScripted.Create;
   FSession := THarnessSession.Open(Config, Err);
   AssertTrue('session opened: ' + Err, FSession <> nil);
-  FApp := THarnessApp.Create(FSurface, FInput, FSession);
+  FApp := THarnessApp.Create(FSurface, FInput, FSession, LocalDriver(FSession));
   FApp.Step;   // initial layout/render
 end;
 
@@ -206,7 +208,7 @@ begin
   Cfg.StorePath := FStorePath;
   FSession := THarnessSession.Open(Cfg, Err);
   AssertTrue('session opened: ' + Err, FSession <> nil);
-  FApp := THarnessApp.Create(FSurface, FInput, FSession);
+  FApp := THarnessApp.Create(FSurface, FInput, FSession, LocalDriver(FSession));
   FApp.Step;
 end;
 
@@ -412,6 +414,22 @@ begin
   AssertEquals('lead-in text', 'let me check ', BlockText(1));
 end;
 
+procedure THarnessAppTest.TestEmptyToolResultShowsPlaceholder;
+var
+  E: TTurnEvent;
+begin
+  Build;
+  { A tool that produced nothing still ran; the block shows a marker. }
+  E := Default(TTurnEvent);
+  E.Kind := teToolResult;
+  E.ToolName := 'glob';
+  E.Text := '';
+  E.ToolOk := True;
+  FSession.Queue.Push(E);
+  FApp.Step;
+  AssertTrue('placeholder shown', FindText(ckTool, '(no output)'));
+end;
+
 procedure THarnessAppTest.TestErrorLineAppears;
 var
   I: Integer;
@@ -561,7 +579,7 @@ begin
   Cfg.Resume := True;
   FSession := THarnessSession.Open(Cfg, Err);
   AssertTrue('resumed: ' + Err, FSession <> nil);
-  FApp := THarnessApp.Create(FSurface, FInput, FSession);
+  FApp := THarnessApp.Create(FSurface, FInput, FSession, LocalDriver(FSession));
   FApp.Step;
 
   SawReasoning := False;
@@ -641,7 +659,7 @@ begin
   Cfg.Resume := True;
   FSession := THarnessSession.Open(Cfg, Err);
   AssertTrue('resumed: ' + Err, FSession <> nil);
-  FApp := THarnessApp.Create(FSurface, FInput, FSession);
+  FApp := THarnessApp.Create(FSurface, FInput, FSession, LocalDriver(FSession));
   FApp.Step;
 
   AssertEquals('resumed stats identical to live', Live, FApp.StatsText);
@@ -759,7 +777,7 @@ begin
   Cfg.Resume := True;
   FSession := THarnessSession.Open(Cfg, Err);
   AssertTrue('resumed: ' + Err, FSession <> nil);
-  FApp := THarnessApp.Create(FSurface, FInput, FSession);
+  FApp := THarnessApp.Create(FSurface, FInput, FSession, LocalDriver(FSession));
   FApp.Step;
 
   AssertEquals('resumed blocks identical to live', Live, BlockSignature);
