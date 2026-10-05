@@ -1158,6 +1158,12 @@ begin
         E.Text := AEvent.Text;
         Broadcast(E);
       end;
+    teReasoningDone:
+      begin
+        E := EmitEvent(ekReasoningDone);
+        E.ElapsedMs := AEvent.ElapsedMs;
+        Broadcast(E);
+      end;
     teToolCall:
       begin
         E := EmitEvent(ekToolCall);

@@ -241,7 +241,7 @@ begin
     S.CreateSession(WorkspaceId, SessionId, Err);
     Conv := TSqliteConversationStore.Create(S, SessionId);
     Conv.Append(UserMsg('hello'));
-    Conv.AppendReasoning('thinking...');
+    Conv.AppendReasoning('thinking...', 0);
     Conv.AppendError('boom', 'detail');
     Conv.Append(UserMsg('again'));
     Msgs := Conv.Messages;
@@ -402,13 +402,14 @@ begin
     S.CreateSession(WorkspaceId, SessionId, Err);
     Conv := TSqliteConversationStore.Create(S, SessionId);
     Conv.Append(UserMsg('hi'));
-    Conv.AppendReasoning('why');
+    Conv.AppendReasoning('why', 2300);
     Conv.AppendError('bad', 'details');
 
     AssertTrue('query', S.QueryMessages(SessionId, Records, Err));
     AssertEquals('three blocks', 3, Length(Records));
     AssertEquals('reasoning role', Ord(mrReasoning), Ord(Records[1].Role));
     AssertEquals('reasoning content', 'why', Records[1].Content);
+    AssertEquals('reasoning duration', 2300, Records[1].DurationMs);
     AssertEquals('error role', Ord(mrError), Ord(Records[2].Role));
     AssertEquals('error content', 'bad', Records[2].Content);
     AssertEquals('error detail', 'details', Records[2].ToolArguments);

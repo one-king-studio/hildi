@@ -27,7 +27,8 @@ type
     tePromptQueued,     // a queued prompt was injected into the loop
     teApprovalAsk,      // the worker is blocked awaiting an answer
     teDone,             // the turn completed successfully
-    teError             // the turn failed
+    teError,            // the turn failed
+    teReasoningDone     // the reasoning phase ended (ElapsedMs = its duration)
   );
 
   TTurnEvent = record
@@ -115,6 +116,7 @@ type
       ADropped: Boolean = False);
     procedure OnText(const AText: string);
     procedure OnReasoning(const AText: string);
+    procedure OnReasoningDone(ADurationMs: Int64);
     procedure OnToolCall(const AId, AName, AArguments, AReason: string);
     procedure OnToolResult(const AId, AName, AResult: string; AOk: Boolean);
     procedure OnUserQueued(const AText: string);
@@ -369,6 +371,16 @@ begin
   Emit(Event);
 end;
 
+procedure TTurnWorker.OnReasoningDone(ADurationMs: Int64);
+var
+  Event: TTurnEvent;
+begin
+  Event := Default(TTurnEvent);
+  Event.Kind := teReasoningDone;
+  Event.ElapsedMs := ADurationMs;
+  Emit(Event);
+end;
+
 procedure TTurnWorker.OnToolCall(const AId, AName, AArguments, AReason: string);
 var
   Event: TTurnEvent;
@@ -405,6 +417,7 @@ begin
   Events := Default(TAgentEvents);
   Events.OnText := OnText;
   Events.OnReasoning := OnReasoning;
+  Events.OnReasoningDone := OnReasoningDone;
   Events.OnToolCall := OnToolCall;
   Events.OnToolResult := OnToolResult;
   Events.OnUserQueued := OnUserQueued;

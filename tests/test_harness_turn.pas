@@ -396,6 +396,8 @@ begin
       teError:
         Result := Result + 'E:' + IntToStr(Ord(Event.ErrorCode)) + ':' +
           Event.Text + '|';
+      teReasoningDone:
+        Result := Result + 'RD:' + IntToStr(Event.ElapsedMs) + '|';
     end;
   end;
 end;

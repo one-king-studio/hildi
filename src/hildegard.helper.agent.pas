@@ -44,8 +44,9 @@ type
     procedure Append(const AMessage: TChatMessage);
     function Messages: TChatMessageArray;
     procedure Clear;
-    { Display-only blocks: persisted for restore, never sent to the provider. }
-    procedure AppendReasoning(const AText: string);
+    { Display-only blocks: persisted for restore, never sent to the provider.
+      ADurationMs is the wall time the reasoning streamed (0 when unknown). }
+    procedure AppendReasoning(const AText: string; ADurationMs: Int64);
     procedure AppendError(const AMessage, ADetail: string);
     { Turn/request audit. BeginTurn opens a loop; the user prompt is appended
       separately, linked to the open turn. Ids are 0 when not persisted. }
@@ -67,7 +68,7 @@ type
     procedure Append(const AMessage: TChatMessage);
     function Messages: TChatMessageArray;
     procedure Clear;
-    procedure AppendReasoning(const AText: string);
+    procedure AppendReasoning(const AText: string; ADurationMs: Int64);
     procedure AppendError(const AMessage, ADetail: string);
     function BeginTurn: Int64;
     function BeginRequest(ATurnId: Int64; const AModel: string;
@@ -90,10 +91,15 @@ type
     AOk: Boolean) of object;
   { A queued prompt was injected into the running loop. }
   TUserQueuedEvent = procedure(const AText: string) of object;
+  { The reasoning phase of a response ended; ADurationMs is how long it
+    streamed. Fired just before the first content delta, so the UI can settle a
+    live thought block with its duration. }
+  TReasoningDoneEvent = procedure(ADurationMs: Int64) of object;
 
   TAgentEvents = record
     OnText: TLLMTextEvent;
     OnReasoning: TLLMReasoningEvent;
+    OnReasoningDone: TReasoningDoneEvent;
     OnToolCall: TToolCallEvent;
     OnToolResult: TToolResultEvent;
     OnUserQueued: TUserQueuedEvent;
@@ -158,6 +164,16 @@ type
     FCancel: TAgentCancelCheck;
     FPromptQueue: TPromptQueue;
     FLastTurnDropped: Boolean;
+    { The response in flight is timed so the reasoning and content phases can be
+      persisted per block: the first reasoning delta, the first content delta,
+      and the resulting durations. }
+    FTimedEvents: TAgentEvents;
+    FReasonStartMs, FContentStartMs: Int64;
+    FReasoningMs, FContentMs: Int64;
+    { The callbacks handed to the client; they timestamp the phases and forward
+      to the caller's events. }
+    procedure OnTimedReasoning(const AText: string);
+    procedure OnTimedText(const AText: string);
     { Build the request. When AContinuing, overlay the pending assistant text
       and the continuation instruction; both are request-only and never
       persisted. }
@@ -238,6 +254,8 @@ type
   TPendingResponse = record
     Content: string;
     Reasoning: string;
+    ReasoningMs: Int64;
+    ContentMs: Int64;
   end;
 
   { Owns the built-in tool handlers. A singleton because TToolHandler is an
@@ -432,7 +450,8 @@ begin
   FItems := nil;
 end;
 
-procedure TMemoryConversationStore.AppendReasoning(const AText: string);
+procedure TMemoryConversationStore.AppendReasoning(const AText: string;
+  ADurationMs: Int64);
 begin
   // in-memory: display blocks are not kept
 end;
@@ -600,6 +619,32 @@ destructor TAgentLoop.Destroy;
 begin
   FPromptQueue.Free;
   inherited Destroy;
+end;
+
+procedure TAgentLoop.OnTimedReasoning(const AText: string);
+begin
+  if FReasonStartMs = 0 then
+    FReasonStartMs := Int64(GetTickCount64);
+  if Assigned(FTimedEvents.OnReasoning) then
+    FTimedEvents.OnReasoning(AText);
+end;
+
+procedure TAgentLoop.OnTimedText(const AText: string);
+begin
+  { The first content delta ends the reasoning phase; report its duration just
+    before the text so the UI settles the thought block first. }
+  if FContentStartMs = 0 then
+  begin
+    FContentStartMs := Int64(GetTickCount64);
+    if FReasonStartMs > 0 then
+    begin
+      FReasoningMs := FContentStartMs - FReasonStartMs;
+      if Assigned(FTimedEvents.OnReasoningDone) then
+        FTimedEvents.OnReasoningDone(FReasoningMs);
+    end;
+  end;
+  if Assigned(FTimedEvents.OnText) then
+    FTimedEvents.OnText(AText);
 end;
 
 function TAgentLoop.BuildRequest(const APendingContent: string;
@@ -799,7 +844,7 @@ var
   AllOk, Committed, Stop, TruncatedRound: Boolean;
   Pending: TPendingResponse;
   TurnId, RequestId: Int64;
-  StartMs: Int64;
+  StartMs, EndMs: Int64;
   Outcome: TRequestOutcome;
   TurnOutcome: TTurnOutcome;
 
@@ -830,9 +875,11 @@ var
   var
     Msg: TChatMessage;
   begin
-    FStore.AppendReasoning(APending.Reasoning + ChatResult.ReasoningContent);
+    FStore.AppendReasoning(APending.Reasoning + ChatResult.ReasoningContent,
+      APending.ReasoningMs + FReasoningMs);
     Msg := ChatResult.Message;
     Msg.Content := APending.Content + ChatResult.Message.Content;
+    Msg.DurationMs := APending.ContentMs + FContentMs;
     FStore.Append(Msg);
   end;
 
@@ -891,11 +938,17 @@ begin
         Length(Request.Messages));
       StartMs := GetTickCount64;
       Outcome := Default(TRequestOutcome);
+      { Time the response's phases; the timed callbacks forward to AEvents. }
+      FTimedEvents := AEvents;
+      FReasonStartMs := 0;
+      FContentStartMs := 0;
+      FReasoningMs := 0;
+      FContentMs := 0;
 
       { The client consults the same check mid-stream, so a cancel aborts the
         request itself rather than waiting for the provider to finish. }
       FClient.CancelCheck := FCancel;
-      if not FClient.Complete(Request, AEvents.OnText, AEvents.OnReasoning,
+      if not FClient.Complete(Request, OnTimedText, OnTimedReasoning,
         ChatResult, AError) then
       begin
         Outcome.Ok := False;
@@ -912,6 +965,20 @@ begin
         FailTurn(AError.Code, AError.Message, AError.Detail, '');
         Exit(False);
       end;
+
+      { Close the phases: reasoning when content starts (or here, when the
+        response was reasoning-only), content at the request's end. }
+      EndMs := Int64(GetTickCount64);
+      if (FReasonStartMs > 0) and (FContentStartMs = 0) then
+      begin
+        FReasoningMs := EndMs - FReasonStartMs;
+        if Assigned(FTimedEvents.OnReasoningDone) then
+          FTimedEvents.OnReasoningDone(FReasoningMs);
+      end;
+      if FContentStartMs > 0 then
+        FContentMs := EndMs - FContentStartMs
+      else
+        FContentMs := 0;
 
       Outcome.Ok := True;
       Outcome.FinishReason := ChatResult.FinishReason;
@@ -947,6 +1014,8 @@ begin
           end;
           Pending.Content := Pending.Content + ChatResult.Message.Content;
           Pending.Reasoning := Pending.Reasoning + ChatResult.ReasoningContent;
+          Pending.ReasoningMs := Pending.ReasoningMs + FReasoningMs;
+          Pending.ContentMs := Pending.ContentMs + FContentMs;
           Inc(Continuations);
           Continue;
         end;

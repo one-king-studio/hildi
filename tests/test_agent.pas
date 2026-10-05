@@ -49,10 +49,20 @@ type
     destructor Destroy; override;
     procedure OnText(const AText: string);
     procedure OnReasoning(const AText: string);
+    procedure OnReasoningDone(ADurationMs: Int64);
     procedure OnToolCall(const AId, AName, AArguments, AReason: string);
     procedure OnToolResult(const AId, AName, AResult: string; AOk: Boolean);
     function Has(const AFragment: string): Boolean;
     function IndexOfFragment(const AFragment: string): Integer;
+  end;
+
+  { Sleeps after each stream chunk, so the loop's phase timings are non-zero. }
+  TChunkDelay = class
+  private
+    FMs: Integer;
+  public
+    constructor Create(AMs: Integer);
+    procedure AfterChunk(Sender: TObject);
   end;
 
   { Wraps an in-memory store and counts appends, to prove the loop uses the
@@ -67,7 +77,7 @@ type
     procedure Append(const AMessage: TChatMessage);
     function Messages: TChatMessageArray;
     procedure Clear;
-    procedure AppendReasoning(const AText: string);
+    procedure AppendReasoning(const AText: string; ADurationMs: Int64);
     procedure AppendError(const AMessage, ADetail: string);
     function BeginTurn: Int64;
     function BeginRequest(ATurnId: Int64; const AModel: string;
@@ -92,15 +102,17 @@ type
     LastRequestMessages: Integer;
     LastOutcome: TRequestOutcome;
     Reasoning: string;
+    ReasoningMs: Int64;
     LastError: string;
     LastErrorDetail: string;
     LastTool: TChatMessage;
+    LastAssistant: TChatMessage;
     constructor Create;
     destructor Destroy; override;
     procedure Append(const AMessage: TChatMessage);
     function Messages: TChatMessageArray;
     procedure Clear;
-    procedure AppendReasoning(const AText: string);
+    procedure AppendReasoning(const AText: string; ADurationMs: Int64);
     procedure AppendError(const AMessage, ADetail: string);
     function BeginTurn: Int64;
     function BeginRequest(ATurnId: Int64; const AModel: string;
@@ -195,6 +207,9 @@ type
     procedure TestSendOpensAndClosesATurn;
     procedure TestSendRecordsRequestOutcome;
     procedure TestSendRecordsReasoning;
+    procedure TestLoopRecordsReasoningDuration;
+    procedure TestLoopRecordsContentDuration;
+    procedure TestLoopReportsReasoningDone;
     procedure TestSendRecordsErrorAndFailedTurn;
     procedure TestToolResultCarriesNameOkAndDuration;
     procedure TestLoopStopsWhenCancelled;
@@ -260,6 +275,11 @@ begin
   FLog.Add('reason:' + AText);
 end;
 
+procedure TEventLog.OnReasoningDone(ADurationMs: Int64);
+begin
+  FLog.Add('reasoningdone:' + IntToStr(ADurationMs));
+end;
+
 procedure TEventLog.OnToolCall(const AId, AName, AArguments, AReason: string);
 begin
   FLog.Add('call:' + AId + ':' + AName + ':' + AArguments + ':' + AReason);
@@ -284,6 +304,19 @@ begin
     if Pos(AFragment, FLog[I]) > 0 then
       Exit(I);
   Result := -1;
+end;
+
+{ TChunkDelay }
+
+constructor TChunkDelay.Create(AMs: Integer);
+begin
+  inherited Create;
+  FMs := AMs;
+end;
+
+procedure TChunkDelay.AfterChunk(Sender: TObject);
+begin
+  Sleep(FMs);
 end;
 
 function TFailTools.AlwaysRaise(const AArgumentsJson: string;
@@ -325,9 +358,10 @@ begin
   FInner.Clear;
 end;
 
-procedure TCountingStore.AppendReasoning(const AText: string);
+procedure TCountingStore.AppendReasoning(const AText: string;
+  ADurationMs: Int64);
 begin
-  FInner.AppendReasoning(AText);
+  FInner.AppendReasoning(AText, ADurationMs);
 end;
 
 procedure TCountingStore.AppendError(const AMessage, ADetail: string);
@@ -380,7 +414,9 @@ end;
 procedure TRecordingStore.Append(const AMessage: TChatMessage);
 begin
   if AMessage.Role = crTool then
-    LastTool := AMessage;
+    LastTool := AMessage
+  else if AMessage.Role = crAssistant then
+    LastAssistant := AMessage;
   FInner.Append(AMessage);
 end;
 
@@ -394,9 +430,11 @@ begin
   FInner.Clear;
 end;
 
-procedure TRecordingStore.AppendReasoning(const AText: string);
+procedure TRecordingStore.AppendReasoning(const AText: string;
+  ADurationMs: Int64);
 begin
   Reasoning := Reasoning + AText;
+  ReasoningMs := ADurationMs;
 end;
 
 procedure TRecordingStore.AppendError(const AMessage, ADetail: string);
@@ -1739,6 +1777,74 @@ begin
     TextDelta('answer'), FinishFrame('stop'), DoneFrame]);
   AssertTrue('send ok', FLoop.Send('hello', nil, Answer, Err));
   AssertEquals('reasoning recorded', 'let me think', Rec.Reasoning);
+end;
+
+procedure TAgentLoopTest.TestLoopRecordsReasoningDuration;
+var
+  Rec: TRecordingStore;
+  Delay: TChunkDelay;
+  Answer: string;
+  Err: TLLMError;
+begin
+  Rec := BuildLoopRecording;
+  Delay := TChunkDelay.Create(20);
+  try
+    FFake.AfterChunk := Delay.AfterChunk;
+    FFake.AddResponse([ReasoningDelta('think'), TextDelta('answer'),
+      FinishFrame('stop'), DoneFrame]);
+    AssertTrue('send ok', FLoop.Send('hi', nil, Answer, Err));
+  finally
+    Delay.Free;
+  end;
+  AssertTrue('reasoning timed', Rec.ReasoningMs >= 10);
+end;
+
+procedure TAgentLoopTest.TestLoopRecordsContentDuration;
+var
+  Rec: TRecordingStore;
+  Delay: TChunkDelay;
+  Answer: string;
+  Err: TLLMError;
+begin
+  Rec := BuildLoopRecording;
+  Delay := TChunkDelay.Create(20);
+  try
+    FFake.AfterChunk := Delay.AfterChunk;
+    FFake.AddResponse([TextDelta('answer'), FinishFrame('stop'), DoneFrame]);
+    AssertTrue('send ok', FLoop.Send('hi', nil, Answer, Err));
+  finally
+    Delay.Free;
+  end;
+  AssertTrue('content timed', Rec.LastAssistant.DurationMs >= 10);
+end;
+
+procedure TAgentLoopTest.TestLoopReportsReasoningDone;
+var
+  Log: TEventLog;
+  Events: TAgentEvents;
+  Delay: TChunkDelay;
+  Answer: string;
+  Err: TLLMError;
+begin
+  BuildLoop('', 8);
+  Log := TEventLog.Create;
+  Delay := TChunkDelay.Create(20);
+  try
+    FFake.AfterChunk := Delay.AfterChunk;
+    FFake.AddResponse([ReasoningDelta('think'), TextDelta('answer'),
+      FinishFrame('stop'), DoneFrame]);
+    Events := Default(TAgentEvents);
+    Events.OnText := Log.OnText;
+    Events.OnReasoning := Log.OnReasoning;
+    Events.OnReasoningDone := Log.OnReasoningDone;
+    AssertTrue('send ok', FLoop.Send('hi', Events, Answer, Err));
+    AssertTrue('reasoning done fired', Log.Has('reasoningdone:'));
+    AssertTrue('reasoning done before text',
+      Log.IndexOfFragment('reasoningdone:') < Log.IndexOfFragment('text:'));
+  finally
+    Delay.Free;
+    Log.Free;
+  end;
 end;
 
 procedure TAgentLoopTest.TestSendRecordsErrorAndFailedTurn;

@@ -28,7 +28,10 @@ type
     ekToolCall, ekToolResult,
     ekApprovalRequest, ekApprovalResolved,
     ekDriveRequested, ekDriveGranted, ekDriveReleased,
-    ekTurnFinished, ekError, ekGap, ekLoopExited);
+    ekTurnFinished, ekError, ekGap, ekLoopExited,
+    { The reasoning phase of a response ended; elapsed_ms is its duration.
+      Appended last so stored ordinals are unchanged. }
+    ekReasoningDone);
 
   { One streamed event. A flat record with optional fields, the same shape as
     TTurnEvent: only the fields named by Kind are meaningful. }
@@ -152,7 +155,7 @@ const
     'tool_call', 'tool_result',
     'approval_request', 'approval_resolved',
     'drive_requested', 'drive_granted', 'drive_released',
-    'turn_finished', 'error', 'gap', 'loop_exited');
+    'turn_finished', 'error', 'gap', 'loop_exited', 'reasoning_done');
 
   MessageKindNames: array[TSessionMessageKind] of string = (
     'hello', 'attached', 'event', 'reply', 'detached', 'error',
@@ -516,6 +519,8 @@ begin
       end;
     ekLoopExited:
       PutStr(O, 'reason', E.Reason);
+    ekReasoningDone:
+      PutInt(O, 'elapsed_ms', E.ElapsedMs);
   end;
 end;
 
@@ -597,6 +602,8 @@ begin
       end;
     ekLoopExited:
       E.Reason := OptStr(O, 'reason');
+    ekReasoningDone:
+      E.ElapsedMs := OptInt64(O, 'elapsed_ms', 0);
   end;
   Result := True;
 end;

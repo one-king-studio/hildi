@@ -75,6 +75,16 @@ procedure TLocalDriver.StartTurn(const AText: string);
 var
   E: TTurnEvent;
 begin
+  { The previous turn's worker has finished (the app only starts a turn when it
+    is not busy), but it may still be unwinding after emitting teDone; join and
+    free it before replacing it, or it leaks. }
+  if FWorker <> nil then
+  begin
+    if not FWorker.Finished then
+      FWorker.WaitFor;
+    FWorker.Free;
+    FWorker := nil;
+  end;
   { Echo the prompt as the first event, so the app handles it the same way as
     the remote path. }
   E := Default(TTurnEvent);
@@ -208,6 +218,11 @@ begin
         E.Kind := teReasoningDelta;
         E.Text := AEvent.Text;
       end;
+    ekReasoningDone:
+      begin
+        E.Kind := teReasoningDone;
+        E.ElapsedMs := AEvent.ElapsedMs;
+      end;
     ekToolCall:
       begin
         E.Kind := teToolCall;
@@ -232,6 +247,12 @@ begin
       end;
     ekTurnFinished:
       begin
+        { The runtime also emits turn_finished after an error (with
+          finish_reason 'error'); the error event already settled the turn, so
+          do not report it as a clean done — that would flip a failed turn back
+          to ready and end it with a divider. }
+        if AEvent.FinishReason = 'error' then
+          Exit;
         E.Kind := teDone;
         E.ElapsedMs := AEvent.ElapsedMs;
       end;

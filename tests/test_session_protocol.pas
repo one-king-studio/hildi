@@ -21,6 +21,7 @@ type
     procedure TestRoundTripHello;
     procedure TestRoundTripAttachedCarriesStoreHwm;
     procedure TestRoundTripEveryEventKind;
+    procedure TestReasoningDoneRoundTrip;
     procedure TestRoundTripReply;
     procedure TestRoundTripReplyError;
     procedure TestRoundTripDetached;
@@ -126,6 +127,8 @@ begin
       end;
     ekLoopExited:
       AEvent.Reason := 'idle';
+    ekReasoningDone:
+      AEvent.ElapsedMs := 2300;
   end;
 end;
 
@@ -190,6 +193,22 @@ begin
     AssertEquals('seq preserved for ' + SessionEventKindToWire(K), 7,
       D.Event.Seq);
   end;
+end;
+
+procedure TSessionProtocolTest.TestReasoningDoneRoundTrip;
+var
+  E: TSessionEvent;
+  M, D: TSessionMessage;
+begin
+  FillEvent(ekReasoningDone, E);
+  M := Default(TSessionMessage);
+  M.Kind := mkEvent;
+  M.Event := E;
+  AssertRoundTrip(M);
+
+  AssertTrue(TSessionCodec.Decode(TSessionCodec.Encode(M), D));
+  AssertEquals('kind', Ord(ekReasoningDone), Ord(D.Event.Kind));
+  AssertEquals('elapsed', 2300, D.Event.ElapsedMs);
 end;
 
 procedure TSessionProtocolTest.TestRoundTripReply;

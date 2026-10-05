@@ -37,7 +37,7 @@ type
     { The history is durable; clearing it here would defeat restore. The loop
       never calls Clear; this is a no-op by design. }
     procedure Clear;
-    procedure AppendReasoning(const AText: string);
+    procedure AppendReasoning(const AText: string; ADurationMs: Int64);
     procedure AppendError(const AMessage, ADetail: string);
     function BeginTurn: Int64;
     function BeginRequest(ATurnId: Int64; const AModel: string;
@@ -122,7 +122,8 @@ begin
           it is not persisted as an empty row; Compose synthesises it on read
           from the tool calls that follow. }
         if AMessage.Content <> '' then
-          Write(mrAssistant, AMessage.Content, '', '', '', '', False, 0);
+          Write(mrAssistant, AMessage.Content, '', '', '', '', False,
+            AMessage.DurationMs);
         for I := 0 to High(AMessage.ToolCalls) do
         begin
           Reason := '';
@@ -139,10 +140,11 @@ begin
   end;
 end;
 
-procedure TSqliteConversationStore.AppendReasoning(const AText: string);
+procedure TSqliteConversationStore.AppendReasoning(const AText: string;
+  ADurationMs: Int64);
 begin
   if AText <> '' then
-    Write(mrReasoning, AText, '', '', '', '', False, 0);
+    Write(mrReasoning, AText, '', '', '', '', False, ADurationMs);
 end;
 
 procedure TSqliteConversationStore.AppendError(const AMessage,
