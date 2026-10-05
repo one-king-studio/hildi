@@ -28,6 +28,7 @@ type
     procedure TestNewSessionIdIs32LowercaseHex;
     procedure TestNewSessionIdIsUnique;
     procedure TestFullRoundTripMatchesAppended;
+    procedure TestEmptyAssistantRowIsNotPersistedAndRestores;
     procedure TestRestoreSkipsReasoningAndErrors;
     procedure TestRestoreAfterReopen;
     procedure TestTailKeepsSystemAndRecent;
@@ -173,6 +174,53 @@ begin
     AssertTrue('tool ok restored', Msgs[2].ToolOk);
     AssertEquals('tool duration restored', 7, Msgs[2].DurationMs);
     AssertEquals('tool id 2', 'call_2', Msgs[3].ToolCallId);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TSessionTest.TestEmptyAssistantRowIsNotPersistedAndRestores;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  SessionId: string;
+  WorkspaceId: Integer;
+  Conv: IConversationStore;
+  Msgs: TChatMessageArray;
+  Recs: TMessageRecordArray;
+  Asst: TChatMessage;
+  I, AssistantRows: Integer;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', WorkspaceId, Err);
+    S.CreateSession(WorkspaceId, SessionId, Err);
+    Conv := TSqliteConversationStore.Create(S, SessionId);
+    Conv.Append(UserMsg('hi'));
+    { An assistant message that only carried tool calls: no content. }
+    Asst := AssistantMsg('');
+    Conv.Append(Asst);
+    Conv.Append(ToolMsg('call_1', 'time'));
+    Conv.Append(ToolMsg('call_2', 'out'));
+
+    { No empty assistant row is persisted. }
+    AssertTrue('query', S.QueryMessages(SessionId, Recs, Err));
+    AssistantRows := 0;
+    for I := 0 to High(Recs) do
+      if Recs[I].Role = mrAssistant then
+      begin
+        Inc(AssistantRows);
+        AssertTrue('assistant row has content', Recs[I].Content <> '');
+      end;
+    AssertEquals('no empty assistant row', 0, AssistantRows);
+
+    { Restore still synthesises the assistant message with its tool calls. }
+    Msgs := Conv.Messages;
+    AssertEquals('user + assistant + 2 tools', 4, Length(Msgs));
+    AssertEquals('assistant synthesised', Ord(crAssistant), Ord(Msgs[1].Role));
+    AssertEquals('two tool calls restored', 2, Length(Msgs[1].ToolCalls));
+    AssertEquals('call id', 'call_1', Msgs[1].ToolCalls[0].Id);
+    AssertEquals('tool result follows', Ord(crTool), Ord(Msgs[2].Role));
   finally
     S.Free;
   end;

@@ -118,7 +118,11 @@ begin
       Write(mrUser, AMessage.Content, '', '', '', '', False, 0);
     crAssistant:
       begin
-        Write(mrAssistant, AMessage.Content, '', '', '', '', False, 0);
+        { An assistant message that only carried tool calls has no content, so
+          it is not persisted as an empty row; Compose synthesises it on read
+          from the tool calls that follow. }
+        if AMessage.Content <> '' then
+          Write(mrAssistant, AMessage.Content, '', '', '', '', False, 0);
         for I := 0 to High(AMessage.ToolCalls) do
         begin
           Reason := '';
@@ -248,6 +252,26 @@ begin
           AddMessage(Result, Msg);
           I := J - 1;
         end;
+      mrToolCall:
+        begin
+          { A run of tool calls with no preceding assistant row: the assistant
+            message had no content, so it was not persisted. Synthesise it. }
+          Msg := Default(TChatMessage);
+          Msg.Role := crAssistant;
+          J := I;
+          while (J <= High(Msgs)) and (Msgs[J].Role = mrToolCall) do
+          begin
+            Call := Default(TChatToolCall);
+            Call.Id := Msgs[J].ToolCallId;
+            Call.Name := Msgs[J].ToolName;
+            Call.Arguments := Msgs[J].ToolArguments;
+            SetLength(Msg.ToolCalls, Length(Msg.ToolCalls) + 1);
+            Msg.ToolCalls[High(Msg.ToolCalls)] := Call;
+            Inc(J);
+          end;
+          AddMessage(Result, Msg);
+          I := J - 1;
+        end;
       mrTool:
         begin
           Msg := Default(TChatMessage);
@@ -259,8 +283,9 @@ begin
           Msg.DurationMs := Msgs[I].DurationMs;
           AddMessage(Result, Msg);
         end;
-      { Tool calls are consumed with their assistant message above. }
-      mrReasoning, mrError, mrToolCall:
+      { Tool calls are consumed with their assistant message above, or
+        synthesised when the assistant had no content. }
+      mrReasoning, mrError:
         ;   // not part of the restored conversation
     end;
     Inc(I);

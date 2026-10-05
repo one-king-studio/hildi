@@ -23,6 +23,7 @@ type
     procedure TestReasoningSectionRenderedWhenEnabled;
     procedure TestReasoningSuppressedWhenDisabled;
     procedure TestToolSectionsRendered;
+    procedure TestEmptyToolResultShowsPlaceholder;
     procedure TestTranscriptShowsToolCallReason;
     procedure TestToolsSuppressedWhenDisabled;
     procedure TestSectionsSeparatedByBlankLine;
@@ -102,6 +103,13 @@ begin
   W.EndTurn;
 end;
 
+procedure TurnEmptyTool(W: TTranscriptWriter);
+begin
+  W.OnToolCall('id1', 'glob', '{"reason":"find"}', 'find');
+  W.OnToolResult('id1', 'glob', '', True);
+  W.EndTurn;
+end;
+
 procedure TTranscriptTest.TestUserSectionRendered;
 var
   S: string;
@@ -154,6 +162,14 @@ var
 begin
   S := RenderScenario(MakeOptions(False, False, True, 0), TurnTool);
   AssertTrue('reason line', Pos('reason: why', S) > 0);
+end;
+
+procedure TTranscriptTest.TestEmptyToolResultShowsPlaceholder;
+var
+  S: string;
+begin
+  S := RenderScenario(MakeOptions(False, False, True, 0), TurnEmptyTool);
+  AssertTrue('placeholder shown', Pos('result: (no output)', S) > 0);
 end;
 
 procedure TTranscriptTest.TestToolsSuppressedWhenDisabled;

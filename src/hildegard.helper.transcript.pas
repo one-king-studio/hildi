@@ -202,23 +202,29 @@ end;
 
 procedure TTranscriptWriter.OnToolResult(const AId, AName, AResult: string;
   AOk: Boolean);
+var
+  Text: string;
 begin
   if not FOptions.ShowTools then
     Exit;
+  { A tool that produced nothing still ran; show a marker, not a blank line. }
+  Text := AResult;
+  if Text = '' then
+    Text := '(no output)';
   EnsureNewline;
   if FHeaders then
   begin
     if AOk then
-      PutLine('result: ' + AResult)
+      PutLine('result: ' + Text)
     else
-      PutLine(AnsiStyled('error: ' + AResult, AnsiRed));
+      PutLine(AnsiStyled('error: ' + Text, AnsiRed));
   end
   else
   begin
     if AOk then
-      PutLine(AnsiStyled('  -> ' + AResult, AnsiGreen))
+      PutLine(AnsiStyled('  -> ' + Text, AnsiGreen))
     else
-      PutLine(AnsiStyled('  !! ' + AResult, AnsiRed));
+      PutLine(AnsiStyled('  !! ' + Text, AnsiRed));
   end;
 end;
 
