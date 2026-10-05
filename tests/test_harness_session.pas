@@ -34,6 +34,8 @@ type
     procedure TestRecallToolRegisteredWithStore;
     procedure TestRecallToolAbsentWithoutStore;
     procedure TestLastTurnEmptyWithoutTurns;
+    procedure TestSessionTotalsEmptyWithoutTurns;
+    procedure TestMaxContextTokensFromConfig;
   end;
 
 implementation
@@ -244,6 +246,40 @@ begin
   try
     Turn := Session.LastTurn;
     AssertEquals('no turns yet', 0, Turn.Id);
+  finally
+    Session.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestSessionTotalsEmptyWithoutTurns;
+var
+  Session: THarnessSession;
+  Err: string;
+  Totals: TTurnRecord;
+begin
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    Totals := Session.SessionTotals;
+    AssertEquals('no turns yet', 0, Totals.Id);
+    AssertEquals('no turns listed', 0, Length(Session.Turns));
+  finally
+    Session.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestMaxContextTokensFromConfig;
+var
+  Session: THarnessSession;
+  Err: string;
+  Cfg: THarnessSessionConfig;
+begin
+  Cfg := Config('', '', False);
+  Cfg.MaxContextTokens := 1000000;
+  Session := THarnessSession.Open(Cfg, Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    AssertEquals('config override applied', 1000000, Session.MaxContextTokens);
   finally
     Session.Free;
   end;

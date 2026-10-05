@@ -140,6 +140,15 @@ type
     { The session's latest turn; seNotFound when there are none. }
     function MostRecentTurn(const ASessionId: string;
       out ATurn: TTurnRecord; out AError: TStoreError): Boolean;
+    { The session's usage for cost: `Usage.PromptTokens` / `CompletionTokens` /
+      `CachedTokens` / `ReasoningTokens` summed over every request (the billed
+      tokens; each request re-sends its whole context, so the prompt sum is the
+      billed input), `Usage.TotalTokens` the billed total, `ContextTokens` the
+      final (largest) context, and `RequestCount` / `DurationMs` the session's
+      totals. `Id` is 1 when the session has requests, 0 when it has none. One
+      query. }
+    function SessionTotals(const ASessionId: string; out ATurn: TTurnRecord;
+      out AError: TStoreError): Boolean;
 
     { Opens an LLM request within a turn, assigning its per-turn sequence. }
     function BeginRequest(ATurnId: Int64; const AModel: string;
@@ -1393,6 +1402,58 @@ begin
       ATurn.FinishedAtMs := Stmt.ColInt64(16);
       ATurn.DurationMs := Stmt.ColInt64(17);
       ATurn.Prompt := Stmt.ColText(18);
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.SessionTotals(const ASessionId: string;
+  out ATurn: TTurnRecord; out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  ATurn := Default(TTurnRecord);
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    { Every request bills its whole (re-sent) context, so the prompt sum is the
+      billed input; the output and reasoning tokens are likewise summed. The
+      final context is the largest prompt ever sent (the window in play). }
+    Stmt := TStmt.Create(FDb,
+      'SELECT COUNT(*), COALESCE(SUM(r.prompt_tokens), 0), ' +
+      'COALESCE(SUM(r.completion_tokens), 0), COALESCE(SUM(r.cached_tokens), 0), ' +
+      'COALESCE(SUM(r.reasoning_tokens), 0), COALESCE(MAX(r.prompt_tokens), 0), ' +
+      '(SELECT COALESCE(SUM(t2.duration_ms), 0) FROM turns t2 ' +
+        'WHERE t2.session_id = ?) ' +
+      'FROM requests r JOIN turns t ON t.id = r.turn_id ' +
+      'WHERE t.session_id = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not query session totals',
+          DbErrorText));
+      Stmt.BindText(1, ASessionId);
+      Stmt.BindText(2, ASessionId);
+      if Stmt.Step <> SQLITE_ROW then
+        Exit(True);   // no row (impossible for an aggregate); the zero record
+      ATurn.RequestCount := Stmt.ColInt(0);
+      ATurn.Usage.PromptTokens := Stmt.ColInt(1);
+      ATurn.Usage.CompletionTokens := Stmt.ColInt(2);
+      ATurn.Usage.CachedTokens := Stmt.ColInt(3);
+      ATurn.Usage.ReasoningTokens := Stmt.ColInt(4);
+      ATurn.ContextTokens := Stmt.ColInt(5);
+      ATurn.Usage.TotalTokens := ATurn.Usage.PromptTokens +
+        ATurn.Usage.CompletionTokens;
+      ATurn.DurationMs := Stmt.ColInt64(6);
+      { Id non-zero only when the session has requests, so a zero session stays
+        "no stats". }
+      if ATurn.RequestCount > 0 then
+        ATurn.Id := 1;
     finally
       Stmt.Free;
     end;

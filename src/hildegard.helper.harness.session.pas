@@ -30,6 +30,10 @@ type
     { Bytes a tool result may contribute to the prompt; 0 => default, negative
       => uncapped. }
     ToolResultCap: Integer;
+    { Overrides the loop's context guard; 0 => HILDEGARD_MAX_CONTEXT_TOKENS,
+      else the agent default. The limit is a model property, so it is
+      overridable until it can be pulled from the model API. }
+    MaxContextTokens: Integer;
     { True for a headless *client*: open the workspace/store/session and load
       history, but do not build the LLM client, tools, loop, gate, or queue.
       The runtime owns the loop. }
@@ -57,6 +61,7 @@ type
     FSessionId: string;
     FWorkspaceRoot: string;
     FModel: string;
+    FMaxContextTokens: Integer;
     FHistory: TMessageRecordArray;
     function Init(const AConfig: THarnessSessionConfig; out AError: string):
       Boolean;
@@ -76,6 +81,10 @@ type
     property WorkspaceRoot: string read FWorkspaceRoot;
     { The model the session is configured with, for the UI. }
     property Model: string read FModel;
+    { The context guard in effect: the config, else `HILDEGARD_MAX_CONTEXT_TOKENS`,
+      else the agent default. The limit is a model property, so it is
+      overridable until it can be pulled from the model API. }
+    property MaxContextTokens: Integer read FMaxContextTokens;
     property Store: TSqliteStore read FStore;   // nil when unconfigured
 
     { Prior message blocks for the initial render (empty for a new session). }
@@ -84,6 +93,14 @@ type
     { The latest turn's metrics for the status bar; a zero record when the
       session has no store or no turns. }
     function LastTurn: TTurnRecord;
+
+    { The session's cumulative metrics over every turn; a zero record when the
+      session has no store. }
+    function SessionTotals: TTurnRecord;
+
+    { Every turn, ordered, for restoring the per-loop dividers; empty when the
+      session has no store. }
+    function Turns: TTurnRecordArray;
 
     { Cancel pending approvals; frees owned objects. Idempotent. }
     procedure Close;
@@ -156,7 +173,7 @@ end;
 function THarnessSession.Init(const AConfig: THarnessSessionConfig;
   out AError: string): Boolean;
 var
-  Path, Err: string;
+  Path, Err, EnvValue: string;
   LlmConfig: TLLMConfig;
   StoreConfig: TStoreConfig;
   StoreErr: TStoreError;
@@ -185,6 +202,17 @@ begin
   FWorkspaceRoot := FWorkspace.Root;
   FModel := AConfig.Model;
   Cap := ResolveToolResultCap(AConfig.ToolResultCap);
+  { The context guard is a model property the app does not know yet: the config,
+    else an env var, else the agent default, until the model API supplies it. }
+  FMaxContextTokens := AConfig.MaxContextTokens;
+  if FMaxContextTokens = 0 then
+  begin
+    EnvValue := GetEnvironmentVariable('HILDEGARD_MAX_CONTEXT_TOKENS');
+    if EnvValue <> '' then
+      FMaxContextTokens := StrToIntDef(EnvValue, 0);
+  end;
+  if FMaxContextTokens = 0 then
+    FMaxContextTokens := DefaultMaxContextTokens;
 
   LlmConfig := Default(TLLMConfig);
   LlmConfig := ResolveLLMConfig(LlmConfig);
@@ -294,7 +322,9 @@ begin
     AgentConfig.SystemPrompt := GetEnvironmentVariable('HILDEGARD_SYSTEM_PROMPT');
   if AgentConfig.SystemPrompt = '' then
     AgentConfig.SystemPrompt := DefaultSystemPrompt;
-  { The tool-call budget and context cap keep their agent defaults here. }
+  { The tool-call budget keeps its agent default; the context cap may have been
+    overridden by the environment above (0 leaves the agent default). }
+  AgentConfig.MaxContextTokens := FMaxContextTokens;
 
   FLoop := TAgentLoop.Create(FClient, FConversation, FTools, AgentConfig);
   Result := True;
@@ -312,6 +342,24 @@ begin
   Result := Default(TTurnRecord);
   if (FStore <> nil) and (FSessionId <> '') then
     FStore.MostRecentTurn(FSessionId, Result, Err);
+end;
+
+function THarnessSession.SessionTotals: TTurnRecord;
+var
+  Err: TStoreError;
+begin
+  Result := Default(TTurnRecord);
+  if (FStore <> nil) and (FSessionId <> '') then
+    FStore.SessionTotals(FSessionId, Result, Err);
+end;
+
+function THarnessSession.Turns: TTurnRecordArray;
+var
+  Err: TStoreError;
+begin
+  Result := nil;
+  if (FStore <> nil) and (FSessionId <> '') then
+    FStore.QueryTurns(FSessionId, Result, Err);
 end;
 
 end.

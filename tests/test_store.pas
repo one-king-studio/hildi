@@ -54,6 +54,8 @@ type
     procedure TestListSessionsCountsMessagesAndTurns;
     procedure TestMostRecentTurnReturnsLatest;
     procedure TestMostRecentTurnNotFound;
+    procedure TestSessionTotalsContextAndGenerated;
+    procedure TestSessionTotalsEmpty;
 
     procedure TestRuntimeMigrationIsAdditive;
     procedure TestRuntimeRowRoundTrip;
@@ -873,6 +875,68 @@ begin
     AssertFalse('none', S.MostRecentTurn(Sid, Turn, Err));
     AssertEquals('not found', Ord(seNotFound), Ord(Err.Code));
     AssertEquals('zero record', 0, Turn.Id);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestSessionTotalsContextAndGenerated;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws: Integer;
+  Sid: string;
+  T1, T2, R: Int64;
+  Totals: TTurnRecord;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, Sid, Err);
+    S.BeginTurn(Sid, T1, Err);
+    S.BeginRequest(T1, 'm', 1, R, Err);
+    S.FinishRequest(R, True, 'stop', 0, '', '',
+      MakeUsage(10, 5, 15, 2, 1), 100, 30, Err);
+    S.FinishTurn(T1, tsCompleted, 'stop', 0, '', '', Err);
+    S.BeginTurn(Sid, T2, Err);
+    S.BeginRequest(T2, 'm', 1, R, Err);
+    S.FinishRequest(R, True, 'stop', 0, '', '',
+      MakeUsage(20, 8, 28, 3, 2), 200, 50, Err);
+    S.FinishTurn(T2, tsCompleted, 'stop', 0, '', '', Err);
+
+    AssertTrue('totals', S.SessionTotals(Sid, Totals, Err));
+    AssertEquals('non-zero when there are requests', 1, Totals.Id);
+    { The billed input is every request's prompt (10 + 20); the final context
+      is the largest single prompt (20). }
+    AssertEquals('billed prompt summed', 30, Totals.Usage.PromptTokens);
+    AssertEquals('cached summed', 5, Totals.Usage.CachedTokens);
+    AssertEquals('completion summed', 13, Totals.Usage.CompletionTokens);
+    AssertEquals('total used is in plus out', 43, Totals.Usage.TotalTokens);
+    AssertEquals('reasoning summed', 3, Totals.Usage.ReasoningTokens);
+    AssertEquals('final context', 20, Totals.ContextTokens);
+    AssertEquals('requests summed', 2, Totals.RequestCount);
+    AssertTrue('duration summed', Totals.DurationMs >= 0);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestSessionTotalsEmpty;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws: Integer;
+  Sid: string;
+  Totals: TTurnRecord;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, Sid, Err);
+    AssertTrue('totals', S.SessionTotals(Sid, Totals, Err));
+    AssertEquals('no turns', 0, Totals.Id);
+    AssertEquals('no tokens', 0, Totals.Usage.TotalTokens);
+    AssertEquals('no requests', 0, Totals.RequestCount);
   finally
     S.Free;
   end;
