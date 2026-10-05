@@ -117,6 +117,7 @@ begin
         AEvent.ErrorCode := 'provider';
         AEvent.Text := 'boom';
         AEvent.Detail := 'the detail';
+        AEvent.Dropped := True;
       end;
     ekGap:
       begin

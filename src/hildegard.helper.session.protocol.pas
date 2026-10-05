@@ -53,6 +53,7 @@ type
     Usage: TTokenUsage;         // turn_finished
     ElapsedMs: Int64;           // turn_finished
     ErrorCode: string;          // error
+    Dropped: Boolean;           // error: the turn was cancelled with no commit
     FromSeq: Int64;             // gap: first missing seq
     ToSeq: Int64;               // gap: last delivered seq
     Client: string;             // drive_*: client id
@@ -135,6 +136,9 @@ function SessionEventKindFromWire(const AValue: string;
 function SessionCommandKindToWire(AKind: TSessionCommandKind): string;
 function SessionCommandKindFromWire(const AValue: string;
   out AKind: TSessionCommandKind): Boolean;
+{ The wire spelling of a loop error code (the `error` event's `code`). }
+function SessionErrorCodeToWire(ACode: TLLMErrorCode): string;
+function SessionErrorCodeFromWire(const AValue: string): TLLMErrorCode;
 
 implementation
 
@@ -223,6 +227,26 @@ begin
     end;
   AKind := scPrompt;
   Result := False;
+end;
+
+const
+  ErrorCodeNames: array[TLLMErrorCode] of string = (
+    'ok', 'config', 'network', 'http_status', 'auth', 'rate_limit',
+    'malformed_stream', 'provider', 'cancelled', 'loop', 'truncated');
+
+function SessionErrorCodeToWire(ACode: TLLMErrorCode): string;
+begin
+  Result := ErrorCodeNames[ACode];
+end;
+
+function SessionErrorCodeFromWire(const AValue: string): TLLMErrorCode;
+var
+  C: TLLMErrorCode;
+begin
+  for C := Low(TLLMErrorCode) to High(TLLMErrorCode) do
+    if ErrorCodeNames[C] = AValue then
+      Exit(C);
+  Result := leProvider;
 end;
 
 { --- JSON field helpers ------------------------------------------------- }
@@ -483,6 +507,7 @@ begin
         PutStr(O, 'code', E.ErrorCode);
         PutStr(O, 'message', E.Text);
         PutStr(O, 'detail', E.Detail);
+        PutBool(O, 'dropped', E.Dropped);
       end;
     ekGap:
       begin
@@ -563,6 +588,7 @@ begin
         E.ErrorCode := OptStr(O, 'code');
         E.Text := OptStr(O, 'message');
         E.Detail := OptStr(O, 'detail');
+        E.Dropped := OptBool(O, 'dropped', False);
       end;
     ekGap:
       begin

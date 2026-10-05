@@ -229,15 +229,6 @@ begin
   Result := Trunc((Now - EncodeDate(1970, 1, 1)) * MSecsPerDay);
 end;
 
-function LLMErrorCodeName(ACode: TLLMErrorCode): string;
-const
-  Names: array[TLLMErrorCode] of string = (
-    'ok', 'config', 'network', 'http_status', 'auth', 'rate_limit',
-    'malformed_stream', 'provider', 'cancelled', 'loop', 'truncated');
-begin
-  Result := Names[ACode];
-end;
-
 function MakeUnixAddr(const APath: string; out AAddr: TUnixSockAddr;
   out ALen: TSockLen): Boolean;
 var
@@ -1207,9 +1198,10 @@ begin
     teError:
       begin
         E := EmitEvent(ekError);
-        E.ErrorCode := LLMErrorCodeName(AEvent.ErrorCode);
+        E.ErrorCode := SessionErrorCodeToWire(AEvent.ErrorCode);
         E.Text := AEvent.Text;
         E.Detail := AEvent.Detail;
+        E.Dropped := AEvent.Dropped;
         Broadcast(E);
         E := EmitEvent(ekTurnFinished);
         E.FinishReason := 'error';
