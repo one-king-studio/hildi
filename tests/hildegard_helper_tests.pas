@@ -11,6 +11,7 @@ program hildegard_helper_tests;
 uses
   {$ifdef unix}cthreads, cwstring,{$endif}   // cthreads first; cwstring for Unicode
   SysUtils, fpcunit, testregistry, consoletestrunner,
+  hildegard.helper.session.runtime,
   test_hildegard_helper, test_store, test_llm, test_agent, test_ansi, test_env,
   test_cli, test_transcript, test_command_policy, test_command_tool,
   test_workspace, test_approval, test_session, test_tui_surface,
@@ -20,11 +21,24 @@ uses
   test_harness_app, test_file_tool, test_tui_encoder, test_tui_widgets,
   test_tui_animation, test_tui_grapheme, test_tui_edit, test_tui_chat,
   test_tui_compose, test_tui_chatpanel, test_recall_tool, test_harness_stats,
-  test_tui_compact, test_markdown, test_markdownview, test_tls;
+  test_tui_compact, test_markdown, test_markdownview, test_tls,
+  test_session_protocol, test_session_runtime;
 
 var
   Runner: TTestRunner;
+  I: Integer;
+  Args: array of string;
 begin
+  { When the client spawns a runtime it re-executes this binary with the
+    runtime argv; run the runtime instead of the test suite. }
+  if (ParamCount >= 2) and (ParamStr(1) = '--session-runtime') then
+  begin
+    SetLength(Args, ParamCount);
+    for I := 1 to ParamCount do
+      Args[I - 1] := ParamStr(I);
+    Halt(RunSessionRuntime(Args));
+  end;
+
   Runner := TTestRunner.Create(nil);
   try
     Runner.Initialize;
