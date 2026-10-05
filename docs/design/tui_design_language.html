@@ -133,6 +133,8 @@
   <a href="#roles">Roles</a>
   <a href="#layout">Layouts</a>
   <a href="#markdown">Markdown</a>
+  <a href="#turnstats">Turn stats</a>
+  <a href="#sessionheader">Session header</a>
   <a href="#components">Components</a>
 </nav>
 
@@ -630,6 +632,60 @@ else:
 
 | :--- | left      | ----: | right
 | :---: | centre   | ---   | default (left)</pre>
+    </div>
+  </div>
+</section>
+
+<section id="turnstats">
+  <h2>Turn stats</h2>
+  <p class="note">The status bar is <b>session-cumulative</b>, prefixed <code>total</code> so it is never mistaken for one loop's cost. Each <b>successful</b> loop ends with a dimmed divider carrying that loop's metrics, right-aligned with a single trailing rule — the same one-row shape as a collapsed thought or tool line. A thought block shows how long the model reasoned, from the same measured value live and on resume.</p>
+  <div class="grid cols-2">
+    <div class="card"><h4>Transcript</h4>
+      <pre class="mock">> what changed in the pool?
+
+ <span class="m">─ Thought for 2.3s ────────────────────────────────── ▼ ─</span>
+  The pool caps concurrency, so I should read it first.
+
+  The pool runs up to N commands at once and queues the rest.
+
+ <span class="m">───────────── 1.2k in · 310 out · 120 think · 92% cached · 3.4s · 2 req ─</span></pre>
+      <p class="legend">The divider is dim (<code>Muted</code>), one row, stats right-aligned, one trailing <code>─</code>. A failed or cancelled loop gets none.</p>
+    </div>
+    <div class="card"><h4>Status bar</h4>
+      <pre class="mock"> <span class="m">~/code/hildegard-helper</span>   <span class="m">12.3M in · 127.3k out · 87% cached · 2h15m · 202 req</span></pre>
+      <p class="legend">The workspace on the left; the session's consumption on the right (billed input, output, token-weighted cache hit, wall time, request count). The context lives on the <a href="#sessionheader">header</a>.</p>
+    </div>
+  </div>
+  <div class="grid cols-2">
+    <div class="card"><h4>Format</h4>
+      <pre class="mock">header   id · ctx [shades] pct%
+status   workspace · in · out · cached · time · req
+divider  <span class="m">─ … &lt;stats&gt; ─</span>   (dim, one row)
+thought  Thought for &lt;duration&gt;   (0 → "Thought")</pre>
+    </div>
+    <div class="card"><h4>Fields (unchanged from v1)</h4>
+      <pre class="mock">1.2k in · 310 out · 120 think · 92% cached · 3.4s · 2 req
+        ^ in/out        ^ reasoning tokens   ^ cache hit
+                          when present        ^ wall time  ^ requests</pre>
+    </div>
+  </div>
+</section>
+
+<section id="sessionheader">
+  <h2>Session header</h2>
+  <p class="note">Session information moves onto the messages panel's <b>top border</b>: the session id at the left, the live session stats at the right. The status bar is then free for other purposes (currently left empty).</p>
+  <div class="grid cols-2">
+    <div class="card"><h4>Header</h4>
+      <pre class="mock">╭ <span class="acc">4830c2f17d9c</span> ────────────────── 121k [<span class="md-bold">▓</span>░░░░░░░░░] 12% ─╮
+│                                                                             │
+│  … the conversation …                                                       │
+╰─────────────────────────────────────────────────────────────────────────────╯</pre>
+      <p class="legend">The id is the first 12 hex, enough to <code>--attach</code>. The header carries only the context: the count, the bar (ten shade cells — a full <code>▓</code> per 10%, a <code>▒</code> half-cell at a 5% remainder, <code>░</code> background), and the percentage. The consumption is on the status bar.</p>
+    </div>
+    <div class="card"><h4>Fields</h4>
+      <pre class="mock">id       first 12 hex
+context  final context [shades] pct%</pre>
+      <p class="legend">The session's consumption (in/out/cached/time/req) is on the <a href="#turnstats">status bar</a>. Cost is omitted for now; it will be tracked per turn alongside the provider and model.</p>
     </div>
   </div>
 </section>

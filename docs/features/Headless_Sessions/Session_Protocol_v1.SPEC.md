@@ -131,7 +131,8 @@ type
     ekToolCall, ekToolResult,
     ekApprovalRequest, ekApprovalResolved,
     ekDriveRequested, ekDriveGranted, ekDriveReleased,
-    ekTurnFinished, ekError, ekGap, ekLoopExited);
+    ekTurnFinished, ekError, ekGap, ekLoopExited,
+    ekReasoningDone);
 
   { One streamed event. A flat record with optional fields, the same shape as
     TTurnEvent: only the fields named by Kind are meaningful. }
@@ -154,7 +155,7 @@ type
     Choice: TApprovalChoice;    // approval_resolved
     FinishReason: string;       // turn_finished
     Usage: TTokenUsage;         // turn_finished
-    ElapsedMs: Int64;           // turn_finished
+    ElapsedMs: Int64;           // turn_finished / reasoning_done
     ErrorCode: string;          // error
     Dropped: Boolean;           // error: the turn was cancelled with no commit
     FromSeq: Int64;             // gap: first missing seq
@@ -259,6 +260,7 @@ Event payloads (the fields beyond `seq`/`ts`/`kind`):
 | `error` | `code`, `message`, `detail`, `dropped` |
 | `gap` | `from_seq`, `to_seq` |
 | `loop_exited` | `reason` |
+| `reasoning_done` | `elapsed_ms` (the reasoning phase's duration) |
 
 ### Event Contracts
 

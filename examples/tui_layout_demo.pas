@@ -415,11 +415,11 @@ begin
     'This is the user''s message. It should be rendered with a slightly lighter ' +
     'background to distinguish it from the rest of the content. Make the border ' +
     'be a dimmed accent color to not make it too distracting.');
-  ChatPanel.Stream.Add(ckThought, 'Thought · 8.2s',
+  ChatPanel.Stream.Add(ckThought, 'Thought for 8.2s',
     'This is an expanded thought block. The entire block is clickable even when ' +
     'collapsed, and clicking toggles between expanded and collapsed. The borders ' +
     'and text in this block are rendered with a dimmed color on the default ' +
-    'background.');
+    'background. Its title carries how long the model reasoned.');
   ChatPanel.Stream.Add(ckAssistant, '',
     'Assistant message between thoughts.');
   ChatPanel.Stream.Add(ckTool, 'looking for the build file',
@@ -430,9 +430,14 @@ begin
     'Final assistant message. The scrollbar is the same character but rendered ' +
     'in different colors: a darker track and a lighter thumb.' + #10 + '' + #10 +
     'A multi-paragraph response simply applies a gap between paragraphs.');
+  ChatPanel.Stream.Add(ckTurn, '',
+    '1.2k in · 310 out · 120 think · 92% cached · 3.4s · 2 req');
   ChatPanel.SetState(psThinking, 'thinking');
+  { The context lives on the messages panel's top border; the workspace and the
+    session's consumption share the status bar. }
+  ChatPanel.SetHeader('4830c2f17d9c', '121k [▓░░░░░░░░░] 12%');
   ChatPanel.SetStatus(GetCurrentDir);
-  ChatPanel.SetStats('1.2k in · 310 out · 92% cached · 3.4s · 2 req');
+  ChatPanel.SetStats('12.3M in · 127.3k out · 87% cached · 2h15m · 202 req');
 
   SideText := TTextBlock.Create([], wmNone);
   SideText.SetText(
