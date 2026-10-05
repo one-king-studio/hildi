@@ -79,6 +79,7 @@ type
     procedure TestRemoteDriverInterrupt;
     procedure TestRemoteDriverReconnectsAfterRuntimeExit;
     procedure TestAppRemoteTurnRenders;
+    procedure TestAppRemoteFailedTurnEndsInErrorWithoutDivider;
   end;
 
 implementation
@@ -709,7 +710,7 @@ var
   Deadline: Int64;
   I: Integer;
   E: TInputEvent;
-  SawBusy, BlankUser: Boolean;
+  SawBusy, BlankUser, SawDivider: Boolean;
   UserBlocks: Integer;
 begin
   Id := NewSession;
@@ -778,6 +779,108 @@ begin
               end;
             AssertEquals('exactly one user block', 1, UserBlocks);
             AssertFalse('no blank user block', BlankUser);
+
+            { A successful remote loop ends with its metrics divider. }
+            SawDivider := False;
+            for I := 0 to App.Panel.Stream.Count - 1 do
+              if App.Panel.Stream.ItemAt(I).Kind = ckTurn then
+                SawDivider := True;
+            AssertTrue('the loop ends with a divider', SawDivider);
+          finally
+            App.Free;
+            Input := nil;
+            Surface := nil;
+          end;
+        finally
+          Session.Free;
+        end;
+      finally
+        Driver := nil;
+      end;
+    finally
+      Rt.Stop;
+      Th.WaitFor;
+      Th.Free;
+      DeleteSocket(Id);
+    end;
+  finally
+    Fake.Free;
+  end;
+end;
+
+procedure THarnessDriverTest.TestAppRemoteFailedTurnEndsInErrorWithoutDivider;
+var
+  Id: string;
+  Fake: TFakeTransport;
+  Rt: TSessionRuntime;
+  Th: TRuntimeThread;
+  Driver: ISessionDriver;
+  Session: THarnessSession;
+  Cfg: THarnessSessionConfig;
+  Surface: TSurfaceMemory;
+  Input: TInputSourceScripted;
+  App: THarnessApp;
+  Err: string;
+  Deadline: Int64;
+  I: Integer;
+  E: TInputEvent;
+  SawBusy, SawDivider: Boolean;
+begin
+  Id := NewSession;
+  Fake := TFakeTransport.Create;
+  try
+    Fake.FailNetwork := True;
+    Rt := MakeRuntime(Id, Fake);
+    Th := TRuntimeThread.Create(Rt);
+    try
+      Th.Start;
+      AssertTrue('bound', WaitForSocket(Id, 5000));
+      Driver := RemoteDriver(ClientConfig(Id), Err);
+      AssertNotNull('driver connects: ' + Err, Driver);
+      try
+        Cfg := Config(Fake);
+        Cfg.SessionId := Id;
+        Cfg.NoLoop := True;
+        Session := THarnessSession.Open(Cfg, Err);
+        AssertTrue('session handle: ' + Err, Session <> nil);
+        try
+          Surface := TSurfaceMemory.Create(60, 20);
+          Input := TInputSourceScripted.Create;
+          App := THarnessApp.Create(Surface, Input, Session, Driver);
+          try
+            App.Step;
+            for I := 1 to Length('hi') do
+            begin
+              E := Default(TInputEvent);
+              E.Kind := ikKey;
+              E.Key.Kind := kkChar;
+              E.Key.Ch := UnicodeString('hi'[I]);
+              Input.Push(E);
+            end;
+            E := Default(TInputEvent);
+            E.Kind := ikKey;
+            E.Key.Kind := kkEnter;
+            E.Key.Mods := [moShift];
+            Input.Push(E);
+
+            Deadline := GetTickCount64 + 6000;
+            SawBusy := False;
+            repeat
+              App.Step;
+              if App.Busy then
+                SawBusy := True;
+              Sleep(2);
+            until (SawBusy and not App.Busy) or (GetTickCount64 >= Deadline);
+
+            { The runtime emits turn_finished after the error too; it must not
+              flip the failed turn back to ready, nor end it with a divider. }
+            AssertEquals('the failed turn ends in error', 'error',
+              App.StateText);
+            SawDivider := False;
+            for I := 0 to App.Panel.Stream.Count - 1 do
+              if App.Panel.Stream.ItemAt(I).Kind = ckTurn then
+                SawDivider := True;
+            AssertFalse('no divider for a failed remote loop', SawDivider);
           finally
             App.Free;
             Input := nil;
