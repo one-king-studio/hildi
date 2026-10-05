@@ -25,6 +25,8 @@ type
     procedure TestSessionFlag;
     procedure TestContinueFlag;
     procedure TestTailFlag;
+    procedure TestAttachFlag;
+    procedure TestDriveFlag;
     procedure TestListSessionsSubcommand;
     procedure TestLongFlagsWithEquals;
     procedure TestHelpFlag;
@@ -173,6 +175,28 @@ begin
   O := ParseCLIOptions(['--tail=0']);
   AssertEquals('tail all', 0, O.SessionTail);
   AssertTrue('negative raises', Raises(['--tail', '-1']));
+end;
+
+procedure TCLITest.TestAttachFlag;
+var
+  O: TCLIOptions;
+begin
+  O := ParseCLIOptions(['--attach', 'abc123']);
+  AssertEquals('attach mode', Ord(cmAttach), Ord(O.Mode));
+  AssertEquals('session id', 'abc123', O.AttachSession);
+  AssertFalse('observer by default', O.AttachDrive);
+end;
+
+procedure TCLITest.TestDriveFlag;
+var
+  O: TCLIOptions;
+begin
+  O := ParseCLIOptions(['--attach=abc123', '--drive']);
+  AssertEquals('attach mode', Ord(cmAttach), Ord(O.Mode));
+  AssertEquals('session id', 'abc123', O.AttachSession);
+  AssertTrue('driver', O.AttachDrive);
+  AssertTrue('positional after attach raises',
+    Raises(['--attach', 'abc123', 'hi']));
 end;
 
 procedure TCLITest.TestListSessionsSubcommand;

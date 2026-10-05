@@ -18,13 +18,14 @@ program agent_cli;
 
 uses
   {$ifdef unix}cthreads, cwstring,{$endif}   // cthreads first; cwstring for Unicode
-  SysUtils, Classes, ctypes, DateUtils,
+  SysUtils, Classes, ctypes, DateUtils, SyncObjs,
   hildegard.helper.ansi, hildegard.helper.env, hildegard.helper.cli,
   hildegard.helper.transcript, hildegard.helper.llm, hildegard.helper.agent,
   hildegard.helper.command.policy, hildegard.helper.command.tool,
   hildegard.helper.files,
   hildegard.helper.approval, hildegard.helper.approval.store,
   hildegard.helper.session, hildegard.helper.session.store,
+  hildegard.helper.session.protocol, hildegard.helper.session.runtime,
   hildegard.helper.recall.tool,
   hildegard.helper.store, hildegard.helper.workspace;
 
@@ -131,6 +132,201 @@ begin
   Result.Scope := Scope;
 end;
 
+type
+  { Maps the headless wire events onto the transcript writer. Its callbacks run
+    on the client's reader thread; the writer is only touched from there. }
+  TSessionObserver = class(TInterfacedObject, ISessionSink)
+  private
+    FWriter: TTranscriptWriter;
+    FDone: TSimpleEvent;
+    FTurnOpen: Boolean;
+  public
+    constructor Create(AWriter: TTranscriptWriter);
+    destructor Destroy; override;
+    procedure OnHello(const AHello: TSessionHello);
+    procedure OnAttached(const AAttached: TSessionAttached);
+    procedure OnEvent(const AEvent: TSessionEvent);
+    procedure OnDetached(const AReason: string);
+    procedure OnError(const ACode, AMessage: string);
+    property Done: TSimpleEvent read FDone;
+  end;
+
+constructor TSessionObserver.Create(AWriter: TTranscriptWriter);
+begin
+  inherited Create;
+  FWriter := AWriter;
+  FDone := TSimpleEvent.Create;
+  FTurnOpen := False;
+end;
+
+destructor TSessionObserver.Destroy;
+begin
+  FDone.Free;
+  inherited Destroy;
+end;
+
+procedure TSessionObserver.OnHello(const AHello: TSessionHello);
+begin
+end;
+
+procedure TSessionObserver.OnAttached(const AAttached: TSessionAttached);
+begin
+  WriteLn(AnsiDim(Format('attached as %s (driver: %s, last_seq: %d)',
+    [SessionRoleToWire(AAttached.Role),
+     AAttached.Driver + ' ',
+     AAttached.LastSeq])));
+end;
+
+procedure TSessionObserver.OnEvent(const AEvent: TSessionEvent);
+begin
+  case AEvent.Kind of
+    ekUserMessage:
+      begin
+        FWriter.BeginTurn(AEvent.Text);
+        FTurnOpen := True;
+      end;
+    ekAssistantDelta:
+      FWriter.OnText(AEvent.Text);
+    ekReasoningDelta:
+      FWriter.OnReasoning(AEvent.Text);
+    ekToolCall:
+      FWriter.OnToolCall(AEvent.ToolId, AEvent.ToolName, AEvent.ToolArguments,
+        AEvent.ToolReason);
+    ekToolResult:
+      FWriter.OnToolResult(AEvent.ToolId, AEvent.ToolName, AEvent.Text,
+        AEvent.ToolOk);
+    ekError:
+      FWriter.WriteError(AEvent.Text + ' (' + AEvent.Detail + ')');
+    ekTurnFinished:
+      begin
+        if FTurnOpen then
+          FWriter.EndTurn;
+        FTurnOpen := False;
+      end;
+  else
+    ;
+  end;
+end;
+
+procedure TSessionObserver.OnDetached(const AReason: string);
+begin
+  WriteLn(AnsiDim('detached: ' + AReason));
+  FDone.SetEvent;
+end;
+
+procedure TSessionObserver.OnError(const ACode, AMessage: string);
+begin
+  WriteLn(AnsiStyled('error: ' + ACode + ': ' + AMessage, AnsiRed));
+end;
+
+{ Attach to a headless session: render its ledger history, then stream the live
+  turn. As the driver, read prompts from stdin. }
+procedure RunAttach(const ASessionId, AWorkspaceRoot, AStorePath: string;
+  ADrive, AShowReasoning, AShowTools: Boolean);
+var
+  Store: TSqliteStore;
+  Conv: TSqliteConversationStore;
+  History: TChatMessageArray;
+  StoreErr: TStoreError;
+  StoreConfig: TStoreConfig;
+  OutStream: TStream;
+  TOpts: TTranscriptOptions;
+  Writer: TTranscriptWriter;
+  Observer: TSessionObserver;
+  Sink: ISessionSink;
+  Client: TSessionClient;
+  Cfg: TSessionClientConfig;
+  Err, Line: string;
+  Cmd: TSessionCommand;
+  PromptSeq: Integer;
+begin
+  StoreConfig := Default(TStoreConfig);
+  StoreConfig.DatabasePath := AStorePath;
+  StoreConfig.BusyTimeoutMs := 5000;
+  Store := TSqliteStore.Create(StoreConfig);
+  try
+    if not Store.Open(StoreErr) then
+      Fatal('attach: could not open store: ' + StoreErr.Message, 1);
+    Conv := TSqliteConversationStore.Create(Store, ASessionId, 0);
+    try
+      History := Conv.Messages;
+    finally
+      Conv.Free;
+    end;
+  finally
+    Store.Close;
+    Store.Free;
+  end;
+
+  OutStream := THandleStream.Create(StdOutputHandle);
+  TOpts := Default(TTranscriptOptions);
+  TOpts.ShowUser := True;
+  TOpts.ShowTools := AShowTools;
+  TOpts.ShowReasoning := AShowReasoning;
+  Writer := TTranscriptWriter.Create(OutStream, TOpts);
+  Observer := TSessionObserver.Create(Writer);
+  Sink := Observer;
+  try
+    if Length(History) > 0 then
+    begin
+      WriteLn(AnsiDim('--- history (' + IntToStr(Length(History)) +
+        ' messages) ---'));
+      Writer.RenderHistory(History);
+      WriteLn;
+    end;
+
+    Cfg := Default(TSessionClientConfig);
+    Cfg.SessionId := ASessionId;
+    Cfg.WorkspacePath := AWorkspaceRoot;
+    Cfg.StorePath := AStorePath;
+    if ADrive then
+      Cfg.Role := srDrive
+    else
+      Cfg.Role := srObserve;
+    Cfg.Spawn := True;
+    Cfg.SpawnTimeoutMs := 5000;
+    Cfg.RuntimeCommand := ExpandFileName(ParamStr(0));
+    Client := TSessionClient.Open(Cfg, Sink, Err);
+    if Client = nil then
+      Fatal('attach: ' + Err, 1);
+    try
+      if ADrive then
+      begin
+        PromptSeq := 0;
+        WriteLn('Attached as driver. Type a message; /exit or Ctrl-D to quit.');
+        while True do
+        begin
+          Write(AnsiBold('> '));
+          Flush(Output);
+          if EOF(Input) then
+            Break;
+          ReadLn(Line);
+          if IsExitCommand(Trim(Line)) then
+            Break;
+          if Trim(Line) = '' then
+            Continue;
+          Inc(PromptSeq);
+          Cmd := Default(TSessionCommand);
+          Cmd.Kind := scPrompt;
+          Cmd.Id := 'p' + IntToStr(PromptSeq);
+          Cmd.Text := Line;
+          Client.Send(Cmd);
+        end;
+        Client.Close;
+      end
+      else
+        Observer.Done.WaitFor(INFINITE);
+    finally
+      Client.Free;
+    end;
+  finally
+    Sink := nil;
+    Observer := nil;
+    Writer.Free;
+    OutStream.Free;
+  end;
+end;
+
 var
   RawArgs: TStringList;
   Args: array of string;
@@ -174,6 +370,16 @@ var
   History: TChatMessageArray;
 
 begin
+  { When a client spawns a runtime it re-executes this binary with the runtime
+    argv; run the runtime instead of parsing a normal session. }
+  if (ParamCount >= 1) and (ParamStr(1) = '--session-runtime') then
+  begin
+    SetLength(Args, ParamCount);
+    for I := 0 to ParamCount - 1 do
+      Args[I] := ParamStr(I + 1);
+    Halt(RunSessionRuntime(Args));
+  end;
+
   RawArgs := CollectArgs;
   try
     try
@@ -241,6 +447,19 @@ begin
           '  ', Summaries[I].MessageCount, ' messages');
     SqliteStore.Close;
     SqliteStore.Free;
+    Workspace.Free;
+    Halt(0);
+  end;
+
+  if Opts.Mode = cmAttach then
+  begin
+    StorePath := GetEnvironmentVariable('HILDEGARD_STORE_PATH');
+    if StorePath = '' then
+      StorePath := IncludeTrailingPathDelimiter(GetUserDir) +
+        '.hildegard-helper' + PathDelim + 'store.db';
+    ForceDirectories(ExtractFileDir(StorePath));
+    RunAttach(Opts.AttachSession, Workspace.Root, StorePath, Opts.AttachDrive,
+      (Opts.Reasoning = tsOn) or (Opts.Reasoning = tsDefault), Opts.ShowTools);
     Workspace.Free;
     Halt(0);
   end;

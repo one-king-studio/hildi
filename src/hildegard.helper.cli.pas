@@ -11,7 +11,7 @@ uses
 
 type
   TTriState = (tsDefault, tsOn, tsOff);
-  TCLIMode = (cmInteractive, cmOnce, cmListSessions);
+  TCLIMode = (cmInteractive, cmOnce, cmListSessions, cmAttach);
 
   TCLIOptions = record
     Mode: TCLIMode;
@@ -24,6 +24,8 @@ type
     Session: string;
     ContinueSession: Boolean;
     SessionTail: Integer;       // -1 = unset (5 on resume); 0 = all messages
+    AttachSession: string;      // --attach <session-id>
+    AttachDrive: Boolean;       // --drive: attach as the driver
     ShowUser: Boolean;
     ShowTools: Boolean;
     Reasoning: TTriState;        // tsDefault => on for interactive, off for once
@@ -128,6 +130,13 @@ begin
       Result.Workspace := ValueOf(AArgs, I, Key, Inline)
     else if Key = '--session' then
       Result.Session := ValueOf(AArgs, I, Key, Inline)
+    else if Key = '--attach' then
+    begin
+      Result.AttachSession := ValueOf(AArgs, I, Key, Inline);
+      Result.Mode := cmAttach;
+    end
+    else if Key = '--drive' then
+      Result.AttachDrive := True
     else if (Key = '-c') or (Key = '--continue') then
       Result.ContinueSession := True
     else if Key = '--tail' then
@@ -146,7 +155,7 @@ begin
     else
     begin
       if (Result.Prompt <> '') or Result.PromptFromStdin or
-        (Result.Mode = cmListSessions) then
+        (Result.Mode = cmListSessions) or (Result.Mode = cmAttach) then
         raise ECLIError.Create('prompt given more than once');
       if Arg = 'sessions' then
         Result.Mode := cmListSessions
@@ -199,6 +208,10 @@ begin
     '      --tail N        on resume, load the last N messages (default 5,' +
     LineEnding +
     '                      0 = all)' + LineEnding +
+    '      --attach ID     attach to a headless session as an observer' +
+    LineEnding +
+    '      --drive         with --attach, attach as the driver and prompt' +
+    LineEnding +
     '  -h, --help          show this help' + LineEnding +
     LineEnding +
     'Environment: HILDEGARD_LLM_ENDPOINT, HILDEGARD_LLM_MODEL,' +
