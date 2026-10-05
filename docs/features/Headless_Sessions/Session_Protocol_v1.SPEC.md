@@ -156,6 +156,7 @@ type
     Usage: TTokenUsage;         // turn_finished
     ElapsedMs: Int64;           // turn_finished
     ErrorCode: string;          // error
+    Dropped: Boolean;           // error: the turn was cancelled with no commit
     FromSeq: Int64;             // gap: first missing seq
     ToSeq: Int64;               // gap: last delivered seq
     Client: string;             // drive_*: client id
@@ -255,7 +256,7 @@ Event payloads (the fields beyond `seq`/`ts`/`kind`):
 | `drive_granted` | `client` |
 | `drive_released` | `client` |
 | `turn_finished` | `finish_reason`, `usage`, `elapsed_ms` |
-| `error` | `code`, `message`, `detail` |
+| `error` | `code`, `message`, `detail`, `dropped` |
 | `gap` | `from_seq`, `to_seq` |
 | `loop_exited` | `reason` |
 
