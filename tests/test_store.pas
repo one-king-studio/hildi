@@ -54,6 +54,12 @@ type
     procedure TestListSessionsCountsMessagesAndTurns;
     procedure TestMostRecentTurnReturnsLatest;
     procedure TestMostRecentTurnNotFound;
+
+    procedure TestRuntimeMigrationIsAdditive;
+    procedure TestRuntimeRowRoundTrip;
+    procedure TestRuntimeRowUnknownSessionFails;
+    procedure TestClearRuntime;
+    procedure TestListRuntimes;
   end;
 
 implementation
@@ -867,6 +873,168 @@ begin
     AssertFalse('none', S.MostRecentTurn(Sid, Turn, Err));
     AssertEquals('not found', Ord(seNotFound), Ord(Err.Code));
     AssertEquals('zero record', 0, Turn.Id);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestRuntimeMigrationIsAdditive;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Cfg: TStoreConfig;
+  Migs: TMigrationArray;
+  Ws: Integer;
+  Sid: string;
+  Row: TSessionRuntimeRow;
+  Msgs: TMessageRecordArray;
+  Msg: TMessageRecord;
+begin
+  Cfg.DatabasePath := FDbPath;
+  Cfg.BusyTimeoutMs := 5000;
+
+  { A v1-only database, as an existing install would have. }
+  Migs := DefaultMigrations;
+  SetLength(Migs, 1);
+  S := TSqliteStore.Create(Cfg, Migs);
+  try
+    AssertTrue('open v1', S.Open(Err));
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, Sid, Err);
+    Msg := Default(TMessageRecord);
+    Msg.SessionId := Sid;
+    Msg.Role := mrUser;
+    Msg.Content := 'hello';
+    AssertTrue('append v1', S.AppendMessage(Msg, Err));
+  finally
+    S.Free;
+  end;
+
+  { Reopen with the full migrations: v2 applies and v1 history survives. }
+  S := TSqliteStore.Create(Cfg);
+  try
+    AssertTrue('reopen', S.Open(Err));
+    AssertTrue('history survives', S.QueryMessages(Sid, Msgs, Err));
+    AssertEquals('one message', 1, Length(Msgs));
+    AssertEquals('content', 'hello', Msgs[0].Content);
+    Row := Default(TSessionRuntimeRow);
+    Row.SessionId := Sid;
+    Row.Pid := 1234;
+    Row.SocketPath := '/tmp/s.sock';
+    Row.Status := rsRunning;
+    Row.StartedAt := 1000;
+    Row.UpdatedAt := 2000;
+    AssertTrue('register after migration', S.RegisterRuntime(Row, Err));
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestRuntimeRowRoundTrip;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws: Integer;
+  Sid: string;
+  Row, Got: TSessionRuntimeRow;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, Sid, Err);
+    Row := Default(TSessionRuntimeRow);
+    Row.SessionId := Sid;
+    Row.Pid := 4321;
+    Row.SocketPath := '/run/hh/abc.sock';
+    Row.Status := rsRunning;
+    Row.StartedAt := 111;
+    Row.UpdatedAt := 222;
+    AssertTrue('register', S.RegisterRuntime(Row, Err));
+
+    AssertTrue('load', S.LoadRuntime(Sid, Got, Err));
+    AssertEquals('pid', 4321, Got.Pid);
+    AssertEquals('socket', '/run/hh/abc.sock', Got.SocketPath);
+    AssertEquals('status', Ord(rsRunning), Ord(Got.Status));
+    AssertEquals('started', 111, Got.StartedAt);
+    AssertEquals('updated', 222, Got.UpdatedAt);
+
+    { Re-registering upserts. }
+    Row.Pid := 5555;
+    Row.Status := rsExited;
+    AssertTrue('re-register', S.RegisterRuntime(Row, Err));
+    AssertTrue('reload', S.LoadRuntime(Sid, Got, Err));
+    AssertEquals('updated pid', 5555, Got.Pid);
+    AssertEquals('updated status', Ord(rsExited), Ord(Got.Status));
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestRuntimeRowUnknownSessionFails;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Row: TSessionRuntimeRow;
+begin
+  S := OpenStore;
+  try
+    Row := Default(TSessionRuntimeRow);
+    Row.SessionId := 'no-such-session';
+    AssertFalse('unknown session', S.RegisterRuntime(Row, Err));
+    AssertEquals('not found', Ord(seNotFound), Ord(Err.Code));
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestClearRuntime;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws: Integer;
+  Sid: string;
+  Row, Got: TSessionRuntimeRow;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, Sid, Err);
+    Row := Default(TSessionRuntimeRow);
+    Row.SessionId := Sid;
+    Row.SocketPath := '/tmp/x.sock';
+    AssertTrue('register', S.RegisterRuntime(Row, Err));
+    AssertTrue('clear', S.ClearRuntime(Sid, Err));
+    AssertFalse('gone', S.LoadRuntime(Sid, Got, Err));
+    AssertEquals('not found', Ord(seNotFound), Ord(Err.Code));
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestListRuntimes;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws: Integer;
+  SidA, SidB: string;
+  Rows: TSessionRuntimeRowArray;
+  Row: TSessionRuntimeRow;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, SidA, Err);
+    S.CreateSession(Ws, SidB, Err);
+    Row := Default(TSessionRuntimeRow);
+    Row.SessionId := SidA;
+    Row.SocketPath := '/tmp/a.sock';
+    AssertTrue('register a', S.RegisterRuntime(Row, Err));
+    Row.SessionId := SidB;
+    Row.SocketPath := '/tmp/b.sock';
+    AssertTrue('register b', S.RegisterRuntime(Row, Err));
+
+    AssertTrue('list', S.ListRuntimes(Rows, Err));
+    AssertEquals('two rows', 2, Length(Rows));
   finally
     S.Free;
   end;

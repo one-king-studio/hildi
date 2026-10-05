@@ -163,6 +163,22 @@ type
     { One message by id, scoped to a session; seNotFound if absent. }
     function QueryMessage(const ASessionId: string; AId: Int64;
       out AMessage: TMessageRecord; out AError: TStoreError): Boolean;
+    { The session's highest message seq (0 when it has none). Cheap: used as
+      the runtime's `store_hwm`, so it must not read every row. }
+    function MessageHighWaterMark(const ASessionId: string; out ASeq: Int64;
+      out AError: TStoreError): Boolean;
+
+    { The live-runtime row (v2). Advisory discovery/display; the socket is the
+      authority on liveness. Register upserts; Load is seNotFound when absent. }
+    function RegisterRuntime(const ARow: TSessionRuntimeRow;
+      out AError: TStoreError): Boolean;
+    function LoadRuntime(const ASessionId: string;
+      out ARow: TSessionRuntimeRow; out AError: TStoreError): Boolean;
+    function ClearRuntime(const ASessionId: string;
+      out AError: TStoreError): Boolean;
+    { Every runtime row, oldest session first. }
+    function ListRuntimes(out ARows: TSessionRuntimeRowArray;
+      out AError: TStoreError): Boolean;
   end;
 
 function StoreSchemaVersion: Integer;
@@ -199,7 +215,7 @@ end;
 function DefaultMigrations: TMigrationArray;
 begin
   Result := nil;
-  SetLength(Result, 1);
+  SetLength(Result, 2);
   Result[0].Version := 1;
   Result[0].Name := 'session history';
   Result[0].Statements := [
@@ -298,6 +314,18 @@ begin
     'CREATE INDEX idx_messages_session ON messages (session_id, seq)',
     'CREATE INDEX idx_messages_turn ON messages (turn_id, seq)',
     'CREATE INDEX idx_messages_request ON messages (request_id)'
+  ];
+  { v2: the live-runtime discovery row. Additive: v1 history is untouched. }
+  Result[1].Version := 2;
+  Result[1].Name := 'session runtimes';
+  Result[1].Statements := [
+    'CREATE TABLE session_runtimes (' +
+      'session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE, ' +
+      'pid INTEGER NOT NULL, ' +
+      'socket_path TEXT NOT NULL, ' +
+      'status INTEGER NOT NULL DEFAULT 0, ' +
+      'started_at INTEGER NOT NULL, ' +
+      'updated_at INTEGER NOT NULL)'
   ];
 end;
 
@@ -1778,6 +1806,187 @@ begin
       if Stmt.Step <> SQLITE_ROW then
         Exit(Fail(AError, seNotFound, 'no session for workspace', ''));
       AId := Stmt.ColText(0);
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.MessageHighWaterMark(const ASessionId: string;
+  out ASeq: Int64; out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  ASeq := 0;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb,
+      'SELECT COALESCE(MAX(seq), 0) FROM messages WHERE session_id = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not read message hwm', DbErrorText));
+      Stmt.BindText(1, ASessionId);
+      if Stmt.Step = SQLITE_ROW then
+        ASeq := Stmt.ColInt64(0);
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+{ --- session runtimes (v2) ---------------------------------------------- }
+
+function TSqliteStore.RegisterRuntime(const ARow: TSessionRuntimeRow;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    if ARow.SessionId = '' then
+      Exit(Fail(AError, seInvalidArgument, 'session id is required', ''));
+    if not SessionExists(ARow.SessionId, AError) then
+    begin
+      AError.Code := seNotFound;
+      AError.Message := 'session not found';
+      AError.Detail := ARow.SessionId;
+      Exit(False);
+    end;
+    Stmt := TStmt.Create(FDb,
+      'INSERT INTO session_runtimes (session_id, pid, socket_path, status, ' +
+      'started_at, updated_at) VALUES (?, ?, ?, ?, ?, ?) ' +
+      'ON CONFLICT(session_id) DO UPDATE SET pid = excluded.pid, ' +
+      'socket_path = excluded.socket_path, status = excluded.status, ' +
+      'started_at = excluded.started_at, updated_at = excluded.updated_at');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not register runtime', DbErrorText));
+      Stmt.BindText(1, ARow.SessionId);
+      Stmt.BindInt(2, ARow.Pid);
+      Stmt.BindText(3, ARow.SocketPath);
+      Stmt.BindInt(4, Ord(ARow.Status));
+      Stmt.BindInt64(5, ARow.StartedAt);
+      Stmt.BindInt64(6, ARow.UpdatedAt);
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not register runtime', DbErrorText));
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.LoadRuntime(const ASessionId: string;
+  out ARow: TSessionRuntimeRow; out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  ARow := Default(TSessionRuntimeRow);
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb,
+      'SELECT session_id, pid, socket_path, status, started_at, updated_at ' +
+      'FROM session_runtimes WHERE session_id = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not load runtime', DbErrorText));
+      Stmt.BindText(1, ASessionId);
+      if Stmt.Step <> SQLITE_ROW then
+        Exit(Fail(AError, seNotFound, 'runtime not found', ASessionId));
+      ARow.SessionId := Stmt.ColText(0);
+      ARow.Pid := Stmt.ColInt(1);
+      ARow.SocketPath := Stmt.ColText(2);
+      ARow.Status := TSessionRuntimeStatus(Stmt.ColInt(3));
+      ARow.StartedAt := Stmt.ColInt64(4);
+      ARow.UpdatedAt := Stmt.ColInt64(5);
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.ClearRuntime(const ASessionId: string;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    if ASessionId = '' then
+      Exit(Fail(AError, seInvalidArgument, 'session id is required', ''));
+    Stmt := TStmt.Create(FDb,
+      'DELETE FROM session_runtimes WHERE session_id = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not clear runtime', DbErrorText));
+      Stmt.BindText(1, ASessionId);
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not clear runtime', DbErrorText));
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.ListRuntimes(out ARows: TSessionRuntimeRowArray;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+  N: Integer;
+  Row: TSessionRuntimeRow;
+begin
+  AError := OkError;
+  ARows := nil;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb,
+      'SELECT session_id, pid, socket_path, status, started_at, updated_at ' +
+      'FROM session_runtimes ORDER BY session_id');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not list runtimes', DbErrorText));
+      N := 0;
+      while Stmt.Step = SQLITE_ROW do
+      begin
+        Row := Default(TSessionRuntimeRow);
+        Row.SessionId := Stmt.ColText(0);
+        Row.Pid := Stmt.ColInt(1);
+        Row.SocketPath := Stmt.ColText(2);
+        Row.Status := TSessionRuntimeStatus(Stmt.ColInt(3));
+        Row.StartedAt := Stmt.ColInt64(4);
+        Row.UpdatedAt := Stmt.ColInt64(5);
+        SetLength(ARows, N + 1);
+        ARows[N] := Row;
+        Inc(N);
+      end;
     finally
       Stmt.Free;
     end;

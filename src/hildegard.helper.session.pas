@@ -96,6 +96,21 @@ type
 
   TSessionSummaryArray = array of TSessionSummary;
 
+  { A session's live runtime row (migration v2). Advisory: discovery and
+    display only - the socket, not this row, is the authority on liveness. }
+  TSessionRuntimeStatus = (rsRunning, rsExited);
+
+  TSessionRuntimeRow = record
+    SessionId: string;
+    Pid: Integer;
+    SocketPath: string;
+    Status: TSessionRuntimeStatus;
+    StartedAt: Int64;
+    UpdatedAt: Int64;
+  end;
+
+  TSessionRuntimeRowArray = array of TSessionRuntimeRow;
+
 { A random 128-bit session id as 32 lowercase hex characters. }
 function NewSessionId: string;
 
