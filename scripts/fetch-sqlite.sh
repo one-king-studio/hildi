@@ -57,5 +57,7 @@ if [ "$actual" != "$SQLITE_SHA3" ]; then
 fi
 echo "sqlite: checksum ok ($SQLITE_SHA3)"
 
-unzip -q -j -o -d "$DEST" "$tmp/$ZIP" "${FILES[@]}"
+unzip -q -j -o -d "$DEST" "$tmp/$ZIP" "sqlite-amalgamation-${SQLITE_VERSION}/${FILES[0]}" \
+  "sqlite-amalgamation-${SQLITE_VERSION}/${FILES[1]}" \
+  "sqlite-amalgamation-${SQLITE_VERSION}/${FILES[2]}"
 echo "sqlite: extracted ${FILES[*]} into $DEST"
