@@ -53,6 +53,7 @@ type
     procedure TestPaddingInsetsChild;
     procedure TestBorderOffStillPads;
     procedure TestMeasureInflates;
+    procedure TestArrangesChildOnce;
   end;
 
   TFocusGroupTest = class(TTestCase)
@@ -247,6 +248,25 @@ begin
   finally
     Panel.Free;
     S.Free;
+  end;
+end;
+
+procedure TPanelTest.TestArrangesChildOnce;
+var
+  Probe: TProbe;
+  Panel: TPanel;
+begin
+  { The panel must not arrange the child at the full bounds and then again at the
+    inner rect: a child that memoises its layout per width would re-measure every
+    block on every frame. }
+  Probe := TProbe.Create(2, 1);
+  Panel := TPanel.Create(Probe, DarkTheme, DefaultBoxStyle);
+  try
+    Panel.Arrange(MakeRect(0, 0, 20, 10));
+    AssertEquals('the child is arranged exactly once', 1, Probe.ArrangeCalls);
+    AssertEquals('and at the inner width', 16, Probe.LastBounds.W);
+  finally
+    Panel.Free;
   end;
 end;
 

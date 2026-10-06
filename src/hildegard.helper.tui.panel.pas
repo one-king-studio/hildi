@@ -177,7 +177,12 @@ end;
 
 procedure TPanel.Arrange(const ABounds: TRect);
 begin
-  inherited Arrange(ABounds);
+  { Set our own bounds, then give the child the inner rect. Do NOT call the
+    inherited Arrange first: TSingleChild would arrange the child at the full
+    bounds and we would immediately arrange it again at the inner rect, laying
+    the child out twice at two widths. A child that memoises its layout per width
+    (the chat stack) then re-measures everything every frame. }
+  FBounds := ABounds;
   if FChild <> nil then
     FChild.Arrange(InnerRect);
 end;
