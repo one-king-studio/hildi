@@ -69,6 +69,7 @@ begin
   InitEnhancedVideo;
   SetCursorType(crHidden);
   WriteOut(#27'[?7l');          { autowrap off: we always position explicitly }
+  WriteOut(#27'[?1004h');       { focus reporting on: CSI I / CSI O on focus change }
   FNeedFullRepaint := True;
   FSizeChanged := False;
   InitSize;
@@ -76,6 +77,7 @@ end;
 
 destructor TSurfaceVideo.Destroy;
 begin
+  WriteOut(#27'[?1004l');       { focus reporting off }
   WriteOut(#27'[?7h');          { restore autowrap before leaving }
   SetCursorType(crUnderLine);
   DoneEnhancedVideo;

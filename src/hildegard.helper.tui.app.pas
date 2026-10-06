@@ -66,12 +66,14 @@ type
     FNowMs: Int64;
     FLastTickMs: Int64;
     FBusy: Boolean;
+    FTerminalFocused: Boolean;
     FNeedsRepaint: Boolean;
     FScreenBg: Byte;
     procedure ArrangeBase;
     procedure ArrangePlanes;
     procedure RenderFrame;
     procedure DispatchEvent(const E: TInputEvent);
+    procedure SetTerminalFocused(AValue: Boolean);
     procedure Present;
     function AdvanceTree(const ANowMs: Int64): Boolean;
     function FrameDue: Boolean;
@@ -118,6 +120,10 @@ type
     property TickMs: Integer read FTickMs write FTickMs;
     property NowMs: Int64 read FNowMs;
     property Animating: Boolean read GetAnimating;
+    { True while the terminal has OS focus (DECSET 1004). Nothing animates while
+      unfocused, so a backgrounded terminal does no work. A terminal without 1004
+      never sends a focus event and stays True. }
+    property TerminalFocused: Boolean read FTerminalFocused;
     { True while the owner has out-of-band work pending (for example a worker
       streaming into a queue). Keeps the frame cadence instead of the long idle
       wait, without a busy poll. }
@@ -175,6 +181,7 @@ begin
   FNowMs := 0;
   FLastTickMs := 0;
   FBusy := False;
+  FTerminalFocused := True;
   SetLength(FPlanes, 1);
   FPlanes[0] := TPlane.Create(ARoot, False);
   ArrangeBase;
@@ -312,6 +319,8 @@ begin
         FPlanes[High(FPlanes)].Root.HandleEvent(E)
       else
         FPlanes[0].Root.HandleEvent(E);
+    ikFocus:
+      SetTerminalFocused(E.Focused);
   else
     ;
   end;
@@ -336,9 +345,20 @@ end;
 function TTuiApp.GetAnimating: Boolean;
 begin
   { Demand is registered, not discovered: a widget registers its animation and
-    the interval it needs, so the app does not walk the tree every frame. A busy
-    owner (a turn streaming) keeps the frame cadence regardless. }
-  Result := FBusy or (AnimationClock.MinIntervalMs > 0);
+    the interval it needs, so the app does not walk the tree every frame. Nothing
+    animates while the terminal is unfocused; a busy owner (a turn streaming)
+    keeps the frame cadence regardless. }
+  Result := FTerminalFocused and
+    (FBusy or (AnimationClock.MinIntervalMs > 0));
+end;
+
+procedure TTuiApp.SetTerminalFocused(AValue: Boolean);
+begin
+  if AValue = FTerminalFocused then
+    Exit;
+  FTerminalFocused := AValue;
+  { Repaint once, so a caret that should be steady renders solid immediately. }
+  FNeedsRepaint := True;
 end;
 
 function TTuiApp.FrameIntervalMs: Integer;

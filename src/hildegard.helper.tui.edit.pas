@@ -44,6 +44,7 @@ type
     FAttr: TAttr;
     FCaretAttr: TAttr;
     FBlinkOn: Boolean;
+    FBlinking: Boolean;
     FGoalCol: Integer;
     FGoalEnd: Boolean;
     FSelAnchor: Integer;
@@ -114,6 +115,9 @@ type
 
     property Wrap: TWrapMode read FWrap write FWrap;
     property Active: Boolean read FActive write SetActive;
+    { False holds the caret solid (the terminal is unfocused); the caret is still
+      drawn, it just stops toggling. }
+    property Blinking: Boolean read FBlinking write FBlinking;
     property Attr: TAttr read FAttr write FAttr;              { text rendition }
     property CaretAttr: TAttr read FCaretAttr write FCaretAttr;
     { The rendition of a selected cluster. }
@@ -148,6 +152,7 @@ begin
   FAttr := DefaultAttr;
   FCaretAttr := DefaultAttr;
   FBlinkOn := True;
+  FBlinking := True;
   FGoalCol := -1;
   FGoalEnd := False;
   FSelAnchor := -1;
@@ -917,7 +922,11 @@ function TTextEdit.Advance(const ANowMs: Int64): Boolean;
 var
   On2: Boolean;
 begin
-  On2 := ((ANowMs div 530) mod 2) = 0;
+  { A non-blinking caret (the terminal is unfocused) stays solid. }
+  if not FBlinking then
+    On2 := True
+  else
+    On2 := ((ANowMs div 530) mod 2) = 0;
   Result := On2 <> FBlinkOn;
   FBlinkOn := On2;
 end;

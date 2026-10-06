@@ -45,22 +45,23 @@ chat counter (3) capture most of the win; focus reporting (5–6) finishes it.
 
 ## Phase 5 — Focus reporting
 
-- [ ] **Implement** `ikFocus` (appended last) and `TInputEvent.Focused` in
+- [x] **Implement** `ikFocus` (appended last) and `TInputEvent.Focused` in
       `src/hildegard.helper.tui.input.pas`.
-- [ ] **Implement** the `CSI I`/`CSI O` mapping in
+- [x] **Implement** the `CSI I`/`CSI O` mapping in
       `src/hildegard.helper.tui.input.decode.pas`.
-- [ ] **Implement** `CSI ? 1004 h` on init and `CSI ? 1004 l` on teardown in
+- [x] **Implement** `CSI ? 1004 h` on init and `CSI ? 1004 l` on teardown in
       `src/hildegard.helper.tui.surface.video.pas`.
-- [ ] **Test** the decoder mapping and the surface's emitted bytes.
+- [x] **Test** the decoder mapping (`test_tui_input.pas`). The surface's emitted
+      bytes are exercised live (the video surface writes to a tty).
 
 ## Phase 6 — Focus-aware animation
 
-- [ ] **Implement** `TTuiApp.FTerminalFocused` and its `ikFocus` handling;
+- [x] **Implement** `TTuiApp.FTerminalFocused` and its `ikFocus` handling;
       `Animating` requires focus.
-- [ ] **Implement** `TTextEdit.Blinking` (default `True`); the app sets it `False`
-      on focus-out so the caret holds solid.
-- [ ] **Test**: memory surface + scripted `ikFocus`: idle wait while unfocused,
-      caret interval when focused; the caret stays solid while unfocused.
+- [x] **Implement** `TTextEdit.Blinking` (default `True`); the harness app sets it
+      `False` on focus-out so the caret holds solid.
+- [x] **Test**: scripted `ikFocus` withdraws animation and restores it
+      (`test_tui_app.pas`); a steady caret holds solid (`test_tui_edit.pas`).
 
 ## Phase 7 — Documentation and completion
 

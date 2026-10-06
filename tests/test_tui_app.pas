@@ -47,6 +47,7 @@ type
     procedure TestStepProcessesOneEvent;
     procedure TestPasteIsDispatched;
     procedure TestFrameIntervalFollowsRegistrations;
+    procedure TestFocusWithdrawsAnimation;
   end;
 
 implementation
@@ -178,6 +179,47 @@ begin
   finally
     A.Free;
     B.Free;
+    App.Free;
+    AnimationClock.Reset;
+  end;
+end;
+
+procedure TTuiAppTest.TestFocusWithdrawsAnimation;
+var
+  S: TSurfaceMemory;
+  Src: TInputSourceScripted;
+  App: TTuiApp;
+  P: TAppProbe;
+  E: TInputEvent;
+begin
+  AnimationClock.Reset;
+  S := TSurfaceMemory.Create(10, 4);
+  Src := TInputSourceScripted.Create;
+  P := TAppProbe.Create(10, 4, 'B');
+  App := TTuiApp.Create(S, Src, P);
+  try
+    P.SetAnimation(250);
+    AssertTrue('animating while focused', App.Animating);
+    AssertTrue('focused by default', App.TerminalFocused);
+
+    E := Default(TInputEvent);
+    E.Kind := ikFocus;
+    E.Focused := False;
+    Src.Push(E);
+    App.Step;
+    AssertFalse('unfocused', App.TerminalFocused);
+    AssertFalse('nothing animates while unfocused', App.Animating);
+    AssertEquals('idle wait while unfocused', -1, App.NextFrameDelayMs);
+
+    E := Default(TInputEvent);
+    E.Kind := ikFocus;
+    E.Focused := True;
+    Src.Push(E);
+    App.Step;
+    AssertTrue('focused again', App.TerminalFocused);
+    AssertTrue('animating again', App.Animating);
+  finally
+    P.ClearAnimation;
     App.Free;
     AnimationClock.Reset;
   end;

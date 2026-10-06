@@ -46,6 +46,7 @@ type
     procedure TestSetCaretClampsToBuffer;
     procedure TestOnChangeFiresOnEveryMutation;
     procedure TestActiveRegistersTheCaret;
+    procedure TestBlinkingHoldsTheCaretSolid;
     { Display rows and navigation. }
     procedure TestRowsTileTheBuffer;
     procedure TestHardBreakSplitsRows;
@@ -1344,6 +1345,24 @@ begin
   finally
     E.Free;
     AnimationClock.Reset;
+  end;
+end;
+
+procedure TTuiEditTest.TestBlinkingHoldsTheCaretSolid;
+var
+  E: TTextEdit;
+begin
+  E := TTextEdit.Create(wmWord);
+  try
+    AssertTrue('blinks by default', E.Blinking);
+    E.Advance(1000);   { 1000 div 530 is odd: the caret toggles off }
+    E.Blinking := False;
+    { A steady caret turns on and then reports no further change. }
+    AssertTrue('steady turns the caret on', E.Advance(1000));
+    AssertFalse('and stays', E.Advance(1590));
+    AssertFalse('and stays', E.Advance(2120));
+  finally
+    E.Free;
   end;
 end;
 

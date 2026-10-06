@@ -37,7 +37,7 @@ type
     Mods: TModifiers;
   end;
 
-  TInputKind = (ikNone, ikKey, ikMouse, ikResize, ikPaste);
+  TInputKind = (ikNone, ikKey, ikMouse, ikResize, ikPaste, ikFocus);
 
   TInputEvent = record
     Kind: TInputKind;
@@ -45,6 +45,7 @@ type
     Mouse: TMouseEvent;
     NewSize: TSize;      // when Kind = ikResize
     Text: UnicodeString; // when Kind = ikPaste (a bracketed-paste payload)
+    Focused: Boolean;    // when Kind = ikFocus: True on focus in
   end;
 
   { A non-blocking source of input events. Poll returns False when no event is

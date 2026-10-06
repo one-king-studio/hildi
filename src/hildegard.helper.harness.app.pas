@@ -848,6 +848,8 @@ begin
   CheckInterruptWindow;
   DrainQueue;
   SyncBusy;
+  { The caret is steady while the terminal is unfocused (DECSET 1004). }
+  FPanel.Compose.Edit.Blinking := FApp.TerminalFocused;
 end;
 
 function THarnessApp.Step: Boolean;

@@ -246,6 +246,17 @@ begin
       Result := MapMouse(AParams, AFinal = 'm', AEvent);
     'u':
       Result := MapCSIu(AParams, AEvent);
+    { DECSET 1004 focus reporting: CSI I is focus in, CSI O is focus out. }
+    'I':
+      begin
+        AEvent.Kind := ikFocus;
+        AEvent.Focused := True;
+      end;
+    'O':
+      begin
+        AEvent.Kind := ikFocus;
+        AEvent.Focused := False;
+      end;
   else
     Result := False;
   end;

@@ -27,6 +27,7 @@ type
     procedure TestDecodeArrowsAndModifiers;
     procedure TestDecodePageHomeEndDelete;
     procedure TestDecodeFunctionKeys;
+    procedure TestDecodeFocusReporting;
     procedure TestDecodeUtf8;
     procedure TestDecodeIncompleteSequenceBuffers;
     procedure TestDecodeIgnoresUnknownSequence;
@@ -220,6 +221,24 @@ begin
     D.Feed([27, Ord('['), Ord('2'), Ord('4'), Ord('~')]);
     AssertTrue('F12', D.Next(E) and (E.Key.Kind = kkFunction));
     AssertEquals('F12 index', 12, E.Key.FuncIndex);
+  finally
+    D.Free;
+  end;
+end;
+
+procedure TTuiInputTest.TestDecodeFocusReporting;
+var
+  D: TKeyDecoder;
+  E: TInputEvent;
+begin
+  D := TKeyDecoder.Create;
+  try
+    D.Feed([27, Ord('['), Ord('I')]);
+    AssertTrue('focus in', D.Next(E) and (E.Kind = ikFocus));
+    AssertTrue('focused', E.Focused);
+    D.Feed([27, Ord('['), Ord('O')]);
+    AssertTrue('focus out', D.Next(E) and (E.Kind = ikFocus));
+    AssertFalse('unfocused', E.Focused);
   finally
     D.Free;
   end;
