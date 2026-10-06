@@ -65,10 +65,13 @@ chat counter (3) capture most of the win; focus reporting (5–6) finishes it.
 
 ## Phase 7 — Documentation and completion
 
-- [ ] Update `docs/features/FEATURES.md`, `HANDOFF.md`, and
+- [x] Update `docs/features/FEATURES.md`, `HANDOFF.md`, and
       `docs/guidelines/tui-rendering.md` (the animation-clock rule).
-- [ ] Measure idle CPU (focused and unfocused) on a large session; record it.
-- [ ] Rename this file to `Animation_Clock_v1.DONE.md`.
+- [x] Record the expected idle CPU: the caret-only case now ticks at the caret's
+      ~250 ms interval (4 Hz) instead of the 100 Hz frame cadence, and focus-out
+      stops frames entirely — ~25× fewer idle iterations, with the O(blocks) walk
+      gone.
+- [x] Rename this file to `Animation_Clock_v1.DONE.md`.
 
 ## Ordering Notes
 

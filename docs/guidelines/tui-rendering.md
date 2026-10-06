@@ -69,6 +69,26 @@ runtime up, so it must block there — `RuntimeSelectTimeout` does. The same rul
 holds for the TUI loop (see "Never busy-poll a TUI loop" in `HANDOFF.md`): a
 blocking wait with a finite timeout, never a 0-delay poll.
 
+## Animation is registered, not discovered
+
+A widget that animates must **register** it: `SetAnimation(intervalMs)` on start
+and `ClearAnimation` on stop (`0` unregisters). The app's frame rate is the
+fastest registered interval; `Animating` no longer walks the tree. A widget that
+reports `Animating = True` but never registers will not be advanced — the walk
+was removed deliberately, because it cost a full traversal every frame and forced
+one rate (the fastest) on everything.
+
+Registration happens on **discrete state changes only** — a caret gains focus, a
+spinner starts, a thinking block is added — never per frame. Register the real
+interval: a caret that blinks every 530 ms registers ~250 ms, not the frame
+cadence. A widget whose "tree" is large (`TChatStack` and its blocks) keeps an
+O(1) count instead of scanning.
+
+The `Animating` hook still exists (a container forwards it, tests assert it), but
+it is no longer how the app decides to tick. Focus is an input to registration:
+`TTuiApp.Animating` is false while the terminal is unfocused, so a backgrounded
+terminal does no work.
+
 ## Idle work should be small and infrequent
 
 The TUI's idle loop wakes on a finite timeout (`IdleWaitMs`) so a resize is
