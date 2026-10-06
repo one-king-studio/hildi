@@ -54,6 +54,15 @@ in `../guidelines/spec-driven-development.md`:
   detection (signature-based) is a separate, simpler future feature. Parked
   with the full design sketch in the doc.
 
+- **MCP Client** (`MCP_Client/FEATURE.md`) — consume MCP servers' tools as
+  first-class registry tools over stdio (a new bidirectional child manager, a
+  JSON-RPC 2.0 client, `inputSchema`/result mapping, and a config loader),
+  namespaced `mcp/<server>/<tool>` approval refs through the existing
+  approvals/ledger/reason gates — zero special cases in the loop. Helper is
+  MCP client, not server. Parked pending a decision on v2's OAuth pipeline
+  (Remote Agent Link specifies device pairing + bearer token, not OAuth); v1
+  is independent of that and of TLS. Full FEATURE doc in the directory.
+
 ## Existing Behaviour (to be documented)
 
 The foundation below is implemented and tested, but predates this documentation
