@@ -143,6 +143,13 @@ const
 { Parse `--session-runtime` argv and run the runtime. Returns the exit code. }
 function RunSessionRuntime(const AArgs: array of string): Integer;
 
+{ The select timeout (ms) for the runtime loop. 0 means "poll without blocking",
+  which is only correct when the loop is about to exit; any other value blocks
+  (bounded), so an idle runtime does not spin. A client attached keeps the
+  runtime up regardless of the idle deadline, so it must block there too. }
+function RuntimeSelectTimeout(ATurnActive: Boolean; AClientCount: Integer;
+  ARemainingMs: Int64): Integer;
+
 implementation
 
 const
@@ -500,19 +507,28 @@ begin
   end;
 end;
 
-function TSessionRuntime.NextTimeout: Integer;
-var
-  Remaining: Int64;
+function RuntimeSelectTimeout(ATurnActive: Boolean; AClientCount: Integer;
+  ARemainingMs: Int64): Integer;
 begin
-  if FTurnActive then
+  if ATurnActive then
     Exit(TurnPollMs);
-  Remaining := FIdleDeadline - NowMs;
-  if Remaining <= 0 then
+  { A client keeps the runtime up, so the idle deadline is irrelevant: block on
+    select rather than poll. Returning 0 here (the old behaviour) spun the loop
+    at 100% CPU once the deadline passed with a client attached. }
+  if AClientCount > 0 then
+    Exit(IdlePollMs);
+  if ARemainingMs <= 0 then
     Exit(0);
-  if Remaining > IdlePollMs then
+  if ARemainingMs > IdlePollMs then
     Result := IdlePollMs
   else
-    Result := Remaining;
+    Result := ARemainingMs;
+end;
+
+function TSessionRuntime.NextTimeout: Integer;
+begin
+  Result := RuntimeSelectTimeout(FTurnActive, FClients.Count,
+    FIdleDeadline - NowMs);
 end;
 
 procedure TSessionRuntime.AcceptClient;
@@ -917,7 +933,9 @@ procedure TSessionRuntime.ReapClosing;
 var
   I: Integer;
   C: TClientConn;
+  Reaped: Boolean;
 begin
+  Reaped := False;
   for I := FClients.Count - 1 downto 0 do
   begin
     C := TClientConn(FClients[I]);
@@ -928,11 +946,18 @@ begin
         FDriver := '';
         FClients.Delete(I);
         PromoteIfPending;
+        Reaped := True;
         Continue;
       end;
       FClients.Delete(I);
+      Reaped := True;
     end;
   end;
+  { The idle clock runs from when the runtime becomes idle, not from startup or
+    the last turn: start it when the last client leaves, so a reconnect within
+    the timeout reuses this runtime. }
+  if Reaped and (FClients.Count = 0) then
+    FIdleDeadline := NowMs + FIdleExitMs;
 end;
 
 procedure TSessionRuntime.Shutdown;

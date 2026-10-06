@@ -89,6 +89,7 @@ type
   published
     procedure TestSocketPathFitsUnixLimit;
     procedure TestIdleExitConfigDefault;
+    procedure TestIdleTimeoutBlocksWithAClient;
     procedure TestStaleSocketRecovered;
     procedure TestSecondRuntimeExits;
     procedure TestSpawnAndAttach;
@@ -402,6 +403,20 @@ begin
   Path := SocketPathFor('0123456789abcdef0123456789abcdef');
   AssertTrue('path is short enough: ' + Path, Length(Path) < 104);
   AssertTrue('under the runtime dir', Pos(RuntimeDir, Path) = 1);
+end;
+
+procedure TSessionRuntimeTest.TestIdleTimeoutBlocksWithAClient;
+begin
+  { A client keeps the runtime up; the loop must block on select, not poll, or
+    it spins at 100% CPU once the idle deadline passes. }
+  AssertTrue('client, past deadline', RuntimeSelectTimeout(False, 1, -60000) > 0);
+  AssertTrue('clients, no deadline', RuntimeSelectTimeout(False, 3, 0) > 0);
+  { No client and past the deadline: one non-blocking pass, then the loop exits. }
+  AssertEquals('about to exit', 0, RuntimeSelectTimeout(False, 0, -1));
+  { No client and the deadline ahead: block (bounded) until it arrives. }
+  AssertTrue('deadline ahead', RuntimeSelectTimeout(False, 0, 60000) > 0);
+  { A turn in flight polls the worker queue. }
+  AssertTrue('turn polls', RuntimeSelectTimeout(True, 0, 60000) > 0);
 end;
 
 procedure TSessionRuntimeTest.TestIdleExitConfigDefault;
