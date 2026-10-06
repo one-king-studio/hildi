@@ -21,6 +21,7 @@ type
     procedure TestMeasureLongestLine;
     procedure TestCharacterWrap;
     procedure TestWordWrap;
+    procedure TestHangIndentInsetsWrappedLines;
     procedure TestWideCharacterOccupiesTwoColumns;
     procedure TestCombiningMarkIsOneCluster;
     procedure TestStyledSpansRetainAttributes;
@@ -103,6 +104,38 @@ begin
     AssertEquals('word row 0', 'the', S.RowText(0, 0, 7));
     AssertEquals('word row 1', 'quick', S.RowText(1, 0, 7));
     AssertEquals('word row 2', 'brown', S.RowText(2, 0, 7));
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiTextTest.TestHangIndentInsetsWrappedLines;
+var
+  T: TTextBlock;
+  S: TSurfaceMemory;
+begin
+  { A hanging indent insets every line after the first, so a wrapped list item
+    aligns under its text rather than under its bullet. }
+  S := TSurfaceMemory.Create(10, 4);
+  try
+    T := TTextBlock.Create([SpanOf(UnicodeString('• aaaa bbbb cccc'))], wmWord);
+    try
+      T.WrapWidth := 10;
+      T.HangIndent := 2;
+      AssertEquals('the wrapped height counts the narrower lines', 3,
+        T.Measure(Default(TSize)).H);
+      T.Arrange(Rc(0, 0, 10, 4));
+      T.Render(S);
+    finally
+      T.Free;
+    end;
+    AssertEquals('marker starts the first row', UnicodeString('•'),
+      S.CellAt(0, 0).Ch);
+    AssertEquals('the first row is not inset', 'a', S.CellAt(2, 0).Ch);
+    AssertEquals('nothing under the marker on the wrapped row', '',
+      S.CellAt(0, 1).Ch);
+    AssertEquals('the wrapped row is inset to the text column', 'b',
+      S.CellAt(2, 1).Ch);
   finally
     S.Free;
   end;

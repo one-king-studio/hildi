@@ -42,6 +42,7 @@ type
     FWrap: TWrapMode;
     FAlign: TTextAlign;
     FWrapWidth: Integer;
+    FHangIndent: Integer;
     FCacheClusters: TStyledClusters;
     FCacheLines: TStyledLines;
     FCacheWidth: Integer;
@@ -50,6 +51,7 @@ type
     FLayoutBuilds: Integer;
     function CachedClusters: TStyledClusters;
     function CachedLines(AWidth: Integer): TStyledLines;
+    procedure SetHangIndent(AValue: Integer);
   public
     constructor Create(const ASpans: array of TSpan;
       AWrap: TWrapMode = wmNone);
@@ -65,6 +67,10 @@ type
       max-content (the longest word). Callers in a fixed-size viewport set it so
       the block fills the width and reports the correct wrapped height. }
     property WrapWidth: Integer read FWrapWidth write FWrapWidth;
+    { When > 0, every wrapped line after the first is inset by this many columns
+      and wraps that much earlier, so text hangs under a leading marker (a list
+      bullet, a quote bar) instead of under the marker itself. }
+    property HangIndent: Integer read FHangIndent write SetHangIndent;
     { Diagnostic: how many times the block has built clusters or wrapped. A
       steady-state measure/render must not increase it. }
     property LayoutBuilds: Integer read FLayoutBuilds;
@@ -130,10 +136,10 @@ begin
   end;
 end;
 
-function WrapClusters(const AClusters: TStyledClusters; AWidth: Integer;
+function WrapClusters(const AClusters: TStyledClusters; AWidth, AIndent: Integer;
   AMode: TWrapMode): TStyledLines;
 var
-  I, J, K, N, W, CurW, BS: Integer;
+  I, J, K, N, W, CurW, BS, EffW: Integer;
   Cur, Line, Rem: TStyledClusters;
   Cluster: TStyledCluster;
 begin
@@ -152,8 +158,15 @@ begin
       Continue;
     end;
     W := ClusterWidth(Cluster.Ch);
+    { Lines after the first are inset by the hanging indent, so they wrap that
+      much earlier (never below one column). }
+    EffW := AWidth;
+    if (AIndent > 0) and (Length(Result) > 0) then
+      Dec(EffW, AIndent);
+    if EffW < 1 then
+      EffW := 1;
     if (AMode <> wmNone) and (AWidth > 0) and (Length(Cur) > 0) and
-      (CurW + W > AWidth) then
+      (CurW + W > EffW) then
     begin
       BS := -1;
       if AMode = wmWord then
@@ -259,11 +272,21 @@ function TTextBlock.CachedLines(AWidth: Integer): TStyledLines;
 begin
   if FLinesValid and (FCacheWidth = AWidth) then
     Exit(FCacheLines);
-  FCacheLines := WrapClusters(CachedClusters, AWidth, FWrap);
+  FCacheLines := WrapClusters(CachedClusters, AWidth, FHangIndent, FWrap);
   FCacheWidth := AWidth;
   FLinesValid := True;
   Inc(FLayoutBuilds);
   Result := FCacheLines;
+end;
+
+procedure TTextBlock.SetHangIndent(AValue: Integer);
+begin
+  if AValue < 0 then
+    AValue := 0;
+  if AValue = FHangIndent then
+    Exit;
+  FHangIndent := AValue;
+  FLinesValid := False;
 end;
 
 function TTextBlock.Measure(const AAvail: TSize): TSize;
@@ -299,13 +322,13 @@ function TTextBlock.LineCountAt(AWidth: Integer): Integer;
 begin
   if AWidth < 1 then
     AWidth := 1;
-  Result := Length(WrapClusters(CachedClusters, AWidth, FWrap));
+  Result := Length(WrapClusters(CachedClusters, AWidth, FHangIndent, FWrap));
 end;
 
 procedure TTextBlock.Render(const S: ISurface);
 var
   Lines: TStyledLines;
-  Row, I, X, LW, Offset, CW: Integer;
+  Row, I, X, LW, Offset, CW, Base, AvailW: Integer;
   Clip: TRect;
   FirstRow, LastRow: Integer;
   Cell: TCell;
@@ -328,13 +351,25 @@ begin
   for Row := FirstRow to LastRow do
   begin
     LW := LineWidth(Lines[Row]);
+    { The hanging indent insets every row after the first, so wrapped text
+      aligns under the marker's text rather than under the marker. }
+    if Row > 0 then
+    begin
+      Base := FHangIndent;
+      AvailW := FBounds.W - FHangIndent;
+    end
+    else
+    begin
+      Base := 0;
+      AvailW := FBounds.W;
+    end;
     case FAlign of
       taCenter:
-        Offset := (FBounds.W - LW) div 2;
+        Offset := Base + (AvailW - LW) div 2;
       taRight:
-        Offset := FBounds.W - LW;
+        Offset := Base + AvailW - LW;
     else
-      Offset := 0;
+      Offset := Base;
     end;
     if Offset < 0 then
       Offset := 0;

@@ -414,6 +414,8 @@ begin
         Text.SetSpans(PrependSpan(
           ConvertSpans(ABlock.Spans, FTheme.Paragraph, FTheme), Prefix,
           FTheme.ListBullet));
+        { Hang the wrapped text under the item text, not under the marker. }
+        Text.HangIndent := StringWidth(Prefix);
       end;
     mbHeading:
       Text.SetSpans(ConvertSpans(ABlock.Spans,

@@ -25,6 +25,8 @@ type
     procedure TestHeadingUsesTheTheme;
     procedure TestBulletPrefix;
     procedure TestOrderedPrefix;
+    procedure TestListItemWrapsUnderTheText;
+    procedure TestOrderedListItemWrapsUnderTheText;
     procedure TestQuoteBar;
     procedure TestRuleIsFullWidth;
     procedure TestCodeFenceIsBoxed;
@@ -156,6 +158,45 @@ begin
   S := RenderSource('1. one', 20, 2);
   try
     AssertTrue('marker drawn', Pos('1.', string(S.RowText(0, 0, 20))) > 0);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TMarkdownViewTest.TestListItemWrapsUnderTheText;
+var
+  S: TSurfaceMemory;
+begin
+  { The bullet is at column 0; a wrapped line must align under the item text
+    (column 2), not under the bullet. }
+  S := RenderSource('- aaaa bbbb cccc', 10, 4);
+  try
+    AssertEquals('bullet starts the item', UnicodeString('•'),
+      S.CellAt(0, 0).Ch);
+    AssertEquals('the item text follows the bullet', 'a',
+      string(S.CellAt(2, 0).Ch));
+    AssertEquals('nothing under the bullet on the wrapped row', '',
+      string(S.CellAt(0, 1).Ch));
+    AssertEquals('the wrapped row aligns under the item text', 'b',
+      string(S.CellAt(2, 1).Ch));
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TMarkdownViewTest.TestOrderedListItemWrapsUnderTheText;
+var
+  S: TSurfaceMemory;
+begin
+  { An ordered marker is three columns wide ('1. '), so the wrapped text aligns
+    at column 3. }
+  S := RenderSource('1. aaaa bbbb cccc', 11, 4);
+  try
+    AssertEquals('marker starts the item', '1', string(S.CellAt(0, 0).Ch));
+    AssertEquals('nothing under the marker on the wrapped row', '',
+      string(S.CellAt(0, 1).Ch));
+    AssertEquals('the wrapped row aligns under the item text', 'b',
+      string(S.CellAt(3, 1).Ch));
   finally
     S.Free;
   end;
