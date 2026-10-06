@@ -17,6 +17,11 @@ uses
   hildegard.helper.tui.input, hildegard.helper.tui.surface,
   hildegard.helper.tui.widget, hildegard.helper.tui.text;
 
+const
+  { The caret toggles every 530 ms; 250 ms keeps the app ticking slowly enough
+    to catch the blink without the 100 Hz frame cadence. }
+  CaretBlinkIntervalMs = 250;
+
 type
   { A display row: the clusters it shows and their total display width. }
   TDisplayRow = record
@@ -35,6 +40,7 @@ type
     FCaret: Integer;
     FWrap: TWrapMode;
     FActive: Boolean;
+    FBlinkIntervalMs: Integer;
     FAttr: TAttr;
     FCaretAttr: TAttr;
     FBlinkOn: Boolean;
@@ -45,6 +51,7 @@ type
     FTopRow: Integer;
     FLastWidth: Integer;
     FOnChange: TNotifyEvent;
+    procedure SetActive(AValue: Boolean);
     function ClusterCount: Integer;
     function Width: Integer;
     function CaretAt(ARow, ACol: Integer; const ARows: TDisplayRowArray): Integer;
@@ -106,7 +113,7 @@ type
     function Animating: Boolean; override;
 
     property Wrap: TWrapMode read FWrap write FWrap;
-    property Active: Boolean read FActive write FActive;
+    property Active: Boolean read FActive write SetActive;
     property Attr: TAttr read FAttr write FAttr;              { text rendition }
     property CaretAttr: TAttr read FCaretAttr write FCaretAttr;
     { The rendition of a selected cluster. }
@@ -137,6 +144,7 @@ begin
   FText := '';
   FCaret := 0;
   FActive := True;
+  FBlinkIntervalMs := CaretBlinkIntervalMs;
   FAttr := DefaultAttr;
   FCaretAttr := DefaultAttr;
   FBlinkOn := True;
@@ -144,10 +152,25 @@ begin
   FGoalEnd := False;
   FSelAnchor := -1;
   FTopRow := 0;
+  { The caret blinks while the box is active; register it so the app ticks at
+    the caret's rate, not the frame cadence. }
+  SetAnimation(FBlinkIntervalMs);
+end;
+
+procedure TTextEdit.SetActive(AValue: Boolean);
+begin
+  if AValue = FActive then
+    Exit;
+  FActive := AValue;
+  if FActive then
+    SetAnimation(FBlinkIntervalMs)
+  else
+    ClearAnimation;
 end;
 
 destructor TTextEdit.Destroy;
 begin
+  ClearAnimation;
   inherited Destroy;
 end;
 

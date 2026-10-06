@@ -10,7 +10,7 @@ uses
   SysUtils, fpcunit, testregistry,
   hildegard.helper.tui.base, hildegard.helper.tui.input,
   hildegard.helper.tui.surface, hildegard.helper.tui.theme,
-  hildegard.helper.tui.chat;
+  hildegard.helper.tui.clock, hildegard.helper.tui.chat;
 
 type
   TTuiChatTest = class(TTestCase)
@@ -51,6 +51,7 @@ type
     procedure TestStreamReservesTheBottomInset;
     procedure TestStackMaterializesOnlyTheWindow;
     procedure TestStackLayoutDoesNotThrashAcrossMeasureAndArrange;
+    procedure TestStackTracksAnimatingBlocks;
     procedure TestStreamOnChangeFiresWhenABlockGrows;
     procedure TestToggleKeepsTheBlockTopInPlace;
     procedure TestToggleThroughTheStreamKeepsTheBlockTop;
@@ -622,6 +623,37 @@ begin
     end;
   finally
     S.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestStackTracksAnimatingBlocks;
+var
+  Stack: TChatStack;
+  S: TSurfaceMemory;
+  Item: TChatItem;
+begin
+  AnimationClock.Reset;
+  S := TSurfaceMemory.Create(30, 8);
+  Stack := TChatStack.Create(FTheme);
+  try
+    AssertEquals('none', 0, Stack.AnimatingCount);
+    AssertFalse('not animating', Stack.Animating);
+    Stack.Add(ckAssistant, '', 'x');
+    AssertEquals('an assistant block does not animate', 0,
+      Stack.AnimatingCount);
+    Item := Stack.Add(ckThinking, '', '');
+    AssertEquals('one', 1, Stack.AnimatingCount);
+    AssertTrue('animating', Stack.Animating);
+    AssertEquals('registered at the sparkle rate', 90,
+      AnimationClock.MinIntervalMs);
+    Stack.Remove(Item);
+    AssertEquals('none again', 0, Stack.AnimatingCount);
+    AssertFalse('not animating', Stack.Animating);
+    AssertEquals('cleared', 0, AnimationClock.MinIntervalMs);
+  finally
+    Stack.Free;
+    S.Free;
+    AnimationClock.Reset;
   end;
 end;
 

@@ -11,7 +11,8 @@ uses
   SysUtils, fpcunit, testregistry,
   hildegard.helper.tui.base, hildegard.helper.tui.input,
   hildegard.helper.tui.surface,
-  hildegard.helper.tui.text, hildegard.helper.tui.edit;
+  hildegard.helper.tui.clock, hildegard.helper.tui.text,
+  hildegard.helper.tui.edit;
 
 type
   TTuiEditTest = class(TTestCase)
@@ -44,6 +45,7 @@ type
     procedure TestCtrlCOnEmptyBufferReportsUnhandled;
     procedure TestSetCaretClampsToBuffer;
     procedure TestOnChangeFiresOnEveryMutation;
+    procedure TestActiveRegistersTheCaret;
     { Display rows and navigation. }
     procedure TestRowsTileTheBuffer;
     procedure TestHardBreakSplitsRows;
@@ -1322,6 +1324,26 @@ begin
     end;
   finally
     S.Free;
+  end;
+end;
+
+procedure TTuiEditTest.TestActiveRegistersTheCaret;
+var
+  E: TTextEdit;
+begin
+  AnimationClock.Reset;
+  E := TTextEdit.Create(wmWord);
+  try
+    AssertEquals('registered at the caret rate', CaretBlinkIntervalMs,
+      AnimationClock.MinIntervalMs);
+    E.Active := False;
+    AssertEquals('cleared when inactive', 0, AnimationClock.MinIntervalMs);
+    E.Active := True;
+    AssertEquals('back when active', CaretBlinkIntervalMs,
+      AnimationClock.MinIntervalMs);
+  finally
+    E.Free;
+    AnimationClock.Reset;
   end;
 end;
 

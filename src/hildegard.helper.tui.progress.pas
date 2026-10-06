@@ -28,16 +28,18 @@ type
     procedure SetValue(AValue: Integer);
     procedure SetMax(AValue: Integer);
     procedure SetWidth(AValue: Integer);
+    procedure SetIndeterminate(AValue: Boolean);
   public
     constructor Create(AWidthCells: Integer); overload;
     constructor Create(AWidthCells: Integer; const AAttr: TAttr); overload;
+    destructor Destroy; override;
     function Advance(const ANowMs: Int64): Boolean; override;
     function Animating: Boolean; override;
     function Measure(const AAvail: TSize): TSize; override;
     procedure Render(const S: ISurface); override;
     property Value: Integer read FValue write SetValue;
     property Max: Integer read FMax write SetMax;
-    property Indeterminate: Boolean read FIndeterminate write FIndeterminate;
+    property Indeterminate: Boolean read FIndeterminate write SetIndeterminate;
     property WidthCells: Integer read FWidth write SetWidth;
     property Attr: TAttr read FAttr write FAttr;
     { The bouncing block's cell (indeterminate); exposed for tests. }
@@ -71,6 +73,25 @@ begin
   FPos := 0;
   FOriginMs := 0;
   FStarted := False;
+end;
+
+procedure TProgress.SetIndeterminate(AValue: Boolean);
+begin
+  if AValue = FIndeterminate then
+    Exit;
+  FIndeterminate := AValue;
+  { The indeterminate bar animates; register it so the app ticks for it (and no
+    faster than its own interval). }
+  if FIndeterminate then
+    SetAnimation(ProgressIntervalMs)
+  else
+    ClearAnimation;
+end;
+
+destructor TProgress.Destroy;
+begin
+  ClearAnimation;
+  inherited Destroy;
 end;
 
 procedure TProgress.SetValue(AValue: Integer);

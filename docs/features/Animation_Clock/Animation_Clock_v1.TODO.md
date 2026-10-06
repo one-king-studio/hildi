@@ -8,37 +8,39 @@ chat counter (3) capture most of the win; focus reporting (5–6) finishes it.
 
 ## Phase 1 — The registry
 
-- [ ] **Implement** `TAnimationClock` in `src/hildegard.helper.tui.clock.pas`:
+- [x] **Implement** `TAnimationClock` in `src/hildegard.helper.tui.clock.pas`:
       `Register`/`Unregister`/`MinIntervalMs`/`Count`, and the process
       `AnimationClock` accessor.
-- [ ] **Implement** the `TWidget.SetAnimation`/`ClearAnimation` helper in
+- [x] **Implement** the `TWidget.SetAnimation`/`ClearAnimation` helper in
       `src/hildegard.helper.tui.widget.pas`.
-- [ ] **Test** `tests/test_tui_clock.pas`: register/replace/unregister;
+- [x] **Test** `tests/test_tui_clock.pas`: register/replace/unregister;
       `MinIntervalMs` is the minimum; `<= 0` unregisters; unknown unregister is a
       no-op; `Count` tracks entries. Add the unit to
       `tests/hildegard_helper_tests.pas`.
 
 ## Phase 2 — The app rate
 
-- [ ] **Implement** `TTuiApp.FrameIntervalMs` (registry interval, else
+- [x] **Implement** `TTuiApp.FrameIntervalMs` (registry interval, else
       `IdleWaitMs`) and `GetAnimating` (registry non-empty); drive
       `NextFrameDelayMs` from it.
-- [ ] **Test** `tests/test_tui_app.pas`: the frame interval follows the fastest
+- [x] **Register every animating widget** (the app no longer discovers them):
+      the panel's state sparkle, the spinner, and the progress bar.
+- [x] **Test** `tests/test_tui_app.pas`: the frame interval follows the fastest
       registration; the idle wait when empty.
 
 ## Phase 3 — The chat stack counter
 
-- [ ] **Implement** `TChatStack.FAnimatingBlocks`, maintained on
+- [x] **Implement** `TChatStack.FAnimatingBlocks`, maintained on
       `Add`/`Remove`/`Clear`; `Animating` is O(1); `Advance` returns `False`
       immediately when none animate.
-- [ ] **Test** `tests/test_tui_chat.pas`: `AnimatingCount` tracks thinking blocks;
+- [x] **Test** `tests/test_tui_chat.pas`: `AnimatingCount` tracks thinking blocks;
       `Advance` is a no-op with none; `Animating` is `False` with none.
 
 ## Phase 4 — The caret
 
-- [ ] **Implement** `TTextEdit.FBlinkIntervalMs` and register/clear the caret
+- [x] **Implement** `TTextEdit.FBlinkIntervalMs` and register/clear the caret
       with the clock from `SetActive`.
-- [ ] **Test** `tests/test_tui_edit.pas`: `Active := True` registers at the caret
+- [x] **Test** `tests/test_tui_edit.pas`: `Active := True` registers at the caret
       interval; `Active := False` clears.
 
 ## Phase 5 — Focus reporting

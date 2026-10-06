@@ -23,17 +23,19 @@ type
     FIndex: Integer;
     FOriginMs: Int64;
     FStarted: Boolean;
+    procedure SetIntervalMs(AValue: Integer);
   public
     constructor Create(const AFrames: array of UnicodeString;
       AIntervalMs: Integer = 90); overload;
     constructor Create(const AFrames: array of UnicodeString;
       AIntervalMs: Integer; const AAttr: TAttr); overload;
+    destructor Destroy; override;
     function Advance(const ANowMs: Int64): Boolean; override;
     function Animating: Boolean; override;
     function Measure(const AAvail: TSize): TSize; override;
     procedure Render(const S: ISurface); override;
     property Frames: TSpinnerFrames read FFrames;
-    property IntervalMs: Integer read FIntervalMs write FIntervalMs;
+    property IntervalMs: Integer read FIntervalMs write SetIntervalMs;
     property Attr: TAttr read FAttr write FAttr;
     { The current frame index; exposed for tests. }
     property Index: Integer read FIndex;
@@ -70,6 +72,25 @@ begin
   FIndex := 0;
   FOriginMs := 0;
   FStarted := False;
+  { A spinner with frames animates; register it so the app ticks for it (and no
+    faster than its own interval). }
+  if Length(FFrames) > 0 then
+    SetAnimation(FIntervalMs);
+end;
+
+procedure TSpinner.SetIntervalMs(AValue: Integer);
+begin
+  if AValue < 1 then
+    AValue := 1;
+  FIntervalMs := AValue;
+  if Length(FFrames) > 0 then
+    SetAnimation(FIntervalMs);
+end;
+
+destructor TSpinner.Destroy;
+begin
+  ClearAnimation;
+  inherited Destroy;
 end;
 
 function TSpinner.Advance(const ANowMs: Int64): Boolean;

@@ -16,7 +16,7 @@ interface
 
 uses
   hildegard.helper.tui.base, hildegard.helper.tui.input,
-  hildegard.helper.tui.surface;
+  hildegard.helper.tui.surface, hildegard.helper.tui.clock;
 
 type
   { Base widget protocol. Bounds are surface-absolute after Arrange. }
@@ -42,6 +42,11 @@ type
     { True while this widget (or a descendant) has time-based content. The app
       uses it to decide whether to schedule the next frame at all. }
     function Animating: Boolean; virtual;
+    { Register this widget's animation at AIntervalMs with the process clock, or
+      clear it (0/nil). Registration is the app's demand signal and its frame
+      rate; call it on discrete state changes, never per frame. }
+    procedure SetAnimation(AIntervalMs: Integer);
+    procedure ClearAnimation;
     property Bounds: TRect read FBounds;
     property Visible: Boolean read FVisible write FVisible;
   end;
@@ -156,6 +161,16 @@ end;
 function TWidget.Animating: Boolean;
 begin
   Result := False;
+end;
+
+procedure TWidget.SetAnimation(AIntervalMs: Integer);
+begin
+  AnimationClock.Register(Self, AIntervalMs);
+end;
+
+procedure TWidget.ClearAnimation;
+begin
+  AnimationClock.Unregister(Self);
 end;
 
 constructor TContainer.Create(const AColumns: array of TTrack;

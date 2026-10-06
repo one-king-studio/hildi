@@ -296,6 +296,8 @@ begin
   Src := TInputSourceScripted.Create;
   P := TAnimProbe.Create;
   P.IsAnimating := True;
+  { Demand is registered, not discovered: register the probe's animation. }
+  P.SetAnimation(DefaultTickMs);
   App := TTuiApp.Create(S, Src, P);
   try
     AssertEquals('due immediately before the first tick', 0,
@@ -304,6 +306,7 @@ begin
     AssertEquals('a full tick after a frame', DefaultTickMs,
       App.NextFrameDelayMs);
   finally
+    P.ClearAnimation;
     App.Free;
   end;
 end;

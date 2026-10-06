@@ -26,6 +26,13 @@ uses
   hildegard.helper.tui.surface, hildegard.helper.tui.widget,
   hildegard.helper.tui.clock;
 
+const
+  { The idle wake-up, not a refresh rate: input and signals wake the tty select
+    immediately, so this only bounds how long a resize goes unnoticed and how
+    often the idle hook runs. It is also the ceiling on a registered animation's
+    interval. }
+  IdleWaitMs = 250;
+
 type
   { Returns True to stop the run loop (a signal, a quit flag). }
   TStopCheck = function: Boolean;
@@ -93,10 +100,15 @@ type
       the test seam. }
     procedure Tick(const ANowMs: Int64);
 
-    { Milliseconds until the next frame (0..TickMs), or -1 when nothing is
-      animating and the app is not Busy (the caller should wait indefinitely).
+    { Milliseconds until the next frame (0..FrameIntervalMs), or -1 when nothing
+      is animating and the app is not Busy (the caller should wait indefinitely).
       Exposed for tests. }
     function NextFrameDelayMs: Integer;
+
+    { The frame interval in ms: the fastest registered animation, the frame
+      cadence while Busy, or the idle wait when nothing demands a frame. Exposed
+      for tests. }
+    function FrameIntervalMs: Integer;
 
     { Wait on input to the next frame (or a long idle timeout when idle),
       advance the tree on each frame, and render once per frame. ACheckStop,
@@ -318,17 +330,33 @@ end;
 
 function TTuiApp.FrameDue: Boolean;
 begin
-  Result := (FLastTickMs = 0) or (FNowMs - FLastTickMs >= FTickMs);
+  Result := (FLastTickMs = 0) or (FNowMs - FLastTickMs >= FrameIntervalMs);
 end;
 
 function TTuiApp.GetAnimating: Boolean;
-var
-  I: Integer;
 begin
-  for I := 0 to High(FPlanes) do
-    if (FPlanes[I].Root <> nil) and FPlanes[I].Root.Animating then
-      Exit(True);
-  Result := False;
+  { Demand is registered, not discovered: a widget registers its animation and
+    the interval it needs, so the app does not walk the tree every frame. A busy
+    owner (a turn streaming) keeps the frame cadence regardless. }
+  Result := FBusy or (AnimationClock.MinIntervalMs > 0);
+end;
+
+function TTuiApp.FrameIntervalMs: Integer;
+var
+  Registered: Integer;
+begin
+  { A turn in flight streams: keep the fast cadence. Otherwise run as slowly as
+    the fastest registered animation allows, or idle. }
+  if FBusy then
+    Exit(FTickMs);
+  Registered := AnimationClock.MinIntervalMs;
+  if Registered <= 0 then
+    Exit(IdleWaitMs);
+  if Registered < 1 then
+    Registered := 1;
+  if Registered > IdleWaitMs then
+    Registered := IdleWaitMs;
+  Result := Registered;
 end;
 
 function TTuiApp.AdvanceTree(const ANowMs: Int64): Boolean;
@@ -354,26 +382,22 @@ begin
 end;
 
 function TTuiApp.NextFrameDelayMs: Integer;
+var
+  Interval: Integer;
 begin
   if not (Animating or FBusy) then
     Exit(-1);
   if FLastTickMs = 0 then
     Exit(0);
-  Result := FTickMs - Integer(FNowMs - FLastTickMs);
+  Interval := FrameIntervalMs;
+  Result := Interval - Integer(FNowMs - FLastTickMs);
   if Result < 0 then
     Result := 0;
-  if Result > FTickMs then
-    Result := FTickMs;
+  if Result > Interval then
+    Result := Interval;
 end;
 
 procedure TTuiApp.Run(ACheckStop: TStopCheck; AOnLoop: TLoopHook);
-const
-  { Idle wake-up, not a refresh rate. IInputSource.Wait blocks on the tty, so
-    input (and a signal, via EINTR) wakes it immediately; this only bounds how
-    long a resize goes unnoticed, and how often the idle loop does its small
-    per-wake work (two `ioctl`s and an `Animating` walk). It is not a repaint
-    cadence, so it can be generous. }
-  IdleWaitMs = 250;
 var
   E: TInputEvent;
   Timeout: Integer;

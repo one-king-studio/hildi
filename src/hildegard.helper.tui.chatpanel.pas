@@ -48,6 +48,7 @@ type
     FStateSpans: array[0..1] of TSpan;
     FSpark: UnicodeString;
     procedure RenderState;
+    procedure RefreshAnimation;
     procedure FitStatus;
   public
     constructor Create(const ATheme: TTheme; const AInfo, AHints: string);
@@ -132,6 +133,10 @@ begin
   Result := AKind in [psThinking, psTool];
 end;
 
+{ The state sparkle advances every 90 ms (matching ThinkingSparkle). }
+const
+  StateSparkleIntervalMs = 90;
+
 { The first whole clusters of AText that fit in AMax display columns. }
 function FitWidth(const AText: UnicodeString; AMax: Integer): UnicodeString;
 var
@@ -200,6 +205,7 @@ end;
 
 destructor TChatPanel.Destroy;
 begin
+  ClearAnimation;
   FMessages.Free;
   FCta.Free;
   FCompose.Free;
@@ -342,6 +348,17 @@ begin
   FStateKind := AKind;
   FStateLabel := ALabel;
   RenderState;
+  RefreshAnimation;
+end;
+
+procedure TChatPanel.RefreshAnimation;
+begin
+  { The state sparkle animates while a turn is thinking or a tool runs; register
+    it at the sparkle's rate so the app ticks for it (and no faster). }
+  if StateAnimated(FStateKind) then
+    SetAnimation(StateSparkleIntervalMs)
+  else
+    ClearAnimation;
 end;
 
 procedure TChatPanel.SetHints(const AText: string);

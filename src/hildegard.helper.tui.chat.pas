@@ -108,6 +108,7 @@ type
     FOnToggle: TNotifyEvent;
     FOnChange: TNotifyEvent;
     FGeneration: Integer;
+    FAnimatingBlocks: Integer;    { blocks whose kind is ckThinking }
     FLayoutValid: Boolean;
     FLayoutWidth: Integer;
     FLayoutGeneration: Integer;
@@ -122,6 +123,7 @@ type
       layout cache thrashes between two widths. }
     function ItemWidth(AStackWidth: Integer): Integer;
     procedure BumpGeneration;
+    procedure RefreshAnimation;
     procedure EnsureLayout(AItemWidth: Integer);
     procedure ItemChanged(Sender: TObject);
     procedure ItemToggled(Sender: TObject);
@@ -136,6 +138,8 @@ type
     { How many times the block layout was rebuilt. A steady-state measure/render
       cycle must not increase it. Diagnostic. }
     function LayoutRuns: Integer;
+    { How many blocks are animating (the thinking indicator). Diagnostic. }
+    function AnimatingCount: Integer;
     { Drop and free one block, e.g. the thinking indicator once text arrives. }
     procedure Remove(AItem: TChatItem);
     { Rows at the bottom of the viewport that something else covers (the compose
@@ -216,6 +220,8 @@ const
   { Blank rows kept below the last block, so it does not sit flush against the
     compose overlay. }
   ContentBottomPad = 2;
+  { The thinking sparkle advances every 90 ms (matching TChatItem.Advance). }
+  ThinkingIntervalMs = 90;
   { The scrollbar track starts this many rows below the panel's top border, so
     it does not touch the rounded corner. }
   ScrollTrackTopGap = 1;
@@ -784,6 +790,7 @@ destructor TChatStack.Destroy;
 var
   I: Integer;
 begin
+  ClearAnimation;
   for I := 0 to High(FItems) do
     FItems[I].Free;
   inherited Destroy;
@@ -813,6 +820,11 @@ begin
   Result.OnToggle := ItemToggled;
   Result.OnChange := ItemChanged;
   FItems[High(FItems)] := Result;
+  if AKind = ckThinking then
+  begin
+    Inc(FAnimatingBlocks);
+    RefreshAnimation;
+  end;
   BumpGeneration;
 end;
 
@@ -823,6 +835,8 @@ begin
   for I := 0 to High(FItems) do
     FItems[I].Free;
   FItems := nil;
+  FAnimatingBlocks := 0;
+  RefreshAnimation;
   BumpGeneration;
 end;
 
@@ -833,10 +847,13 @@ begin
   for I := 0 to High(FItems) do
     if FItems[I] = AItem then
     begin
+      if AItem.Kind = ckThinking then
+        Dec(FAnimatingBlocks);
       FItems[I].Free;
       for J := I to High(FItems) - 1 do
         FItems[J] := FItems[J + 1];
       SetLength(FItems, Length(FItems) - 1);
+      RefreshAnimation;
       BumpGeneration;
       Exit;
     end;
@@ -1041,19 +1058,32 @@ var
   I: Integer;
 begin
   Result := False;
+  { Only the thinking indicator animates; skip the whole list when none does. }
+  if FAnimatingBlocks = 0 then
+    Exit;
   for I := 0 to Count - 1 do
     if ItemAt(I).Advance(ANowMs) then
       Result := True;
 end;
 
 function TChatStack.Animating: Boolean;
-var
-  I: Integer;
 begin
-  for I := 0 to Count - 1 do
-    if ItemAt(I).Animating then
-      Exit(True);
-  Result := False;
+  Result := FAnimatingBlocks > 0;
+end;
+
+procedure TChatStack.RefreshAnimation;
+begin
+  { Register the stack's own animation with the process clock while any block
+    animates, so the app keeps ticking for it (and no faster). }
+  if FAnimatingBlocks > 0 then
+    SetAnimation(ThinkingIntervalMs)
+  else
+    ClearAnimation;
+end;
+
+function TChatStack.AnimatingCount: Integer;
+begin
+  Result := FAnimatingBlocks;
 end;
 
 { TChatStream }

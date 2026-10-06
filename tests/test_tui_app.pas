@@ -10,7 +10,7 @@ uses
   SysUtils, fpcunit, testregistry,
   hildegard.helper.tui.base, hildegard.helper.tui.input,
   hildegard.helper.tui.surface, hildegard.helper.tui.widget,
-  hildegard.helper.tui.app;
+  hildegard.helper.tui.clock, hildegard.helper.tui.app;
 
 type
   TAppProbe = class(TWidget)
@@ -46,6 +46,7 @@ type
     procedure TestResizeRelayoutsRoot;
     procedure TestStepProcessesOneEvent;
     procedure TestPasteIsDispatched;
+    procedure TestFrameIntervalFollowsRegistrations;
   end;
 
 implementation
@@ -145,6 +146,40 @@ begin
       string(Base.LastPaste));
   finally
     App.Free;
+  end;
+end;
+
+procedure TTuiAppTest.TestFrameIntervalFollowsRegistrations;
+var
+  S: TSurfaceMemory;
+  Src: TInputSourceScripted;
+  App: TTuiApp;
+  A, B: TAppProbe;
+begin
+  AnimationClock.Reset;
+  S := TSurfaceMemory.Create(10, 4);
+  Src := TInputSourceScripted.Create;
+  App := TTuiApp.Create(S, Src, TAppProbe.Create(10, 4, 'B'));
+  A := TAppProbe.Create(1, 1);
+  B := TAppProbe.Create(1, 1);
+  try
+    AssertEquals('idle', IdleWaitMs, App.FrameIntervalMs);
+    AssertFalse('nothing animates', App.Animating);
+    A.SetAnimation(250);
+    AssertEquals('caret rate', 250, App.FrameIntervalMs);
+    AssertTrue('animating', App.Animating);
+    B.SetAnimation(30);
+    AssertEquals('fastest wins', 30, App.FrameIntervalMs);
+    B.ClearAnimation;
+    AssertEquals('back to the caret', 250, App.FrameIntervalMs);
+    A.ClearAnimation;
+    AssertEquals('idle again', IdleWaitMs, App.FrameIntervalMs);
+    AssertFalse('nothing animates again', App.Animating);
+  finally
+    A.Free;
+    B.Free;
+    App.Free;
+    AnimationClock.Reset;
   end;
 end;
 
