@@ -112,6 +112,7 @@ type
     FLayoutWidth: Integer;
     FLayoutGeneration: Integer;
     FLayoutTotal: Integer;
+    FLayoutRuns: Integer;         { how often the layout was rebuilt; diagnostic }
     FLayoutY: array of Integer;   { each block's top, relative to the stack }
     FLayoutH: array of Integer;   { each block's height }
     function Count: Integer;
@@ -132,6 +133,9 @@ type
     { How many blocks currently hold a rendered layout (the rest are windowed
       out). Diagnostic. }
     function MaterializedCount: Integer;
+    { How many times the block layout was rebuilt. A steady-state measure/render
+      cycle must not increase it. Diagnostic. }
+    function LayoutRuns: Integer;
     { Drop and free one block, e.g. the thinking indicator once text arrives. }
     procedure Remove(AItem: TChatItem);
     { Rows at the bottom of the viewport that something else covers (the compose
@@ -877,6 +881,10 @@ begin
     FOnToggle(Self);
 end;
 
+{ Rebuild the block offset/height arrays when the item width or the content
+  changed. The height memo is keyed per width, so Measure and Arrange MUST pass
+  the same item width or this re-measures every block on every frame (see
+  docs/guidelines/tui-rendering.md). }
 procedure TChatStack.EnsureLayout(AItemWidth: Integer);
 var
   I, Y: Integer;
@@ -885,6 +893,7 @@ begin
   if FLayoutValid and (FLayoutWidth = AItemWidth) and
     (FLayoutGeneration = FGeneration) and (Length(FLayoutY) = Count) then
     Exit;
+  Inc(FLayoutRuns);
   SetLength(FLayoutY, Count);
   SetLength(FLayoutH, Count);
   Sz := Default(TSize);
@@ -905,12 +914,21 @@ begin
 end;
 
 function TChatStack.Measure(const AAvail: TSize): TSize;
+var
+  W: Integer;
 begin
   Result := Default(TSize);
-  Result.W := AAvail.W - 1;   { reserve the scrollbar column }
-  if Result.W < 1 then
-    Result.W := 1;
-  EnsureLayout(ItemWidth(Result.W));
+  { Lay out at the width the stack is arranged at, so Measure and Arrange agree.
+    If they disagree, EnsureLayout re-measures every block on every frame (the
+    height memo is keyed per width); before the stack has been arranged, fall
+    back to the available width. }
+  W := FBounds.W;
+  if W < 1 then
+    W := AAvail.W - 1;   { reserve the scrollbar column }
+  if W < 1 then
+    W := 1;
+  Result.W := W;
+  EnsureLayout(ItemWidth(W));
   Result.H := FLayoutTotal + ContentBottomPad + FBottomInset;
 end;
 
@@ -938,10 +956,16 @@ begin
       Inc(Result);
 end;
 
+function TChatStack.LayoutRuns: Integer;
+begin
+  Result := FLayoutRuns;
+end;
+
 procedure TChatStack.Render(const S: ISurface);
 var
   I, Top, Bottom, First, Last, ItemW: Integer;
   Clip: TRect;
+  Item: TChatItem;
 begin
   S.PushClip(FBounds);
   Clip := S.ClipRect;
@@ -979,16 +1003,19 @@ begin
   end;
   ItemW := ItemWidth(FBounds.W);
   for I := 0 to Count - 1 do
+  begin
+    Item := ItemAt(I);
     if (First < 0) or (I < First) or (I > Last) then
-      ItemAt(I).Dematerialize
-    else
+      Item.Dematerialize
+    else if not Item.Materialized then
     begin
-      ItemAt(I).Materialize;
-      { Re-arrange: the block was released when Arrange ran, so its body has no
-        bounds yet. }
-      ItemAt(I).Arrange(Rc(FBounds.X + 1, FBounds.Y + FLayoutY[I], ItemW,
+      { The block was released when Arrange ran, so materialize it now and give
+        its body bounds. Already-materialized blocks were arranged by Arrange. }
+      Item.Materialize;
+      Item.Arrange(Rc(FBounds.X + 1, FBounds.Y + FLayoutY[I], ItemW,
         FLayoutH[I]));
     end;
+  end;
   for I := 0 to Count - 1 do
   begin
     if FLayoutY[I] >= Bottom then

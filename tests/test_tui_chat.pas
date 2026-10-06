@@ -50,6 +50,7 @@ type
     procedure TestStreamKeepsTheNewestBlockVisible;
     procedure TestStreamReservesTheBottomInset;
     procedure TestStackMaterializesOnlyTheWindow;
+    procedure TestStackLayoutDoesNotThrashAcrossMeasureAndArrange;
     procedure TestStreamOnChangeFiresWhenABlockGrows;
     procedure TestToggleKeepsTheBlockTopInPlace;
     procedure TestToggleThroughTheStreamKeepsTheBlockTop;
@@ -616,6 +617,46 @@ begin
       Large := Stack.MaterializedCount;
       AssertEquals('retained layouts do not grow with the block count',
         Small, Large);
+    finally
+      Stack.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestStackLayoutDoesNotThrashAcrossMeasureAndArrange;
+var
+  Stack: TChatStack;
+  S: TSurfaceMemory;
+  Sz: TSize;
+  Before, I: Integer;
+begin
+  S := TSurfaceMemory.Create(30, 8);
+  try
+    Stack := TChatStack.Create(FTheme);
+    try
+      for I := 1 to 50 do
+        Stack.Add(ckAssistant, '', 'line ' + IntToStr(I));
+      Sz := Default(TSize);
+      Sz.W := 30;
+      Sz.H := 8;
+      Stack.Measure(Sz);
+      Stack.Arrange(Rc(0, 0, 30, 8));
+      S.Clear(DefaultAttr);
+      Stack.Render(S);
+      Before := Stack.LayoutRuns;
+      { Repeated measure/arrange cycles with no content change must not rebuild
+        the layout: Measure and Arrange must agree on the item width, or the
+        height memo misses and every block is re-measured (and re-parsed). }
+      for I := 1 to 10 do
+      begin
+        Stack.Measure(Sz);
+        Stack.Arrange(Rc(0, 0, 30, 8));
+        S.Clear(DefaultAttr);
+        Stack.Render(S);
+      end;
+      AssertEquals('layout does not thrash', Before, Stack.LayoutRuns);
     finally
       Stack.Free;
     end;
