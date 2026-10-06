@@ -369,9 +369,11 @@ end;
 procedure TTuiApp.Run(ACheckStop: TStopCheck; AOnLoop: TLoopHook);
 const
   { Idle wake-up, not a refresh rate. IInputSource.Wait blocks on the tty, so
-    this only bounds how long a signal or resize goes unnoticed; it is not a
-    repaint cadence. }
-  IdleWaitMs = 100;
+    input (and a signal, via EINTR) wakes it immediately; this only bounds how
+    long a resize goes unnoticed, and how often the idle loop does its small
+    per-wake work (two `ioctl`s and an `Animating` walk). It is not a repaint
+    cadence, so it can be generous. }
+  IdleWaitMs = 250;
 var
   E: TInputEvent;
   Timeout: Integer;
