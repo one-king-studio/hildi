@@ -51,6 +51,7 @@ type
     procedure TestStreamReservesTheBottomInset;
     procedure TestStackMaterializesOnlyTheWindow;
     procedure TestStackLayoutDoesNotThrashAcrossMeasureAndArrange;
+    procedure TestStreamWidthFollowsTheViewport;
     procedure TestStackTracksAnimatingBlocks;
     procedure TestStreamOnChangeFiresWhenABlockGrows;
     procedure TestToggleKeepsTheBlockTopInPlace;
@@ -662,7 +663,7 @@ var
   Stack: TChatStack;
   S: TSurfaceMemory;
   Sz: TSize;
-  Before, I: Integer;
+  Before, I, W: Integer;
 begin
   S := TSurfaceMemory.Create(30, 8);
   try
@@ -673,8 +674,10 @@ begin
       Sz := Default(TSize);
       Sz.W := 30;
       Sz.H := 8;
-      Stack.Measure(Sz);
-      Stack.Arrange(Rc(0, 0, 30, 8));
+      { The scroll container arranges its child at the width the child reported,
+        so measure and then arrange at the measured width. }
+      W := Stack.Measure(Sz).W;
+      Stack.Arrange(Rc(0, 0, W, 8));
       S.Clear(DefaultAttr);
       Stack.Render(S);
       Before := Stack.LayoutRuns;
@@ -683,8 +686,8 @@ begin
         height memo misses and every block is re-measured (and re-parsed). }
       for I := 1 to 10 do
       begin
-        Stack.Measure(Sz);
-        Stack.Arrange(Rc(0, 0, 30, 8));
+        W := Stack.Measure(Sz).W;
+        Stack.Arrange(Rc(0, 0, W, 8));
         S.Clear(DefaultAttr);
         Stack.Render(S);
       end;
@@ -694,6 +697,30 @@ begin
     end;
   finally
     S.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestStreamWidthFollowsTheViewport;
+var
+  St: TChatStream;
+  Item: TChatItem;
+  Wide, Narrow: Integer;
+begin
+  { A regression guard: the stream must reflow to the viewport width. The stack
+    used to report its own arranged width, which the scroll container fed back as
+    the child's width, so the content stayed at its first width forever. }
+  St := TChatStream.Create(FTheme);
+  try
+    Item := St.Add(ckAssistant, '',
+      'the quick brown fox jumps over the lazy dog and keeps running so it wraps');
+    St.Arrange(Rc(0, 0, 60, 12));
+    Wide := Item.Bounds.W;
+    St.Arrange(Rc(0, 0, 30, 12));
+    Narrow := Item.Bounds.W;
+    AssertTrue('the block narrows with the viewport', Narrow < Wide);
+    AssertEquals('the block tracks the narrow viewport', 28, Narrow);
+  finally
+    St.Free;
   end;
 end;
 

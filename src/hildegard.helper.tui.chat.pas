@@ -935,13 +935,12 @@ var
   W: Integer;
 begin
   Result := Default(TSize);
-  { Lay out at the width the stack is arranged at, so Measure and Arrange agree.
-    If they disagree, EnsureLayout re-measures every block on every frame (the
-    height memo is keyed per width); before the stack has been arranged, fall
-    back to the available width. }
-  W := FBounds.W;
-  if W < 1 then
-    W := AAvail.W - 1;   { reserve the scrollbar column }
+  { Reserve the scrollbar column and report the width the stack will be arranged
+    at: the scroll container arranges its child at the width the child reported,
+    so Arrange's bounds equal this width and the per-width height memo never
+    misses. Reporting our own arranged bounds instead would pin the stack to its
+    first width and it would never follow a resize. }
+  W := AAvail.W - 1;
   if W < 1 then
     W := 1;
   Result.W := W;
