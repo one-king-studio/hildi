@@ -50,6 +50,8 @@ type
     function EffectiveExpanded: Boolean;
     function DisplayBody: string;
     procedure Rebuild;
+    procedure EnsureBody;
+    procedure ArrangeBody(const ABounds: TRect);
     procedure BodyRows(AWidth: Integer; out ATextRows, ALines: Integer);
     function Boxed: Boolean;
     procedure InvalidateHeight;
@@ -63,6 +65,12 @@ type
     procedure SetText(const AText: string);
     procedure AppendText(const AText: string);
     function Text: string;
+    { Build or free the rendered body (spans or markdown). A block off the
+      viewport releases it; the memoized height survives, so the scroll extent
+      is unchanged. }
+    procedure Materialize;
+    procedure Dematerialize;
+    function Materialized: Boolean;
     function Measure(const AAvail: TSize): TSize; override;
     procedure Arrange(const ABounds: TRect); override;
     procedure Render(const S: ISurface); override;
@@ -121,6 +129,9 @@ type
     destructor Destroy; override;
     function Add(AKind: TChatKind; const ALabel, AText: string): TChatItem;
     procedure Clear;
+    { How many blocks currently hold a rendered layout (the rest are windowed
+      out). Diagnostic. }
+    function MaterializedCount: Integer;
     { Drop and free one block, e.g. the thinking indicator once text arrives. }
     procedure Remove(AItem: TChatItem);
     { Rows at the bottom of the viewport that something else covers (the compose
@@ -192,6 +203,9 @@ const
   { A live (streaming) block shows this many tail lines, plus a '...' when the
     body is longer. }
   LiveTailLines = 6;
+  { Blocks beyond the viewport that keep their rendered layout, so a short
+    scroll does not rebuild one. }
+  WindowOverscan = 16;
   { Columns reserved at the right of a block title for the rule, the mark, and
     the border. }
   TitleChrome = 10;
@@ -254,17 +268,8 @@ begin
   FHeightValid := False;
   FHeightWidth := 0;
   FHeight := 0;
-  if AKind = ckAssistant then
-  begin
-    FText := nil;
-    FMarkdown := TMarkdownView.Create;
-  end
-  else
-  begin
-    FMarkdown := nil;
-    FText := TTextBlock.Create([], wmWord);
-  end;
-  Rebuild;
+  { The rendered body is built lazily by Materialize, so a large history does
+    not hold every block's layout at once. }
 end;
 
 destructor TChatItem.Destroy;
@@ -331,6 +336,7 @@ procedure TChatItem.Rebuild;
 var
   One: TSpan;
 begin
+  EnsureBody;
   if FMarkdown <> nil then
   begin
     FMarkdown.SetSource(DisplayBody);
@@ -340,6 +346,36 @@ begin
   One.Text := UnicodeString(DisplayBody);
   One.Attr := BodyAttr;
   FText.SetSpans([One]);
+end;
+
+{ Create the rendered body (spans or markdown) if it is not already present. }
+procedure TChatItem.EnsureBody;
+begin
+  if (FText <> nil) or (FMarkdown <> nil) then
+    Exit;
+  if FKind = ckAssistant then
+    FMarkdown := TMarkdownView.Create
+  else
+    FText := TTextBlock.Create([], wmWord);
+end;
+
+procedure TChatItem.Materialize;
+begin
+  if Materialized then
+    Exit;
+  EnsureBody;
+  Rebuild;
+end;
+
+procedure TChatItem.Dematerialize;
+begin
+  FreeAndNil(FText);
+  FreeAndNil(FMarkdown);
+end;
+
+function TChatItem.Materialized: Boolean;
+begin
+  Result := (FText <> nil) or (FMarkdown <> nil);
 end;
 
 procedure TChatItem.InvalidateHeight;
@@ -461,6 +497,7 @@ end;
 function TChatItem.Measure(const AAvail: TSize): TSize;
 var
   TextRows, Lines: Integer;
+  WasMaterialized: Boolean;
 begin
   Result := Default(TSize);
   Result.W := AAvail.W;
@@ -473,6 +510,11 @@ begin
     Exit;
   end;
   Inc(FMeasureCount);
+  { Measuring needs the rendered body. Build it if it was released, and release
+    it again afterwards unless it was already held, so a layout pass does not
+    retain every block's layout. }
+  WasMaterialized := Materialized;
+  Materialize;
   case FKind of
     ckUser:
       begin
@@ -500,14 +542,15 @@ begin
   FHeight := Result.H;
   FHeightWidth := AAvail.W;
   FHeightValid := True;
+  if not WasMaterialized then
+    Dematerialize;
 end;
 
-procedure TChatItem.Arrange(const ABounds: TRect);
+procedure TChatItem.ArrangeBody(const ABounds: TRect);
 var
   TextRows, Lines, InnerW: Integer;
   BodyR: TRect;
 begin
-  inherited Arrange(ABounds);
   if Boxed then
   begin
     InnerW := ABounds.W - 4;
@@ -527,6 +570,14 @@ begin
     FText.Arrange(BodyR);
 end;
 
+procedure TChatItem.Arrange(const ABounds: TRect);
+begin
+  inherited Arrange(ABounds);
+  { A released block arranges its body when it is materialized in Render. }
+  if Materialized then
+    ArrangeBody(ABounds);
+end;
+
 procedure TChatItem.Render(const S: ISurface);
 var
   L, R, T, B, TextRows, Lines, X, I, TitleMaxW: Integer;
@@ -538,6 +589,11 @@ var
 begin
   if (FBounds.W < 1) or (FBounds.H < 1) then
     Exit;
+  if not Materialized then
+  begin
+    Materialize;
+    ArrangeBody(FBounds);
+  end;
 
   case FKind of
     ckAssistant:
@@ -872,9 +928,19 @@ begin
       FLayoutH[I]));
 end;
 
+function TChatStack.MaterializedCount: Integer;
+var
+  I: Integer;
+begin
+  Result := 0;
+  for I := 0 to Count - 1 do
+    if ItemAt(I).Materialized then
+      Inc(Result);
+end;
+
 procedure TChatStack.Render(const S: ISurface);
 var
-  I, Top, Bottom: Integer;
+  I, Top, Bottom, First, Last, ItemW: Integer;
   Clip: TRect;
 begin
   S.PushClip(FBounds);
@@ -884,6 +950,45 @@ begin
   Bottom := Clip.Y + Clip.H - FBounds.Y;
   { The layout is ordered, so the first block past the clip ends the scan and
     only the visible blocks are drawn. }
+  First := -1;
+  Last := -1;
+  for I := 0 to Count - 1 do
+  begin
+    if FLayoutY[I] >= Bottom then
+      Break;
+    if FLayoutY[I] + FLayoutH[I] > Top then
+    begin
+      if First < 0 then
+        First := I;
+      Last := I;
+    end;
+  end;
+  { Materialize the visible range plus an overscan and release the rest, so a
+    long session does not hold every block's rendered layout. The overscan keeps
+    a block that just left the viewport from rebuilding on a short scroll. }
+  if First >= 0 then
+  begin
+    if First - WindowOverscan > 0 then
+      Dec(First, WindowOverscan)
+    else
+      First := 0;
+    if Last + WindowOverscan < Count - 1 then
+      Inc(Last, WindowOverscan)
+    else
+      Last := Count - 1;
+  end;
+  ItemW := ItemWidth(FBounds.W);
+  for I := 0 to Count - 1 do
+    if (First < 0) or (I < First) or (I > Last) then
+      ItemAt(I).Dematerialize
+    else
+    begin
+      ItemAt(I).Materialize;
+      { Re-arrange: the block was released when Arrange ran, so its body has no
+        bounds yet. }
+      ItemAt(I).Arrange(Rc(FBounds.X + 1, FBounds.Y + FLayoutY[I], ItemW,
+        FLayoutH[I]));
+    end;
   for I := 0 to Count - 1 do
   begin
     if FLayoutY[I] >= Bottom then

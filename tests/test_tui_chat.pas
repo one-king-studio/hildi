@@ -49,6 +49,7 @@ type
     procedure TestStreamRemoveDropsOneBlock;
     procedure TestStreamKeepsTheNewestBlockVisible;
     procedure TestStreamReservesTheBottomInset;
+    procedure TestStackMaterializesOnlyTheWindow;
     procedure TestStreamOnChangeFiresWhenABlockGrows;
     procedure TestToggleKeepsTheBlockTopInPlace;
     procedure TestToggleThroughTheStreamKeepsTheBlockTop;
@@ -575,6 +576,48 @@ begin
       AssertEquals('and the row below that', '', S.CellAt(0, 2).Ch);
     finally
       St.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestStackMaterializesOnlyTheWindow;
+var
+  Stack: TChatStack;
+  S: TSurfaceMemory;
+  Sz: TSize;
+  I, Small, Large: Integer;
+begin
+  S := TSurfaceMemory.Create(30, 8);
+  try
+    Stack := TChatStack.Create(FTheme);
+    try
+      for I := 1 to 200 do
+        Stack.Add(ckAssistant, '', 'line ' + IntToStr(I));
+      Stack.Arrange(Rc(0, 0, 30, 8));
+      S.Clear(DefaultAttr);
+      Stack.Render(S);
+      Small := Stack.MaterializedCount;
+      AssertTrue('a window is materialized', Small > 0);
+      AssertTrue('not every block', Small < 200);
+      { The extent is still exact: every block's height is measured even though
+        its rendered layout is released. }
+      Sz := Default(TSize);
+      Sz.W := 30;
+      Sz.H := 8;
+      AssertTrue('extent is the full column', Stack.Measure(Sz).H > 8);
+      { More blocks do not mean more retained layouts. }
+      for I := 201 to 600 do
+        Stack.Add(ckAssistant, '', 'line ' + IntToStr(I));
+      Stack.Arrange(Rc(0, 0, 30, 8));
+      S.Clear(DefaultAttr);
+      Stack.Render(S);
+      Large := Stack.MaterializedCount;
+      AssertEquals('retained layouts do not grow with the block count',
+        Small, Large);
+    finally
+      Stack.Free;
     end;
   finally
     S.Free;
