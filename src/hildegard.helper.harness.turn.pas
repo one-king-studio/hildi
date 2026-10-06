@@ -1,13 +1,15 @@
 unit hildegard.helper.harness.turn;
-{ The thread boundary between the agent and the UI.
+{ The thread-boundary types between the agent and the UI: TTurnEvent, the
+  thread-safe TTurnQueue, and TApprovalGate.
 
-  TAgentLoop.Send is synchronous and streams through callbacks. TTurnWorker runs
-  one Send on a worker thread and republishes its callbacks as TTurnEvents on a
-  thread-safe TTurnQueue, which the UI drains each frame. Approval prompts are
-  bridged the other way by TApprovalGate: the worker blocks in Ask while the UI
-  answers from its own thread.
+  TAgentLoop.Send is synchronous and streams through callbacks; TTurnWorker (in
+  hildegard.helper.harness.turn.worker) runs one Send on a worker thread and
+  republishes its callbacks as TTurnEvents on the queue, which the UI drains
+  each frame. Approval prompts are bridged the other way by TApprovalGate: the
+  worker blocks in Ask while the UI answers from its own thread.
 
-  Nothing here knows about widgets, and nothing here links a terminal. }
+  Nothing here knows about widgets or the agent, so a UI client can depend on
+  these types without linking the loop. }
 
 {$mode delphi}{$H+}
 
@@ -15,7 +17,7 @@ interface
 
 uses
   Classes, SysUtils, SyncObjs,
-  hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.approval;
+  hildegard.helper.llm, hildegard.helper.approval;
 
 type
   TTurnEventKind = (
@@ -98,49 +100,7 @@ type
     procedure Cancel;
   end;
 
-  { Runs one TAgentLoop.Send on a worker thread, translating its events into
-    TTurnEvents on the queue. Owned by the app; always joined before freeing
-    (TThread.Destroy waits for the thread). }
-  TTurnWorker = class(TThread)
-  private
-    FLoop: TAgentLoop;
-    FQueue: TTurnQueue;
-    FUserText: string;
-    FCancelled: Boolean;
-    FAnswer: string;
-    FError: TLLMError;
-    FStart: TDateTime;
-    function ElapsedMs: Int64;
-    function Cancelled: Boolean;
-    procedure Emit(const AEvent: TTurnEvent);
-    procedure EmitError(ACode: TLLMErrorCode; const AMessage, ADetail: string;
-      ADropped: Boolean = False);
-    procedure OnText(const AText: string);
-    procedure OnReasoning(const AText: string);
-    procedure OnReasoningDone(ADurationMs: Int64);
-    procedure OnToolCall(const AId, AName, AArguments, AReason: string);
-    procedure OnToolResult(const AId, AName, AResult: string; AOk: Boolean);
-    procedure OnToolOutput(const AId, AName, AText: string);
-    procedure OnUserQueued(const AText: string);
-  protected
-    procedure Execute; override;
-  public
-    constructor Create(ALoop: TAgentLoop; AQueue: TTurnQueue;
-      const AUserText: string);
-    { UI thread. The loop consults the flag between requests, so the turn stops
-      at the next boundary; an in-flight stream finishes first. }
-    procedure RequestCancel;
-    { UI thread. Hand the running loop another prompt; it is injected at the
-      next boundary. }
-    procedure QueuePrompt(const AText: string);
-    property Answer: string read FAnswer;
-    property Error: TLLMError read FError;
-  end;
-
 implementation
-
-uses
-  DateUtils;
 
 { TTurnQueue }
 
@@ -287,178 +247,6 @@ begin
     end;
   finally
     FLock.Release;
-  end;
-end;
-
-{ TTurnWorker }
-
-constructor TTurnWorker.Create(ALoop: TAgentLoop; AQueue: TTurnQueue;
-  const AUserText: string);
-begin
-  inherited Create(True);
-  FreeOnTerminate := False;
-  FLoop := ALoop;
-  FQueue := AQueue;
-  FUserText := AUserText;
-  FError := Default(TLLMError);
-end;
-
-procedure TTurnWorker.RequestCancel;
-begin
-  FCancelled := True;
-end;
-
-procedure TTurnWorker.QueuePrompt(const AText: string);
-begin
-  FLoop.PromptQueue.Push(AText);
-end;
-
-function TTurnWorker.ElapsedMs: Int64;
-begin
-  Result := MilliSecondsBetween(Now, FStart);
-end;
-
-function TTurnWorker.Cancelled: Boolean;
-begin
-  Result := FCancelled;
-end;
-
-procedure TTurnWorker.Emit(const AEvent: TTurnEvent);
-begin
-  FQueue.Push(AEvent);
-end;
-
-procedure TTurnWorker.EmitError(ACode: TLLMErrorCode;
-  const AMessage, ADetail: string; ADropped: Boolean);
-var
-  Event: TTurnEvent;
-begin
-  Event := Default(TTurnEvent);
-  Event.Kind := teError;
-  Event.ErrorCode := ACode;
-  Event.Text := AMessage;
-  Event.Detail := ADetail;
-  Event.Dropped := ADropped;
-  Event.ElapsedMs := ElapsedMs;
-  Emit(Event);
-end;
-
-procedure TTurnWorker.OnUserQueued(const AText: string);
-var
-  Event: TTurnEvent;
-begin
-  Event := Default(TTurnEvent);
-  Event.Kind := tePromptQueued;
-  Event.Text := AText;
-  Emit(Event);
-end;
-
-procedure TTurnWorker.OnText(const AText: string);
-var
-  Event: TTurnEvent;
-begin
-  Event := Default(TTurnEvent);
-  Event.Kind := teAssistantDelta;
-  Event.Text := AText;
-  Emit(Event);
-end;
-
-procedure TTurnWorker.OnReasoning(const AText: string);
-var
-  Event: TTurnEvent;
-begin
-  Event := Default(TTurnEvent);
-  Event.Kind := teReasoningDelta;
-  Event.Text := AText;
-  Emit(Event);
-end;
-
-procedure TTurnWorker.OnReasoningDone(ADurationMs: Int64);
-var
-  Event: TTurnEvent;
-begin
-  Event := Default(TTurnEvent);
-  Event.Kind := teReasoningDone;
-  Event.ElapsedMs := ADurationMs;
-  Emit(Event);
-end;
-
-procedure TTurnWorker.OnToolCall(const AId, AName, AArguments, AReason: string);
-var
-  Event: TTurnEvent;
-begin
-  Event := Default(TTurnEvent);
-  Event.Kind := teToolCall;
-  Event.ToolId := AId;
-  Event.ToolName := AName;
-  Event.ToolArguments := AArguments;
-  Event.ToolReason := AReason;
-  Emit(Event);
-end;
-
-procedure TTurnWorker.OnToolResult(const AId, AName, AResult: string;
-  AOk: Boolean);
-var
-  Event: TTurnEvent;
-begin
-  Event := Default(TTurnEvent);
-  Event.Kind := teToolResult;
-  Event.ToolId := AId;
-  Event.ToolName := AName;
-  Event.Text := AResult;
-  Event.ToolOk := AOk;
-  Emit(Event);
-end;
-
-procedure TTurnWorker.OnToolOutput(const AId, AName, AText: string);
-var
-  Event: TTurnEvent;
-begin
-  Event := Default(TTurnEvent);
-  Event.Kind := teToolOutput;
-  Event.ToolId := AId;
-  Event.ToolName := AName;
-  Event.Text := AText;
-  Emit(Event);
-end;
-
-procedure TTurnWorker.Execute;
-var
-  Events: TAgentEvents;
-  Event: TTurnEvent;
-begin
-  FStart := Now;
-  Events := Default(TAgentEvents);
-  Events.OnText := OnText;
-  Events.OnReasoning := OnReasoning;
-  Events.OnReasoningDone := OnReasoningDone;
-  Events.OnToolCall := OnToolCall;
-  Events.OnToolResult := OnToolResult;
-  Events.OnToolOutput := OnToolOutput;
-  Events.OnUserQueued := OnUserQueued;
-
-  { The loop consults this between requests, so a cancel stops the turn at the
-    next boundary and an in-flight stream still finishes. }
-  FLoop.CancelCheck := Cancelled;
-  try
-    try
-      if FLoop.Send(FUserText, Events, FAnswer, FError) then
-      begin
-        Event := Default(TTurnEvent);
-        Event.Kind := teDone;
-        Event.Answer := FAnswer;
-        Event.ElapsedMs := ElapsedMs;
-        Emit(Event);
-      end
-      else
-        EmitError(FError.Code, FError.Message, FError.Detail,
-          FLoop.LastTurnDropped);
-    except
-      on E: Exception do
-        EmitError(leProvider, E.Message, '');
-    end;
-  finally
-    FLoop.CancelCheck := nil;
   end;
 end;
 

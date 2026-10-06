@@ -88,7 +88,7 @@ TEST_SRCS := $(wildcard $(TESTS)/*.pas)
 
 .PHONY: all test test-leak watch check release clean help libsqlite libmbedtls \
         store-demo agent-cli release-agent-cli tui-demo widgets-demo layout-demo \
-        tui-agent bench perf
+        headless-agent tui-agent bench perf
 
 all: $(BIN)/hildegard-helper-demo
 
@@ -183,12 +183,20 @@ $(BIN)/hildegard-helper-tui-layout-demo: $(EXAMPLES)/tui_layout_demo.pas $(LIB_S
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
-# Full-screen agent harness (conversation + approvals + sessions). Builds and
-# runs; Ctrl-C quits.
-tui-agent: libsqlite libmbedtls $(BIN)/hildegard-helper-tui-agent
-	$(BIN)/hildegard-helper-tui-agent $(ARGS)
+# Headless agent: hosts a session's runtime; spawned detached by the TUI or the
+# CLI. No terminal. A client finds it as a sibling (or via HILDEGARD_RUNTIME_BIN).
+headless-agent: libsqlite libmbedtls $(BIN)/hildegard-helper-agent
 
-$(BIN)/hildegard-helper-tui-agent: $(EXAMPLES)/tui_agent.pas $(LIB_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
+$(BIN)/hildegard-helper-agent: $(EXAMPLES)/headless_agent.pas $(LIB_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
+	@mkdir -p $(BIN) $(DBGUNITS)
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+
+# Full-screen agent harness (conversation + approvals + sessions). Builds and
+# runs; Ctrl-C quits. Drives the headless agent.
+tui-agent: headless-agent $(BIN)/hildegard-helper-tui
+	$(BIN)/hildegard-helper-tui $(ARGS)
+
+$(BIN)/hildegard-helper-tui: $(EXAMPLES)/tui_agent.pas $(LIB_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
@@ -251,6 +259,7 @@ help:
 	@echo "  make tui-demo                 build & run the interactive TUI demonstration"
 	@echo "  make widgets-demo             build & run the widget-kit demo"
 	@echo "  make layout-demo              build & run the responsive two-column layout demo"
+	@echo "  make headless-agent           build the headless session runtime (no TUI)"
 	@echo "  make tui-agent [ARGS=...]     build & run the agent harness (needs an API key)"
 	@echo "  make bench [ARGS=--real]      build & run the TUI wall-clock benchmark"
 	@echo "  make perf                     run the benchmark with budget assertions"

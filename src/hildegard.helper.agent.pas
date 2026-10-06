@@ -251,8 +251,6 @@ const
   DefaultSoftToolLimit = 30;
   DefaultHardToolLimit = 50;
   DefaultToolNoticeStep = 5;
-  { The running context (latest prompt tokens) may not exceed this. }
-  DefaultMaxContextTokens = 120000;
   { Followup requests allowed for one truncated response. }
   DefaultMaxContinuations = 3;
   { The user message that asks the model to resume a truncated response. It

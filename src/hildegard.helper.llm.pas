@@ -156,6 +156,9 @@ const
   DefaultLLMEndpoint = 'https://api.fireworks.ai/inference/v1/chat/completions';
   DefaultConnectTimeoutMs = 10000;
   DefaultReadTimeoutMs = 120000;
+  { The default running-context limit (latest prompt tokens) until the model API
+    can supply it. Shared by the loop's guard and the UI's context meter. }
+  DefaultMaxContextTokens = 120000;
 
 implementation
 

@@ -11,7 +11,8 @@ interface
 uses
   Classes, SysUtils, fpcunit, testregistry,
   hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.approval,
-  hildegard.helper.harness.turn, llm_fakes;
+  hildegard.helper.harness.turn, hildegard.helper.harness.turn.worker,
+  llm_fakes;
 
 type
   { Runs Gate.Ask on its own thread so the main thread can Answer/Cancel. }

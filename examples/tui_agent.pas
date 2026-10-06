@@ -20,9 +20,9 @@ uses
   hildegard.helper.tui.base, hildegard.helper.tui.input,
   hildegard.helper.tui.surface, hildegard.helper.tui.surface.video,
   hildegard.helper.tui.input.terminal, hildegard.helper.tui.theme,
-  hildegard.helper.harness.session, hildegard.helper.harness.driver,
+  hildegard.helper.harness.view, hildegard.helper.harness.driver,
   hildegard.helper.harness.app, hildegard.helper.session.protocol,
-  hildegard.helper.session.runtime;
+  hildegard.helper.session.client;
 
 var
   RawArgs: TStringList;
@@ -34,7 +34,7 @@ var
   Light: Boolean;
   StorePath: string;
   Cfg: THarnessSessionConfig;
-  Session: THarnessSession;
+  Session: TSessionView;
   Err: string;
   ClientCfg: TSessionClientConfig;
   Driver: ISessionDriver;
@@ -50,16 +50,6 @@ begin
 end;
 
 begin
-  { When the driver spawns a runtime it re-executes this binary with the runtime
-    argv; run the runtime instead of the TUI. }
-  if (ParamCount >= 1) and (ParamStr(1) = '--session-runtime') then
-  begin
-    SetLength(Args, ParamCount);
-    for I := 0 to ParamCount - 1 do
-      Args[I] := ParamStr(I + 1);
-    Halt(RunSessionRuntime(Args));
-  end;
-
   RawArgs := TStringList.Create;
   try
     for I := 1 to ParamCount do
@@ -111,9 +101,8 @@ begin
   Cfg.Resume := Opts.ContinueSession;
   Cfg.Model := Opts.Model;
   Cfg.Endpoint := Opts.Endpoint;
-  Cfg.NoLoop := True;
 
-  Session := THarnessSession.Open(Cfg, Err);
+  Session := TSessionView.Open(Cfg, Err);
   if Session = nil then
   begin
     WriteLn('error: ', Err);
@@ -129,7 +118,11 @@ begin
   ClientCfg.FromSeq := 0;
   ClientCfg.Spawn := True;
   ClientCfg.SpawnTimeoutMs := 5000;
-  ClientCfg.RuntimeCommand := ExpandFileName(ParamStr(0));
+  { The headless agent to spawn: HILDEGARD_RUNTIME_BIN, else a sibling of this
+    executable. '' when neither exists; the client then reports a clear error if
+    it must spawn (an already-live runtime still attaches). }
+  ClientCfg.RuntimeCommand := ResolveRuntimeBinary(
+    GetEnvironmentVariable('HILDEGARD_RUNTIME_BIN'), ParamStr(0));
   Driver := RemoteDriver(ClientCfg, Err);
   if Driver = nil then
   begin

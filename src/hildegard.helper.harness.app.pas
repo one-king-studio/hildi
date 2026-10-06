@@ -12,7 +12,7 @@ interface
 
 uses
   Classes, SysUtils,
-  hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.approval,
+  hildegard.helper.llm, hildegard.helper.approval,
   hildegard.helper.tui.base, hildegard.helper.tui.input,
   hildegard.helper.tui.surface, hildegard.helper.tui.widget,
   hildegard.helper.tui.text, hildegard.helper.tui.chat,
@@ -20,7 +20,7 @@ uses
   hildegard.helper.tui.approvalmodal,
   hildegard.helper.tui.panel, hildegard.helper.tui.theme,
   hildegard.helper.tui.app, hildegard.helper.harness.turn,
-  hildegard.helper.harness.driver, hildegard.helper.harness.session,
+  hildegard.helper.harness.driver, hildegard.helper.harness.view,
   hildegard.helper.harness.stats, hildegard.helper.session;
 
 type
@@ -30,7 +30,7 @@ type
   private
     FSurface: ISurface;
     FInput: IInputSource;
-    FSession: THarnessSession;
+    FSession: TSessionView;
     FDriver: ISessionDriver;
     FApp: TTuiApp;
     FTheme: TTheme;
@@ -108,7 +108,7 @@ type
     procedure Quit(Sender: TObject);
   public
     constructor Create(const ASurface: ISurface; const AInput: IInputSource;
-      ASession: THarnessSession; ADriver: ISessionDriver;
+      ASession: TSessionView; ADriver: ISessionDriver;
       AMode: TThemeMode = tmAuto; ALightDetected: Boolean = False);
     destructor Destroy; override;
 
@@ -230,7 +230,7 @@ begin
 end;
 
 constructor THarnessApp.Create(const ASurface: ISurface; const AInput: IInputSource;
-  ASession: THarnessSession; ADriver: ISessionDriver; AMode: TThemeMode;
+  ASession: TSessionView; ADriver: ISessionDriver; AMode: TThemeMode;
   ALightDetected: Boolean);
 begin
   inherited Create;

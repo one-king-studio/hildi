@@ -1,0 +1,134 @@
+unit test_harness_view;
+{ fpcunit tests for hildegard.helper.harness.view: the client-side session handle
+  that opens a workspace/store/session and reads history and metrics, with no
+  loop, LLM client, or tools. The "no agent" property is asserted by the split
+  boundary test (tests/test_split.pas). }
+
+{$mode delphi}{$H+}
+
+interface
+
+uses
+  Classes, SysUtils, fpcunit, testregistry,
+  hildegard.helper.store, hildegard.helper.session,
+  hildegard.helper.harness.view;
+
+type
+  THarnessViewTest = class(TTestCase)
+  private
+    FDir: string;
+    FStorePath: string;
+    function Config(const AStorePath: string): THarnessSessionConfig;
+  protected
+    procedure SetUp; override;
+    procedure TearDown; override;
+  published
+    procedure TestInMemoryViewHasNoStore;
+    procedure TestStoreViewCreatesSession;
+    procedure TestHistoryReadsOnDemand;
+    procedure TestMaxContextTokensOverride;
+  end;
+
+implementation
+
+procedure THarnessViewTest.SetUp;
+begin
+  FDir := IncludeTrailingPathDelimiter(GetTempDir) + 'hh-view-' +
+    IntToStr(Random(1000000));
+  ForceDirectories(FDir);
+  FStorePath := IncludeTrailingPathDelimiter(FDir) + 'store.db';
+end;
+
+procedure THarnessViewTest.TearDown;
+begin
+  DeleteFile(FStorePath);
+  RemoveDir(FDir);
+end;
+
+function THarnessViewTest.Config(const AStorePath: string): THarnessSessionConfig;
+begin
+  Result := Default(THarnessSessionConfig);
+  Result.WorkspacePath := FDir;
+  Result.StorePath := AStorePath;
+end;
+
+procedure THarnessViewTest.TestInMemoryViewHasNoStore;
+var
+  View: TSessionView;
+  Err: string;
+begin
+  View := TSessionView.Open(Config(''), Err);
+  try
+    AssertNotNull('view opens: ' + Err, View);
+    AssertTrue('no store', View.Store = nil);
+    AssertEquals('ephemeral id', '', View.SessionId);
+    AssertEquals('workspace root', FDir, View.WorkspaceRoot);
+    AssertEquals('no history', 0, Length(View.History));
+  finally
+    View.Free;
+  end;
+end;
+
+procedure THarnessViewTest.TestStoreViewCreatesSession;
+var
+  View: TSessionView;
+  Err: string;
+begin
+  View := TSessionView.Open(Config(FStorePath), Err);
+  try
+    AssertNotNull('view opens: ' + Err, View);
+    AssertTrue('store opened', View.Store <> nil);
+    AssertEquals('session id is 32 hex', 32, Length(View.SessionId));
+  finally
+    View.Free;
+  end;
+end;
+
+procedure THarnessViewTest.TestHistoryReadsOnDemand;
+var
+  View: TSessionView;
+  Err: string;
+  StoreErr: TStoreError;
+  Rec: TMessageRecord;
+  Sid: string;
+  History: TMessageRecordArray;
+begin
+  View := TSessionView.Open(Config(FStorePath), Err);
+  try
+    AssertNotNull('view opens: ' + Err, View);
+    Sid := View.SessionId;
+    AssertEquals('history starts empty', 0, Length(View.History));
+    Rec := Default(TMessageRecord);
+    Rec.SessionId := Sid;
+    Rec.Role := mrUser;
+    Rec.Content := 'hello';
+    AssertTrue('append', View.Store.AppendMessage(Rec, StoreErr));
+    { A second read sees the new row: History is not a stale cache. }
+    History := View.History;
+    AssertEquals('one message', 1, Length(History));
+    AssertEquals('content', 'hello', History[0].Content);
+  finally
+    View.Free;
+  end;
+end;
+
+procedure THarnessViewTest.TestMaxContextTokensOverride;
+var
+  View: TSessionView;
+  Err: string;
+  Cfg: THarnessSessionConfig;
+begin
+  Cfg := Config('');
+  Cfg.MaxContextTokens := 1000000;
+  View := TSessionView.Open(Cfg, Err);
+  try
+    AssertNotNull('view opens: ' + Err, View);
+    AssertEquals('override applied', 1000000, View.MaxContextTokens);
+  finally
+    View.Free;
+  end;
+end;
+
+initialization
+  RegisterTest(THarnessViewTest);
+end.

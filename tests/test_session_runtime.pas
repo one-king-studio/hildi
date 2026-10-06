@@ -12,7 +12,8 @@ uses
   Classes, SysUtils, SyncObjs, fpcunit, testregistry,
   hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.approval,
   hildegard.helper.store, hildegard.helper.session,
-  hildegard.helper.session.protocol, hildegard.helper.session.runtime,
+  hildegard.helper.session.protocol, hildegard.helper.session.socket,
+  hildegard.helper.session.client, hildegard.helper.session.runtime,
   hildegard.helper.workspace, llm_fakes;
 
 type

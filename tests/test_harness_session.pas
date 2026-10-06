@@ -12,7 +12,8 @@ uses
   hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.session,
   hildegard.helper.store, hildegard.helper.workspace,
   hildegard.helper.recall.tool,
-  hildegard.helper.harness.session, llm_fakes;
+  hildegard.helper.harness.session, hildegard.helper.harness.view,
+  llm_fakes;
 
 type
   THarnessSessionTest = class(TTestCase)
@@ -79,9 +80,9 @@ begin
   try
     AssertTrue('opened: ' + Err, Session <> nil);
     AssertTrue('loop built', Session.Loop <> nil);
-    AssertTrue('store is nil', Session.Store = nil);
-    AssertEquals('ephemeral session id', '', Session.SessionId);
-    AssertEquals('workspace root', FDir, Session.WorkspaceRoot);
+    AssertTrue('store is nil', Session.View.Store = nil);
+    AssertEquals('ephemeral session id', '', Session.View.SessionId);
+    AssertEquals('workspace root', FDir, Session.View.WorkspaceRoot);
     { builtins (get_system_time) plus run_command }
     AssertTrue('tools registered', Session.Tools.Count >= 2);
   finally
@@ -100,16 +101,16 @@ begin
   Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
   AssertTrue('opened: ' + Err, Session <> nil);
   try
-    AssertTrue('store opened', Session.Store <> nil);
-    AssertEquals('session id is 32 hex', 32, Length(Session.SessionId));
-    Sid := Session.SessionId;
+    AssertTrue('store opened', Session.View.Store <> nil);
+    AssertEquals('session id is 32 hex', 32, Length(Session.View.SessionId));
+    Sid := Session.View.SessionId;
 
     Rec := Default(TMessageRecord);
     Rec.SessionId := Sid;
     Rec.Role := mrUser;
     Rec.Content := 'hello from a previous run';
     AssertTrue('append block',
-      Session.Store.AppendMessage(Rec, StoreErr));
+      Session.View.Store.AppendMessage(Rec, StoreErr));
   finally
     Session.Free;
   end;
@@ -117,7 +118,7 @@ begin
   Session := THarnessSession.Open(Config(FStorePath, Sid, True), Err);
   AssertTrue('reopened: ' + Err, Session <> nil);
   try
-    History := Session.History;
+    History := Session.View.History;
     AssertEquals('history restored', 1, Length(History));
     AssertEquals('history content', 'hello from a previous run',
       History[0].Content);
@@ -138,20 +139,20 @@ begin
   Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
   AssertTrue('opened: ' + Err, Session <> nil);
   try
-    Sid := Session.SessionId;
-    AssertTrue('begin turn', Session.Store.BeginTurn(Sid, TurnId, StoreErr));
+    Sid := Session.View.SessionId;
+    AssertTrue('begin turn', Session.View.Store.BeginTurn(Sid, TurnId, StoreErr));
     Rec := Default(TMessageRecord);
     Rec.SessionId := Sid;
     Rec.TurnId := TurnId;
     Rec.Role := mrUser;
     Rec.Content := 'do it';
-    AssertTrue('user', Session.Store.AppendMessage(Rec, StoreErr));
+    AssertTrue('user', Session.View.Store.AppendMessage(Rec, StoreErr));
     Rec := Default(TMessageRecord);
     Rec.SessionId := Sid;
     Rec.TurnId := TurnId;
     Rec.Role := mrReasoning;
     Rec.Content := 'thinking';
-    AssertTrue('reasoning', Session.Store.AppendMessage(Rec, StoreErr));
+    AssertTrue('reasoning', Session.View.Store.AppendMessage(Rec, StoreErr));
     Rec := Default(TMessageRecord);
     Rec.SessionId := Sid;
     Rec.TurnId := TurnId;
@@ -160,7 +161,7 @@ begin
     Rec.ToolName := 'run_command';
     Rec.ToolArguments := '{"command":"date"}';
     Rec.ToolReason := 'check the date';
-    AssertTrue('tool call', Session.Store.AppendMessage(Rec, StoreErr));
+    AssertTrue('tool call', Session.View.Store.AppendMessage(Rec, StoreErr));
   finally
     Session.Free;
   end;
@@ -168,7 +169,7 @@ begin
   Session := THarnessSession.Open(Config(FStorePath, Sid, True), Err);
   AssertTrue('reopened: ' + Err, Session <> nil);
   try
-    History := Session.History;
+    History := Session.View.History;
     AssertEquals('three blocks', 3, Length(History));
     AssertEquals('user', Ord(mrUser), Ord(History[0].Role));
     AssertEquals('reasoning', Ord(mrReasoning), Ord(History[1].Role));
@@ -244,7 +245,7 @@ begin
   Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
   AssertTrue('opened: ' + Err, Session <> nil);
   try
-    Turn := Session.LastTurn;
+    Turn := Session.View.LastTurn;
     AssertEquals('no turns yet', 0, Turn.Id);
   finally
     Session.Free;
@@ -260,9 +261,9 @@ begin
   Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
   AssertTrue('opened: ' + Err, Session <> nil);
   try
-    Totals := Session.SessionTotals;
+    Totals := Session.View.SessionTotals;
     AssertEquals('no turns yet', 0, Totals.Id);
-    AssertEquals('no turns listed', 0, Length(Session.Turns));
+    AssertEquals('no turns listed', 0, Length(Session.View.Turns));
   finally
     Session.Free;
   end;
@@ -279,7 +280,7 @@ begin
   Session := THarnessSession.Open(Cfg, Err);
   AssertTrue('opened: ' + Err, Session <> nil);
   try
-    AssertEquals('config override applied', 1000000, Session.MaxContextTokens);
+    AssertEquals('config override applied', 1000000, Session.View.MaxContextTokens);
   finally
     Session.Free;
   end;

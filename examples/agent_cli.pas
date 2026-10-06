@@ -25,7 +25,7 @@ uses
   hildegard.helper.files,
   hildegard.helper.approval, hildegard.helper.approval.store,
   hildegard.helper.session, hildegard.helper.session.store,
-  hildegard.helper.session.protocol, hildegard.helper.session.runtime,
+  hildegard.helper.session.protocol, hildegard.helper.session.client,
   hildegard.helper.recall.tool,
   hildegard.helper.store, hildegard.helper.workspace;
 
@@ -285,7 +285,8 @@ begin
       Cfg.Role := srObserve;
     Cfg.Spawn := True;
     Cfg.SpawnTimeoutMs := 5000;
-    Cfg.RuntimeCommand := ExpandFileName(ParamStr(0));
+    Cfg.RuntimeCommand := ResolveRuntimeBinary(
+      GetEnvironmentVariable('HILDEGARD_RUNTIME_BIN'), ParamStr(0));
     Client := TSessionClient.Open(Cfg, Sink, Err);
     if Client = nil then
       Fatal('attach: ' + Err, 1);
@@ -370,16 +371,6 @@ var
   History: TChatMessageArray;
 
 begin
-  { When a client spawns a runtime it re-executes this binary with the runtime
-    argv; run the runtime instead of parsing a normal session. }
-  if (ParamCount >= 1) and (ParamStr(1) = '--session-runtime') then
-  begin
-    SetLength(Args, ParamCount);
-    for I := 0 to ParamCount - 1 do
-      Args[I] := ParamStr(I + 1);
-    Halt(RunSessionRuntime(Args));
-  end;
-
   RawArgs := CollectArgs;
   try
     try

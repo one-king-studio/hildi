@@ -1,9 +1,11 @@
 unit hildegard.helper.harness.session;
-{ Owns the agent-side object graph for one TUI run: workspace, optional SQLite
-  store, conversation store, LLM client, tool registry (builtins plus gated
-  run_command), approval service, the turn queue/gate, and the agent loop. This
-  is the same bootstrap examples/agent_cli.pas performs, extracted so the CLI and
-  the TUI do not drift. It knows nothing about widgets or terminals. }
+{ Owns the agent-side object graph for one session: the session view (workspace,
+  store, identity, history, metrics) plus the LLM client, the tool registry
+  (builtins and gated run_command), the approval service, the turn queue/gate,
+  and the agent loop.
+
+  Used by the headless runtime. A UI client uses hildegard.helper.harness.view
+  instead, so it links no agent, tools, or conversation store. }
 
 {$mode delphi}{$H+}
 
@@ -14,41 +16,18 @@ uses
   hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.approval,
   hildegard.helper.approval.store, hildegard.helper.command.tool,
   hildegard.helper.files,
-  hildegard.helper.workspace, hildegard.helper.store,
   hildegard.helper.session, hildegard.helper.session.store,
-  hildegard.helper.recall.tool, hildegard.helper.harness.turn;
+  hildegard.helper.recall.tool, hildegard.helper.harness.turn,
+  hildegard.helper.harness.view;
 
 type
-  THarnessSessionConfig = record
-    WorkspacePath: string;        // '' => process working directory
-    StorePath: string;            // '' => in-memory, no persistence
-    SessionId: string;            // '' => create new (store) or ephemeral
-    Resume: Boolean;              // SessionId = '' => most recent; else exists
-    Model: string;                // '' => resolved from env/.env
-    Endpoint: string;             // '' => resolved from env/.env
-    SystemPrompt: string;         // '' => env HILDEGARD_SYSTEM_PROMPT, else default
-    { Bytes a tool result may contribute to the prompt; 0 => default, negative
-      => uncapped. }
-    ToolResultCap: Integer;
-    { Overrides the loop's context guard; 0 => HILDEGARD_MAX_CONTEXT_TOKENS,
-      else the agent default. The limit is a model property, so it is
-      overridable until it can be pulled from the model API. }
-    MaxContextTokens: Integer;
-    { True for a headless *client*: open the workspace/store/session and load
-      history, but do not build the LLM client, tools, loop, gate, or queue.
-      The runtime owns the loop. }
-    NoLoop: Boolean;
-    { Optional test seam: when set, the client uses this transport instead of
-      the real HTTP transport. }
-    Transport: TLLMTransport;
-  end;
-
-  { Not thread-safe except that Queue/Gate are safe across the worker/UI
-    boundary. Call Close (or Free) to release everything. }
+  { The loop side of one session. Owns a TSessionView for the workspace, store,
+    identity, history, and metrics. Not thread-safe except that Queue/Gate are
+    safe across the worker/UI boundary. Call Close (or Free) to release
+    everything. }
   THarnessSession = class
   private
-    FWorkspace: TWorkspace;
-    FStore: TSqliteStore;
+    FView: TSessionView;
     FConversation: IConversationStore;
     FClient: TLLMClient;
     FTools: TToolRegistry;
@@ -58,61 +37,27 @@ type
     FLoop: TAgentLoop;
     FQueue: TTurnQueue;
     FGate: TApprovalGate;
-    FSessionId: string;
-    FWorkspaceRoot: string;
-    FModel: string;
-    FMaxContextTokens: Integer;
-    FHistory: TMessageRecordArray;
     function Init(const AConfig: THarnessSessionConfig; out AError: string):
       Boolean;
   public
-    { Resolves config, opens the workspace and optional store, ensures the
-      workspace and session, builds the tools/approvals/loop. Returns nil with
-      AError on failure. }
+    { Opens the session view and builds the tools, approvals, and loop. Returns
+      nil with AError on failure. }
     class function Open(const AConfig: THarnessSessionConfig;
       out AError: string): THarnessSession;
     destructor Destroy; override;
 
+    { The client-side view: identity, store, history, and metrics. }
+    property View: TSessionView read FView;
     property Loop: TAgentLoop read FLoop;
     property Tools: TToolRegistry read FTools;
     property Queue: TTurnQueue read FQueue;
     property Gate: TApprovalGate read FGate;
-    property SessionId: string read FSessionId;
-    property WorkspaceRoot: string read FWorkspaceRoot;
-    { The model the session is configured with, for the UI. }
-    property Model: string read FModel;
-    { The context guard in effect: the config, else `HILDEGARD_MAX_CONTEXT_TOKENS`,
-      else the agent default. The limit is a model property, so it is
-      overridable until it can be pulled from the model API. }
-    property MaxContextTokens: Integer read FMaxContextTokens;
-    property Store: TSqliteStore read FStore;   // nil when unconfigured
-
-    { Prior message blocks for the initial render (empty for a new session). }
-    function History: TMessageRecordArray;
-
-    { The latest turn's metrics for the status bar; a zero record when the
-      session has no store or no turns. }
-    function LastTurn: TTurnRecord;
-
-    { The session's cumulative metrics over every turn; a zero record when the
-      session has no store. }
-    function SessionTotals: TTurnRecord;
-
-    { Every turn, ordered, for restoring the per-loop dividers; empty when the
-      session has no store. }
-    function Turns: TTurnRecordArray;
 
     { Cancel pending approvals; frees owned objects. Idempotent. }
     procedure Close;
   end;
 
 implementation
-
-uses
-  hildegard.helper.env;
-
-const
-  DefaultStoreBusyTimeoutMs = 5000;
 
 destructor THarnessSession.Destroy;
 begin
@@ -135,10 +80,8 @@ begin
   FClient.Free;
   FClient := nil;
   FConversation := nil;
-  FStore.Free;
-  FStore := nil;
-  FWorkspace.Free;
-  FWorkspace := nil;
+  FView.Free;
+  FView := nil;
   FGate.Free;
   FGate := nil;
   FQueue.Free;
@@ -173,11 +116,8 @@ end;
 function THarnessSession.Init(const AConfig: THarnessSessionConfig;
   out AError: string): Boolean;
 var
-  Path, Err, EnvValue: string;
+  EnvValue: string;
   LlmConfig: TLLMConfig;
-  StoreConfig: TStoreConfig;
-  StoreErr: TStoreError;
-  WorkspaceId: Integer;
   ApprovalStore: IApprovalStore;
   ApprovalService: IApprovalService;
   ApprovalCtx: TApprovalContext;
@@ -188,31 +128,13 @@ var
   Cap: Integer;
 begin
   Result := False;
-  LoadDotEnvFile('.env');            // optional; shell env wins
 
-  Path := AConfig.WorkspacePath;
-  if Path = '' then
-    Path := GetEnvironmentVariable('HILDEGARD_WORKSPACE');
-  FWorkspace := TWorkspace.Open(Path, Err);
-  if FWorkspace = nil then
-  begin
-    AError := 'workspace: ' + Err;
+  { The view loads .env, opens the workspace/store, and resolves the session. }
+  FView := TSessionView.Open(AConfig, AError);
+  if FView = nil then
     Exit;
-  end;
-  FWorkspaceRoot := FWorkspace.Root;
-  FModel := AConfig.Model;
+
   Cap := ResolveToolResultCap(AConfig.ToolResultCap);
-  { The context guard is a model property the app does not know yet: the config,
-    else an env var, else the agent default, until the model API supplies it. }
-  FMaxContextTokens := AConfig.MaxContextTokens;
-  if FMaxContextTokens = 0 then
-  begin
-    EnvValue := GetEnvironmentVariable('HILDEGARD_MAX_CONTEXT_TOKENS');
-    if EnvValue <> '' then
-      FMaxContextTokens := StrToIntDef(EnvValue, 0);
-  end;
-  if FMaxContextTokens = 0 then
-    FMaxContextTokens := DefaultMaxContextTokens;
 
   LlmConfig := Default(TLLMConfig);
   LlmConfig := ResolveLLMConfig(LlmConfig);
@@ -227,49 +149,10 @@ begin
 
   { A store enables persistence and durable approvals; without one, approvals
     are session-only (in memory) and nothing is written. }
-  FStore := nil;
-  WorkspaceId := 0;
-  FSessionId := AConfig.SessionId;
-  if AConfig.StorePath <> '' then
+  if FView.Store <> nil then
   begin
-    ForceDirectories(ExtractFileDir(AConfig.StorePath));
-    StoreConfig := Default(TStoreConfig);
-    StoreConfig.DatabasePath := AConfig.StorePath;
-    StoreConfig.BusyTimeoutMs := DefaultStoreBusyTimeoutMs;
-    FStore := TSqliteStore.Create(StoreConfig);
-    if not FStore.Open(StoreErr) then
-    begin
-      AError := 'could not open store: ' + StoreErr.Message;
-      Exit;
-    end;
-    if not FStore.EnsureWorkspace(FWorkspaceRoot, WorkspaceId, StoreErr) then
-    begin
-      AError := 'workspace: ' + StoreErr.Message;
-      Exit;
-    end;
-    if FSessionId = '' then
-    begin
-      if AConfig.Resume then
-      begin
-        if not FStore.MostRecentSessionId(WorkspaceId, FSessionId, StoreErr) then
-        begin
-          AError := 'no session to resume for ' + FWorkspaceRoot;
-          Exit;
-        end;
-      end
-      else if not FStore.CreateSession(WorkspaceId, FSessionId, StoreErr) then
-      begin
-        AError := 'could not create session: ' + StoreErr.Message;
-        Exit;
-      end;
-    end
-    else if not FStore.SessionExists(FSessionId, StoreErr) then
-    begin
-      AError := 'unknown session: ' + FSessionId;
-      Exit;
-    end;
-    ApprovalStore := TStoreApprovalStore.Create(FStore);
-    Conv := TSqliteConversationStore.Create(FStore, FSessionId, 0);
+    ApprovalStore := TStoreApprovalStore.Create(FView.Store);
+    Conv := TSqliteConversationStore.Create(FView.Store, FView.SessionId, 0);
     Conv.ToolResultCap := Cap;
     FConversation := Conv;
   end
@@ -279,28 +162,16 @@ begin
     FConversation := TMemoryConversationStore.Create;
   end;
 
-  { The full block history for the initial render; empty for a new session. }
-  if (FStore <> nil) and (FSessionId <> '') then
-    FStore.QueryMessages(FSessionId, FHistory, StoreErr);
-
-  { A headless client needs only the store/workspace/session handle; the
-    runtime owns the loop. }
-  if AConfig.NoLoop then
-  begin
-    Result := True;
-    Exit;
-  end;
-
   FQueue := TTurnQueue.Create;
   FGate := TApprovalGate.Create(FQueue);
 
-  ApprovalCtx.WorkspaceId := WorkspaceId;
-  ApprovalCtx.SessionId := FSessionId;
+  ApprovalCtx.WorkspaceId := FView.WorkspaceId;
+  ApprovalCtx.SessionId := FView.SessionId;
   ApprovalService := TApprovalService.Create(ApprovalStore, FGate.Prompt,
     ApprovalCtx);
   ToolConfig := Default(TCommandToolConfig);
   ToolConfig.Shell := DefaultShellProfile;
-  ToolConfig.DefaultCwd := FWorkspaceRoot;
+  ToolConfig.DefaultCwd := FView.WorkspaceRoot;
   { Optional cap on the model's run_command timeout (ms); unset = the model
     defines its own. }
   EnvValue := GetEnvironmentVariable('HILDEGARD_COMMAND_TIMEOUT_MS');
@@ -310,14 +181,14 @@ begin
   FCommandTool.Register(FTools);
 
   FileConfig := Default(TFileToolConfig);
-  FileConfig.Root := FWorkspaceRoot;
+  FileConfig.Root := FView.WorkspaceRoot;
   FFileTool := TFileTool.Create(FileConfig, ApprovalService);
   FFileTool.Register(FTools);
 
   { The recall tool reads stored artifacts; without a store there are none. }
-  if FStore <> nil then
+  if FView.Store <> nil then
   begin
-    FRecallTool := TRecallTool.Create(FStore, FSessionId, Cap);
+    FRecallTool := TRecallTool.Create(FView.Store, FView.SessionId, Cap);
     FRecallTool.Register(FTools);
   end;
 
@@ -327,44 +198,12 @@ begin
     AgentConfig.SystemPrompt := GetEnvironmentVariable('HILDEGARD_SYSTEM_PROMPT');
   if AgentConfig.SystemPrompt = '' then
     AgentConfig.SystemPrompt := DefaultSystemPrompt;
-  { The tool-call budget keeps its agent default; the context cap may have been
-    overridden by the environment above (0 leaves the agent default). }
-  AgentConfig.MaxContextTokens := FMaxContextTokens;
+  { The tool-call budget keeps its agent default; the context cap comes from the
+    view (which resolved the config, env, or the default). }
+  AgentConfig.MaxContextTokens := FView.MaxContextTokens;
 
   FLoop := TAgentLoop.Create(FClient, FConversation, FTools, AgentConfig);
   Result := True;
-end;
-
-function THarnessSession.History: TMessageRecordArray;
-begin
-  Result := FHistory;
-end;
-
-function THarnessSession.LastTurn: TTurnRecord;
-var
-  Err: TStoreError;
-begin
-  Result := Default(TTurnRecord);
-  if (FStore <> nil) and (FSessionId <> '') then
-    FStore.MostRecentTurn(FSessionId, Result, Err);
-end;
-
-function THarnessSession.SessionTotals: TTurnRecord;
-var
-  Err: TStoreError;
-begin
-  Result := Default(TTurnRecord);
-  if (FStore <> nil) and (FSessionId <> '') then
-    FStore.SessionTotals(FSessionId, Result, Err);
-end;
-
-function THarnessSession.Turns: TTurnRecordArray;
-var
-  Err: TStoreError;
-begin
-  Result := nil;
-  if (FStore <> nil) and (FSessionId <> '') then
-    FStore.QueryTurns(FSessionId, Result, Err);
 end;
 
 end.

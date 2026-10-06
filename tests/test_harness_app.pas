@@ -15,7 +15,9 @@ uses
   hildegard.helper.tui.surface, hildegard.helper.tui.widget,
   hildegard.helper.tui.chat,
   hildegard.helper.harness.turn, hildegard.helper.harness.session,
-  hildegard.helper.harness.driver, hildegard.helper.harness.app,
+  hildegard.helper.harness.view,
+  hildegard.helper.harness.driver, hildegard.helper.harness.driver.local,
+  hildegard.helper.harness.app,
   hildegard.helper.store,
   hildegard.helper.session, llm_fakes;
 
@@ -202,7 +204,7 @@ begin
   FInput := TInputSourceScripted.Create;
   FSession := THarnessSession.Open(Config, Err);
   AssertTrue('session opened: ' + Err, FSession <> nil);
-  FApp := THarnessApp.Create(FSurface, FInput, FSession, LocalDriver(FSession));
+  FApp := THarnessApp.Create(FSurface, FInput, FSession.View, LocalDriver(FSession));
   FApp.Step;   // initial layout/render
 end;
 
@@ -222,7 +224,7 @@ begin
   Cfg.StorePath := FStorePath;
   FSession := THarnessSession.Open(Cfg, Err);
   AssertTrue('session opened: ' + Err, FSession <> nil);
-  FApp := THarnessApp.Create(FSurface, FInput, FSession, LocalDriver(FSession));
+  FApp := THarnessApp.Create(FSurface, FInput, FSession.View, LocalDriver(FSession));
   FApp.Step;
 end;
 
@@ -696,7 +698,7 @@ begin
   Cfg.Resume := True;
   FSession := THarnessSession.Open(Cfg, Err);
   AssertTrue('resumed: ' + Err, FSession <> nil);
-  FApp := THarnessApp.Create(FSurface, FInput, FSession, LocalDriver(FSession));
+  FApp := THarnessApp.Create(FSurface, FInput, FSession.View, LocalDriver(FSession));
   FApp.Step;
 
   SawReasoning := False;
@@ -737,7 +739,7 @@ begin
   AssertTrue('turn finished', Pump(300));
 
   { The id prefix is the left border title; the context the right. }
-  AssertEquals('session id on the left', Copy(FSession.SessionId, 1, 12),
+  AssertEquals('session id on the left', Copy(FSession.View.SessionId, 1, 12),
     FApp.Panel.HeaderLeft);
   AssertTrue('context tokens in the header',
     Pos('1.2k', FApp.Panel.HeaderRight) > 0);
@@ -764,7 +766,7 @@ begin
   AssertTrue('turn finished', Pump(300));
   Live := FApp.Panel.HeaderLeft + '|' + FApp.Panel.HeaderRight;
   AssertTrue('live header present', FApp.Panel.HeaderRight <> '');
-  Sid := FSession.SessionId;
+  Sid := FSession.View.SessionId;
 
   { Drop the live app but keep the store, then resume the same session. }
   FApp.Free;
@@ -784,7 +786,7 @@ begin
   Cfg.Resume := True;
   FSession := THarnessSession.Open(Cfg, Err);
   AssertTrue('resumed: ' + Err, FSession <> nil);
-  FApp := THarnessApp.Create(FSurface, FInput, FSession, LocalDriver(FSession));
+  FApp := THarnessApp.Create(FSurface, FInput, FSession.View, LocalDriver(FSession));
   FApp.Step;
 
   AssertEquals('resumed header identical to live', Live,
@@ -876,7 +878,7 @@ begin
   AssertTrue('turn finished', Pump(300));
   Live := DividerSignature;
   AssertTrue('a live divider exists', Live <> '');
-  Sid := FSession.SessionId;
+  Sid := FSession.View.SessionId;
 
   FApp.Free;
   FApp := nil;
@@ -895,7 +897,7 @@ begin
   Cfg.Resume := True;
   FSession := THarnessSession.Open(Cfg, Err);
   AssertTrue('resumed: ' + Err, FSession <> nil);
-  FApp := THarnessApp.Create(FSurface, FInput, FSession, LocalDriver(FSession));
+  FApp := THarnessApp.Create(FSurface, FInput, FSession.View, LocalDriver(FSession));
   FApp.Step;
 
   AssertEquals('resumed dividers identical to live', Live, DividerSignature);
@@ -921,7 +923,7 @@ begin
   end;
   Live := ThoughtLabel;
   AssertTrue('thought shows its duration', Pos('Thought for ', Live) > 0);
-  Sid := FSession.SessionId;
+  Sid := FSession.View.SessionId;
 
   FApp.Free;
   FApp := nil;
@@ -940,7 +942,7 @@ begin
   Cfg.Resume := True;
   FSession := THarnessSession.Open(Cfg, Err);
   AssertTrue('resumed: ' + Err, FSession <> nil);
-  FApp := THarnessApp.Create(FSurface, FInput, FSession, LocalDriver(FSession));
+  FApp := THarnessApp.Create(FSurface, FInput, FSession.View, LocalDriver(FSession));
   FApp.Step;
 
   AssertEquals('resumed thought label identical', Live, ThoughtLabel);
@@ -1038,7 +1040,7 @@ begin
   AssertTrue('turn finished', Pump(300));
   AssertFalse('no fragment live', FindText(ckAssistant, 'partial answer'));
   Live := BlockSignature;
-  Sid := FSession.SessionId;
+  Sid := FSession.View.SessionId;
 
   { Drop the live app but keep the store, then resume the same session. }
   FApp.Free;
@@ -1058,7 +1060,7 @@ begin
   Cfg.Resume := True;
   FSession := THarnessSession.Open(Cfg, Err);
   AssertTrue('resumed: ' + Err, FSession <> nil);
-  FApp := THarnessApp.Create(FSurface, FInput, FSession, LocalDriver(FSession));
+  FApp := THarnessApp.Create(FSurface, FInput, FSession.View, LocalDriver(FSession));
   FApp.Step;
 
   AssertEquals('resumed blocks identical to live', Live, BlockSignature);

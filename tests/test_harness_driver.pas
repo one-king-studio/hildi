@@ -11,9 +11,12 @@ uses
   Classes, SysUtils, SyncObjs, fpcunit, testregistry,
   hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.approval,
   hildegard.helper.store, hildegard.helper.session,
-  hildegard.helper.session.protocol, hildegard.helper.session.runtime,
-  hildegard.helper.harness.session, hildegard.helper.harness.turn,
+  hildegard.helper.session.protocol, hildegard.helper.session.socket,
+  hildegard.helper.session.client, hildegard.helper.session.runtime,
+  hildegard.helper.harness.session, hildegard.helper.harness.view,
+  hildegard.helper.harness.turn,
   hildegard.helper.harness.driver,
+  hildegard.helper.harness.driver.local,
   hildegard.helper.tui.base, hildegard.helper.tui.input,
   hildegard.helper.tui.surface, hildegard.helper.tui.chat,
   hildegard.helper.harness.app,
@@ -701,7 +704,7 @@ var
   Rt: TSessionRuntime;
   Th: TRuntimeThread;
   Driver: ISessionDriver;
-  Session: THarnessSession;
+  Session: TSessionView;
   Cfg: THarnessSessionConfig;
   Surface: TSurfaceMemory;
   Input: TInputSourceScripted;
@@ -729,8 +732,7 @@ begin
         { The app's handle: the same session, no loop. }
         Cfg := Config(Fake);
         Cfg.SessionId := Id;
-        Cfg.NoLoop := True;
-        Session := THarnessSession.Open(Cfg, Err);
+        Session := TSessionView.Open(Cfg, Err);
         AssertTrue('session handle: ' + Err, Session <> nil);
         try
           Surface := TSurfaceMemory.Create(60, 20);
@@ -815,7 +817,7 @@ var
   Rt: TSessionRuntime;
   Th: TRuntimeThread;
   Driver: ISessionDriver;
-  Session: THarnessSession;
+  Session: TSessionView;
   Cfg: THarnessSessionConfig;
   Surface: TSurfaceMemory;
   Input: TInputSourceScripted;
@@ -840,8 +842,7 @@ begin
       try
         Cfg := Config(Fake);
         Cfg.SessionId := Id;
-        Cfg.NoLoop := True;
-        Session := THarnessSession.Open(Cfg, Err);
+        Session := TSessionView.Open(Cfg, Err);
         AssertTrue('session handle: ' + Err, Session <> nil);
         try
           Surface := TSurfaceMemory.Create(60, 20);

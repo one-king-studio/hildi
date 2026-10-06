@@ -17,12 +17,13 @@ uses
   test_workspace, test_approval, test_session, test_tui_surface,
   test_tui_input, test_tui_layout, test_tui_text, test_tui_scroll,
   test_tui_app, test_tui_perf, test_harness_turn, test_tui_prompt,
-  test_tui_approvalmodal, test_harness_session,
+  test_tui_approvalmodal, test_harness_session, test_harness_view, test_split,
   test_harness_app, test_file_tool, test_tui_encoder, test_tui_widgets,
   test_tui_animation, test_tui_grapheme, test_tui_edit, test_tui_chat,
   test_tui_compose, test_tui_chatpanel, test_recall_tool, test_harness_stats,
   test_tui_compact, test_markdown, test_markdownview, test_tls,
-  test_session_protocol, test_session_runtime, test_harness_driver;
+  test_session_protocol, test_session_runtime, test_session_client,
+  test_harness_driver;
 
 var
   Runner: TTestRunner;
