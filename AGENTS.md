@@ -115,6 +115,11 @@ Hard-won constraints; please respect them:
   branch explicitly.
 - Always `WaitFor`/`Free` threads and their owned objects; `make test-leak`
   enforces this.
+- A widget's `Measure` and `Arrange` must lay children out at the **same width**,
+  or per-width memos (block heights, wrapped text) miss and re-measure everything
+  every frame - CPU that scales with the block count while typing or streaming.
+  A `select` timeout of `0` is a busy poll: return it only when about to exit.
+  See `docs/guidelines/tui-rendering.md`.
 
 ## Code Style
 
