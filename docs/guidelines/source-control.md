@@ -58,6 +58,50 @@ Use footers for metadata:
 
 ## Branch Strategy
 
+### Parallel Agent Playgrounds (worktrees)
+
+Multiple agents work the same project in parallel, each in its own **git
+worktree** under `.worktrees/` inside the repo (nested worktrees are fine;
+the directory is gitignored so the main tree stays clean):
+
+```sh
+git worktree add .worktrees/agent-mcp -b agent/mcp
+git worktree add .worktrees/agent-tls -b agent/tls
+```
+
+- **One playground per agent**, one feature branch per playground. Each
+  playground is a full checkout: its own build, its own store, its own
+  session sockets - playgrounds cannot collide at runtime, not just at git
+  level.
+- **Branch naming**: `agent/<topic>` (lowercase, hyphens). A playground
+  that finishes its feature starts a fresh branch from the new main; do
+  not reuse a merged branch.
+- **Main checkout = integrator.** Agent branches never land on main
+  directly. The integrator merges one branch at a time (see Integration
+  below) and owns the shared doc index (`FEATURES.md`, `HANDOFF.md`) plus
+  the tests' `uses` registration - the guaranteed-conflict files. Agents
+  work their feature folder, `src/`, and their tests; they do not edit
+  integrator-owned files.
+- **Rebase discipline (the two moments)**:
+  1. *Sync rebase* - every agent session starts with `git rebase main`
+     (clean tree first: commit or stash). At main's velocity, stale
+     playgrounds turn small conflicts into trench warfare; fresh ones get
+     resolved with context. Granular commits stay granular - never squash
+     during sync.
+  2. *Integration rebase* - the integrator re-confirms the branch is on
+     current main, runs `make check`, then `git merge --ff-only`. If it
+     cannot fast-forward, the discipline slipped - stop and fix; do not
+     merge-commit past it. Linear history is enforced, not hoped for.
+- **Dispatcher**: the main Makefile delegates to the denoted playground.
+  `.worktrees/ACTIVE` (one-line file) names it: `make agent-tui` builds
+  the active playground, `make agent-tui ACTIVE=mcp` overrides for one
+  call, `echo mcp > .worktrees/ACTIVE` persists it. The dispatcher
+  delegates with `$(MAKE) -C` and never recurses.
+- **Hygiene**: searches from the main root are path-scoped (`src/`,
+  `docs/`) so recursive tools do not wander into playgrounds; `make
+  agents` lists worktrees with ahead/behind vs main and flags stale ones
+  (behind by more than ~20 commits).
+
 ### Feature Branches
 
 Create feature branches for new development, mirroring the artifact naming in

@@ -35,3 +35,6 @@ backup/
 .DS_Store
 *.swp
 *~
+
+# Parallel agent playgrounds (git worktrees)
+.worktrees/

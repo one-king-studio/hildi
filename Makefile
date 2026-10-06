@@ -88,7 +88,7 @@ TEST_SRCS := $(wildcard $(TESTS)/*.pas)
 
 .PHONY: all test test-leak watch check release clean help libsqlite libmbedtls \
         store-demo agent-cli release-agent-cli tui-demo widgets-demo layout-demo \
-        headless-agent tui-agent bench perf
+        headless-agent tui-agent bench perf agents agent-%
 
 all: $(BIN)/hildegard-helper-demo
 
@@ -245,6 +245,34 @@ clean:
 	rm -f $(TESTS)/*.o $(TESTS)/*.ppu
 	rm -f $(EXAMPLES)/*.o $(EXAMPLES)/*.ppu
 
+# Parallel agent playgrounds (git worktrees under .worktrees/, see
+# docs/guidelines/source-control.md). The ACTIVE file names the playground
+# that `make agent-<target>` delegates to; per-call override wins:
+#   make agent-tui ACTIVE=mcp
+WORKTREES  := .worktrees
+ACTIVE     ?= $(shell cat $(WORKTREES)/ACTIVE 2>/dev/null)
+
+agents:
+	@echo "playgrounds (.worktrees/):"
+	@for d in $(WORKTREES)/*/; do \
+		[ -d "$$d" ] || continue; \
+		name=$$(basename $$d); \
+		if [ -f "$$d/.git" ] || [ -d "$$d/.git" ]; then \
+			ahead=$$(git -C "$$d" rev-list --count main..HEAD 2>/dev/null || echo '?'); \
+			behind=$$(git -C "$$d" rev-list --count HEAD..main 2>/dev/null || echo '?'); \
+			flag=""; \
+			[ "$$behind" -gt 20 ] 2>/dev/null && flag="  [STALE: rebase]"; \
+			active=""; [ "$$name" = "$(ACTIVE)" ] && active="  <- active"; \
+			echo "  $$name  ahead:$$ahead behind:$$behind$$flag$$active"; \
+		fi; \
+	done
+	@if [ -n "$(ACTIVE)" ]; then echo "active: $(ACTIVE)"; else echo "active: (none - echo <name> > $(WORKTREES)/ACTIVE)"; fi
+
+agent-%:
+	@test -n "$(ACTIVE)" || { echo "no active playground: echo <name> > $(WORKTREES)/ACTIVE (or make agent-<t> ACTIVE=<name>)"; exit 1; }
+	@test -d "$(WORKTREES)/$(ACTIVE)" || { echo "playground not found: $(WORKTREES)/$(ACTIVE) (git worktree add $(WORKTREES)/$(ACTIVE) -b agent/$(ACTIVE))"; exit 1; }
+	$(MAKE) -C $(WORKTREES)/$(ACTIVE) $*
+
 help:
 	@echo "hildegard-helper targets:"
 	@echo "  make                          build the example (debug)"
@@ -260,6 +288,8 @@ help:
 	@echo "  make widgets-demo             build & run the widget-kit demo"
 	@echo "  make layout-demo              build & run the responsive two-column layout demo"
 	@echo "  make headless-agent           build the headless session runtime (no TUI)"
+	@echo "  make agents                   list agent playgrounds (ahead/behind, stale flags)"
+	@echo "  make agent-<target>           run <target> in the ACTIVE playground"
 	@echo "  make tui-agent [ARGS=...]     build & run the agent harness (needs an API key)"
 	@echo "  make bench [ARGS=--real]      build & run the TUI wall-clock benchmark"
 	@echo "  make perf                     run the benchmark with budget assertions"
