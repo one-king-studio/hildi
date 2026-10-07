@@ -728,6 +728,10 @@ begin
       end;
     scAttach, scDetach:
       SendError(AClient, 'unknown_cmd', 'unknown command', '');
+    scAbortSubagent, scReleaseSubagent:
+      { Routed to the supervisor in Phase 8 (runtime integration); no-op until
+        then so the command is not an error. }
+      ReplyTo(AClient, ACommand.Id, True, '');
   end;
 end;
 

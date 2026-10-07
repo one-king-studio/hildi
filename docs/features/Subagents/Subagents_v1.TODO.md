@@ -99,14 +99,16 @@ registered in `tests/hildegard_helper_tests.pas` (integrator-owned).
 
 ## Phase 7 — Protocol additions
 
-- [ ] **Test** (`tests/test_session_protocol.pas`): `TestRoundTripAmbient`,
+- [x] **Test** (`tests/test_session_protocol.pas`): `TestRoundTripAmbient`,
       `TestRoundTripSubagent`, `TestRoundTripSubagentAsk`,
-      `TestRoundTripAbortReleaseCommands`.
-- [ ] **Implement**: append `ekAmbient`, `ekSubagent`, `ekSubagentAsk`;
+      `TestRoundTripAbortReleaseCommands`; `FillEvent` covers the new kinds.
+- [x] **Implement**: append `ekAmbient`, `ekSubagent`, `ekSubagentAsk`;
       `scAbortSubagent`, `scReleaseSubagent`; the new `TSessionEvent`/
-      `TSessionCommand` fields; wire names.
-  - Files: `src/hildegard.helper.session.protocol.pas`.
-- [ ] **Check**: `make test SUITE=TSessionProtocolTest`.
+      `TSessionCommand` fields; wire names; encode/decode. The runtime accepts
+      the new commands as a no-op reply until Phase 8 routes them.
+  - Files: `src/hildegard.helper.session.protocol.pas`,
+    `src/hildegard.helper.session.runtime.pas`.
+- [x] **Check**: `make test SUITE=TSessionProtocolTest`.
 
 ## Phase 8 — Runtime integration
 

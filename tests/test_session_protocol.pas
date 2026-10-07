@@ -32,6 +32,10 @@ type
     procedure TestRoundTripApproveCommand;
     procedure TestRoundTripPingPong;
     procedure TestRoundTripUnicodeText;
+    procedure TestRoundTripAmbient;
+    procedure TestRoundTripSubagent;
+    procedure TestRoundTripSubagentAsk;
+    procedure TestRoundTripAbortReleaseCommands;
     procedure TestRejectsBadJson;
     procedure TestRejectsUnknownType;
     procedure TestRejectsUnknownEventKind;
@@ -134,6 +138,28 @@ begin
         AEvent.ToolId := 'call_1';
         AEvent.ToolName := 'run_command';
         AEvent.Text := 'chunk';
+      end;
+    ekAmbient:
+      begin
+        AEvent.SubSessionId := 'child-1';
+        AEvent.Text := 'the delegated result';
+        AEvent.ElapsedMs := 4200;
+      end;
+    ekSubagent:
+      begin
+        AEvent.SubSessionId := 'child-1';
+        AEvent.Text := 'research';
+        AEvent.SubStatus := 'completed';
+      end;
+    ekSubagentAsk:
+      begin
+        AEvent.SubSessionId := 'child-1';
+        AEvent.AskId := 'ask_1';
+        AEvent.Ask.Summary := 'subagent wants to run a command';
+        AEvent.Ask.Reason := 'delegated work';
+        SetLength(AEvent.Ask.Options, 1);
+        AEvent.Ask.Options[0].Key := 'once';
+        AEvent.Ask.Options[0].Caption := 'Allow once';
       end;
   end;
 end;
@@ -418,6 +444,65 @@ begin
     '"text":"' + StringOfChar('x', DefaultMaxLineBytes) + '"}';
   AssertTrue('the fixture is oversize', Length(Line) > DefaultMaxLineBytes);
   AssertFalse('oversize line', TSessionCodec.Decode(Line, M));
+end;
+
+procedure TSessionProtocolTest.TestRoundTripAmbient;
+var
+  M: TSessionMessage;
+begin
+  M := Default(TSessionMessage);
+  M.Kind := mkEvent;
+  M.Event.Kind := ekAmbient;
+  M.Event.SubSessionId := 'child-1';
+  M.Event.Text := 'result text';
+  M.Event.ElapsedMs := 4200;
+  AssertRoundTrip(M);
+end;
+
+procedure TSessionProtocolTest.TestRoundTripSubagent;
+var
+  M: TSessionMessage;
+begin
+  M := Default(TSessionMessage);
+  M.Kind := mkEvent;
+  M.Event.Kind := ekSubagent;
+  M.Event.SubSessionId := 'child-1';
+  M.Event.Text := 'research';
+  M.Event.SubStatus := 'running';
+  AssertRoundTrip(M);
+end;
+
+procedure TSessionProtocolTest.TestRoundTripSubagentAsk;
+var
+  M: TSessionMessage;
+begin
+  M := Default(TSessionMessage);
+  M.Kind := mkEvent;
+  M.Event.Kind := ekSubagentAsk;
+  M.Event.SubSessionId := 'child-1';
+  M.Event.AskId := 'ask_7';
+  M.Event.Ask.Summary := 'subagent wants to run a command';
+  M.Event.Ask.Reason := 'delegated work';
+  AssertRoundTrip(M);
+end;
+
+procedure TSessionProtocolTest.TestRoundTripAbortReleaseCommands;
+var
+  M: TSessionMessage;
+begin
+  M := Default(TSessionMessage);
+  M.Kind := mkCmd;
+  M.Command.Kind := scAbortSubagent;
+  M.Command.Id := 'c1';
+  M.Command.SessionId := 'child-1';
+  AssertRoundTrip(M);
+
+  M := Default(TSessionMessage);
+  M.Kind := mkCmd;
+  M.Command.Kind := scReleaseSubagent;
+  M.Command.Id := 'c2';
+  M.Command.SessionId := 'child-2';
+  AssertRoundTrip(M);
 end;
 
 initialization

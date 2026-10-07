@@ -33,7 +33,11 @@ type
       Appended last so stored ordinals are unchanged. }
     ekReasoningDone,
     { A streamed chunk of a tool's output. Appended last for the same reason. }
-    ekToolOutput);
+    ekToolOutput,
+    { Subagent events, appended last so stored ordinals are unchanged:
+      ekAmbient is a delivered subagent result; ekSubagent is a roster update;
+      ekSubagentAsk is a child's approval ask relayed up. }
+    ekAmbient, ekSubagent, ekSubagentAsk);
 
   { One streamed event. A flat record with optional fields, the same shape as
     TTurnEvent: only the fields named by Kind are meaningful. }
@@ -63,6 +67,10 @@ type
     ToSeq: Int64;               // gap: last delivered seq
     Client: string;             // drive_*: client id
     Reason: string;             // loop_exited
+    { Subagent: the child session an ambient/roster/ask event refers to, and the
+      roster status. }
+    SubSessionId: string;
+    SubStatus: string;
   end;
 
   TSessionCommandKind = (
@@ -70,7 +78,9 @@ type
     scClaimDrive, scReleaseDrive, scPing,
     { Ask the runtime to stop gracefully. Driver-only. Appended last so stored
       ordinals are unchanged. }
-    scShutdown);
+    scShutdown,
+    { Operator subagent actions, appended last. }
+    scAbortSubagent, scReleaseSubagent);
 
   { One client command. Id is echoed in the reply. }
   TSessionCommand = record
@@ -81,6 +91,8 @@ type
     Text: string;               // prompt
     AskId: string;              // approve
     Choice: TApprovalChoice;    // approve
+    { The child session an abort/release subagent command acts on. }
+    SessionId: string;
   end;
 
   TSessionHello = record
@@ -161,7 +173,7 @@ const
     'approval_request', 'approval_resolved',
     'drive_requested', 'drive_granted', 'drive_released',
     'turn_finished', 'error', 'gap', 'loop_exited', 'reasoning_done',
-    'tool_output');
+    'tool_output', 'ambient', 'subagent', 'subagent_ask');
 
   MessageKindNames: array[TSessionMessageKind] of string = (
     'hello', 'attached', 'event', 'reply', 'detached', 'error',
@@ -171,7 +183,8 @@ const
     names, so they are absent here. }
   CommandKindNames: array[TSessionCommandKind] of string = (
     'attach', 'detach', 'prompt', 'approve', 'interrupt',
-    'claim_drive', 'release_drive', 'ping', 'shutdown');
+    'claim_drive', 'release_drive', 'ping', 'shutdown',
+    'abort_subagent', 'release_subagent');
 
 { --- enum <-> wire ------------------------------------------------------ }
 
@@ -533,6 +546,26 @@ begin
         PutStr(O, 'name', E.ToolName);
         PutStr(O, 'text', E.Text);
       end;
+    ekAmbient:
+      begin
+        PutStr(O, 'session', E.SubSessionId);
+        PutStr(O, 'text', E.Text);
+        PutInt(O, 'elapsed_ms', E.ElapsedMs);
+      end;
+    ekSubagent:
+      begin
+        PutStr(O, 'session', E.SubSessionId);
+        PutStr(O, 'label', E.Text);
+        PutStr(O, 'status', E.SubStatus);
+      end;
+    ekSubagentAsk:
+      begin
+        PutStr(O, 'session', E.SubSessionId);
+        PutStr(O, 'ask_id', E.AskId);
+        PutStr(O, 'summary', E.Ask.Summary);
+        PutStr(O, 'reason', E.Ask.Reason);
+        O.Add('options', EncodeOptions(E.Ask.Options));
+      end;
   end;
 end;
 
@@ -622,6 +655,27 @@ begin
         E.ToolName := OptStr(O, 'name');
         E.Text := OptStr(O, 'text');
       end;
+    ekAmbient:
+      begin
+        E.SubSessionId := OptStr(O, 'session');
+        E.Text := OptStr(O, 'text');
+        E.ElapsedMs := OptInt64(O, 'elapsed_ms', 0);
+      end;
+    ekSubagent:
+      begin
+        E.SubSessionId := OptStr(O, 'session');
+        E.Text := OptStr(O, 'label');
+        E.SubStatus := OptStr(O, 'status');
+      end;
+    ekSubagentAsk:
+      begin
+        E.SubSessionId := OptStr(O, 'session');
+        E.AskId := OptStr(O, 'ask_id');
+        E.Ask := Default(TApprovalAsk);
+        E.Ask.Summary := OptStr(O, 'summary');
+        E.Ask.Reason := OptStr(O, 'reason');
+        DecodeOptions(O, E.Ask);
+      end;
   end;
   Result := True;
 end;
@@ -639,6 +693,8 @@ begin
         PutStr(O, 'ask_id', C.AskId);
         O.Add('choice', EncodeChoice(C.Choice));
       end;
+    scAbortSubagent, scReleaseSubagent:
+      PutStr(O, 'session', C.SessionId);
     scAttach, scDetach, scInterrupt, scClaimDrive, scReleaseDrive, scPing,
     scShutdown:
       ;   // no payload beyond the name
@@ -671,6 +727,8 @@ begin
         if not DecodeChoice(TJSONObject(D), C.Choice) then
           Exit(False);
       end;
+    scAbortSubagent, scReleaseSubagent:
+      C.SessionId := OptStr(O, 'session');
     scAttach, scDetach, scInterrupt, scClaimDrive, scReleaseDrive, scPing,
     scShutdown:
       ;
