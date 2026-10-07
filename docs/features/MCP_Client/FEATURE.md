@@ -300,3 +300,31 @@ Security and trust
 - Operator preference recorded from ideation: helper is MCP **client**, not
   server — lending tools out bypasses the local trust model; consuming tools
   enriches it.
+
+## Decisions (v1)
+
+Resolved during SPEC drafting (2026-10-06); recorded here so the FEATURE, the
+SPECs, and the code stay in sync. Each is also pinned in its SPEC.
+
+- **Config storage is the SQLite store, not a file.** Servers live in a new
+  `mcp_servers` table, scoped `global` / `workspace` / `agent`. This replaces
+  the FEATURE's original "operator config file" assumption. Precedence on a name
+  clash: `agent` > `workspace` > `global`. See `Config_v1.SPEC.md`.
+- **Agent scope is reserved, not built.** The schema, the enum, and the
+  precedence include `msAgent`; no agent rows are written in v1. The direction
+  is that an agent configures **its own** MCP servers, scoped only to itself —
+  never global or workspace. The session does not yet know an agent id.
+- **No operator UI in v1.** The operator configures servers by writing directly
+  to the `mcp_servers` table. A CLI subcommand or TUI screen is a later feature.
+- **v1 is store-backed only.** A file source (JSON/JSONC/TOML) is a future
+  alternative; the seam is the row array (`TMcpServerRowArray`), so a future
+  loader produces the same rows and reuses `ResolveMcpConfig` unchanged.
+- **Identity (persisted contract).** Approval ref `mcp/<server>/<tool>`
+  (sanitized to `[a-z0-9_-]`); model-visible name `mcp_<server>_<tool>`
+  (provider-safe, ≤64 chars). Native tools keep bare names; MCP tools can never
+  shadow them. See `Mcp_Client_v1.SPEC.md`.
+- **`NormalizeExit` is exported in place** from `hildegard.helper.process`
+  (Decision A) so the stdio child manager reuses it. See
+  `Stdio_Child_Manager_v1.SPEC.md`.
+- **Approvals stay ref-only in v1** (tool-level asks, `AnyParams`); param-scoped
+  MCP rules are deferred until approval params gain canonicalization.

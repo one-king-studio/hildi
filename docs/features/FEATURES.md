@@ -56,12 +56,14 @@ in `../guidelines/spec-driven-development.md`:
 
 - **MCP Client** (`MCP_Client/FEATURE.md`) — consume MCP servers' tools as
   first-class registry tools over stdio (a new bidirectional child manager, a
-  JSON-RPC 2.0 client, `inputSchema`/result mapping, and a config loader),
-  namespaced `mcp/<server>/<tool>` approval refs through the existing
+  JSON-RPC 2.0 client, `inputSchema`/result mapping, and a scoped SQLite
+  config) — namespaced `mcp/<server>/<tool>` approval refs through the existing
   approvals/ledger/reason gates — zero special cases in the loop. Helper is
-  MCP client, not server. Parked pending a decision on v2's OAuth pipeline
-  (Remote Agent Link specifies device pairing + bearer token, not OAuth); v1
-  is independent of that and of TLS. Full FEATURE doc in the directory.
+  MCP client, not server. v1 (stdio) is SPEC'd and under development; v2
+  (HTTP/OAuth) is parked pending a decision on the shared OAuth pipeline
+  (Remote Agent Link specifies device pairing + bearer token, not OAuth). v1 is
+  independent of that and of TLS. Full FEATURE doc and v1 SPECs in the
+  directory.
 
 ## Existing Behaviour (to be documented)
 
