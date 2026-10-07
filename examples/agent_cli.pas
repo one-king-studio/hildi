@@ -27,6 +27,7 @@ uses
   hildegard.helper.session, hildegard.helper.session.store,
   hildegard.helper.session.protocol, hildegard.helper.session.client,
   hildegard.helper.recall.tool,
+  hildegard.helper.mcp.cli, hildegard.helper.mcp.config,
   hildegard.helper.store, hildegard.helper.workspace;
 
 {$ifdef unix}
@@ -328,6 +329,221 @@ begin
   end;
 end;
 
+{ Apply a parsed `mcp` command to the store. Config only: never spawns a
+  server. Returns the process exit code. }
+function McpScopeName(AScope: TMcpScope): string;
+begin
+  case AScope of
+    msGlobal: Result := 'global';
+    msWorkspace: Result := 'workspace';
+    msAgent: Result := 'agent';
+  end;
+end;
+
+function RunMcpAdmin(const AArgs: array of string): Integer;
+var
+  Cmd: TMcpCommand;
+  StorePath, WSErr, Msg: string;
+  Store: TSqliteStore;
+  StoreErr: TStoreError;
+  Cfg: TStoreConfig;
+  Workspace: TWorkspace;
+  WorkspaceId: Integer;
+  Row: TMcpServerRow;
+  Rows: TMcpServerRowArray;
+  Ctx: TMcpConfigContext;
+  Existing: TMcpServerRowArray;
+  I: Integer;
+begin
+  Result := 0;
+  try
+    Cmd := ParseMcpCommand(AArgs);
+  except
+    on E: EMcpCLIError do
+    begin
+      WriteLn('error: ', E.Message);
+      Halt(2);
+    end;
+  end;
+
+  if Cmd.Verb = mvHelp then
+  begin
+    WriteLn(McpUsageText);
+    Exit(0);
+  end;
+
+  StorePath := GetEnvironmentVariable('HILDEGARD_STORE_PATH');
+  if StorePath = '' then
+    StorePath := IncludeTrailingPathDelimiter(GetUserDir) +
+      '.hildegard-helper' + PathDelim + 'store.db';
+  ForceDirectories(ExtractFileDir(StorePath));
+  Cfg := Default(TStoreConfig);
+  Cfg.DatabasePath := StorePath;
+  Cfg.BusyTimeoutMs := 5000;
+  Store := TSqliteStore.Create(Cfg);
+  try
+    if not Store.Open(StoreErr) then
+    begin
+      WriteLn('error: could not open store: ', StoreErr.Message);
+      Exit(1);
+    end;
+
+    if Cmd.Verb = mvList then
+    begin
+      if Cmd.Scope = msWorkspace then
+      begin
+        Workspace := TWorkspace.Open('', WSErr);
+        if Workspace = nil then
+        begin
+          WriteLn('error: workspace: ', WSErr);
+          Exit(1);
+        end;
+        try
+          if not Store.EnsureWorkspace(Workspace.Root, WorkspaceId, StoreErr) then
+          begin
+            WriteLn('error: ', StoreErr.Message);
+            Exit(1);
+          end;
+          Ctx := Default(TMcpConfigContext);
+          Ctx.WorkspaceId := WorkspaceId;
+          if not Store.LoadMcpServers(Ctx, Rows, StoreErr) then
+          begin
+            WriteLn('error: ', StoreErr.Message);
+            Exit(1);
+          end;
+        finally
+          Workspace.Free;
+        end;
+      end
+      else if not Store.ListMcpServers(Rows, StoreErr) then
+      begin
+        WriteLn('error: ', StoreErr.Message);
+        Exit(1);
+      end;
+      WriteLn(FormatMcpServers(Rows));
+      Exit(0);
+    end;
+
+    { Resolve the scope's workspace id for writes. }
+    Row := Default(TMcpServerRow);
+    Row.Name := Cmd.Name;
+    Row.Scope := Cmd.Scope;
+    if Cmd.Scope = msWorkspace then
+    begin
+      Workspace := TWorkspace.Open('', WSErr);
+      if Workspace = nil then
+      begin
+        WriteLn('error: workspace: ', WSErr);
+        Exit(1);
+      end;
+      try
+        if not Store.EnsureWorkspace(Workspace.Root, WorkspaceId, StoreErr) then
+        begin
+          WriteLn('error: ', StoreErr.Message);
+          Exit(1);
+        end;
+      finally
+        Workspace.Free;
+      end;
+      Row.WorkspaceId := WorkspaceId;
+    end;
+
+    case Cmd.Verb of
+      mvAdd:
+        begin
+          Row.Command := Cmd.Command;
+          Row.Args := Copy(Cmd.Args, 0, Length(Cmd.Args));
+          Row.Env := Copy(Cmd.Env, 0, Length(Cmd.Env));
+          Row.WorkingDir := Cmd.WorkingDir;
+          Row.Enabled := not Cmd.Disabled;
+          if not ValidateMcpServerRow(Row, Msg) then
+          begin
+            WriteLn('error: ', Msg);
+            Exit(2);
+          end;
+          { Report insert vs update. }
+          Ctx := Default(TMcpConfigContext);
+          Ctx.WorkspaceId := Row.WorkspaceId;
+          Existing := nil;
+          if Store.LoadMcpServers(Ctx, Existing, StoreErr) then
+            for I := 0 to High(Existing) do
+              if (Existing[I].Scope = Row.Scope) and
+                (Existing[I].WorkspaceId = Row.WorkspaceId) and
+                (Existing[I].Name = Row.Name) then
+                Msg := 'updated'
+              else
+                Msg := '';
+          if not Store.SaveMcpServer(Row, StoreErr) then
+          begin
+            WriteLn('error: ', StoreErr.Message);
+            Exit(1);
+          end;
+          if Msg = 'updated' then
+            WriteLn('mcp: updated server "', Row.Name, '" (', McpScopeName(Row.Scope),
+              ')')
+          else
+            WriteLn('mcp: added server "', Row.Name, '" (', McpScopeName(Row.Scope),
+              ')');
+        end;
+      mvRemove:
+        begin
+          if not Store.RemoveMcpServer(Row, StoreErr) then
+          begin
+            WriteLn('error: ', StoreErr.Message);
+            Exit(1);
+          end;
+          WriteLn('mcp: removed server "', Row.Name, '"');
+        end;
+      mvEnable, mvDisable:
+        begin
+          Ctx := Default(TMcpConfigContext);
+          Ctx.WorkspaceId := Row.WorkspaceId;
+          Rows := nil;
+          if not Store.LoadMcpServers(Ctx, Rows, StoreErr) then
+          begin
+            WriteLn('error: ', StoreErr.Message);
+            Exit(1);
+          end;
+          Msg := '';
+          for I := 0 to High(Rows) do
+            if (Rows[I].Scope = Row.Scope) and
+              (Rows[I].WorkspaceId = Row.WorkspaceId) and
+              (Rows[I].Name = Row.Name) then
+              Msg := Rows[I].Command;
+          if Msg = '' then
+          begin
+            WriteLn('error: no such server "', Row.Name, '"');
+            Exit(1);
+          end;
+          for I := 0 to High(Rows) do
+            if (Rows[I].Scope = Row.Scope) and
+              (Rows[I].WorkspaceId = Row.WorkspaceId) and
+              (Rows[I].Name = Row.Name) then
+              Rows[I].Enabled := (Cmd.Verb = mvEnable);
+          { Save only the matching row. }
+          for I := 0 to High(Rows) do
+            if (Rows[I].Scope = Row.Scope) and
+              (Rows[I].WorkspaceId = Row.WorkspaceId) and
+              (Rows[I].Name = Row.Name) then
+              if not Store.SaveMcpServer(Rows[I], StoreErr) then
+              begin
+                WriteLn('error: ', StoreErr.Message);
+                Exit(1);
+              end;
+          if Cmd.Verb = mvEnable then
+            WriteLn('mcp: enabled server "', Row.Name, '"')
+          else
+            WriteLn('mcp: disabled server "', Row.Name, '"');
+        end;
+      mvList, mvHelp:
+        ;
+    end;
+  finally
+    Store.Close;
+    Store.Free;
+  end;
+end;
+
 var
   RawArgs: TStringList;
   Args: array of string;
@@ -372,6 +588,15 @@ var
 
 begin
   RawArgs := CollectArgs;
+  { The `mcp` admin subcommand is handled before any LLM setup. }
+  if (RawArgs.Count >= 1) and (RawArgs[0] = 'mcp') then
+  begin
+    SetLength(Args, RawArgs.Count - 1);
+    for I := 1 to RawArgs.Count - 1 do
+      Args[I - 1] := RawArgs[I];
+    RawArgs.Free;
+    Halt(RunMcpAdmin(Args));
+  end;
   try
     try
       SetLength(Args, RawArgs.Count);
