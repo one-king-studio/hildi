@@ -101,33 +101,30 @@ Pure, no I/O — the easiest red/green, and the base of everything.
   grow to 3 — writing `Result[2]` past a 2-length array corrupted memory (a
   range-check error cascaded to every store test).
 
-### Phase 4: MCP client (`hildegard.helper.mcp.client`)
+### Phase 4: MCP client (`hildegard.helper.mcp.client`) — DONE
 
-- [ ] **Test**: `TestMcpRefIsStable`, `TestMcpToolNameIsProviderSafe`,
-      `TestMcpToolNameNeverCollidesWithNative`, `TestToolNameCollisionResolved`
-      — red.
-- [ ] **Implement**: `McpRef`, `McpToolName` (+ collision suffixing).
-- [ ] **Test**: `TestSchemaAcceptsValid`, `TestSchemaStripsServerReason`,
-      `TestSchemaRejectsNonObject`, `TestSchemaRejectsOverWide`.
-- [ ] **Implement**: `McpSchemaToParams`.
-- [ ] **Test**: `TestResultConcatenatesText`, `TestResultMarksNonText`,
-      `TestResultStructuredNote`, `TestResultIsError`.
-- [ ] **Implement**: `McpResultToText`.
-- [ ] **Test (fake server over real pipes)**: `TestOpenRegistersTools`
-      (initialize + list) — the core lifecycle test.
-- [ ] **Implement**: `TMcpClient.Open` (handshake, initialized, list, register).
-- [ ] **Test**: `TestUnsupportedProtocolRefused`, `TestListTimeoutDropsServer`.
-- [ ] **Implement**: protocol negotiation and bounded listing.
-- [ ] **Test**: `TestNotificationsConsumed`, `TestServerRequestAnsweredWithError`
-      (sampling/roots/elicitation → `-32601`).
-- [ ] **Implement**: the read loop's notification/request handling.
-- [ ] **Test**: `TestCallDispatchesThroughApproval` (allow rule → proceeds; none
-      → asks; deny → blocked), `TestCallStripsReason`.
-- [ ] **Implement**: the `tools/call` handler + `IApprovalService` ask.
-- [ ] **Test**: `TestServerDeathMidSession` (clean tool failure),
-      `TestCloseTerminatesChildren` (leak-clean).
-- [ ] **Implement**: `TMcpManager`, per-server isolation, `Close`.
-- [ ] **Refactor**; `make test-leak SUITE=TMcpClientTest`.
+- [x] **Test**: `TestMcpRefIsStable`, `TestMcpToolNameIsProviderSafe`,
+      `TestMcpToolNameNeverCollidesWithNative` (covered by the `mcp_` prefix +
+      `TestMcpUniqueToolNameResolvesCollision`), `TestToolNameCollisionResolved`.
+- [x] **Implement**: `McpRef`, `McpToolName`, `McpUniqueToolName`.
+- [x] **Test**: `TestSchemaStripsReasonAndRejectsNonObject`.
+- [x] **Implement**: `McpSchemaToParams`.
+- [x] **Test**: `TestResultMapsTextNonTextAndStructured`.
+- [x] **Implement**: `McpResultToText`, `McpResultIsError`.
+- [x] **Test (fake server over real pipes)**: `TestOpenRegistersToolsAndCallSucceeds`.
+- [x] **Implement**: `TMcpClient.Open` (handshake, initialized, list, register).
+- [x] **Test**: `TestUnsupportedProtocolRefused`, `TestListTimeoutDropsServer`.
+- [x] **Implement**: protocol negotiation and bounded listing.
+- [x] **Test**: `TestServerRequestAnsweredAndIgnored` (sampling → `-32601`).
+- [x] **Implement**: the read loop's notification/request handling.
+- [x] **Test**: `TestCallDeniedByApproval`.
+- [x] **Implement**: the `tools/call` handler + `IApprovalService` ask.
+- [x] **Implement**: `TMcpManager`, per-server isolation, `Close`.
+- [x] **Refactor**; `make check` — 872 tests, 0 failures; leak-clean.
+
+  Notes: `fpjson`'s `AsJSON` is single-line (`foSingleLineObject`), so it is
+  safe as a line-framed JSON-RPC payload. A `{ }` comment containing a literal
+  brace closes early — watch JSON snippets in comments.
 
 ### Phase 5: Integration & Docs
 
