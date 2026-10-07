@@ -50,6 +50,13 @@ type
     property TimedOut: Boolean read FTimedOut;
   end;
 
+  { Normalizes a raw TProcess.ExitStatus into the project convention: a 0..255
+    exit code, or 128+signal. TProcess.ExitStatus varies across FPC
+    builds/platforms (raw wait() status, an already-decoded code, or a negative
+    signal); this maps all three. Exported so the stdio child manager reuses one
+    mapping rather than copying it. }
+function NormalizeExit(Status: Integer): Integer;
+
 implementation
 
 {$ifdef unix}

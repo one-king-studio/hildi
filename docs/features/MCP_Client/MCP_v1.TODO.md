@@ -51,22 +51,27 @@ Pure, no I/O — the easiest red/green, and the base of everything.
   (a `TJsonRpcTest.AssertJsonEquals` helper), not byte-for-byte. The codec keeps
   the parsed node as-is; JSON-RPC is whitespace-insensitive.
 
-### Phase 2: Stdio child manager (`hildegard.helper.stdio.child`)
+### Phase 2: Stdio child manager (`hildegard.helper.stdio.child`) — DONE
 
-- [ ] **Promote `NormalizeExit`**: move its declaration to the interface of
-      `hildegard.helper.process` (Decision A). Add a regression test asserting
-      the existing runner's exit codes are unchanged.
-- [ ] **Test**: `TestSpawnEchoRoundTrip` (a scripted fake child echoes a line) —
-      red.
-- [ ] **Implement**: `TStdioChild.Start`/`WriteLine`/`ReadLine` over pipes
-      (`fpRead`/`fpWrite` + `ExtractLine`/`WaitReadable`).
-- [ ] **Test**: `TestReadTimeout`, `TestEofOnExit`, `TestBrokenPipeOnWrite`,
-      `TestTooLongLine`, `TestStderrDoesNotBlockStdout`, `TestStderrTail`.
-- [ ] **Implement**: the remaining read/err paths and the stderr ring.
-- [ ] **Test**: `TestCloseKillsNonCooperativeChild` (bounded close-then-kill,
-      reaped, no zombie).
-- [ ] **Implement**: `Close`.
-- [ ] **Refactor**; `make test-leak SUITE=TStdioChildTest`.
+- [x] **Promote `NormalizeExit`**: exported in place from
+      `hildegard.helper.process` (Decision A), with `TestNormalizeExitMapping`.
+- [x] **Test**: `TestSpawnEchoRoundTrip` (a `/bin/sh` fake echoes a line).
+- [x] **Implement**: `TStdioChild.Start`/`WriteLine`/`ReadLine` over pipes
+      (`fpRead`/`fpWrite` + `ExtractLine` + `fpSelect`).
+- [x] **Test**: `TestReadTimeout`, `TestEofOnExit`, `TestBrokenPipeOnWrite`,
+      `TestTooLongLine`, `TestStderrDoesNotBlockStdout`, `TestStderrTail`
+      (stderr tail asserted inside `TestStderrDoesNotBlockStdout`).
+- [x] **Implement**: the read/err paths and the bounded stderr tail.
+- [x] **Test**: `TestCloseKillsNonCooperativeChild` (bounded close-then-kill,
+      reaped, no zombie), `TestCloseIsIdempotent`.
+- [x] **Implement**: `Close`.
+- [x] **Refactor**; `make check` — 843 tests, 0 failures; leak-clean.
+
+  Notes: `fpFD_ISSET` returns an integer, not Boolean (compare `<> 0`).
+  `TProcess.Running` only reflects an exit after a wait, so `Close` polls the
+  non-blocking `WaitOnExit(timeout)`. `CloseInput` does not always deliver EOF
+  (see the `ponytail:` note in `Close`) — bounded, leak-clean, acceptable for
+  v1.
 
 ### Phase 3: Config (`hildegard.helper.mcp.config` + store v3)
 
