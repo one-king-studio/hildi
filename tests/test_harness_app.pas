@@ -87,6 +87,7 @@ type
     procedure TearDown; override;
   published
     procedure TestStreamedTurnRendersAndReenables;
+    procedure TestAssistantFinalizedAfterTurn;
     procedure TestToolLineAppears;
     procedure TestEmptyToolResultShowsPlaceholder;
     procedure TestAppStreamsToolOutput;
@@ -395,6 +396,38 @@ begin
     not FindText(ckThinking, 'Thinking'));
   AssertTrue('prompt re-enabled', FApp.PromptActive);
   AssertFalse('not busy', FApp.Busy);
+end;
+
+procedure THarnessAppTest.TestAssistantFinalizedAfterTurn;
+var
+  Y, X, W: Integer;
+  SawBacktick, SawText: Boolean;
+  Row: UnicodeString;
+begin
+  Build;
+  FFake.AddResponse([TextDelta('see `code`'), FinishFrame('stop'), DoneFrame]);
+  SubmitPrompt('hi');
+  AssertTrue('turn finished', Pump(300));
+  { The turn ended, so the assistant block must have been finalized: the open
+    tail is parsed, so the raw backticks are gone from the rendered screen (a
+    finalised inline-code chip draws the text without the delimiters). }
+  W := FSurface.Width;
+  SawBacktick := False;
+  SawText := False;
+  for Y := 0 to FSurface.Height - 1 do
+  begin
+    Row := FSurface.RowText(Y, 0, W);
+    if Pos('`', Row) > 0 then
+      SawBacktick := True;
+    if Pos('see', Row) > 0 then
+      SawText := True;
+    for X := 0 to W - 1 do
+      if FSurface.CellAt(X, Y).Ch = '`' then
+        SawBacktick := True;
+  end;
+  AssertTrue('the assistant text is drawn', SawText);
+  AssertFalse('the last block was finalized (no raw backticks)',
+    SawBacktick);
 end;
 
 procedure THarnessAppTest.TestReasoningSettlesIntoAThoughtBlock;

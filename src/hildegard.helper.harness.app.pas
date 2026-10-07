@@ -71,6 +71,10 @@ type
     procedure UpdateCta;
     { Settle the streaming thinking block into a persisted "Thought" block. }
     procedure FinalizeThinking;
+    { End the streamed assistant body: the open markdown tail becomes the final
+      block, so the last block is parsed and styled like the rest. Called
+      wherever the live assistant block stops growing. }
+    procedure FinalizeAssistant;
     { Append a tool result to its block; no leading gap when the block has no
       body yet. The result speaks for itself (a tool adds its own call context
       when that helps), so no [ok]/[failed] prefix is added. }
@@ -519,6 +523,15 @@ begin
   FThoughtMs := 0;
 end;
 
+procedure THarnessApp.FinalizeAssistant;
+begin
+  if FAssistant <> nil then
+  begin
+    FAssistant.Finalize;
+    FAssistant := nil;
+  end;
+end;
+
 procedure THarnessApp.AddTurnDivider;
 var
   Turn: TTurnRecord;
@@ -706,7 +719,7 @@ begin
           start fresh blocks, after the tool lines. The turn is still in flight,
           so the state returns to thinking. }
         SetState(psThinking, 'thinking');
-        FAssistant := nil;
+        FinalizeAssistant;
         FThought := nil;
       end;
     teToolOutput:
@@ -820,7 +833,7 @@ procedure THarnessApp.FinishTurn(AState: TPanelState; const ALabel: string);
 begin
   FBusy := False;
   FInterruptPending := False;
-  FAssistant := nil;
+  FinalizeAssistant;
   FThought := nil;
   SettleOpenTool;
   FUserBlock := nil;

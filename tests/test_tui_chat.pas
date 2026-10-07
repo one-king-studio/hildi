@@ -33,6 +33,11 @@ type
     procedure TestUserBubbleDrawsRaisedChrome;
     procedure TestAssistantRendersPlainText;
     procedure TestAssistantRendersMarkdown;
+    procedure TestStreamedAssistantDoesNotSplitTheFirstToken;
+    procedure TestFinalizeRendersTheLastStreamedBlock;
+    procedure TestSetTextAfterStreamResetsStreaming;
+    procedure TestStreamSurvivesAReleaseAndRebuild;
+    procedure TestSetTextThenAppendRendersOneBlock;
     procedure TestCollapsedThoughtDrawsADimmedRule;
     procedure TestTurnDividerDrawsRuleAndRightAlignedStats;
     procedure TestCollapsedToolDrawsAThinFullContrastRule;
@@ -231,6 +236,148 @@ begin
         sfBold in S.CellAt(6, 0).Attr.Style);
       { The paragraph is row 0, a blank row separates it, the list is row 2. }
       AssertTrue('the list bullet is drawn', S.CellAt(1, 2).Ch = '•');
+    finally
+      It.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestStreamedAssistantDoesNotSplitTheFirstToken;
+var
+  It: TChatItem;
+  S: TSurfaceMemory;
+begin
+  S := TSurfaceMemory.Create(40, 6);
+  try
+    { The live path creates the block empty, then appends each delta; the first
+      delta must not be committed as its own block. }
+    It := TChatItem.Create(ckAssistant, '', '', FTheme);
+    try
+      It.AppendText('I');
+      It.AppendText('''ve read the docs');
+      It.Arrange(Rc(0, 0, 40, It.Measure(Avail(40, 0)).H));
+      It.Render(S);
+      AssertTrue('the first token is not split onto its own line',
+        Pos('I''ve read the docs', S.RowText(0, 0, 40)) > 0);
+      { No paragraph break: the text is one wrapped run, so row 1 is blank. }
+      AssertEquals('no spurious second block', '', S.CellAt(1, 1).Ch);
+    finally
+      It.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestFinalizeRendersTheLastStreamedBlock;
+var
+  It: TChatItem;
+  S: TSurfaceMemory;
+begin
+  S := TSurfaceMemory.Create(40, 6);
+  try
+    It := TChatItem.Create(ckAssistant, '', '', FTheme);
+    try
+      It.AppendText('see `code`');
+      { While streaming the open tail is raw (unstyled); finalizing parses it. }
+      It.Arrange(Rc(0, 0, 40, It.Measure(Avail(40, 0)).H));
+      It.Render(S);
+      AssertTrue('the tail is raw while streaming',
+        Pos('`code`', S.RowText(0, 0, 40)) > 0);
+      It.Finalize;
+      It.Arrange(Rc(0, 0, 40, It.Measure(Avail(40, 0)).H));
+      It.Render(S);
+      AssertEquals('the backticks are parsed away', 0,
+        Pos('`code`', S.RowText(0, 0, 40)));
+      AssertTrue('the inline code text remains', Pos('code',
+        S.RowText(0, 0, 40)) > 0);
+    finally
+      It.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestSetTextAfterStreamResetsStreaming;
+var
+  It: TChatItem;
+  S: TSurfaceMemory;
+begin
+  S := TSurfaceMemory.Create(40, 6);
+  try
+    { A tool block streams live, then settles with its authoritative result via
+      SetText; the result must render as one block, not append to the stream. }
+    It := TChatItem.Create(ckAssistant, '', '', FTheme);
+    try
+      It.AppendText('partial');
+      It.SetText('**done**');
+      It.Arrange(Rc(0, 0, 40, It.Measure(Avail(40, 0)).H));
+      It.Render(S);
+      AssertTrue('the replaced text is drawn', Pos('done',
+        S.RowText(0, 0, 40)) > 0);
+      AssertTrue('the streamed text is gone', Pos('partial',
+        S.RowText(0, 0, 40)) = 0);
+    finally
+      It.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestStreamSurvivesAReleaseAndRebuild;
+var
+  It: TChatItem;
+  S: TSurfaceMemory;
+begin
+  S := TSurfaceMemory.Create(40, 6);
+  try
+    { A streamed block scrolled off-screen releases its view; a later chunk
+      must resume the stream from the whole body, not split it. }
+    It := TChatItem.Create(ckAssistant, '', '', FTheme);
+    try
+      It.AppendText('I');
+      It.AppendText('''ve read the docs');
+      It.Dematerialize;               { released off-screen }
+      It.AppendText(' and more');
+      It.Finalize;
+      It.Arrange(Rc(0, 0, 40, It.Measure(Avail(40, 0)).H));
+      It.Render(S);
+      AssertTrue('the whole body is one block',
+        Pos('I''ve read the docs and more', S.RowText(0, 0, 40)) > 0);
+      AssertEquals('no spurious split', '', S.CellAt(1, 1).Ch);
+    finally
+      It.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestSetTextThenAppendRendersOneBlock;
+var
+  It: TChatItem;
+  S: TSurfaceMemory;
+begin
+  S := TSurfaceMemory.Create(40, 6);
+  try
+    { A body settled with SetText (a finished parser) that then keeps streaming
+      must be re-parsed from the whole body, or the pre-settle text and the new
+      chunk render as two blocks. }
+    It := TChatItem.Create(ckAssistant, '', '', FTheme);
+    try
+      It.AppendText('one');
+      It.SetText('one two');
+      It.AppendText(' three');
+      It.Finalize;
+      It.Arrange(Rc(0, 0, 40, It.Measure(Avail(40, 0)).H));
+      It.Render(S);
+      AssertTrue('the combined body is one block',
+        Pos('one two three', S.RowText(0, 0, 40)) > 0);
+      AssertEquals('no spurious split', '', S.CellAt(1, 1).Ch);
     finally
       It.Free;
     end;

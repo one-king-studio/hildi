@@ -41,6 +41,10 @@ type
     FOnChange: TNotifyEvent;
     FSpark: Integer;
     FLive: Boolean;
+    { True once AppendText has fed the markdown view as a stream. The body must
+      then only ever be finished (never re-SetSource), or the open tail would be
+      committed early and the next chunk would start a spurious second block. }
+    FLiveStarted: Boolean;
     FHeightValid: Boolean;
     FHeightWidth: Integer;
     FHeight: Integer;
@@ -64,6 +68,10 @@ type
     { Replace or append the body text (streaming); both fire OnChange. }
     procedure SetText(const AText: string);
     procedure AppendText(const AText: string);
+    { End a streamed body: the open markdown tail becomes its final block, so
+      the last (still-open) block is parsed and styled. Idempotent; a no-op
+      unless AppendText streamed this body. }
+    procedure Finalize;
     function Text: string;
     { Build or free the rendered body (spans or markdown). A block off the
       viewport releases it; the memoized height survives, so the scroll extent
@@ -275,6 +283,7 @@ begin
   FTheme := ATheme;
   FExpanded := (AKind = ckUser) or (AKind = ckAssistant) or
     (AKind = ckError) or (AKind = ckThinking);
+  FLiveStarted := False;
   FHeightValid := False;
   FHeightWidth := 0;
   FHeight := 0;
@@ -379,6 +388,9 @@ end;
 
 procedure TChatItem.Dematerialize;
 begin
+  { The rendered body is dropped; a later AppendText must rebuild the stream
+    from the whole body, so clear the streaming flag too. }
+  FLiveStarted := False;
   FreeAndNil(FText);
   FreeAndNil(FMarkdown);
 end;
@@ -419,6 +431,7 @@ begin
   if AText = FBody then
     Exit;
   FBody := AText;
+  FLiveStarted := False;
   InvalidateHeight;
   if FMarkdown <> nil then
     FMarkdown.SetSource(AText)
@@ -434,13 +447,43 @@ begin
     Exit;
   FBody := FBody + AText;
   InvalidateHeight;
-  { Feed the markdown parser incrementally; it never re-parses a closed block. }
+  { Feed the markdown parser incrementally; it never re-parses a closed block.
+    The view must be built in streaming mode from the first chunk, so build it
+    (EnsureBody) and append the whole body so far - never Rebuild/SetSource,
+    which would finish the parser and split the stream into two blocks. }
+  EnsureBody;
   if FMarkdown <> nil then
-    FMarkdown.AppendSource(AText)
+  begin
+    if FLiveStarted then
+      FMarkdown.AppendSource(AText)
+    else
+    begin
+      { Start (or restart) the stream from the whole body: reset any finished
+        parser - e.g. after the view was released off-screen and rebuilt - and
+        feed the body as an open stream, never finishing it. }
+      FMarkdown.SetSource('');
+      FLiveStarted := True;
+      FMarkdown.AppendSource(FBody);
+    end;
+  end
   else
     Rebuild;
   if Assigned(FOnChange) then
     FOnChange(Self);
+end;
+
+procedure TChatItem.Finalize;
+begin
+  { Finish the open markdown tail so the last block is parsed and styled; a
+    block built with SetText already finished its parser. }
+  if (FMarkdown <> nil) and FLiveStarted then
+  begin
+    FLiveStarted := False;
+    FMarkdown.FinishSource;
+    InvalidateHeight;
+    if Assigned(FOnChange) then
+      FOnChange(Self);
+  end;
 end;
 
 function TChatItem.Text: string;
