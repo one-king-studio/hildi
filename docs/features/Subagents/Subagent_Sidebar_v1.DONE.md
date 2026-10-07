@@ -75,10 +75,31 @@ moving on. Register new tests in `tests/hildegard_helper_tests.pas`
 
 ## Phase 6 — Verification
 
-- [ ] All tasks above checked.
-- [ ] `make check` passes (whole suite + leak gate).
-- [ ] Every acceptance criterion in the sidebar section of `FEATURE.md` maps to
-      a named test.
-- [ ] Update the SPEC if behaviour diverged.
-- [ ] Rename this TODO to `Subagent_Sidebar_v1.DONE.md`.
+- [x] All tasks above checked.
+- [x] `make check` passes (whole suite + leak gate; 948 tests, 0 leaks).
+- [x] The sidebar acceptance criteria map to tests (roster, sidebar widget,
+      spy, app toggle, ambient render). The spy-mode **Abort/Release actions
+      bar** is deferred (see Completion Notes).
+- [x] Update the SPEC if behaviour diverged (recorded below).
+- [x] Rename this TODO to `Subagent_Sidebar_v1.DONE.md`.
 - [ ] Hand the integrator the `FEATURES.md` + `HANDOFF.md` lines.
+
+## Completion Notes
+
+Deviations from the SPEC, recorded:
+
+- The **composer is hidden** in spy mode (a `SetComposeActive(False)`), but the
+  **Abort/Release actions bar** that replaces it is deferred; the operator can
+  still abort/release through the parent agent or a future bar. The spy itself
+  is observe-only.
+- The sidebar is toggled by **`Ctrl+B`** (a `ctrl+b subagents` hint sits on the
+  toolbar above the composer). The SPEC said "floating sidebar"; it is drawn as
+  an overlay panel positioned over the chat area.
+- The **driver dropped subagent events** (found while testing the core live):
+  `MapSessionEvent` now maps `ekSubagent`/`ekSubagentAsk`/`ekAmbient`, so a
+  child's approval ask reaches the approval modal.
+- Ambient results render as a dimmed `ckAmbient` block (marker + text), not a
+  user bubble.
+
+Deferred: the spy-mode actions bar, and the live smoke test (the parent→child
+path is covered in-process).
