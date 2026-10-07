@@ -14,6 +14,7 @@ uses
   Classes, SysUtils,
   hildegard.helper.agent, hildegard.helper.llm, hildegard.helper.approval,
   hildegard.helper.stdio.child, hildegard.helper.jsonrpc,
+  hildegard.helper.mcp.transport,
   hildegard.helper.mcp.config;
 
 type
@@ -60,7 +61,7 @@ type
     FConfig: TMcpClientConfig;
     FApproval: IApprovalService;
     FOnEvent: TMcpEvent;
-    FChild: TStdioChild;
+    FTransport: IMcpTransport;
     FIdGen: TJsonRpcIdGen;
     FTools: TMcpToolArray;
     FSpecs: TToolSpecArray;
@@ -490,7 +491,7 @@ function TMcpClient.WaitResponse(AId: TJsonRpcId; ATimeoutMs: Integer;
 var
   Incoming: TJsonRpcIncoming;
   Line, WriteErr: string;
-  Reason: TStdioReadResult;
+  Reason: TMcpRecvResult;
   Deadline, Remaining: Int64;
 begin
   Result := False;
@@ -504,12 +505,12 @@ begin
       AError := 'timed out waiting for MCP response';
       Exit;
     end;
-    if not FChild.ReadLine(Line, Remaining, Reason) then
+    if not FTransport.Receive(Line, Remaining, Reason) then
     begin
       case Reason of
-        srTimeout: AError := 'timed out waiting for MCP response';
-        srEof: begin FDead := True; AError := 'MCP server exited'; end;
-        srTooLong: AError := 'MCP server sent an over-long line';
+        mrTimeout: AError := 'timed out waiting for MCP response';
+        mrEof: begin FDead := True; AError := 'MCP server exited'; end;
+        mrTooLong: AError := 'MCP server sent an over-long line';
       else
         AError := 'MCP read error';
       end;
@@ -535,7 +536,7 @@ begin
         begin
           Line := TJsonRpcCodec.EncodeError(Incoming.Id, JsonRpcMethodNotFound,
             'method not supported: ' + Incoming.Method);
-          FChild.WriteLine(Line, WriteErr);
+          FTransport.Send(Line, WriteErr);
         end;
       ikMalformed:
         Emit('mcp: malformed message from ' + ServerName,
@@ -552,14 +553,14 @@ var
 begin
   AResultJson := '';
   AError := '';
-  if FDead or (FChild = nil) then
+  if FDead or (FTransport = nil) then
   begin
     AError := 'MCP server not available';
     Exit(False);
   end;
   Id := FIdGen.Next;
   Line := TJsonRpcCodec.EncodeRequest(Id, AMethod, AParamsJson);
-  if not FChild.WriteLine(Line, Err) then
+  if not FTransport.Send(Line, Err) then
   begin
     FDead := True;
     AError := 'MCP write failed: ' + Err;
@@ -747,7 +748,7 @@ var
   InitParams, ResultJson, Err: string;
 begin
   AError := '';
-  if FChild <> nil then
+  if FTransport <> nil then
     Exit(True);
   FDead := False;   // a fresh open clears a previous death
   { A new connection starts a fresh id sequence (ids are per-connection). }
@@ -759,8 +760,8 @@ begin
   ChildCfg.Env := Copy(FConfig.Server.Env, 0, Length(FConfig.Server.Env));
   ChildCfg.WorkingDir := FConfig.Server.WorkingDir;
   ChildCfg.ReadTimeoutMs := FConfig.ListTimeoutMs;
-  FChild := TStdioChild.Create(ChildCfg);
-  if not FChild.Start(Err) then
+  FTransport := TStdioTransport.Create(ChildCfg);
+  if not FTransport.Open(Err) then
   begin
     AError := 'spawn failed: ' + Err;
     Emit('mcp: server "' + ServerName + '" failed to spawn', Err);
@@ -784,7 +785,7 @@ begin
     Close;
     Exit(False);
   end;
-  FChild.WriteLine(TJsonRpcCodec.EncodeNotification(
+  FTransport.Send(TJsonRpcCodec.EncodeNotification(
     'notifications/initialized', ''), Err);
 
   if not Discover(AError) then
@@ -884,10 +885,10 @@ begin
   FHandlers := nil;
   FSpecs := nil;
   FRegisteredRefs.Clear;
-  if FChild <> nil then
+  if FTransport <> nil then
   begin
-    FChild.Close;
-    FreeAndNil(FChild);
+    FTransport.Close;
+    FTransport := nil;
   end;
 end;
 
