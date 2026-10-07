@@ -28,6 +28,8 @@ type
 const
   { The violet used for the queued/ambient border, matching inline code. }
   QueuedBorderFg = 140;
+  { The tool box border colour. }
+  ToolBorderFg = 23;
 
 type
   { One block in the stream. Mutable, so a stream can append into it. Its
@@ -752,7 +754,8 @@ begin
   else if FKind = ckTool then
   begin
     SurfaceAttr := OnBg(FTheme.Text, FTheme.SunkenBg);
-    Border := OnBg(FTheme.Border, FTheme.SunkenBg);
+    Border := OnBg(FTheme.Text, FTheme.SunkenBg);
+    Border.Fg := ToolBorderFg;
   end
   else
   begin
@@ -810,17 +813,17 @@ begin
   end
   else
   begin
-    { ┌─ Label ───── ▲ ─┐ }
+    { ╭─ Label ───── ▲ ─╮ }
     InnerW := FBounds.W - 4;
     if InnerW < 1 then
       InnerW := 1;
-    Title := '┌─ ' + DispLabel + ' ';
+    Title := '╭─ ' + DispLabel + ' ';
     I := FBounds.W - StringWidth(Title) - 5;
     if I < 1 then
       I := 1;
-    PutText(S, L, T, Title + Rep('─', I) + ' ▲ ─┐', Border);
-    PutCh(S, L, B, '└', Border);
-    PutCh(S, R, B, '┘', Border);
+    PutText(S, L, T, Title + Rep('─', I) + ' ▲ ─╮', Border);
+    PutCh(S, L, B, '╰', Border);
+    PutCh(S, R, B, '╯', Border);
     for X := L + 1 to R - 1 do
       PutCh(S, X, B, '─', Border);
     Clip := S.ClipRect;
