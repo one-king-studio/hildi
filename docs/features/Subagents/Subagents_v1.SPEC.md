@@ -26,7 +26,7 @@ The hard part already exists. This spec designs only the gap.
 | A child agent session | `hildegard.helper.session.runtime` (`TSessionRuntime`) | Spawn one per child; it is an ordinary session |
 | Spawn / attach / drive a child | `hildegard.helper.session.client` (`TSessionClient`, connect-or-spawn, `srDrive`) | The supervisor is a client of each child |
 | Line framing | `hildegard.helper.session.socket` (`ExtractLine`/`ReadLineTimeout`/`SendAll`) | Not re-implemented |
-| Durable lineage | `hildegard.helper.store` (`sessions` table, migrations) | Additive migration v3 |
+| Durable lineage | `hildegard.helper.store` (`sessions` table, migrations) | Additive migration v4 (v3 is MCP servers) |
 | History + ambient rows | `hildegard.helper.session.store` (`TSqliteConversationStore`) | New `mrAmbient` role + `AppendAmbient` |
 | Tool contract + reason gate | `hildegard.helper.agent` (`TToolRegistry`/`TToolSpec`, `ExtractToolReason`) | Register four tools |
 | Approvals + scopes | `hildegard.helper.approval` (+ `.store`) | Lineage = one shared session scope (see §7) |
@@ -75,7 +75,7 @@ TSessionSummary = record
   UpdatedAtMs: Int64;
   MessageCount: Integer;
   TurnCount: Integer;
-  { Lineage (v3). A root session has ParentId = '' and Depth = 0. }
+  { Lineage (v4). A root session has ParentId = '' and Depth = 0. }
   ParentId: string;
   Depth: Integer;
   LabelText: string;   // 'Label' is a reserved word in FPC
@@ -410,7 +410,8 @@ The child's **conversation** session id stays its own (the ledger is per-session
 
 ## Data Model and Migrations
 
-Additive migration **v3** (no reset; existing history untouched):
+Additive migration **v4** (no reset; existing history untouched). v3 is MCP
+servers (landed on main first); lineage took the next free version:
 
 ```sql
 ALTER TABLE sessions ADD COLUMN parent_session_id TEXT NOT NULL DEFAULT '';
@@ -420,7 +421,7 @@ CREATE INDEX idx_sessions_parent ON sessions (parent_session_id);
 ALTER TABLE messages ADD COLUMN ref_session_id TEXT NOT NULL DEFAULT '';
 ```
 
-`StoreSchemaVersion` becomes 3.
+`StoreSchemaVersion` becomes 4.
 
 ## Validation and Error Handling
 
@@ -440,7 +441,7 @@ ALTER TABLE messages ADD COLUMN ref_session_id TEXT NOT NULL DEFAULT '';
 
 ## Testing Strategy
 
-- **Lineage:** create/child/lineage/children queries; migration v3 is additive
+- **Lineage:** create/child/lineage/children queries; migration v4 is additive
   (a v2 database opens and keeps its history); root defaults.
 - **Tools:** each tool's spec, `reason` enforcement, approval ask shape, and
   argument parsing (task/context/label, session id) — pure, no sockets.

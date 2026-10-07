@@ -11,7 +11,7 @@ registered in `tests/hildegard_helper_tests.pas` (integrator-owned).
       root, a child, assert parent/depth/label), `TestChildrenOf`,
       `TestLineageRootDefaults`, `TestMigrationV3IsAdditive` (a v2 database opens
       and keeps its history).
-- [x] **Implement**: migration v3 (`parent_session_id`, `depth`, `label`,
+- [x] **Implement**: migration v4 (`parent_session_id`, `depth`, `label`,
       `idx_sessions_parent`, `messages.ref_session_id`); `CreateChildSession`,
       `SessionLineage`, `ChildrenOf`; extend `TSessionSummary`; extend
       `QueryMessages`/`AppendMessage` for `ref_session_id`; `StoreSchemaVersion`.
@@ -48,15 +48,15 @@ registered in `tests/hildegard_helper_tests.pas` (integrator-owned).
 
 ## Phase 4 — Delegation tools
 
-- [ ] **Test** (`tests/test_subagent.pas`): `TestDelegateTaskSpec`,
+- [x] **Test** (`tests/test_subagent.pas`): `TestDelegateTaskSpec`,
       `TestDelegateTaskRequiresReason`, `TestDelegateTaskReturnsSessionAndCapacity`,
       `TestMessageAbortReleaseSpecs`, `TestUnknownChildIdErrors`,
       `TestApprovalAskShape` (`subagent:<verb>` refs, default ask).
-- [ ] **Implement**: `hildegard.helper.subagent` — `ISubagentService`,
+- [x] **Implement**: `hildegard.helper.subagent` — `ISubagentService`,
       `TSubagentSpawnResult`, the four `IApprovableTool`s, and a
       `RegisterSubagentTools(ATools, AService, AApproval)` helper.
   - Files: `src/hildegard.helper.subagent.pas` (new).
-- [ ] **Check**: `make test SUITE=TSubagentToolTest`.
+- [x] **Check**: `make test SUITE=TSubagentToolTest`.
 
 ## Phase 5 — Supervisor
 

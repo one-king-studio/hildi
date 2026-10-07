@@ -25,7 +25,7 @@ uses
   test_tui_compact, test_markdown, test_markdownview, test_tls,
   test_session_protocol, test_session_runtime, test_session_client,
   test_harness_driver, test_jsonrpc, test_stdio_child, test_mcp_config,
-  test_mcp_client;
+  test_mcp_client, test_subagent, test_subagent_supervisor;
 
 var
   Runner: TTestRunner;
