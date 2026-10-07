@@ -7,25 +7,25 @@
 
 ### Phase 1: Parser (`hildegard.helper.mcp.cli`)
 
-- [ ] **Test**: `tests/test_mcp_cli.pas` — list/add(--split)/scope/env/cwd/
+- [x] **Test**: `tests/test_mcp_cli.pas` — list/add(--split)/scope/env/cwd/
       disabled/remove/enable/disable/errors/format — red.
-- [ ] **Implement**: `TMcpVerb`, `TMcpCommand`, `EMcpCLIError`,
+- [x] **Implement**: `TMcpVerb`, `TMcpCommand`, `EMcpCLIError`,
       `ParseMcpCommand`, `FormatMcpServers`, `McpUsageText`.
-- [ ] **Register** `test_mcp_cli` in `tests/hildegard_helper_tests.pas`.
-- [ ] **Refactor**; `make check`.
+- [x] **Register** `test_mcp_cli` in `tests/hildegard_helper_tests.pas`.
+- [x] **Refactor**; `make check`.
 
 ### Phase 2: Dispatch (`examples/agent_cli.pas`)
 
-- [ ] **Detect** `mcp` as the first arg before any LLM setup; parse and dispatch.
-- [ ] **Implement**: `RunMcpAdmin` — open the store, resolve the workspace for
+- [x] **Detect** `mcp` as the first arg before any LLM setup; parse and dispatch.
+- [x] **Implement**: `RunMcpAdmin` — open the store, resolve the workspace for
       `--scope workspace`, apply add/remove/enable/disable/list via the store.
-- [ ] **Wire** `--help` to include the `mcp` subcommand.
-- [ ] **Manual**: add/list/disable/remove a real server.
+- [x] **Wire** `--help` to include the `mcp` subcommand.
+- [x] **Manual**: add/list/disable/remove a real server.
 
 ### Phase 3: Validation
 
-- [ ] `make check` green.
-- [ ] Manual smoke against the real store (a temp copy).
+- [x] `make check` green.
+- [x] Manual smoke against the real store (a temp copy).
 
 ## Files to Create/Modify
 
