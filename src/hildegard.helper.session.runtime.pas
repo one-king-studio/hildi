@@ -1216,6 +1216,10 @@ begin
         Broadcast(E);
         FinishTurn;
       end;
+  else
+    { teSubagent/teSubagentAsk/teAmbient are driver-side: they arrive from the
+      client's mapping of subagent wire events, never from the turn queue. }
+    ;
   end;
 end;
 

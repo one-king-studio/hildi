@@ -31,7 +31,11 @@ type
     teDone,             // the turn completed successfully
     teError,            // the turn failed
     teReasoningDone,    // the reasoning phase ended (ElapsedMs = its duration)
-    teToolOutput        // a streamed chunk of a tool's output
+    teToolOutput,       // a streamed chunk of a tool's output
+    { Subagent events, appended last so stored ordinals are unchanged:
+      teSubagent is a roster update; teSubagentAsk is a child's approval ask
+      relayed up; teAmbient is a delivered async-task result. }
+    teSubagent, teSubagentAsk, teAmbient
   );
 
   TTurnEvent = record
@@ -50,6 +54,12 @@ type
     ErrorCode: TLLMErrorCode;  // teError
     Dropped: Boolean;          // teError: an early cancel dropped the turn
     ElapsedMs: Int64;          // teDone/teError
+    { Subagent events: the child session, its label, and its status; teAmbient
+      also carries the task's source. }
+    SubSessionId: string;
+    SubLabel: string;
+    SubStatus: string;
+    SubSource: string;
   end;
 
   { A thread-safe FIFO. Push from the worker thread, Pop from the UI thread.

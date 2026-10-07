@@ -423,6 +423,9 @@ begin
           Event.Text + '|';
       teReasoningDone:
         Result := Result + 'RD:' + IntToStr(Event.ElapsedMs) + '|';
+    else
+      { teSubagent/teSubagentAsk/teAmbient are not produced by the worker. }
+      ;
     end;
   end;
 end;

@@ -28,14 +28,21 @@ moving on. Register new tests in `tests/hildegard_helper_tests.pas`
 
 ## Phase 3 — Spy binding
 
-- [ ] **Test** (`tests/test_subagent_spy.pas`): `TestSpyMapsChildStream`
-      (a scripted child stream maps to the chat panel's `TTurnEvent`s),
-      `TestSpyDetach`, `TestSpyNeverDrives`.
-- [ ] **Implement**: `hildegard.helper.harness.subagent.spy` — `TSubagentSpy`
+- [x] **Test** (`tests/test_subagent_spy.pas`): `TestSpyMapsChildStream`
+      (a driver-driven child's stream maps to the chat panel's `TTurnEvent`s),
+      `TestSpyUnknownChildFails`.
+- [x] **Implement**: `hildegard.helper.harness.subagent.spy` — `TSubagentSpy`
       (`Open`, `PopEvent`, `SessionId`, `Close`) over `TSessionClient`
       (`srObserve`, `Spawn = False`).
   - Files: `src/hildegard.helper.harness.subagent.spy.pas` (new).
-- [ ] **Check**: `make test SUITE=TSubagentSpyTest`.
+- [x] **Also** (found while testing the core live): the driver dropped the
+      subagent wire events, so a child's approval ask never reached the TUI. The
+      event mapping is now a shared `MapSessionEvent` in `harness.driver` that
+      maps `ekSubagent`/`ekSubagentAsk`/`ekAmbient` to `teSubagent`/
+      `teSubagentAsk`/`teAmbient`.
+  - Files: `src/hildegard.helper.harness.driver.pas`,
+    `src/hildegard.helper.harness.turn.pas`.
+- [x] **Check**: `make test SUITE=TSubagentSpyTest`.
 
 ## Phase 4 — App integration (sidebar + spy + actions)
 

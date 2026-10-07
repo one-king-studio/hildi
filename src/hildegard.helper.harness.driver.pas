@@ -40,6 +40,11 @@ type
 function RemoteDriver(const AConfig: TSessionClientConfig;
   out AError: string): ISessionDriver;
 
+{ Map one wire event onto a TTurnEvent. Returns False when there is nothing for
+  the UI to render (loop_started, turn_started, approval_resolved, drive_*,
+  gap, loop_exited). Shared by the remote driver and the subagent spy. }
+function MapSessionEvent(const AEvent: TSessionEvent; out E: TTurnEvent): Boolean;
+
 implementation
 
 uses
@@ -106,6 +111,14 @@ procedure TRemoteSink.OnEvent(const AEvent: TSessionEvent);
 var
   E: TTurnEvent;
 begin
+  if MapSessionEvent(AEvent, E) then
+    FQueue.Push(E);
+end;
+
+function MapSessionEvent(const AEvent: TSessionEvent;
+  out E: TTurnEvent): Boolean;
+begin
+  Result := True;
   E := Default(TTurnEvent);
   case AEvent.Kind of
     ekUserMessage:
@@ -164,7 +177,7 @@ begin
           do not report it as a clean done — that would flip a failed turn back
           to ready and end it with a divider. }
         if AEvent.FinishReason = 'error' then
-          Exit;
+          Exit(False);
         E.Kind := teDone;
         E.ElapsedMs := AEvent.ElapsedMs;
       end;
@@ -176,14 +189,35 @@ begin
         E.Detail := AEvent.Detail;
         E.Dropped := AEvent.Dropped;
       end;
+    ekSubagent:
+      begin
+        E.Kind := teSubagent;
+        E.SubSessionId := AEvent.SubSessionId;
+        E.SubLabel := AEvent.Text;
+        E.SubStatus := AEvent.SubStatus;
+      end;
+    ekSubagentAsk:
+      begin
+        E.Kind := teSubagentAsk;
+        E.SubSessionId := AEvent.SubSessionId;
+        E.AskRef := AEvent.AskId;
+        E.Ask := AEvent.Ask;
+      end;
+    ekAmbient:
+      begin
+        E.Kind := teAmbient;
+        E.SubSessionId := AEvent.SubSessionId;
+        E.Text := AEvent.Text;
+        E.ElapsedMs := AEvent.ElapsedMs;
+      end;
   else
     { loop_started, turn_started, approval_resolved, drive_*, gap, loop_exited:
       nothing for the UI to render; a gap is resynced from the ledger. Do NOT
       push E here: its default Kind is teUserMessage (ord 0), which the app
       would render as a blank user block. }
-    Exit;
+    Exit(False);
   end;
-  FQueue.Push(E);
+  Result := True;
 end;
 
 procedure TRemoteSink.OnDetached(const AReason: string);

@@ -27,7 +27,8 @@ uses
   test_harness_driver, test_jsonrpc, test_stdio_child, test_mcp_config,
   test_mcp_client, test_subagent, test_subagent_supervisor,
   test_mcp_cli, test_mcp_http, test_mcp_oauth,
-  test_mcp_oauth_flow, test_subagent_sidebar, test_tui_sidebar;
+  test_mcp_oauth_flow, test_subagent_sidebar, test_tui_sidebar,
+  test_subagent_spy;
 
 var
   Runner: TTestRunner;
