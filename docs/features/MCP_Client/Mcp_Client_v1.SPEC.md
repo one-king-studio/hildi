@@ -139,8 +139,13 @@ type
       registration) when the server is unusable; the caller logs and continues. }
     function Open(ATools: TToolRegistry; out AError: string): Boolean;
 
-    { Re-run tools/list and reconcile the registry (list_changed, or manual). }
-    function Refresh(out AError: string): Boolean;
+    { Re-run tools/list and register newly-appearing tools (already-registered
+      refs are left in place, so a re-list does not collide). }
+    function Refresh(ATools: TToolRegistry; out AError: string): Boolean;
+
+    { The tools/call path for one tool: approval ask, strip reason, call, map. }
+    function CallTool(const ATool: TMcpTool; const AArgumentsJson: string;
+      out AResult: string; out AError: string): Boolean;
 
     { Close the child. Idempotent. Called by the owner on session shutdown. }
     procedure Close;

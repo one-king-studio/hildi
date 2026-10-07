@@ -17,8 +17,10 @@ uses
   hildegard.helper.approval.store, hildegard.helper.command.tool,
   hildegard.helper.files,
   hildegard.helper.session, hildegard.helper.session.store,
+  hildegard.helper.store,
   hildegard.helper.recall.tool, hildegard.helper.harness.turn,
-  hildegard.helper.harness.view;
+  hildegard.helper.harness.view,
+  hildegard.helper.mcp.config, hildegard.helper.mcp.client;
 
 type
   { The loop side of one session. Owns a TSessionView for the workspace, store,
@@ -34,9 +36,12 @@ type
     FCommandTool: TCommandTool;
     FFileTool: TFileTool;
     FRecallTool: TRecallTool;
+    FMcp: TMcpManager;
     FLoop: TAgentLoop;
     FQueue: TTurnQueue;
     FGate: TApprovalGate;
+    { MCP events (server failure etc.) are recorded as session errors. }
+    procedure McpEvent(const AMessage, ADetail: string);
     function Init(const AConfig: THarnessSessionConfig; out AError: string):
       Boolean;
   public
@@ -69,6 +74,8 @@ procedure THarnessSession.Close;
 begin
   FLoop.Free;
   FLoop := nil;
+  FMcp.Free;
+  FMcp := nil;
   FCommandTool.Free;
   FCommandTool := nil;
   FFileTool.Free;
@@ -113,6 +120,12 @@ begin
   Result := Session;
 end;
 
+procedure THarnessSession.McpEvent(const AMessage, ADetail: string);
+begin
+  if FConversation <> nil then
+    FConversation.AppendError(AMessage, ADetail);
+end;
+
 function THarnessSession.Init(const AConfig: THarnessSessionConfig;
   out AError: string): Boolean;
 var
@@ -125,6 +138,10 @@ var
   FileConfig: TFileToolConfig;
   AgentConfig: TAgentConfig;
   Conv: TSqliteConversationStore;
+  McpCtx: TMcpConfigContext;
+  McpCfg: TMcpConfig;
+  McpRows: TMcpServerRowArray;
+  StoreErr: TStoreError;
   Cap: Integer;
 begin
   Result := False;
@@ -190,6 +207,27 @@ begin
   begin
     FRecallTool := TRecallTool.Create(FView.Store, FView.SessionId, Cap);
     FRecallTool.Register(FTools);
+  end;
+
+  { MCP servers: effective config comes from the store (scoped), resolved for
+    this workspace. Servers that fail are logged and skipped. Only with a
+    store; without one there is nowhere to read config from. }
+  if FView.Store <> nil then
+  begin
+    McpCtx := Default(TMcpConfigContext);
+    McpCtx.WorkspaceId := FView.WorkspaceId;
+    McpCfg := Default(TMcpConfig);
+    McpCfg.Context := McpCtx;
+    McpRows := nil;
+    if FView.Store.LoadMcpServers(McpCtx, McpRows, StoreErr) then
+    begin
+      McpCfg.Servers := ResolveMcpConfig(McpRows, McpCtx);
+      if Length(McpCfg.Servers) > 0 then
+      begin
+        FMcp := TMcpManager.Create(McpCfg, ApprovalService, McpEvent);
+        FMcp.Open(FTools);
+      end;
+    end;
   end;
 
   AgentConfig := Default(TAgentConfig);

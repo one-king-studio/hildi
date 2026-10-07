@@ -13,6 +13,7 @@ uses
   hildegard.helper.store, hildegard.helper.workspace,
   hildegard.helper.recall.tool,
   hildegard.helper.harness.session, hildegard.helper.harness.view,
+  hildegard.helper.mcp.config,
   llm_fakes;
 
 type
@@ -37,6 +38,7 @@ type
     procedure TestLastTurnEmptyWithoutTurns;
     procedure TestSessionTotalsEmptyWithoutTurns;
     procedure TestMaxContextTokensFromConfig;
+    procedure TestMcpServerToolsRegistered;
   end;
 
 implementation
@@ -281,6 +283,57 @@ begin
   AssertTrue('opened: ' + Err, Session <> nil);
   try
     AssertEquals('config override applied', 1000000, Session.View.MaxContextTokens);
+  finally
+    Session.Free;
+  end;
+end;
+
+{ A configured MCP server's tools appear in the session registry alongside the
+  native ones. The server is a /bin/sh fake; config is written to the store. }
+procedure THarnessSessionTest.TestMcpServerToolsRegistered;
+var
+  Store: TSqliteStore;
+  StoreCfg: TStoreConfig;
+  Err: string;
+  StoreErr: TStoreError;
+  Row: TMcpServerRow;
+  Session: THarnessSession;
+  Tool: TRegisteredTool;
+  Script: string;
+const
+  Q = #39;
+begin
+  Script :=
+    'read line; printf ' + Q + '%s\n' + Q + ' ' + Q +
+    '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05",' +
+    '"capabilities":{},"serverInfo":{"name":"fake","version":"1"}}}' + Q +
+    '; read line; read line; printf ' + Q + '%s\n' + Q + ' ' + Q +
+    '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"echo",' +
+    '"description":"Echo","inputSchema":{"type":"object","properties":{}}}]}}' +
+    Q + '; while IFS= read -r line; do :; done';
+
+  StoreCfg := Default(TStoreConfig);
+  StoreCfg.DatabasePath := FStorePath;
+  StoreCfg.BusyTimeoutMs := 5000;
+  Store := TSqliteStore.Create(StoreCfg);
+  try
+    AssertTrue('store opens', Store.Open(StoreErr));
+    Row := Default(TMcpServerRow);
+    Row.Scope := msGlobal;
+    Row.Name := 'fake';
+    Row.Command := '/bin/sh';
+    Row.Args := ['-c', Script];
+    Row.Enabled := True;
+    AssertTrue('config saved', Store.SaveMcpServer(Row, StoreErr));
+  finally
+    Store.Free;
+  end;
+
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    AssertTrue('mcp tool registered',
+      Session.Tools.Find('mcp_fake_echo', Tool));
   finally
     Session.Free;
   end;

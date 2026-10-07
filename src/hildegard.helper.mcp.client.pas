@@ -64,6 +64,7 @@ type
     FIdGen: TJsonRpcIdGen;
     FTools: TMcpToolArray;
     FHandlers: array of TMcpToolHandler;
+    FRegisteredRefs: TStringList;
     FDead: Boolean;
     procedure Emit(const AMessage, ADetail: string);
     function GetServerName: string;
@@ -397,12 +398,14 @@ begin
   FApproval := AApproval;
   FOnEvent := AOnEvent;
   FIdGen := TJsonRpcIdGen.Create;
+  FRegisteredRefs := TStringList.Create;
   FDead := False;
 end;
 
 destructor TMcpClient.Destroy;
 begin
   Close;
+  FRegisteredRefs.Free;
   FIdGen.Free;
   inherited Destroy;
 end;
@@ -633,9 +636,13 @@ begin
       Taken.Add(Specs[I].Name);
     for I := 0 to High(FTools) do
     begin
+      { A tool already registered (e.g. across a Refresh) is left in place. }
+      if FRegisteredRefs.IndexOf(FTools[I].Ref) >= 0 then
+        Continue;
       UniqueName := McpUniqueToolName(FTools[I].Name, Taken);
       FTools[I].Name := UniqueName;
       Taken.Add(UniqueName);
+      FRegisteredRefs.Add(FTools[I].Ref);
       Spec := Default(TToolSpec);
       Spec.Name := UniqueName;
       Spec.Description := FTools[I].Description;

@@ -126,16 +126,23 @@ Pure, no I/O — the easiest red/green, and the base of everything.
   safe as a line-framed JSON-RPC payload. A `{ }` comment containing a literal
   brace closes early — watch JSON snippets in comments.
 
-### Phase 5: Integration & Docs
+### Phase 5: Integration & Docs — DONE
 
-- [ ] **Wire `THarnessSession`**: build the effective list
+- [x] **Wire `THarnessSession`**: build the effective list
       (`LoadMcpServers` → `ResolveMcpConfig`), construct `TMcpManager`, `Open`
-      into `FTools`, `Close` in `Close`. (Existing file — the one core edit.)
-- [ ] **Test**: `TestSessionRegistersMcpTools` alongside native tools.
-- [ ] **Example**: extend `examples/` (or add one) to open a session with a
-      local fake server configured.
-- [ ] **Doc comments**: `{** ... }` on the new public interfaces (fpdoc style).
-- [ ] **Update SPECs** if behaviour diverged; record deviations below.
+      into `FTools`, `Close` in `Close`; MCP events recorded via
+      `IConversationStore.AppendError`.
+- [x] **Test**: `TestMcpServerToolsRegistered` alongside native tools.
+- [x] **Doc comments**: house style (`{ ... }`) on the new public interfaces.
+- [x] **Update SPECs**: the client API was reconciled with the implementation
+      (`TMcpToolHandler`, `CallTool`, `Refresh(ATools)`).
+
+  Notes: no separate example binary — the session integration test exercises a
+  configured fake server end to end, which is the same coverage without a new
+  Makefile target. `Refresh` was made real (not the "may be a no-op" of the
+  SPEC): it re-lists and registers only tools whose ref is not already
+  registered, tracked in `FRegisteredRefs` (a re-list would otherwise collide
+  and suffix duplicates).
 
 ### Phase 6: Validation
 
