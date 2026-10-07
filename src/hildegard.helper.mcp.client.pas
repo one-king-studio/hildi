@@ -223,8 +223,8 @@ const
   { Reconnect backoff: start and cap (ms). }
   McpBackoffInitialMs = 1000;
   McpBackoffMaxMs = 60000;
-  SupportedProtocolVersions: array[0..2] of string =
-    ('2024-11-05', '2025-03-26', '2025-06-18');
+  SupportedProtocolVersions: array[0..3] of string =
+    ('2024-11-05', '2025-03-26', '2025-06-18', '2025-11-25');
 
 implementation
 

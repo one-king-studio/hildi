@@ -425,6 +425,60 @@ begin
 end;
 
 { Run the OAuth flow for one configured server and store the token. }
+{ The id of the current working directory's workspace, or 0. }
+function CurrentWorkspaceId(AStore: TSqliteStore): Integer;
+var
+  Ws: TWorkspace;
+  WsErr: string;
+  StoreErr: TStoreError;
+begin
+  Result := 0;
+  Ws := TWorkspace.Open('', WsErr);
+  if Ws = nil then
+    Exit;
+  try
+    AStore.EnsureWorkspace(Ws.Root, Result, StoreErr);
+  finally
+    Ws.Free;
+  end;
+end;
+
+{ Resolve a server by name for use (test/auth): the requested scope first, then
+  the most specific other scope that has it. This lets `mcp test NAME` find a
+  workspace-scoped server without --scope. Returns False when absent. }
+function ResolveServerForUse(AStore: TSqliteStore;
+  const AName: string; AScope: TMcpScope; AWorkspaceId: Integer;
+  out ARow: TMcpServerRow): Boolean;
+var
+  Ctx: TMcpConfigContext;
+  Rows: TMcpServerRowArray;
+  StoreErr: TStoreError;
+  I, BestRank, ThisRank: Integer;
+begin
+  Result := False;
+  ARow := Default(TMcpServerRow);
+  Ctx := Default(TMcpConfigContext);
+  Ctx.WorkspaceId := AWorkspaceId;
+  if not AStore.LoadMcpServers(Ctx, Rows, StoreErr) then
+    Exit;
+  BestRank := -1;
+  for I := 0 to High(Rows) do
+    if Rows[I].Name = AName then
+    begin
+      { The requested scope wins outright; otherwise take the most specific. }
+      if Rows[I].Scope = AScope then
+        ThisRank := 1000
+      else
+        ThisRank := Ord(Rows[I].Scope);
+      if ThisRank > BestRank then
+      begin
+        ARow := Rows[I];
+        BestRank := ThisRank;
+        Result := True;
+      end;
+    end;
+end;
+
 function RunMcpAuth(AStore: TSqliteStore; const ARow: TMcpServerRow): Integer;
 var
   PRM: TProtectedResourceMeta;
@@ -561,6 +615,8 @@ var
   Text: string;
   Added, Updated: Integer;
   WasThere: Boolean;
+  WsId: Integer;
+  SrvName: string;
 begin
   Result := 0;
   try
@@ -658,50 +714,22 @@ begin
     case Cmd.Verb of
       mvTest:
         begin
-          Ctx := Default(TMcpConfigContext);
-          Ctx.WorkspaceId := Row.WorkspaceId;
-          if not Store.LoadMcpServers(Ctx, Rows, StoreErr) then
+          WsId := CurrentWorkspaceId(Store);
+          SrvName := Row.Name;
+          if not ResolveServerForUse(Store, SrvName, Row.Scope, WsId, Row) then
           begin
-            WriteLn('error: ', StoreErr.Message);
-            Exit(1);
-          end;
-          Msg := '';
-          for I := 0 to High(Rows) do
-            if (Rows[I].Scope = Row.Scope) and
-              (Rows[I].WorkspaceId = Row.WorkspaceId) and
-              (Rows[I].Name = Row.Name) then
-            begin
-              Row := Rows[I];
-              Msg := 'found';
-            end;
-          if Msg = '' then
-          begin
-            WriteLn('error: no such server "', Row.Name, '"');
+            WriteLn('error: no such server "', Cmd.Name, '"');
             Exit(1);
           end;
           Exit(RunMcpTest(Store, Row));
         end;
       mvAuth:
         begin
-          Ctx := Default(TMcpConfigContext);
-          Ctx.WorkspaceId := Row.WorkspaceId;
-          if not Store.LoadMcpServers(Ctx, Rows, StoreErr) then
+          WsId := CurrentWorkspaceId(Store);
+          SrvName := Row.Name;
+          if not ResolveServerForUse(Store, SrvName, Row.Scope, WsId, Row) then
           begin
-            WriteLn('error: ', StoreErr.Message);
-            Exit(1);
-          end;
-          Msg := '';
-          for I := 0 to High(Rows) do
-            if (Rows[I].Scope = Row.Scope) and
-              (Rows[I].WorkspaceId = Row.WorkspaceId) and
-              (Rows[I].Name = Row.Name) then
-            begin
-              Row := Rows[I];
-              Msg := 'found';
-            end;
-          if Msg = '' then
-          begin
-            WriteLn('error: no such server "', Row.Name, '"');
+            WriteLn('error: no such server "', Cmd.Name, '"');
             Exit(1);
           end;
           Exit(RunMcpAuth(Store, Row));
