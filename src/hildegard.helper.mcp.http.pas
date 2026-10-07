@@ -29,6 +29,7 @@ type
     FPending: TStringList;      // response messages not yet delivered
     FDead: Boolean;
     FLastError: string;
+    FTokenSource: TMcpTokenSource;   // OAuth: a fresh bearer token per request
     procedure Post(const ABody: string; out AStatusCode: Integer);
     procedure BufferBody(const ABody, AContentType: string);
   public
@@ -40,6 +41,8 @@ type
       out AReason: TMcpRecvResult): Boolean;
     procedure Close;
     function Dead: Boolean;
+    { When set, each request obtains a bearer token from this source. }
+    property TokenSource: TMcpTokenSource read FTokenSource write FTokenSource;
   end;
 
 { Split a response body into JSON-RPC message strings: a plain JSON body is one
@@ -90,7 +93,7 @@ var
   Client: TFPHTTPClient;
   ReqBody, RespBody: TStringStream;
   I: Integer;
-  Hdr, Name: string;
+  Hdr, Name, Tok, TokErr: string;
 begin
   AStatusCode := 0;
   FLastError := '';
@@ -113,6 +116,18 @@ begin
     end;
     if FSessionId <> '' then
       Client.AddHeader('Mcp-Session-Id', FSessionId);
+    { OAuth: obtain a fresh bearer token for this request. }
+    if Assigned(FTokenSource) then
+    begin
+      if FTokenSource(Tok, TokErr) and (Tok <> '') then
+        Client.AddHeader('Authorization', 'Bearer ' + Tok)
+      else
+      begin
+        FLastError := 'no OAuth token: ' + TokErr;
+        FDead := True;
+        Exit;
+      end;
+    end;
     try
       Client.RequestBody := ReqBody;
       Client.Post(FConfig.URL, RespBody);

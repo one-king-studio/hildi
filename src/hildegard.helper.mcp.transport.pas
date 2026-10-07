@@ -16,6 +16,10 @@ type
   { Why a Receive returned False (mirrors TStdioReadResult). }
   TMcpRecvResult = (mrOk, mrTimeout, mrEof, mrTooLong, mrError);
 
+  { Supplies a current bearer token (refreshing if needed), or '' when none is
+    available. Set on THttpTransport for OAuth-authenticated servers. }
+  TMcpTokenSource = function(out AToken, AError: string): Boolean of object;
+
   { A bidirectional, line-framed JSON-RPC transport. One implementation per
     connection. Not thread-safe; driven on the loop's thread. }
   IMcpTransport = interface

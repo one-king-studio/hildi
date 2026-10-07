@@ -40,6 +40,9 @@ type
     CallTimeoutMs: Integer;        // 0 => DefaultMcpCallTimeoutMs
     ClientName: string;            // '' => McpClientName
     ClientVersion: string;         // '' => '0.1'
+    { When set and the server is HTTP, each request obtains a bearer token from
+      this source (OAuth). Nil for static-header / no auth. }
+    TokenSource: TMcpTokenSource;
   end;
 
   TMcpClient = class;
@@ -746,6 +749,7 @@ function TMcpClient.Open(out AError: string): Boolean;
 var
   ChildCfg: TStdioChildConfig;
   HttpCfg: THttpTransportConfig;
+  HttpT: THttpTransport;
   InitParams, ResultJson, Err: string;
 begin
   AError := '';
@@ -762,7 +766,10 @@ begin
     HttpCfg.Headers := Copy(FConfig.Server.Headers, 0,
       Length(FConfig.Server.Headers));
     HttpCfg.ReadTimeoutMs := FConfig.ListTimeoutMs;
-    FTransport := THttpTransport.Create(HttpCfg);
+    HttpT := THttpTransport.Create(HttpCfg);
+    if Assigned(FConfig.TokenSource) then
+      HttpT.TokenSource := FConfig.TokenSource;
+    FTransport := HttpT;
   end
   else
   begin
