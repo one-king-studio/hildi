@@ -88,7 +88,7 @@ TEST_SRCS := $(wildcard $(TESTS)/*.pas)
 
 .PHONY: all test test-leak watch check release clean help libsqlite libmbedtls \
         store-demo agent-cli release-agent-cli tui-demo widgets-demo layout-demo \
-        headless-agent tui-agent bench perf agents agent-%
+        headless-agent tui-agent bench perf agents agent-% mcp-smoke
 
 all: $(BIN)/hildegard-helper-demo
 
@@ -141,6 +141,16 @@ $(BIN)/hildegard-helper-store-demo: $(EXAMPLES)/store_demo.pas $(LIB_SRCS) $(SQL
 agent-cli: libsqlite libmbedtls $(BIN)/hildegard-helper-agent-cli
 
 $(BIN)/hildegard-helper-agent-cli: $(EXAMPLES)/agent_cli.pas $(LIB_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
+	@mkdir -p $(BIN) $(DBGUNITS)
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+
+# Live MCP calibration smoke: drives the MCP client against a real MCP server
+# (the Playwright container over docker stdio). Needs Docker; not part of
+# `make check` (the suite is hermetic). See examples/mcp_smoke.pas.
+mcp-smoke: libsqlite libmbedtls $(BIN)/mcp-smoke
+	$(BIN)/mcp-smoke
+
+$(BIN)/mcp-smoke: $(EXAMPLES)/mcp_smoke.pas $(LIB_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
@@ -288,6 +298,7 @@ help:
 	@echo "  make widgets-demo             build & run the widget-kit demo"
 	@echo "  make layout-demo              build & run the responsive two-column layout demo"
 	@echo "  make headless-agent           build the headless session runtime (no TUI)"
+	@echo "  make mcp-smoke                live MCP smoke against a real server (needs Docker)"
 	@echo "  make agents                   list agent playgrounds (ahead/behind, stale flags)"
 	@echo "  make agent-<target>           run <target> in the ACTIVE playground"
 	@echo "  make tui-agent [ARGS=...]     build & run the agent harness (needs an API key)"

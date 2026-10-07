@@ -233,3 +233,31 @@ HANDOFF.md                              (state) — integrator-owned
 - **Risk:** child-process teardown under the leak gate is the fiddliest part;
   budget time for Phase 2's kill/reap tests.
 - Record deviations from the SPECs here, with the reason.
+
+## Live calibration (real MCP server)
+
+Beyond the hermetic suite, the client was driven against a **real** MCP server:
+the Playwright container (`mcr.microsoft.com/playwright/mcp`) over docker stdio,
+via `examples/mcp_smoke.pas` (`make mcp-smoke`, needs Docker; not part of
+`make check`).
+
+Results (Docker 29.8.2, macOS aarch64):
+
+- The handshake succeeded: the server answered `initialize` with
+  `protocolVersion 2024-11-05` (in our supported set) and
+  `capabilities.tools.listChanged: true`.
+- **25 tools** were discovered and namespaced (`mcp_playwright_browser_navigate`,
+  ref `mcp/playwright/browser_navigate`, …).
+- A real call worked: `browser_navigate` → `https://example.com` returned
+  "Page Title: Example Domain"; `browser_close` succeeded.
+- **Teardown was clean on real hardware:** after the smoke exited,
+  `docker ps` showed **no orphan container** — our bounded close-then-kill
+  terminated the real `docker run` child. This is the part fakes cannot prove.
+
+Observations (no action needed):
+
+- The Playwright schemas use `$schema`, `anyOf`, `enum`, and `default`, which
+  `McpSchemaToParams` passes through untouched; the registry accepted all 25, so
+  the mapper is permissive enough for a real server.
+- The server writes a `.playwright-mcp/` directory into its cwd — relevant when
+  a `cwd` is chosen for it.
