@@ -80,12 +80,19 @@ in `../guidelines/spec-driven-development.md`:
   session wiring). Prompt fragments are request-only (never persisted); trust is
   unchanged. Spec'd (v1); not yet implemented.
 
-- **Runtime Lifecycle** (`Runtime_Lifecycle/FEATURE.md`) — let the session
-  runtime (which owns the agent loop and its tools) stop **promptly and
+- **Runtime Lifecycle** (`Runtime_Lifecycle/FEATURE.md`) — let the session  runtime (which owns the agent loop and its tools) stop **promptly and
   gracefully**: an in-band `scShutdown` command, SIGTERM/SIGINT handling, and an
   exit-when-no-clients policy with a short grace (down from the 5-minute idle
   timeout). Makes upgrading/restarting a long-lived agent painless. Spec'd (v1);
   not yet implemented.
+
+- **Turn Lifecycle** (`Turn_Lifecycle/FEATURE.md`) — guarantee a turn always
+  reaches a terminal state: reconcile orphaned `tsRunning` turns on runtime
+  start, self-heal in `BeginTurn`, finalize the in-flight turn on client loss
+  and shutdown, bound the approval wait, and repair a dangling tool call on
+  resume. Fixes the non-stable session state (pending approvals, unresolved tool
+  calls) that long-running commands make likely. Spec'd (v1); not yet
+  implemented.
 
 ## Existing Behaviour (to be documented)
 
