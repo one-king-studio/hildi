@@ -59,6 +59,19 @@ type
 
   TMcpServerArray = array of TMcpServerConfig;
 
+  { OAuth tokens for one server, keyed like its config row. }
+  TOAuthTokenRow = record
+    Scope: TMcpScope;
+    WorkspaceId: Integer;
+    ServerName: string;
+    ClientId: string;
+    ClientSecret: string;
+    AccessToken: string;
+    RefreshToken: string;
+    ExpiresAt: Int64;      // ms epoch; 0 = unknown
+    TokenScope: string;
+  end;
+
   { The context a session resolves against. }
   TMcpConfigContext = record
     WorkspaceId: Integer;   // 0 = no workspace (global only)

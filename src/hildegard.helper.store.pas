@@ -126,6 +126,15 @@ type
     function ListMcpServers(out ARows: TMcpServerRowArray;
       out AError: TStoreError): Boolean;
 
+    { OAuth tokens for a server (keyed by scope/workspace/name). }
+    function SaveOAuthToken(const ARow: TOAuthTokenRow;
+      out AError: TStoreError): Boolean;
+    function LoadOAuthToken(AScope: TMcpScope; AWorkspaceId: Integer;
+      const AServerName: string; out ARow: TOAuthTokenRow;
+      out AError: TStoreError): Boolean;
+    function ClearOAuthToken(AScope: TMcpScope; AWorkspaceId: Integer;
+      const AServerName: string; out AError: TStoreError): Boolean;
+
     { Creates a session bound to a workspace and returns its 32-hex id. }
     function CreateSession(AWorkspaceId: Integer; out AId: string;
       out AError: TStoreError): Boolean;
@@ -250,7 +259,7 @@ end;
 function DefaultMigrations: TMigrationArray;
 begin
   Result := nil;
-  SetLength(Result, 7);
+  SetLength(Result, 8);
   Result[0].Version := 1;
   Result[0].Name := 'session history';
   Result[0].Statements := [
@@ -417,6 +426,24 @@ begin
     'ALTER TABLE mcp_servers ADD COLUMN transport INTEGER NOT NULL DEFAULT 0',
     'ALTER TABLE mcp_servers ADD COLUMN url TEXT NOT NULL DEFAULT ''''',
     'ALTER TABLE mcp_servers ADD COLUMN headers TEXT NOT NULL DEFAULT ''[]'''
+  ];
+  { v8: OAuth tokens for MCP servers, keyed like the config row. Additive.
+    (Renumbered from v5 during the rebase: main took v4-v6 for subagents.) }
+  Result[7].Version := 8;
+  Result[7].Name := 'mcp oauth tokens';
+  Result[7].Statements := [
+    'CREATE TABLE mcp_oauth_tokens (' +
+      'scope INTEGER NOT NULL, ' +
+      'workspace_id INTEGER NOT NULL DEFAULT 0, ' +
+      'server_name TEXT NOT NULL, ' +
+      'client_id TEXT NOT NULL DEFAULT '''', ' +
+      'client_secret TEXT NOT NULL DEFAULT '''', ' +
+      'access_token TEXT NOT NULL DEFAULT '''', ' +
+      'refresh_token TEXT NOT NULL DEFAULT '''', ' +
+      'expires_at INTEGER NOT NULL DEFAULT 0, ' +
+      'token_scope TEXT NOT NULL DEFAULT '''', ' +
+      'updated_at INTEGER NOT NULL, ' +
+      'UNIQUE (scope, workspace_id, server_name))'
   ];
 end;
 
@@ -1420,6 +1447,124 @@ begin
         ARows[N] := Row;
         Inc(N);
       end;
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+{ --- mcp oauth tokens (v5) -------------------------------------------- }
+
+function TSqliteStore.SaveOAuthToken(const ARow: TOAuthTokenRow;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb,
+      'INSERT INTO mcp_oauth_tokens (scope, workspace_id, server_name, ' +
+      'client_id, client_secret, access_token, refresh_token, expires_at, ' +
+      'token_scope, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
+      'ON CONFLICT(scope, workspace_id, server_name) DO UPDATE SET ' +
+      'client_id = excluded.client_id, client_secret = excluded.client_secret, ' +
+      'access_token = excluded.access_token, ' +
+      'refresh_token = excluded.refresh_token, ' +
+      'expires_at = excluded.expires_at, ' +
+      'token_scope = excluded.token_scope, updated_at = excluded.updated_at');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not save oauth token', DbErrorText));
+      Stmt.BindInt(1, Ord(ARow.Scope));
+      Stmt.BindInt(2, ARow.WorkspaceId);
+      Stmt.BindText(3, ARow.ServerName);
+      Stmt.BindText(4, ARow.ClientId);
+      Stmt.BindText(5, ARow.ClientSecret);
+      Stmt.BindText(6, ARow.AccessToken);
+      Stmt.BindText(7, ARow.RefreshToken);
+      Stmt.BindInt64(8, ARow.ExpiresAt);
+      Stmt.BindText(9, ARow.TokenScope);
+      Stmt.BindInt64(10, NowMs);
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not save oauth token', DbErrorText));
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.LoadOAuthToken(AScope: TMcpScope; AWorkspaceId: Integer;
+  const AServerName: string; out ARow: TOAuthTokenRow;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  ARow := Default(TOAuthTokenRow);
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb,
+      'SELECT client_id, client_secret, access_token, refresh_token, ' +
+      'expires_at, token_scope FROM mcp_oauth_tokens ' +
+      'WHERE scope = ? AND workspace_id = ? AND server_name = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not load oauth token', DbErrorText));
+      Stmt.BindInt(1, Ord(AScope));
+      Stmt.BindInt(2, AWorkspaceId);
+      Stmt.BindText(3, AServerName);
+      if Stmt.Step <> SQLITE_ROW then
+        Exit(Fail(AError, seNotFound, 'no oauth token for ' + AServerName, ''));
+      ARow.Scope := AScope;
+      ARow.WorkspaceId := AWorkspaceId;
+      ARow.ServerName := AServerName;
+      ARow.ClientId := Stmt.ColText(0);
+      ARow.ClientSecret := Stmt.ColText(1);
+      ARow.AccessToken := Stmt.ColText(2);
+      ARow.RefreshToken := Stmt.ColText(3);
+      ARow.ExpiresAt := Stmt.ColInt64(4);
+      ARow.TokenScope := Stmt.ColText(5);
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.ClearOAuthToken(AScope: TMcpScope; AWorkspaceId: Integer;
+  const AServerName: string; out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb,
+      'DELETE FROM mcp_oauth_tokens WHERE scope = ? AND workspace_id = ? ' +
+      'AND server_name = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not clear oauth token', DbErrorText));
+      Stmt.BindInt(1, Ord(AScope));
+      Stmt.BindInt(2, AWorkspaceId);
+      Stmt.BindText(3, AServerName);
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not clear oauth token', DbErrorText));
     finally
       Stmt.Free;
     end;

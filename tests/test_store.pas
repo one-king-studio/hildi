@@ -76,6 +76,10 @@ type
     procedure TestSessionLineageUnknownFails;
     procedure TestLineageMigrationV4IsAdditive;
     procedure TestMessageRefSessionRoundTrip;
+
+    procedure TestOAuthTokenRoundTrip;
+    procedure TestOAuthTokenMissing;
+    procedure TestClearOAuthToken;
   end;
 
 implementation
@@ -1470,6 +1474,75 @@ begin
 end;
 
 
+procedure TStoreTest.TestOAuthTokenRoundTrip;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  R, Got: TOAuthTokenRow;
+begin
+  S := OpenStore;
+  try
+    R := Default(TOAuthTokenRow);
+    R.Scope := msGlobal;
+    R.ServerName := 'meta';
+    R.ClientId := 'client-1';
+    R.ClientSecret := 'secret';
+    R.AccessToken := 'at';
+    R.RefreshToken := 'rt';
+    R.ExpiresAt := 12345;
+    R.TokenScope := 'read';
+    AssertTrue('save', S.SaveOAuthToken(R, Err));
+    AssertTrue('load', S.LoadOAuthToken(msGlobal, 0, 'meta', Got, Err));
+    AssertEquals('client', 'client-1', Got.ClientId);
+    AssertEquals('secret', 'secret', Got.ClientSecret);
+    AssertEquals('access', 'at', Got.AccessToken);
+    AssertEquals('refresh', 'rt', Got.RefreshToken);
+    AssertEquals('expiry', 12345, Got.ExpiresAt);
+    AssertEquals('scope', 'read', Got.TokenScope);
+    { Upsert updates in place. }
+    R.AccessToken := 'at2';
+    AssertTrue('upsert', S.SaveOAuthToken(R, Err));
+    AssertTrue('reload', S.LoadOAuthToken(msGlobal, 0, 'meta', Got, Err));
+    AssertEquals('updated', 'at2', Got.AccessToken);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestOAuthTokenMissing;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Got: TOAuthTokenRow;
+begin
+  S := OpenStore;
+  try
+    AssertFalse('missing', S.LoadOAuthToken(msGlobal, 0, 'nope', Got, Err));
+    AssertEquals('not found', Ord(seNotFound), Ord(Err.Code));
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestClearOAuthToken;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  R, Got: TOAuthTokenRow;
+begin
+  S := OpenStore;
+  try
+    R := Default(TOAuthTokenRow);
+    R.Scope := msGlobal;
+    R.ServerName := 'meta';
+    R.AccessToken := 'at';
+    AssertTrue('save', S.SaveOAuthToken(R, Err));
+    AssertTrue('clear', S.ClearOAuthToken(msGlobal, 0, 'meta', Err));
+    AssertFalse('gone', S.LoadOAuthToken(msGlobal, 0, 'meta', Got, Err));
+  finally
+    S.Free;
+  end;
+end;
 
 initialization
   RegisterTest(TStoreTest);
