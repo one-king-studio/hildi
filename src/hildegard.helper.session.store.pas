@@ -39,8 +39,8 @@ type
     procedure Clear;
     procedure AppendReasoning(const AText: string; ADurationMs: Int64);
     procedure AppendError(const AMessage, ADetail: string);
-    procedure AppendAmbient(const AText, ARefSessionId: string;
-      AElapsedMs: Int64);
+    procedure AppendAmbient(const AText, ARefSessionId, ALabel,
+      ASource: string; AElapsedMs: Int64);
     function BeginTurn: Int64;
     function BeginRequest(ATurnId: Int64; const AModel: string;
       AMessageCount: Integer): Int64;
@@ -155,8 +155,8 @@ begin
   Write(mrError, AMessage, '', '', ADetail, '', False, 0);
 end;
 
-procedure TSqliteConversationStore.AppendAmbient(const AText,
-  ARefSessionId: string; AElapsedMs: Int64);
+procedure TSqliteConversationStore.AppendAmbient(const AText, ARefSessionId,
+  ALabel, ASource: string; AElapsedMs: Int64);
 var
   Rec: TMessageRecord;
   Err: TStoreError;
@@ -168,6 +168,8 @@ begin
   Rec.Role := mrAmbient;
   Rec.Content := AText;
   Rec.RefSessionId := ARefSessionId;
+  Rec.LabelText := ALabel;
+  Rec.Source := ASource;
   Rec.DurationMs := AElapsedMs;
   FStore.AppendMessage(Rec, Err);
 end;
@@ -261,7 +263,8 @@ begin
           Msg := Default(TChatMessage);
           Msg.Role := crUser;
           Msg.Content := FormatAmbient(Msgs[I].Content,
-            Msgs[I].RefSessionId, Msgs[I].CreatedAtMs);
+            Msgs[I].RefSessionId, Msgs[I].LabelText, Msgs[I].Source,
+            Msgs[I].CreatedAtMs);
           AddMessage(Result, Msg);
         end;
       mrAssistant:

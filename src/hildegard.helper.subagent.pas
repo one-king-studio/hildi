@@ -225,7 +225,7 @@ begin
           '"context":{"type":"string","description":"Context the subagent needs; it cannot see this conversation."},' +
           '"label":{"type":"string","description":"Short human label for this task."},' +
           '"reason":{"type":"string","description":"Short reason this delegation is needed."}' +
-          '},"required":["task","context","reason"]}';
+          '},"required":["task","context","label","reason"]}';
       end;
     svMessage:
       begin
@@ -394,7 +394,11 @@ begin
           end;
           if not ReadStringArg(Root, 'context', Context) then
             Context := '';
-          ReadStringArg(Root, 'label', Lbl);
+          if not ReadStringArg(Root, 'label', Lbl) or (Trim(Lbl) = '') then
+          begin
+            AError := 'label is required';
+            Exit;
+          end;
           Summary := Lbl;
           if Summary = '' then
             Summary := Task;

@@ -128,7 +128,8 @@ const
   "task":    "string, required - the instruction for the subagent",
   "context": "string, required - the context the parent supplies (the child has
              no access to the parent's conversation)",
-  "label":   "string, optional - a short human label for the sidebar/dialog"
+  "label":   "string, required - a short human label for the task; it names the
+             task in the approval dialog, the sidebar, and the ambient result"
 }
 ```
 
@@ -323,15 +324,35 @@ end;
 ### 6. Loop and ambient delivery
 
 **Ambient record.** `TMessageRole` gains `mrAmbient` (appended last). The
-`messages` table gains `ref_session_id` (the child session id); the elapsed is
-stored in the existing `duration_ms`.
+`messages` table gains `ref_session_id` (the task id), `label` (the task's
+human label), and `source` (the producing tool); the elapsed is stored in the
+existing `duration_ms`.
+
+**Ambient envelope.** Delivered to the provider as a user message wrapping the
+result, with the task's identity in a `<message>` element and the handling
+instructions in an `<instructions>` element (never shown to the user). The
+envelope is generic — `<message source=...>` is the extension point for any
+future async producer:
+
+```xml
+<ambient timestamp="ISO_DATE">
+  <message source="delegate_task" id="<session-id>" label="...">
+    <the task's result>
+  </message>
+
+  <instructions>
+    ...
+  </instructions>
+</ambient>
+```
 
 `IConversationStore` gains:
 
 ```pascal
-{ Append an ambient (subagent result) notification. Delivered to the provider as
-  a user message wrapped by the ambient format; persisted as its own kind. }
-procedure AppendAmbient(const AText, ARefSessionId: string; AElapsedMs: Int64);
+{ Append an ambient (async task result) notification. Delivered to the provider
+  as a user message wrapped by the ambient format; persisted as its own kind. }
+procedure AppendAmbient(const AText, ARefSessionId, ALabel, ASource: string;
+  AElapsedMs: Int64);
 ```
 
 **Prompt queue.** `TPromptQueue` carries a kind per item:
@@ -355,7 +376,8 @@ function SendAmbient(const AEvents: TAgentEvents;
   out AAnswer: string; out AError: TLLMError): Boolean;
 ```
 
-`TAgentEvents` gains `OnAmbient: TAmbientEvent` (the text + child id + elapsed).
+`TAgentEvents` gains `OnAmbient: TAmbientEvent` (the text + task id + label +
+source + elapsed).
 `TTurnWorker` gains `CreateAmbient(ALoop, AQueue)` that calls `SendAmbient`.
 
 **Waking the parent.** The runtime, on a `sekResult`/`sekAborted` event:
@@ -410,18 +432,23 @@ The child's **conversation** session id stays its own (the ledger is per-session
 
 ## Data Model and Migrations
 
-Additive migration **v4** (no reset; existing history untouched). v3 is MCP
-servers (landed on main first); lineage took the next free version:
+Additive migrations **v4** (lineage) and **v5** (ambient task identity), no
+reset; existing history untouched. v3 is MCP servers (landed on main first);
+lineage took the next free version:
 
 ```sql
+-- v4: subagent lineage
 ALTER TABLE sessions ADD COLUMN parent_session_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE sessions ADD COLUMN depth INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE sessions ADD COLUMN label TEXT NOT NULL DEFAULT '';
 CREATE INDEX idx_sessions_parent ON sessions (parent_session_id);
 ALTER TABLE messages ADD COLUMN ref_session_id TEXT NOT NULL DEFAULT '';
+-- v5: the ambient message's producing-task identity
+ALTER TABLE messages ADD COLUMN label TEXT NOT NULL DEFAULT '';
+ALTER TABLE messages ADD COLUMN source TEXT NOT NULL DEFAULT '';
 ```
 
-`StoreSchemaVersion` becomes 4.
+`StoreSchemaVersion` becomes 5.
 
 ## Validation and Error Handling
 
@@ -441,13 +468,13 @@ ALTER TABLE messages ADD COLUMN ref_session_id TEXT NOT NULL DEFAULT '';
 
 ## Testing Strategy
 
-- **Lineage:** create/child/lineage/children queries; migration v4 is additive
-  (a v2 database opens and keeps its history); root defaults.
+- **Lineage:** create/child/lineage/children queries; migrations v4/v5 are
+  additive (a v2 database opens and keeps its history); root defaults.
 - **Tools:** each tool's spec, `reason` enforcement, approval ask shape, and
   argument parsing (task/context/label, session id) — pure, no sockets.
 - **Ambient:** `AppendAmbient` round-trip; `Compose` wraps `mrAmbient` into the
-  `<ambient timestamp session>` user message with instructions; the elapsed and
-  child id survive.
+  `<ambient timestamp>` user message with a `<message source id label>` element
+  and `<instructions>`; the task id, label, and source survive.
 - **Supervisor:** with a scripted fake child over a real socket (a stub runtime
   binary), spawn/message/abort/release, capacity and depth enforcement, roster
   events, result capture, and approval relay.

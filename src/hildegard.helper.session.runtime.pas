@@ -1065,7 +1065,7 @@ begin
           Broadcast(E);
           { Wake the parent with the result as an ambient notification. }
           FSession.Loop.PromptQueue.PushAmbient(Ev.Result, Ev.SessionId,
-            Ev.ElapsedMs);
+            Ev.LabelText, SubagentDelegateTool, Ev.ElapsedMs);
           if not FTurnActive then
             StartAmbientTurn;
         end;

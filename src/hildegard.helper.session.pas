@@ -44,9 +44,12 @@ type
     ToolOk: Boolean;
     CreatedAtMs: Int64;
     DurationMs: Int64;
-    { Lineage (v3): for an ambient record, the child session it came from; ''
+    { Ambient (v4/v5): for an mrAmbient record, the producing task's identity.
+      RefSessionId is the task's id; LabelText and Source describe it. ''
       otherwise. }
     RefSessionId: string;
+    LabelText: string;
+    Source: string;
   end;
 
   TMessageRecordArray = array of TMessageRecord;

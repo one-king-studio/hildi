@@ -620,7 +620,8 @@ begin
     S.CreateSession(Ws, Sid, Err);
     Conv := TSqliteConversationStore.Create(S, Sid, 0);
     try
-      Conv.AppendAmbient('subagent done: 3 files', 'child-abc', 4200);
+      Conv.AppendAmbient('subagent done: 3 files', 'child-abc', 'research',
+        'delegate_task', 4200);
     finally
       Conv.Free;
     end;
@@ -629,6 +630,8 @@ begin
     AssertEquals('ambient role', Ord(mrAmbient), Ord(Recs[0].Role));
     AssertEquals('content', 'subagent done: 3 files', Recs[0].Content);
     AssertEquals('ref session', 'child-abc', Recs[0].RefSessionId);
+    AssertEquals('label', 'research', Recs[0].LabelText);
+    AssertEquals('source', 'delegate_task', Recs[0].Source);
     AssertEquals('elapsed', 4200, Recs[0].DurationMs);
   finally
     S.Free;
@@ -650,16 +653,20 @@ begin
     S.CreateSession(Ws, Sid, Err);
     Conv := TSqliteConversationStore.Create(S, Sid, 0);
     try
-      Conv.AppendAmbient('the result text', 'child-xyz', 1000);
+      Conv.AppendAmbient('the result text', 'child-xyz', 'research',
+        'delegate_task', 1000);
       Msgs := Conv.Messages;
       AssertEquals('one provider message', 1, Length(Msgs));
       AssertEquals('delivered as user', Ord(crUser), Ord(Msgs[0].Role));
       AssertTrue('wrapped', Pos('<ambient ', Msgs[0].Content) = 1);
-      AssertTrue('carries child id', Pos('session="child-xyz"',
+      AssertTrue('message element', Pos('<message source="delegate_task"',
+        Msgs[0].Content) > 0);
+      AssertTrue('carries id', Pos('id="child-xyz"', Msgs[0].Content) > 0);
+      AssertTrue('carries label', Pos('label="research"',
         Msgs[0].Content) > 0);
       AssertTrue('carries the text', Pos('the result text',
         Msgs[0].Content) > 0);
-      AssertTrue('carries instructions', Pos('ambient notification',
+      AssertTrue('carries instructions', Pos('<instructions>',
         Msgs[0].Content) > 0);
     finally
       Conv.Free;
@@ -673,12 +680,15 @@ procedure TSessionTest.TestFormatAmbientEscapes;
 var
   S: string;
 begin
-  S := FormatAmbient('a < b & c > d', 'child-1', 0);
+  S := FormatAmbient('a < b & c > d', 'child-1', 'lbl', 'delegate_task', 0);
   AssertTrue('escaped lt', Pos('a &lt; b', S) > 0);
   AssertTrue('escaped amp', Pos('&amp;', S) > 0);
   AssertTrue('escaped gt', Pos('c &gt; d', S) > 0);
-  AssertTrue('session attr', Pos('session="child-1"', S) > 0);
+  AssertTrue('id attr', Pos('id="child-1"', S) > 0);
+  AssertTrue('label attr', Pos('label="lbl"', S) > 0);
+  AssertTrue('source attr', Pos('source="delegate_task"', S) > 0);
   AssertTrue('timestamp attr', Pos('timestamp="', S) > 0);
+  AssertTrue('instructions block', Pos('<instructions>', S) > 0);
 end;
 
 initialization

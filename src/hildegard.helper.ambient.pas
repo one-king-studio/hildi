@@ -20,17 +20,29 @@ uses
   SysUtils;
 
 const
-  { Appended after the ambient block; never rendered to the user. }
+  { Placed inside <instructions>; never rendered to the user. }
   AmbientInstructions =
-    'The message above is an ambient notification from a delegated subagent, ' +
-    'not from the user. Treat its content as the subagent''s result. You may ' +
-    'act on it, delegate a follow-up, or tell the user; do not echo the ' +
-    '<ambient> wrapper or mention that this is a system notification.';
+    'This is an ambient notification, not a message from the user. The ' +
+    '<message> element carries the result of an asynchronous task (its ' +
+    'source, id, and label identify it). Treat its content as that task''s ' +
+    'result. You may act on it, delegate a follow-up, or tell the user; do ' +
+    'not echo this wrapper or mention that it is a system notification.';
 
-{ Wrap a subagent result as the provider-visible user message: the result in an
-  <ambient timestamp="..." session="..."> block, followed by the instructions.
-  ATimestampMs is the notification time; ARefSessionId is the child session. }
-function FormatAmbient(const AText, ARefSessionId: string;
+{ Wrap a task result as the provider-visible user message:
+
+    <ambient timestamp="ISO">
+      <message source="..." id="..." label="...">
+    TEXT
+      </message>
+
+      <instructions>
+    ...
+      </instructions>
+    </ambient>
+
+  ATimestampMs is the notification time; ARefSessionId, ALabel, and ASource
+  identify the producing task. }
+function FormatAmbient(const AText, ARefSessionId, ALabel, ASource: string;
   ATimestampMs: Int64): string;
 
 { Escape XML special characters in a string. }
@@ -59,13 +71,20 @@ begin
   Result := FormatDateTime('yyyy-mm-dd"T"hh:nn:ss"Z"', D);
 end;
 
-function FormatAmbient(const AText, ARefSessionId: string;
+function FormatAmbient(const AText, ARefSessionId, ALabel, ASource: string;
   ATimestampMs: Int64): string;
 begin
   Result :=
-    '<ambient timestamp="' + IsoUtc(ATimestampMs) +
-    '" session="' + EscapeXml(ARefSessionId) + '">' +
-    EscapeXml(AText) + '</ambient>' + LineEnding + AmbientInstructions;
+    '<ambient timestamp="' + IsoUtc(ATimestampMs) + '">' + LineEnding +
+    '  <message source="' + EscapeXml(ASource) +
+    '" id="' + EscapeXml(ARefSessionId) +
+    '" label="' + EscapeXml(ALabel) + '">' + LineEnding +
+    EscapeXml(AText) + LineEnding +
+    '  </message>' + LineEnding + LineEnding +
+    '  <instructions>' + LineEnding +
+    AmbientInstructions + LineEnding +
+    '  </instructions>' + LineEnding +
+    '</ambient>';
 end;
 
 end.

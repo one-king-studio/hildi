@@ -54,11 +54,11 @@ type
       ADurationMs is the wall time the reasoning streamed (0 when unknown). }
     procedure AppendReasoning(const AText: string; ADurationMs: Int64);
     procedure AppendError(const AMessage, ADetail: string);
-    { An ambient (subagent result) notification. Delivered to the provider as a
-      user message wrapped by hildegard.helper.ambient; persisted as its own
-      kind (mrAmbient) with the child session and elapsed. }
-    procedure AppendAmbient(const AText, ARefSessionId: string;
-      AElapsedMs: Int64);
+    { An ambient (async task result) notification. Delivered to the provider as
+      a user message wrapped by hildegard.helper.ambient; persisted as its own
+      kind (mrAmbient) with the task's id, label, source, and elapsed. }
+    procedure AppendAmbient(const AText, ARefSessionId, ALabel,
+      ASource: string; AElapsedMs: Int64);
     { Turn/request audit. BeginTurn opens a loop; the user prompt is appended
       separately, linked to the open turn. Ids are 0 when not persisted. }
     function BeginTurn: Int64;
@@ -81,8 +81,8 @@ type
     procedure Clear;
     procedure AppendReasoning(const AText: string; ADurationMs: Int64);
     procedure AppendError(const AMessage, ADetail: string);
-    procedure AppendAmbient(const AText, ARefSessionId: string;
-      AElapsedMs: Int64);
+    procedure AppendAmbient(const AText, ARefSessionId, ALabel,
+      ASource: string; AElapsedMs: Int64);
     function BeginTurn: Int64;
     function BeginRequest(ATurnId: Int64; const AModel: string;
       AMessageCount: Integer): Int64;
@@ -134,9 +134,9 @@ type
     AOk: Boolean) of object;
   { A queued prompt was injected into the running loop. }
   TUserQueuedEvent = procedure(const AText: string) of object;
-  { An ambient (subagent result) notification was injected into the running
-    loop. ARefSessionId is the child session it came from. }
-  TAmbientEvent = procedure(const AText, ARefSessionId: string;
+  { An ambient (async task result) notification was injected into the running
+    loop. ARefSessionId, ALabel, and ASource identify the producing task. }
+  TAmbientEvent = procedure(const AText, ARefSessionId, ALabel, ASource: string;
     AElapsedMs: Int64) of object;
   { The reasoning phase of a response ended; ADurationMs is how long it
     streamed. Fired just before the first content delta, so the UI can settle a
@@ -162,7 +162,9 @@ type
   TPromptItem = record
     Kind: TPromptKind;
     Text: string;
-    RefSessionId: string;   // pkAmbient: the child session
+    RefSessionId: string;   // pkAmbient: the task id
+    LabelText: string;      // pkAmbient: the task's human label
+    Source: string;         // pkAmbient: the producing tool
     ElapsedMs: Int64;       // pkAmbient: the task duration
   end;
 
@@ -178,9 +180,9 @@ type
     constructor Create;
     destructor Destroy; override;
     procedure Push(const AText: string);
-    { Queue an ambient (subagent result) notification. }
-    procedure PushAmbient(const AText, ARefSessionId: string;
-      AElapsedMs: Int64);
+    { Queue an ambient (async task result) notification. }
+    procedure PushAmbient(const AText, ARefSessionId, ALabel,
+      ASource: string; AElapsedMs: Int64);
     { Remove and return every queued item, in order. }
     function DrainItems: TPromptItemArray;
     { The queued operator prompts only, in order (ambients excluded). }
@@ -598,8 +600,8 @@ begin
   // in-memory: display blocks are not kept
 end;
 
-procedure TMemoryConversationStore.AppendAmbient(const AText,
-  ARefSessionId: string; AElapsedMs: Int64);
+procedure TMemoryConversationStore.AppendAmbient(const AText, ARefSessionId,
+  ALabel, ASource: string; AElapsedMs: Int64);
 var
   Msg: TChatMessage;
 begin
@@ -607,7 +609,8 @@ begin
     sees the result. The dedicated ambient record is store-only. }
   Msg := Default(TChatMessage);
   Msg.Role := crUser;
-  Msg.Content := FormatAmbient(AText, ARefSessionId, AElapsedMs);
+  Msg.Content := FormatAmbient(AText, ARefSessionId, ALabel, ASource,
+    AElapsedMs);
   Append(Msg);
 end;
 
@@ -673,8 +676,8 @@ begin
   end;
 end;
 
-procedure TPromptQueue.PushAmbient(const AText, ARefSessionId: string;
-  AElapsedMs: Int64);
+procedure TPromptQueue.PushAmbient(const AText, ARefSessionId, ALabel,
+  ASource: string; AElapsedMs: Int64);
 var
   Item: TPromptItem;
 begin
@@ -684,6 +687,8 @@ begin
   Item.Kind := pkAmbient;
   Item.Text := AText;
   Item.RefSessionId := ARefSessionId;
+  Item.LabelText := ALabel;
+  Item.Source := ASource;
   Item.ElapsedMs := AElapsedMs;
   FLock.Acquire;
   try
@@ -1157,10 +1162,10 @@ begin
     if Items[I].Kind = pkAmbient then
     begin
       FStore.AppendAmbient(Items[I].Text, Items[I].RefSessionId,
-        Items[I].ElapsedMs);
+        Items[I].LabelText, Items[I].Source, Items[I].ElapsedMs);
       if Assigned(AEvents.OnAmbient) then
         AEvents.OnAmbient(Items[I].Text, Items[I].RefSessionId,
-          Items[I].ElapsedMs);
+          Items[I].LabelText, Items[I].Source, Items[I].ElapsedMs);
     end
     else
     begin

@@ -340,7 +340,7 @@ begin
   Tool := MakeTool(svDelegate);
   try
     AssertFalse('delegate failure surfaces',
-      Tool.Run(Args(['task', 't', 'context', 'c', 'reason', 'r']), Res, Err));
+      Tool.Run(Args(['task', 't', 'context', 'c', 'label', 'l', 'reason', 'r']), Res, Err));
     AssertTrue('carries the service error', Pos('capacity', Err) > 0);
   finally
     Tool.Free;
@@ -373,7 +373,7 @@ begin
   Tool := MakeTool(svDelegate);
   try
     AssertFalse('denied fails',
-      Tool.Run(Args(['task', 't', 'context', 'c', 'reason', 'r']), Res, Err));
+      Tool.Run(Args(['task', 't', 'context', 'c', 'label', 'l', 'reason', 'r']), Res, Err));
     AssertEquals('one approval call', 1, FApproval.Calls);
     AssertTrue('mentions denial', Pos('denied', Err) > 0);
   finally
