@@ -26,10 +26,9 @@ type
     procedure SetUp; override;
   published
     procedure TestNeededHeightGrowsWithWrappedText;
-    procedure TestShiftEnterSubmitsAndClears;
-    procedure TestCtrlEnterSubmits;
-    procedure TestCmdEnterSubmits;
-    procedure TestEnterAddsALine;
+    procedure TestEnterSubmitsAndClears;
+    procedure TestShiftEnterAddsALine;
+    procedure TestAltEnterAddsALine;
     procedure TestEmptySubmitIsIgnored;
     procedure TestPasteInsertsLiterallyWithoutSubmit;
     procedure TestCtaShowsSendAndCancel;
@@ -95,7 +94,7 @@ begin
   end;
 end;
 
-procedure TTuiComposeTest.TestShiftEnterSubmitsAndClears;
+procedure TTuiComposeTest.TestEnterSubmitsAndClears;
 var
   C: TComposeBox;
   I: Integer;
@@ -106,7 +105,7 @@ begin
     C.Arrange(Rc(0, 0, 30, 5));
     for I := 1 to 3 do
       C.HandleEvent(Ch('abc'[I]));
-    AssertTrue('shift+enter handled', C.HandleEvent(Key(kkEnter, [moShift])));
+    AssertTrue('enter handled', C.HandleEvent(Key(kkEnter)));
     AssertEquals('submitted once', 1, FSubmits);
     AssertEquals('submitted the text', 'abc', FSubmitted);
     AssertEquals('box cleared', '', string(C.Text));
@@ -115,41 +114,7 @@ begin
   end;
 end;
 
-procedure TTuiComposeTest.TestCtrlEnterSubmits;
-var
-  C: TComposeBox;
-begin
-  C := TComposeBox.Create(FTheme, 'info');
-  try
-    C.OnSubmit := OnSubmit;
-    C.Arrange(Rc(0, 0, 30, 5));
-    C.HandleEvent(Ch('a'));
-    AssertTrue('ctrl+enter handled', C.HandleEvent(Key(kkEnter, [moCtrl])));
-    AssertEquals('submitted once', 1, FSubmits);
-    AssertEquals('submitted the text', 'a', FSubmitted);
-  finally
-    C.Free;
-  end;
-end;
-
-procedure TTuiComposeTest.TestCmdEnterSubmits;
-var
-  C: TComposeBox;
-begin
-  C := TComposeBox.Create(FTheme, 'info');
-  try
-    C.OnSubmit := OnSubmit;
-    C.Arrange(Rc(0, 0, 30, 5));
-    C.HandleEvent(Ch('a'));
-    AssertTrue('cmd+enter handled', C.HandleEvent(Key(kkEnter, [moSuper])));
-    AssertEquals('submitted once', 1, FSubmits);
-    AssertEquals('submitted the text', 'a', FSubmitted);
-  finally
-    C.Free;
-  end;
-end;
-
-procedure TTuiComposeTest.TestEnterAddsALine;
+procedure TTuiComposeTest.TestShiftEnterAddsALine;
 var
   C: TComposeBox;
   I: Integer;
@@ -160,9 +125,26 @@ begin
     C.Arrange(Rc(0, 0, 30, 5));
     for I := 1 to 2 do
       C.HandleEvent(Ch('ab'[I]));
-    AssertTrue('enter handled', C.HandleEvent(Key(kkEnter)));
+    AssertTrue('shift+enter handled', C.HandleEvent(Key(kkEnter, [moShift])));
     AssertEquals('not submitted', 0, FSubmits);
     AssertEquals('a line was added', 'ab' + #10, string(C.Text));
+  finally
+    C.Free;
+  end;
+end;
+
+procedure TTuiComposeTest.TestAltEnterAddsALine;
+var
+  C: TComposeBox;
+begin
+  C := TComposeBox.Create(FTheme, 'info');
+  try
+    C.OnSubmit := OnSubmit;
+    C.Arrange(Rc(0, 0, 30, 5));
+    C.HandleEvent(Ch('a'));
+    AssertTrue('alt+enter handled', C.HandleEvent(Key(kkEnter, [moAlt])));
+    AssertEquals('not submitted', 0, FSubmits);
+    AssertEquals('a line was added', 'a' + #10, string(C.Text));
   finally
     C.Free;
   end;
@@ -177,7 +159,7 @@ begin
     C.OnSubmit := OnSubmit;
     C.Arrange(Rc(0, 0, 30, 5));
     C.HandleEvent(Ch(' '));
-    C.HandleEvent(Key(kkEnter, [moShift]));
+    C.HandleEvent(Key(kkEnter));
     AssertEquals('whitespace-only is not submitted', 0, FSubmits);
   finally
     C.Free;

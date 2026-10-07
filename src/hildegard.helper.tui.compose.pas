@@ -2,9 +2,9 @@ unit hildegard.helper.tui.compose;
 { The chat input box: a raised, heavy-topped panel wrapping a TTextEdit, so the
   caret, wrapping, word motion and selection come from the editor.
 
-  Cmd+Enter or Shift+Enter submits (Ctrl+Enter too, where the terminal reports
-  neither); a plain Enter adds a line, so a multi-line paste is safe. The info
-  line carries a primary-action CTA at the right, opposite the label. }
+  A plain Enter sends; Shift+Enter or Option/Alt+Enter adds a newline (the
+  terminals on macOS do not forward Cmd+Enter). The info line carries the
+  newline hint and the primary-action CTA at the right, opposite the label. }
 
 {$mode delphi}{$H+}{$codepage utf8}
 
@@ -18,13 +18,8 @@ uses
   hildegard.helper.tui.grapheme, hildegard.helper.tui.theme;
 
 const
-  { The advertised submit key. Cmd is macOS-only (and even there it needs a
-    terminal keybinding to be forwarded); elsewhere Ctrl is the reliable one. }
-{$IFDEF DARWIN}
-  SendCtaKey = '⌘+enter';
-{$ELSE}
-  SendCtaKey = 'ctrl+enter';
-{$ENDIF}
+  { The advertised send key: a plain Enter. }
+  SendCtaKey = 'enter';
 
 type
   TComposeSubmittedEvent = procedure(const AText: string) of object;
@@ -214,17 +209,19 @@ begin
     where the terminal reports neither. A plain Enter adds a line. }
   if E.Key.Kind = kkEnter then
   begin
-    if (moSuper in E.Key.Mods) or (moShift in E.Key.Mods) or
-      (moCtrl in E.Key.Mods) then
+    { Shift+Enter or Option/Alt+Enter inserts a newline; a plain Enter sends
+      (the macOS terminals do not forward Cmd+Enter). }
+    if (moShift in E.Key.Mods) or (moAlt in E.Key.Mods) then
     begin
-      if Assigned(FOnSubmit) and (Trim(string(FEdit.Text)) <> '') then
-      begin
-        FOnSubmit(string(FEdit.Text));
-        FEdit.Clear;
-      end;
+      FEdit.HandleEvent(E);
       Exit(True);
     end;
-    Exit(FEdit.HandleEvent(E));
+    if Assigned(FOnSubmit) and (Trim(string(FEdit.Text)) <> '') then
+    begin
+      FOnSubmit(string(FEdit.Text));
+      FEdit.Clear;
+    end;
+    Exit(True);
   end;
   Result := FEdit.HandleEvent(E);
 end;

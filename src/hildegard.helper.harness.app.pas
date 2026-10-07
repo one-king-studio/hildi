@@ -178,7 +178,7 @@ const
   { The interaction hints live in the CTA strip, which acts as a context
     toolbar; the status bar is reserved for the workspace and the metrics. }
   { The toolbar hints, right-aligned above the composer. }
-  CtaHints = 'ctrl+b subagents';
+  CtaHints = 'shift+enter newline · ctrl+b subagents';
   { How long the first Escape stays armed before the interrupt prompt expires. }
   InterruptWindowMs = 2000;
 

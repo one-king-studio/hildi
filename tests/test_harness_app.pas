@@ -254,14 +254,11 @@ end;
 procedure THarnessAppTest.SubmitPrompt(const AText: string);
 var
   I: Integer;
-  E: TInputEvent;
 begin
   for I := 1 to Length(AText) do
     FInput.Push(Ch(AText[I]));
-  { Shift+Enter submits now; a plain Enter adds a line. }
-  E := Key(kkEnter);
-  E.Key.Mods := [moShift];
-  FInput.Push(E);
+  { A plain Enter sends; Shift+Enter adds a newline. }
+  FInput.Push(Key(kkEnter));
 end;
 
 function THarnessAppTest.Pump(AMax: Integer): Boolean;
@@ -986,7 +983,8 @@ procedure THarnessAppTest.TestCtaHintsAreBlank;
 begin
   Build;
   { The toolbar carries the subagent toggle hint. }
-  AssertEquals('hints', 'ctrl+b subagents', FApp.HintsText);
+  AssertEquals('hints', 'shift+enter newline · ctrl+b subagents',
+    FApp.HintsText);
   AssertFalse('hints are not in the status bar',
     Pos('newline', FApp.StatusText) > 0);
 end;

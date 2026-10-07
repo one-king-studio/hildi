@@ -751,7 +751,6 @@ begin
             E := Default(TInputEvent);
             E.Kind := ikKey;
             E.Key.Kind := kkEnter;
-            E.Key.Mods := [moShift];
             Input.Push(E);
 
             Deadline := GetTickCount64 + 6000;
@@ -861,7 +860,6 @@ begin
             E := Default(TInputEvent);
             E.Kind := ikKey;
             E.Key.Kind := kkEnter;
-            E.Key.Mods := [moShift];
             Input.Push(E);
 
             Deadline := GetTickCount64 + 6000;
