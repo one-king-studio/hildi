@@ -59,6 +59,8 @@ type
     procedure TestStoreSaveLoadRemoveRoundTrip;
     procedure TestStoreSuppressesDuplicates;
     procedure TestStoreFiltersByContext;
+    procedure TestChildResolvesAgainstRootScope;
+    procedure TestGrantForOneChildAppliesToSibling;
   protected
     procedure SetUp; override;
     procedure TearDown; override;
@@ -535,6 +537,79 @@ begin
     AssertEquals('global + ws8', 2, Length(Rules));
   finally
     Store.Free;
+  end;
+end;
+
+procedure TApprovalTest.TestChildResolvesAgainstRootScope;
+var
+  Store: IApprovalStore;
+  Prompt: TFakePrompt;
+  Svc: IApprovalService;
+  Asks: TApprovalAskArray;
+  Result_: TApprovalBatchResult;
+  Err: string;
+  Ctx: TApprovalContext;
+begin
+  { A grant made under the lineage root's session scope. }
+  Store := TMemoryApprovalStore.Create;
+  Store.Save(Rule(aeAllow, asSession, 0, 'root-session', 'run_command:ls',
+    [], True), Err);
+  Prompt := TFakePrompt.Create;
+  try
+    Prompt.Allowed := True;
+    { The child resolves with the ROOT session id as its context, so the grant
+      is in force for the child. }
+    Ctx := Default(TApprovalContext);
+    Ctx.WorkspaceId := 0;
+    Ctx.SessionId := 'root-session';
+    Svc := TApprovalService.Create(Store, Prompt.Prompt, Ctx);
+    SetLength(Asks, 1);
+    Asks[0] := Ask('run_command:ls', 'ls', [],
+      [Option('once', 'once', False, 'run_command:ls', [], False)]);
+    AssertTrue('resolved', Svc.Resolve(Asks, Result_));
+    AssertTrue('allowed from the root grant', Result_.Allowed);
+    AssertEquals('no prompt needed', 0, Prompt.Calls);
+  finally
+    Prompt.Free;
+  end;
+end;
+
+procedure TApprovalTest.TestGrantForOneChildAppliesToSibling;
+var
+  Store: IApprovalStore;
+  Prompt: TFakePrompt;
+  SvcA, SvcB: IApprovalService;
+  Asks: TApprovalAskArray;
+  Result_: TApprovalBatchResult;
+  Ctx: TApprovalContext;
+begin
+  { A grant made while resolving for child A is stored at the root session
+    scope, so a sibling child B (same root context) is allowed without a new
+    prompt. }
+  Store := TMemoryApprovalStore.Create;
+  Prompt := TFakePrompt.Create;
+  try
+    Prompt.Allowed := True;
+    Prompt.OptionKey := 'exact';
+    Prompt.Scope := asSession;
+    Ctx := Default(TApprovalContext);
+    Ctx.SessionId := 'root-session';
+    SvcA := TApprovalService.Create(Store, Prompt.Prompt, Ctx);
+    SetLength(Asks, 1);
+    Asks[0] := Ask('run_command:git', 'git status', [],
+      [Option('exact', 'always this exact command', True, 'run_command:git',
+        [], False)]);
+    AssertTrue('child A resolved', SvcA.Resolve(Asks, Result_));
+    AssertTrue('child A allowed', Result_.Allowed);
+    AssertEquals('child A prompted once', 1, Prompt.Calls);
+
+    { Sibling B, same lineage context: no new prompt. }
+    SvcB := TApprovalService.Create(Store, Prompt.Prompt, Ctx);
+    AssertTrue('child B resolved', SvcB.Resolve(Asks, Result_));
+    AssertTrue('child B allowed from the shared grant', Result_.Allowed);
+    AssertEquals('no extra prompt for the sibling', 1, Prompt.Calls);
+  finally
+    Prompt.Free;
   end;
 end;
 

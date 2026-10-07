@@ -34,6 +34,9 @@ type
     SpawnTimeoutMs: Integer;    // 0 => default
     RuntimeCommand: string;     // the executable used to spawn a runtime
     IdleExitMs: Integer;        // passed to a spawned runtime; 0 => default
+    { The lineage root whose approval scope the spawned session resolves against
+      (a subagent's parent). '' => the session's own id. }
+    ApprovalRootSessionId: string;
   end;
 
   TSessionClient = class;
@@ -98,7 +101,7 @@ implementation
 
 {$ifdef unix}
 function SpawnDetached(const ACommand, ASessionId, AWorkspace,
-  AStore, ALogPath: string; AIdleExitMs: Integer): Boolean;
+  AStore, ALogPath, AApprovalRoot: string; AIdleExitMs: Integer): Boolean;
 var
   P: TProcess;
   Inner, Script: string;
@@ -107,6 +110,8 @@ begin
   Inner := ShellQuote(ACommand) + ' --session-runtime ' +
     ShellQuote(ASessionId) + ' --workspace ' + ShellQuote(AWorkspace) +
     ' --store ' + ShellQuote(AStore);
+  if AApprovalRoot <> '' then
+    Inner := Inner + ' --approval-root ' + ShellQuote(AApprovalRoot);
   if AIdleExitMs > 0 then
     Inner := Inner + ' --idle-ms ' + IntToStr(AIdleExitMs);
   { ponytail: nohup + sh is the portable detach idiom on macOS and Linux.
@@ -258,7 +263,8 @@ begin
         ForceDirectories(RuntimeDir);
         if not SpawnDetached(AConfig.RuntimeCommand, AConfig.SessionId,
           AConfig.WorkspacePath, AConfig.StorePath,
-          RuntimeDir + AConfig.SessionId + '.log', AConfig.IdleExitMs) then
+          RuntimeDir + AConfig.SessionId + '.log',
+          AConfig.ApprovalRootSessionId, AConfig.IdleExitMs) then
         begin
           AError := 'could not spawn a runtime';
           Client.Free;

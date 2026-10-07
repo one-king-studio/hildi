@@ -83,15 +83,19 @@ registered in `tests/hildegard_helper_tests.pas` (integrator-owned).
 
 ## Phase 6 — Approvals: lineage-wide scope
 
-- [ ] **Test** (`tests/test_approval.pas`): `TestChildResolvesAgainstRootScope`
+- [x] **Test** (`tests/test_approval.pas`): `TestChildResolvesAgainstRootScope`
       (a grant under the root allows the child), `TestGrantForOneChildAppliesToSibling`.
-- [ ] **Implement**: `THarnessSessionConfig.ApprovalRootSessionId`; the approval
+- [x] **Implement**: `THarnessSessionConfig.ApprovalRootSessionId`; the approval
       context `SessionId` set to the root; thread it through
-      `THarnessSession`/`TSessionView`.
+      `THarnessSession`/`TSessionView`/`TSessionRuntimeConfig`/
+      `TSessionClientConfig` and the runtime `--approval-root` arg; the
+      supervisor sets a child's root to its parent.
   - Files: `src/hildegard.helper.harness.session.pas`,
     `src/hildegard.helper.harness.view.pas`,
-    `src/hildegard.helper.approval.pas` (if a helper is needed).
-- [ ] **Check**: `make test SUITE=TApprovalTest`.
+    `src/hildegard.helper.session.runtime.pas`,
+    `src/hildegard.helper.session.client.pas`,
+    `src/hildegard.helper.subagent.supervisor.pas`.
+- [x] **Check**: `make test SUITE=TApprovalTest`.
 
 ## Phase 7 — Protocol additions
 

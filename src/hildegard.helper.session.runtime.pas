@@ -40,6 +40,9 @@ type
     ClientExitGraceMs: Integer;
     Model: string;              // '' => resolved from env/.env
     Endpoint: string;
+    { The lineage root whose approval scope this session resolves against (a
+      subagent sets this to its parent). '' => the session's own id. }
+    ApprovalRootSessionId: string;
     Transport: TLLMTransport;   // test seam
   end;
 
@@ -214,6 +217,7 @@ begin
     HConfig.SessionId := AConfig.SessionId;
     HConfig.Model := AConfig.Model;
     HConfig.Endpoint := AConfig.Endpoint;
+    HConfig.ApprovalRootSessionId := AConfig.ApprovalRootSessionId;
     HConfig.Transport := AConfig.Transport;
     Runtime.FSession := THarnessSession.Open(HConfig, AError);
     if Runtime.FSession = nil then
@@ -1136,7 +1140,7 @@ end;
 function RunSessionRuntime(const AArgs: array of string): Integer;
 var
   I: Integer;
-  SessionId, Workspace, Store, Model, Endpoint: string;
+  SessionId, Workspace, Store, Model, Endpoint, ApprovalRoot: string;
   IdleMs: Integer;
   Cfg: TSessionRuntimeConfig;
   Runtime: TSessionRuntime;
@@ -1147,6 +1151,7 @@ begin
   Store := '';
   Model := '';
   Endpoint := '';
+  ApprovalRoot := '';
   IdleMs := 0;
   I := 0;
   while I <= High(AArgs) do
@@ -1186,6 +1191,12 @@ begin
       Inc(I);
       if I <= High(AArgs) then
         IdleMs := StrToIntDef(AArgs[I], 0);
+    end
+    else if AArgs[I] = '--approval-root' then
+    begin
+      Inc(I);
+      if I <= High(AArgs) then
+        ApprovalRoot := AArgs[I];
     end;
     Inc(I);
   end;
@@ -1197,6 +1208,7 @@ begin
   Cfg.Model := Model;
   Cfg.Endpoint := Endpoint;
   Cfg.IdleExitMs := IdleMs;
+  Cfg.ApprovalRootSessionId := ApprovalRoot;
   if Cfg.IdleExitMs <= 0 then
     Cfg.IdleExitMs := StrToIntDef(
       GetEnvironmentVariable('HILDEGARD_RUNTIME_IDLE_MS'), 0);

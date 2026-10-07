@@ -201,7 +201,12 @@ begin
   FGate := TApprovalGate.Create(FQueue);
 
   ApprovalCtx.WorkspaceId := FView.WorkspaceId;
-  ApprovalCtx.SessionId := FView.SessionId;
+  { A subagent resolves approvals against its lineage root, so the whole
+    lineage shares one session scope. }
+  if AConfig.ApprovalRootSessionId <> '' then
+    ApprovalCtx.SessionId := AConfig.ApprovalRootSessionId
+  else
+    ApprovalCtx.SessionId := FView.SessionId;
   ApprovalService := TApprovalService.Create(ApprovalStore, FGate.Prompt,
     ApprovalCtx);
   ToolConfig := Default(TCommandToolConfig);

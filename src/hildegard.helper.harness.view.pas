@@ -29,6 +29,11 @@ type
     MaxContextTokens: Integer;
     { Loop-only: the system prompt override. The view ignores it. }
     SystemPrompt: string;
+    { The session whose approval scope this session resolves against. A subagent
+      sets this to its lineage root (the parent), so approvals are lineage-wide:
+      a grant made for one child is in force for the parent and every sibling.
+      '' => the session's own id. }
+    ApprovalRootSessionId: string;
     { Loop-only test seam: when set, the loop's client uses this transport. }
     Transport: TLLMTransport;
   end;

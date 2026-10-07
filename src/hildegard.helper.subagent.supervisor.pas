@@ -397,6 +397,9 @@ begin
   Result.Spawn := True;
   Result.RuntimeCommand := FConfig.RuntimeCommand;
   Result.IdleExitMs := FConfig.IdleExitMs;
+  { The child resolves approvals against the parent (the lineage root), so a
+    grant is in force across the whole lineage. }
+  Result.ApprovalRootSessionId := FConfig.ParentSessionId;
   AError := '';
 end;
 
