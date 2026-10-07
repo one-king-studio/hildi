@@ -80,6 +80,8 @@ type
     procedure TestOAuthTokenRoundTrip;
     procedure TestOAuthTokenMissing;
     procedure TestClearOAuthToken;
+    procedure TestFinalizeRunningTurns;
+    procedure TestBeginTurnSelfHeals;
   end;
 
 implementation
@@ -1540,6 +1542,65 @@ begin
     AssertTrue('save', S.SaveOAuthToken(R, Err));
     AssertTrue('clear', S.ClearOAuthToken(msGlobal, 0, 'meta', Err));
     AssertFalse('gone', S.LoadOAuthToken(msGlobal, 0, 'meta', Got, Err));
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestFinalizeRunningTurns;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws: Integer;
+  Sid: string;
+  TurnId: Int64;
+  Count: Integer;
+  Turns: TTurnRecordArray;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, Sid, Err);
+    { A running turn, and a completed one that must be left alone. }
+    S.BeginTurn(Sid, TurnId, Err);
+    S.FinishTurn(TurnId, tsCompleted, 'stop', 0, '', '', Err);
+    S.BeginTurn(Sid, TurnId, Err);   { this one stays running }
+    AssertTrue('finalize', S.FinalizeRunningTurns(Sid, 'recovered_on_start',
+      Count, Err));
+    AssertEquals('one finalized', 1, Count);
+    { Idempotent: a second call finalizes nothing. }
+    AssertTrue('finalize again', S.FinalizeRunningTurns(Sid, 'recovered', Count,
+      Err));
+    AssertEquals('none the second time', 0, Count);
+    { The completed turn is untouched; no running turn remains. }
+    AssertTrue('query', S.QueryTurns(Sid, Turns, Err));
+    AssertEquals('two turns', 2, Length(Turns));
+    AssertEquals('first still completed', Ord(tsCompleted), Ord(Turns[0].Status));
+    AssertEquals('second cancelled', Ord(tsCancelled), Ord(Turns[1].Status));
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestBeginTurnSelfHeals;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws: Integer;
+  Sid: string;
+  T1, T2: Int64;
+  Turns: TTurnRecordArray;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, Sid, Err);
+    S.BeginTurn(Sid, T1, Err);       { left running }
+    S.BeginTurn(Sid, T2, Err);       { opening this finalizes T1 }
+    AssertTrue('query', S.QueryTurns(Sid, Turns, Err));
+    AssertEquals('two turns', 2, Length(Turns));
+    AssertEquals('prior self-healed', Ord(tsCancelled), Ord(Turns[0].Status));
+    AssertEquals('new one running', Ord(tsRunning), Ord(Turns[1].Status));
   finally
     S.Free;
   end;

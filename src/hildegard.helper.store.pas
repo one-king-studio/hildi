@@ -73,6 +73,9 @@ type
     function ApplyMigrations(out AError: TStoreError): Boolean;
     function ReadUserVersion(out AVersion: Integer;
       out AError: TStoreError): Boolean;
+    { Finalize running turns; assumes FLock is held. }
+    function FinalizeRunningTurnsLocked(const ASessionId, AReason: string;
+      out ACount: Integer; out AError: TStoreError): Boolean;
     function DbErrorText: string;
   public
     constructor Create(const AConfig: TStoreConfig); overload;
@@ -162,9 +165,15 @@ type
     function MostRecentSessionId(AWorkspaceId: Integer; out AId: string;
       out AError: TStoreError): Boolean;
 
-    { Opens a turn (loop) for a session, assigning its per-session sequence. }
+    { Opens a turn (loop) for a session, assigning its per-session sequence.
+      Any prior tsRunning turn for the session is finalized (tsCancelled,
+      'superseded') first, so a turn can never be orphaned. }
     function BeginTurn(const ASessionId: string; out ATurnId: Int64;
       out AError: TStoreError): Boolean;
+    { Finalize every tsRunning turn for a session (tsCancelled, AReason),
+      rolling up counts. Returns how many were finalized. Idempotent. }
+    function FinalizeRunningTurns(const ASessionId, AReason: string;
+      out ACount: Integer; out AError: TStoreError): Boolean;
     { Closes a turn and rolls its requests' metrics up onto it. }
     function FinishTurn(ATurnId: Int64; AStatus: TTurnStatus;
       const AFinishReason: string; AErrorCode: Integer;
@@ -1797,10 +1806,75 @@ begin
   end;
 end;
 
+function TSqliteStore.FinalizeRunningTurns(const ASessionId, AReason: string;
+  out ACount: Integer; out AError: TStoreError): Boolean;
+begin
+  AError := OkError;
+  ACount := 0;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    if ASessionId = '' then
+      Exit(Fail(AError, seInvalidArgument, 'session id is required', ''));
+    Result := FinalizeRunningTurnsLocked(ASessionId, AReason, ACount, AError);
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.FinalizeRunningTurnsLocked(const ASessionId,
+  AReason: string; out ACount: Integer; out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  ACount := 0;
+  { Finalize every running turn for the session, rolling up counts. Only
+    tsRunning rows are touched, so this is idempotent. }
+  Stmt := TStmt.Create(FDb,
+    'UPDATE turns SET status = ?, finish_reason = ?, finished_at = ?, ' +
+    'duration_ms = ? - created_at, ' +
+    'request_count = (SELECT COUNT(*) FROM requests r ' +
+      'WHERE r.turn_id = turns.id), ' +
+    'message_count = (SELECT COUNT(*) FROM messages m ' +
+      'WHERE m.turn_id = turns.id), ' +
+    'prompt_tokens = (SELECT COALESCE(SUM(r.prompt_tokens), 0) ' +
+      'FROM requests r WHERE r.turn_id = turns.id), ' +
+    'completion_tokens = (SELECT COALESCE(SUM(r.completion_tokens), 0) ' +
+      'FROM requests r WHERE r.turn_id = turns.id), ' +
+    'total_tokens = (SELECT COALESCE(SUM(r.total_tokens), 0) ' +
+      'FROM requests r WHERE r.turn_id = turns.id), ' +
+    'cached_tokens = (SELECT COALESCE(SUM(r.cached_tokens), 0) ' +
+      'FROM requests r WHERE r.turn_id = turns.id), ' +
+    'reasoning_tokens = (SELECT COALESCE(SUM(r.reasoning_tokens), 0) ' +
+      'FROM requests r WHERE r.turn_id = turns.id) ' +
+    'WHERE session_id = ? AND status = ?');
+  try
+    if not Stmt.Valid then
+      Exit(Fail(AError, seError, 'could not finalize running turns',
+        DbErrorText));
+    Stmt.BindInt(1, Ord(tsCancelled));
+    Stmt.BindText(2, AReason);
+    Stmt.BindInt64(3, NowMs);
+    Stmt.BindInt64(4, NowMs);
+    Stmt.BindText(5, ASessionId);
+    Stmt.BindInt(6, Ord(tsRunning));
+    if Stmt.Step <> SQLITE_DONE then
+      Exit(Fail(AError, seError, 'could not finalize running turns',
+        DbErrorText));
+    ACount := sqlite3_changes(FDb);
+  finally
+    Stmt.Free;
+  end;
+  Result := True;
+end;
+
 function TSqliteStore.BeginTurn(const ASessionId: string; out ATurnId: Int64;
   out AError: TStoreError): Boolean;
 var
   Stmt: TStmt;
+  Ignored: Integer;
 begin
   AError := OkError;
   ATurnId := 0;
@@ -1817,6 +1891,11 @@ begin
       AError.Detail := ASessionId;
       Exit(False);
     end;
+    { Self-heal: never leave a prior turn running. Finalize any open turn for
+      this session before opening a new one. }
+    if not FinalizeRunningTurnsLocked(ASessionId, 'superseded', Ignored,
+      AError) then
+      Exit(False);
     Stmt := TStmt.Create(FDb,
       'INSERT INTO turns (session_id, seq, status, created_at) VALUES (' +
       '?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM turns WHERE session_id = ?), ' +

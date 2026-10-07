@@ -100,6 +100,8 @@ type
     function Bind: Boolean;
     function Hwm: Int64;
     procedure RegisterRow;
+    { Finalize any tsRunning turn for this session (a loop that is gone). }
+    procedure RecoverInterruptedTurns;
     procedure UnregisterRow;
     procedure EmitLoopStarted;
     function EmitEvent(AKind: TSessionEventKind): TSessionEvent;
@@ -349,6 +351,22 @@ begin
   Result := 0;
   if not FSession.View.Store.MessageHighWaterMark(FSessionId, Result, Err) then
     Result := 0;
+end;
+
+procedure TSessionRuntime.RecoverInterruptedTurns;
+var
+  Count: Integer;
+  Err: TStoreError;
+begin
+  { The socket is bound, so this process owns the session; any turn still
+    marked running belongs to a loop that is gone. Close them so the session
+    never resumes mid-turn. }
+  if (FSession = nil) or (FSession.View = nil) or (FSession.View.Store = nil) then
+    Exit;
+  if FSession.View.Store.FinalizeRunningTurns(FSessionId, 'recovered_on_start',
+    Count, Err) and (Count > 0) then
+    WriteLn(StdErr, 'session runtime: recovered ', Count,
+      ' interrupted turn(s)');
 end;
 
 procedure TSessionRuntime.RegisterRow;
@@ -1266,6 +1284,15 @@ var
   Deadline: Int64;
   Drained: Boolean;
 begin
+  { Cancel and finalize any in-flight turn before exiting, so a shutdown never
+    leaves a running turn behind. }
+  if FTurnActive and (FWorker <> nil) then
+  begin
+    FWorker.RequestCancel;
+    FWorker.WaitFor;
+  end;
+  DrainTurn;
+
   E := EmitEvent(ekLoopExited);
   if FExitReason <> '' then
     E.Reason := FExitReason
@@ -1329,6 +1356,7 @@ begin
   RegisterRow;
   EmitLoopStarted;
   InstallRuntimeSignals;
+  RecoverInterruptedTurns;
   try
     FIdleDeadline := NowMs + FIdleExitMs;
     FLastClientCount := 0;

@@ -99,6 +99,7 @@ type
     procedure TestSecondDriverGetsObserve;
     procedure TestClaimDriveNeedsConsent;
     procedure TestIdleExit;
+    procedure TestRecoversInterruptedTurn;
     procedure TestShutdownCommandStopsRuntime;
     procedure TestShutdownFromNonDriverRefused;
     procedure TestNoClientsExitAfterGrace;
@@ -866,6 +867,60 @@ begin
     WaitFinished(Th, 3000);
     Th.Free;
     DeleteSocket(Id);
+  end;
+end;
+
+procedure TSessionRuntimeTest.TestRecoversInterruptedTurn;
+var
+  Id: string;
+  Rt: TSessionRuntime;
+  Th: TRuntimeThread;
+  Store: TSqliteStore;
+  Cfg: TStoreConfig;
+  Err: TStoreError;
+  Ws: Integer;
+  TurnId: Int64;
+  Turns: TTurnRecordArray;
+begin
+  Id := NewSession;
+  { Leave an orphaned running turn in the store, as a crashed loop would. }
+  Cfg := Default(TStoreConfig);
+  Cfg.DatabasePath := FDbPath;
+  Cfg.BusyTimeoutMs := 5000;
+  Store := TSqliteStore.Create(Cfg);
+  try
+    AssertTrue('open', Store.Open(Err));
+    Store.EnsureWorkspace(FWs, Ws, Err);
+    { Bind the session id to this workspace so the runtime resumes it. }
+    Store.EnsureWorkspace(FWs, Ws, Err);
+    AssertTrue('begin turn', Store.BeginTurn(Id, TurnId, Err));
+  finally
+    Store.Free;
+  end;
+
+  { Opening the runtime on that session finalizes the orphaned turn. }
+  Rt := MakeRuntime(Id, nil, 300);
+  Th := TRuntimeThread.Create(Rt);
+  try
+    Th.Start;
+    AssertTrue('bound', WaitForSocket(Id, 5000));
+    AssertTrue('idle-exits', WaitFinished(Th, 5000));
+  finally
+    if not Th.Finished then
+      Rt.Stop;
+    WaitFinished(Th, 3000);
+    Th.Free;
+    DeleteSocket(Id);
+  end;
+
+  Store := TSqliteStore.Create(Cfg);
+  try
+    AssertTrue('reopen', Store.Open(Err));
+    AssertTrue('query', Store.QueryTurns(Id, Turns, Err));
+    AssertEquals('one turn', 1, Length(Turns));
+    AssertEquals('recovered to cancelled', Ord(tsCancelled), Ord(Turns[0].Status));
+  finally
+    Store.Free;
   end;
 end;
 

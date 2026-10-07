@@ -110,6 +110,11 @@ type
     procedure Cancel;
   end;
 
+const
+  { The default approval wait: past it an unanswered ask is denied and the loop
+    proceeds, so a disconnected driver never blocks the turn forever. }
+  DefaultApprovalTimeoutMs = 300000;
+
 implementation
 
 { TTurnQueue }

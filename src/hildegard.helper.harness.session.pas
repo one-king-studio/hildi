@@ -22,7 +22,6 @@ uses
   hildegard.helper.harness.view,
   hildegard.helper.mcp.config, hildegard.helper.mcp.client,
   hildegard.helper.mcp.transport, hildegard.helper.mcp.oauth.flow;
-
 type
   { The loop side of one session. Owns a TSessionView for the workspace, store,
     identity, history, and metrics. Not thread-safe except that Queue/Gate are
@@ -227,7 +226,9 @@ begin
   end;
 
   FQueue := TTurnQueue.Create;
-  FGate := TApprovalGate.Create(FQueue);
+  { Bound the approval wait: an approval no client answers within the timeout is
+    denied, so a disconnected driver never blocks the turn forever. }
+  FGate := TApprovalGate.Create(FQueue, DefaultApprovalTimeoutMs);
 
   ApprovalCtx.WorkspaceId := FView.WorkspaceId;
   { A subagent resolves approvals against its lineage root, so the whole
