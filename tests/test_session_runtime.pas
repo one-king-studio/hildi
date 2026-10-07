@@ -99,6 +99,9 @@ type
     procedure TestSecondDriverGetsObserve;
     procedure TestClaimDriveNeedsConsent;
     procedure TestIdleExit;
+    procedure TestShutdownCommandStopsRuntime;
+    procedure TestShutdownFromNonDriverRefused;
+    procedure TestNoClientsExitAfterGrace;
     procedure TestSlowObserverGetsGap;
   end;
 
@@ -854,6 +857,121 @@ begin
     Th.Start;
     AssertTrue('bound', WaitForSocket(Id, 5000));
     AssertTrue('runtime idle-exits', WaitFinished(Th, 5000));
+    AssertEquals('clean exit', 0, Th.ExitCode);
+  finally
+    if not Th.Finished then
+      Rt.Stop;
+    WaitFinished(Th, 3000);
+    Th.Free;
+    DeleteSocket(Id);
+  end;
+end;
+
+procedure TSessionRuntimeTest.TestShutdownCommandStopsRuntime;
+var
+  Id: string;
+  Rt: TSessionRuntime;
+  Th: TRuntimeThread;
+  Sink: TRecordingSink;
+  Client: TSessionClient;
+  Err: string;
+  Cmd: TSessionCommand;
+  Reply: TSessionMessage;
+begin
+  Id := NewSession;
+  Rt := MakeRuntime(Id, nil, 300000);
+  Th := TRuntimeThread.Create(Rt);
+  try
+    Th.Start;
+    AssertTrue('bound', WaitForSocket(Id, 5000));
+    Sink := TRecordingSink.Create;
+    Client := TSessionClient.Open(MakeClientConfig(Id, srDrive), Sink, Err);
+    AssertNotNull('driver attaches: ' + Err, Client);
+    try
+      Cmd := Default(TSessionCommand);
+      Cmd.Kind := scShutdown;
+      Cmd.Id := 'sd1';
+      AssertTrue('shutdown replied ok', Client.SendAndWait(Cmd, 3000, Reply));
+      AssertTrue('reply ok', Reply.Ok);
+      AssertTrue('runtime stopped', WaitFinished(Th, 5000));
+      AssertEquals('clean exit', 0, Th.ExitCode);
+    finally
+      Client.Free;
+      Sink := nil;
+    end;
+  finally
+    if not Th.Finished then
+      Rt.Stop;
+    WaitFinished(Th, 3000);
+    Th.Free;
+    DeleteSocket(Id);
+  end;
+end;
+
+procedure TSessionRuntimeTest.TestShutdownFromNonDriverRefused;
+var
+  Id: string;
+  Rt: TSessionRuntime;
+  Th: TRuntimeThread;
+  Sink: TRecordingSink;
+  Obs: TSessionClient;
+  Err: string;
+  Cmd: TSessionCommand;
+  Reply: TSessionMessage;
+begin
+  Id := NewSession;
+  Rt := MakeRuntime(Id, nil, 300000);
+  Th := TRuntimeThread.Create(Rt);
+  try
+    Th.Start;
+    AssertTrue('bound', WaitForSocket(Id, 5000));
+    Sink := TRecordingSink.Create;
+    { An observer (not the driver) may not shut the runtime down. }
+    Obs := TSessionClient.Open(MakeClientConfig(Id, srObserve), Sink, Err);
+    AssertNotNull('observer attaches: ' + Err, Obs);
+    try
+      Cmd := Default(TSessionCommand);
+      Cmd.Kind := scShutdown;
+      Cmd.Id := 'sd2';
+      AssertTrue('reply received', Obs.SendAndWait(Cmd, 3000, Reply));
+      AssertFalse('refused', Reply.Ok);
+      AssertFalse('runtime still up', Th.Finished);
+    finally
+      Obs.Free;
+      Sink := nil;
+    end;
+  finally
+    if not Th.Finished then
+      Rt.Stop;
+    WaitFinished(Th, 3000);
+    Th.Free;
+    DeleteSocket(Id);
+  end;
+end;
+
+procedure TSessionRuntimeTest.TestNoClientsExitAfterGrace;
+var
+  Id: string;
+  Rt: TSessionRuntime;
+  Th: TRuntimeThread;
+  Sink: TRecordingSink;
+  Client: TSessionClient;
+  Err: string;
+begin
+  Id := NewSession;
+  Rt := MakeRuntime(Id, nil, 300000);
+  Th := TRuntimeThread.Create(Rt);
+  try
+    Th.Start;
+    AssertTrue('bound', WaitForSocket(Id, 5000));
+    Sink := TRecordingSink.Create;
+    Client := TSessionClient.Open(MakeClientConfig(Id, srDrive), Sink, Err);
+    AssertNotNull('driver attaches: ' + Err, Client);
+    Client.Free;   { disconnect the last client }
+    Sink := nil;
+    { The runtime exits within the no-clients grace (default 2000ms), well under
+      the 300s idle timeout. }
+    AssertTrue('exits after the last client leaves', WaitFinished(Th, 6000));
     AssertEquals('clean exit', 0, Th.ExitCode);
   finally
     if not Th.Finished then

@@ -35,6 +35,9 @@ type
     WorkspacePath: string;      // '' => env / cwd
     StorePath: string;          // required (the runtime is store-backed)
     IdleExitMs: Integer;        // 0 => DefaultIdleExitMs
+    { Exit this long after the last client disconnects (ms). 0 => the default;
+      negative => never (a runtime outlives its clients). }
+    ClientExitGraceMs: Integer;
     Model: string;              // '' => resolved from env/.env
     Endpoint: string;
     Transport: TLLMTransport;   // test seam
@@ -61,9 +64,13 @@ type
     FLoopId: string;
     FSocketPath: string;
     FIdleExitMs: Integer;
+    FClientExitGraceMs: Integer;
+    FLastClientCount: Integer;
     FListenFd: Integer;
     FClients: TObjectList;
     FStop: Boolean;
+    FSignalStop: Boolean;
+    FExitReason: string;
     FSeq: Int64;
     FTurnActive: Boolean;
     FWorker: TTurnWorker;
@@ -136,6 +143,9 @@ type
 
 const
   DefaultIdleExitMs = 300000;
+  { Exit this long after the last client disconnects. Short so a quit TUI does
+    not strand a runtime, but long enough to cancel on a quick reattach. }
+  DefaultClientExitGraceMs = 2000;
   DefaultDriveRequestMs = 30000;
   { Per-client outbound ceiling; a slower observer is dropped with a gap. }
   DefaultMaxOutBytes = 262144;
@@ -190,6 +200,9 @@ begin
     Runtime.FIdleExitMs := AConfig.IdleExitMs;
     if Runtime.FIdleExitMs <= 0 then
       Runtime.FIdleExitMs := DefaultIdleExitMs;
+    Runtime.FClientExitGraceMs := AConfig.ClientExitGraceMs;
+    if Runtime.FClientExitGraceMs = 0 then
+      Runtime.FClientExitGraceMs := DefaultClientExitGraceMs;
     Runtime.FClients := TObjectList.Create(True);
     Runtime.FListenFd := -1;
     Runtime.FSeq := 0;
@@ -531,6 +544,28 @@ begin
     FIdleDeadline - NowMs);
 end;
 
+{ The signal handler for SIGTERM/SIGINT: async-signal-safe, it only sets a
+  flag. The serve loop observes it like FStop. }
+var
+  GSignalStop: Boolean = False;
+
+procedure RuntimeSignalHandler(ASig: cint); cdecl;
+begin
+  GSignalStop := True;
+end;
+
+procedure InstallRuntimeSignals;
+var
+  Act: SigActionRec;
+begin
+  {$ifdef unix}
+  FillChar(Act, SizeOf(Act), 0);
+  Act.sa_handler := SigActionHandler(@RuntimeSignalHandler);
+  fpSigAction(SIGTERM, @Act, nil);
+  fpSigAction(SIGINT, @Act, nil);
+  {$endif}
+end;
+
 procedure TSessionRuntime.AcceptClient;
 var
   Addr: TUnixSockAddr;
@@ -676,6 +711,17 @@ begin
       HandleRelease(AClient, ACommand);
     scPing:
       ReplyTo(AClient, ACommand.Id, True, '');
+    scShutdown:
+      begin
+        if AClient.Role <> srDrive then
+        begin
+          ReplyTo(AClient, ACommand.Id, False, 'not_driver');
+          Exit;
+        end;
+        ReplyTo(AClient, ACommand.Id, True, '');
+        FExitReason := 'shutdown_command';
+        FStop := True;
+      end;
     scAttach, scDetach:
       SendError(AClient, 'unknown_cmd', 'unknown command', '');
   end;
@@ -971,7 +1017,9 @@ var
   Drained: Boolean;
 begin
   E := EmitEvent(ekLoopExited);
-  if FStop then
+  if FExitReason <> '' then
+    E.Reason := FExitReason
+  else if FStop then
     E.Reason := 'stopped'
   else
     E.Reason := 'idle';
@@ -1026,10 +1074,17 @@ begin
   end;
   RegisterRow;
   EmitLoopStarted;
+  InstallRuntimeSignals;
   try
     FIdleDeadline := NowMs + FIdleExitMs;
+    FLastClientCount := 0;
     while not FStop do
     begin
+      if GSignalStop then
+      begin
+        FExitReason := 'signal';
+        Break;
+      end;
       BuildSets;
       N := fpSelect(FMaxFd + 1, @FReadSet, @FWriteSet, nil, NextTimeout);
       if N < 0 then
@@ -1048,6 +1103,22 @@ begin
       ReapClosing;
       if FStop then
         Break;
+      { No-clients exit: the last client left and no turn is active; exit after
+        the grace (a reattach resets the deadline; a negative grace disables). }
+      if (FClients.Count <> FLastClientCount) then
+      begin
+        FLastClientCount := FClients.Count;
+        if (FClients.Count = 0) and (FClientExitGraceMs > 0) then
+        begin
+          FIdleDeadline := NowMs + FClientExitGraceMs;
+          FExitReason := 'no_clients';
+        end
+        else if FClients.Count > 0 then
+        begin
+          FIdleDeadline := NowMs + FIdleExitMs;
+          FExitReason := '';   { a live client cancels a pending reason }
+        end;
+      end;
       if (not FTurnActive) and (FClients.Count = 0) and
         (NowMs >= FIdleDeadline) then
         Break;

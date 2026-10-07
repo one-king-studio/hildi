@@ -67,7 +67,10 @@ type
 
   TSessionCommandKind = (
     scAttach, scDetach, scPrompt, scApprove, scInterrupt,
-    scClaimDrive, scReleaseDrive, scPing);
+    scClaimDrive, scReleaseDrive, scPing,
+    { Ask the runtime to stop gracefully. Driver-only. Appended last so stored
+      ordinals are unchanged. }
+    scShutdown);
 
   { One client command. Id is echoed in the reply. }
   TSessionCommand = record
@@ -168,7 +171,7 @@ const
     names, so they are absent here. }
   CommandKindNames: array[TSessionCommandKind] of string = (
     'attach', 'detach', 'prompt', 'approve', 'interrupt',
-    'claim_drive', 'release_drive', 'ping');
+    'claim_drive', 'release_drive', 'ping', 'shutdown');
 
 { --- enum <-> wire ------------------------------------------------------ }
 
@@ -636,7 +639,8 @@ begin
         PutStr(O, 'ask_id', C.AskId);
         O.Add('choice', EncodeChoice(C.Choice));
       end;
-    scAttach, scDetach, scInterrupt, scClaimDrive, scReleaseDrive, scPing:
+    scAttach, scDetach, scInterrupt, scClaimDrive, scReleaseDrive, scPing,
+    scShutdown:
       ;   // no payload beyond the name
   end;
 end;
@@ -667,7 +671,8 @@ begin
         if not DecodeChoice(TJSONObject(D), C.Choice) then
           Exit(False);
       end;
-    scAttach, scDetach, scInterrupt, scClaimDrive, scReleaseDrive, scPing:
+    scAttach, scDetach, scInterrupt, scClaimDrive, scReleaseDrive, scPing,
+    scShutdown:
       ;
   end;
   Result := True;

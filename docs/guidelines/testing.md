@@ -34,6 +34,16 @@ Useful commands:
   temporary directories and clean them up.
 - Tests compile under `-Sew`, so warnings are errors. A test that does not
   compile is not a passing test.
+- **Never `Free` an object you handed over through an interface.** Most test
+  doubles here (`TRecordingSink`, `TMemoryConversationStore`, `TStubProvider`,
+  and the fake approval services) are `TInterfacedObject`. When the code under
+  test holds them via an interface reference, that reference is the owner: an
+  explicit `X.Free` in the test's cleanup is a **double-free** — usually an
+  `EInvalidPointer`/`EBusError`/`EAccessViolation`, sometimes at a nonsense
+  address, sometimes only in the leak build. Release it with `X := nil` (drop
+  the interface ref) or declare the variable as the interface type and let scope
+  release it. This has cost real debugging time three times; check it first when
+  a test crashes in cleanup.
 
 ## Leak testing (heaptrc)
 
