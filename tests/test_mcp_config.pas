@@ -29,6 +29,10 @@ type
     procedure TestValidateRejectsBadEnvEntry;
     procedure TestValidateRejectsTooManyServers;
     procedure TestIsValidMcpName;
+    procedure TestParseJsonValid;
+    procedure TestParseJsonEnvObject;
+    procedure TestParseJsonErrors;
+    procedure TestJsonRoundTrip;
   end;
 
 implementation
@@ -216,6 +220,72 @@ begin
   AssertFalse('slash', IsValidMcpName('a/b'));
   AssertFalse('space', IsValidMcpName('a b'));
   AssertFalse('too long', IsValidMcpName(StringOfChar('a', MaxMcpNameChars + 1)));
+end;
+
+procedure TMcpConfigTest.TestParseJsonValid;
+var
+  Rows: TMcpServerRowArray;
+  Err: string;
+begin
+  AssertTrue('parsed', ParseMcpServersJson(
+    '{"mcpServers":{"pw":{"command":"docker","args":["run","-i","--rm"]}}}',
+    msGlobal, 0, Rows, Err));
+  AssertEquals('one row', 1, Length(Rows));
+  AssertEquals('name', 'pw', Rows[0].Name);
+  AssertEquals('command', 'docker', Rows[0].Command);
+  AssertEquals('args', 3, Length(Rows[0].Args));
+  AssertEquals('arg0', 'run', Rows[0].Args[0]);
+  AssertTrue('enabled default', Rows[0].Enabled);
+end;
+
+procedure TMcpConfigTest.TestParseJsonEnvObject;
+var
+  Rows: TMcpServerRowArray;
+  Err: string;
+begin
+  AssertTrue('parsed', ParseMcpServersJson(
+    '{"mcpServers":{"x":{"command":"c","env":{"TOKEN":"abc"},"cwd":"/d",' +
+    '"enabled":false}}}', msWorkspace, 7, Rows, Err));
+  AssertEquals('scope', Ord(msWorkspace), Ord(Rows[0].Scope));
+  AssertEquals('workspace', 7, Rows[0].WorkspaceId);
+  AssertEquals('env', 1, Length(Rows[0].Env));
+  AssertEquals('env pair', 'TOKEN=abc', Rows[0].Env[0]);
+  AssertEquals('cwd', '/d', Rows[0].WorkingDir);
+  AssertFalse('disabled', Rows[0].Enabled);
+end;
+
+procedure TMcpConfigTest.TestParseJsonErrors;
+var
+  Rows: TMcpServerRowArray;
+  Err: string;
+begin
+  AssertFalse('not json', ParseMcpServersJson('nope', msGlobal, 0, Rows, Err));
+  AssertFalse('no mcpServers',
+    ParseMcpServersJson('{"other":{}}', msGlobal, 0, Rows, Err));
+  AssertFalse('entry not object',
+    ParseMcpServersJson('{"mcpServers":{"x":5}}', msGlobal, 0, Rows, Err));
+  AssertFalse('missing command',
+    ParseMcpServersJson('{"mcpServers":{"x":{"args":[]}}}', msGlobal, 0, Rows,
+      Err));
+end;
+
+procedure TMcpConfigTest.TestJsonRoundTrip;
+var
+  Rows, Rows2: TMcpServerRowArray;
+  Err: string;
+  J: string;
+begin
+  AssertTrue('parse', ParseMcpServersJson(
+    '{"mcpServers":{"pw":{"command":"docker","args":["run","-i"],' +
+    '"env":{"A":"1"},"cwd":"/w"}}}', msGlobal, 0, Rows, Err));
+  J := FormatMcpServersJson(Rows);
+  AssertTrue('reparse', ParseMcpServersJson(J, msGlobal, 0, Rows2, Err));
+  AssertEquals('one row', 1, Length(Rows2));
+  AssertEquals('name', 'pw', Rows2[0].Name);
+  AssertEquals('command', 'docker', Rows2[0].Command);
+  AssertEquals('args', 2, Length(Rows2[0].Args));
+  AssertEquals('env', 'A=1', Rows2[0].Env[0]);
+  AssertEquals('cwd', '/w', Rows2[0].WorkingDir);
 end;
 
 initialization

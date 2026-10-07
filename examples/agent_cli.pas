@@ -342,6 +342,32 @@ begin
 end;
 
 { Connect to one configured server, list its tools, and disconnect. }
+function ReadFileText(const APath: string): string;
+var
+  F: TStringList;
+begin
+  F := TStringList.Create;
+  try
+    F.LoadFromFile(APath);
+    Result := F.Text;
+  finally
+    F.Free;
+  end;
+end;
+
+procedure WriteFileText(const APath, AText: string);
+var
+  F: TStringList;
+begin
+  F := TStringList.Create;
+  try
+    F.Text := AText;
+    F.SaveToFile(APath);
+  finally
+    F.Free;
+  end;
+end;
+
 function RunMcpTest(const ARow: TMcpServerRow): Integer;
 var
   Cfg: TMcpClientConfig;
@@ -390,7 +416,10 @@ var
   Rows: TMcpServerRowArray;
   Ctx: TMcpConfigContext;
   Existing: TMcpServerRowArray;
-  I: Integer;
+  I, J: Integer;
+  Text: string;
+  Added, Updated: Integer;
+  WasThere: Boolean;
 begin
   Result := 0;
   try
@@ -550,6 +579,25 @@ begin
         end;
       mvRemove:
         begin
+          Ctx := Default(TMcpConfigContext);
+          Ctx.WorkspaceId := Row.WorkspaceId;
+          Rows := nil;
+          if not Store.LoadMcpServers(Ctx, Rows, StoreErr) then
+          begin
+            WriteLn('error: ', StoreErr.Message);
+            Exit(1);
+          end;
+          Msg := '';
+          for I := 0 to High(Rows) do
+            if (Rows[I].Scope = Row.Scope) and
+              (Rows[I].WorkspaceId = Row.WorkspaceId) and
+              (Rows[I].Name = Row.Name) then
+              Msg := 'found';
+          if Msg = '' then
+          begin
+            WriteLn('error: no such server "', Row.Name, '"');
+            Exit(1);
+          end;
           if not Store.RemoveMcpServer(Row, StoreErr) then
           begin
             WriteLn('error: ', StoreErr.Message);
@@ -597,6 +645,74 @@ begin
             WriteLn('mcp: enabled server "', Row.Name, '"')
           else
             WriteLn('mcp: disabled server "', Row.Name, '"');
+        end;
+      mvImport:
+        begin
+          if not FileExists(Cmd.Path) then
+          begin
+            WriteLn('error: no such file: ', Cmd.Path);
+            Exit(1);
+          end;
+          Text := ReadFileText(Cmd.Path);
+          if not ParseMcpServersJson(Text, Row.Scope, Row.WorkspaceId, Rows,
+            Msg) then
+          begin
+            WriteLn('error: ', Msg);
+            Exit(2);
+          end;
+          Added := 0;
+          Updated := 0;
+          for I := 0 to High(Rows) do
+          begin
+            Ctx := Default(TMcpConfigContext);
+            Ctx.WorkspaceId := Rows[I].WorkspaceId;
+            Existing := nil;
+            WasThere := False;
+            if Store.LoadMcpServers(Ctx, Existing, StoreErr) then
+              for J := 0 to High(Existing) do
+                if (Existing[J].Scope = Rows[I].Scope) and
+                  (Existing[J].WorkspaceId = Rows[I].WorkspaceId) and
+                  (Existing[J].Name = Rows[I].Name) then
+                  WasThere := True;
+            if not Store.SaveMcpServer(Rows[I], StoreErr) then
+            begin
+              WriteLn('error: ', StoreErr.Message);
+              Exit(1);
+            end;
+            if WasThere then Inc(Updated) else Inc(Added);
+          end;
+          WriteLn(Format('mcp: imported %d added, %d updated',
+            [Added, Updated]));
+        end;
+      mvExport:
+        begin
+          if Cmd.Scope = msWorkspace then
+          begin
+            Ctx := Default(TMcpConfigContext);
+            Ctx.WorkspaceId := Row.WorkspaceId;
+            if not Store.LoadMcpServers(Ctx, Rows, StoreErr) then
+            begin
+              WriteLn('error: ', StoreErr.Message);
+              Exit(1);
+            end;
+          end
+          else if not Store.ListMcpServers(Rows, StoreErr) then
+          begin
+            WriteLn('error: ', StoreErr.Message);
+            Exit(1);
+          end;
+          { The JSON format is name-keyed, so collapse to one row per name. }
+          Ctx := Default(TMcpConfigContext);
+          Ctx.WorkspaceId := Row.WorkspaceId;
+          Rows := EffectiveMcpRows(Rows, Ctx);
+          Text := FormatMcpServersJson(Rows);
+          if Cmd.Path <> '' then
+          begin
+            WriteFileText(Cmd.Path, Text);
+            WriteLn('mcp: exported to ', Cmd.Path);
+          end
+          else
+            WriteLn(Text);
         end;
       mvList, mvHelp:
         ;

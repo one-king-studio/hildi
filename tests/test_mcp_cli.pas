@@ -19,6 +19,7 @@ type
     procedure TestAddOptions;
     procedure TestRemoveEnableDisable;
     procedure TestTestVerb;
+    procedure TestImportExportVerbs;
     procedure TestUnknownVerbRaises;
     procedure TestUnknownOptionRaises;
     procedure TestMissingOperandsRaise;
@@ -120,6 +121,27 @@ begin
     on E: EMcpCLIError do Raised := True;
   end;
   AssertTrue('test needs a name', Raised);
+end;
+
+procedure TMcpCliTest.TestImportExportVerbs;
+var
+  C: TMcpCommand;
+  Raised: Boolean;
+begin
+  C := ParseMcpCommand(['import', '/tmp/servers.json']);
+  AssertEquals('import', Ord(mvImport), Ord(C.Verb));
+  AssertEquals('path', '/tmp/servers.json', C.Path);
+  C := ParseMcpCommand(['export', '--scope', 'workspace', '--out', '/tmp/o.json']);
+  AssertEquals('export', Ord(mvExport), Ord(C.Verb));
+  AssertEquals('scope', Ord(msWorkspace), Ord(C.Scope));
+  AssertEquals('out', '/tmp/o.json', C.Path);
+  Raised := False;
+  try
+    ParseMcpCommand(['import']);
+  except
+    on E: EMcpCLIError do Raised := True;
+  end;
+  AssertTrue('import needs a file', Raised);
 end;
 
 procedure TMcpCliTest.TestUnknownVerbRaises;

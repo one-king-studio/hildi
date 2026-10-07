@@ -11,7 +11,8 @@ uses
   SysUtils, hildegard.helper.mcp.config;
 
 type
-  TMcpVerb = (mvList, mvAdd, mvRemove, mvEnable, mvDisable, mvTest, mvHelp);
+  TMcpVerb = (mvList, mvAdd, mvRemove, mvEnable, mvDisable, mvTest,
+              mvImport, mvExport, mvHelp);
 
   { A parsed `mcp` command. Fields are meaningful per Verb. }
   TMcpCommand = record
@@ -23,6 +24,7 @@ type
     Env: array of string;         // add: NAME=VALUE (repeatable)
     WorkingDir: string;           // add: --cwd
     Disabled: Boolean;            // add: --disabled
+    Path: string;                 // import: file; export: --out target
   end;
 
   EMcpCLIError = class(Exception);
@@ -69,6 +71,8 @@ begin
   else if AWord = 'enable' then AVerb := mvEnable
   else if AWord = 'disable' then AVerb := mvDisable
   else if AWord = 'test' then AVerb := mvTest
+  else if AWord = 'import' then AVerb := mvImport
+  else if AWord = 'export' then AVerb := mvExport
   else if (AWord = 'help') or (AWord = '--help') or (AWord = '-h') then
     AVerb := mvHelp
   else
@@ -147,6 +151,13 @@ begin
     end
     else if Arg = '--disabled' then
       Result.Disabled := True
+    else if Arg = '--out' then
+    begin
+      Inc(I);
+      if I > High(AArgs) then
+        raise EMcpCLIError.Create('--out requires a value');
+      Result.Path := AArgs[I];
+    end
     else if (Arg <> '') and (Arg[1] = '-') then
       raise EMcpCLIError.Create('mcp: unknown option: ' + Arg)
     else
@@ -169,7 +180,13 @@ begin
           raise EMcpCLIError.Create('mcp: a server NAME is required');
         Result.Name := Positionals[0];
       end;
-    mvList, mvHelp:
+    mvImport:
+      begin
+        if NPos < 1 then
+          raise EMcpCLIError.Create('mcp import: a FILE is required');
+        Result.Path := Positionals[0];
+      end;
+    mvList, mvExport, mvHelp:
       ;
   end;
 end;
@@ -233,6 +250,9 @@ begin
     '  hildegard-helper-agent-cli mcp enable NAME [--scope ...]' + LineEnding +
     '  hildegard-helper-agent-cli mcp disable NAME [--scope ...]' + LineEnding +
     '  hildegard-helper-agent-cli mcp test NAME [--scope ...]' + LineEnding +
+    '  hildegard-helper-agent-cli mcp import FILE [--scope ...]' + LineEnding +
+    '  hildegard-helper-agent-cli mcp export [--scope ...] [--out FILE]' +
+      LineEnding +
     LineEnding +
     'Options (add):' + LineEnding +
     '  --scope global|workspace   where the server is defined (default global)' +
