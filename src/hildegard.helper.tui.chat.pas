@@ -26,8 +26,8 @@ type
     ckTurn, ckAmbient, ckQueued);
 
 const
-  { The violet used for the queued/ambient border, matching inline code. }
-  QueuedBorderFg = 140;
+  { The violet used for the ambient border. }
+  QueuedBorderFg = 104;
   { The tool box border colour. }
   ToolBorderFg = 23;
 
@@ -518,7 +518,8 @@ end;
 
 function TChatItem.Inset: Integer;
 begin
-  if (FKind = ckUser) or ((FKind in [ckThought, ckTool]) and EffectiveExpanded) then
+  if (FKind = ckUser) or (FKind = ckQueued) or (FKind = ckAmbient) or
+    ((FKind in [ckThought, ckTool]) and EffectiveExpanded) then
     Result := 4
   else if (FKind = ckAssistant) or (FKind = ckError) then
     Result := 1
@@ -786,15 +787,27 @@ begin
   else if (FKind = ckQueued) or (FKind = ckAmbient) then
   begin
     { The user-box frame with a right-aligned title (Queued / the ambient
-      label); the border is teal for a queued prompt, violet for an ambient. }
+      label); the border is teal for a queued prompt, violet for an ambient.
+      A queued prompt keeps the heavy bottom; an ambient result uses a thin
+      bottom. }
     PutCh(S, L, T, '╭', Border);
     PutCh(S, R, T, '╮', Border);
-    PutCh(S, L, B, '╰', Border);
-    PutCh(S, R, B, '┘', Border);
     for X := L + 1 to R - 1 do
       PutCh(S, X, T, '─', Border);
-    for X := L + 1 to R - 1 do
-      PutCh(S, X, B, '═', Border);
+    if FKind = ckAmbient then
+    begin
+      PutCh(S, L, B, '╰', Border);
+      PutCh(S, R, B, '╯', Border);
+      for X := L + 1 to R - 1 do
+        PutCh(S, X, B, '─', Border);
+    end
+    else
+    begin
+      PutCh(S, L, B, '╰', Border);
+      PutCh(S, R, B, '┘', Border);
+      for X := L + 1 to R - 1 do
+        PutCh(S, X, B, '═', Border);
+    end;
     Clip := S.ClipRect;
     for I := T + 1 to B - 1 do
       if (I >= Clip.Y) and (I < Clip.Y + Clip.H) then
