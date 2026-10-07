@@ -59,6 +59,10 @@ int hildegard_tls_live_count(void);
 const unsigned char *hildegard_ca_pem(void);
 unsigned             hildegard_ca_pem_len(void);
 
+/* SHA-256 (via mbedTLS), for PKCE. Writes 32 bytes to out. 0 on success. */
+int hildegard_sha256(const unsigned char *data, unsigned len,
+                     unsigned char out[32]);
+
 #ifdef __cplusplus
 }
 #endif

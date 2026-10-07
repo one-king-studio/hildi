@@ -20,6 +20,7 @@
 #include "mbedtls/net_sockets.h"
 #include "mbedtls/ssl.h"
 #include "mbedtls/x509_crt.h"
+#include "mbedtls/sha256.h"
 
 struct hildegard_tls {
   mbedtls_ssl_context      ssl;
@@ -230,4 +231,9 @@ int hildegard_tls_last_error(hildegard_tls *h, char *buf, unsigned buflen) {
     buf[buflen - 1] = '\0';
   }
   return h->last_error;
+}
+
+int hildegard_sha256(const unsigned char *data, unsigned len,
+                     unsigned char out[32]) {
+  return mbedtls_sha256(data, len, out, 0) == 0 ? 0 : HILDEGARD_TLS_ERROR;
 }
