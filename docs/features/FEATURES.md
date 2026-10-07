@@ -73,6 +73,13 @@ in `../guidelines/spec-driven-development.md`:
   lifecycle manager. Trust is unchanged (every call stays approval-gated).
   Spec'd (v1); not yet implemented.
 
+- **Turn Injection** (`Turn_Injection/FEATURE.md`) — assemble the loop's tools
+  **and prompt** fresh each turn from registered *contributors*, so tools can be
+  loaded dynamically and **skills** can inject prompt + tools. Adds an
+  `IToolProvider` seam; MCP becomes one contributor (retiring the MCP-specific
+  session wiring). Prompt fragments are request-only (never persisted); trust is
+  unchanged. Spec'd (v1); not yet implemented.
+
 ## Existing Behaviour (to be documented)
 
 The foundation below is implemented and tested, but predates this documentation
