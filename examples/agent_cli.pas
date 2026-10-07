@@ -28,6 +28,7 @@ uses
   hildegard.helper.session.protocol, hildegard.helper.session.client,
   hildegard.helper.recall.tool,
   hildegard.helper.mcp.cli, hildegard.helper.mcp.config,
+  hildegard.helper.mcp.client,
   hildegard.helper.store, hildegard.helper.workspace;
 
 {$ifdef unix}
@@ -340,6 +341,42 @@ begin
   end;
 end;
 
+{ Connect to one configured server, list its tools, and disconnect. }
+function RunMcpTest(const ARow: TMcpServerRow): Integer;
+var
+  Cfg: TMcpClientConfig;
+  Client: TMcpClient;
+  Err: string;
+  Tools: TMcpToolArray;
+  I: Integer;
+begin
+  Cfg := Default(TMcpClientConfig);
+  Cfg.Server.Name := ARow.Name;
+  Cfg.Server.Command := ARow.Command;
+  Cfg.Server.Args := Copy(ARow.Args, 0, Length(ARow.Args));
+  Cfg.Server.Env := Copy(ARow.Env, 0, Length(ARow.Env));
+  Cfg.Server.WorkingDir := ARow.WorkingDir;
+  Cfg.ListTimeoutMs := ARow.ListTimeoutMs;
+  Cfg.CallTimeoutMs := ARow.CallTimeoutMs;
+
+  WriteLn('testing "', ARow.Name, '" ...');
+  Client := TMcpClient.Create(Cfg, nil, nil);
+  try
+    if not Client.Open(Err) then
+    begin
+      WriteLn('FAILED: ', Err);
+      Exit(1);
+    end;
+    Tools := Client.Tools;
+    WriteLn(Format('OK: %d tools', [Length(Tools)]));
+    for I := 0 to High(Tools) do
+      WriteLn('  ', Tools[I].Name, '   [', Tools[I].Ref, ']');
+    Result := 0;
+  finally
+    Client.Free;
+  end;
+end;
+
 function RunMcpAdmin(const AArgs: array of string): Integer;
 var
   Cmd: TMcpCommand;
@@ -449,6 +486,32 @@ begin
     end;
 
     case Cmd.Verb of
+      mvTest:
+        begin
+          Ctx := Default(TMcpConfigContext);
+          Ctx.WorkspaceId := Row.WorkspaceId;
+          Rows := nil;
+          if not Store.LoadMcpServers(Ctx, Rows, StoreErr) then
+          begin
+            WriteLn('error: ', StoreErr.Message);
+            Exit(1);
+          end;
+          Msg := '';
+          for I := 0 to High(Rows) do
+            if (Rows[I].Scope = Row.Scope) and
+              (Rows[I].WorkspaceId = Row.WorkspaceId) and
+              (Rows[I].Name = Row.Name) then
+            begin
+              Row := Rows[I];
+              Msg := 'found';
+            end;
+          if Msg = '' then
+          begin
+            WriteLn('error: no such server "', Row.Name, '"');
+            Exit(1);
+          end;
+          Exit(RunMcpTest(Row));
+        end;
       mvAdd:
         begin
           Row.Command := Cmd.Command;

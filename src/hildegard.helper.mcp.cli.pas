@@ -11,7 +11,7 @@ uses
   SysUtils, hildegard.helper.mcp.config;
 
 type
-  TMcpVerb = (mvList, mvAdd, mvRemove, mvEnable, mvDisable, mvHelp);
+  TMcpVerb = (mvList, mvAdd, mvRemove, mvEnable, mvDisable, mvTest, mvHelp);
 
   { A parsed `mcp` command. Fields are meaningful per Verb. }
   TMcpCommand = record
@@ -68,6 +68,7 @@ begin
   else if AWord = 'remove' then AVerb := mvRemove
   else if AWord = 'enable' then AVerb := mvEnable
   else if AWord = 'disable' then AVerb := mvDisable
+  else if AWord = 'test' then AVerb := mvTest
   else if (AWord = 'help') or (AWord = '--help') or (AWord = '-h') then
     AVerb := mvHelp
   else
@@ -162,7 +163,7 @@ begin
         Result.Name := Positionals[0];
         Result.Command := Positionals[1];
       end;
-    mvRemove, mvEnable, mvDisable:
+    mvRemove, mvEnable, mvDisable, mvTest:
       begin
         if NPos < 1 then
           raise EMcpCLIError.Create('mcp: a server NAME is required');
@@ -231,6 +232,7 @@ begin
     '  hildegard-helper-agent-cli mcp remove NAME [--scope ...]' + LineEnding +
     '  hildegard-helper-agent-cli mcp enable NAME [--scope ...]' + LineEnding +
     '  hildegard-helper-agent-cli mcp disable NAME [--scope ...]' + LineEnding +
+    '  hildegard-helper-agent-cli mcp test NAME [--scope ...]' + LineEnding +
     LineEnding +
     'Options (add):' + LineEnding +
     '  --scope global|workspace   where the server is defined (default global)' +

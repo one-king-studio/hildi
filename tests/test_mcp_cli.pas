@@ -18,6 +18,7 @@ type
     procedure TestAddDockerArgsAreNotOptions;
     procedure TestAddOptions;
     procedure TestRemoveEnableDisable;
+    procedure TestTestVerb;
     procedure TestUnknownVerbRaises;
     procedure TestUnknownOptionRaises;
     procedure TestMissingOperandsRaise;
@@ -100,6 +101,25 @@ begin
   AssertEquals('scope', Ord(msWorkspace), Ord(C.Scope));
   C := ParseMcpCommand(['disable', 'gh']);
   AssertEquals('disable', Ord(mvDisable), Ord(C.Verb));
+end;
+
+procedure TMcpCliTest.TestTestVerb;
+var
+  C: TMcpCommand;
+  Raised: Boolean;
+begin
+  C := ParseMcpCommand(['test', 'playwright']);
+  AssertEquals('verb', Ord(mvTest), Ord(C.Verb));
+  AssertEquals('name', 'playwright', C.Name);
+  C := ParseMcpCommand(['test', 'playwright', '--scope', 'workspace']);
+  AssertEquals('scope', Ord(msWorkspace), Ord(C.Scope));
+  Raised := False;
+  try
+    ParseMcpCommand(['test']);
+  except
+    on E: EMcpCLIError do Raised := True;
+  end;
+  AssertTrue('test needs a name', Raised);
 end;
 
 procedure TMcpCliTest.TestUnknownVerbRaises;
