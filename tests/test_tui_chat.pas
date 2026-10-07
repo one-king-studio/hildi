@@ -41,6 +41,7 @@ type
     procedure TestCollapsedThoughtDrawsADimmedRule;
     procedure TestTurnDividerDrawsRuleAndRightAlignedStats;
     procedure TestCollapsedToolDrawsAThinFullContrastRule;
+    procedure TestAmbientBlockRenders;
     procedure TestLongToolTitleIsTruncated;
     procedure TestLiveThoughtShowsTheTail;
     procedure TestExpandedThoughtDrawsABox;
@@ -942,6 +943,25 @@ begin
     AssertEquals('the block top stayed on the same row', TopBefore, TopAfter);
   finally
     St.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestAmbientBlockRenders;
+var
+  It: TChatItem;
+  S: ISurface;
+begin
+  It := TChatItem.Create(ckAmbient, 'research',
+    '◀ research · completed ▶' + #10 + 'the child result', FTheme);
+  try
+    AssertTrue('kind', It.Kind = ckAmbient);
+    { It measures as a body and renders without error. }
+    AssertTrue('has height', It.Measure(Avail(40, 0)).H >= 1);
+    S := TSurfaceMemory.Create(40, 6);
+    It.Arrange(Rc(0, 0, 40, 4));
+    It.Render(S);
+  finally
+    It.Free;
   end;
 end;
 

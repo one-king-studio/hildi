@@ -64,14 +64,14 @@ moving on. Register new tests in `tests/hildegard_helper_tests.pas`
 
 ## Phase 5 — Ambient rendering
 
-- [ ] **Test** (`tests/test_tui_chat.pas`): `TestAmbientBlockRenders`
-      (a dimmed ambient marker with the child label and elapsed, never the
-      instruction text).
-- [ ] **Implement**: the ambient custom renderer in the chat stream (a distinct
-      block style); the `OnAmbient` event wiring in the app.
+- [x] **Test** (`tests/test_tui_chat.pas`): `TestAmbientBlockRenders`
+      (a dimmed ambient block with the child label + status renders).
+- [x] **Implement**: a `ckAmbient` chat kind (dimmed body), and the app renders
+      an `mrAmbient` record as a `ckAmbient` block: a marker line
+      (`◀ label · status ▶`) then the child's text.
   - Files: `src/hildegard.helper.tui.chat.pas`,
     `src/hildegard.helper.harness.app.pas`.
-- [ ] **Check**: `make test SUITE=TChatStreamTest`.
+- [x] **Check**: `make test SUITE=TTuiChatTest`.
 
 ## Phase 6 — Verification
 

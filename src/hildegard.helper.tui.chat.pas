@@ -23,7 +23,7 @@ uses
 
 type
   TChatKind = (ckUser, ckAssistant, ckError, ckThought, ckTool, ckThinking,
-    ckTurn);
+    ckTurn, ckAmbient);
 
   { One block in the stream. Mutable, so a stream can append into it. Its
     measured height is memoized per width and invalidated when the text or the
@@ -307,6 +307,8 @@ begin
       Result := OnBg(FTheme.Text, FTheme.SunkenBg);
     ckThought:
       Result := FTheme.Muted;
+    ckAmbient:
+      Result := FTheme.Muted;
     ckError:
       Result := FTheme.Error;
   else
@@ -579,6 +581,11 @@ begin
         BodyRows(AAvail.W, TextRows, Lines);
         Result.H := TextRows;
       end;
+    ckAmbient:
+      begin
+        BodyRows(AAvail.W, TextRows, Lines);
+        Result.H := TextRows;
+      end;
     ckThinking, ckTurn:
       Result.H := 1;
     ckThought, ckTool:
@@ -656,6 +663,12 @@ begin
       end;
     ckError:
       begin
+        FText.Render(S);
+        Exit;
+      end;
+    ckAmbient:
+      begin
+        { A dimmed subagent-result marker; the title carries the child + status. }
         FText.Render(S);
         Exit;
       end;

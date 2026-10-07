@@ -518,10 +518,12 @@ begin
           either; live and resume stay identical. }
         ;
       mrAmbient:
-        { A subagent result. // ponytail: rendered as a plain block here; the
-          dedicated ambient renderer lands with Subagent_Sidebar_v1.SPEC.md. }
+        { A subagent result: a dimmed marker line (label + status), then the
+          child's text. }
         if Rec.Content <> '' then
-          FPanel.Stream.Add(ckUser, '', Rec.Content);
+          FPanel.Stream.Add(ckAmbient, '',
+            '◀ ' + Rec.LabelText + ' · ' + Rec.Status + ' ▶' + LineEnding +
+            Rec.Content);
     end;
   end;
   { The final turn's divider. }
