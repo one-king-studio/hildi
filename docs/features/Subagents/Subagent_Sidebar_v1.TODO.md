@@ -18,13 +18,13 @@ moving on. Register new tests in `tests/hildegard_helper_tests.pas`
 
 ## Phase 2 — Sidebar widget
 
-- [ ] **Test** (`tests/test_tui_sidebar.pas`): `TestSidebarRendersRows`,
+- [x] **Test** (`tests/test_tui_sidebar.pas`): `TestSidebarRendersRows`,
       `TestSidebarSelectionMoves`, `TestSidebarEnterFiresSelect`,
       `TestSidebarEmptyState` — all over `TSurfaceMemory`.
-- [ ] **Implement**: `hildegard.helper.tui.sidebar` — `TSidebar`
-      (`Measure`/`Arrange`/`Render`/`HandleEvent`/`Refresh`, `OnSelect`).
+- [x] **Implement**: `hildegard.helper.tui.sidebar` — `TSidebar`
+      (`Measure`/`Render`/`HandleEvent`/`Refresh`, `OnSelect`).
   - Files: `src/hildegard.helper.tui.sidebar.pas` (new).
-- [ ] **Check**: `make test SUITE=TSidebarTest`.
+- [x] **Check**: `make test SUITE=TSidebarTest`.
 
 ## Phase 3 — Spy binding
 
