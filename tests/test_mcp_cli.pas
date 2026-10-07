@@ -19,6 +19,7 @@ type
     procedure TestAddOptions;
     procedure TestRemoveEnableDisable;
     procedure TestTestVerb;
+    procedure TestAuthVerb;
     procedure TestImportExportVerbs;
     procedure TestAddHttpServer;
     procedure TestUnknownVerbRaises;
@@ -165,6 +166,25 @@ begin
     on E: EMcpCLIError do Raised := True;
   end;
   AssertTrue('bad header raises', Raised);
+end;
+
+procedure TMcpCliTest.TestAuthVerb;
+var
+  C: TMcpCommand;
+  Raised: Boolean;
+begin
+  C := ParseMcpCommand(['auth', 'remote']);
+  AssertEquals('verb', Ord(mvAuth), Ord(C.Verb));
+  AssertEquals('name', 'remote', C.Name);
+  C := ParseMcpCommand(['auth', 'remote', '--scope', 'workspace']);
+  AssertEquals('scope', Ord(msWorkspace), Ord(C.Scope));
+  Raised := False;
+  try
+    ParseMcpCommand(['auth']);
+  except
+    on E: EMcpCLIError do Raised := True;
+  end;
+  AssertTrue('auth needs a name', Raised);
 end;
 
 procedure TMcpCliTest.TestUnknownVerbRaises;

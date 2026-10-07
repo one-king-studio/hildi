@@ -12,7 +12,7 @@ uses
 
 type
   TMcpVerb = (mvList, mvAdd, mvRemove, mvEnable, mvDisable, mvTest,
-              mvImport, mvExport, mvHelp);
+              mvImport, mvExport, mvAuth, mvHelp);
 
   { A parsed `mcp` command. Fields are meaningful per Verb. }
   TMcpCommand = record
@@ -75,6 +75,7 @@ begin
   else if AWord = 'test' then AVerb := mvTest
   else if AWord = 'import' then AVerb := mvImport
   else if AWord = 'export' then AVerb := mvExport
+  else if AWord = 'auth' then AVerb := mvAuth
   else if (AWord = 'help') or (AWord = '--help') or (AWord = '-h') then
     AVerb := mvHelp
   else
@@ -196,7 +197,7 @@ begin
         if Result.Url = '' then
           Result.Command := Positionals[1];
       end;
-    mvRemove, mvEnable, mvDisable, mvTest:
+    mvRemove, mvEnable, mvDisable, mvTest, mvAuth:
       begin
         if NPos < 1 then
           raise EMcpCLIError.Create('mcp: a server NAME is required');
@@ -275,6 +276,7 @@ begin
     '  hildegard-helper-agent-cli mcp enable NAME [--scope ...]' + LineEnding +
     '  hildegard-helper-agent-cli mcp disable NAME [--scope ...]' + LineEnding +
     '  hildegard-helper-agent-cli mcp test NAME [--scope ...]' + LineEnding +
+    '  hildegard-helper-agent-cli mcp auth NAME [--scope ...]' + LineEnding +
     '  hildegard-helper-agent-cli mcp import FILE [--scope ...]' + LineEnding +
     '  hildegard-helper-agent-cli mcp export [--scope ...] [--out FILE]' +
       LineEnding +

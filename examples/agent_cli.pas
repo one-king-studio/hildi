@@ -18,7 +18,8 @@ program agent_cli;
 
 uses
   {$ifdef unix}cthreads, cwstring,{$endif}   // cthreads first; cwstring for Unicode
-  SysUtils, Classes, ctypes, DateUtils, SyncObjs,
+  SysUtils, Classes, ctypes, DateUtils, SyncObjs, Process,
+  {$ifdef unix}BaseUnix,{$endif}
   hildegard.helper.ansi, hildegard.helper.env, hildegard.helper.cli,
   hildegard.helper.transcript, hildegard.helper.llm, hildegard.helper.agent,
   hildegard.helper.command.policy, hildegard.helper.command.tool,
@@ -29,6 +30,7 @@ uses
   hildegard.helper.recall.tool,
   hildegard.helper.mcp.cli, hildegard.helper.mcp.config,
   hildegard.helper.mcp.client,
+  hildegard.helper.mcp.oauth, hildegard.helper.mcp.oauth.flow,
   hildegard.helper.store, hildegard.helper.workspace;
 
 {$ifdef unix}
@@ -368,6 +370,126 @@ begin
   end;
 end;
 
+{ A browser opener for the OAuth flow: prints the URL for copy/paste, then
+  offers to open it (Enter). Uses the platform opener; no GUI dependency. }
+type
+  TConsoleBrowser = class
+  public
+    procedure Open(const AUrl: string);
+  end;
+
+{ Hand the URL to the platform opener, detached (best effort). }
+procedure OpenInBrowser(const AUrl: string);
+var
+  Proc: TProcess;
+begin
+  {$ifdef unix}
+  Proc := TProcess.Create(nil);
+  try
+    try
+      {$ifdef darwin}
+      Proc.Executable := 'open';
+      {$else}
+      Proc.Executable := 'xdg-open';
+      {$endif}
+      Proc.Parameters.Add(AUrl);
+      Proc.Options := [poDetached];
+      Proc.Execute;
+    except
+      on E: Exception do
+        WriteLn('(could not open a browser automatically: ', E.Message, ')');
+    end;
+  finally
+    Proc.Free;
+  end;
+  {$endif}
+end;
+
+procedure TConsoleBrowser.Open(const AUrl: string);
+var
+  Line: string;
+begin
+  WriteLn;
+  WriteLn('Open this URL in your browser to authorize:');
+  WriteLn;
+  WriteLn('  ', AUrl);
+  WriteLn;
+  Write('Press Enter to open it in your browser, or paste the URL yourself ' +
+    '(Ctrl-C to cancel): ');
+  Flush(Output);
+  if not EOF(Input) then
+    ReadLn(Line);
+  if Line = '' then
+    OpenInBrowser(AUrl);
+  WriteLn('Waiting for authorization ...');
+end;
+
+{ Run the OAuth flow for one configured server and store the token. }
+function RunMcpAuth(AStore: TSqliteStore; const ARow: TMcpServerRow): Integer;
+var
+  PRM: TProtectedResourceMeta;
+  ASMeta: TAuthServerMeta;
+  Flow: TOAuthFlow;
+  Browser: TConsoleBrowser;
+  Tokens: TOAuthTokens;
+  Row: TOAuthTokenRow;
+  StoreErr: TStoreError;
+  Err: string;
+begin
+  if ARow.Transport <> mtHttp then
+  begin
+    WriteLn('error: server "', ARow.Name, '" is not an HTTP server');
+    Exit(1);
+  end;
+  WriteLn('authorizing "', ARow.Name, '" (', ARow.Url, ')');
+  if not DiscoverProtectedResource(ARow.Url, PRM, Err) then
+  begin
+    WriteLn('error: discovery failed: ', Err);
+    Exit(1);
+  end;
+  if Length(PRM.AuthorizationServers) = 0 then
+  begin
+    WriteLn('error: no authorization server advertised');
+    Exit(1);
+  end;
+  if not DiscoverAuthServer(PRM.AuthorizationServers[0], ASMeta, Err) then
+  begin
+    WriteLn('error: authorization-server metadata failed: ', Err);
+    Exit(1);
+  end;
+
+  Browser := TConsoleBrowser.Create;
+  Flow := TOAuthFlow.Create(ASMeta, ARow.Url);
+  try
+    if not Flow.Run('', '', '', Browser.Open, Tokens, Err) then
+    begin
+      WriteLn('error: authorization failed: ', Err);
+      Exit(1);
+    end;
+  finally
+    Flow.Free;
+    Browser.Free;
+  end;
+
+  Row := Default(TOAuthTokenRow);
+  Row.Scope := ARow.Scope;
+  Row.WorkspaceId := ARow.WorkspaceId;
+  Row.ServerName := ARow.Name;
+  Row.ClientId := Tokens.ClientId;
+  Row.ClientSecret := Tokens.ClientSecret;
+  Row.AccessToken := Tokens.AccessToken;
+  Row.RefreshToken := Tokens.RefreshToken;
+  Row.ExpiresAt := Tokens.ExpiresAt;
+  Row.TokenScope := Tokens.TokenScope;
+  if not AStore.SaveOAuthToken(Row, StoreErr) then
+  begin
+    WriteLn('error: could not save token: ', StoreErr.Message);
+    Exit(1);
+  end;
+  WriteLn('authorized "', ARow.Name, '"; token stored.');
+  Result := 0;
+end;
+
 function RunMcpTest(const ARow: TMcpServerRow): Integer;
 var
   Cfg: TMcpClientConfig;
@@ -522,7 +644,6 @@ begin
         begin
           Ctx := Default(TMcpConfigContext);
           Ctx.WorkspaceId := Row.WorkspaceId;
-          Rows := nil;
           if not Store.LoadMcpServers(Ctx, Rows, StoreErr) then
           begin
             WriteLn('error: ', StoreErr.Message);
@@ -543,6 +664,31 @@ begin
             Exit(1);
           end;
           Exit(RunMcpTest(Row));
+        end;
+      mvAuth:
+        begin
+          Ctx := Default(TMcpConfigContext);
+          Ctx.WorkspaceId := Row.WorkspaceId;
+          if not Store.LoadMcpServers(Ctx, Rows, StoreErr) then
+          begin
+            WriteLn('error: ', StoreErr.Message);
+            Exit(1);
+          end;
+          Msg := '';
+          for I := 0 to High(Rows) do
+            if (Rows[I].Scope = Row.Scope) and
+              (Rows[I].WorkspaceId = Row.WorkspaceId) and
+              (Rows[I].Name = Row.Name) then
+            begin
+              Row := Rows[I];
+              Msg := 'found';
+            end;
+          if Msg = '' then
+          begin
+            WriteLn('error: no such server "', Row.Name, '"');
+            Exit(1);
+          end;
+          Exit(RunMcpAuth(Store, Row));
         end;
       mvAdd:
         begin
