@@ -333,8 +333,8 @@ begin
   Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
   AssertTrue('opened: ' + Err, Session <> nil);
   try
-    AssertTrue('mcp tool registered',
-      Session.Tools.Find('mcp_fake_echo', Tool));
+    AssertTrue('mcp tool resolvable',
+      Session.Loop.ResolveTool('mcp_fake_echo', Tool));
   finally
     Session.Free;
   end;
@@ -368,7 +368,8 @@ begin
   Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
   AssertTrue('opened: ' + Err, Session <> nil);
   try
-    AssertFalse('no mcp tools yet', Session.Tools.Find('mcp_late_echo', Tool));
+    AssertFalse('no mcp tools yet',
+      Session.Loop.ResolveTool('mcp_late_echo', Tool));
 
     { The operator adds a server to the store. }
     StoreCfg := Default(TStoreConfig);
@@ -389,9 +390,9 @@ begin
     end;
 
     { The next turn's boundary reconcile picks it up. }
-    Session.Loop.OnTurnStart();
+    Session.Loop.PrepareProviders;
     AssertTrue('picked up at boundary',
-      Session.Tools.Find('mcp_late_echo', Tool));
+      Session.Loop.ResolveTool('mcp_late_echo', Tool));
   finally
     Session.Free;
   end;

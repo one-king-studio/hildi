@@ -63,6 +63,7 @@ type
     FChild: TStdioChild;
     FIdGen: TJsonRpcIdGen;
     FTools: TMcpToolArray;
+    FSpecs: TToolSpecArray;
     FHandlers: array of TMcpToolHandler;
     FRegisteredRefs: TStringList;
     FDead: Boolean;
@@ -75,19 +76,19 @@ type
     function ProtocolOk(const AInitializeResultJson: string;
       out AError: string): Boolean;
     function Discover(out AError: string): Boolean;
-    function RegisterTools(ATools: TToolRegistry; out AError: string): Boolean;
+    function RegisterTools(out AError: string): Boolean;
   public
     constructor Create(const AConfig: TMcpClientConfig;
       AApproval: IApprovalService; AOnEvent: TMcpEvent);
     destructor Destroy; override;
 
-    { Spawn, handshake, list, and register into ATools. False + AError (and no
-      registration) when the server is unusable. }
-    function Open(ATools: TToolRegistry; out AError: string): Boolean;
+    { Spawn, handshake, list, and build this client's specs. False + AError (and
+      no specs) when the server is unusable. }
+    function Open(out AError: string): Boolean;
 
-    { Re-run tools/list and register newly-appearing tools (existing names are
-      left in place). }
-    function Refresh(ATools: TToolRegistry; out AError: string): Boolean;
+    { Re-run tools/list and add newly-appearing tools (existing refs are left in
+      place). }
+    function Refresh(out AError: string): Boolean;
 
     { The tools/call path for one tool: approval ask, strip reason, call, map. }
     function CallTool(const ATool: TMcpTool; const AArgumentsJson: string;
@@ -95,6 +96,12 @@ type
 
     { Close the child. Idempotent. }
     procedure Close;
+
+    { The specs this client offers (namespaced names, reason-augmented). Built on
+      Open/Refresh; empty when not connected. }
+    function Specs: TToolSpecArray;
+    { Resolve a tool name to its handler; False when this client does not own it. }
+    function Find(const AName: string; out ATool: TRegisteredTool): Boolean;
 
     property ServerName: string read GetServerName;
     property Tools: TMcpToolArray read FTools;
@@ -120,8 +127,12 @@ type
 
   TMcpServerRuntimeArray = array of TMcpServerRuntime;
 
-  { Spawns every configured server, registers every tool, and reconciles the
-    live set from config at a boundary. Tear-down closes them all. }
+  { Supplies the current effective MCP config (e.g. from the store). }
+  TMcpConfigSource = function: TMcpConfig of object;
+
+  { Spawns every configured server, and reconciles the live set from config at a
+    boundary. Tear-down closes them all. The manager owns the tool specs; it is
+    exposed to the loop through TMcpProvider. }
   TMcpManager = class
   private
     FApproval: IApprovalService;
@@ -131,26 +142,41 @@ type
     FBackoffMaxMs: Integer;
     function FindRuntime(const AName: string): Integer;
     function ClientConfigFor(const AServer: TMcpServerConfig): TMcpClientConfig;
-    procedure CloseRuntime(AIndex: Integer; ATools: TToolRegistry);
-    function OpenRuntime(AIndex: Integer; ATools: TToolRegistry): Boolean;
+    procedure CloseRuntime(AIndex: Integer);
+    function OpenRuntime(AIndex: Integer): Boolean;
   public
     constructor Create(const AConfig: TMcpConfig;
       AApproval: IApprovalService; AOnEvent: TMcpEvent);
     destructor Destroy; override;
-    { Open every configured server (a thin wrapper over Reconcile). Failures are
-      skipped (logged). }
-    function Open(ATools: TToolRegistry): Boolean;
+    { Open every configured server (a thin wrapper over Reconcile). }
+    function Open: Boolean;
     { Diff AConfig against the live set: open new, reconnect dead (after
-      backoff), close+unregister disabled/removed. Returns True when consistent;
-      individual server failures are logged, not fatal. }
-    function Reconcile(const AConfig: TMcpConfig;
-      ATools: TToolRegistry): Boolean;
+      backoff), close disabled/removed. Returns True when consistent. }
+    function Reconcile(const AConfig: TMcpConfig): Boolean;
     procedure Close;
     function Runtimes: TMcpServerRuntimeArray;
+    { The union of connected servers' tool specs. }
+    function Specs: TToolSpecArray;
+    { Resolve a tool name to its owning server's handler. }
+    function Find(const AName: string; out ATool: TRegisteredTool): Boolean;
     { Backoff knobs; default 1000 -> 60000 ms. Exposed for tests. }
     property BackoffInitialMs: Integer read FBackoffInitialMs
       write FBackoffInitialMs;
     property BackoffMaxMs: Integer read FBackoffMaxMs write FBackoffMaxMs;
+  end;
+
+  { The MCP manager as a turn provider. Prepare reconciles from the config
+    source; Specs/Find expose the live tools; PromptFragment is ''. }
+  TMcpProvider = class(TInterfacedObject, IToolProvider)
+  private
+    FManager: TMcpManager;
+    FConfigSource: TMcpConfigSource;
+  public
+    constructor Create(AManager: TMcpManager; AConfigSource: TMcpConfigSource);
+    procedure Prepare;
+    function Specs: TToolSpecArray;
+    function PromptFragment: string;
+    function Find(const AName: string; out ATool: TRegisteredTool): Boolean;
   end;
 
 { --- pure mapping (public for direct testing) --------------------------- }
@@ -656,12 +682,10 @@ begin
   end;
 end;
 
-function TMcpClient.RegisterTools(ATools: TToolRegistry;
-  out AError: string): Boolean;
+function TMcpClient.RegisterTools(out AError: string): Boolean;
 var
   I: Integer;
   Taken: TStringList;
-  Specs: TToolSpecArray;
   Spec: TToolSpec;
   Handler: TMcpToolHandler;
   UniqueName: string;
@@ -669,9 +693,9 @@ begin
   AError := '';
   Taken := TStringList.Create;
   try
-    Specs := ATools.Specs;
-    for I := 0 to High(Specs) do
-      Taken.Add(Specs[I].Name);
+    { Names already in use by this client's own specs. }
+    for I := 0 to High(FSpecs) do
+      Taken.Add(FSpecs[I].Name);
     for I := 0 to High(FTools) do
     begin
       { A tool already registered (e.g. across a Refresh) is left in place. }
@@ -681,14 +705,13 @@ begin
       FTools[I].Name := UniqueName;
       Taken.Add(UniqueName);
       FRegisteredRefs.Add(FTools[I].Ref);
-      Spec := Default(TToolSpec);
-      Spec.Name := UniqueName;
-      Spec.Description := FTools[I].Description;
-      Spec.ParametersJson := FTools[I].ParametersJson;
+      Spec := MakeToolSpec(UniqueName, FTools[I].Description,
+        FTools[I].ParametersJson);
       Handler := TMcpToolHandler.Create(Self, FTools[I]);
       SetLength(FHandlers, Length(FHandlers) + 1);
       FHandlers[High(FHandlers)] := Handler;
-      ATools.Add(Spec, Handler.Handle);
+      SetLength(FSpecs, Length(FSpecs) + 1);
+      FSpecs[High(FSpecs)] := Spec;
     end;
     Result := True;
   finally
@@ -696,7 +719,29 @@ begin
   end;
 end;
 
-function TMcpClient.Open(ATools: TToolRegistry; out AError: string): Boolean;
+function TMcpClient.Specs: TToolSpecArray;
+begin
+  Result := FSpecs;
+end;
+
+function TMcpClient.Find(const AName: string;
+  out ATool: TRegisteredTool): Boolean;
+var
+  I: Integer;
+begin
+  for I := 0 to High(FSpecs) do
+    if FSpecs[I].Name = AName then
+    begin
+      ATool := Default(TRegisteredTool);
+      ATool.Spec := FSpecs[I];
+      ATool.Handler := FHandlers[I].Handle;
+      Exit(True);
+    end;
+  ATool := Default(TRegisteredTool);
+  Result := False;
+end;
+
+function TMcpClient.Open(out AError: string): Boolean;
 var
   ChildCfg: TStdioChildConfig;
   InitParams, ResultJson, Err: string;
@@ -705,6 +750,9 @@ begin
   if FChild <> nil then
     Exit(True);
   FDead := False;   // a fresh open clears a previous death
+  { A new connection starts a fresh id sequence (ids are per-connection). }
+  FIdGen.Free;
+  FIdGen := TJsonRpcIdGen.Create;
   ChildCfg := Default(TStdioChildConfig);
   ChildCfg.Executable := FConfig.Server.Command;
   ChildCfg.Args := Copy(FConfig.Server.Args, 0, Length(FConfig.Server.Args));
@@ -745,12 +793,12 @@ begin
     Close;
     Exit(False);
   end;
-  Result := RegisterTools(ATools, AError);
+  Result := RegisterTools(AError);
   if not Result then
     Close;
 end;
 
-function TMcpClient.Refresh(ATools: TToolRegistry; out AError: string): Boolean;
+function TMcpClient.Refresh(out AError: string): Boolean;
 var
   NewTools: TMcpToolArray;
   I: Integer;
@@ -767,7 +815,7 @@ begin
     SetLength(FTools, Length(FTools) + 1);
     FTools[High(FTools)] := NewTools[I];
   end;
-  RegisterTools(ATools, Err);
+  RegisterTools(Err);
   Result := True;
 end;
 
@@ -834,6 +882,8 @@ begin
   for I := 0 to High(FHandlers) do
     FHandlers[I].Free;
   FHandlers := nil;
+  FSpecs := nil;
+  FRegisteredRefs.Clear;
   if FChild <> nil then
   begin
     FChild.Close;
@@ -892,28 +942,13 @@ begin
   Result := -1;
 end;
 
-function TMcpManager.OpenRuntime(AIndex: Integer;
-  ATools: TToolRegistry): Boolean;
+function TMcpManager.OpenRuntime(AIndex: Integer): Boolean;
 var
   Err: string;
-  Specs: TToolSpecArray;
-  I: Integer;
 begin
-  Result := FRuntimes[AIndex].Client.Open(ATools, Err);
+  Result := FRuntimes[AIndex].Client.Open(Err);
   if Result then
   begin
-    { Record exactly which tool names this server registered, so removal is
-      exact (never by prefix). }
-    Specs := ATools.Specs;
-    FRuntimes[AIndex].RegisteredNames := nil;
-    for I := 0 to High(Specs) do
-      if Pos('mcp_' + FRuntimes[AIndex].Name + '_', Specs[I].Name) = 1 then
-      begin
-        SetLength(FRuntimes[AIndex].RegisteredNames,
-          Length(FRuntimes[AIndex].RegisteredNames) + 1);
-        FRuntimes[AIndex].RegisteredNames[High(FRuntimes[AIndex].RegisteredNames)]
-          := Specs[I].Name;
-      end;
     FRuntimes[AIndex].State := mssConnected;
     FRuntimes[AIndex].BackoffMs := FBackoffInitialMs;
     FRuntimes[AIndex].NextAttemptAt := 0;
@@ -930,20 +965,13 @@ begin
   end;
 end;
 
-procedure TMcpManager.CloseRuntime(AIndex: Integer; ATools: TToolRegistry);
-var
-  I: Integer;
+procedure TMcpManager.CloseRuntime(AIndex: Integer);
 begin
-  { Unregister exactly the tools this server registered (recorded on open). }
-  if ATools <> nil then
-    for I := 0 to High(FRuntimes[AIndex].RegisteredNames) do
-      ATools.Remove(FRuntimes[AIndex].RegisteredNames[I]);
-  FRuntimes[AIndex].RegisteredNames := nil;
   FRuntimes[AIndex].Client.Close;
   FRuntimes[AIndex].State := mssStopped;
 end;
 
-function TMcpManager.Open(ATools: TToolRegistry): Boolean;
+function TMcpManager.Open: Boolean;
 var
   I: Integer;
   Cfg: TMcpConfig;
@@ -952,11 +980,10 @@ begin
   SetLength(Cfg.Servers, Length(FRuntimes));
   for I := 0 to High(FRuntimes) do
     Cfg.Servers[I] := FRuntimes[I].Config;
-  Result := Reconcile(Cfg, ATools);
+  Result := Reconcile(Cfg);
 end;
 
-function TMcpManager.Reconcile(const AConfig: TMcpConfig;
-  ATools: TToolRegistry): Boolean;
+function TMcpManager.Reconcile(const AConfig: TMcpConfig): Boolean;
 var
   I, J: Integer;
   Name: string;
@@ -980,7 +1007,7 @@ begin
     if not Found then
     begin
       if FRuntimes[I].State <> mssStopped then
-        CloseRuntime(I, ATools);
+        CloseRuntime(I);
       FRuntimes[I].Client.Free;
       for J := I to High(FRuntimes) - 1 do
         FRuntimes[J] := FRuntimes[J + 1];
@@ -1010,20 +1037,50 @@ begin
       mssConnected:
         if FRuntimes[I].Client.Dead then
         begin
-          CloseRuntime(I, ATools);
+          CloseRuntime(I);
           FRuntimes[I].State := mssDead;
           FRuntimes[I].NextAttemptAt := Now + FRuntimes[I].BackoffMs;
         end;
       mssStopped:
-        OpenRuntime(I, ATools);
+        OpenRuntime(I);
       mssDead:
         if Now >= FRuntimes[I].NextAttemptAt then
         begin
           FRuntimes[I].Client.Close;
-          OpenRuntime(I, ATools);
+          OpenRuntime(I);
         end;
     end;
   end;
+end;
+
+function TMcpManager.Specs: TToolSpecArray;
+var
+  I, K, N: Integer;
+  S: TToolSpecArray;
+begin
+  Result := nil;
+  for I := 0 to High(FRuntimes) do
+  begin
+    S := FRuntimes[I].Client.Specs;
+    for K := 0 to High(S) do
+    begin
+      N := Length(Result);
+      SetLength(Result, N + 1);
+      Result[N] := S[K];
+    end;
+  end;
+end;
+
+function TMcpManager.Find(const AName: string;
+  out ATool: TRegisteredTool): Boolean;
+var
+  I: Integer;
+begin
+  for I := 0 to High(FRuntimes) do
+    if FRuntimes[I].Client.Find(AName, ATool) then
+      Exit(True);
+  ATool := Default(TRegisteredTool);
+  Result := False;
 end;
 
 procedure TMcpManager.Close;
@@ -1041,6 +1098,46 @@ end;
 function TMcpManager.Runtimes: TMcpServerRuntimeArray;
 begin
   Result := FRuntimes;
+end;
+
+{ --- TMcpProvider ------------------------------------------------------- }
+
+constructor TMcpProvider.Create(AManager: TMcpManager;
+  AConfigSource: TMcpConfigSource);
+begin
+  inherited Create;
+  FManager := AManager;
+  FConfigSource := AConfigSource;
+end;
+
+procedure TMcpProvider.Prepare;
+begin
+  if (FManager <> nil) and Assigned(FConfigSource) then
+    FManager.Reconcile(FConfigSource());
+end;
+
+function TMcpProvider.Specs: TToolSpecArray;
+begin
+  if FManager = nil then
+    Result := nil
+  else
+    Result := FManager.Specs;
+end;
+
+function TMcpProvider.PromptFragment: string;
+begin
+  Result := '';   { MCP contributes no prompt }
+end;
+
+function TMcpProvider.Find(const AName: string;
+  out ATool: TRegisteredTool): Boolean;
+begin
+  if FManager = nil then
+  begin
+    ATool := Default(TRegisteredTool);
+    Exit(False);
+  end;
+  Result := FManager.Find(AName, ATool);
 end;
 
 end.

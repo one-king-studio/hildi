@@ -1,7 +1,7 @@
 program mcp_session_check;
 { Verification: open a real THarnessSession against a store (a copy, so the
-  real one is not mutated) and confirm a configured MCP server's tools register
-  alongside the native tools. Run by hand:
+  real one is not mutated), trigger the turn boundary, and confirm a configured
+  MCP server's tools resolve through the provider seam. Run by hand:
 
     ./build/bin/mcp-session-check <store-path> <workspace-path> }
 
@@ -17,8 +17,10 @@ var
   Cfg: THarnessSessionConfig;
   Session: THarnessSession;
   Err: string;
-  I, McpCount: Integer;
-  Specs: TToolSpecArray;
+  Tool: TRegisteredTool;
+  Names: array[0..2] of string;
+  I: Integer;
+  Found: Integer;
 begin
   if ParamCount < 2 then
   begin
@@ -36,19 +38,22 @@ begin
     Halt(1);
   end;
   try
-    Specs := Session.Tools.Specs;
-    WriteLn('session tools: ', Length(Specs));
-    McpCount := 0;
-    for I := 0 to High(Specs) do
-    begin
-      if Pos('mcp_', Specs[I].Name) = 1 then
+    { Fire the turn boundary so providers reconcile from the store. }
+    Session.Loop.PrepareProviders;
+
+    Names[0] := 'mcp_playwright_browser_navigate';
+    Names[1] := 'mcp_playwright_browser_close';
+    Names[2] := 'mcp_playwright_browser_snapshot';
+    Found := 0;
+    for I := Low(Names) to High(Names) do
+      if Session.Loop.ResolveTool(Names[I], Tool) then
       begin
-        Inc(McpCount);
-        if McpCount <= 5 then
-          WriteLn('  ', Specs[I].Name);
-      end;
-    end;
-    WriteLn('MCP tools registered: ', McpCount);
+        Inc(Found);
+        WriteLn('resolved: ', Names[I]);
+      end
+      else
+        WriteLn('MISSING:  ', Names[I]);
+    WriteLn('MCP tools resolved: ', Found, ' of ', Length(Names));
   finally
     Session.Free;
   end;

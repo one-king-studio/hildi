@@ -37,14 +37,14 @@ type
     FFileTool: TFileTool;
     FRecallTool: TRecallTool;
     FMcp: TMcpManager;
+    FMcpProvider: IToolProvider;
     FLoop: TAgentLoop;
     FQueue: TTurnQueue;
     FGate: TApprovalGate;
     { MCP events (server failure etc.) are recorded as session errors. }
     procedure McpEvent(const AMessage, ADetail: string);
-    { Re-read MCP config from the store and reconcile the live servers; the
-      turn-boundary hook. }
-    procedure McpReconcile;
+    { The current effective MCP config from the store, for the provider. }
+    function McpConfigSource: TMcpConfig;
     function Init(const AConfig: THarnessSessionConfig; out AError: string):
       Boolean;
   public
@@ -77,6 +77,7 @@ procedure THarnessSession.Close;
 begin
   FLoop.Free;
   FLoop := nil;
+  FMcpProvider := nil;
   FMcp.Free;
   FMcp := nil;
   FCommandTool.Free;
@@ -129,25 +130,21 @@ begin
     FConversation.AppendError(AMessage, ADetail);
 end;
 
-procedure THarnessSession.McpReconcile;
+function THarnessSession.McpConfigSource: TMcpConfig;
 var
   Ctx: TMcpConfigContext;
-  Cfg: TMcpConfig;
   Rows: TMcpServerRowArray;
   StoreErr: TStoreError;
 begin
-  if (FMcp = nil) or (FView = nil) or (FView.Store = nil) then
+  Result := Default(TMcpConfig);
+  if (FView = nil) or (FView.Store = nil) then
     Exit;
   Ctx := Default(TMcpConfigContext);
   Ctx.WorkspaceId := FView.WorkspaceId;
-  Cfg := Default(TMcpConfig);
-  Cfg.Context := Ctx;
+  Result.Context := Ctx;
   Rows := nil;
   if FView.Store.LoadMcpServers(Ctx, Rows, StoreErr) then
-  begin
-    Cfg.Servers := ResolveMcpConfig(Rows, Ctx);
-    FMcp.Reconcile(Cfg, FTools);
-  end;
+    Result.Servers := ResolveMcpConfig(Rows, Ctx);
 end;
 
 function THarnessSession.Init(const AConfig: THarnessSessionConfig;
@@ -162,10 +159,7 @@ var
   FileConfig: TFileToolConfig;
   AgentConfig: TAgentConfig;
   Conv: TSqliteConversationStore;
-  McpCtx: TMcpConfigContext;
   McpCfg: TMcpConfig;
-  McpRows: TMcpServerRowArray;
-  StoreErr: TStoreError;
   Cap: Integer;
 begin
   Result := False;
@@ -240,15 +234,10 @@ begin
     nowhere to read config from. }
   if FView.Store <> nil then
   begin
-    McpCtx := Default(TMcpConfigContext);
-    McpCtx.WorkspaceId := FView.WorkspaceId;
-    McpCfg := Default(TMcpConfig);
-    McpCfg.Context := McpCtx;
-    McpRows := nil;
-    if FView.Store.LoadMcpServers(McpCtx, McpRows, StoreErr) then
-      McpCfg.Servers := ResolveMcpConfig(McpRows, McpCtx);
+    McpCfg := McpConfigSource;
     FMcp := TMcpManager.Create(McpCfg, ApprovalService, McpEvent);
-    FMcp.Open(FTools);
+    FMcp.Open;
+    FMcpProvider := TMcpProvider.Create(FMcp, McpConfigSource);
   end;
 
   AgentConfig := Default(TAgentConfig);
@@ -262,9 +251,11 @@ begin
   AgentConfig.MaxContextTokens := FView.MaxContextTokens;
 
   FLoop := TAgentLoop.Create(FClient, FConversation, FTools, AgentConfig);
-  { Reconcile the MCP tool surface from the store at each turn boundary, so a
-    server added/changed/removed between turns is picked up without a restart. }
-  FLoop.OnTurnStart := McpReconcile;
+  { Register the MCP provider: at each turn boundary it reconciles from the
+    store and contributes its live tools, so a server added/changed/removed
+    between turns is picked up without a restart. }
+  if FMcpProvider <> nil then
+    FLoop.AddProvider(FMcpProvider);
   Result := True;
 end;
 

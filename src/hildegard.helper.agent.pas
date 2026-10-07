@@ -266,6 +266,10 @@ type
     { Register a per-turn tool/prompt contributor. Prepare fires at each turn
       start; its Specs join the request's tool list; its Find resolves calls. }
     procedure AddProvider(const AProvider: IToolProvider);
+    { Run the turn boundary: the OnTurnStart hook, then each provider's Prepare
+      (a provider that raises is skipped). Called by Send before the first
+      request; public so a host may trigger it explicitly. }
+    procedure PrepareProviders;
     { Prompts the operator injects into a running turn. }
     property PromptQueue: TPromptQueue read FPromptQueue;
     { True when the last turn was cancelled before any response was committed,
@@ -881,6 +885,20 @@ begin
   FProviders[N] := AProvider;
 end;
 
+procedure TAgentLoop.PrepareProviders;
+var
+  I: Integer;
+begin
+  if Assigned(FOnTurnStart) then
+    FOnTurnStart();
+  for I := 0 to High(FProviders) do
+    try
+      FProviders[I].Prepare;
+    except
+      on E: Exception do ;   { a broken provider never wedges the loop }
+    end;
+end;
+
 procedure TAgentLoop.ExecuteToolCalls(const ACalls: TChatToolCallArray;
   const AEvents: TAgentEvents; out AAllOk: Boolean);
 var
@@ -1058,7 +1076,6 @@ var
   StartMs, EndMs: Int64;
   Outcome: TRequestOutcome;
   TurnOutcome: TTurnOutcome;
-  I: Integer;
 
   procedure FailTurn(ACode: TLLMErrorCode; const AMessage, ADetail,
     AFinishReason: string);
@@ -1104,14 +1121,7 @@ begin
   { The turn boundary: the owner may reconcile its tool surface here, before the
     first request. The registry is snapshotted per request, so mutating it now is
     race-free. }
-  if Assigned(FOnTurnStart) then
-    FOnTurnStart();
-  for I := 0 to High(FProviders) do
-    try
-      FProviders[I].Prepare;
-    except
-      on E: Exception do ;   { a broken provider never wedges the loop }
-    end;
+  PrepareProviders;
 
   if (FStore.Messages = nil) and (FConfig.SystemPrompt <> '') then
   begin

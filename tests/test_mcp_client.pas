@@ -200,21 +200,18 @@ end;
 procedure TMcpClientTest.TestOpenRegistersToolsAndCallSucceeds;
 var
   Client: TMcpClient;
-  Reg: TToolRegistry;
   Tool: TRegisteredTool;
   Approval: IApprovalService;
   Res, Err: string;
 begin
   Approval := TFakeApproval.Create(True);
   Client := TMcpClient.Create(ClientConfig(StandardScript), Approval, nil);
-  Reg := TToolRegistry.Create;
   try
-    AssertTrue('open', Client.Open(Reg, Err));
-    AssertTrue('registered', Reg.Find('mcp_fake_echo', Tool));
+    AssertTrue('open', Client.Open(Err));
+    AssertTrue('registered', Client.Find('mcp_fake_echo', Tool));
     AssertTrue('call', Tool.Handler('{"message":"hi","reason":"testing"}', Res, Err));
     AssertEquals('result', 'echoed', Res);
   finally
-    Reg.Free;
     Client.Free;
   end;
 end;
@@ -222,21 +219,18 @@ end;
 procedure TMcpClientTest.TestCallDeniedByApproval;
 var
   Client: TMcpClient;
-  Reg: TToolRegistry;
   Tool: TRegisteredTool;
   Approval: IApprovalService;
   Res, Err: string;
 begin
   Approval := TFakeApproval.Create(False);   // deny
   Client := TMcpClient.Create(ClientConfig(StandardScript), Approval, nil);
-  Reg := TToolRegistry.Create;
   try
-    AssertTrue('open', Client.Open(Reg, Err));
-    AssertTrue('registered', Reg.Find('mcp_fake_echo', Tool));
+    AssertTrue('open', Client.Open(Err));
+    AssertTrue('registered', Client.Find('mcp_fake_echo', Tool));
     AssertFalse('denied', Tool.Handler('{"message":"hi","reason":"x"}', Res, Err));
     AssertEquals('reason', 'denied by operator', Err);
   finally
-    Reg.Free;
     Client.Free;
   end;
 end;
@@ -244,7 +238,6 @@ end;
 procedure TMcpClientTest.TestUnsupportedProtocolRefused;
 var
   Client: TMcpClient;
-  Reg: TToolRegistry;
   Approval: IApprovalService;
   Err: string;
   Script: string;
@@ -253,13 +246,12 @@ begin
     '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"1999-01-01"}}');
   Approval := TFakeApproval.Create(True);
   Client := TMcpClient.Create(ClientConfig(Script), Approval, nil);
-  Reg := TToolRegistry.Create;
   try
-    AssertFalse('refused', Client.Open(Reg, Err));
-    AssertEquals('no tools registered', 0, Reg.Count);
+    Err := '';
+    AssertFalse('refused', Client.Open(Err));
+    AssertEquals('no tools', 0, Length(Client.Specs));
     AssertTrue('names the version', Pos('1999-01-01', Err) > 0);
   finally
-    Reg.Free;
     Client.Free;
   end;
 end;
@@ -267,7 +259,6 @@ end;
 procedure TMcpClientTest.TestListTimeoutDropsServer;
 var
   Client: TMcpClient;
-  Reg: TToolRegistry;
   Approval: IApprovalService;
   Err: string;
   Script: string;
@@ -277,14 +268,13 @@ begin
   Script := 'read line; ' + Line(InitJson) + 'read line; read line; sleep 30';
   Approval := TFakeApproval.Create(True);
   Client := TMcpClient.Create(ClientConfig(Script, 400), Approval, nil);
-  Reg := TToolRegistry.Create;
   try
+    Err := '';
     Start := GetTickCount64;
-    AssertFalse('dropped', Client.Open(Reg, Err));
+    AssertFalse('dropped', Client.Open(Err));
     AssertTrue('bounded', GetTickCount64 - Start < 3000);
-    AssertEquals('no tools', 0, Reg.Count);
+    AssertEquals('no tools', 0, Length(Client.Specs));
   finally
-    Reg.Free;
     Client.Free;
   end;
 end;
@@ -292,7 +282,6 @@ end;
 procedure TMcpClientTest.TestServerRequestAnsweredAndIgnored;
 var
   Client: TMcpClient;
-  Reg: TToolRegistry;
   Approval: IApprovalService;
   Err: string;
   Script: string;
@@ -305,12 +294,11 @@ begin
     Line(ListJson);
   Approval := TFakeApproval.Create(True);
   Client := TMcpClient.Create(ClientConfig(Script), Approval, nil);
-  Reg := TToolRegistry.Create;
   try
-    AssertTrue('open despite server request', Client.Open(Reg, Err));
-    AssertEquals('one tool', 1, Reg.Count);
+    Err := '';
+    AssertTrue('open despite server request', Client.Open(Err));
+    AssertEquals('one tool', 1, Length(Client.Specs));
   finally
-    Reg.Free;
     Client.Free;
   end;
 end;
@@ -318,19 +306,15 @@ end;
 procedure TMcpClientTest.TestReconcileOpensNewServer;
 var
   Mgr: TMcpManager;
-  Reg: TToolRegistry;
   Approval: IApprovalService;
   Tool: TRegisteredTool;
 begin
   Approval := TFakeApproval.Create(True);
   Mgr := TMcpManager.Create(Default(TMcpConfig), Approval, nil);
-  Reg := TToolRegistry.Create;
   try
-    AssertTrue('reconcile',
-      Mgr.Reconcile(McpCfg('fake', StandardScript), Reg));
-    AssertTrue('tool registered', Reg.Find('mcp_fake_echo', Tool));
+    AssertTrue('reconcile', Mgr.Reconcile(McpCfg('fake', StandardScript)));
+    AssertTrue('tool present', Mgr.Find('mcp_fake_echo', Tool));
   finally
-    Reg.Free;
     Mgr.Free;
   end;
 end;
@@ -338,24 +322,21 @@ end;
 procedure TMcpClientTest.TestReconcileNoOpWhenConnected;
 var
   Mgr: TMcpManager;
-  Reg: TToolRegistry;
   Approval: IApprovalService;
   Rt: TMcpServerRuntimeArray;
 begin
   Approval := TFakeApproval.Create(True);
   Mgr := TMcpManager.Create(Default(TMcpConfig), Approval, nil);
-  Reg := TToolRegistry.Create;
   try
-    Mgr.Reconcile(McpCfg('fake', StandardScript), Reg);
-    AssertEquals('one tool', 1, Reg.Count);
+    Mgr.Reconcile(McpCfg('fake', StandardScript));
+    AssertEquals('one tool', 1, Length(Mgr.Specs));
     { A second reconcile with the same config must not respawn: still one tool. }
-    Mgr.Reconcile(McpCfg('fake', StandardScript), Reg);
-    AssertEquals('still one tool (no duplicate)', 1, Reg.Count);
+    Mgr.Reconcile(McpCfg('fake', StandardScript));
+    AssertEquals('still one tool (no duplicate)', 1, Length(Mgr.Specs));
     Rt := Mgr.Runtimes;
     AssertEquals('one runtime', 1, Length(Rt));
     AssertEquals('connected', Ord(mssConnected), Ord(Rt[0].State));
   finally
-    Reg.Free;
     Mgr.Free;
   end;
 end;
@@ -363,22 +344,19 @@ end;
 procedure TMcpClientTest.TestReconcileDisableUnregisters;
 var
   Mgr: TMcpManager;
-  Reg: TToolRegistry;
   Approval: IApprovalService;
   Tool: TRegisteredTool;
 begin
   Approval := TFakeApproval.Create(True);
   Mgr := TMcpManager.Create(Default(TMcpConfig), Approval, nil);
-  Reg := TToolRegistry.Create;
   try
-    Mgr.Reconcile(McpCfg('fake', StandardScript), Reg);
-    AssertEquals('registered', 1, Reg.Count);
+    Mgr.Reconcile(McpCfg('fake', StandardScript));
+    AssertEquals('registered', 1, Length(Mgr.Specs));
     { Reconcile with an empty config removes the server and its tools. }
-    Mgr.Reconcile(Default(TMcpConfig), Reg);
-    AssertEquals('unregistered', 0, Reg.Count);
-    AssertFalse('gone', Reg.Find('mcp_fake_echo', Tool));
+    Mgr.Reconcile(Default(TMcpConfig));
+    AssertEquals('unregistered', 0, Length(Mgr.Specs));
+    AssertFalse('gone', Mgr.Find('mcp_fake_echo', Tool));
   finally
-    Reg.Free;
     Mgr.Free;
   end;
 end;
@@ -386,28 +364,34 @@ end;
 procedure TMcpClientTest.TestReconcileReconnectsDeadServer;
 var
   Mgr: TMcpManager;
-  Reg: TToolRegistry;
   Approval: IApprovalService;
   Tool: TRegisteredTool;
   Res, Err: string;
   Rt: TMcpServerRuntimeArray;
+  DiesAfterList: string;
 begin
   Approval := TFakeApproval.Create(True);
   Mgr := TMcpManager.Create(Default(TMcpConfig), Approval, nil);
-  Mgr.BackoffInitialMs := 1;   // reconnect immediately in the test
-  Reg := TToolRegistry.Create;
+  Mgr.BackoffInitialMs := 1;
+  { The server answers init + list, then exits — so a later call finds it dead. }
+  DiesAfterList := 'read line; ' + Line(InitJson) +
+    'read line; read line; ' + Line(ListJson);
   try
-    Mgr.Reconcile(McpCfg('fake', StandardScript), Reg);
-    AssertTrue('registered', Reg.Find('mcp_fake_echo', Tool));
-    { Kill the child so the next call marks the client dead. }
-    Tool.Handler('{"message":"x","reason":"x"}', Res, Err);   // may succeed
-    { Force death by calling after close is not available; instead reconcile
-      after the server's stdin is gone is hard to script — assert the runtime
-      reports dead when a call fails. }
+    Mgr.Reconcile(McpCfg('fake', DiesAfterList));
+    AssertTrue('registered', Mgr.Find('mcp_fake_echo', Tool));
+    { A call after the child exited marks the client dead. }
+    Tool.Handler('{"message":"x","reason":"x"}', Res, Err);
+    { Reconcile detects the death and drops the tools. }
+    Mgr.Reconcile(McpCfg('fake', DiesAfterList));
     Rt := Mgr.Runtimes;
-    AssertEquals('one runtime', 1, Length(Rt));
+    AssertEquals('dead', Ord(mssDead), Ord(Rt[0].State));
+    Sleep(10);   { let the backoff elapse }
+    { Reconcile reconnects and re-registers. }
+    Mgr.Reconcile(McpCfg('fake', DiesAfterList));
+    Rt := Mgr.Runtimes;
+    AssertEquals('state after reconnect', Ord(mssConnected), Ord(Rt[0].State));
+    AssertTrue('reconnected and re-registered', Mgr.Find('mcp_fake_echo', Tool));
   finally
-    Reg.Free;
     Mgr.Free;
   end;
 end;
@@ -415,7 +399,6 @@ end;
 procedure TMcpClientTest.TestReconcileIsolatesFailures;
 var
   Mgr: TMcpManager;
-  Reg: TToolRegistry;
   Approval: IApprovalService;
   Tool: TRegisteredTool;
   Rt: TMcpServerRuntimeArray;
@@ -423,15 +406,13 @@ begin
   Approval := TFakeApproval.Create(True);
   Mgr := TMcpManager.Create(Default(TMcpConfig), Approval, nil);
   Mgr.BackoffInitialMs := 1;
-  Reg := TToolRegistry.Create;
   try
     { Server A is healthy; server B exits immediately (fails to initialize). }
-    Mgr.Reconcile(McpCfgTwo('good', StandardScript, 'bad', 'exit 1'), Reg);
-    AssertTrue('healthy server registered', Reg.Find('mcp_good_echo', Tool));
+    Mgr.Reconcile(McpCfgTwo('good', StandardScript, 'bad', 'exit 1'));
+    AssertTrue('healthy server present', Mgr.Find('mcp_good_echo', Tool));
     Rt := Mgr.Runtimes;
     AssertEquals('two runtimes', 2, Length(Rt));
   finally
-    Reg.Free;
     Mgr.Free;
   end;
 end;
