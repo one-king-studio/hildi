@@ -271,10 +271,8 @@ begin
   begin
     McpCfg := McpConfigSource;
     FMcpTokenProviders := TObjectList.Create(True);
-    FMcp := TMcpManager.Create(McpCfg, ApprovalService, McpEvent);
-    { OAuth: HTTP servers with a stored token get a token source (refreshing as
-      needed); static-header servers are unaffected. }
-    FMcp.TokenSourceFor := McpTokenSourceFor;
+    FMcp := TMcpManager.Create(McpCfg, ApprovalService, McpEvent,
+      McpTokenSourceFor);
     FMcp.Open;
     FMcpProvider := TMcpProvider.Create(FMcp, McpConfigSource);
   end;

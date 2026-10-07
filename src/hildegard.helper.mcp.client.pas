@@ -156,7 +156,8 @@ type
     function OpenRuntime(AIndex: Integer): Boolean;
   public
     constructor Create(const AConfig: TMcpConfig;
-      AApproval: IApprovalService; AOnEvent: TMcpEvent);
+      AApproval: IApprovalService; AOnEvent: TMcpEvent;
+      ATokenSourceFor: TMcpTokenSourceFactory = nil);
     destructor Destroy; override;
     { Open every configured server (a thin wrapper over Reconcile). }
     function Open: Boolean;
@@ -924,7 +925,8 @@ end;
 { --- TMcpManager -------------------------------------------------------- }
 
 constructor TMcpManager.Create(const AConfig: TMcpConfig;
-  AApproval: IApprovalService; AOnEvent: TMcpEvent);
+  AApproval: IApprovalService; AOnEvent: TMcpEvent;
+  ATokenSourceFor: TMcpTokenSourceFactory = nil);
 var
   I: Integer;
   Cfg: TMcpClientConfig;
@@ -932,6 +934,8 @@ begin
   inherited Create;
   FApproval := AApproval;
   FOnEvent := AOnEvent;
+  { Set before building the clients, so each HTTP client gets its token source. }
+  FTokenSourceFor := ATokenSourceFor;
   FBackoffInitialMs := McpBackoffInitialMs;
   FBackoffMaxMs := McpBackoffMaxMs;
   SetLength(FRuntimes, Length(AConfig.Servers));
