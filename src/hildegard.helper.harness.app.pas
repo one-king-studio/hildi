@@ -67,6 +67,9 @@ type
     FSpy: TSubagentSpy;
     FSpyId: string;
     FAskRefIsChild: Boolean;
+    { Queued prompts shown as 'Queued' boxes at the end of the stream, removed
+      when they are injected as a real user turn. }
+    FQueuedBlocks: array of TChatItem;
     function BuildTree: TWidget;
     procedure Submit(const AText: string);
     procedure DrainQueue;
@@ -78,6 +81,8 @@ type
     procedure CloseModal;
     { Subagents: feed the roster, toggle/show the sidebar, spy on a child. }
     procedure HandleSubagentEvent(const E: TTurnEvent);
+    { Show a queued prompt (a violet 'Queued' box) at the end of the stream. }
+    procedure ShowQueued(const AText: string);
     procedure ToggleSidebar(Sender: TObject);
     procedure LayoutSidebar;
     procedure OnSidebarSelect(const ASessionId: string);
@@ -518,11 +523,10 @@ begin
           either; live and resume stay identical. }
         ;
       mrAmbient:
-        { A subagent result: a dimmed marker line (label + status), then the
-          child's text. }
+        { A subagent result: a user-style box with a violet border, titled with
+          the task label and status. }
         if Rec.Content <> '' then
-          FPanel.Stream.Add(ckAmbient, '',
-            '◀ ' + Rec.LabelText + ' · ' + Rec.Status + ' ▶' + LineEnding +
+          FPanel.Stream.Add(ckAmbient, Rec.LabelText + ' · ' + Rec.Status,
             Rec.Content);
     end;
   end;
@@ -541,9 +545,10 @@ begin
   if FBusy then
   begin
     { A turn is in flight: hand the prompt to the driver, which injects it at
-      the runtime's next boundary. }
+      the runtime's next boundary, and show it as a 'Queued' box now. }
     if FDriver <> nil then
       FDriver.QueuePrompt(AText);
+    ShowQueued(AText);
     Exit;
   end;
   FUserPrompt := AText;
@@ -687,6 +692,7 @@ end;
 procedure THarnessApp.HandleUserMessage(const AText: string);
 var
   Block: TChatItem;
+  I: Integer;
 begin
   { An empty user message carries no information (and a mis-mapped event can
     produce one); never draw a blank user block. }
@@ -705,6 +711,14 @@ begin
     FThought := nil;
   end;
   SettleOpenTool;
+  { A queued box is superseded by the real user turn; drop the oldest. }
+  if Length(FQueuedBlocks) > 0 then
+  begin
+    FPanel.Stream.Remove(FQueuedBlocks[0]);
+    for I := 1 to High(FQueuedBlocks) do
+      FQueuedBlocks[I - 1] := FQueuedBlocks[I];
+    SetLength(FQueuedBlocks, Length(FQueuedBlocks) - 1);
+  end;
   Block := FPanel.Stream.Add(ckUser, '', AText);
   { The turn's first user message is the one an early cancel restores; a queued
     prompt leaves the first block in place. }  if FUserBlock = nil then
@@ -971,6 +985,16 @@ begin
 end;
 
 { --- subagents ---------------------------------------------------------- }
+
+procedure THarnessApp.ShowQueued(const AText: string);
+var
+  Block: TChatItem;
+begin
+  Block := FPanel.Stream.Add(ckQueued, 'Queued', AText);
+  SetLength(FQueuedBlocks, Length(FQueuedBlocks) + 1);
+  FQueuedBlocks[High(FQueuedBlocks)] := Block;
+  FApp.Invalidate;
+end;
 
 procedure THarnessApp.HandleSubagentEvent(const E: TTurnEvent);
 begin

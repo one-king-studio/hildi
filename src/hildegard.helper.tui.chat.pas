@@ -23,8 +23,13 @@ uses
 
 type
   TChatKind = (ckUser, ckAssistant, ckError, ckThought, ckTool, ckThinking,
-    ckTurn, ckAmbient);
+    ckTurn, ckAmbient, ckQueued);
 
+const
+  { The violet used for the queued/ambient border, matching inline code. }
+  QueuedBorderFg = 140;
+
+type
   { One block in the stream. Mutable, so a stream can append into it. Its
     measured height is memoized per width and invalidated when the text or the
     expansion changes, so a layout pass does not re-measure unchanged blocks. }
@@ -282,7 +287,8 @@ begin
   FBody := AText;
   FTheme := ATheme;
   FExpanded := (AKind = ckUser) or (AKind = ckAssistant) or
-    (AKind = ckError) or (AKind = ckThinking);
+    (AKind = ckError) or (AKind = ckThinking) or (AKind = ckQueued) or
+    (AKind = ckAmbient);
   FLiveStarted := False;
   FHeightValid := False;
   FHeightWidth := 0;
@@ -307,8 +313,8 @@ begin
       Result := OnBg(FTheme.Text, FTheme.SunkenBg);
     ckThought:
       Result := FTheme.Muted;
-    ckAmbient:
-      Result := FTheme.Muted;
+    ckAmbient, ckQueued:
+      Result := OnBg(FTheme.Text, FTheme.RaisedBg);
     ckError:
       Result := FTheme.Error;
   else
@@ -520,7 +526,7 @@ end;
 
 function TChatItem.Boxed: Boolean;
 begin
-  Result := (FKind = ckUser) or
+  Result := (FKind = ckUser) or (FKind = ckQueued) or (FKind = ckAmbient) or
     ((FKind in [ckThought, ckTool]) and EffectiveExpanded);
 end;
 
@@ -571,17 +577,12 @@ begin
   WasMaterialized := Materialized;
   Materialize;
   case FKind of
-    ckUser:
+    ckUser, ckQueued, ckAmbient:
       begin
         BodyRows(AAvail.W, TextRows, Lines);
         Result.H := TextRows + 2;   { top border, body, heavy bottom }
       end;
     ckAssistant, ckError:
-      begin
-        BodyRows(AAvail.W, TextRows, Lines);
-        Result.H := TextRows;
-      end;
-    ckAmbient:
       begin
         BodyRows(AAvail.W, TextRows, Lines);
         Result.H := TextRows;
@@ -642,7 +643,7 @@ procedure TChatItem.Render(const S: ISurface);
 var
   L, R, T, B, TextRows, Lines, X, I, TitleMaxW: Integer;
   InnerW: Integer;
-  Border, SurfaceAttr: TAttr;
+  Border, SurfaceAttr, TitleAttr: TAttr;
   Clip: TRect;
   Title, DispLabel: UnicodeString;
   RuleCh, MarkCh: UnicodeString;
@@ -737,6 +738,15 @@ begin
     SurfaceAttr := OnBg(FTheme.Text, FTheme.RaisedBg);
     Border := OnBg(WithStyle(FTheme.Accent, [sfDim]), FTheme.RaisedBg);
   end
+  else if (FKind = ckQueued) or (FKind = ckAmbient) then
+  begin
+    { A user box with a violet border (matching inline code), to mark a queued
+      prompt or a subagent's ambient result. }
+    SurfaceAttr := OnBg(FTheme.Text, FTheme.RaisedBg);
+    Border := OnBg(FTheme.Text, FTheme.RaisedBg);
+    Border.Fg := QueuedBorderFg;
+    Border.Style := Border.Style + [sfDim];
+  end
   else if FKind = ckTool then
   begin
     SurfaceAttr := OnBg(FTheme.Text, FTheme.SunkenBg);
@@ -767,6 +777,33 @@ begin
         PutCh(S, L, I, '│', Border);
         PutCh(S, R, I, '│', Border);
       end;
+  end
+  else if (FKind = ckQueued) or (FKind = ckAmbient) then
+  begin
+    { The user-box frame with a right-aligned title (Queued / the ambient
+      label) and a violet border. }
+    PutCh(S, L, T, '╭', Border);
+    PutCh(S, R, T, '╮', Border);
+    PutCh(S, L, B, '╰', Border);
+    PutCh(S, R, B, '┘', Border);
+    for X := L + 1 to R - 1 do
+      PutCh(S, X, T, '─', Border);
+    for X := L + 1 to R - 1 do
+      PutCh(S, X, B, '═', Border);
+    Clip := S.ClipRect;
+    for I := T + 1 to B - 1 do
+      if (I >= Clip.Y) and (I < Clip.Y + Clip.H) then
+      begin
+        PutCh(S, L, I, '│', Border);
+        PutCh(S, R, I, '│', Border);
+      end;
+    Title := UnicodeString(FLabel) + ' ─';
+    if StringWidth(Title) <= FBounds.W - 2 then
+    begin
+      TitleAttr := OnBg(FTheme.Text, FTheme.RaisedBg);
+      TitleAttr.Fg := QueuedBorderFg;
+      PutText(S, R - 1 - StringWidth(Title), T, Title, TitleAttr);
+    end;
   end
   else
   begin
