@@ -65,6 +65,14 @@ in `../guidelines/spec-driven-development.md`:
   bearer token, not OAuth). v1 is independent of that and of TLS. Full FEATURE
   doc and v1 SPECs in the directory.
 
+- **Dynamic Tools** (`Dynamic_Tools/FEATURE.md`) — make a *running* session's MCP
+  tool surface dynamic: reconcile from the store at each turn boundary, with
+  enable/disable/remove and **reconnect** (bounded backoff) for dropped servers
+  — the remote-MCP requirement. Adds a generic `TAgentLoop.OnTurnStart` boundary
+  hook, `TToolRegistry.Remove`, and turns `TMcpManager` into a per-server
+  lifecycle manager. Trust is unchanged (every call stays approval-gated).
+  Spec'd (v1); not yet implemented.
+
 ## Existing Behaviour (to be documented)
 
 The foundation below is implemented and tested, but predates this documentation
