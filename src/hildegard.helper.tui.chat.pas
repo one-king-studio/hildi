@@ -27,7 +27,7 @@ type
 
 const
   { The violet used for the ambient border. }
-  QueuedBorderFg = 104;
+  QueuedBorderFg = 135;
   { The tool box border colour. }
   ToolBorderFg = 23;
 
