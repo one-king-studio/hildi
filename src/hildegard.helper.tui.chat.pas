@@ -670,12 +670,6 @@ begin
         FText.Render(S);
         Exit;
       end;
-    ckAmbient:
-      begin
-        { A dimmed subagent-result marker; the title carries the child + status. }
-        FText.Render(S);
-        Exit;
-      end;
     ckThinking:
       begin
         PutText(S, FBounds.X + 1, FBounds.Y, Sparkles[FSpark], FTheme.Accent);
