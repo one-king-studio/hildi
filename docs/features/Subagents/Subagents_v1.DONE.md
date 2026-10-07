@@ -144,12 +144,33 @@ registered in `tests/hildegard_helper_tests.pas` (integrator-owned).
 
 ## Phase 10 — Verification
 
-- [ ] All tasks above checked.
-- [ ] `make check` passes (whole suite + leak gate), including child-process
-      teardown.
-- [ ] Every acceptance criterion in `FEATURE.md` (lineage, tools, ambient,
-      approvals, lifecycle, cost) maps to a named test.
-- [ ] Update the SPEC if behaviour diverged; bump the version for a major
-      revision.
-- [ ] Rename this TODO to `Subagents_v1.DONE.md`.
+- [x] All tasks above checked.
+- [x] `make check` passes (whole suite + leak gate), including child-process
+      teardown (935 tests, 0 leaks).
+- [x] Every acceptance criterion in `FEATURE.md` (lineage, tools, ambient,
+      approvals, lifecycle, cost) maps to a named test. Two live-parent→child
+      integration tests remain deliberately unhermetic and are deferred to a
+      live smoke test (the spawn/result/relay paths are covered in-process by
+      `TSubagentSupervisorTest`).
+- [x] Update the SPEC if behaviour diverged (ambient envelope + status, v5/v6
+      migrations, required `label` recorded).
+- [x] Rename this TODO to `Subagents_v1.DONE.md`.
 - [ ] Hand the integrator the `FEATURES.md` + `HANDOFF.md` lines.
+
+## Completion Notes
+
+The core (lineage, delegation tools, ambient delivery, lineage-wide approvals,
+supervisor, protocol, runtime integration, config) is implemented and green.
+The **TUI sidebar** is a separate component (`Subagent_Sidebar_v1.SPEC.md` /
+`TODO.md`) and is not part of this component.
+
+Deviations from the SPEC, recorded:
+
+- `TSessionSummary.Label` is `LabelText` (`Label` is an FPC reserved word).
+- Lineage is migration **v4** (v3 is MCP servers, landed on main first); the
+  ambient task identity and status are **v5**/`v6`.
+- The ambient envelope was refined to nest `<message source id label status>`
+  and `<instructions>` inside `<ambient timestamp>`, and `delegate_task.label`
+  became required.
+- `CanDelegate` gates tool registration by depth; the supervisor is held by an
+  owning interface ref (the tools hold a second ref).
