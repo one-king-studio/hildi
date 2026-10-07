@@ -490,13 +490,16 @@ begin
   Result := 0;
 end;
 
-function RunMcpTest(const ARow: TMcpServerRow): Integer;
+function RunMcpTest(AStore: TSqliteStore; const ARow: TMcpServerRow): Integer;
 var
   Cfg: TMcpClientConfig;
   Client: TMcpClient;
   Err: string;
   Tools: TMcpToolArray;
   I: Integer;
+  Provider: TOAuthTokenProvider;
+  TokenRow: TOAuthTokenRow;
+  StoreErr: TStoreError;
 begin
   Cfg := Default(TMcpClientConfig);
   Cfg.Server.Name := ARow.Name;
@@ -509,6 +512,18 @@ begin
   Cfg.Server.WorkingDir := ARow.WorkingDir;
   Cfg.ListTimeoutMs := ARow.ListTimeoutMs;
   Cfg.CallTimeoutMs := ARow.CallTimeoutMs;
+
+  { An HTTP server with a stored OAuth token authenticates with it (refreshing
+    as needed); otherwise it falls back to static headers. }
+  Provider := nil;
+  if (ARow.Transport = mtHttp) and (AStore <> nil) and
+    AStore.LoadOAuthToken(ARow.Scope, ARow.WorkspaceId, ARow.Name, TokenRow,
+      StoreErr) then
+  begin
+    Provider := TOAuthTokenProvider.Create(AStore, ARow.Scope,
+      ARow.WorkspaceId, ARow.Name, ARow.Url);
+    Cfg.TokenSource := Provider.GetToken;
+  end;
 
   WriteLn('testing "', ARow.Name, '" ...');
   Client := TMcpClient.Create(Cfg, nil, nil);
@@ -525,6 +540,7 @@ begin
     Result := 0;
   finally
     Client.Free;
+    Provider.Free;
   end;
 end;
 
@@ -663,7 +679,7 @@ begin
             WriteLn('error: no such server "', Row.Name, '"');
             Exit(1);
           end;
-          Exit(RunMcpTest(Row));
+          Exit(RunMcpTest(Store, Row));
         end;
       mvAuth:
         begin

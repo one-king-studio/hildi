@@ -12,7 +12,8 @@ unit hildegard.helper.mcp.oauth.flow;
 interface
 
 uses
-  SysUtils, hildegard.helper.mcp.oauth;
+  SysUtils, hildegard.helper.mcp.oauth, hildegard.helper.mcp.config,
+  hildegard.helper.store;
 
 type
   TOAuthBrowser = procedure(const AUrl: string) of object;
@@ -25,7 +26,6 @@ type
     ClientId: string;
     ClientSecret: string;
   end;
-
   { The authorization-code flow. AMeta is the discovered AS metadata; AResource
     is the MCP server URL (the RFC 8707 resource). }
   TOAuthFlow = class
@@ -66,6 +66,27 @@ function ParseTokenResponse(const AJson, AClientId, AClientSecret: string;
 
 { URL-decode a query value. }
 function UrlDecode(const AValue: string): string;
+
+{ A store-backed OAuth token provider: loads the stored token for a server and
+  refreshes it when expired. Its GetToken matches TMcpTokenSource, so it plugs
+  straight into the HTTP transport. }
+type
+  TOAuthTokenProvider = class
+  private
+    FStore: TSqliteStore;
+    FScope: TMcpScope;
+    FWorkspaceId: Integer;
+    FServerName: string;
+    FResource: string;
+    FMeta: TAuthServerMeta;
+    FHasMeta: Boolean;
+  public
+    constructor Create(AStore: TSqliteStore; AScope: TMcpScope;
+      AWorkspaceId: Integer; const AServerName, AResource: string);
+    { Returns a valid access token, refreshing if needed. False + AError when
+      there is no token (run `mcp auth`) or a refresh fails. }
+    function GetToken(out AToken, AError: string): Boolean;
+  end;
 
 const
   DefaultRefreshSkewMs = 60000;
@@ -559,6 +580,86 @@ begin
   finally
     CloseSocket(ListenFd);
   end;
+end;
+
+{ --- TOAuthTokenProvider --- }
+
+constructor TOAuthTokenProvider.Create(AStore: TSqliteStore; AScope: TMcpScope;
+  AWorkspaceId: Integer; const AServerName, AResource: string);
+begin
+  inherited Create;
+  FStore := AStore;
+  FScope := AScope;
+  FWorkspaceId := AWorkspaceId;
+  FServerName := AServerName;
+  FResource := AResource;
+  FHasMeta := False;
+end;
+
+function NowEpochMs: Int64;
+begin
+  Result := Trunc((Now - EncodeDate(1970, 1, 1)) * MSecsPerDay);
+end;
+
+function TOAuthTokenProvider.GetToken(out AToken, AError: string): Boolean;
+var
+  Row: TOAuthTokenRow;
+  StoreErr: TStoreError;
+  PRM: TProtectedResourceMeta;
+  ASMeta: TAuthServerMeta;
+  Cur, Fresh: TOAuthTokens;
+begin
+  AToken := '';
+  AError := '';
+  if FStore = nil then
+  begin
+    AError := 'no store';
+    Exit(False);
+  end;
+  if not FStore.LoadOAuthToken(FScope, FWorkspaceId, FServerName, Row, StoreErr)
+  then
+  begin
+    AError := 'not authorized; run: mcp auth ' + FServerName;
+    Exit(False);
+  end;
+  { A token with no known expiry, or one still valid, is used as-is. }
+  if (Row.ExpiresAt = 0) or
+    (NowEpochMs < Row.ExpiresAt - DefaultRefreshSkewMs) then
+  begin
+    AToken := Row.AccessToken;
+    Exit(AToken <> '');
+  end;
+  { Expired: refresh. Needs the AS metadata (discovered once). }
+  if not FHasMeta then
+  begin
+    if not DiscoverProtectedResource(FResource, PRM, AError) then
+      Exit(False);
+    if (Length(PRM.AuthorizationServers) = 0) or
+      not DiscoverAuthServer(PRM.AuthorizationServers[0], ASMeta, AError) then
+      Exit(False);
+    FMeta := ASMeta;
+    FHasMeta := True;
+  end;
+  Cur := Default(TOAuthTokens);
+  Cur.AccessToken := Row.AccessToken;
+  Cur.RefreshToken := Row.RefreshToken;
+  Cur.ClientId := Row.ClientId;
+  Cur.ClientSecret := Row.ClientSecret;
+  Cur.ExpiresAt := Row.ExpiresAt;
+  Cur.TokenScope := Row.TokenScope;
+  if not RefreshAccessToken(FMeta, Cur, FResource, Fresh, AError) then
+  begin
+    AError := 'refresh failed (' + AError + '); re-run: mcp auth ' + FServerName;
+    Exit(False);
+  end;
+  Row.AccessToken := Fresh.AccessToken;
+  Row.RefreshToken := Fresh.RefreshToken;
+  Row.ExpiresAt := Fresh.ExpiresAt;
+  if Fresh.TokenScope <> '' then
+    Row.TokenScope := Fresh.TokenScope;
+  FStore.SaveOAuthToken(Row, StoreErr);
+  AToken := Row.AccessToken;
+  Result := AToken <> '';
 end;
 
 end.

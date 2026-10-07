@@ -12,7 +12,7 @@ unit hildegard.helper.harness.session;
 interface
 
 uses
-  Classes, SysUtils,
+  Classes, Contnrs, SysUtils,
   hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.approval,
   hildegard.helper.approval.store, hildegard.helper.command.tool,
   hildegard.helper.files,
@@ -20,7 +20,8 @@ uses
   hildegard.helper.store,
   hildegard.helper.recall.tool, hildegard.helper.harness.turn,
   hildegard.helper.harness.view,
-  hildegard.helper.mcp.config, hildegard.helper.mcp.client;
+  hildegard.helper.mcp.config, hildegard.helper.mcp.client,
+  hildegard.helper.mcp.transport, hildegard.helper.mcp.oauth.flow;
 
 type
   { The loop side of one session. Owns a TSessionView for the workspace, store,
@@ -38,6 +39,7 @@ type
     FRecallTool: TRecallTool;
     FMcp: TMcpManager;
     FMcpProvider: IToolProvider;
+    FMcpTokenProviders: TObjectList;
     FLoop: TAgentLoop;
     FQueue: TTurnQueue;
     FGate: TApprovalGate;
@@ -46,6 +48,8 @@ type
     procedure McpEvent(const AMessage, ADetail: string);
     { The current effective MCP config from the store, for the provider. }
     function McpConfigSource: TMcpConfig;
+    { A token source for a server with a stored OAuth token (or nil). }
+    function McpTokenSourceFor(const AServer: TMcpServerConfig): TMcpTokenSource;
     function Init(const AConfig: THarnessSessionConfig; out AError: string):
       Boolean;
   public
@@ -84,6 +88,8 @@ begin
   FMcpProvider := nil;
   FMcp.Free;
   FMcp := nil;
+  FMcpTokenProviders.Free;
+  FMcpTokenProviders := nil;
   FCommandTool.Free;
   FCommandTool := nil;
   FFileTool.Free;
@@ -132,6 +138,25 @@ procedure THarnessSession.McpEvent(const AMessage, ADetail: string);
 begin
   if FConversation <> nil then
     FConversation.AppendError(AMessage, ADetail);
+end;
+
+function THarnessSession.McpTokenSourceFor(
+  const AServer: TMcpServerConfig): TMcpTokenSource;
+var
+  Row: TOAuthTokenRow;
+  StoreErr: TStoreError;
+  Provider: TOAuthTokenProvider;
+begin
+  Result := nil;
+  if (AServer.Transport <> mtHttp) or (FView = nil) or (FView.Store = nil) then
+    Exit;
+  if not FView.Store.LoadOAuthToken(AServer.Scope, FView.WorkspaceId,
+    AServer.Name, Row, StoreErr) then
+    Exit;   { no stored token: fall back to static headers / none }
+  Provider := TOAuthTokenProvider.Create(FView.Store, AServer.Scope,
+    FView.WorkspaceId, AServer.Name, AServer.Url);
+  FMcpTokenProviders.Add(Provider);
+  Result := Provider.GetToken;
 end;
 
 function THarnessSession.McpConfigSource: TMcpConfig;
@@ -245,7 +270,11 @@ begin
   if FView.Store <> nil then
   begin
     McpCfg := McpConfigSource;
+    FMcpTokenProviders := TObjectList.Create(True);
     FMcp := TMcpManager.Create(McpCfg, ApprovalService, McpEvent);
+    { OAuth: HTTP servers with a stored token get a token source (refreshing as
+      needed); static-header servers are unaffected. }
+    FMcp.TokenSourceFor := McpTokenSourceFor;
     FMcp.Open;
     FMcpProvider := TMcpProvider.Create(FMcp, McpConfigSource);
   end;

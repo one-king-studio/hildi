@@ -134,6 +134,11 @@ type
   { Supplies the current effective MCP config (e.g. from the store). }
   TMcpConfigSource = function: TMcpConfig of object;
 
+  { Supplies a token source for one server (or nil), e.g. from stored OAuth
+    tokens. Set on the manager by the session. }
+  TMcpTokenSourceFactory = function(const AServer: TMcpServerConfig):
+    TMcpTokenSource of object;
+
   { Spawns every configured server, and reconciles the live set from config at a
     boundary. Tear-down closes them all. The manager owns the tool specs; it is
     exposed to the loop through TMcpProvider. }
@@ -144,6 +149,7 @@ type
     FRuntimes: TMcpServerRuntimeArray;
     FBackoffInitialMs: Integer;
     FBackoffMaxMs: Integer;
+    FTokenSourceFor: TMcpTokenSourceFactory;
     function FindRuntime(const AName: string): Integer;
     function ClientConfigFor(const AServer: TMcpServerConfig): TMcpClientConfig;
     procedure CloseRuntime(AIndex: Integer);
@@ -167,6 +173,9 @@ type
     property BackoffInitialMs: Integer read FBackoffInitialMs
       write FBackoffInitialMs;
     property BackoffMaxMs: Integer read FBackoffMaxMs write FBackoffMaxMs;
+    { When set, each HTTP server's client gets a token source from here. }
+    property TokenSourceFor: TMcpTokenSourceFactory read FTokenSourceFor
+      write FTokenSourceFor;
   end;
 
   { The MCP manager as a turn provider. Prepare reconciles from the config
@@ -951,6 +960,8 @@ begin
   Result.Server := AServer;
   Result.ListTimeoutMs := AServer.ListTimeoutMs;
   Result.CallTimeoutMs := AServer.CallTimeoutMs;
+  if (AServer.Transport = mtHttp) and Assigned(FTokenSourceFor) then
+    Result.TokenSource := FTokenSourceFor(AServer);
 end;
 
 function TMcpManager.FindRuntime(const AName: string): Integer;
