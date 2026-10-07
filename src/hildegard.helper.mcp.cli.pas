@@ -25,6 +25,8 @@ type
     WorkingDir: string;           // add: --cwd
     Disabled: Boolean;            // add: --disabled
     Path: string;                 // import: file; export: --out target
+    Url: string;                  // add: --url (HTTP server)
+    Headers: array of string;     // add: --header 'Name: value' (repeatable)
   end;
 
   EMcpCLIError = class(Exception);
@@ -158,6 +160,24 @@ begin
         raise EMcpCLIError.Create('--out requires a value');
       Result.Path := AArgs[I];
     end
+    else if Arg = '--url' then
+    begin
+      Inc(I);
+      if I > High(AArgs) then
+        raise EMcpCLIError.Create('--url requires a value');
+      Result.Url := AArgs[I];
+    end
+    else if Arg = '--header' then
+    begin
+      Inc(I);
+      if I > High(AArgs) then
+        raise EMcpCLIError.Create('--header requires a value');
+      if Pos(':', AArgs[I]) <= 1 then
+        raise EMcpCLIError.Create('--header requires "Name: value", got: ' +
+          AArgs[I]);
+      SetLength(Result.Headers, Length(Result.Headers) + 1);
+      Result.Headers[High(Result.Headers)] := AArgs[I];
+    end
     else if (Arg <> '') and (Arg[1] = '-') then
       raise EMcpCLIError.Create('mcp: unknown option: ' + Arg)
     else
@@ -168,11 +188,13 @@ begin
   case Result.Verb of
     mvAdd:
       begin
-        if NPos < 2 then
+        { stdio: NAME COMMAND -- ARGS... ; http: NAME --url URL }
+        if (NPos < 1) or ((NPos < 2) and (Result.Url = '')) then
           raise EMcpCLIError.Create(
-            'mcp add: NAME and COMMAND are required');
+            'mcp add: NAME and COMMAND (or NAME --url URL) are required');
         Result.Name := Positionals[0];
-        Result.Command := Positionals[1];
+        if Result.Url = '' then
+          Result.Command := Positionals[1];
       end;
     mvRemove, mvEnable, mvDisable, mvTest:
       begin
@@ -221,8 +243,11 @@ begin
   for I := 0 to High(Sorted) do
   begin
     ArgsStr := '';
-    for J := 0 to High(Sorted[I].Args) do
-      ArgsStr := ArgsStr + ' ' + Sorted[I].Args[J];
+    if Sorted[I].Transport = mtHttp then
+      ArgsStr := Sorted[I].Url
+    else
+      for J := 0 to High(Sorted[I].Args) do
+        ArgsStr := ArgsStr + ' ' + Sorted[I].Args[J];
     if Sorted[I].Enabled then
       State := 'enabled'
     else
@@ -261,10 +286,15 @@ begin
       LineEnding +
     '  --cwd DIR                  working directory for the child' + LineEnding +
     '  --disabled                 add it disabled' + LineEnding +
+    '  --url URL                  add an HTTP server (instead of COMMAND)' +
+      LineEnding +
+    '  --header "Name: value"     HTTP request header (repeatable)' + LineEnding +
     LineEnding +
     'Example:' + LineEnding +
     '  mcp add playwright docker -- run -i --rm --init ' +
-      'mcr.microsoft.com/playwright/mcp';
+      'mcr.microsoft.com/playwright/mcp' + LineEnding +
+    '  mcp add meta --url https://mcp.example.com/rpc ' +
+      '--header "Authorization: Bearer TOKEN"';
 end;
 
 end.

@@ -546,8 +546,18 @@ begin
         end;
       mvAdd:
         begin
-          Row.Command := Cmd.Command;
-          Row.Args := Copy(Cmd.Args, 0, Length(Cmd.Args));
+          if Cmd.Url <> '' then
+          begin
+            Row.Transport := mtHttp;
+            Row.Url := Cmd.Url;
+            Row.Headers := Copy(Cmd.Headers, 0, Length(Cmd.Headers));
+          end
+          else
+          begin
+            Row.Transport := mtStdio;
+            Row.Command := Cmd.Command;
+            Row.Args := Copy(Cmd.Args, 0, Length(Cmd.Args));
+          end;
           Row.Env := Copy(Cmd.Env, 0, Length(Cmd.Env));
           Row.WorkingDir := Cmd.WorkingDir;
           Row.Enabled := not Cmd.Disabled;

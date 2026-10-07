@@ -20,6 +20,7 @@ type
     procedure TestRemoveEnableDisable;
     procedure TestTestVerb;
     procedure TestImportExportVerbs;
+    procedure TestAddHttpServer;
     procedure TestUnknownVerbRaises;
     procedure TestUnknownOptionRaises;
     procedure TestMissingOperandsRaise;
@@ -142,6 +143,28 @@ begin
     on E: EMcpCLIError do Raised := True;
   end;
   AssertTrue('import needs a file', Raised);
+end;
+
+procedure TMcpCliTest.TestAddHttpServer;
+var
+  C: TMcpCommand;
+  Raised: Boolean;
+begin
+  C := ParseMcpCommand(['add', 'meta', '--url', 'https://x/rpc',
+    '--header', 'Authorization: Bearer T', '--header', 'X-Y: z']);
+  AssertEquals('verb', Ord(mvAdd), Ord(C.Verb));
+  AssertEquals('name', 'meta', C.Name);
+  AssertEquals('url', 'https://x/rpc', C.Url);
+  AssertEquals('no command', '', C.Command);
+  AssertEquals('headers', 2, Length(C.Headers));
+  AssertEquals('header0', 'Authorization: Bearer T', C.Headers[0]);
+  Raised := False;
+  try
+    ParseMcpCommand(['add', 'meta', '--header', 'nocolon']);
+  except
+    on E: EMcpCLIError do Raised := True;
+  end;
+  AssertTrue('bad header raises', Raised);
 end;
 
 procedure TMcpCliTest.TestUnknownVerbRaises;
