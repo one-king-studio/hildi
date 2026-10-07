@@ -7,14 +7,14 @@ moving on. Register new tests in `tests/hildegard_helper_tests.pas`
 
 ## Phase 1 — Roster model
 
-- [ ] **Test** (`tests/test_subagent_sidebar.pas`): `TestRosterApplyStatuses`
-      (spawned/running/completed/aborted/gone), `TestTerminalEntriesPersist`,
-      `TestRosterPrune`, `TestRosterFind`.
-- [ ] **Implement**: `hildegard.helper.harness.subagent` — `TSubagentStatus`,
+- [x] **Test** (`tests/test_subagent_sidebar.pas`): `TestApplyMapsStatuses`,
+      `TestApplyUpdatesInPlace`, `TestTerminalEntriesPersist`,
+      `TestRosterFind`, `TestPruneDropsOldTerminalOnly`.
+- [x] **Implement**: `hildegard.helper.harness.subagent` — `TSubagentStatus`,
       `TSubagentEntry`, `TSubagentRoster` (`Apply`, `Entries`, `Count`, `Find`,
       `Prune`).
   - Files: `src/hildegard.helper.harness.subagent.pas` (new).
-- [ ] **Check**: `make test SUITE=TSubagentRosterTest`.
+- [x] **Check**: `make test SUITE=TSubagentRosterTest`.
 
 ## Phase 2 — Sidebar widget
 
