@@ -144,12 +144,17 @@ Pure, no I/O — the easiest red/green, and the base of everything.
   registered, tracked in `FRegisteredRefs` (a re-list would otherwise collide
   and suffix duplicates).
 
-### Phase 6: Validation
+### Phase 6: Validation — DONE
 
-- [ ] **Run**: `make test SUITE=...` for each new suite (green).
-- [ ] **Run**: `make test` (whole suite).
-- [ ] **Run**: `make test-leak` (no leaks).
-- [ ] **Run**: `make check` (all gates).
+- [x] **Run**: per-suite runs green (`TJsonRpcTest` 17, `TStdioChildTest` 9,
+      `TMcpConfigTest` 13, `TMcpClientTest` 10, `THarnessSessionTest` 11).
+- [x] **Run**: `make test` (whole suite) — 873 tests, 0 failures.
+- [x] **Run**: `make test-leak` (no leaks) — 0 failures.
+- [x] **Run**: `make check` (all gates) — green.
+
+  Caveat: everything is tested against fakes and `/bin/sh` scripts (hermetic,
+  per `testing.md`). No real MCP server has been run — that is calibration, and
+  it is out of scope for the automated suite.
 
 ## Dependencies & Ordering
 
