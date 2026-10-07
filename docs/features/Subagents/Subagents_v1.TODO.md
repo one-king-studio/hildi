@@ -135,14 +135,15 @@ registered in `tests/hildegard_helper_tests.pas` (integrator-owned).
 
 ## Phase 9 — Configuration and CLI
 
-- [ ] **Test** (`tests/test_cli.pas` or config test):
-      `TestSubagentConfigDefaults` (`HILDEGARD_SUBAGENT_MAX` = 10,
-      `HILDEGARD_SUBAGENT_DEPTH` = 1, `HILDEGARD_SUBAGENT_AUTO_DENY_MS` = 60000).
-- [ ] **Implement**: resolve the three env knobs (a small helper reused by the
-      runtime and the CLI); the runtime reads them in `Open`.
-  - Files: `src/hildegard.helper.subagent.pas` (resolver),
+- [x] **Test** (`tests/test_subagent.pas`): `TestSubagentConfigDefaults`
+      (`HILDEGARD_SUBAGENT_MAX` = 10, `_DEPTH` = 1, `_AUTO_DENY_MS` = 60000),
+      `TestSubagentConfigOverridesAndBounds`.
+- [x] **Implement**: pure resolvers `ResolveSubagentMax`/`_Depth`/`_AutoDenyMs`
+      in `hildegard.helper.subagent` (raw value in, default/bounds applied); the
+      runtime reads the env vars and delegates to them.
+  - Files: `src/hildegard.helper.subagent.pas`,
     `src/hildegard.helper.session.runtime.pas`.
-- [ ] **Check**: `make test SUITE=TSubagentToolTest`.
+- [x] **Check**: `make test SUITE=TSubagentToolTest`.
 
 ## Phase 10 — Verification
 

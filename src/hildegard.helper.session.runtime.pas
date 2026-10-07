@@ -170,10 +170,6 @@ const
   DefaultDriveRequestMs = 30000;
   { Per-client outbound ceiling; a slower observer is dropped with a gap. }
   DefaultMaxOutBytes = 262144;
-  { Subagent defaults (overridable via env). }
-  DefaultSubagentMax = 10;
-  DefaultSubagentDepth = 1;
-  DefaultSubagentAutoDenyMs = 60000;
 
 { Resolve the subagent knobs from the environment (defaults when unset). }
 function ResolveSubagentMax: Integer;
@@ -199,27 +195,20 @@ const
 
 function ResolveSubagentMax: Integer;
 begin
-  Result := StrToIntDef(GetEnvironmentVariable('HILDEGARD_SUBAGENT_MAX'),
-    DefaultSubagentMax);
-  if Result < 1 then
-    Result := DefaultSubagentMax;
+  Result := hildegard.helper.subagent.ResolveSubagentMax(
+    GetEnvironmentVariable('HILDEGARD_SUBAGENT_MAX'));
 end;
 
 function ResolveSubagentDepth: Integer;
 begin
-  Result := StrToIntDef(GetEnvironmentVariable('HILDEGARD_SUBAGENT_DEPTH'),
-    DefaultSubagentDepth);
-  if Result < 0 then
-    Result := DefaultSubagentDepth;
+  Result := hildegard.helper.subagent.ResolveSubagentDepth(
+    GetEnvironmentVariable('HILDEGARD_SUBAGENT_DEPTH'));
 end;
 
 function ResolveSubagentAutoDenyMs: Int64;
 begin
-  Result := StrToInt64Def(
-    GetEnvironmentVariable('HILDEGARD_SUBAGENT_AUTO_DENY_MS'),
-    DefaultSubagentAutoDenyMs);
-  if Result < 0 then
-    Result := DefaultSubagentAutoDenyMs;
+  Result := hildegard.helper.subagent.ResolveSubagentAutoDenyMs(
+    GetEnvironmentVariable('HILDEGARD_SUBAGENT_AUTO_DENY_MS'));
 end;
 
 { --- TClientConn -------------------------------------------------------- }

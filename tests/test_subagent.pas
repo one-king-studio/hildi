@@ -70,6 +70,8 @@ type
     procedure TestDelegateDeniedReturnsError;
     procedure TestRegisterAdvertisesFourTools;
     procedure TestReasonIsCarriedIntoTheAsk;
+    procedure TestSubagentConfigDefaults;
+    procedure TestSubagentConfigOverridesAndBounds;
   end;
 
 implementation
@@ -416,6 +418,26 @@ begin
   finally
     Tool.Free;
   end;
+end;
+
+procedure TSubagentToolTest.TestSubagentConfigDefaults;
+begin
+  AssertEquals('default max', 10, ResolveSubagentMax(''));
+  AssertEquals('default depth', 1, ResolveSubagentDepth(''));
+  AssertEquals('default auto-deny', 60000, ResolveSubagentAutoDenyMs(''));
+end;
+
+procedure TSubagentToolTest.TestSubagentConfigOverridesAndBounds;
+begin
+  AssertEquals('max override', 3, ResolveSubagentMax('3'));
+  AssertEquals('max zero falls back', 10, ResolveSubagentMax('0'));
+  AssertEquals('max garbage falls back', 10, ResolveSubagentMax('abc'));
+  AssertEquals('depth override', 2, ResolveSubagentDepth('2'));
+  AssertEquals('depth zero is valid', 0, ResolveSubagentDepth('0'));
+  AssertEquals('depth negative falls back', 1, ResolveSubagentDepth('-1'));
+  AssertEquals('auto-deny override', 5000, ResolveSubagentAutoDenyMs('5000'));
+  AssertEquals('auto-deny negative falls back', 60000,
+    ResolveSubagentAutoDenyMs('-5'));
 end;
 
 initialization

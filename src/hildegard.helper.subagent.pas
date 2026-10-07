@@ -23,6 +23,17 @@ const
   SubagentAbortTool    = 'abort_task';
   SubagentReleaseTool  = 'release_task';
 
+  { Subagent defaults, overridable via env. }
+  DefaultSubagentMax = 10;
+  DefaultSubagentDepth = 1;
+  DefaultSubagentAutoDenyMs = 60000;
+
+{ Resolve a subagent knob from its raw env value ('' => default; an invalid or
+  out-of-range value falls back to the default). Pure, so it is unit-testable. }
+function ResolveSubagentMax(const ARaw: string): Integer;
+function ResolveSubagentDepth(const ARaw: string): Integer;
+function ResolveSubagentAutoDenyMs(const ARaw: string): Int64;
+
 type
   TSubagentVerb = (svDelegate, svMessage, svAbort, svRelease);
 
@@ -104,6 +115,33 @@ begin
     svAbort:    Result := SubagentAbortTool;
     svRelease:  Result := SubagentReleaseTool;
   end;
+end;
+
+function ResolveSubagentMax(const ARaw: string): Integer;
+begin
+  if ARaw = '' then
+    Exit(DefaultSubagentMax);
+  Result := StrToIntDef(ARaw, DefaultSubagentMax);
+  if Result < 1 then
+    Result := DefaultSubagentMax;
+end;
+
+function ResolveSubagentDepth(const ARaw: string): Integer;
+begin
+  if ARaw = '' then
+    Exit(DefaultSubagentDepth);
+  Result := StrToIntDef(ARaw, DefaultSubagentDepth);
+  if Result < 0 then
+    Result := DefaultSubagentDepth;
+end;
+
+function ResolveSubagentAutoDenyMs(const ARaw: string): Int64;
+begin
+  if ARaw = '' then
+    Exit(DefaultSubagentAutoDenyMs);
+  Result := StrToInt64Def(ARaw, DefaultSubagentAutoDenyMs);
+  if Result < 0 then
+    Result := DefaultSubagentAutoDenyMs;
 end;
 
 function SubagentApprovalRef(AVerb: TSubagentVerb): string;
