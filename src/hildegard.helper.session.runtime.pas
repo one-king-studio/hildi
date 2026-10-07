@@ -25,9 +25,11 @@ uses
   hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.approval,
   hildegard.helper.store, hildegard.helper.session,
   hildegard.helper.session.protocol, hildegard.helper.session.socket,
+  hildegard.helper.session.client,
   hildegard.helper.harness.session, hildegard.helper.harness.view,
   hildegard.helper.harness.turn,
-  hildegard.helper.harness.turn.worker;
+  hildegard.helper.harness.turn.worker,
+  hildegard.helper.subagent, hildegard.helper.subagent.supervisor;
 
 type
   TSessionRuntimeConfig = record
@@ -86,6 +88,15 @@ type
     FReplay: array of TSessionEvent;
     FReadSet, FWriteSet: TFDSet;
     FMaxFd: Integer;
+    { Subagents: the supervisor (nil when this session may not delegate), its
+      delegation tools, and the in-flight child ask awaiting an operator.
+      FSubagentsKeep is the owning interface reference (the supervisor is a
+      TInterfacedObject; the tools hold a second ref, so it must not be freed
+      twice). }
+    FSubagents: TSubagentSupervisor;
+    FSubagentsKeep: ISubagentService;
+    FSubagentTools: TSubagentToolSet;
+    FPendingChildAsk: string;
     function Bind: Boolean;
     function Hwm: Int64;
     procedure RegisterRow;
@@ -123,6 +134,13 @@ type
       const ACommand: TSessionCommand);
     procedure HandleRelease(AClient: TClientConn;
       const ACommand: TSessionCommand);
+    procedure HandleAbortSubagent(AClient: TClientConn;
+      const ACommand: TSessionCommand);
+    procedure HandleReleaseSubagent(AClient: TClientConn;
+      const ACommand: TSessionCommand);
+    { Drain child events for the runtime loop; relay them as events. }
+    procedure DrainSubagents;
+    procedure StartAmbientTurn;
     procedure StartTurn(const AText: string);
     procedure FinishTurn;
     procedure DrainTurn;
@@ -152,6 +170,15 @@ const
   DefaultDriveRequestMs = 30000;
   { Per-client outbound ceiling; a slower observer is dropped with a gap. }
   DefaultMaxOutBytes = 262144;
+  { Subagent defaults (overridable via env). }
+  DefaultSubagentMax = 10;
+  DefaultSubagentDepth = 1;
+  DefaultSubagentAutoDenyMs = 60000;
+
+{ Resolve the subagent knobs from the environment (defaults when unset). }
+function ResolveSubagentMax: Integer;
+function ResolveSubagentDepth: Integer;
+function ResolveSubagentAutoDenyMs: Int64;
 
 { Parse `--session-runtime` argv and run the runtime. Returns the exit code. }
 function RunSessionRuntime(const AArgs: array of string): Integer;
@@ -169,6 +196,31 @@ const
   TurnPollMs = 10;
   IdlePollMs = 200;
   SocketBacklog = 16;
+
+function ResolveSubagentMax: Integer;
+begin
+  Result := StrToIntDef(GetEnvironmentVariable('HILDEGARD_SUBAGENT_MAX'),
+    DefaultSubagentMax);
+  if Result < 1 then
+    Result := DefaultSubagentMax;
+end;
+
+function ResolveSubagentDepth: Integer;
+begin
+  Result := StrToIntDef(GetEnvironmentVariable('HILDEGARD_SUBAGENT_DEPTH'),
+    DefaultSubagentDepth);
+  if Result < 0 then
+    Result := DefaultSubagentDepth;
+end;
+
+function ResolveSubagentAutoDenyMs: Int64;
+begin
+  Result := StrToInt64Def(
+    GetEnvironmentVariable('HILDEGARD_SUBAGENT_AUTO_DENY_MS'),
+    DefaultSubagentAutoDenyMs);
+  if Result < 0 then
+    Result := DefaultSubagentAutoDenyMs;
+end;
 
 { --- TClientConn -------------------------------------------------------- }
 
@@ -188,6 +240,7 @@ class function TSessionRuntime.Open(const AConfig: TSessionRuntimeConfig;
 var
   Runtime: TSessionRuntime;
   HConfig: THarnessSessionConfig;
+  SubCfg: TSubagentSupervisorConfig;
 begin
   Result := nil;
   AError := '';
@@ -228,6 +281,42 @@ begin
     Runtime.FSessionId := Runtime.FSession.View.SessionId;
     Runtime.FSocketPath := SocketPathFor(Runtime.FSessionId);
     Runtime.FLoopId := NewSessionId;
+
+    { Subagents: the parent's runtime supervises its children. Created only when
+      this session may delegate (below the depth cap) and it has a store; a
+      session at the cap neither supervises nor advertises the tools. }
+    if Runtime.FSession.View.Store <> nil then
+    begin
+      SubCfg := Default(TSubagentSupervisorConfig);
+      SubCfg.WorkspacePath := AConfig.WorkspacePath;
+      SubCfg.StorePath := AConfig.StorePath;
+      SubCfg.RuntimeCommand := GetEnvironmentVariable('HILDEGARD_RUNTIME_BIN');
+      if SubCfg.RuntimeCommand = '' then
+        SubCfg.RuntimeCommand := ResolveRuntimeBinary('', ParamStr(0));
+      SubCfg.ParentSessionId := Runtime.FSessionId;
+      SubCfg.ParentWorkspaceId := Runtime.FSession.View.WorkspaceId;
+      SubCfg.ParentDepth := 0;
+      SubCfg.MaxChildren := ResolveSubagentMax;
+      SubCfg.MaxDepth := ResolveSubagentDepth;
+      SubCfg.IdleExitMs := AConfig.IdleExitMs;
+      SubCfg.AutoDenyMs := ResolveSubagentAutoDenyMs;
+      { The child's approval root is this session's lineage root: itself for a
+        root session, or the inherited root for a child. }
+      if AConfig.ApprovalRootSessionId <> '' then
+        SubCfg.ParentApprovalRoot := AConfig.ApprovalRootSessionId
+      else
+        SubCfg.ParentApprovalRoot := Runtime.FSessionId;
+      Runtime.FSubagents := TSubagentSupervisor.Create(SubCfg,
+        Runtime.FSession.View.Store);
+      Runtime.FSubagentsKeep := Runtime.FSubagents;   // owning ref
+      { Advertise the delegation tools only when this session may delegate. }
+      if Runtime.FSubagents.CanDelegate then
+      begin
+        Runtime.FSubagentTools := TSubagentToolSet.Create(Runtime.FSubagents,
+          Runtime.FSession.ApprovalService);
+        Runtime.FSubagentTools.Register(Runtime.FSession.Tools);
+      end;
+    end;
   except
     on E: Exception do
     begin
@@ -248,6 +337,12 @@ begin
     FWorker.Free;
     FWorker := nil;
   end;
+  FSubagentTools.Free;
+  FSubagentTools := nil;
+  { Freeing the tools dropped their ref; releasing our own owning ref frees the
+    supervisor exactly once. }
+  FSubagentsKeep := nil;
+  FSubagents := nil;
   FClients.Free;
   FSession.Free;
   inherited Destroy;
@@ -728,10 +823,10 @@ begin
       end;
     scAttach, scDetach:
       SendError(AClient, 'unknown_cmd', 'unknown command', '');
-    scAbortSubagent, scReleaseSubagent:
-      { Routed to the supervisor in Phase 8 (runtime integration); no-op until
-        then so the command is not an error. }
-      ReplyTo(AClient, ACommand.Id, True, '');
+    scAbortSubagent:
+      HandleAbortSubagent(AClient, ACommand);
+    scReleaseSubagent:
+      HandleReleaseSubagent(AClient, ACommand);
   end;
 end;
 
@@ -760,7 +855,18 @@ begin
     ReplyTo(AClient, ACommand.Id, False, 'not_driver');
     Exit;
   end;
-  FSession.Gate.Answer(StrToIntDef(ACommand.AskId, 0), ACommand.Choice);
+  { A namespaced ask id (<child>/<ask>) is a child's approval, relayed down to
+    that child; otherwise it is this session's own gate ask. }
+  if (FSubagents <> nil) and (Pos('/', ACommand.AskId) > 0) then
+  begin
+    FSubagents.AnswerChildAsk(Copy(ACommand.AskId, 1,
+      Pos('/', ACommand.AskId) - 1),
+      Copy(ACommand.AskId, Pos('/', ACommand.AskId) + 1, MaxInt),
+      ACommand.Choice);
+    FPendingChildAsk := '';
+  end
+  else
+    FSession.Gate.Answer(StrToIntDef(ACommand.AskId, 0), ACommand.Choice);
   E := EmitEvent(ekApprovalResolved);
   E.AskId := ACommand.AskId;
   E.Choice := ACommand.Choice;
@@ -867,6 +973,140 @@ begin
   FTurnActive := True;
   FWorker := TTurnWorker.Create(FSession.Loop, FSession.Queue, AText);
   FWorker.Start;
+end;
+
+procedure TSessionRuntime.StartAmbientTurn;
+var
+  E: TSessionEvent;
+begin
+  { The ambient notification is already queued; the turn drains it at its first
+    boundary and no user message is echoed. }
+  E := EmitEvent(ekUserMessage);
+  E.Text := '[subagent result]';
+  Broadcast(E);
+  FTurnActive := True;
+  FWorker := TTurnWorker.CreateAmbient(FSession.Loop, FSession.Queue);
+  FWorker.Start;
+end;
+
+procedure TSessionRuntime.HandleAbortSubagent(AClient: TClientConn;
+  const ACommand: TSessionCommand);
+var
+  Err, ChildId: string;
+  E: TSessionEvent;
+begin
+  if AClient.Role <> srDrive then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'not_driver');
+    Exit;
+  end;
+  if FSubagents = nil then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'no_subagents');
+    Exit;
+  end;
+  ChildId := ACommand.SessionId;
+  if not FSubagents.Abort(ChildId, Err) then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'abort_failed');
+    Exit;
+  end;
+  E := EmitEvent(ekSubagent);
+  E.SubSessionId := ChildId;
+  E.SubStatus := 'aborted';
+  Broadcast(E);
+  ReplyTo(AClient, ACommand.Id, True, '');
+end;
+
+procedure TSessionRuntime.HandleReleaseSubagent(AClient: TClientConn;
+  const ACommand: TSessionCommand);
+var
+  Err, ChildId: string;
+  E: TSessionEvent;
+begin
+  if AClient.Role <> srDrive then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'not_driver');
+    Exit;
+  end;
+  if FSubagents = nil then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'no_subagents');
+    Exit;
+  end;
+  ChildId := ACommand.SessionId;
+  if not FSubagents.Release(ChildId, Err) then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'release_failed');
+    Exit;
+  end;
+  E := EmitEvent(ekSubagent);
+  E.SubSessionId := ChildId;
+  E.SubStatus := 'released';
+  Broadcast(E);
+  ReplyTo(AClient, ACommand.Id, True, '');
+end;
+
+procedure TSessionRuntime.DrainSubagents;
+var
+  Ev: TSubagentEvent;
+  E: TSessionEvent;
+begin
+  if FSubagents = nil then
+    Exit;
+  { Auto-deny a headless child's stale ask before draining new events. }
+  FSubagents.TickAutoDeny(NowMs);
+  while FSubagents.Poll(Ev) do
+  begin
+    case Ev.Kind of
+      sekSpawned:
+        begin
+          E := EmitEvent(ekSubagent);
+          E.SubSessionId := Ev.SessionId;
+          E.Text := Ev.LabelText;
+          E.SubStatus := 'spawned';
+          Broadcast(E);
+        end;
+      sekResult:
+        begin
+          E := EmitEvent(ekSubagent);
+          E.SubSessionId := Ev.SessionId;
+          E.Text := Ev.LabelText;
+          E.SubStatus := 'completed';
+          Broadcast(E);
+          { Wake the parent with the result as an ambient notification. }
+          FSession.Loop.PromptQueue.PushAmbient(Ev.Result, Ev.SessionId,
+            Ev.ElapsedMs);
+          if not FTurnActive then
+            StartAmbientTurn;
+        end;
+      sekAborted:
+        begin
+          E := EmitEvent(ekSubagent);
+          E.SubSessionId := Ev.SessionId;
+          E.Text := Ev.LabelText;
+          E.SubStatus := 'aborted';
+          Broadcast(E);
+        end;
+      sekApprovalAsk:
+        begin
+          FPendingChildAsk := Ev.SessionId + '/' + Ev.AskId;
+          E := EmitEvent(ekSubagentAsk);
+          E.SubSessionId := Ev.SessionId;
+          E.AskId := FPendingChildAsk;
+          E.Ask := Ev.Ask;
+          Broadcast(E);
+        end;
+      sekGone:
+        begin
+          E := EmitEvent(ekSubagent);
+          E.SubSessionId := Ev.SessionId;
+          E.Text := Ev.LabelText;
+          E.SubStatus := 'gone';
+          Broadcast(E);
+        end;
+    end;
+  end;
 end;
 
 procedure TSessionRuntime.FinishTurn;
@@ -1033,6 +1273,10 @@ begin
     E.Reason := 'idle';
   Broadcast(E);
 
+  { Children are terminated with the parent, whatever the exit reason. }
+  if FSubagents <> nil then
+    FSubagents.TerminateAll;
+
   M := Default(TSessionMessage);
   M.Kind := mkDetached;
   M.Reason := 'loop exited';
@@ -1108,6 +1352,12 @@ begin
         HandleClients;
       end;
       DrainTurn;
+      if FSubagents <> nil then
+      begin
+        { Auto-deny applies only when no interactive client is attached. }
+        FSubagents.HasClient := FClients.Count > 0;
+        DrainSubagents;
+      end;
       ReapClosing;
       if FStop then
         Break;

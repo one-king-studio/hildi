@@ -52,6 +52,9 @@ type
     ParentSessionId: string;
     ParentWorkspaceId: Integer;
     ParentDepth: Integer;      // the parent's own depth (children are +1)
+    { The lineage root the child's approvals resolve against (the parent's own
+      approval root). '' => ParentSessionId. }
+    ParentApprovalRoot: string;
     MaxChildren: Integer;      // 0 => DefaultMaxChildren
     MaxDepth: Integer;         // 0 => DefaultMaxDepth
     IdleExitMs: Integer;       // 0 => the client default
@@ -117,6 +120,7 @@ type
     procedure RemoveChild(const ASessionId: string; AActive: Boolean);
     function MakeClientConfig(const ASessionId: string;
       out AError: string): TSessionClientConfig;
+    function GetCanDelegate: Boolean;
     procedure DeferReap(AChild: TChild);
     procedure ReapPending;
     function DefaultFactory(const AConfig: TSessionClientConfig;
@@ -150,6 +154,9 @@ type
 
     property Available: Integer read FreeSlots;
     property Max: Integer read FConfig.MaxChildren;
+    { True when this session is below the depth cap, so it may spawn children
+      (and should advertise the delegation tools). }
+    property CanDelegate: Boolean read GetCanDelegate;
     property HasClient: Boolean read FHasClient write FHasClient;
     { Test seam: replace the client factory. }
     property Factory: TSubagentClientFactory read FFactory write FFactory;
@@ -295,6 +302,11 @@ begin
     Result := 0;
 end;
 
+function TSubagentSupervisor.GetCanDelegate: Boolean;
+begin
+  Result := FConfig.ParentDepth + 1 <= FConfig.MaxDepth;
+end;
+
 { The child's final assistant text, read from the durable store (the runtime
   does not stream block text for a completed turn). }
 function TSubagentSupervisor.LastAssistantText(
@@ -397,9 +409,12 @@ begin
   Result.Spawn := True;
   Result.RuntimeCommand := FConfig.RuntimeCommand;
   Result.IdleExitMs := FConfig.IdleExitMs;
-  { The child resolves approvals against the parent (the lineage root), so a
-    grant is in force across the whole lineage. }
-  Result.ApprovalRootSessionId := FConfig.ParentSessionId;
+  { The child resolves approvals against the parent's lineage root, so a grant
+    is in force across the whole lineage. }
+  if FConfig.ParentApprovalRoot <> '' then
+    Result.ApprovalRootSessionId := FConfig.ParentApprovalRoot
+  else
+    Result.ApprovalRootSessionId := FConfig.ParentSessionId;
   AError := '';
 end;
 

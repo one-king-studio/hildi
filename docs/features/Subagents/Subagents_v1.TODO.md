@@ -112,16 +112,26 @@ registered in `tests/hildegard_helper_tests.pas` (integrator-owned).
 
 ## Phase 8 — Runtime integration
 
-- [ ] **Test** (`tests/test_session_runtime.pas`): `TestRuntimeSpawnsChildOnDelegate`,
-      `TestChildResultBecomesAmbientTurn`, `TestChildAskRelayedToParent`,
-      `TestAbortSubagentCommand`, `TestReleaseSubagentCommand`,
-      `TestNoDelegationToolsAtDepthCap`.
-- [ ] **Implement**: create/destroy the supervisor in `Open`/`Destroy`; register
-      the delegation tools when depth < max; `DrainSubagents` in the select loop;
-      handle `scAbortSubagent`/`scReleaseSubagent`; route `scApprove` for child
-      asks; maintain `HasClient`.
-  - Files: `src/hildegard.helper.session.runtime.pas`.
-- [ ] **Check**: `make test SUITE=TSessionRuntimeTest`.
+- [x] **Test** (`tests/test_session_runtime.pas`):
+      `TestAbortReleaseCommandsRouteToSupervisor` (the abort/release commands are
+      routed to the supervisor and fail cleanly on an unknown child),
+      `TestAbortRefusedForObserver` (drive-only).
+      *(Deferred: `TestRuntimeSpawnsChildOnDelegate` and
+      `TestChildResultBecomesAmbientTurn` — a full parent→child turn is not
+      hermetic because the spawned child builds its own LLM transport. The
+      spawn/result/relay paths are covered by `TSubagentSupervisorTest`, which
+      runs a child in-process with an injected transport.)*
+- [x] **Implement**: create/destroy the supervisor in `Open`/`Destroy` (with an
+      owning interface ref, since the tools hold a second ref); register the
+      delegation tools when `CanDelegate`; `DrainSubagents` in the select loop
+      (roster/ambient/ask relay, ambient turn start, auto-deny); handle
+      `scAbortSubagent`/`scReleaseSubagent`; route `scApprove` for a namespaced
+      child ask; maintain `HasClient`; `TerminateAll` on every exit reason.
+  - Files: `src/hildegard.helper.session.runtime.pas`,
+    `src/hildegard.helper.harness.session.pas` (ApprovalService accessor),
+    `src/hildegard.helper.subagent.supervisor.pas` (CanDelegate,
+    ParentApprovalRoot).
+- [x] **Check**: `make test SUITE=TSessionRuntimeTest`.
 
 ## Phase 9 — Configuration and CLI
 

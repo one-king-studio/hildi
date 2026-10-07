@@ -103,6 +103,8 @@ type
     procedure TestShutdownFromNonDriverRefused;
     procedure TestNoClientsExitAfterGrace;
     procedure TestSlowObserverGetsGap;
+    procedure TestAbortReleaseCommandsRouteToSupervisor;
+    procedure TestAbortRefusedForObserver;
   end;
 
 implementation
@@ -1047,6 +1049,98 @@ begin
     end;
   finally
     Fake.Free;
+  end;
+end;
+
+procedure TSessionRuntimeTest.TestAbortReleaseCommandsRouteToSupervisor;
+var
+  Id: string;
+  Rt: TSessionRuntime;
+  Th: TRuntimeThread;
+  Sink: TRecordingSink;
+  Driver: TSessionClient;
+  Err: string;
+  Cmd: TSessionCommand;
+  Reply: TSessionMessage;
+begin
+  { A root runtime with a store supervises subagents, so the abort/release
+    commands are routed to the supervisor (an unknown child fails cleanly with
+    abort_failed rather than being an unknown command). }
+  Id := NewSession;
+  Rt := MakeRuntime(Id, nil, 300000);
+  Th := TRuntimeThread.Create(Rt);
+  try
+    Th.Start;
+    AssertTrue('bound', WaitForSocket(Id, 5000));
+    Sink := TRecordingSink.Create;
+    Driver := TSessionClient.Open(MakeClientConfig(Id, srDrive), Sink, Err);
+    AssertNotNull('driver attaches: ' + Err, Driver);
+    try
+      Cmd := Default(TSessionCommand);
+      Cmd.Kind := scAbortSubagent;
+      Cmd.Id := 'a1';
+      Cmd.SessionId := 'no-such-child';
+      AssertTrue('abort replied', Driver.SendAndWait(Cmd, 3000, Reply));
+      AssertFalse('unknown child refused', Reply.Ok);
+      AssertEquals('reason', 'abort_failed', Reply.ErrorCode);
+
+      Cmd := Default(TSessionCommand);
+      Cmd.Kind := scReleaseSubagent;
+      Cmd.Id := 'r1';
+      Cmd.SessionId := 'no-such-child';
+      AssertTrue('release replied', Driver.SendAndWait(Cmd, 3000, Reply));
+      AssertFalse('unknown child refused', Reply.Ok);
+      AssertEquals('reason', 'release_failed', Reply.ErrorCode);
+    finally
+      Driver.Free;
+      Sink := nil;
+    end;
+  finally
+    Rt.Stop;
+    WaitFinished(Th, 3000);
+    Th.Free;
+    DeleteSocket(Id);
+  end;
+end;
+
+procedure TSessionRuntimeTest.TestAbortRefusedForObserver;
+var
+  Id: string;
+  Rt: TSessionRuntime;
+  Th: TRuntimeThread;
+  Sink: TRecordingSink;
+  Driver: TSessionClient;
+  Err: string;
+  Cmd: TSessionCommand;
+  Reply: TSessionMessage;
+begin
+  { An observer (not the driver) may not abort a subagent. }
+  Id := NewSession;
+  Rt := MakeRuntime(Id, nil, 300000);
+  Th := TRuntimeThread.Create(Rt);
+  try
+    Th.Start;
+    AssertTrue('bound', WaitForSocket(Id, 5000));
+    Sink := TRecordingSink.Create;
+    Driver := TSessionClient.Open(MakeClientConfig(Id, srObserve), Sink, Err);
+    AssertNotNull('observer attaches: ' + Err, Driver);
+    try
+      Cmd := Default(TSessionCommand);
+      Cmd.Kind := scAbortSubagent;
+      Cmd.Id := 'a1';
+      Cmd.SessionId := 'x';
+      AssertTrue('abort replied', Driver.SendAndWait(Cmd, 3000, Reply));
+      AssertFalse('observer refused', Reply.Ok);
+      AssertEquals('not driver', 'not_driver', Reply.ErrorCode);
+    finally
+      Driver.Free;
+      Sink := nil;
+    end;
+  finally
+    Rt.Stop;
+    WaitFinished(Th, 3000);
+    Th.Free;
+    DeleteSocket(Id);
   end;
 end;
 

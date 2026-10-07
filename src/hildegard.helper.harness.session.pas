@@ -41,6 +41,7 @@ type
     FLoop: TAgentLoop;
     FQueue: TTurnQueue;
     FGate: TApprovalGate;
+    FApprovalService: IApprovalService;
     { MCP events (server failure etc.) are recorded as session errors. }
     procedure McpEvent(const AMessage, ADetail: string);
     { The current effective MCP config from the store, for the provider. }
@@ -60,6 +61,9 @@ type
     property Tools: TToolRegistry read FTools;
     property Queue: TTurnQueue read FQueue;
     property Gate: TApprovalGate read FGate;
+    { The session's approval service, so the runtime can hand it to the
+      delegation tools. }
+    property ApprovalService: IApprovalService read FApprovalService;
 
     { Cancel pending approvals; frees owned objects. Idempotent. }
     procedure Close;
@@ -209,6 +213,7 @@ begin
     ApprovalCtx.SessionId := FView.SessionId;
   ApprovalService := TApprovalService.Create(ApprovalStore, FGate.Prompt,
     ApprovalCtx);
+  FApprovalService := ApprovalService;
   ToolConfig := Default(TCommandToolConfig);
   ToolConfig.Shell := DefaultShellProfile;
   ToolConfig.DefaultCwd := FView.WorkspaceRoot;
