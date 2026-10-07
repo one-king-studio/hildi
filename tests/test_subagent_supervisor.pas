@@ -20,6 +20,7 @@ uses
   hildegard.helper.session.protocol, hildegard.helper.session.client,
   hildegard.helper.session.socket, hildegard.helper.session.runtime,
   hildegard.helper.subagent, hildegard.helper.subagent.supervisor,
+  hildegard.helper.approval,
   hildegard.helper.llm, llm_fakes;
 
 type
@@ -64,6 +65,8 @@ type
     procedure TestReleaseDetachesWithoutAbort;
     procedure TestUnknownChildIdErrors;
     procedure TestTerminateAllOnShutdown;
+    procedure TestChildApprovalRelayed;
+    procedure TestAutoDenyWhenHeadless;
   end;
 
 implementation
@@ -391,6 +394,87 @@ begin
     Sup.TerminateAll;
     AssertEquals('all slots free', 10, Sup.Available);
     AssertEquals('status gone', 'gone', Sup.Status(Res.SessionId));
+  finally
+    Sup.Free;
+  end;
+end;
+
+procedure TSubagentSupervisorTest.TestChildApprovalRelayed;
+var
+  Sup: TSubagentSupervisor;
+  Res: TSubagentSpawnResult;
+  Ev: TSubagentEvent;
+  Fake: TFakeTransport;
+  Choice: TApprovalChoice;
+begin
+  { The child calls run_command, which asks for approval. The ask is relayed up
+    as sekApprovalAsk with a namespaced ask id; answering it lets the child
+    finish. }
+  Fake := TFakeTransport.Create;
+  Fake.AddResponse([ToolNameFrame(0, 'call_1', 'run_command'),
+    ToolArgsFrame(0, '{"command":"echo hi","reason":"say hi"}'),
+    FinishFrame('tool_calls'), DoneFrame]);
+  Fake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
+  FChildTransport := Fake;
+  Sup := MakeSupervisor(10, 1);
+  try
+    AssertTrue('delegate ok', Sup.Delegate('do it', 'ctx', 'l', Res));
+    AssertTrue('child ask relayed', WaitEvent(Sup, sekApprovalAsk, Ev));
+    AssertEquals('names the child', Res.SessionId, Ev.SessionId);
+    AssertTrue('has a child ask id', Ev.AskId <> '');
+
+    { Approve and let the child complete. }
+    Choice := Default(TApprovalChoice);
+    Choice.Allowed := True;
+    Choice.OptionKey := 'once';
+    Choice.Scope := asWorkspace;
+    Sup.AnswerChildAsk(Ev.SessionId, Ev.AskId, Choice);
+    AssertTrue('child completes', WaitEvent(Sup, sekResult, Ev));
+    AssertEquals('completed', 'completed', Ev.Status);
+  finally
+    Sup.Free;
+  end;
+end;
+
+procedure TSubagentSupervisorTest.TestAutoDenyWhenHeadless;
+var
+  Sup: TSubagentSupervisor;
+  Res: TSubagentSpawnResult;
+  Ev: TSubagentEvent;
+  Fake: TFakeTransport;
+  Cfg: TSubagentSupervisorConfig;
+begin
+  { With no attached client, an unanswered child ask is auto-denied after the
+    window and the child continues (the denial is answered, not left hanging). }
+  Fake := TFakeTransport.Create;
+  Fake.AddResponse([ToolNameFrame(0, 'call_1', 'run_command'),
+    ToolArgsFrame(0, '{"command":"echo hi","reason":"say hi"}'),
+    FinishFrame('tool_calls'), DoneFrame]);
+  Fake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
+  FChildTransport := Fake;
+
+  Cfg := Default(TSubagentSupervisorConfig);
+  Cfg.WorkspacePath := FWs;
+  Cfg.StorePath := FDbPath;
+  Cfg.ParentSessionId := FRoot;
+  Cfg.ParentWorkspaceId := 1;
+  Cfg.ParentDepth := 0;
+  Cfg.MaxChildren := 10;
+  Cfg.MaxDepth := 1;
+  Cfg.IdleExitMs := 8000;
+  Cfg.AutoDenyMs := 200;   // a short window for the test
+  Sup := TSubagentSupervisor.Create(Cfg, FStore);
+  Sup.Factory := ChildFactory;
+  Sup.HasClient := False;   // headless
+  try
+    AssertTrue('delegate ok', Sup.Delegate('do it', 'ctx', 'l', Res));
+    AssertTrue('child ask relayed', WaitEvent(Sup, sekApprovalAsk, Ev));
+    { Wait past the auto-deny window; the supervisor denies and the child, told
+      it was denied, continues and finishes. }
+    Sleep(400);
+    Sup.TickAutoDeny(GetTickCount64);
+    AssertTrue('child completes after auto-deny',
+      WaitEvent(Sup, sekResult, Ev));
   finally
     Sup.Free;
   end;

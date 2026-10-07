@@ -66,11 +66,8 @@ registered in `tests/hildegard_helper_tests.pas` (integrator-owned).
       `TestCapacityCapFailsCleanly`, `TestDepthCapFailsCleanly`,
       `TestResultCapturedFromChild`, `TestAbortReleasesSlot`,
       `TestReleaseDetachesWithoutAbort`, `TestUnknownChildIdErrors`,
-      `TestTerminateAllOnShutdown`.
-      *(Deferred to a later phase: `TestChildApprovalRelayed` and
-      `TestAutoDenyWhenHeadless` — they need a scripted approval-producing child.
-      The relay/auto-deny code paths are implemented; only their tests are
-      pending.)*
+      `TestTerminateAllOnShutdown`, `TestChildApprovalRelayed`,
+      `TestAutoDenyWhenHeadless`.
 - [x] **Implement**: `hildegard.helper.subagent.supervisor` —
       `TSubagentSupervisor`, the per-child client, the event queue
       (`Poll`), `Delegate/Message/Abort/Release/Status`, `AnswerChildAsk`,
