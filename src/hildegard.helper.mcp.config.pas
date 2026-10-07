@@ -16,6 +16,9 @@ type
   { Where a server definition lives. Most specific wins on a name clash. }
   TMcpScope = (msGlobal, msWorkspace, msAgent);
 
+  { How the client reaches the server. }
+  TMcpTransportKind = (mtStdio, mtHttp);
+
   { A stored server definition, as read from any source. }
   TMcpServerRow = record
     Id: Integer;
@@ -23,8 +26,11 @@ type
     WorkspaceId: Integer;   // 0 for global (and agent)
     AgentId: string;        // '' unless agent scope (reserved; agent support later)
     Name: string;
-    Command: string;
-    Args: array of string;
+    Transport: TMcpTransportKind;  // mtStdio (default) or mtHttp
+    Command: string;        // stdio
+    Args: array of string;  // stdio
+    Url: string;            // http
+    Headers: array of string; // http: 'Name: value'
     Env: array of string;   // 'NAME=VALUE' additions (secrets stay out of argv)
     WorkingDir: string;     // '' => process cwd
     Enabled: Boolean;
@@ -38,8 +44,11 @@ type
   { The effective server, after resolution. }
   TMcpServerConfig = record
     Name: string;
+    Transport: TMcpTransportKind;
     Command: string;
     Args: array of string;
+    Url: string;
+    Headers: array of string;
     Env: array of string;
     WorkingDir: string;
     Enabled: Boolean;
@@ -140,8 +149,11 @@ function ToConfig(const ARow: TMcpServerRow): TMcpServerConfig;
 begin
   Result := Default(TMcpServerConfig);
   Result.Name := ARow.Name;
+  Result.Transport := ARow.Transport;
   Result.Command := ARow.Command;
   Result.Args := Copy(ARow.Args, 0, Length(ARow.Args));
+  Result.Url := ARow.Url;
+  Result.Headers := Copy(ARow.Headers, 0, Length(ARow.Headers));
   Result.Env := Copy(ARow.Env, 0, Length(ARow.Env));
   Result.WorkingDir := ARow.WorkingDir;
   Result.Enabled := ARow.Enabled;
@@ -227,7 +239,15 @@ begin
       'illegal characters (allowed: [A-Za-z0-9_-])';
     Exit(False);
   end;
-  if ARow.Command = '' then
+  if ARow.Transport = mtHttp then
+  begin
+    if ARow.Url = '' then
+    begin
+      AError := 'server "' + ARow.Name + '" is HTTP but has no url';
+      Exit(False);
+    end;
+  end
+  else if ARow.Command = '' then
   begin
     AError := 'server "' + ARow.Name + '" has an empty command';
     Exit(False);
@@ -313,20 +333,47 @@ begin
       Row.Name := Name;
       Row.Enabled := True;
 
-      if Entry.Find('command') is TJSONString then
-        Row.Command := Entry.Find('command').AsString
+      { HTTP: a "url" (plus optional "headers") instead of a command. }
+      if Entry.Find('url') is TJSONString then
+      begin
+        Row.Transport := mtHttp;
+        Row.Url := Entry.Find('url').AsString;
+        if Entry.Find('headers') is TJSONObject then
+        begin
+          EnvObj := TJSONObject(Entry.Find('headers'));
+          for EnvPair in EnvObj do
+          begin
+            SetLength(Row.Headers, Length(Row.Headers) + 1);
+            Row.Headers[High(Row.Headers)] :=
+              EnvPair.Key + ': ' + EnvPair.Value.AsString;
+          end;
+        end
+        else if Entry.Find('headers') is TJSONArray then
+        begin
+          ArgsArr := TJSONArray(Entry.Find('headers'));
+          SetLength(Row.Headers, ArgsArr.Count);
+          for K := 0 to ArgsArr.Count - 1 do
+            Row.Headers[K] := ArgsArr.Strings[K];
+        end;
+      end
       else
       begin
-        AError := 'server "' + Name + '" needs a string "command"';
-        Exit(False);
-      end;
+        Row.Transport := mtStdio;
+        if Entry.Find('command') is TJSONString then
+          Row.Command := Entry.Find('command').AsString
+        else
+        begin
+          AError := 'server "' + Name + '" needs a string "command" or "url"';
+          Exit(False);
+        end;
 
-      if Entry.Find('args') is TJSONArray then
-      begin
-        ArgsArr := TJSONArray(Entry.Find('args'));
-        SetLength(Row.Args, ArgsArr.Count);
-        for K := 0 to ArgsArr.Count - 1 do
-          Row.Args[K] := ArgsArr.Strings[K];
+        if Entry.Find('args') is TJSONArray then
+        begin
+          ArgsArr := TJSONArray(Entry.Find('args'));
+          SetLength(Row.Args, ArgsArr.Count);
+          for K := 0 to ArgsArr.Count - 1 do
+            Row.Args[K] := ArgsArr.Strings[K];
+        end;
       end;
 
       EnvVal := Entry.Find('env');
@@ -424,13 +471,32 @@ begin
     for I := 0 to High(ARows) do
     begin
       Entry := TJSONObject.Create;
-      Entry.Add('command', ARows[I].Command);
-      if Length(ARows[I].Args) > 0 then
+      if ARows[I].Transport = mtHttp then
       begin
-        ArgsArr := TJSONArray.Create;
-        for J := 0 to High(ARows[I].Args) do
-          ArgsArr.Add(ARows[I].Args[J]);
-        Entry.Add('args', ArgsArr);
+        Entry.Add('url', ARows[I].Url);
+        if Length(ARows[I].Headers) > 0 then
+        begin
+          EnvObj := TJSONObject.Create;
+          for J := 0 to High(ARows[I].Headers) do
+          begin
+            Pair := ARows[I].Headers[J];
+            P := Pos(': ', Pair);
+            if P > 1 then
+              EnvObj.Add(Copy(Pair, 1, P - 1), Copy(Pair, P + 2, MaxInt));
+          end;
+          Entry.Add('headers', EnvObj);
+        end;
+      end
+      else
+      begin
+        Entry.Add('command', ARows[I].Command);
+        if Length(ARows[I].Args) > 0 then
+        begin
+          ArgsArr := TJSONArray.Create;
+          for J := 0 to High(ARows[I].Args) do
+            ArgsArr.Add(ARows[I].Args[J]);
+          Entry.Add('args', ArgsArr);
+        end;
       end;
       if Length(ARows[I].Env) > 0 then
       begin

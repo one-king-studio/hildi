@@ -30,6 +30,8 @@ type
     procedure TestValidateRejectsTooManyServers;
     procedure TestIsValidMcpName;
     procedure TestParseJsonValid;
+    procedure TestParseJsonHttpServer;
+    procedure TestValidateHttpNeedsUrl;
     procedure TestParseJsonEnvObject;
     procedure TestParseJsonErrors;
     procedure TestJsonRoundTrip;
@@ -236,6 +238,34 @@ begin
   AssertEquals('args', 3, Length(Rows[0].Args));
   AssertEquals('arg0', 'run', Rows[0].Args[0]);
   AssertTrue('enabled default', Rows[0].Enabled);
+end;
+
+procedure TMcpConfigTest.TestParseJsonHttpServer;
+var
+  Rows: TMcpServerRowArray;
+  Err: string;
+begin
+  AssertTrue('parsed', ParseMcpServersJson(
+    '{"mcpServers":{"remote":{"url":"https://mcp.example.com/rpc",' +
+    '"headers":{"Authorization":"Bearer xyz"}}}}', msGlobal, 0, Rows, Err));
+  AssertEquals('one row', 1, Length(Rows));
+  AssertEquals('http kind', Ord(mtHttp), Ord(Rows[0].Transport));
+  AssertEquals('url', 'https://mcp.example.com/rpc', Rows[0].Url);
+  AssertEquals('header', 1, Length(Rows[0].Headers));
+  AssertEquals('header text', 'Authorization: Bearer xyz', Rows[0].Headers[0]);
+end;
+
+procedure TMcpConfigTest.TestValidateHttpNeedsUrl;
+var
+  R: TMcpServerRow;
+  Err: string;
+begin
+  R := Default(TMcpServerRow);
+  R.Name := 'x';
+  R.Transport := mtHttp;
+  AssertFalse('no url', ValidateMcpServerRow(R, Err));
+  R.Url := 'https://x/rpc';
+  AssertTrue('with url', ValidateMcpServerRow(R, Err));
 end;
 
 procedure TMcpConfigTest.TestParseJsonEnvObject;

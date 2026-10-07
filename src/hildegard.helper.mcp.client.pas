@@ -14,7 +14,7 @@ uses
   Classes, SysUtils,
   hildegard.helper.agent, hildegard.helper.llm, hildegard.helper.approval,
   hildegard.helper.stdio.child, hildegard.helper.jsonrpc,
-  hildegard.helper.mcp.transport,
+  hildegard.helper.mcp.transport, hildegard.helper.mcp.http,
   hildegard.helper.mcp.config;
 
 type
@@ -745,6 +745,7 @@ end;
 function TMcpClient.Open(out AError: string): Boolean;
 var
   ChildCfg: TStdioChildConfig;
+  HttpCfg: THttpTransportConfig;
   InitParams, ResultJson, Err: string;
 begin
   AError := '';
@@ -754,17 +755,29 @@ begin
   { A new connection starts a fresh id sequence (ids are per-connection). }
   FIdGen.Free;
   FIdGen := TJsonRpcIdGen.Create;
-  ChildCfg := Default(TStdioChildConfig);
-  ChildCfg.Executable := FConfig.Server.Command;
-  ChildCfg.Args := Copy(FConfig.Server.Args, 0, Length(FConfig.Server.Args));
-  ChildCfg.Env := Copy(FConfig.Server.Env, 0, Length(FConfig.Server.Env));
-  ChildCfg.WorkingDir := FConfig.Server.WorkingDir;
-  ChildCfg.ReadTimeoutMs := FConfig.ListTimeoutMs;
-  FTransport := TStdioTransport.Create(ChildCfg);
+  if FConfig.Server.Transport = mtHttp then
+  begin
+    HttpCfg := Default(THttpTransportConfig);
+    HttpCfg.URL := FConfig.Server.Url;
+    HttpCfg.Headers := Copy(FConfig.Server.Headers, 0,
+      Length(FConfig.Server.Headers));
+    HttpCfg.ReadTimeoutMs := FConfig.ListTimeoutMs;
+    FTransport := THttpTransport.Create(HttpCfg);
+  end
+  else
+  begin
+    ChildCfg := Default(TStdioChildConfig);
+    ChildCfg.Executable := FConfig.Server.Command;
+    ChildCfg.Args := Copy(FConfig.Server.Args, 0, Length(FConfig.Server.Args));
+    ChildCfg.Env := Copy(FConfig.Server.Env, 0, Length(FConfig.Server.Env));
+    ChildCfg.WorkingDir := FConfig.Server.WorkingDir;
+    ChildCfg.ReadTimeoutMs := FConfig.ListTimeoutMs;
+    FTransport := TStdioTransport.Create(ChildCfg);
+  end;
   if not FTransport.Open(Err) then
   begin
-    AError := 'spawn failed: ' + Err;
-    Emit('mcp: server "' + ServerName + '" failed to spawn', Err);
+    AError := 'open failed: ' + Err;
+    Emit('mcp: server "' + ServerName + '" failed to open', Err);
     Close;
     Exit(False);
   end;

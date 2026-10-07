@@ -250,7 +250,7 @@ end;
 function DefaultMigrations: TMigrationArray;
 begin
   Result := nil;
-  SetLength(Result, 6);
+  SetLength(Result, 7);
   Result[0].Version := 1;
   Result[0].Name := 'session history';
   Result[0].Statements := [
@@ -408,6 +408,15 @@ begin
   Result[5].Name := 'ambient status';
   Result[5].Statements := [
     'ALTER TABLE messages ADD COLUMN status TEXT NOT NULL DEFAULT '''''
+  ];
+  { v7: HTTP transport for MCP servers. Additive columns. (Renumbered from v4
+    during the rebase: main took v4-v6 for subagents.) }
+  Result[6].Version := 7;
+  Result[6].Name := 'mcp http transport';
+  Result[6].Statements := [
+    'ALTER TABLE mcp_servers ADD COLUMN transport INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE mcp_servers ADD COLUMN url TEXT NOT NULL DEFAULT ''''',
+    'ALTER TABLE mcp_servers ADD COLUMN headers TEXT NOT NULL DEFAULT ''[]'''
   ];
 end;
 
@@ -1237,7 +1246,8 @@ begin
       Exit(False);
     Stmt := TStmt.Create(FDb,
       'SELECT id, scope, workspace_id, agent_id, name, command, args, env, ' +
-      'cwd, enabled, list_timeout_ms, call_timeout_ms, created_at ' +
+      'cwd, enabled, list_timeout_ms, call_timeout_ms, created_at, ' +
+      'transport, url, headers ' +
       'FROM mcp_servers ' +
       'WHERE scope = 0 OR (scope = 1 AND workspace_id = ?) ' +
       'OR (scope = 2 AND agent_id = ? AND ? <> '''')');
@@ -1264,6 +1274,9 @@ begin
         Row.ListTimeoutMs := Stmt.ColInt(10);
         Row.CallTimeoutMs := Stmt.ColInt(11);
         Row.CreatedAt := Stmt.ColInt64(12);
+        Row.Transport := TMcpTransportKind(Stmt.ColInt(13));
+        Row.Url := Stmt.ColText(14);
+        DecodeMcpStrings(Stmt.ColText(15), Row.Headers);
         SetLength(ARows, N + 1);
         ARows[N] := Row;
         Inc(N);
@@ -1292,13 +1305,16 @@ begin
       Exit(Fail(AError, seInvalidArgument, Msg, ''));
     Stmt := TStmt.Create(FDb,
       'INSERT INTO mcp_servers (scope, workspace_id, agent_id, name, command, ' +
-      'args, env, cwd, enabled, list_timeout_ms, call_timeout_ms, created_at) ' +
-      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
+      'args, env, cwd, enabled, list_timeout_ms, call_timeout_ms, created_at, ' +
+      'transport, url, headers) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
       'ON CONFLICT(scope, workspace_id, agent_id, name) DO UPDATE SET ' +
       'command = excluded.command, args = excluded.args, env = excluded.env, ' +
       'cwd = excluded.cwd, enabled = excluded.enabled, ' +
       'list_timeout_ms = excluded.list_timeout_ms, ' +
-      'call_timeout_ms = excluded.call_timeout_ms');
+      'call_timeout_ms = excluded.call_timeout_ms, ' +
+      'transport = excluded.transport, url = excluded.url, ' +
+      'headers = excluded.headers');
     try
       if not Stmt.Valid then
         Exit(Fail(AError, seError, 'could not save mcp server', DbErrorText));
@@ -1314,6 +1330,9 @@ begin
       Stmt.BindInt(10, ARow.ListTimeoutMs);
       Stmt.BindInt(11, ARow.CallTimeoutMs);
       Stmt.BindInt64(12, NowMs);
+      Stmt.BindInt(13, Ord(ARow.Transport));
+      Stmt.BindText(14, ARow.Url);
+      Stmt.BindText(15, EncodeMcpStrings(ARow.Headers));
       if Stmt.Step <> SQLITE_DONE then
         Exit(Fail(AError, seError, 'could not save mcp server', DbErrorText));
     finally
@@ -1371,7 +1390,8 @@ begin
       Exit(False);
     Stmt := TStmt.Create(FDb,
       'SELECT id, scope, workspace_id, agent_id, name, command, args, env, ' +
-      'cwd, enabled, list_timeout_ms, call_timeout_ms, created_at ' +
+      'cwd, enabled, list_timeout_ms, call_timeout_ms, created_at, ' +
+      'transport, url, headers ' +
       'FROM mcp_servers');
     try
       if not Stmt.Valid then
@@ -1393,6 +1413,9 @@ begin
         Row.ListTimeoutMs := Stmt.ColInt(10);
         Row.CallTimeoutMs := Stmt.ColInt(11);
         Row.CreatedAt := Stmt.ColInt64(12);
+        Row.Transport := TMcpTransportKind(Stmt.ColInt(13));
+        Row.Url := Stmt.ColText(14);
+        DecodeMcpStrings(Stmt.ColText(15), Row.Headers);
         SetLength(ARows, N + 1);
         ARows[N] := Row;
         Inc(N);

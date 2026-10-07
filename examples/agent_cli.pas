@@ -378,8 +378,11 @@ var
 begin
   Cfg := Default(TMcpClientConfig);
   Cfg.Server.Name := ARow.Name;
+  Cfg.Server.Transport := ARow.Transport;
   Cfg.Server.Command := ARow.Command;
   Cfg.Server.Args := Copy(ARow.Args, 0, Length(ARow.Args));
+  Cfg.Server.Url := ARow.Url;
+  Cfg.Server.Headers := Copy(ARow.Headers, 0, Length(ARow.Headers));
   Cfg.Server.Env := Copy(ARow.Env, 0, Length(ARow.Env));
   Cfg.Server.WorkingDir := ARow.WorkingDir;
   Cfg.ListTimeoutMs := ARow.ListTimeoutMs;
