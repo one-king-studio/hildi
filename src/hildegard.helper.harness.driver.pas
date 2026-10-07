@@ -29,6 +29,10 @@ type
     procedure Interrupt;
     { Resolve a pending approval ask by its reference. }
     procedure AnswerAsk(const AAskRef: string; const AChoice: TApprovalChoice);
+    { Abort a subagent by its session id. }
+    procedure AbortSubagent(const ASessionId: string);
+    { Release a subagent by its session id (detach without aborting). }
+    procedure ReleaseSubagent(const ASessionId: string);
     { UI thread: pop the next event, if any. }
     function PopEvent(out AEvent: TTurnEvent): Boolean;
     { Release the connection and join any thread. Idempotent. }
@@ -80,7 +84,8 @@ type
     FClosed: Boolean;
     function EnsureClient(out AError: string): Boolean;
     procedure SendCommand(AKind: TSessionCommandKind; const AText,
-      AAskRef: string; const AChoice: TApprovalChoice);
+      AAskRef: string; const AChoice: TApprovalChoice;
+      const ASessionId: string);
     procedure PushError(const AText: string);
   public
     constructor Create(const AConfig: TSessionClientConfig);
@@ -89,6 +94,8 @@ type
     procedure QueuePrompt(const AText: string);
     procedure Interrupt;
     procedure AnswerAsk(const AAskRef: string; const AChoice: TApprovalChoice);
+    procedure AbortSubagent(const ASessionId: string);
+    procedure ReleaseSubagent(const ASessionId: string);
     function PopEvent(out AEvent: TTurnEvent): Boolean;
     procedure Close;
   end;
@@ -298,7 +305,8 @@ begin
 end;
 
 procedure TRemoteDriver.SendCommand(AKind: TSessionCommandKind;
-  const AText, AAskRef: string; const AChoice: TApprovalChoice);
+  const AText, AAskRef: string; const AChoice: TApprovalChoice;
+  const ASessionId: string);
 var
   Cmd: TSessionCommand;
   Err: string;
@@ -315,6 +323,7 @@ begin
   Cmd.Text := AText;
   Cmd.AskId := AAskRef;
   Cmd.Choice := AChoice;
+  Cmd.SessionId := ASessionId;
   if not FClient.Send(Cmd) then
   begin
     FSink.Detached := True;
@@ -324,24 +333,34 @@ end;
 
 procedure TRemoteDriver.StartTurn(const AText: string);
 begin
-  SendCommand(scPrompt, AText, '', Default(TApprovalChoice));
+  SendCommand(scPrompt, AText, '', Default(TApprovalChoice), '');
 end;
 
 procedure TRemoteDriver.QueuePrompt(const AText: string);
 begin
   { The runtime queues a prompt that arrives mid-turn. }
-  SendCommand(scPrompt, AText, '', Default(TApprovalChoice));
+  SendCommand(scPrompt, AText, '', Default(TApprovalChoice), '');
 end;
 
 procedure TRemoteDriver.Interrupt;
 begin
-  SendCommand(scInterrupt, '', '', Default(TApprovalChoice));
+  SendCommand(scInterrupt, '', '', Default(TApprovalChoice), '');
 end;
 
 procedure TRemoteDriver.AnswerAsk(const AAskRef: string;
   const AChoice: TApprovalChoice);
 begin
-  SendCommand(scApprove, '', AAskRef, AChoice);
+  SendCommand(scApprove, '', AAskRef, AChoice, '');
+end;
+
+procedure TRemoteDriver.AbortSubagent(const ASessionId: string);
+begin
+  SendCommand(scAbortSubagent, '', '', Default(TApprovalChoice), ASessionId);
+end;
+
+procedure TRemoteDriver.ReleaseSubagent(const ASessionId: string);
+begin
+  SendCommand(scReleaseSubagent, '', '', Default(TApprovalChoice), ASessionId);
 end;
 
 function TRemoteDriver.PopEvent(out AEvent: TTurnEvent): Boolean;

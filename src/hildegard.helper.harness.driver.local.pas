@@ -32,6 +32,8 @@ type
     procedure QueuePrompt(const AText: string);
     procedure Interrupt;
     procedure AnswerAsk(const AAskRef: string; const AChoice: TApprovalChoice);
+    procedure AbortSubagent(const ASessionId: string);
+    procedure ReleaseSubagent(const ASessionId: string);
     function PopEvent(out AEvent: TTurnEvent): Boolean;
     procedure Close;
   end;
@@ -82,6 +84,16 @@ procedure TLocalDriver.AnswerAsk(const AAskRef: string;
   const AChoice: TApprovalChoice);
 begin
   FSession.Gate.Answer(StrToIntDef(AAskRef, 0), AChoice);
+end;
+
+procedure TLocalDriver.AbortSubagent(const ASessionId: string);
+begin
+  { The in-process local driver has no runtime supervisor; subagents are a
+    runtime feature. }
+end;
+
+procedure TLocalDriver.ReleaseSubagent(const ASessionId: string);
+begin
 end;
 
 function TLocalDriver.PopEvent(out AEvent: TTurnEvent): Boolean;

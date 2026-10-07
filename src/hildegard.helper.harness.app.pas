@@ -21,7 +21,10 @@ uses
   hildegard.helper.tui.panel, hildegard.helper.tui.theme,
   hildegard.helper.tui.app, hildegard.helper.harness.turn,
   hildegard.helper.harness.driver, hildegard.helper.harness.view,
-  hildegard.helper.harness.stats, hildegard.helper.session;
+  hildegard.helper.harness.stats, hildegard.helper.session,
+  hildegard.helper.harness.subagent, hildegard.helper.harness.subagent.spy,
+  hildegard.helper.tui.sidebar, hildegard.helper.tui.list,
+  hildegard.helper.session.protocol, hildegard.helper.session.client;
 
 type
   { Builds the tree and owns the TTuiApp and the current worker. The session is
@@ -56,6 +59,14 @@ type
     { The submitted prompt and its block, so an early cancel can undo them. }
     FUserPrompt: string;
     FUserBlock: TChatItem;
+    { Subagents: the roster (fed from ekSubagent), the sidebar plane, and — in
+      spy mode — the spied child and its observer. }
+    FRoster: TSubagentRoster;
+    FSidebar: TSidebar;
+    FSidebarShown: Boolean;
+    FSpy: TSubagentSpy;
+    FSpyId: string;
+    FAskRefIsChild: Boolean;
     function BuildTree: TWidget;
     procedure Submit(const AText: string);
     procedure DrainQueue;
@@ -65,6 +76,18 @@ type
     procedure ShowApproval(const E: TTurnEvent);
     procedure OnApprovalChosen(const AChoice: TApprovalChoice);
     procedure CloseModal;
+    { Subagents: feed the roster, toggle/show the sidebar, spy on a child. }
+    procedure HandleSubagentEvent(const E: TTurnEvent);
+    procedure ToggleSidebar(Sender: TObject);
+    procedure LayoutSidebar;
+    procedure OnSidebarSelect(const ASessionId: string);
+    procedure ShowSpy(const ASessionId: string);
+    procedure LeaveSpy;
+    procedure DrainSpy;
+    procedure SendSubagentCommand(AKind: TSessionCommandKind;
+      const ASessionId: string);
+    function SidebarShown: Boolean;
+    function SpyId: string;
     procedure FinishTurn(AState: TPanelState; const ALabel: string);
     procedure SetState(AKind: TPanelState; const ALabel: string);
     { The compose's primary-action hint, from the run state and the box. }
@@ -142,6 +165,10 @@ type
     property HintsText: string read FHintsText;
     { True once the first Escape has armed the interrupt. }
     property InterruptArmed: Boolean read FInterruptPending;
+    { Whether the subagent sidebar is shown. }
+    property SidebarVisible: Boolean read SidebarShown;
+    { The spied child's session id, '' when not spying. }
+    property SpiedSessionId: string read SpyId;
     function ConversationText: string;
   end;
 
@@ -150,9 +177,8 @@ implementation
 const
   { The interaction hints live in the CTA strip, which acts as a context
     toolbar; the status bar is reserved for the workspace and the metrics. }
-  { The toolbar hints are blank for now; the compose CTA carries the primary
-    action. }
-  CtaHints = '';
+  { The toolbar hints, right-aligned above the composer. }
+  CtaHints = 'ctrl+b subagents';
   { How long the first Escape stays armed before the interrupt prompt expires. }
   InterruptWindowMs = 2000;
 
@@ -170,9 +196,11 @@ type
     FOnQuit: TNotifyEvent;
     FOnEscape: TNotifyEvent;
     FCanQuit: TQueryEvent;
+    FOnToggleSidebar: TNotifyEvent;
   public
     constructor Create(AChild: TWidget; AOnQuit, AOnEscape: TNotifyEvent;
       ACanQuit: TQueryEvent);
+    procedure SetSidebarToggle(AHandler: TNotifyEvent);
     function HandleEvent(const E: TInputEvent): Boolean; override;
   end;
 
@@ -201,10 +229,21 @@ begin
   FCanQuit := ACanQuit;
 end;
 
+procedure TAppShell.SetSidebarToggle(AHandler: TNotifyEvent);
+begin
+  FOnToggleSidebar := AHandler;
+end;
+
 function TAppShell.HandleEvent(const E: TInputEvent): Boolean;
 begin
   if (E.Kind = ikKey) and (E.Key.Kind = kkChar) and (moCtrl in E.Key.Mods) then
   begin
+    if (E.Key.Ch = 'b') or (E.Key.Ch = 'B') then
+    begin
+      if Assigned(FOnToggleSidebar) then
+        FOnToggleSidebar(Self);
+      Exit(True);
+    end;
     if (E.Key.Ch = 'c') or (E.Key.Ch = 'C') then
     begin
       { Ctrl-C clears a non-empty compose; only an empty one quits. }
@@ -243,6 +282,7 @@ begin
   FSession := ASession;
   FDriver := ADriver;
   FTheme := SelectTheme(AMode, ALightDetected);
+  FRoster := TSubagentRoster.Create;
   FApp := TTuiApp.Create(ASurface, AInput, BuildTree);
   FApp.ScreenBg := FTheme.Bg;
   RenderHistory;
@@ -253,6 +293,9 @@ end;
 destructor THarnessApp.Destroy;
 begin
   CancelTurn;
+  FSpy.Free;
+  FSidebar.Free;
+  FRoster.Free;
   FApp.Free;
   inherited Destroy;
 end;
@@ -267,6 +310,8 @@ begin
 end;
 
 function THarnessApp.BuildTree: TWidget;
+var
+  Shell: TAppShell;
 begin
   FPanel := TChatPanel.Create(FTheme, 'Hildegard · ' + FSession.Model,
     CtaHints);
@@ -281,7 +326,12 @@ begin
   FHintsText := CtaHints;
   FPanel.SetHints(FHintsText);
   UpdateCta;
-  Result := TAppShell.Create(FPanel, Quit, HandleEscape, ComposeIsEmpty);
+  FSidebar := TSidebar.Create(FTheme, FRoster);
+  FSidebar.OnSelect := OnSidebarSelect;
+  FSidebar.Visible := False;
+  Shell := TAppShell.Create(FPanel, Quit, HandleEscape, ComposeIsEmpty);
+  Shell.SetSidebarToggle(ToggleSidebar);
+  Result := Shell;
 end;
 
 procedure THarnessApp.Quit(Sender: TObject);
@@ -732,7 +782,12 @@ begin
         FTool.AppendText(E.Text);
       end;
     teApprovalAsk:
-      EnqueueAsk(E);
+      begin
+        FAskRefIsChild := False;
+        EnqueueAsk(E);
+      end;
+    teSubagent, teSubagentAsk, teAmbient:
+      HandleSubagentEvent(E);
     teDone:
       begin
         { A successful loop ends with its metrics. }
@@ -809,8 +864,11 @@ end;
 
 procedure THarnessApp.OnApprovalChosen(const AChoice: TApprovalChoice);
 begin
+  { A child's ask is answered with the namespaced ref (<child>/<ask>); the
+    runtime routes it down to the child. A parent's own ask answers the gate. }
   if FDriver <> nil then
     FDriver.AnswerAsk(FPendingAskRef, AChoice);
+  FAskRefIsChild := False;
   { Defer popping: we are inside the modal's own event handler. }
   FCloseModal := True;
 end;
@@ -877,6 +935,7 @@ begin
   CloseModal;
   CheckInterruptWindow;
   DrainQueue;
+  DrainSpy;
   Result := FApp.Step;
 end;
 
@@ -907,6 +966,143 @@ begin
   Result := '';
   for I := 0 to FPanel.Stream.Count - 1 do
     Result := Result + FPanel.Stream.ItemAt(I).Text + #10;
+end;
+
+{ --- subagents ---------------------------------------------------------- }
+
+procedure THarnessApp.HandleSubagentEvent(const E: TTurnEvent);
+begin
+  case E.Kind of
+    teSubagent:
+      begin
+        FRoster.Apply(E.SubSessionId, E.SubLabel, E.SubStatus,
+          Int64(GetTickCount64));
+        if FSidebarShown then
+          FSidebar.Refresh;
+      end;
+    teAmbient:
+      { The ambient result is delivered to the parent as its own turn; the block
+        renders from history. Nothing to draw here directly. }
+      ;
+    teSubagentAsk:
+      begin
+        FAskRefIsChild := True;
+        EnqueueAsk(E);
+      end;
+  else
+    ;
+  end;
+end;
+
+function THarnessApp.SidebarShown: Boolean;
+begin
+  Result := FSidebarShown;
+end;
+
+function THarnessApp.SpyId: string;
+begin
+  Result := FSpyId;
+end;
+
+procedure THarnessApp.ToggleSidebar(Sender: TObject);
+begin
+  FSidebarShown := not FSidebarShown;
+  FSidebar.Visible := FSidebarShown;
+  if FSidebarShown then
+  begin
+    FSidebar.Refresh;
+    LayoutSidebar;
+  end;
+  FApp.Invalidate;
+end;
+
+procedure THarnessApp.LayoutSidebar;
+var
+  R: TRect;
+  W: Integer;
+  Avail: TSize;
+begin
+  if not FSidebarShown then
+    Exit;
+  Avail := Default(TSize);
+  Avail.W := FSurface.Width;
+  Avail.H := FSurface.Height;
+  R := Default(TRect);
+  R.X := 2;
+  R.Y := 2;
+  W := FSidebar.Measure(Avail).W + 2;
+  if W < 16 then
+    W := 16;
+  if W > FSurface.Width - 4 then
+    W := FSurface.Width - 4;
+  R.W := W;
+  R.H := FRoster.Count + 2;
+  if R.H < 3 then
+    R.H := 3;
+  if R.H > FSurface.Height - 4 then
+    R.H := FSurface.Height - 4;
+  FSidebar.Arrange(R);
+end;
+
+procedure THarnessApp.OnSidebarSelect(const ASessionId: string);
+begin
+  ShowSpy(ASessionId);
+end;
+
+procedure THarnessApp.ShowSpy(const ASessionId: string);
+var
+  Cfg: TSessionClientConfig;
+  Err: string;
+begin
+  LeaveSpy;
+  Cfg := Default(TSessionClientConfig);
+  Cfg.WorkspacePath := FSession.WorkspaceRoot;
+  Cfg.Spawn := False;
+  Cfg.Role := srObserve;
+  FSpy := TSubagentSpy.Open(ASessionId, Cfg, Err);
+  if FSpy = nil then
+    Exit;
+  FSpyId := ASessionId;
+  FSidebar.Visible := False;
+  FPanel.SetComposeActive(False);
+end;
+
+procedure THarnessApp.LeaveSpy;
+begin
+  if FSpy <> nil then
+  begin
+    FSpy.Close;
+    FSpy.Free;
+    FSpy := nil;
+  end;
+  if FSpyId <> '' then
+  begin
+    FSpyId := '';
+    FPanel.SetComposeActive(True);
+  end;
+  if FSidebarShown then
+    FSidebar.Visible := True;
+end;
+
+procedure THarnessApp.DrainSpy;
+var
+  E: TTurnEvent;
+begin
+  if FSpy = nil then
+    Exit;
+  while FSpy.PopEvent(E) do
+    HandleTurnEvent(E);
+end;
+
+procedure THarnessApp.SendSubagentCommand(AKind: TSessionCommandKind;
+  const ASessionId: string);
+begin
+  if FDriver = nil then
+    Exit;
+  if AKind = scAbortSubagent then
+    FDriver.AbortSubagent(ASessionId)
+  else if AKind = scReleaseSubagent then
+    FDriver.ReleaseSubagent(ASessionId);
 end;
 
 end.

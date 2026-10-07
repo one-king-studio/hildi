@@ -106,6 +106,7 @@ type
     procedure TestResumeRendersTurnDividers;
     procedure TestThoughtShowsDuration;
     procedure TestCtaHintsAreBlank;
+    procedure TestSidebarTogglesWithCtrlB;
     procedure TestThinkingStateDuringATurn;
     procedure TestReasoningSettlesIntoAThoughtBlock;
     procedure TestReadyStateAfterATurn;
@@ -984,8 +985,8 @@ end;
 procedure THarnessAppTest.TestCtaHintsAreBlank;
 begin
   Build;
-  { The toolbar hints are intentionally blank for now. }
-  AssertEquals('hints blanked', '', FApp.HintsText);
+  { The toolbar carries the subagent toggle hint. }
+  AssertEquals('hints', 'ctrl+b subagents', FApp.HintsText);
   AssertFalse('hints are not in the status bar',
     Pos('newline', FApp.StatusText) > 0);
 end;
@@ -1270,6 +1271,18 @@ begin
   { A cell above the modal (the panel's top border) is dimmed. }
   AssertTrue('the background is dimmed',
     sfDim in FSurface.CellAt(20, 0).Attr.Style);
+end;
+
+procedure THarnessAppTest.TestSidebarTogglesWithCtrlB;
+begin
+  Build;
+  AssertFalse('hidden by default', FApp.SidebarVisible);
+  FInput.Push(Ctrl('b'));
+  Pump(4);
+  AssertTrue('shown after ctrl+b', FApp.SidebarVisible);
+  FInput.Push(Ctrl('b'));
+  Pump(4);
+  AssertFalse('hidden again', FApp.SidebarVisible);
 end;
 
 initialization

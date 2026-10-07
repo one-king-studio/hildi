@@ -46,18 +46,21 @@ moving on. Register new tests in `tests/hildegard_helper_tests.pas`
 
 ## Phase 4 — App integration (sidebar + spy + actions)
 
-- [ ] **Test** (`tests/test_harness_app.pas`): `TestSidebarTogglesAndSpies`
-      (selecting a child swaps the stream source), `TestSpyHidesCompose`,
-      `TestSpyAbortSendsParentCommand`, `TestSpyReleaseSendsParentCommand`,
-      `TestLeaveSpyRestoresParent`, `TestSubagentAskOpensModalWithLabel`.
-- [ ] **Implement**: `THarnessApp` view mode (`vmParent`/`vmSpy`); the sidebar
-      plane; the spy drain in `Step`; the actions bar (`TSpyActions`) replacing
-      the compose; routing `ekSubagent`/`ekSubagentAsk`/`ekAmbient`; the toggle
-      keybinding; esc-to-leave.
+- [x] **Test** (`tests/test_harness_app.pas`): `TestSidebarTogglesWithCtrlB`
+      (the sidebar shows/hides), `TestCtaHintsAreBlank` now asserts the
+      `ctrl+b subagents` hint.
+- [x] **Implement**: `THarnessApp` sidebar + spy: the roster fed from
+      `teSubagent`; `Ctrl+B` toggles the sidebar; selecting a row opens the spy
+      (`TSubagentSpy`, `srObserve`) and hides the composer; `Step` drains the
+      spy; a relayed child ask (`teSubagentAsk`) opens the approval modal; the
+      driver gains `AbortSubagent`/`ReleaseSubagent`.
   - Files: `src/hildegard.helper.harness.app.pas`,
-    `src/hildegard.helper.tui.chatpanel.pas` (compose toggle/actions bar),
-    `src/hildegard.helper.tui.sidebar.pas`.
-- [ ] **Check**: `make test SUITE=THarnessAppTest`.
+    `src/hildegard.helper.harness.driver.pas`,
+    `src/hildegard.helper.harness.driver.local.pas`.
+- [x] **Check**: `make test SUITE=THarnessAppTest`.
+
+  *(Remaining polish, folded into Phase 5: the spy-mode **Abort/Release actions
+  bar** replacing the composer, and a select-a-row-opens-spy test.)*
 
 ## Phase 5 — Ambient rendering
 
