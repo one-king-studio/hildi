@@ -176,6 +176,21 @@ type
     function Count: Integer;
   end;
 
+  { A per-turn source of tools and prompt. Prepare is called once at turn start
+    on the loop's thread; Specs/PromptFragment/Find are read while assembling the
+    request. Implementations need not be thread-safe (loop thread only). }
+  IToolProvider = interface
+    { Reconcile or activate; called once per turn, in registration order. }
+    procedure Prepare;
+    { The tools currently offered (already reason-augmented specs). }
+    function Specs: TToolSpecArray;
+    { A request-only prompt fragment, or '' for none. Never persisted. }
+    function PromptFragment: string;
+    { Resolve a called tool name to a handler; first provider to return True
+      wins. }
+    function Find(const AName: string; out ATool: TRegisteredTool): Boolean;
+  end;
+
   TAgentConfig = record
     SystemPrompt: string;
     { Tool-call budget for one turn. From SoftToolLimit the model is nudged
@@ -201,6 +216,7 @@ type
     FConfig: TAgentConfig;
     FCancel: TAgentCancelCheck;
     FOnTurnStart: TAgentBoundaryEvent;
+    FProviders: array of IToolProvider;
     FPromptQueue: TPromptQueue;
     FLastTurnDropped: Boolean;
     { The response in flight is timed so the reasoning and content phases can be
@@ -224,6 +240,10 @@ type
       assistant's tool_calls stay paired with results. }
     procedure InterceptToolCalls(const ACalls: TChatToolCallArray;
       const ANotice: string; const AEvents: TAgentEvents);
+  public
+    { Resolve a called name against the base registry, then providers. }
+    function ResolveTool(const AName: string;
+      out ATool: TRegisteredTool): Boolean;
     { Append every queued prompt as a user message and tell the UI. }
     procedure DrainQueued(const AEvents: TAgentEvents);
     function FinishError(const AResult: TChatResult): TLLMError;
@@ -243,6 +263,9 @@ type
     { Invoked once at the start of each turn, on the loop's thread, before the
       first request. Nil = no-op. The owner may mutate the tool registry here. }
     property OnTurnStart: TAgentBoundaryEvent read FOnTurnStart write FOnTurnStart;
+    { Register a per-turn tool/prompt contributor. Prepare fires at each turn
+      start; its Specs join the request's tool list; its Find resolves calls. }
+    procedure AddProvider(const AProvider: IToolProvider);
     { Prompts the operator injects into a running turn. }
     property PromptQueue: TPromptQueue read FPromptQueue;
     { True when the last turn was cancelled before any response was committed,
@@ -251,6 +274,11 @@ type
   end;
 
 procedure RegisterDefaultTools(ATools: TToolRegistry);
+
+{ Build a spec with the required `reason` parameter ensured, for providers that
+  bypass the registry's Add. }
+function MakeToolSpec(const AName, ADescription,
+  AParametersJson: string): TToolSpec;
 
 { Required, non-empty, human-readable reason every tool call must carry. }
 function ExtractToolReason(const AArgumentsJson: string;
@@ -673,6 +701,22 @@ begin
   Result := Length(FTools);
 end;
 
+{ Builds a spec with the required `reason` parameter ensured, for providers that
+  bypass the registry's Add. }
+function MakeToolSpec(const AName, ADescription,
+  AParametersJson: string): TToolSpec;
+var
+  Augmented: string;
+begin
+  Result := Default(TToolSpec);
+  Result.Name := AName;
+  Result.Description := ADescription;
+  if AugmentReasonParam(AParametersJson, Augmented) then
+    Result.ParametersJson := Augmented
+  else
+    Result.ParametersJson := AParametersJson;
+end;
+
 { --- TAgentLoop --------------------------------------------------------- }
 
 constructor TAgentLoop.Create(AClient: TLLMClient; AStore: IConversationStore;
@@ -734,9 +778,39 @@ function TAgentLoop.BuildRequest(const APendingContent: string;
 var
   N: Integer;
   Msg: TChatMessage;
+  I, K: Integer;
+  Specs: TToolSpecArray;
+  Fragment: string;
 begin
   Result := Default(TChatRequest);
   Result.Messages := FStore.Messages;
+  { Request-only system fragments from providers, injected after any leading
+    system message(s) and before the first non-system message. Never persisted. }
+  K := 0;
+  for I := 0 to High(FProviders) do
+  begin
+    try
+      Fragment := FProviders[I].PromptFragment;
+    except
+      on E: Exception do
+        Fragment := '';
+    end;
+    if Fragment = '' then
+      Continue;
+    Msg := Default(TChatMessage);
+    Msg.Role := crSystem;
+    Msg.Content := Fragment;
+    N := Length(Result.Messages);
+    SetLength(Result.Messages, N + 1);
+    { Shift from K to make room, keeping system messages first. }
+    for K := N downto 1 do
+      if Result.Messages[K - 1].Role = crSystem then
+        Result.Messages[K] := Result.Messages[K - 1]
+      else
+        Break;
+    Result.Messages[K] := Msg;
+    K := K + 1;
+  end;
   if AContinuing then
   begin
     { The pending fragment and the instruction are request-only: neither is
@@ -760,6 +834,51 @@ begin
   end;
   if FTools <> nil then
     Result.Tools := FTools.Specs;
+  { Append provider tools (registration order). }
+  for I := 0 to High(FProviders) do
+  begin
+    try
+      Specs := FProviders[I].Specs;
+    except
+      on E: Exception do
+        Specs := nil;
+    end;
+    for K := 0 to High(Specs) do
+    begin
+      N := Length(Result.Tools);
+      SetLength(Result.Tools, N + 1);
+      Result.Tools[N] := Specs[K];
+    end;
+  end;
+end;
+
+function TAgentLoop.ResolveTool(const AName: string;
+  out ATool: TRegisteredTool): Boolean;
+var
+  I: Integer;
+begin
+  if (FTools <> nil) and FTools.Find(AName, ATool) then
+    Exit(True);
+  for I := 0 to High(FProviders) do
+    try
+      if FProviders[I].Find(AName, ATool) then
+        Exit(True);
+    except
+      on E: Exception do ;   { a broken provider is skipped }
+    end;
+  ATool := Default(TRegisteredTool);
+  Result := False;
+end;
+
+procedure TAgentLoop.AddProvider(const AProvider: IToolProvider);
+var
+  N: Integer;
+begin
+  if AProvider = nil then
+    Exit;
+  N := Length(FProviders);
+  SetLength(FProviders, N + 1);
+  FProviders[N] := AProvider;
 end;
 
 procedure TAgentLoop.ExecuteToolCalls(const ACalls: TChatToolCallArray;
@@ -788,7 +907,7 @@ begin
     StartMs := GetTickCount64;
     if not ReasonOk then
       ResultText := 'error: tool "' + ACalls[I].Name + '" ' + ReasonError
-    else if (FTools = nil) or not FTools.Find(ACalls[I].Name, Tool) then
+    else if (FTools = nil) or not ResolveTool(ACalls[I].Name, Tool) then
       ResultText := 'error: unknown tool "' + ACalls[I].Name + '"'
     else
     begin
@@ -939,6 +1058,7 @@ var
   StartMs, EndMs: Int64;
   Outcome: TRequestOutcome;
   TurnOutcome: TTurnOutcome;
+  I: Integer;
 
   procedure FailTurn(ACode: TLLMErrorCode; const AMessage, ADetail,
     AFinishReason: string);
@@ -986,6 +1106,12 @@ begin
     race-free. }
   if Assigned(FOnTurnStart) then
     FOnTurnStart();
+  for I := 0 to High(FProviders) do
+    try
+      FProviders[I].Prepare;
+    except
+      on E: Exception do ;   { a broken provider never wedges the loop }
+    end;
 
   if (FStore.Messages = nil) and (FConfig.SystemPrompt <> '') then
   begin

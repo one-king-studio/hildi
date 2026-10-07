@@ -198,6 +198,11 @@ type
     procedure TestRegistryRemovePresentAndAbsent;
     procedure TestTurnStartHookFiresOnceBeforeRequest;
     procedure TestTurnStartNilIsNoOp;
+    procedure TestProviderToolsComposedIntoRequest;
+    procedure TestProviderPrepareCalledOncePerTurn;
+    procedure TestProviderPromptInjectedRequestOnly;
+    procedure TestProviderToolDispatches;
+    procedure TestNativeToolTakesPriorityOverProvider;
     procedure TestGetSystemTimeReturnsParseableTime;
     procedure TestEmptyToolNameIsIgnored;
     procedure TestReasoningForwardedThroughEvents;
@@ -1357,6 +1362,216 @@ begin
     AssertEquals('unchanged', 1, Tools.Count);
   finally
     Tools.Free;
+  end;
+end;
+
+type
+  { A stub turn provider: one optional tool, an optional prompt fragment. }
+  TStubProvider = class(TInterfacedObject, IToolProvider)
+  public
+    PrepareCalls: Integer;
+    ToolName: string;
+    Fragment: string;
+    Found: Integer;
+    procedure Prepare;
+    function Specs: TToolSpecArray;
+    function PromptFragment: string;
+    function Find(const AName: string; out ATool: TRegisteredTool): Boolean;
+    function Handle(const AArgumentsJson: string;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
+  end;
+
+  TStubProvider2 = class(TInterfacedObject, IToolProvider)
+  public
+    ToolName: string;
+    procedure Prepare;
+    function Specs: TToolSpecArray;
+    function PromptFragment: string;
+    function Find(const AName: string; out ATool: TRegisteredTool): Boolean;
+    function Handle(const AArgumentsJson: string;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
+  end;
+
+function TStubProvider.Handle(const AArgumentsJson: string;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver): Boolean;
+begin
+  AResult := 'stub result';
+  AError := '';
+  Result := True;
+end;
+
+function TStubProvider2.Handle(const AArgumentsJson: string;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver): Boolean;
+begin
+  AResult := 'stub2 result';
+  AError := '';
+  Result := True;
+end;
+
+procedure TStubProvider.Prepare;
+begin
+  Inc(PrepareCalls);
+end;
+
+function TStubProvider.Specs: TToolSpecArray;
+begin
+  Result := nil;
+  if ToolName = '' then
+    Exit;
+  SetLength(Result, 1);
+  Result[0] := MakeToolSpec(ToolName, 'a stub tool',
+    '{"type":"object","properties":{}}');
+end;
+
+function TStubProvider.PromptFragment: string;
+begin
+  Result := Fragment;
+end;
+
+function TStubProvider.Find(const AName: string;
+  out ATool: TRegisteredTool): Boolean;
+begin
+  Result := (ToolName <> '') and (AName = ToolName);
+  if Result then
+  begin
+    Inc(Found);
+    ATool := Default(TRegisteredTool);
+    ATool.Spec := MakeToolSpec(ToolName, 'a stub tool',
+      '{"type":"object","properties":{}}');
+    ATool.Handler := Handle;
+  end;
+end;
+
+procedure TStubProvider2.Prepare;
+begin
+end;
+
+function TStubProvider2.Specs: TToolSpecArray;
+begin
+  Result := nil;
+end;
+
+function TStubProvider2.PromptFragment: string;
+begin
+  Result := '';
+end;
+
+function TStubProvider2.Find(const AName: string;
+  out ATool: TRegisteredTool): Boolean;
+begin
+  Result := (AName = ToolName);
+  if Result then
+  begin
+    ATool := Default(TRegisteredTool);
+    ATool.Handler := Handle;
+  end;
+end;
+
+procedure TAgentLoopTest.TestProviderToolsComposedIntoRequest;
+var
+  P: TStubProvider;
+  Answer: string;
+  Err: TLLMError;
+begin
+  BuildLoop('', 8);
+  P := TStubProvider.Create;
+  P.ToolName := 'provider_tool';
+  try
+    FLoop.AddProvider(P);
+    FFake.AddResponse([TextDelta('ok'), FinishFrame('stop'), DoneFrame]);
+    AssertTrue('send ok', FLoop.Send('hi', nil, Answer, Err));
+    AssertTrue('provider tool in request', Pos('provider_tool',
+      FFake.LastBody) > 0);
+  finally
+    P := nil;   { the loop owns it via the provider interface }
+  end;
+end;
+
+procedure TAgentLoopTest.TestProviderPrepareCalledOncePerTurn;
+var
+  P: TStubProvider;
+  Answer: string;
+  Err: TLLMError;
+begin
+  BuildLoop('', 8);
+  P := TStubProvider.Create;
+  try
+    FLoop.AddProvider(P);
+    FFake.AddResponse([TextDelta('ok'), FinishFrame('stop'), DoneFrame]);
+    FLoop.Send('hi', nil, Answer, Err);
+    AssertEquals('prepared once', 1, P.PrepareCalls);
+  finally
+    P := nil;   { the loop owns it via the provider interface }
+  end;
+end;
+
+procedure TAgentLoopTest.TestProviderPromptInjectedRequestOnly;
+var
+  P: TStubProvider;
+  Before, After: Integer;
+  Answer: string;
+  Err: TLLMError;
+begin
+  BuildLoop('', 8);
+  P := TStubProvider.Create;
+  P.Fragment := 'INJECTED_SKILL_GUIDANCE';
+  try
+    FLoop.AddProvider(P);
+    FFake.AddResponse([TextDelta('ok'), FinishFrame('stop'), DoneFrame]);
+    Before := Length(FStore.Messages);
+    FLoop.Send('hi', nil, Answer, Err);
+    AssertTrue('fragment in request', Pos('INJECTED_SKILL_GUIDANCE',
+      FFake.LastBody) > 0);
+    After := Length(FStore.Messages);
+    { The stored conversation must not gain a system fragment: only the user
+      message and the assistant reply are added (two, same as without one). }
+    AssertEquals('two messages added (user + assistant)', Before + 2, After);
+  finally
+    P := nil;   { the loop owns it via the provider interface }
+  end;
+end;
+
+procedure TAgentLoopTest.TestProviderToolDispatches;
+var
+  P: TStubProvider;
+  Answer: string;
+  Err: TLLMError;
+begin
+  BuildLoop('', 8);
+  P := TStubProvider.Create;
+  P.ToolName := 'provider_tool';
+  try
+    FLoop.AddProvider(P);
+    FFake.AddResponse([ToolNameFrame(0, 'c1', 'provider_tool'),
+      ToolArgsFrame(0, '{"reason":"x"}'), FinishFrame('tool_calls'), DoneFrame]);
+    FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
+    AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
+    AssertTrue('provider handler dispatched', P.Found > 0);
+  finally
+    P := nil;   { the loop owns it via the provider interface }
+  end;
+end;
+
+procedure TAgentLoopTest.TestNativeToolTakesPriorityOverProvider;
+var
+  P: TStubProvider;
+  Tool: TRegisteredTool;
+begin
+  BuildLoop('', 8);
+  RegisterDefaultTools(FTools);
+  P := TStubProvider.Create;
+  P.ToolName := 'get_system_time';   { same name as a native tool }
+  try
+    FLoop.AddProvider(P);
+    AssertTrue('resolves', FLoop.ResolveTool('get_system_time', Tool));
+    AssertEquals('native spec wins (has a description)',
+      'Return the current UTC time as an ISO 8601 timestamp.', Tool.Spec.Description);
+  finally
+    P := nil;   { the loop owns it via the provider interface }
   end;
 end;
 
