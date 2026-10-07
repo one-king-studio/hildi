@@ -733,15 +733,17 @@ begin
   end;
 
   { Boxed kinds. }
-  if FKind = ckUser then
+  if (FKind = ckUser) or (FKind = ckQueued) then
   begin
+    { A user box: the teal accent border (dimmed). A queued prompt keeps the
+      same teal, only its right-aligned 'Queued' title marks it as pending. }
     SurfaceAttr := OnBg(FTheme.Text, FTheme.RaisedBg);
     Border := OnBg(WithStyle(FTheme.Accent, [sfDim]), FTheme.RaisedBg);
   end
-  else if (FKind = ckQueued) or (FKind = ckAmbient) then
+  else if FKind = ckAmbient then
   begin
-    { A user box with a violet border (matching inline code), to mark a queued
-      prompt or a subagent's ambient result. }
+    { An ambient result: the user-box frame with a violet border (matching
+      inline code), to mark it as an async task's output. }
     SurfaceAttr := OnBg(FTheme.Text, FTheme.RaisedBg);
     Border := OnBg(FTheme.Text, FTheme.RaisedBg);
     Border.Fg := QueuedBorderFg;
@@ -781,7 +783,7 @@ begin
   else if (FKind = ckQueued) or (FKind = ckAmbient) then
   begin
     { The user-box frame with a right-aligned title (Queued / the ambient
-      label) and a violet border. }
+      label); the border is teal for a queued prompt, violet for an ambient. }
     PutCh(S, L, T, '╭', Border);
     PutCh(S, R, T, '╮', Border);
     PutCh(S, L, B, '╰', Border);
@@ -800,8 +802,9 @@ begin
     Title := UnicodeString(FLabel) + ' ─';
     if StringWidth(Title) <= FBounds.W - 2 then
     begin
-      TitleAttr := OnBg(FTheme.Text, FTheme.RaisedBg);
-      TitleAttr.Fg := QueuedBorderFg;
+      { The title takes the border's colour: teal for a queued prompt, violet
+        for an ambient result. }
+      TitleAttr := Border;
       PutText(S, R - 1 - StringWidth(Title), T, Title, TitleAttr);
     end;
   end

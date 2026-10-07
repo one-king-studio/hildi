@@ -1007,9 +1007,13 @@ begin
           FSidebar.Refresh;
       end;
     teAmbient:
-      { The ambient result is delivered to the parent as its own turn; the block
-        renders from history. Nothing to draw here directly. }
-      ;
+      { The ambient result, shown live as a violet box (title = label ·
+        status). }
+      if E.Text <> '' then
+      begin
+        FPanel.Stream.Add(ckAmbient, E.SubLabel + ' · ' + E.SubStatus, E.Text);
+        FApp.Invalidate;
+      end;
     teSubagentAsk:
       begin
         FAskRefIsChild := True;

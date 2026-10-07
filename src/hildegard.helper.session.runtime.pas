@@ -965,14 +965,9 @@ begin
 end;
 
 procedure TSessionRuntime.StartAmbientTurn;
-var
-  E: TSessionEvent;
 begin
   { The ambient notification is already queued; the turn drains it at its first
-    boundary and no user message is echoed. }
-  E := EmitEvent(ekUserMessage);
-  E.Text := '[subagent result]';
-  Broadcast(E);
+    boundary. No user message is emitted (there is no operator prompt). }
   FTurnActive := True;
   FWorker := TTurnWorker.CreateAmbient(FSession.Loop, FSession.Queue);
   FWorker.Start;
@@ -1062,6 +1057,13 @@ begin
           E.SubSessionId := Ev.SessionId;
           E.Text := Ev.LabelText;
           E.SubStatus := Ev.Status;
+          Broadcast(E);
+          { The ambient result, delivered live so the box shows immediately. }
+          E := EmitEvent(ekAmbient);
+          E.SubSessionId := Ev.SessionId;
+          E.Text := Ev.Result;
+          E.SubStatus := Ev.Status;
+          E.ElapsedMs := Ev.ElapsedMs;
           Broadcast(E);
           { Wake the parent with the result as an ambient notification. }
           FSession.Loop.PromptQueue.PushAmbient(Ev.Result, Ev.SessionId,
