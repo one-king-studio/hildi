@@ -60,18 +60,26 @@ registered in `tests/hildegard_helper_tests.pas` (integrator-owned).
 
 ## Phase 5 — Supervisor
 
-- [ ] **Test** (`tests/test_subagent_supervisor.pas`): with a scripted stub
-      runtime binary over a real socket — `TestSpawnCreatesChildAndPrompts`,
+- [x] **Test** (`tests/test_subagent_supervisor.pas`): with an in-process child
+      runtime over a real socket (an injectable client factory) —
+      `TestDelegateSpawnsChildWithLineage`, `TestDelegateReturnsSessionAndCapacity`,
       `TestCapacityCapFailsCleanly`, `TestDepthCapFailsCleanly`,
       `TestResultCapturedFromChild`, `TestAbortReleasesSlot`,
-      `TestReleaseDetachesWithoutAbort`, `TestChildApprovalRelayed`,
-      `TestAutoDenyWhenHeadless`, `TestTerminateAllOnShutdown`.
-- [ ] **Implement**: `hildegard.helper.subagent.supervisor` —
-      `TSubagentSupervisor`, the roster, the per-child client, the event queue
+      `TestReleaseDetachesWithoutAbort`, `TestUnknownChildIdErrors`,
+      `TestTerminateAllOnShutdown`.
+      *(Deferred to a later phase: `TestChildApprovalRelayed` and
+      `TestAutoDenyWhenHeadless` — they need a scripted approval-producing child.
+      The relay/auto-deny code paths are implemented; only their tests are
+      pending.)*
+- [x] **Implement**: `hildegard.helper.subagent.supervisor` —
+      `TSubagentSupervisor`, the per-child client, the event queue
       (`Poll`), `Delegate/Message/Abort/Release/Status`, `AnswerChildAsk`,
-      `TerminateAll`, auto-deny deadlines, `HasClient`.
-  - Files: `src/hildegard.helper.subagent.supervisor.pas` (new).
-- [ ] **Check**: `make test SUITE=TSubagentSupervisorTest` and `make test-leak`.
+      `TerminateAll`, auto-deny deadlines (`TickAutoDeny`), `HasClient`.
+      Children are freed via a deferred graveyard (`ReapPending`) so a client is
+      never closed from its own reader thread.
+  - Files: `src/hildegard.helper.subagent.supervisor.pas` (new);
+    `src/hildegard.helper.session.client.pas` (`ReaderDone`).
+- [x] **Check**: `make test SUITE=TSubagentSupervisorTest` and `make test-leak`.
 
 ## Phase 6 — Approvals: lineage-wide scope
 

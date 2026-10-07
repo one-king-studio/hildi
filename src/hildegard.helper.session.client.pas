@@ -74,6 +74,10 @@ type
     { Blocking helper: send and wait for the correlated reply. }
     function SendAndWait(const ACommand: TSessionCommand; ATimeoutMs: Integer;
       out AReply: TSessionMessage): Boolean;
+    { True once the reader thread has exited (or there is none). Non-blocking:
+      lets an owner reap a finished client without joining a thread it may be
+      running on. }
+    function ReaderDone: Boolean;
     property Role: TSessionRole read FRole;
     property Hello: TSessionHello read FHello;
     property Attached: TSessionAttached read FAttached;
@@ -438,9 +442,13 @@ begin
   end;
 end;
 
-procedure TSessionClient.Close;
+function TSessionClient.ReaderDone: Boolean;
 begin
-  FLock.Acquire;
+  Result := (FReader = nil) or FReader.Finished;
+end;
+
+procedure TSessionClient.Close;
+begin  FLock.Acquire;
   try
     if FClosed then
       Exit;
