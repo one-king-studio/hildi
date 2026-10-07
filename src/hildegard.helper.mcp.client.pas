@@ -98,24 +98,59 @@ type
 
     property ServerName: string read GetServerName;
     property Tools: TMcpToolArray read FTools;
+    { True once a write/read failure marked the server unavailable; the manager
+      treats a dead server as due for reconnect. }
+    property Dead: Boolean read FDead;
   end;
 
-  { Spawns every configured server, registers every tool, tears them all down. }
+  { A server's lifecycle state. }
+  TMcpServerState = (mssStopped, mssConnected, mssDead);
+
+  { Per-server runtime the manager owns. }
+  TMcpServerRuntime = record
+    Name: string;
+    Config: TMcpServerConfig;
+    Client: TMcpClient;
+    State: TMcpServerState;
+    NextAttemptAt: Int64;      // ms epoch; 0 = now
+    BackoffMs: Integer;
+    Attempts: Integer;
+    RegisteredNames: array of string;   // exact tool names this server added
+  end;
+
+  TMcpServerRuntimeArray = array of TMcpServerRuntime;
+
+  { Spawns every configured server, registers every tool, and reconciles the
+    live set from config at a boundary. Tear-down closes them all. }
   TMcpManager = class
   private
-    FConfig: TMcpConfig;
     FApproval: IApprovalService;
     FOnEvent: TMcpEvent;
-    FClients: array of TMcpClient;
+    FRuntimes: TMcpServerRuntimeArray;
+    FBackoffInitialMs: Integer;
+    FBackoffMaxMs: Integer;
+    function FindRuntime(const AName: string): Integer;
+    function ClientConfigFor(const AServer: TMcpServerConfig): TMcpClientConfig;
+    procedure CloseRuntime(AIndex: Integer; ATools: TToolRegistry);
+    function OpenRuntime(AIndex: Integer; ATools: TToolRegistry): Boolean;
   public
     constructor Create(const AConfig: TMcpConfig;
       AApproval: IApprovalService; AOnEvent: TMcpEvent);
     destructor Destroy; override;
-    { Open every configured server; failures are skipped (logged). True when
-      the manager itself is valid. }
+    { Open every configured server (a thin wrapper over Reconcile). Failures are
+      skipped (logged). }
     function Open(ATools: TToolRegistry): Boolean;
+    { Diff AConfig against the live set: open new, reconnect dead (after
+      backoff), close+unregister disabled/removed. Returns True when consistent;
+      individual server failures are logged, not fatal. }
+    function Reconcile(const AConfig: TMcpConfig;
+      ATools: TToolRegistry): Boolean;
     procedure Close;
-    function Servers: TMcpServerArray;
+    function Runtimes: TMcpServerRuntimeArray;
+    { Backoff knobs; default 1000 -> 60000 ms. Exposed for tests. }
+    property BackoffInitialMs: Integer read FBackoffInitialMs
+      write FBackoffInitialMs;
+    property BackoffMaxMs: Integer read FBackoffMaxMs write FBackoffMaxMs;
   end;
 
 { --- pure mapping (public for direct testing) --------------------------- }
@@ -146,6 +181,9 @@ const
   MaxToolNameChars = 64;
   { The protocol version the client requests, and the set it accepts back. }
   McpProtocolVersion = '2024-11-05';
+  { Reconnect backoff: start and cap (ms). }
+  McpBackoffInitialMs = 1000;
+  McpBackoffMaxMs = 60000;
   SupportedProtocolVersions: array[0..2] of string =
     ('2024-11-05', '2025-03-26', '2025-06-18');
 
@@ -666,6 +704,7 @@ begin
   AError := '';
   if FChild <> nil then
     Exit(True);
+  FDead := False;   // a fresh open clears a previous death
   ChildCfg := Default(TStdioChildConfig);
   ChildCfg.Executable := FConfig.Server.Command;
   ChildCfg.Args := Copy(FConfig.Server.Args, 0, Length(FConfig.Server.Args));
@@ -806,11 +845,26 @@ end;
 
 constructor TMcpManager.Create(const AConfig: TMcpConfig;
   AApproval: IApprovalService; AOnEvent: TMcpEvent);
+var
+  I: Integer;
+  Cfg: TMcpClientConfig;
 begin
   inherited Create;
-  FConfig := AConfig;
   FApproval := AApproval;
   FOnEvent := AOnEvent;
+  FBackoffInitialMs := McpBackoffInitialMs;
+  FBackoffMaxMs := McpBackoffMaxMs;
+  SetLength(FRuntimes, Length(AConfig.Servers));
+  for I := 0 to High(AConfig.Servers) do
+  begin
+    FRuntimes[I] := Default(TMcpServerRuntime);
+    FRuntimes[I].Name := AConfig.Servers[I].Name;
+    FRuntimes[I].Config := AConfig.Servers[I];
+    FRuntimes[I].State := mssStopped;
+    Cfg := ClientConfigFor(AConfig.Servers[I]);
+    FRuntimes[I].Client := TMcpClient.Create(Cfg, FApproval, FOnEvent);
+    FRuntimes[I].BackoffMs := FBackoffInitialMs;
+  end;
 end;
 
 destructor TMcpManager.Destroy;
@@ -819,32 +873,155 @@ begin
   inherited Destroy;
 end;
 
+function TMcpManager.ClientConfigFor(
+  const AServer: TMcpServerConfig): TMcpClientConfig;
+begin
+  Result := Default(TMcpClientConfig);
+  Result.Server := AServer;
+  Result.ListTimeoutMs := AServer.ListTimeoutMs;
+  Result.CallTimeoutMs := AServer.CallTimeoutMs;
+end;
+
+function TMcpManager.FindRuntime(const AName: string): Integer;
+var
+  I: Integer;
+begin
+  for I := 0 to High(FRuntimes) do
+    if FRuntimes[I].Name = AName then
+      Exit(I);
+  Result := -1;
+end;
+
+function TMcpManager.OpenRuntime(AIndex: Integer;
+  ATools: TToolRegistry): Boolean;
+var
+  Err: string;
+  Specs: TToolSpecArray;
+  I: Integer;
+begin
+  Result := FRuntimes[AIndex].Client.Open(ATools, Err);
+  if Result then
+  begin
+    { Record exactly which tool names this server registered, so removal is
+      exact (never by prefix). }
+    Specs := ATools.Specs;
+    FRuntimes[AIndex].RegisteredNames := nil;
+    for I := 0 to High(Specs) do
+      if Pos('mcp_' + FRuntimes[AIndex].Name + '_', Specs[I].Name) = 1 then
+      begin
+        SetLength(FRuntimes[AIndex].RegisteredNames,
+          Length(FRuntimes[AIndex].RegisteredNames) + 1);
+        FRuntimes[AIndex].RegisteredNames[High(FRuntimes[AIndex].RegisteredNames)]
+          := Specs[I].Name;
+      end;
+    FRuntimes[AIndex].State := mssConnected;
+    FRuntimes[AIndex].BackoffMs := FBackoffInitialMs;
+    FRuntimes[AIndex].NextAttemptAt := 0;
+  end
+  else
+  begin
+    FRuntimes[AIndex].State := mssDead;
+    Inc(FRuntimes[AIndex].Attempts);
+    FRuntimes[AIndex].NextAttemptAt := NowMs + FRuntimes[AIndex].BackoffMs;
+    if FRuntimes[AIndex].BackoffMs < FBackoffMaxMs then
+      FRuntimes[AIndex].BackoffMs := FRuntimes[AIndex].BackoffMs * 2;
+    if FRuntimes[AIndex].BackoffMs > FBackoffMaxMs then
+      FRuntimes[AIndex].BackoffMs := FBackoffMaxMs;
+  end;
+end;
+
+procedure TMcpManager.CloseRuntime(AIndex: Integer; ATools: TToolRegistry);
+var
+  I: Integer;
+begin
+  { Unregister exactly the tools this server registered (recorded on open). }
+  if ATools <> nil then
+    for I := 0 to High(FRuntimes[AIndex].RegisteredNames) do
+      ATools.Remove(FRuntimes[AIndex].RegisteredNames[I]);
+  FRuntimes[AIndex].RegisteredNames := nil;
+  FRuntimes[AIndex].Client.Close;
+  FRuntimes[AIndex].State := mssStopped;
+end;
+
 function TMcpManager.Open(ATools: TToolRegistry): Boolean;
 var
   I: Integer;
-  Cfg: TMcpClientConfig;
-  Client: TMcpClient;
-  Err: string;
+  Cfg: TMcpConfig;
+begin
+  Cfg := Default(TMcpConfig);
+  SetLength(Cfg.Servers, Length(FRuntimes));
+  for I := 0 to High(FRuntimes) do
+    Cfg.Servers[I] := FRuntimes[I].Config;
+  Result := Reconcile(Cfg, ATools);
+end;
+
+function TMcpManager.Reconcile(const AConfig: TMcpConfig;
+  ATools: TToolRegistry): Boolean;
+var
+  I, J: Integer;
+  Name: string;
+  CfgServer: TMcpServerConfig;
+  Found: Boolean;
+  Now: Int64;
 begin
   Result := True;
-  for I := 0 to High(FConfig.Servers) do
+  Now := NowMs;
+  { Remove runtimes no longer enabled/configured. }
+  for I := High(FRuntimes) downto 0 do
   begin
-    Cfg := Default(TMcpClientConfig);
-    Cfg.Server := FConfig.Servers[I];
-    Cfg.ListTimeoutMs := FConfig.Servers[I].ListTimeoutMs;
-    Cfg.CallTimeoutMs := FConfig.Servers[I].CallTimeoutMs;
-    Client := TMcpClient.Create(Cfg, FApproval, FOnEvent);
-    if Client.Open(ATools, Err) then
+    Name := FRuntimes[I].Name;
+    Found := False;
+    for J := 0 to High(AConfig.Servers) do
+      if AConfig.Servers[J].Name = Name then
+      begin
+        Found := True;
+        Break;
+      end;
+    if not Found then
     begin
-      SetLength(FClients, Length(FClients) + 1);
-      FClients[High(FClients)] := Client;
+      if FRuntimes[I].State <> mssStopped then
+        CloseRuntime(I, ATools);
+      FRuntimes[I].Client.Free;
+      for J := I to High(FRuntimes) - 1 do
+        FRuntimes[J] := FRuntimes[J + 1];
+      SetLength(FRuntimes, Length(FRuntimes) - 1);
+    end;
+  end;
+  { Add or reconcile configured servers. }
+  for J := 0 to High(AConfig.Servers) do
+  begin
+    CfgServer := AConfig.Servers[J];
+    I := FindRuntime(CfgServer.Name);
+    if I < 0 then
+    begin
+      SetLength(FRuntimes, Length(FRuntimes) + 1);
+      I := High(FRuntimes);
+      FRuntimes[I] := Default(TMcpServerRuntime);
+      FRuntimes[I].Name := CfgServer.Name;
+      FRuntimes[I].Config := CfgServer;
+      FRuntimes[I].Client := TMcpClient.Create(ClientConfigFor(CfgServer),
+        FApproval, FOnEvent);
+      FRuntimes[I].BackoffMs := FBackoffInitialMs;
+      FRuntimes[I].State := mssStopped;
     end
     else
-    begin
-      if Assigned(FOnEvent) then
-        FOnEvent('mcp: server "' + FConfig.Servers[I].Name + '" unavailable',
-          Err);
-      Client.Free;
+      FRuntimes[I].Config := CfgServer;
+    case FRuntimes[I].State of
+      mssConnected:
+        if FRuntimes[I].Client.Dead then
+        begin
+          CloseRuntime(I, ATools);
+          FRuntimes[I].State := mssDead;
+          FRuntimes[I].NextAttemptAt := Now + FRuntimes[I].BackoffMs;
+        end;
+      mssStopped:
+        OpenRuntime(I, ATools);
+      mssDead:
+        if Now >= FRuntimes[I].NextAttemptAt then
+        begin
+          FRuntimes[I].Client.Close;
+          OpenRuntime(I, ATools);
+        end;
     end;
   end;
 end;
@@ -853,14 +1030,17 @@ procedure TMcpManager.Close;
 var
   I: Integer;
 begin
-  for I := 0 to High(FClients) do
-    FClients[I].Free;
-  FClients := nil;
+  for I := 0 to High(FRuntimes) do
+  begin
+    FRuntimes[I].Client.Close;
+    FRuntimes[I].Client.Free;
+  end;
+  FRuntimes := nil;
 end;
 
-function TMcpManager.Servers: TMcpServerArray;
+function TMcpManager.Runtimes: TMcpServerRuntimeArray;
 begin
-  Result := FConfig.Servers;
+  Result := FRuntimes;
 end;
 
 end.

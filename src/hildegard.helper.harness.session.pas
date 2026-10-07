@@ -42,6 +42,9 @@ type
     FGate: TApprovalGate;
     { MCP events (server failure etc.) are recorded as session errors. }
     procedure McpEvent(const AMessage, ADetail: string);
+    { Re-read MCP config from the store and reconcile the live servers; the
+      turn-boundary hook. }
+    procedure McpReconcile;
     function Init(const AConfig: THarnessSessionConfig; out AError: string):
       Boolean;
   public
@@ -124,6 +127,27 @@ procedure THarnessSession.McpEvent(const AMessage, ADetail: string);
 begin
   if FConversation <> nil then
     FConversation.AppendError(AMessage, ADetail);
+end;
+
+procedure THarnessSession.McpReconcile;
+var
+  Ctx: TMcpConfigContext;
+  Cfg: TMcpConfig;
+  Rows: TMcpServerRowArray;
+  StoreErr: TStoreError;
+begin
+  if (FMcp = nil) or (FView = nil) or (FView.Store = nil) then
+    Exit;
+  Ctx := Default(TMcpConfigContext);
+  Ctx.WorkspaceId := FView.WorkspaceId;
+  Cfg := Default(TMcpConfig);
+  Cfg.Context := Ctx;
+  Rows := nil;
+  if FView.Store.LoadMcpServers(Ctx, Rows, StoreErr) then
+  begin
+    Cfg.Servers := ResolveMcpConfig(Rows, Ctx);
+    FMcp.Reconcile(Cfg, FTools);
+  end;
 end;
 
 function THarnessSession.Init(const AConfig: THarnessSessionConfig;
@@ -210,8 +234,10 @@ begin
   end;
 
   { MCP servers: effective config comes from the store (scoped), resolved for
-    this workspace. Servers that fail are logged and skipped. Only with a
-    store; without one there is nowhere to read config from. }
+    this workspace. The manager is created even with no servers, so a server
+    added to the store later is picked up at the next turn boundary
+    (FLoop.OnTurnStart -> McpReconcile). Only with a store; without one there is
+    nowhere to read config from. }
   if FView.Store <> nil then
   begin
     McpCtx := Default(TMcpConfigContext);
@@ -220,14 +246,9 @@ begin
     McpCfg.Context := McpCtx;
     McpRows := nil;
     if FView.Store.LoadMcpServers(McpCtx, McpRows, StoreErr) then
-    begin
       McpCfg.Servers := ResolveMcpConfig(McpRows, McpCtx);
-      if Length(McpCfg.Servers) > 0 then
-      begin
-        FMcp := TMcpManager.Create(McpCfg, ApprovalService, McpEvent);
-        FMcp.Open(FTools);
-      end;
-    end;
+    FMcp := TMcpManager.Create(McpCfg, ApprovalService, McpEvent);
+    FMcp.Open(FTools);
   end;
 
   AgentConfig := Default(TAgentConfig);
@@ -241,6 +262,9 @@ begin
   AgentConfig.MaxContextTokens := FView.MaxContextTokens;
 
   FLoop := TAgentLoop.Create(FClient, FConversation, FTools, AgentConfig);
+  { Reconcile the MCP tool surface from the store at each turn boundary, so a
+    server added/changed/removed between turns is picked up without a restart. }
+  FLoop.OnTurnStart := McpReconcile;
   Result := True;
 end;
 

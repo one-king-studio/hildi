@@ -195,6 +195,9 @@ type
     procedure TestSystemPromptIncludedFirst;
     procedure TestStoreIsUsedThroughTheInterface;
     procedure TestDefaultToolsRegistered;
+    procedure TestRegistryRemovePresentAndAbsent;
+    procedure TestTurnStartHookFiresOnceBeforeRequest;
+    procedure TestTurnStartNilIsNoOp;
     procedure TestGetSystemTimeReturnsParseableTime;
     procedure TestEmptyToolNameIsIgnored;
     procedure TestReasoningForwardedThroughEvents;
@@ -1329,6 +1332,127 @@ begin
     AssertTrue('returns something', R <> '');
   finally
     Tools.Free;
+  end;
+end;
+
+procedure TAgentLoopTest.TestRegistryRemovePresentAndAbsent;
+var
+  Tools: TToolRegistry;
+  Spec: TToolSpec;
+  Tool: TRegisteredTool;
+begin
+  Tools := TToolRegistry.Create;
+  try
+    Spec := Default(TToolSpec);
+    Spec.Name := 'a';
+    Spec.ParametersJson := '{"type":"object","properties":{}}';
+    Tools.Add(Spec, nil);
+    Spec.Name := 'b';
+    Tools.Add(Spec, nil);
+    AssertEquals('two', 2, Tools.Count);
+    AssertTrue('remove present', Tools.Remove('a'));
+    AssertEquals('one left', 1, Tools.Count);
+    AssertFalse('gone', Tools.Find('a', Tool));
+    AssertFalse('remove absent', Tools.Remove('a'));
+    AssertEquals('unchanged', 1, Tools.Count);
+  finally
+    Tools.Free;
+  end;
+end;
+
+type
+  { A probe that adds a tool at the turn boundary. }
+  TBoundaryProbe = class
+  public
+    Calls: Integer;
+    Tools: TToolRegistry;
+    procedure OnBoundary;
+  end;
+
+procedure TBoundaryProbe.OnBoundary;
+var
+  Spec: TToolSpec;
+begin
+  Inc(Calls);
+  Spec := Default(TToolSpec);
+  Spec.Name := 'added_at_boundary';
+  Spec.ParametersJson := '{"type":"object","properties":{}}';
+  Tools.Add(Spec, nil);
+end;
+
+procedure TAgentLoopTest.TestTurnStartHookFiresOnceBeforeRequest;
+var
+  Tools: TToolRegistry;
+  Loop: TAgentLoop;
+  Cfg: TLLMConfig;
+  ACfg: TAgentConfig;
+  Fake: TFakeTransport;
+  Client: TLLMClient;
+  Store: IConversationStore;
+  Probe: TBoundaryProbe;
+  Answer: string;
+  Err: TLLMError;
+begin
+  Cfg := Default(TLLMConfig);
+  Cfg.Endpoint := 'https://example.test/v1/chat/completions';
+  Cfg.Model := 'm';
+  Cfg.ApiKey := 'k';
+  Fake := TFakeTransport.Create;
+  Client := TLLMClient.Create(Cfg, Fake);
+  Store := TMemoryConversationStore.Create;
+  Tools := TToolRegistry.Create;
+  ACfg := Default(TAgentConfig);
+  ACfg.SystemPrompt := '';
+  Loop := TAgentLoop.Create(Client, Store, Tools, ACfg);
+  Probe := TBoundaryProbe.Create;
+  Probe.Tools := Tools;
+  try
+    Loop.OnTurnStart := Probe.OnBoundary;
+    Fake.AddResponse([TextDelta('ok'), FinishFrame('stop'), DoneFrame]);
+    AssertTrue('send ok', Loop.Send('hi', nil, Answer, Err));
+    AssertEquals('fired once', 1, Probe.Calls);
+    AssertEquals('tool added at boundary is registered', 1, Tools.Count);
+  finally
+    Loop.Free;
+    Probe.Free;
+    Tools.Free;
+    Client.Free;
+    Fake.Free;
+  end;
+end;
+
+procedure TAgentLoopTest.TestTurnStartNilIsNoOp;
+var
+  Tools: TToolRegistry;
+  Loop: TAgentLoop;
+  Cfg: TLLMConfig;
+  ACfg: TAgentConfig;
+  Fake: TFakeTransport;
+  Client: TLLMClient;
+  Store: IConversationStore;
+  Answer: string;
+  Err: TLLMError;
+begin
+  Cfg := Default(TLLMConfig);
+  Cfg.Endpoint := 'https://example.test/v1/chat/completions';
+  Cfg.Model := 'm';
+  Cfg.ApiKey := 'k';
+  Fake := TFakeTransport.Create;
+  Client := TLLMClient.Create(Cfg, Fake);
+  Store := TMemoryConversationStore.Create;
+  Tools := TToolRegistry.Create;
+  ACfg := Default(TAgentConfig);
+  ACfg.SystemPrompt := '';
+  Loop := TAgentLoop.Create(Client, Store, Tools, ACfg);
+  try
+    { No OnTurnStart set: Send must not raise. }
+    Fake.AddResponse([TextDelta('ok'), FinishFrame('stop'), DoneFrame]);
+    AssertTrue('send ok', Loop.Send('hi', nil, Answer, Err));
+  finally
+    Loop.Free;
+    Tools.Free;
+    Client.Free;
+    Fake.Free;
   end;
 end;
 

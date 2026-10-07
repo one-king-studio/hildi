@@ -39,6 +39,7 @@ type
     procedure TestSessionTotalsEmptyWithoutTurns;
     procedure TestMaxContextTokensFromConfig;
     procedure TestMcpServerToolsRegistered;
+    procedure TestSessionPicksUpServerAddedBetweenTurns;
   end;
 
 implementation
@@ -339,8 +340,64 @@ begin
   end;
 end;
 
+{ A server added to the store *after* the session opens is picked up at the
+  next turn boundary (the OnTurnStart reconcile). }
+procedure THarnessSessionTest.TestSessionPicksUpServerAddedBetweenTurns;
+var
+  Session: THarnessSession;
+  Err: string;
+  Tool: TRegisteredTool;
+  Store: TSqliteStore;
+  StoreCfg: TStoreConfig;
+  StoreErr: TStoreError;
+  Row: TMcpServerRow;
+  Script: string;
+const
+  Q = #39;
+begin
+  Script :=
+    'read line; printf ' + Q + '%s\n' + Q + ' ' + Q +
+    '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05",' +
+    '"capabilities":{},"serverInfo":{"name":"late","version":"1"}}}' + Q +
+    '; read line; read line; printf ' + Q + '%s\n' + Q + ' ' + Q +
+    '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"echo",' +
+    '"description":"Echo","inputSchema":{"type":"object","properties":{}}}]}}' +
+    Q + '; while IFS= read -r line; do :; done';
+
+  { Open with an empty config (no servers yet). }
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    AssertFalse('no mcp tools yet', Session.Tools.Find('mcp_late_echo', Tool));
+
+    { The operator adds a server to the store. }
+    StoreCfg := Default(TStoreConfig);
+    StoreCfg.DatabasePath := FStorePath;
+    StoreCfg.BusyTimeoutMs := 5000;
+    Store := TSqliteStore.Create(StoreCfg);
+    try
+      AssertTrue('store opens', Store.Open(StoreErr));
+      Row := Default(TMcpServerRow);
+      Row.Scope := msGlobal;
+      Row.Name := 'late';
+      Row.Command := '/bin/sh';
+      Row.Args := ['-c', Script];
+      Row.Enabled := True;
+      AssertTrue('row saved', Store.SaveMcpServer(Row, StoreErr));
+    finally
+      Store.Free;
+    end;
+
+    { The next turn's boundary reconcile picks it up. }
+    Session.Loop.OnTurnStart();
+    AssertTrue('picked up at boundary',
+      Session.Tools.Find('mcp_late_echo', Tool));
+  finally
+    Session.Free;
+  end;
+end;
+
 initialization
   RegisterTest(THarnessSessionTest);
 
-  Randomize;
-end.
+  Randomize;end.

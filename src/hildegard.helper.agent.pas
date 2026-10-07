@@ -37,6 +37,11 @@ type
   { Consulted at each loop boundary; True stops the turn as cancelled. }
   TAgentCancelCheck = function: Boolean of object;
 
+  { Invoked once at the start of a turn, on the loop's thread, before the first
+    request. The owner may mutate the tool registry here; the loop snapshots the
+    registry per request, so a boundary mutation is race-free. }
+  TAgentBoundaryEvent = procedure of object;
+
   { The loop's persistence seam: the conversation it replays, the display-only
     blocks it produces, and the turn/request audit. An implementation that does
     not persist (in-memory) ignores the audit calls and returns 0 for the ids. }
@@ -164,6 +169,8 @@ type
   public
     { A spec with an empty Name is ignored (see the spec's pinned behaviour). }
     procedure Add(const ASpec: TToolSpec; AHandler: TToolHandler);
+    { Remove a tool by name. True when it was present. Absent is a no-op. }
+    function Remove(const AName: string): Boolean;
     function Find(const AName: string; out ATool: TRegisteredTool): Boolean;
     function Specs: TToolSpecArray;
     function Count: Integer;
@@ -193,6 +200,7 @@ type
     FTools: TToolRegistry;
     FConfig: TAgentConfig;
     FCancel: TAgentCancelCheck;
+    FOnTurnStart: TAgentBoundaryEvent;
     FPromptQueue: TPromptQueue;
     FLastTurnDropped: Boolean;
     { The response in flight is timed so the reasoning and content phases can be
@@ -232,6 +240,9 @@ type
     { Consulted at each loop boundary (before building a request); True closes
       the turn as cancelled. Never breaks a tool batch part-way. }
     property CancelCheck: TAgentCancelCheck read FCancel write FCancel;
+    { Invoked once at the start of each turn, on the loop's thread, before the
+      first request. Nil = no-op. The owner may mutate the tool registry here. }
+    property OnTurnStart: TAgentBoundaryEvent read FOnTurnStart write FOnTurnStart;
     { Prompts the operator injects into a running turn. }
     property PromptQueue: TPromptQueue read FPromptQueue;
     { True when the last turn was cancelled before any response was committed,
@@ -632,6 +643,21 @@ begin
   Result := False;
 end;
 
+function TToolRegistry.Remove(const AName: string): Boolean;
+var
+  I, J: Integer;
+begin
+  Result := False;
+  for I := 0 to High(FTools) do
+    if FTools[I].Spec.Name = AName then
+    begin
+      for J := I to High(FTools) - 1 do
+        FTools[J] := FTools[J + 1];
+      SetLength(FTools, Length(FTools) - 1);
+      Exit(True);
+    end;
+end;
+
 function TToolRegistry.Specs: TToolSpecArray;
 var
   I: Integer;
@@ -954,6 +980,12 @@ begin
   AError := AgentOk;
   FLastTurnDropped := False;
   Committed := False;
+
+  { The turn boundary: the owner may reconcile its tool surface here, before the
+    first request. The registry is snapshotted per request, so mutating it now is
+    race-free. }
+  if Assigned(FOnTurnStart) then
+    FOnTurnStart();
 
   if (FStore.Messages = nil) and (FConfig.SystemPrompt <> '') then
   begin

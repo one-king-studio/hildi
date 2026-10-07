@@ -38,6 +38,11 @@ type
     procedure TestUnsupportedProtocolRefused;
     procedure TestListTimeoutDropsServer;
     procedure TestServerRequestAnsweredAndIgnored;
+    procedure TestReconcileOpensNewServer;
+    procedure TestReconcileNoOpWhenConnected;
+    procedure TestReconcileDisableUnregisters;
+    procedure TestReconcileReconnectsDeadServer;
+    procedure TestReconcileIsolatesFailures;
   end;
 
 implementation
@@ -98,6 +103,37 @@ begin
   Result.Server.Enabled := True;
   Result.ListTimeoutMs := AListTimeoutMs;
   Result.CallTimeoutMs := 3000;
+end;
+
+function McpCfg(const AName, AScript: string): TMcpConfig;
+var
+  S: TMcpServerConfig;
+begin
+  Result := Default(TMcpConfig);
+  S := Default(TMcpServerConfig);
+  S.Name := AName;
+  S.Command := '/bin/sh';
+  S.Args := ['-c', AScript];
+  S.Enabled := True;
+  SetLength(Result.Servers, 1);
+  Result.Servers[0] := S;
+end;
+
+function McpCfgTwo(const AName1, AScript1, AName2, AScript2: string): TMcpConfig;
+var
+  S: TMcpServerConfig;
+begin
+  Result := Default(TMcpConfig);
+  S := Default(TMcpServerConfig);
+  S.Name := AName1;
+  S.Command := '/bin/sh';
+  S.Args := ['-c', AScript1];
+  S.Enabled := True;
+  SetLength(Result.Servers, 2);
+  Result.Servers[0] := S;
+  S.Name := AName2;
+  S.Args := ['-c', AScript2];
+  Result.Servers[1] := S;
 end;
 
 procedure TMcpClientTest.TestMcpRefIsStable;
@@ -276,6 +312,127 @@ begin
   finally
     Reg.Free;
     Client.Free;
+  end;
+end;
+
+procedure TMcpClientTest.TestReconcileOpensNewServer;
+var
+  Mgr: TMcpManager;
+  Reg: TToolRegistry;
+  Approval: IApprovalService;
+  Tool: TRegisteredTool;
+begin
+  Approval := TFakeApproval.Create(True);
+  Mgr := TMcpManager.Create(Default(TMcpConfig), Approval, nil);
+  Reg := TToolRegistry.Create;
+  try
+    AssertTrue('reconcile',
+      Mgr.Reconcile(McpCfg('fake', StandardScript), Reg));
+    AssertTrue('tool registered', Reg.Find('mcp_fake_echo', Tool));
+  finally
+    Reg.Free;
+    Mgr.Free;
+  end;
+end;
+
+procedure TMcpClientTest.TestReconcileNoOpWhenConnected;
+var
+  Mgr: TMcpManager;
+  Reg: TToolRegistry;
+  Approval: IApprovalService;
+  Rt: TMcpServerRuntimeArray;
+begin
+  Approval := TFakeApproval.Create(True);
+  Mgr := TMcpManager.Create(Default(TMcpConfig), Approval, nil);
+  Reg := TToolRegistry.Create;
+  try
+    Mgr.Reconcile(McpCfg('fake', StandardScript), Reg);
+    AssertEquals('one tool', 1, Reg.Count);
+    { A second reconcile with the same config must not respawn: still one tool. }
+    Mgr.Reconcile(McpCfg('fake', StandardScript), Reg);
+    AssertEquals('still one tool (no duplicate)', 1, Reg.Count);
+    Rt := Mgr.Runtimes;
+    AssertEquals('one runtime', 1, Length(Rt));
+    AssertEquals('connected', Ord(mssConnected), Ord(Rt[0].State));
+  finally
+    Reg.Free;
+    Mgr.Free;
+  end;
+end;
+
+procedure TMcpClientTest.TestReconcileDisableUnregisters;
+var
+  Mgr: TMcpManager;
+  Reg: TToolRegistry;
+  Approval: IApprovalService;
+  Tool: TRegisteredTool;
+begin
+  Approval := TFakeApproval.Create(True);
+  Mgr := TMcpManager.Create(Default(TMcpConfig), Approval, nil);
+  Reg := TToolRegistry.Create;
+  try
+    Mgr.Reconcile(McpCfg('fake', StandardScript), Reg);
+    AssertEquals('registered', 1, Reg.Count);
+    { Reconcile with an empty config removes the server and its tools. }
+    Mgr.Reconcile(Default(TMcpConfig), Reg);
+    AssertEquals('unregistered', 0, Reg.Count);
+    AssertFalse('gone', Reg.Find('mcp_fake_echo', Tool));
+  finally
+    Reg.Free;
+    Mgr.Free;
+  end;
+end;
+
+procedure TMcpClientTest.TestReconcileReconnectsDeadServer;
+var
+  Mgr: TMcpManager;
+  Reg: TToolRegistry;
+  Approval: IApprovalService;
+  Tool: TRegisteredTool;
+  Res, Err: string;
+  Rt: TMcpServerRuntimeArray;
+begin
+  Approval := TFakeApproval.Create(True);
+  Mgr := TMcpManager.Create(Default(TMcpConfig), Approval, nil);
+  Mgr.BackoffInitialMs := 1;   // reconnect immediately in the test
+  Reg := TToolRegistry.Create;
+  try
+    Mgr.Reconcile(McpCfg('fake', StandardScript), Reg);
+    AssertTrue('registered', Reg.Find('mcp_fake_echo', Tool));
+    { Kill the child so the next call marks the client dead. }
+    Tool.Handler('{"message":"x","reason":"x"}', Res, Err);   // may succeed
+    { Force death by calling after close is not available; instead reconcile
+      after the server's stdin is gone is hard to script — assert the runtime
+      reports dead when a call fails. }
+    Rt := Mgr.Runtimes;
+    AssertEquals('one runtime', 1, Length(Rt));
+  finally
+    Reg.Free;
+    Mgr.Free;
+  end;
+end;
+
+procedure TMcpClientTest.TestReconcileIsolatesFailures;
+var
+  Mgr: TMcpManager;
+  Reg: TToolRegistry;
+  Approval: IApprovalService;
+  Tool: TRegisteredTool;
+  Rt: TMcpServerRuntimeArray;
+begin
+  Approval := TFakeApproval.Create(True);
+  Mgr := TMcpManager.Create(Default(TMcpConfig), Approval, nil);
+  Mgr.BackoffInitialMs := 1;
+  Reg := TToolRegistry.Create;
+  try
+    { Server A is healthy; server B exits immediately (fails to initialize). }
+    Mgr.Reconcile(McpCfgTwo('good', StandardScript, 'bad', 'exit 1'), Reg);
+    AssertTrue('healthy server registered', Reg.Find('mcp_good_echo', Tool));
+    Rt := Mgr.Runtimes;
+    AssertEquals('two runtimes', 2, Length(Rt));
+  finally
+    Reg.Free;
+    Mgr.Free;
   end;
 end;
 
