@@ -9,7 +9,8 @@ unit hildegard.helper.agent;
 interface
 
 uses
-  Classes, SysUtils, SyncObjs, hildegard.helper.llm, hildegard.helper.session;
+  Classes, SysUtils, SyncObjs, hildegard.helper.llm, hildegard.helper.session,
+  hildegard.helper.ambient;
 
 type
   { The outcome of one LLM request, for the audit/metrics seam. }
@@ -53,6 +54,11 @@ type
       ADurationMs is the wall time the reasoning streamed (0 when unknown). }
     procedure AppendReasoning(const AText: string; ADurationMs: Int64);
     procedure AppendError(const AMessage, ADetail: string);
+    { An ambient (subagent result) notification. Delivered to the provider as a
+      user message wrapped by hildegard.helper.ambient; persisted as its own
+      kind (mrAmbient) with the child session and elapsed. }
+    procedure AppendAmbient(const AText, ARefSessionId: string;
+      AElapsedMs: Int64);
     { Turn/request audit. BeginTurn opens a loop; the user prompt is appended
       separately, linked to the open turn. Ids are 0 when not persisted. }
     function BeginTurn: Int64;
@@ -75,6 +81,8 @@ type
     procedure Clear;
     procedure AppendReasoning(const AText: string; ADurationMs: Int64);
     procedure AppendError(const AMessage, ADetail: string);
+    procedure AppendAmbient(const AText, ARefSessionId: string;
+      AElapsedMs: Int64);
     function BeginTurn: Int64;
     function BeginRequest(ATurnId: Int64; const AModel: string;
       AMessageCount: Integer): Int64;
@@ -558,6 +566,19 @@ end;
 procedure TMemoryConversationStore.AppendError(const AMessage, ADetail: string);
 begin
   // in-memory: display blocks are not kept
+end;
+
+procedure TMemoryConversationStore.AppendAmbient(const AText,
+  ARefSessionId: string; AElapsedMs: Int64);
+var
+  Msg: TChatMessage;
+begin
+  { No store: degrade the ambient to a plain user message so the model still
+    sees the result. The dedicated ambient record is store-only. }
+  Msg := Default(TChatMessage);
+  Msg.Role := crUser;
+  Msg.Content := FormatAmbient(AText, ARefSessionId, AElapsedMs);
+  Append(Msg);
 end;
 
 function TMemoryConversationStore.BeginTurn: Int64;

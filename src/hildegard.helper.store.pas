@@ -129,6 +129,19 @@ type
     { Creates a session bound to a workspace and returns its 32-hex id. }
     function CreateSession(AWorkspaceId: Integer; out AId: string;
       out AError: TStoreError): Boolean;
+    { Creates a child session under AParentId (a subagent), with the given
+      depth and a short human label. Returns its 32-hex id. }
+    function CreateChildSession(AWorkspaceId: Integer; const AParentId: string;
+      ADepth: Integer; const ALabel: string; out AId: string;
+      out AError: TStoreError): Boolean;
+    { A session's lineage. A root has AParentId='', ADepth=0, ALabel=''.
+      seNotFound when the id is unknown. }
+    function SessionLineage(const AId: string; out AParentId: string;
+      out ADepth: Integer; out ALabel: string;
+      out AError: TStoreError): Boolean;
+    { Direct children of a session, newest updated first. }
+    function ChildrenOf(const AParentId: string;
+      out AChildren: TSessionSummaryArray; out AError: TStoreError): Boolean;
     function SessionExists(const AId: string;
       out AError: TStoreError): Boolean;
     function TouchSession(const AId: string;
@@ -237,7 +250,7 @@ end;
 function DefaultMigrations: TMigrationArray;
 begin
   Result := nil;
-  SetLength(Result, 3);
+  SetLength(Result, 4);
   Result[0].Version := 1;
   Result[0].Name := 'session history';
   Result[0].Statements := [
@@ -370,6 +383,17 @@ begin
       'UNIQUE (scope, workspace_id, agent_id, name))',
     'CREATE INDEX idx_mcp_servers_scope ON mcp_servers ' +
       '(scope, workspace_id, agent_id)'
+  ];
+  { v4: subagent lineage. Additive: v3 history is untouched. }
+  Result[3].Version := 4;
+  Result[3].Name := 'subagent lineage';
+  Result[3].Statements := [
+    'ALTER TABLE sessions ADD COLUMN parent_session_id TEXT NOT NULL ' +
+      'DEFAULT ''''',
+    'ALTER TABLE sessions ADD COLUMN depth INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE sessions ADD COLUMN label TEXT NOT NULL DEFAULT ''''',
+    'CREATE INDEX idx_sessions_parent ON sessions (parent_session_id)',
+    'ALTER TABLE messages ADD COLUMN ref_session_id TEXT NOT NULL DEFAULT '''''
   ];
 end;
 
@@ -1405,6 +1429,139 @@ begin
   end;
 end;
 
+function TSqliteStore.CreateChildSession(AWorkspaceId: Integer;
+  const AParentId: string; ADepth: Integer; const ALabel: string;
+  out AId: string; out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  AId := '';
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    if AWorkspaceId < 0 then
+      Exit(Fail(AError, seInvalidArgument, 'workspace id is required', ''));
+    if AParentId = '' then
+      Exit(Fail(AError, seInvalidArgument, 'parent id is required', ''));
+    if not SessionExists(AParentId, AError) then
+    begin
+      AError.Code := seNotFound;
+      AError.Message := 'parent session not found';
+      AError.Detail := AParentId;
+      Exit(False);
+    end;
+    AId := NewSessionId;
+    Stmt := TStmt.Create(FDb,
+      'INSERT INTO sessions (id, workspace_id, created_at, updated_at, ' +
+      'parent_session_id, depth, label) VALUES (?, ?, ?, ?, ?, ?, ?)');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not create child session',
+          DbErrorText));
+      Stmt.BindText(1, AId);
+      Stmt.BindInt(2, AWorkspaceId);
+      Stmt.BindInt64(3, NowMs);
+      Stmt.BindInt64(4, NowMs);
+      Stmt.BindText(5, AParentId);
+      Stmt.BindInt(6, ADepth);
+      Stmt.BindText(7, ALabel);
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not create child session',
+          DbErrorText));
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.SessionLineage(const AId: string; out AParentId: string;
+  out ADepth: Integer; out ALabel: string;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  AParentId := '';
+  ADepth := 0;
+  ALabel := '';
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb,
+      'SELECT parent_session_id, depth, label FROM sessions WHERE id = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not read lineage', DbErrorText));
+      Stmt.BindText(1, AId);
+      if Stmt.Step <> SQLITE_ROW then
+        Exit(Fail(AError, seNotFound, 'session not found', AId));
+      AParentId := Stmt.ColText(0);
+      ADepth := Stmt.ColInt(1);
+      ALabel := Stmt.ColText(2);
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.ChildrenOf(const AParentId: string;
+  out AChildren: TSessionSummaryArray; out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+  N: Integer;
+  Item: TSessionSummary;
+begin
+  AError := OkError;
+  AChildren := nil;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb,
+      'SELECT s.id, s.created_at, s.updated_at, ' +
+      '(SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id), ' +
+      '(SELECT COUNT(*) FROM turns t WHERE t.session_id = s.id), ' +
+      's.parent_session_id, s.depth, s.label ' +
+      'FROM sessions s WHERE s.parent_session_id = ? ' +
+      'ORDER BY s.updated_at DESC, s.rowid DESC');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not list children', DbErrorText));
+      Stmt.BindText(1, AParentId);
+      N := 0;
+      while Stmt.Step = SQLITE_ROW do
+      begin
+        Item := Default(TSessionSummary);
+        Item.Id := Stmt.ColText(0);
+        Item.CreatedAtMs := Stmt.ColInt64(1);
+        Item.UpdatedAtMs := Stmt.ColInt64(2);
+        Item.MessageCount := Stmt.ColInt(3);
+        Item.TurnCount := Stmt.ColInt(4);
+        Item.ParentId := Stmt.ColText(5);
+        Item.Depth := Stmt.ColInt(6);
+        Item.LabelText := Stmt.ColText(7);
+        SetLength(AChildren, N + 1);
+        AChildren[N] := Item;
+        Inc(N);
+      end;
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
 function TSqliteStore.SessionExists(const AId: string;
   out AError: TStoreError): Boolean;
 var
@@ -1909,9 +2066,10 @@ begin
     Stmt := TStmt.Create(FDb,
       'INSERT INTO messages (session_id, turn_id, request_id, seq, role, ' +
       'content, tool_call_id, tool_name, tool_arguments, tool_reason, ' +
-      'tool_ok, created_at, duration_ms) VALUES (?, NULLIF(?, 0), ' +
+      'tool_ok, created_at, duration_ms, ref_session_id) VALUES ' +
+      '(?, NULLIF(?, 0), ' +
       'NULLIF(?, 0), (SELECT COALESCE(MAX(seq), 0) + 1 FROM messages ' +
-      'WHERE session_id = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+      'WHERE session_id = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     try
       if not Stmt.Valid then
         Exit(Fail(AError, seError, 'could not append message', DbErrorText));
@@ -1928,6 +2086,7 @@ begin
       Stmt.BindInt(11, Ord(AMessage.ToolOk));
       Stmt.BindInt64(12, NowMs);
       Stmt.BindInt64(13, AMessage.DurationMs);
+      Stmt.BindText(14, AMessage.RefSessionId);
       if Stmt.Step <> SQLITE_DONE then
         Exit(Fail(AError, seError, 'could not append message', DbErrorText));
     finally
@@ -1983,7 +2142,8 @@ begin
     Stmt := TStmt.Create(FDb,
       'SELECT id, session_id, turn_id, request_id, seq, role, content, ' +
       'tool_call_id, tool_name, tool_arguments, tool_reason, tool_ok, ' +
-      'created_at, duration_ms FROM messages WHERE session_id = ? ' +
+      'created_at, duration_ms, ref_session_id FROM messages ' +
+      'WHERE session_id = ? ' +
       'ORDER BY seq');
     try
       if not Stmt.Valid then
@@ -2007,6 +2167,7 @@ begin
         Rec.ToolOk := Stmt.ColInt(11) <> 0;
         Rec.CreatedAtMs := Stmt.ColInt64(12);
         Rec.DurationMs := Stmt.ColInt64(13);
+        Rec.RefSessionId := Stmt.ColText(14);
         SetLength(AMessages, N + 1);
         AMessages[N] := Rec;
         Inc(N);
@@ -2034,7 +2195,8 @@ begin
     Stmt := TStmt.Create(FDb,
       'SELECT id, session_id, turn_id, request_id, seq, role, content, ' +
       'tool_call_id, tool_name, tool_arguments, tool_reason, tool_ok, ' +
-      'created_at, duration_ms FROM messages WHERE id = ? AND session_id = ?');
+      'created_at, duration_ms, ref_session_id FROM messages ' +
+      'WHERE id = ? AND session_id = ?');
     try
       if not Stmt.Valid then
         Exit(Fail(AError, seError, 'could not query message', DbErrorText));
@@ -2056,6 +2218,7 @@ begin
       AMessage.ToolOk := Stmt.ColInt(11) <> 0;
       AMessage.CreatedAtMs := Stmt.ColInt64(12);
       AMessage.DurationMs := Stmt.ColInt64(13);
+      AMessage.RefSessionId := Stmt.ColText(14);
     finally
       Stmt.Free;
     end;

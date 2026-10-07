@@ -11,7 +11,7 @@ uses
   Classes, SysUtils, fpcunit, testregistry,
   hildegard.helper.store, hildegard.helper.session,
   hildegard.helper.session.store, hildegard.helper.llm, hildegard.helper.agent,
-  hildegard.helper.recall.tool;
+  hildegard.helper.recall.tool, hildegard.helper.ambient;
 
 type
   TSessionTest = class(TTestCase)
@@ -40,6 +40,9 @@ type
     procedure TestPromptLeavesSmallToolResultIntact;
     procedure TestCapZeroDisablesTruncation;
     procedure TestRenderStillShowsFullResult;
+    procedure TestAppendAmbientRoundTrip;
+    procedure TestComposeWrapsAmbientAsUser;
+    procedure TestFormatAmbientEscapes;
   end;
 
 implementation
@@ -600,6 +603,82 @@ begin
   finally
     S.Free;
   end;
+end;
+
+procedure TSessionTest.TestAppendAmbientRoundTrip;
+var
+  S: TSqliteStore;
+  Conv: TSqliteConversationStore;
+  Recs: TMessageRecordArray;
+  Err: TStoreError;
+  Ws: Integer;
+  Sid: string;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, Sid, Err);
+    Conv := TSqliteConversationStore.Create(S, Sid, 0);
+    try
+      Conv.AppendAmbient('subagent done: 3 files', 'child-abc', 4200);
+    finally
+      Conv.Free;
+    end;
+    AssertTrue('query', S.QueryMessages(Sid, Recs, Err));
+    AssertEquals('one record', 1, Length(Recs));
+    AssertEquals('ambient role', Ord(mrAmbient), Ord(Recs[0].Role));
+    AssertEquals('content', 'subagent done: 3 files', Recs[0].Content);
+    AssertEquals('ref session', 'child-abc', Recs[0].RefSessionId);
+    AssertEquals('elapsed', 4200, Recs[0].DurationMs);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TSessionTest.TestComposeWrapsAmbientAsUser;
+var
+  S: TSqliteStore;
+  Conv: TSqliteConversationStore;
+  Msgs: TChatMessageArray;
+  Err: TStoreError;
+  Ws: Integer;
+  Sid: string;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, Sid, Err);
+    Conv := TSqliteConversationStore.Create(S, Sid, 0);
+    try
+      Conv.AppendAmbient('the result text', 'child-xyz', 1000);
+      Msgs := Conv.Messages;
+      AssertEquals('one provider message', 1, Length(Msgs));
+      AssertEquals('delivered as user', Ord(crUser), Ord(Msgs[0].Role));
+      AssertTrue('wrapped', Pos('<ambient ', Msgs[0].Content) = 1);
+      AssertTrue('carries child id', Pos('session="child-xyz"',
+        Msgs[0].Content) > 0);
+      AssertTrue('carries the text', Pos('the result text',
+        Msgs[0].Content) > 0);
+      AssertTrue('carries instructions', Pos('ambient notification',
+        Msgs[0].Content) > 0);
+    finally
+      Conv.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TSessionTest.TestFormatAmbientEscapes;
+var
+  S: string;
+begin
+  S := FormatAmbient('a < b & c > d', 'child-1', 0);
+  AssertTrue('escaped lt', Pos('a &lt; b', S) > 0);
+  AssertTrue('escaped amp', Pos('&amp;', S) > 0);
+  AssertTrue('escaped gt', Pos('c &gt; d', S) > 0);
+  AssertTrue('session attr', Pos('session="child-1"', S) > 0);
+  AssertTrue('timestamp attr', Pos('timestamp="', S) > 0);
 end;
 
 initialization

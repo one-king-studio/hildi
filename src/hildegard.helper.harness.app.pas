@@ -463,6 +463,11 @@ begin
         { The system prompt is never drawn live, so it is not drawn on resume
           either; live and resume stay identical. }
         ;
+      mrAmbient:
+        { A subagent result. // ponytail: rendered as a plain block here; the
+          dedicated ambient renderer lands with Subagent_Sidebar_v1.SPEC.md. }
+        if Rec.Content <> '' then
+          FPanel.Stream.Add(ckUser, '', Rec.Content);
     end;
   end;
   { The final turn's divider. }

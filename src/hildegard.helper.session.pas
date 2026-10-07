@@ -22,7 +22,10 @@ type
   { One block in a session's history. Tool calls are messages in their own
     right, so a tool call and its result are separate, ordered rows. }
   TMessageRole = (
-    mrSystem, mrUser, mrAssistant, mrReasoning, mrToolCall, mrTool, mrError);
+    mrSystem, mrUser, mrAssistant, mrReasoning, mrToolCall, mrTool, mrError,
+    { An ambient notification: a subagent's result delivered back to the parent.
+      Appended last so stored ordinals are unchanged. }
+    mrAmbient);
 
   TTurnStatus = (tsRunning, tsCompleted, tsFailed, tsCancelled);
 
@@ -41,6 +44,9 @@ type
     ToolOk: Boolean;
     CreatedAtMs: Int64;
     DurationMs: Int64;
+    { Lineage (v3): for an ambient record, the child session it came from; ''
+      otherwise. }
+    RefSessionId: string;
   end;
 
   TMessageRecordArray = array of TMessageRecord;
@@ -95,6 +101,10 @@ type
     UpdatedAtMs: Int64;
     MessageCount: Integer;
     TurnCount: Integer;
+    { Lineage (v3). A root session has ParentId = '' and Depth = 0. }
+    ParentId: string;
+    Depth: Integer;
+    LabelText: string;
   end;
 
   TSessionSummaryArray = array of TSessionSummary;

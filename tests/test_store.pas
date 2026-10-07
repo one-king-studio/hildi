@@ -69,6 +69,13 @@ type
     procedure TestRemoveMcpServer;
     procedure TestMcpArgsEnvRoundTrip;
     procedure TestSaveMcpServerRejectsInvalid;
+
+    procedure TestLineageRootDefaults;
+    procedure TestChildSessionLineage;
+    procedure TestChildrenOf;
+    procedure TestSessionLineageUnknownFails;
+    procedure TestLineageMigrationV4IsAdditive;
+    procedure TestMessageRefSessionRoundTrip;
   end;
 
 implementation
@@ -481,6 +488,30 @@ begin
     Result := sqlite3_step(Stmt) = SQLITE_ROW;
     sqlite3_finalize(Stmt);
   end;
+  sqlite3_close(Db);
+end;
+
+{ Inserts one message row with raw SQL, bypassing the store's current schema
+  assumptions. Used to seed a database as an older build would have written it. }
+procedure RawInsertMessage(const APath, ASessionId, AContent: string);
+var
+  Db: Psqlite3;
+  ErrMsg: PAnsiChar;
+  S: AnsiString;
+begin
+  Db := nil;
+  if sqlite3_open(PAnsiChar(AnsiString(APath)), @Db) <> SQLITE_OK then
+  begin
+    if Db <> nil then
+      sqlite3_close(Db);
+    Exit;
+  end;
+  S := 'INSERT INTO messages (session_id, seq, role, content, created_at) ' +
+    'VALUES (''' + AnsiString(ASessionId) + ''', 1, 1, ''' +
+    AnsiString(AContent) + ''', 1)';
+  sqlite3_exec(Db, PAnsiChar(S), nil, nil, @ErrMsg);
+  if ErrMsg <> nil then
+    sqlite3_free(ErrMsg);
   sqlite3_close(Db);
 end;
 
@@ -959,7 +990,6 @@ var
   Sid: string;
   Row: TSessionRuntimeRow;
   Msgs: TMessageRecordArray;
-  Msg: TMessageRecord;
 begin
   Cfg.DatabasePath := FDbPath;
   Cfg.BusyTimeoutMs := 5000;
@@ -972,14 +1002,12 @@ begin
     AssertTrue('open v1', S.Open(Err));
     S.EnsureWorkspace('/tmp', Ws, Err);
     S.CreateSession(Ws, Sid, Err);
-    Msg := Default(TMessageRecord);
-    Msg.SessionId := Sid;
-    Msg.Role := mrUser;
-    Msg.Content := 'hello';
-    AssertTrue('append v1', S.AppendMessage(Msg, Err));
   finally
     S.Free;
   end;
+  { A v1-era row: the v1 messages table has no ref_session_id, so insert it
+    with raw SQL rather than the current AppendMessage. }
+  RawInsertMessage(FDbPath, Sid, 'hello');
 
   { Reopen with the full migrations: v2 applies and v1 history survives. }
   S := TSqliteStore.Create(Cfg);
@@ -1106,6 +1134,162 @@ begin
 
     AssertTrue('list', S.ListRuntimes(Rows, Err));
     AssertEquals('two rows', 2, Length(Rows));
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestLineageRootDefaults;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws, Depth: Integer;
+  Sid, Parent, Lbl: string;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    AssertTrue('create', S.CreateSession(Ws, Sid, Err));
+    Parent := 'x';
+    Lbl := 'x';
+    Depth := -1;
+    AssertTrue('lineage', S.SessionLineage(Sid, Parent, Depth, Lbl, Err));
+    AssertEquals('root parent empty', '', Parent);
+    AssertEquals('root depth 0', 0, Depth);
+    AssertEquals('root label empty', '', Lbl);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestChildSessionLineage;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws, Depth: Integer;
+  Root, Child, Parent, Lbl: string;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    AssertTrue('root', S.CreateSession(Ws, Root, Err));
+    AssertTrue('child', S.CreateChildSession(Ws, Root, 1, 'research', Child,
+      Err));
+    AssertTrue('child id differs', Root <> Child);
+    AssertTrue('lineage', S.SessionLineage(Child, Parent, Depth, Lbl, Err));
+    AssertEquals('parent', Root, Parent);
+    AssertEquals('depth', 1, Depth);
+    AssertEquals('label', 'research', Lbl);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestChildrenOf;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws: Integer;
+  Root, A, B: string;
+  Kids: TSessionSummaryArray;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    AssertTrue('root', S.CreateSession(Ws, Root, Err));
+    AssertTrue('a', S.CreateChildSession(Ws, Root, 1, 'a', A, Err));
+    AssertTrue('b', S.CreateChildSession(Ws, Root, 1, 'b', B, Err));
+    AssertTrue('children', S.ChildrenOf(Root, Kids, Err));
+    AssertEquals('two children', 2, Length(Kids));
+    { A root has no children of its own. }
+    AssertTrue('grandchildren none', S.ChildrenOf(A, Kids, Err));
+    AssertEquals('leaf has none', 0, Length(Kids));
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestSessionLineageUnknownFails;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Depth: Integer;
+  Parent, Lbl: string;
+begin
+  S := OpenStore;
+  try
+    AssertFalse('unknown', S.SessionLineage('nope', Parent, Depth, Lbl, Err));
+    AssertEquals('not found', Ord(seNotFound), Ord(Err.Code));
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestLineageMigrationV4IsAdditive;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Cfg: TStoreConfig;
+  Migs: TMigrationArray;
+  Ws, Depth: Integer;
+  Sid, Parent, Lbl: string;
+  Msgs: TMessageRecordArray;
+begin
+  Cfg.DatabasePath := FDbPath;
+  Cfg.BusyTimeoutMs := 5000;
+
+  { A v2-only database, as an install predating lineage would have. }
+  Migs := DefaultMigrations;
+  SetLength(Migs, 2);
+  S := TSqliteStore.Create(Cfg, Migs);
+  try
+    AssertTrue('open v2', S.Open(Err));
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, Sid, Err);
+  finally
+    S.Free;
+  end;
+
+  { Reopen with the full migrations: v3 (mcp servers) and v4 (lineage) apply
+    and the v2 session survives. }
+  S := TSqliteStore.Create(Cfg);
+  try
+    AssertTrue('reopen', S.Open(Err));
+    AssertEquals('schema at v4', 4, RawReadUserVersion(FDbPath));
+    AssertTrue('lineage after migration',
+      S.SessionLineage(Sid, Parent, Depth, Lbl, Err));
+    AssertEquals('migrated root parent empty', '', Parent);
+    AssertTrue('history survives', S.QueryMessages(Sid, Msgs, Err));
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestMessageRefSessionRoundTrip;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws: Integer;
+  Sid: string;
+  Msg: TMessageRecord;
+  Msgs: TMessageRecordArray;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, Sid, Err);
+    Msg := Default(TMessageRecord);
+    Msg.SessionId := Sid;
+    Msg.Role := mrAmbient;
+    Msg.Content := 'subagent finished';
+    Msg.RefSessionId := 'child-123';
+    Msg.DurationMs := 4200;
+    AssertTrue('append', S.AppendMessage(Msg, Err));
+    AssertTrue('query', S.QueryMessages(Sid, Msgs, Err));
+    AssertEquals('one', 1, Length(Msgs));
+    AssertEquals('role ambient', Ord(mrAmbient), Ord(Msgs[0].Role));
+    AssertEquals('ref session', 'child-123', Msgs[0].RefSessionId);
+    AssertEquals('elapsed', 4200, Msgs[0].DurationMs);
   finally
     S.Free;
   end;
@@ -1284,6 +1468,8 @@ begin
     S.Free;
   end;
 end;
+
+
 
 initialization
   RegisterTest(TStoreTest);

@@ -91,6 +91,8 @@ type
     procedure Clear;
     procedure AppendReasoning(const AText: string; ADurationMs: Int64);
     procedure AppendError(const AMessage, ADetail: string);
+    procedure AppendAmbient(const AText, ARefSessionId: string;
+      AElapsedMs: Int64);
     function BeginTurn: Int64;
     function BeginRequest(ATurnId: Int64; const AModel: string;
       AMessageCount: Integer): Int64;
@@ -126,6 +128,8 @@ type
     procedure Clear;
     procedure AppendReasoning(const AText: string; ADurationMs: Int64);
     procedure AppendError(const AMessage, ADetail: string);
+    procedure AppendAmbient(const AText, ARefSessionId: string;
+      AElapsedMs: Int64);
     function BeginTurn: Int64;
     function BeginRequest(ATurnId: Int64; const AModel: string;
       AMessageCount: Integer): Int64;
@@ -416,6 +420,12 @@ begin
   FInner.AppendError(AMessage, ADetail);
 end;
 
+procedure TCountingStore.AppendAmbient(const AText, ARefSessionId: string;
+  AElapsedMs: Int64);
+begin
+  FInner.AppendAmbient(AText, ARefSessionId, AElapsedMs);
+end;
+
 function TCountingStore.BeginTurn: Int64;
 begin
   Result := FInner.BeginTurn;
@@ -488,6 +498,13 @@ procedure TRecordingStore.AppendError(const AMessage, ADetail: string);
 begin
   LastError := AMessage;
   LastErrorDetail := ADetail;
+end;
+
+procedure TRecordingStore.AppendAmbient(const AText, ARefSessionId: string;
+  AElapsedMs: Int64);
+begin
+  { Record the ambient as a plain append so Messages reflects it. }
+  FInner.AppendAmbient(AText, ARefSessionId, AElapsedMs);
 end;
 
 function TRecordingStore.BeginTurn: Int64;

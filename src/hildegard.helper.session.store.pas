@@ -11,7 +11,7 @@ interface
 uses
   SysUtils, hildegard.helper.agent, hildegard.helper.llm,
   hildegard.helper.store, hildegard.helper.session,
-  hildegard.helper.recall.tool;
+  hildegard.helper.recall.tool, hildegard.helper.ambient;
 
 type
   TSqliteConversationStore = class(TInterfacedObject, IConversationStore)
@@ -39,6 +39,8 @@ type
     procedure Clear;
     procedure AppendReasoning(const AText: string; ADurationMs: Int64);
     procedure AppendError(const AMessage, ADetail: string);
+    procedure AppendAmbient(const AText, ARefSessionId: string;
+      AElapsedMs: Int64);
     function BeginTurn: Int64;
     function BeginRequest(ATurnId: Int64; const AModel: string;
       AMessageCount: Integer): Int64;
@@ -153,6 +155,23 @@ begin
   Write(mrError, AMessage, '', '', ADetail, '', False, 0);
 end;
 
+procedure TSqliteConversationStore.AppendAmbient(const AText,
+  ARefSessionId: string; AElapsedMs: Int64);
+var
+  Rec: TMessageRecord;
+  Err: TStoreError;
+begin
+  Rec := Default(TMessageRecord);
+  Rec.SessionId := FSessionId;
+  Rec.TurnId := FCurrentTurnId;
+  Rec.RequestId := FCurrentRequestId;
+  Rec.Role := mrAmbient;
+  Rec.Content := AText;
+  Rec.RefSessionId := ARefSessionId;
+  Rec.DurationMs := AElapsedMs;
+  FStore.AppendMessage(Rec, Err);
+end;
+
 function TSqliteConversationStore.BeginTurn: Int64;
 var
   Err: TStoreError;
@@ -233,6 +252,16 @@ begin
           Msg := Default(TChatMessage);
           Msg.Role := crUser;
           Msg.Content := Msgs[I].Content;
+          AddMessage(Result, Msg);
+        end;
+      mrAmbient:
+        begin
+          { Delivered to the provider as a user message wrapped by the ambient
+            format; the persisted record stays plain. }
+          Msg := Default(TChatMessage);
+          Msg.Role := crUser;
+          Msg.Content := FormatAmbient(Msgs[I].Content,
+            Msgs[I].RefSessionId, Msgs[I].CreatedAtMs);
           AddMessage(Result, Msg);
         end;
       mrAssistant:
