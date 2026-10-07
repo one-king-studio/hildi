@@ -336,7 +336,7 @@ future async producer:
 
 ```xml
 <ambient timestamp="ISO_DATE">
-  <message source="delegate_task" id="<session-id>" label="...">
+  <message source="delegate_task" id="<session-id>" label="..." status="...">
     <the task's result>
   </message>
 
@@ -346,13 +346,16 @@ future async producer:
 </ambient>
 ```
 
+`status` is one of `completed`, `failed`, `aborted`, `gone` (the ambient
+statuses are canonical constants in `hildegard.helper.ambient`).
+
 `IConversationStore` gains:
 
 ```pascal
 { Append an ambient (async task result) notification. Delivered to the provider
   as a user message wrapped by the ambient format; persisted as its own kind. }
-procedure AppendAmbient(const AText, ARefSessionId, ALabel, ASource: string;
-  AElapsedMs: Int64);
+procedure AppendAmbient(const AText, ARefSessionId, ALabel, ASource,
+  AStatus: string; AElapsedMs: Int64);
 ```
 
 **Prompt queue.** `TPromptQueue` carries a kind per item:
@@ -432,9 +435,9 @@ The child's **conversation** session id stays its own (the ledger is per-session
 
 ## Data Model and Migrations
 
-Additive migrations **v4** (lineage) and **v5** (ambient task identity), no
-reset; existing history untouched. v3 is MCP servers (landed on main first);
-lineage took the next free version:
+Additive migrations **v4** (lineage), **v5** (ambient task identity), and **v6**
+(ambient status), no reset; existing history untouched. v3 is MCP servers
+(landed on main first); lineage took the next free version:
 
 ```sql
 -- v4: subagent lineage
@@ -446,9 +449,11 @@ ALTER TABLE messages ADD COLUMN ref_session_id TEXT NOT NULL DEFAULT '';
 -- v5: the ambient message's producing-task identity
 ALTER TABLE messages ADD COLUMN label TEXT NOT NULL DEFAULT '';
 ALTER TABLE messages ADD COLUMN source TEXT NOT NULL DEFAULT '';
+-- v6: the ambient message's outcome status
+ALTER TABLE messages ADD COLUMN status TEXT NOT NULL DEFAULT '';
 ```
 
-`StoreSchemaVersion` becomes 5.
+`StoreSchemaVersion` becomes 6.
 
 ## Validation and Error Handling
 
@@ -473,8 +478,8 @@ ALTER TABLE messages ADD COLUMN source TEXT NOT NULL DEFAULT '';
 - **Tools:** each tool's spec, `reason` enforcement, approval ask shape, and
   argument parsing (task/context/label, session id) — pure, no sockets.
 - **Ambient:** `AppendAmbient` round-trip; `Compose` wraps `mrAmbient` into the
-  `<ambient timestamp>` user message with a `<message source id label>` element
-  and `<instructions>`; the task id, label, and source survive.
+  `<ambient timestamp>` user message with a `<message source id label status>`
+  element and `<instructions>`; the task id, label, source, and status survive.
 - **Supervisor:** with a scripted fake child over a real socket (a stub runtime
   binary), spawn/message/abort/release, capacity and depth enforcement, roster
   events, result capture, and approval relay.

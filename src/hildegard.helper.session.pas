@@ -44,12 +44,13 @@ type
     ToolOk: Boolean;
     CreatedAtMs: Int64;
     DurationMs: Int64;
-    { Ambient (v4/v5): for an mrAmbient record, the producing task's identity.
-      RefSessionId is the task's id; LabelText and Source describe it. ''
-      otherwise. }
+    { Ambient (v4/v5/v6): for an mrAmbient record, the producing task's
+      identity and outcome. RefSessionId is the task's id; LabelText, Source,
+      and Status describe it. '' otherwise. }
     RefSessionId: string;
     LabelText: string;
     Source: string;
+    Status: string;
   end;
 
   TMessageRecordArray = array of TMessageRecord;

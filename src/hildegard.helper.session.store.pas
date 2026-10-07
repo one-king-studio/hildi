@@ -39,8 +39,8 @@ type
     procedure Clear;
     procedure AppendReasoning(const AText: string; ADurationMs: Int64);
     procedure AppendError(const AMessage, ADetail: string);
-    procedure AppendAmbient(const AText, ARefSessionId, ALabel,
-      ASource: string; AElapsedMs: Int64);
+    procedure AppendAmbient(const AText, ARefSessionId, ALabel, ASource,
+      AStatus: string; AElapsedMs: Int64);
     function BeginTurn: Int64;
     function BeginRequest(ATurnId: Int64; const AModel: string;
       AMessageCount: Integer): Int64;
@@ -156,7 +156,7 @@ begin
 end;
 
 procedure TSqliteConversationStore.AppendAmbient(const AText, ARefSessionId,
-  ALabel, ASource: string; AElapsedMs: Int64);
+  ALabel, ASource, AStatus: string; AElapsedMs: Int64);
 var
   Rec: TMessageRecord;
   Err: TStoreError;
@@ -170,6 +170,7 @@ begin
   Rec.RefSessionId := ARefSessionId;
   Rec.LabelText := ALabel;
   Rec.Source := ASource;
+  Rec.Status := AStatus;
   Rec.DurationMs := AElapsedMs;
   FStore.AppendMessage(Rec, Err);
 end;
@@ -264,7 +265,7 @@ begin
           Msg.Role := crUser;
           Msg.Content := FormatAmbient(Msgs[I].Content,
             Msgs[I].RefSessionId, Msgs[I].LabelText, Msgs[I].Source,
-            Msgs[I].CreatedAtMs);
+            Msgs[I].Status, Msgs[I].CreatedAtMs);
           AddMessage(Result, Msg);
         end;
       mrAssistant:

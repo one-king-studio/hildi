@@ -135,10 +135,11 @@ Ambient result delivery
 - [ ] The ambient record is stored with an internal/system role but is
       **hijacked on delivery to the API** into a `user` message: an
       `<ambient timestamp="ISO_DATE">` envelope holding a `<message
-      source="delegate_task" id="<child-id>" label="...">` element (the result)
-      and an `<instructions>` element, auto-injected and never visible to the
-      user. The `<message source=...>` field is the extension point for future
-      async producers.
+      source="delegate_task" id="<child-id>" label="..." status="...">` element
+      (the result) and an `<instructions>` element, auto-injected and never
+      visible to the user. The `<message source=...>` field is the extension
+      point for future async producers; `status` distinguishes completed /
+      failed / aborted / gone.
 - [ ] The ambient payload carries the child's **final assistant response**, the
       **child session id**, and the **elapsed time** of the task.
 - [ ] The parent sees **only** the child's assistant responses; the child's
@@ -317,7 +318,7 @@ Cost
 - **Naming.** Tools: `delegate_task`, `message_task`, `abort_task`,
   `release_task`. Abort implies release but they are distinct actions; release is
   detach-without-abort (fire-and-forget).
-- **Ambient format.** `<ambient timestamp="ISO_DATE"><message source="delegate_task" id="<child-id>" label="...">…</message><instructions>…</instructions></ambient>`,
+- **Ambient format.** `<ambient timestamp="ISO_DATE"><message source="delegate_task" id="<child-id>" label="..." status="completed|failed|aborted|gone">…</message><instructions>…</instructions></ambient>`,
   delivered as a `user` message with auto-injected handling instructions.
 - **Config knobs.** `HILDEGARD_SUBAGENT_MAX` (default 10),
   `HILDEGARD_SUBAGENT_DEPTH` (default 1), and an auto-deny timeout (default 60s).

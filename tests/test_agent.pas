@@ -91,8 +91,8 @@ type
     procedure Clear;
     procedure AppendReasoning(const AText: string; ADurationMs: Int64);
     procedure AppendError(const AMessage, ADetail: string);
-    procedure AppendAmbient(const AText, ARefSessionId, ALabel,
-      ASource: string; AElapsedMs: Int64);
+    procedure AppendAmbient(const AText, ARefSessionId, ALabel, ASource,
+      AStatus: string; AElapsedMs: Int64);
     function BeginTurn: Int64;
     function BeginRequest(ATurnId: Int64; const AModel: string;
       AMessageCount: Integer): Int64;
@@ -132,8 +132,8 @@ type
     procedure Clear;
     procedure AppendReasoning(const AText: string; ADurationMs: Int64);
     procedure AppendError(const AMessage, ADetail: string);
-    procedure AppendAmbient(const AText, ARefSessionId, ALabel,
-      ASource: string; AElapsedMs: Int64);
+    procedure AppendAmbient(const AText, ARefSessionId, ALabel, ASource,
+      AStatus: string; AElapsedMs: Int64);
     function BeginTurn: Int64;
     function BeginRequest(ATurnId: Int64; const AModel: string;
       AMessageCount: Integer): Int64;
@@ -428,9 +428,9 @@ begin
 end;
 
 procedure TCountingStore.AppendAmbient(const AText, ARefSessionId, ALabel,
-  ASource: string; AElapsedMs: Int64);
+  ASource, AStatus: string; AElapsedMs: Int64);
 begin
-  FInner.AppendAmbient(AText, ARefSessionId, ALabel, ASource, AElapsedMs);
+  FInner.AppendAmbient(AText, ARefSessionId, ALabel, ASource, AStatus, AElapsedMs);
 end;
 
 function TCountingStore.BeginTurn: Int64;
@@ -510,13 +510,13 @@ begin
 end;
 
 procedure TRecordingStore.AppendAmbient(const AText, ARefSessionId, ALabel,
-  ASource: string; AElapsedMs: Int64);
+  ASource, AStatus: string; AElapsedMs: Int64);
 begin
   { Record the ambient as a plain append so Messages reflects it. }
   Inc(AmbientAppends);
   LastAmbientRef := ARefSessionId;
   LastAmbientMs := AElapsedMs;
-  FInner.AppendAmbient(AText, ARefSessionId, ALabel, ASource, AElapsedMs);
+  FInner.AppendAmbient(AText, ARefSessionId, ALabel, ASource, AStatus, AElapsedMs);
 end;
 
 function TRecordingStore.BeginTurn: Int64;
@@ -960,7 +960,7 @@ var
   Found: Boolean;
 begin
   Rec := BuildLoopRecording;
-  FLoop.PromptQueue.PushAmbient('subagent result', 'child-1', 'research', 'delegate_task', 4200);
+  FLoop.PromptQueue.PushAmbient('subagent result', 'child-1', 'research', 'delegate_task', 'completed', 4200);
   FFake.AddResponse([TextDelta('ok'), FinishFrame('stop'), DoneFrame]);
   AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
   { The ambient reached the payload wrapped as a user message. }
@@ -989,7 +989,7 @@ var
   Events: TAgentEvents;
 begin
   Rec := BuildLoopRecording;
-  FLoop.PromptQueue.PushAmbient('the delegated answer', 'child-9', 'research', 'delegate_task', 100);
+  FLoop.PromptQueue.PushAmbient('the delegated answer', 'child-9', 'research', 'delegate_task', 'completed', 100);
   FFake.AddResponse([TextDelta('ack'), FinishFrame('stop'), DoneFrame]);
   Events := Default(TAgentEvents);
   AssertTrue('ambient send ok', FLoop.SendAmbient(Events, Answer, Err));

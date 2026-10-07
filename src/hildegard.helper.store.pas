@@ -250,7 +250,7 @@ end;
 function DefaultMigrations: TMigrationArray;
 begin
   Result := nil;
-  SetLength(Result, 5);
+  SetLength(Result, 6);
   Result[0].Version := 1;
   Result[0].Name := 'session history';
   Result[0].Statements := [
@@ -402,6 +402,12 @@ begin
   Result[4].Statements := [
     'ALTER TABLE messages ADD COLUMN label TEXT NOT NULL DEFAULT ''''',
     'ALTER TABLE messages ADD COLUMN source TEXT NOT NULL DEFAULT '''''
+  ];
+  { v6: the ambient message's outcome status. Additive. }
+  Result[5].Version := 6;
+  Result[5].Name := 'ambient status';
+  Result[5].Statements := [
+    'ALTER TABLE messages ADD COLUMN status TEXT NOT NULL DEFAULT '''''
   ];
 end;
 
@@ -2074,11 +2080,11 @@ begin
     Stmt := TStmt.Create(FDb,
       'INSERT INTO messages (session_id, turn_id, request_id, seq, role, ' +
       'content, tool_call_id, tool_name, tool_arguments, tool_reason, ' +
-      'tool_ok, created_at, duration_ms, ref_session_id, label, source) ' +
-      'VALUES ' +
+      'tool_ok, created_at, duration_ms, ref_session_id, label, source, ' +
+      'status) VALUES ' +
       '(?, NULLIF(?, 0), ' +
       'NULLIF(?, 0), (SELECT COALESCE(MAX(seq), 0) + 1 FROM messages ' +
-      'WHERE session_id = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+      'WHERE session_id = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     try
       if not Stmt.Valid then
         Exit(Fail(AError, seError, 'could not append message', DbErrorText));
@@ -2098,6 +2104,7 @@ begin
       Stmt.BindText(14, AMessage.RefSessionId);
       Stmt.BindText(15, AMessage.LabelText);
       Stmt.BindText(16, AMessage.Source);
+      Stmt.BindText(17, AMessage.Status);
       if Stmt.Step <> SQLITE_DONE then
         Exit(Fail(AError, seError, 'could not append message', DbErrorText));
     finally
@@ -2153,7 +2160,7 @@ begin
     Stmt := TStmt.Create(FDb,
       'SELECT id, session_id, turn_id, request_id, seq, role, content, ' +
       'tool_call_id, tool_name, tool_arguments, tool_reason, tool_ok, ' +
-      'created_at, duration_ms, ref_session_id, label, source FROM messages ' +
+      'created_at, duration_ms, ref_session_id, label, source, status FROM messages ' +
       'WHERE session_id = ? ' +
       'ORDER BY seq');
     try
@@ -2181,6 +2188,7 @@ begin
         Rec.RefSessionId := Stmt.ColText(14);
         Rec.LabelText := Stmt.ColText(15);
         Rec.Source := Stmt.ColText(16);
+        Rec.Status := Stmt.ColText(17);
         SetLength(AMessages, N + 1);
         AMessages[N] := Rec;
         Inc(N);
@@ -2208,7 +2216,7 @@ begin
     Stmt := TStmt.Create(FDb,
       'SELECT id, session_id, turn_id, request_id, seq, role, content, ' +
       'tool_call_id, tool_name, tool_arguments, tool_reason, tool_ok, ' +
-      'created_at, duration_ms, ref_session_id, label, source FROM messages ' +
+      'created_at, duration_ms, ref_session_id, label, source, status FROM messages ' +
       'WHERE id = ? AND session_id = ?');
     try
       if not Stmt.Valid then
@@ -2234,6 +2242,7 @@ begin
       AMessage.RefSessionId := Stmt.ColText(14);
       AMessage.LabelText := Stmt.ColText(15);
       AMessage.Source := Stmt.ColText(16);
+      AMessage.Status := Stmt.ColText(17);
     finally
       Stmt.Free;
     end;

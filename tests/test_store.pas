@@ -1255,7 +1255,7 @@ begin
   S := TSqliteStore.Create(Cfg);
   try
     AssertTrue('reopen', S.Open(Err));
-    AssertEquals('schema at v5', 5, RawReadUserVersion(FDbPath));
+    AssertEquals('schema at v6', 6, RawReadUserVersion(FDbPath));
     AssertTrue('lineage after migration',
       S.SessionLineage(Sid, Parent, Depth, Lbl, Err));
     AssertEquals('migrated root parent empty', '', Parent);

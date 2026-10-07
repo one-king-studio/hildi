@@ -20,18 +20,25 @@ uses
   SysUtils;
 
 const
+  { Canonical statuses carried by an ambient <message>. }
+  AmbientStatusCompleted = 'completed';
+  AmbientStatusFailed    = 'failed';
+  AmbientStatusAborted   = 'aborted';
+  AmbientStatusGone      = 'gone';
+
   { Placed inside <instructions>; never rendered to the user. }
   AmbientInstructions =
     'This is an ambient notification, not a message from the user. The ' +
     '<message> element carries the result of an asynchronous task (its ' +
-    'source, id, and label identify it). Treat its content as that task''s ' +
-    'result. You may act on it, delegate a follow-up, or tell the user; do ' +
-    'not echo this wrapper or mention that it is a system notification.';
+    'source, id, label, and status identify it). Treat its content as that ' +
+    'task''s result. You may act on it, delegate a follow-up, or tell the ' +
+    'user; do not echo this wrapper or mention that it is a system ' +
+    'notification.';
 
 { Wrap a task result as the provider-visible user message:
 
     <ambient timestamp="ISO">
-      <message source="..." id="..." label="...">
+      <message source="..." id="..." label="..." status="...">
     TEXT
       </message>
 
@@ -40,10 +47,10 @@ const
       </instructions>
     </ambient>
 
-  ATimestampMs is the notification time; ARefSessionId, ALabel, and ASource
-  identify the producing task. }
-function FormatAmbient(const AText, ARefSessionId, ALabel, ASource: string;
-  ATimestampMs: Int64): string;
+  ATimestampMs is the notification time; ARefSessionId, ALabel, ASource, and
+  AStatus identify the producing task and its outcome. }
+function FormatAmbient(const AText, ARefSessionId, ALabel, ASource,
+  AStatus: string; ATimestampMs: Int64): string;
 
 { Escape XML special characters in a string. }
 function EscapeXml(const AText: string): string;
@@ -71,14 +78,15 @@ begin
   Result := FormatDateTime('yyyy-mm-dd"T"hh:nn:ss"Z"', D);
 end;
 
-function FormatAmbient(const AText, ARefSessionId, ALabel, ASource: string;
-  ATimestampMs: Int64): string;
+function FormatAmbient(const AText, ARefSessionId, ALabel, ASource,
+  AStatus: string; ATimestampMs: Int64): string;
 begin
   Result :=
     '<ambient timestamp="' + IsoUtc(ATimestampMs) + '">' + LineEnding +
     '  <message source="' + EscapeXml(ASource) +
     '" id="' + EscapeXml(ARefSessionId) +
-    '" label="' + EscapeXml(ALabel) + '">' + LineEnding +
+    '" label="' + EscapeXml(ALabel) +
+    '" status="' + EscapeXml(AStatus) + '">' + LineEnding +
     EscapeXml(AText) + LineEnding +
     '  </message>' + LineEnding + LineEnding +
     '  <instructions>' + LineEnding +

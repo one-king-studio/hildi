@@ -1061,11 +1061,11 @@ begin
           E := EmitEvent(ekSubagent);
           E.SubSessionId := Ev.SessionId;
           E.Text := Ev.LabelText;
-          E.SubStatus := 'completed';
+          E.SubStatus := Ev.Status;
           Broadcast(E);
           { Wake the parent with the result as an ambient notification. }
           FSession.Loop.PromptQueue.PushAmbient(Ev.Result, Ev.SessionId,
-            Ev.LabelText, SubagentDelegateTool, Ev.ElapsedMs);
+            Ev.LabelText, SubagentDelegateTool, Ev.Status, Ev.ElapsedMs);
           if not FTurnActive then
             StartAmbientTurn;
         end;
@@ -1093,6 +1093,13 @@ begin
           E.Text := Ev.LabelText;
           E.SubStatus := 'gone';
           Broadcast(E);
+          { A child that vanished without a result still wakes the parent so it
+            is not left waiting. }
+          FSession.Loop.PromptQueue.PushAmbient(
+            'subagent ' + Ev.SessionId + ' exited before completing',
+            Ev.SessionId, Ev.LabelText, SubagentDelegateTool, 'gone', 0);
+          if not FTurnActive then
+            StartAmbientTurn;
         end;
     end;
   end;

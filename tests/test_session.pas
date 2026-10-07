@@ -621,7 +621,7 @@ begin
     Conv := TSqliteConversationStore.Create(S, Sid, 0);
     try
       Conv.AppendAmbient('subagent done: 3 files', 'child-abc', 'research',
-        'delegate_task', 4200);
+        'delegate_task', 'completed', 4200);
     finally
       Conv.Free;
     end;
@@ -632,6 +632,7 @@ begin
     AssertEquals('ref session', 'child-abc', Recs[0].RefSessionId);
     AssertEquals('label', 'research', Recs[0].LabelText);
     AssertEquals('source', 'delegate_task', Recs[0].Source);
+    AssertEquals('status', 'completed', Recs[0].Status);
     AssertEquals('elapsed', 4200, Recs[0].DurationMs);
   finally
     S.Free;
@@ -654,7 +655,7 @@ begin
     Conv := TSqliteConversationStore.Create(S, Sid, 0);
     try
       Conv.AppendAmbient('the result text', 'child-xyz', 'research',
-        'delegate_task', 1000);
+        'delegate_task', 'completed', 1000);
       Msgs := Conv.Messages;
       AssertEquals('one provider message', 1, Length(Msgs));
       AssertEquals('delivered as user', Ord(crUser), Ord(Msgs[0].Role));
@@ -663,6 +664,8 @@ begin
         Msgs[0].Content) > 0);
       AssertTrue('carries id', Pos('id="child-xyz"', Msgs[0].Content) > 0);
       AssertTrue('carries label', Pos('label="research"',
+        Msgs[0].Content) > 0);
+      AssertTrue('carries status', Pos('status="completed"',
         Msgs[0].Content) > 0);
       AssertTrue('carries the text', Pos('the result text',
         Msgs[0].Content) > 0);
@@ -680,13 +683,14 @@ procedure TSessionTest.TestFormatAmbientEscapes;
 var
   S: string;
 begin
-  S := FormatAmbient('a < b & c > d', 'child-1', 'lbl', 'delegate_task', 0);
+  S := FormatAmbient('a < b & c > d', 'child-1', 'lbl', 'delegate_task', 'completed', 0);
   AssertTrue('escaped lt', Pos('a &lt; b', S) > 0);
   AssertTrue('escaped amp', Pos('&amp;', S) > 0);
   AssertTrue('escaped gt', Pos('c &gt; d', S) > 0);
   AssertTrue('id attr', Pos('id="child-1"', S) > 0);
   AssertTrue('label attr', Pos('label="lbl"', S) > 0);
   AssertTrue('source attr', Pos('source="delegate_task"', S) > 0);
+  AssertTrue('status attr', Pos('status="completed"', S) > 0);
   AssertTrue('timestamp attr', Pos('timestamp="', S) > 0);
   AssertTrue('instructions block', Pos('<instructions>', S) > 0);
 end;

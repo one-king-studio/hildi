@@ -40,6 +40,7 @@ type
     LabelText: string;
     Result: string;    // sekResult: the child's final assistant text
     ElapsedMs: Int64;  // sekResult: the task duration
+    Status: string;    // sekResult: completed/failed; sekGone: gone; sekAborted: aborted
     AskId: string;     // sekApprovalAsk: the child's ask id
     Ask: TApprovalAsk; // sekApprovalAsk
     Error: string;     // sekGone
@@ -558,6 +559,7 @@ begin
   Cmd.Id := 'a' + ASessionId;
   Child.Client.Send(Cmd);
   Push(MakeEvent(sekAborted, ASessionId, Child.LabelText, '', 0));
+  FEvents[High(FEvents)].Status := 'aborted';
   RemoveChild(ASessionId, True);
   Result := True;
 end;
@@ -649,6 +651,7 @@ begin
         Child.LastAssistant := LastAssistantText(ASessionId);
         E := MakeEvent(sekResult, ASessionId, Child.LabelText,
           Child.LastAssistant, AEvent.ElapsedMs);
+        E.Status := 'completed';
         Push(E);
         Child.Active := False;   // the slot frees; the child may be reused
       end;
@@ -670,6 +673,7 @@ begin
         Child.LastAssistant := LastAssistantText(ASessionId);
         E := MakeEvent(sekResult, ASessionId, Child.LabelText,
           Child.LastAssistant, AEvent.ElapsedMs);
+        E.Status := 'failed';
         Push(E);
         Child.Active := False;
       end;
@@ -682,12 +686,15 @@ procedure TSubagentSupervisor.HandleDetached(const ASessionId,
   AReason: string);
 var
   Child: TChild;
+  E: TSubagentEvent;
 begin
   Child := Find(ASessionId);
   if Child = nil then
     Exit;
   Child.Status := 'gone';
-  Push(MakeEvent(sekGone, ASessionId, Child.LabelText, '', 0));
+  E := MakeEvent(sekGone, ASessionId, Child.LabelText, '', 0);
+  E.Status := 'gone';
+  Push(E);
   RemoveChild(ASessionId, True);
 end;
 
