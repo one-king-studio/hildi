@@ -78,7 +78,7 @@ TSessionSummary = record
   { Lineage (v3). A root session has ParentId = '' and Depth = 0. }
   ParentId: string;
   Depth: Integer;
-  Label: string;
+  LabelText: string;   // 'Label' is a reserved word in FPC
 end;
 ```
 

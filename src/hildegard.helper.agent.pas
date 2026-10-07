@@ -134,6 +134,10 @@ type
     AOk: Boolean) of object;
   { A queued prompt was injected into the running loop. }
   TUserQueuedEvent = procedure(const AText: string) of object;
+  { An ambient (subagent result) notification was injected into the running
+    loop. ARefSessionId is the child session it came from. }
+  TAmbientEvent = procedure(const AText, ARefSessionId: string;
+    AElapsedMs: Int64) of object;
   { The reasoning phase of a response ended; ADurationMs is how long it
     streamed. Fired just before the first content delta, so the UI can settle a
     live thought block with its duration. }
@@ -147,21 +151,39 @@ type
     OnToolResult: TToolResultEvent;
     OnToolOutput: TToolOutputEvent;
     OnUserQueued: TUserQueuedEvent;
+    OnAmbient: TAmbientEvent;
   end;
 
   TPromptArray = array of string;
+
+  { A queued prompt is either operator text or an ambient subagent result. }
+  TPromptKind = (pkUser, pkAmbient);
+
+  TPromptItem = record
+    Kind: TPromptKind;
+    Text: string;
+    RefSessionId: string;   // pkAmbient: the child session
+    ElapsedMs: Int64;       // pkAmbient: the task duration
+  end;
+
+  TPromptItemArray = array of TPromptItem;
 
   { Prompts the operator injects into a running turn, drained at loop
     boundaries. Safe to Push from the UI thread while the worker drains it. }
   TPromptQueue = class
   private
     FLock: TCriticalSection;
-    FItems: TPromptArray;
+    FItems: TPromptItemArray;
   public
     constructor Create;
     destructor Destroy; override;
     procedure Push(const AText: string);
-    { Remove and return every queued prompt, in order. }
+    { Queue an ambient (subagent result) notification. }
+    procedure PushAmbient(const AText, ARefSessionId: string;
+      AElapsedMs: Int64);
+    { Remove and return every queued item, in order. }
+    function DrainItems: TPromptItemArray;
+    { The queued operator prompts only, in order (ambients excluded). }
     function Drain: TPromptArray;
     function Pending: Boolean;
   end;
@@ -227,6 +249,9 @@ type
     FProviders: array of IToolProvider;
     FPromptQueue: TPromptQueue;
     FLastTurnDropped: Boolean;
+    { The turn in flight is an ambient turn: its opening content is a queued
+      ambient notification, so no user message is appended. }
+    FAmbientTurn: Boolean;
     { The response in flight is timed so the reasoning and content phases can be
       persisted per block: the first reasoning delta, the first content delta,
       and the resulting durations. }
@@ -265,6 +290,11 @@ type
       out AAnswer: string; out AError: TLLMError): Boolean; overload;
     function Send(const AUserText: string; const AEvents: TAgentEvents;
       out AAnswer: string; out AError: TLLMError): Boolean; overload;
+    { Run a turn whose opening content is already queued as an ambient
+      notification: no user message is appended; the queue is drained at the
+      first loop boundary. }
+    function SendAmbient(const AEvents: TAgentEvents;
+      out AAnswer: string; out AError: TLLMError): Boolean;
     { Consulted at each loop boundary (before building a request); True closes
       the turn as cancelled. Never breaks a tool batch part-way. }
     property CancelCheck: TAgentCancelCheck read FCancel write FCancel;
@@ -626,19 +656,45 @@ begin
 end;
 
 procedure TPromptQueue.Push(const AText: string);
+var
+  Item: TPromptItem;
 begin
   if Trim(AText) = '' then
     Exit;
+  Item := Default(TPromptItem);
+  Item.Kind := pkUser;
+  Item.Text := AText;
   FLock.Acquire;
   try
     SetLength(FItems, Length(FItems) + 1);
-    FItems[High(FItems)] := AText;
+    FItems[High(FItems)] := Item;
   finally
     FLock.Release;
   end;
 end;
 
-function TPromptQueue.Drain: TPromptArray;
+procedure TPromptQueue.PushAmbient(const AText, ARefSessionId: string;
+  AElapsedMs: Int64);
+var
+  Item: TPromptItem;
+begin
+  if AText = '' then
+    Exit;
+  Item := Default(TPromptItem);
+  Item.Kind := pkAmbient;
+  Item.Text := AText;
+  Item.RefSessionId := ARefSessionId;
+  Item.ElapsedMs := AElapsedMs;
+  FLock.Acquire;
+  try
+    SetLength(FItems, Length(FItems) + 1);
+    FItems[High(FItems)] := Item;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TPromptQueue.DrainItems: TPromptItemArray;
 begin
   FLock.Acquire;
   try
@@ -647,6 +703,21 @@ begin
   finally
     FLock.Release;
   end;
+end;
+
+function TPromptQueue.Drain: TPromptArray;
+var
+  Items: TPromptItemArray;
+  I: Integer;
+begin
+  Result := nil;
+  Items := DrainItems;
+  for I := 0 to High(Items) do
+    if Items[I].Kind = pkUser then
+    begin
+      SetLength(Result, Length(Result) + 1);
+      Result[High(Result)] := Items[I].Text;
+    end;
 end;
 
 function TPromptQueue.Pending: Boolean;
@@ -1063,24 +1134,43 @@ end;
 function TAgentLoop.Send(const AUserText: string; const AEvents: TAgentEvents;
   out AAnswer: string; out AError: TLLMError): Boolean;
 begin
+  FAmbientTurn := False;
   Result := DoSend(AUserText, AEvents, AAnswer, AError);
+end;
+
+function TAgentLoop.SendAmbient(const AEvents: TAgentEvents;
+  out AAnswer: string; out AError: TLLMError): Boolean;
+begin
+  FAmbientTurn := True;
+  Result := DoSend('', AEvents, AAnswer, AError);
 end;
 
 procedure TAgentLoop.DrainQueued(const AEvents: TAgentEvents);
 var
-  Prompts: TPromptArray;
+  Items: TPromptItemArray;
   I: Integer;
   Msg: TChatMessage;
 begin
-  Prompts := FPromptQueue.Drain;
-  for I := 0 to High(Prompts) do
+  Items := FPromptQueue.DrainItems;
+  for I := 0 to High(Items) do
   begin
-    Msg := Default(TChatMessage);
-    Msg.Role := crUser;
-    Msg.Content := Prompts[I];
-    FStore.Append(Msg);
-    if Assigned(AEvents.OnUserQueued) then
-      AEvents.OnUserQueued(Prompts[I]);
+    if Items[I].Kind = pkAmbient then
+    begin
+      FStore.AppendAmbient(Items[I].Text, Items[I].RefSessionId,
+        Items[I].ElapsedMs);
+      if Assigned(AEvents.OnAmbient) then
+        AEvents.OnAmbient(Items[I].Text, Items[I].RefSessionId,
+          Items[I].ElapsedMs);
+    end
+    else
+    begin
+      Msg := Default(TChatMessage);
+      Msg.Role := crUser;
+      Msg.Content := Items[I].Text;
+      FStore.Append(Msg);
+      if Assigned(AEvents.OnUserQueued) then
+        AEvents.OnUserQueued(Items[I].Text);
+    end;
   end;
 end;
 
@@ -1155,10 +1245,15 @@ begin
   { Open the loop before appending the prompt, so the prompt is linked to it. }
   TurnId := FStore.BeginTurn;
 
-  UserMsg := Default(TChatMessage);
-  UserMsg.Role := crUser;
-  UserMsg.Content := AUserText;
-  FStore.Append(UserMsg);
+  { An ambient turn's opening content is the queued ambient notification, so no
+    user message is appended; the first boundary drains it. }
+  if not FAmbientTurn then
+  begin
+    UserMsg := Default(TChatMessage);
+    UserMsg.Role := crUser;
+    UserMsg.Content := AUserText;
+    FStore.Append(UserMsg);
+  end;
 
   Rounds := 0;
   while True do

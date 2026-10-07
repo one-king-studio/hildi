@@ -7,44 +7,44 @@ registered in `tests/hildegard_helper_tests.pas` (integrator-owned).
 
 ## Phase 1 — Lineage in the store
 
-- [ ] **Test** (`tests/test_store.pas`): `TestChildSessionLineage` (create a
+- [x] **Test** (`tests/test_store.pas`): `TestChildSessionLineage` (create a
       root, a child, assert parent/depth/label), `TestChildrenOf`,
       `TestLineageRootDefaults`, `TestMigrationV3IsAdditive` (a v2 database opens
       and keeps its history).
-- [ ] **Implement**: migration v3 (`parent_session_id`, `depth`, `label`,
+- [x] **Implement**: migration v3 (`parent_session_id`, `depth`, `label`,
       `idx_sessions_parent`, `messages.ref_session_id`); `CreateChildSession`,
       `SessionLineage`, `ChildrenOf`; extend `TSessionSummary`; extend
       `QueryMessages`/`AppendMessage` for `ref_session_id`; `StoreSchemaVersion`.
   - Files: `src/hildegard.helper.store.pas`, `src/hildegard.helper.session.pas`.
-- [ ] **Check**: `make test SUITE=TStoreTest`.
+- [x] **Check**: `make test SUITE=TStoreTest`.
 
 ## Phase 2 — Ambient record and wrapper
 
-- [ ] **Test** (`tests/test_session.pas`): `TestAppendAmbientRoundTrip` (kind,
+- [x] **Test** (`tests/test_session.pas`): `TestAppendAmbientRoundTrip` (kind,
       ref session, elapsed survive), `TestComposeWrapsAmbientAsUser`
       (`<ambient timestamp=... session=...>` + instructions, role user),
-      `TestAmbientElapsed`.
-- [ ] **Implement**: `mrAmbient`; `IConversationStore.AppendAmbient`; the ambient
+      `TestFormatAmbientEscapes`.
+- [x] **Implement**: `mrAmbient`; `IConversationStore.AppendAmbient`; the ambient
       wrapper (a pure function in a new `hildegard.helper.ambient` unit) and its
       use in `TSqliteConversationStore.Compose`; in-memory store degradation
       (append as a plain user message).
   - Files: `src/hildegard.helper.session.pas`,
     `src/hildegard.helper.session.store.pas`, `src/hildegard.helper.ambient.pas`
     (new), `src/hildegard.helper.agent.pas`.
-- [ ] **Check**: `make test SUITE=TSessionStoreTest`.
+- [x] **Check**: `make test SUITE=TSessionTest`.
 
 ## Phase 3 — Prompt queue kinds and the ambient turn
 
-- [ ] **Test** (`tests/test_agent.pas`): `TestQueuedAmbientDrainsAsAmbient`
+- [x] **Test** (`tests/test_agent.pas`): `TestQueuedAmbientDrainsAsAmbient`
       (a `pkAmbient` prompt appends an ambient record, not a user message),
-      `TestSendAmbientStartsWithoutUserMessage`, `TestAmbientQueuedMidTurn`.
-- [ ] **Implement**: `TPromptKind`; `TPromptQueue.PushAmbient`; `DrainQueued`
+      `TestSendAmbientStartsWithoutUserMessage`, `TestSendAmbientDrainsQueuedAmbient`.
+- [x] **Implement**: `TPromptKind`; `TPromptQueue.PushAmbient`; `DrainQueued`
       branching; `OnAmbient` in `TAgentEvents`; `TAgentLoop.SendAmbient`;
       `TTurnWorker.CreateAmbient`.
   - Files: `src/hildegard.helper.agent.pas`,
     `src/hildegard.helper.harness.turn.pas`,
     `src/hildegard.helper.harness.turn.worker.pas`.
-- [ ] **Check**: `make test SUITE=TAgentLoopTest`.
+- [x] **Check**: `make test SUITE=TAgentLoopTest`.
 
 ## Phase 4 — Delegation tools
 

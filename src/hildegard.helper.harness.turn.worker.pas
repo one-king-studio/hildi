@@ -26,6 +26,7 @@ type
     FAnswer: string;
     FError: TLLMError;
     FStart: TDateTime;
+    FAmbient: Boolean;
     function ElapsedMs: Int64;
     function Cancelled: Boolean;
     procedure Emit(const AEvent: TTurnEvent);
@@ -43,6 +44,9 @@ type
   public
     constructor Create(ALoop: TAgentLoop; AQueue: TTurnQueue;
       const AUserText: string);
+    { Run an ambient turn: the loop's opening content is a queued ambient
+      notification, so no user message is echoed. }
+    constructor CreateAmbient(ALoop: TAgentLoop; AQueue: TTurnQueue);
     { UI thread. The loop consults the flag between requests, so the turn stops
       at the next boundary; an in-flight stream finishes first. }
     procedure RequestCancel;
@@ -66,6 +70,18 @@ begin
   FLoop := ALoop;
   FQueue := AQueue;
   FUserText := AUserText;
+  FAmbient := False;
+  FError := Default(TLLMError);
+end;
+
+constructor TTurnWorker.CreateAmbient(ALoop: TAgentLoop; AQueue: TTurnQueue);
+begin
+  inherited Create(True);
+  FreeOnTerminate := False;
+  FLoop := ALoop;
+  FQueue := AQueue;
+  FUserText := '';
+  FAmbient := True;
   FError := Default(TLLMError);
 end;
 
@@ -192,6 +208,7 @@ procedure TTurnWorker.Execute;
 var
   Events: TAgentEvents;
   Event: TTurnEvent;
+  Ok: Boolean;
 begin
   FStart := Now;
   Events := Default(TAgentEvents);
@@ -208,7 +225,11 @@ begin
   FLoop.CancelCheck := Cancelled;
   try
     try
-      if FLoop.Send(FUserText, Events, FAnswer, FError) then
+      if FAmbient then
+        Ok := FLoop.SendAmbient(Events, FAnswer, FError)
+      else
+        Ok := FLoop.Send(FUserText, Events, FAnswer, FError);
+      if Ok then
       begin
         Event := Default(TTurnEvent);
         Event.Kind := teDone;

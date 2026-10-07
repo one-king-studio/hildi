@@ -121,6 +121,10 @@ type
     LastErrorDetail: string;
     LastTool: TChatMessage;
     LastAssistant: TChatMessage;
+    UserAppends: Integer;
+    AmbientAppends: Integer;
+    LastAmbientRef: string;
+    LastAmbientMs: Int64;
     constructor Create;
     destructor Destroy; override;
     procedure Append(const AMessage: TChatMessage);
@@ -218,6 +222,9 @@ type
     procedure TestSingleShotToolEmitsNoChunks;
     procedure TestForwardObserverDropsChunksAfterComplete;
     procedure TestV1SendOverloadStillWorks;
+    procedure TestQueuedAmbientDrainsAsAmbient;
+    procedure TestSendAmbientStartsWithoutUserMessage;
+    procedure TestSendAmbientDrainsQueuedAmbient;
     procedure TestRegistrationAddsRequiredReasonParam;
     procedure TestRegistrationPreservesExistingParams;
     procedure TestRegistrationIsIdempotent;
@@ -473,7 +480,9 @@ begin
   if AMessage.Role = crTool then
     LastTool := AMessage
   else if AMessage.Role = crAssistant then
-    LastAssistant := AMessage;
+    LastAssistant := AMessage
+  else if AMessage.Role = crUser then
+    Inc(UserAppends);
   FInner.Append(AMessage);
 end;
 
@@ -504,6 +513,9 @@ procedure TRecordingStore.AppendAmbient(const AText, ARefSessionId: string;
   AElapsedMs: Int64);
 begin
   { Record the ambient as a plain append so Messages reflects it. }
+  Inc(AmbientAppends);
+  LastAmbientRef := ARefSessionId;
+  LastAmbientMs := AElapsedMs;
   FInner.AppendAmbient(AText, ARefSessionId, AElapsedMs);
 end;
 
@@ -936,6 +948,73 @@ begin
   AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
   AssertTrue('the queued prompt reached the payload',
     Pos('more context', FFake.LastBody) > 0);
+end;
+
+procedure TAgentLoopTest.TestQueuedAmbientDrainsAsAmbient;
+var
+  Rec: TRecordingStore;
+  Msgs: TChatMessageArray;
+  Answer: string;
+  Err: TLLMError;
+  I: Integer;
+  Found: Boolean;
+begin
+  Rec := BuildLoopRecording;
+  FLoop.PromptQueue.PushAmbient('subagent result', 'child-1', 4200);
+  FFake.AddResponse([TextDelta('ok'), FinishFrame('stop'), DoneFrame]);
+  AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
+  { The ambient reached the payload wrapped as a user message. }
+  AssertTrue('wrapped in the payload',
+    Pos('<ambient ', FFake.LastBody) > 0);
+  AssertTrue('carries the child id',
+    Pos('child-1', FFake.LastBody) > 0);
+  { It was recorded as an ambient append, not a user append. }
+  AssertEquals('ambient append recorded', 1, Rec.AmbientAppends);
+  AssertEquals('ref session', 'child-1', Rec.LastAmbientRef);
+  AssertEquals('elapsed', 4200, Rec.LastAmbientMs);
+  { The memory store degrades the ambient to a plain user message. }
+  Msgs := FStore.Messages;
+  Found := False;
+  for I := 0 to High(Msgs) do
+    if Pos('subagent result', Msgs[I].Content) > 0 then
+      Found := True;
+  AssertTrue('ambient content present in history', Found);
+end;
+
+procedure TAgentLoopTest.TestSendAmbientStartsWithoutUserMessage;
+var
+  Rec: TRecordingStore;
+  Answer: string;
+  Err: TLLMError;
+  Events: TAgentEvents;
+begin
+  Rec := BuildLoopRecording;
+  FLoop.PromptQueue.PushAmbient('the delegated answer', 'child-9', 100);
+  FFake.AddResponse([TextDelta('ack'), FinishFrame('stop'), DoneFrame]);
+  Events := Default(TAgentEvents);
+  AssertTrue('ambient send ok', FLoop.SendAmbient(Events, Answer, Err));
+  AssertEquals('no user append for an ambient turn', 0, Rec.UserAppends);
+  AssertEquals('one ambient append', 1, Rec.AmbientAppends);
+  AssertTrue('the ambient is in the payload',
+    Pos('the delegated answer', FFake.LastBody) > 0);
+end;
+
+procedure TAgentLoopTest.TestSendAmbientDrainsQueuedAmbient;
+var
+  Rec: TRecordingStore;
+  Answer: string;
+  Err: TLLMError;
+  Events: TAgentEvents;
+begin
+  { An ambient turn with nothing queued: the queue is drained (nothing to
+    inject) and no user message is appended. The client rejects an empty
+    request, so this fails cleanly at the boundary rather than hanging. }
+  Rec := BuildLoopRecording;
+  FFake.AddResponse([TextDelta('ok'), FinishFrame('stop'), DoneFrame]);
+  Events := Default(TAgentEvents);
+  FLoop.SendAmbient(Events, Answer, Err);
+  AssertEquals('no user append', 0, Rec.UserAppends);
+  AssertEquals('no ambient append', 0, Rec.AmbientAppends);
 end;
 
 procedure TAgentLoopTest.TestQueuedPromptSupersedesAToolCall;
