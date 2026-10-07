@@ -73,25 +73,33 @@ Pure, no I/O — the easiest red/green, and the base of everything.
   (see the `ponytail:` note in `Close`) — bounded, leak-clean, acceptable for
   v1.
 
-### Phase 3: Config (`hildegard.helper.mcp.config` + store v3)
+### Phase 3: Config (`hildegard.helper.mcp.config` + store v3) — DONE
 
-- [ ] **Test**: `TestResolveGlobalOnly`, `TestResolveWorkspaceOverridesGlobal`,
+- [x] **Test**: `TestResolveGlobalOnly`, `TestResolveWorkspaceOverridesGlobal`,
       `TestResolveUnionsDistinctNames`, `TestResolveExcludesDisabled`,
-      `TestResolveAgentOverridesAll` (hand-built row) in
-      `tests/test_mcp_config.pas` — red.
-- [ ] **Implement**: `ResolveMcpConfig`.
-- [ ] **Test**: `TestValidateRow*` (empty/illegal name, empty command, non-string
-      args, bad env entry, over `MaxMcpServers`).
-- [ ] **Implement**: `ValidateMcpServerRow`.
-- [ ] **Test (store)**: `TestMigrationV3Applies` (`StoreSchemaVersion` = 3; a v2
-      DB upgrades additively) in `tests/test_store.pas` — red.
-- [ ] **Implement**: migration v3 (`mcp_servers` table + index) in
+      `TestResolveAgentOverridesAll`, `TestResolveSkipsOtherWorkspaceRows`,
+      `TestResolveIsNameSorted` — red.
+- [x] **Implement**: `ResolveMcpConfig`.
+- [x] **Test**: `TestValidateAcceptsValidRow`, `TestValidateRejectsBadName`,
+      `TestValidateRejectsEmptyCommand`, `TestValidateRejectsBadEnvEntry`,
+      `TestValidateRejectsTooManyServers`, `TestIsValidMcpName`.
+- [x] **Implement**: `ValidateMcpServerRow`, `ValidateMcpConfig`, `IsValidMcpName`.
+- [x] **Test (store)**: `TestMcpServerMigrationIsAdditive` (a v2 DB upgrades to
+      v3; earlier data intact).
+- [x] **Implement**: migration v3 (`mcp_servers` table + index) in
       `hildegard.helper.store`.
-- [ ] **Test (store)**: `TestSaveMcpServerUpserts`, `TestLoadMcpServersScoped`,
-      `TestRemoveMcpServer`, `TestArgsEnvRoundTrip`.
-- [ ] **Implement**: `LoadMcpServers`/`SaveMcpServer`/`RemoveMcpServer`/
-      `ListMcpServers`.
-- [ ] **Refactor**; `make check`.
+- [x] **Test (store)**: `TestSaveMcpServerUpserts`, `TestLoadMcpServersScoped`,
+      `TestRemoveMcpServer`, `TestMcpArgsEnvRoundTrip`,
+      `TestSaveMcpServerRejectsInvalid`.
+- [x] **Implement**: `LoadMcpServers`/`SaveMcpServer`/`RemoveMcpServer`/
+      `ListMcpServers` (upsert via `ON CONFLICT`).
+- [x] **Refactor**; `make check` — 862 tests, 0 failures; leak-clean.
+
+  Notes: `out` open-array params cannot be assigned, so the JSON (de)coders take
+  a named `TStringArray` (`Types`). A `case` over a full enum needs no `else`
+  (`-Sew` flags unreachable code). The `DefaultMigrations` array length had to
+  grow to 3 — writing `Result[2]` past a 2-length array corrupted memory (a
+  range-check error cascaded to every store test).
 
 ### Phase 4: MCP client (`hildegard.helper.mcp.client`)
 

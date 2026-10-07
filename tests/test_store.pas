@@ -10,7 +10,8 @@ uses
   Classes, SysUtils, SyncObjs, fpcunit, testregistry,
   {$ifdef unix}BaseUnix,{$endif}
   hildegard.helper.sqlite,
-  hildegard.helper.store, hildegard.helper.session, hildegard.helper.llm;
+  hildegard.helper.store, hildegard.helper.session, hildegard.helper.llm,
+  hildegard.helper.mcp.config;
 
 type
   TStoreTest = class(TTestCase)
@@ -62,6 +63,12 @@ type
     procedure TestRuntimeRowUnknownSessionFails;
     procedure TestClearRuntime;
     procedure TestListRuntimes;
+    procedure TestMcpServerMigrationIsAdditive;
+    procedure TestSaveMcpServerUpserts;
+    procedure TestLoadMcpServersScoped;
+    procedure TestRemoveMcpServer;
+    procedure TestMcpArgsEnvRoundTrip;
+    procedure TestSaveMcpServerRejectsInvalid;
   end;
 
 implementation
@@ -1099,6 +1106,180 @@ begin
 
     AssertTrue('list', S.ListRuntimes(Rows, Err));
     AssertEquals('two rows', 2, Length(Rows));
+  finally
+    S.Free;
+  end;
+end;
+
+{ A v2-only database (before mcp_servers) upgrades to v3 additively. }
+procedure TStoreTest.TestMcpServerMigrationIsAdditive;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Cfg: TStoreConfig;
+  Migs: TMigrationArray;
+  Ws, Found: Integer;
+  Rows: TMcpServerRowArray;
+begin
+  Cfg.DatabasePath := FDbPath;
+  Cfg.BusyTimeoutMs := 5000;
+  Migs := DefaultMigrations;
+  SetLength(Migs, 2);   // v1 + v2 only
+  S := TSqliteStore.Create(Cfg, Migs);
+  try
+    AssertTrue('open v2', S.Open(Err));
+    S.EnsureWorkspace('/tmp', Ws, Err);
+  finally
+    S.Free;
+  end;
+
+  S := TSqliteStore.Create(Cfg);
+  try
+    AssertTrue('reopen at v3', S.Open(Err));
+    AssertTrue('find workspace survives', S.FindWorkspace('/tmp', Found, Err));
+    AssertEquals('same workspace', Ws, Found);
+    AssertTrue('mcp table usable', S.ListMcpServers(Rows, Err));
+    AssertEquals('empty', 0, Length(Rows));
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestSaveMcpServerUpserts;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  R: TMcpServerRow;
+  Rows: TMcpServerRowArray;
+begin
+  S := OpenStore;
+  try
+    R := Default(TMcpServerRow);
+    R.Scope := msGlobal;
+    R.Name := 'github';
+    R.Command := 'npx';
+    R.Enabled := True;
+    AssertTrue('insert', S.SaveMcpServer(R, Err));
+    R.Command := 'mcp-server-github';
+    AssertTrue('upsert', S.SaveMcpServer(R, Err));
+    AssertTrue('list', S.ListMcpServers(Rows, Err));
+    AssertEquals('one row (upserted, not duplicated)', 1, Length(Rows));
+    AssertEquals('command updated', 'mcp-server-github', Rows[0].Command);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestLoadMcpServersScoped;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws: Integer;
+  G, W, Other: TMcpServerRow;
+  Rows: TMcpServerRowArray;
+  Ctx: TMcpConfigContext;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp/ws', Ws, Err);
+    G := Default(TMcpServerRow);
+    G.Scope := msGlobal;
+    G.Name := 'global-srv';
+    G.Command := 'g';
+    W := Default(TMcpServerRow);
+    W.Scope := msWorkspace;
+    W.WorkspaceId := Ws;
+    W.Name := 'ws-srv';
+    W.Command := 'w';
+    Other := Default(TMcpServerRow);
+    Other.Scope := msWorkspace;
+    Other.WorkspaceId := Ws + 1000;
+    Other.Name := 'other-srv';
+    Other.Command := 'o';
+    AssertTrue('save global', S.SaveMcpServer(G, Err));
+    AssertTrue('save ws', S.SaveMcpServer(W, Err));
+    AssertTrue('save other', S.SaveMcpServer(Other, Err));
+
+    Ctx.WorkspaceId := Ws;
+    Ctx.AgentId := '';
+    AssertTrue('load', S.LoadMcpServers(Ctx, Rows, Err));
+    AssertEquals('global + this workspace only', 2, Length(Rows));
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestRemoveMcpServer;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  R: TMcpServerRow;
+  Rows: TMcpServerRowArray;
+begin
+  S := OpenStore;
+  try
+    R := Default(TMcpServerRow);
+    R.Scope := msGlobal;
+    R.Name := 'temp';
+    R.Command := 'x';
+    AssertTrue('save', S.SaveMcpServer(R, Err));
+    AssertTrue('remove', S.RemoveMcpServer(R, Err));
+    AssertTrue('list', S.ListMcpServers(Rows, Err));
+    AssertEquals('gone', 0, Length(Rows));
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestMcpArgsEnvRoundTrip;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  R: TMcpServerRow;
+  Rows: TMcpServerRowArray;
+begin
+  S := OpenStore;
+  try
+    R := Default(TMcpServerRow);
+    R.Scope := msGlobal;
+    R.Name := 'args';
+    R.Command := 'cmd';
+    R.Args := ['-y', 'pkg with spaces'];
+    R.Env := ['TOKEN=abc', 'OTHER=x=y'];
+    R.WorkingDir := '/tmp/work';
+    R.ListTimeoutMs := 5000;
+    R.CallTimeoutMs := 60000;
+    AssertTrue('save', S.SaveMcpServer(R, Err));
+    AssertTrue('list', S.ListMcpServers(Rows, Err));
+    AssertEquals('one', 1, Length(Rows));
+    AssertEquals('args count', 2, Length(Rows[0].Args));
+    AssertEquals('arg 1', '-y', Rows[0].Args[0]);
+    AssertEquals('arg 2', 'pkg with spaces', Rows[0].Args[1]);
+    AssertEquals('env count', 2, Length(Rows[0].Env));
+    AssertEquals('env 1', 'TOKEN=abc', Rows[0].Env[0]);
+    AssertEquals('env 2 keeps equals', 'OTHER=x=y', Rows[0].Env[1]);
+    AssertEquals('cwd', '/tmp/work', Rows[0].WorkingDir);
+    AssertEquals('list timeout', 5000, Rows[0].ListTimeoutMs);
+    AssertEquals('call timeout', 60000, Rows[0].CallTimeoutMs);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestSaveMcpServerRejectsInvalid;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  R: TMcpServerRow;
+begin
+  S := OpenStore;
+  try
+    R := Default(TMcpServerRow);
+    R.Scope := msGlobal;
+    R.Name := 'bad name';
+    R.Command := 'x';
+    AssertFalse('rejected', S.SaveMcpServer(R, Err));
+    AssertEquals('invalid argument', Ord(seInvalidArgument), Ord(Err.Code));
   finally
     S.Free;
   end;

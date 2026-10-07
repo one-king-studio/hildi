@@ -18,7 +18,7 @@ interface
 uses
   Classes, SysUtils, SyncObjs,
   hildegard.helper.sqlite, hildegard.helper.approval, hildegard.helper.llm,
-  hildegard.helper.session;
+  hildegard.helper.session, hildegard.helper.mcp.config;
 
 type
   { Stable error codes. seOk is success. }
@@ -113,6 +113,19 @@ type
     function RemoveApproval(const ARule: TApprovalRule;
       out AError: TStoreError): Boolean;
 
+    { MCP server config rows applicable to a context (global + the workspace's
+      + the agent's). No resolution — the caller merges (mcp.config). }
+    function LoadMcpServers(const AContext: TMcpConfigContext;
+      out ARows: TMcpServerRowArray; out AError: TStoreError): Boolean;
+    { Upsert by (scope, workspace_id, agent_id, name). }
+    function SaveMcpServer(const ARow: TMcpServerRow;
+      out AError: TStoreError): Boolean;
+    function RemoveMcpServer(const ARow: TMcpServerRow;
+      out AError: TStoreError): Boolean;
+    { Every row, for management/UI. }
+    function ListMcpServers(out ARows: TMcpServerRowArray;
+      out AError: TStoreError): Boolean;
+
     { Creates a session bound to a workspace and returns its 32-hex id. }
     function CreateSession(AWorkspaceId: Integer; out AId: string;
       out AError: TStoreError): Boolean;
@@ -197,7 +210,7 @@ implementation
 
 uses
   {$ifdef unix}BaseUnix,{$endif}
-  fpjson, jsonparser;
+  Types, fpjson, jsonparser;
 
 const
   DefaultBusyTimeoutMs = 5000;
@@ -224,7 +237,7 @@ end;
 function DefaultMigrations: TMigrationArray;
 begin
   Result := nil;
-  SetLength(Result, 2);
+  SetLength(Result, 3);
   Result[0].Version := 1;
   Result[0].Name := 'session history';
   Result[0].Statements := [
@@ -335,6 +348,28 @@ begin
       'status INTEGER NOT NULL DEFAULT 0, ' +
       'started_at INTEGER NOT NULL, ' +
       'updated_at INTEGER NOT NULL)'
+  ];
+  { v3: MCP server config, scoped global/workspace/agent. Additive. }
+  Result[2].Version := 3;
+  Result[2].Name := 'mcp servers';
+  Result[2].Statements := [
+    'CREATE TABLE mcp_servers (' +
+      'id INTEGER PRIMARY KEY AUTOINCREMENT, ' +
+      'scope INTEGER NOT NULL, ' +
+      'workspace_id INTEGER NOT NULL DEFAULT 0, ' +
+      'agent_id TEXT NOT NULL DEFAULT '''', ' +
+      'name TEXT NOT NULL, ' +
+      'command TEXT NOT NULL, ' +
+      'args TEXT NOT NULL DEFAULT ''[]'', ' +
+      'env TEXT NOT NULL DEFAULT ''[]'', ' +
+      'cwd TEXT NOT NULL DEFAULT '''', ' +
+      'enabled INTEGER NOT NULL DEFAULT 1, ' +
+      'list_timeout_ms INTEGER NOT NULL DEFAULT 0, ' +
+      'call_timeout_ms INTEGER NOT NULL DEFAULT 0, ' +
+      'created_at INTEGER NOT NULL, ' +
+      'UNIQUE (scope, workspace_id, agent_id, name))',
+    'CREATE INDEX idx_mcp_servers_scope ON mcp_servers ' +
+      '(scope, workspace_id, agent_id)'
   ];
 end;
 
@@ -1094,6 +1129,236 @@ begin
       Stmt.BindInt(7, Ord(ARule.AnyParams));
       if Stmt.Step <> SQLITE_DONE then
         Exit(Fail(AError, seError, 'could not remove approval', DbErrorText));
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+{ --- mcp servers (v3) -------------------------------------------------- }
+
+function EncodeMcpStrings(const AValues: TStringArray): string;
+var
+  Arr: TJSONArray;
+  I: Integer;
+begin
+  Arr := TJSONArray.Create;
+  try
+    for I := 0 to High(AValues) do
+      Arr.Add(AValues[I]);
+    Result := Arr.AsJSON;
+  finally
+    Arr.Free;
+  end;
+end;
+
+function DecodeMcpStrings(const AJson: string;
+  out AValues: TStringArray): Boolean;
+var
+  Data: TJSONData;
+  Arr: TJSONArray;
+  I: Integer;
+  Tmp: TStringArray;
+begin
+  AValues := nil;
+  Data := nil;
+  try
+    try
+      Data := GetJSON(AJson);
+    except
+      Exit(False);
+    end;
+    if not (Data is TJSONArray) then
+      Exit(False);
+    Arr := TJSONArray(Data);
+    SetLength(Tmp, Arr.Count);
+    for I := 0 to Arr.Count - 1 do
+      Tmp[I] := Arr.Strings[I];
+    AValues := Tmp;
+    Result := True;
+  finally
+    Data.Free;
+  end;
+end;
+
+function TSqliteStore.LoadMcpServers(const AContext: TMcpConfigContext;
+  out ARows: TMcpServerRowArray; out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+  N: Integer;
+  Row: TMcpServerRow;
+begin
+  AError := OkError;
+  ARows := nil;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb,
+      'SELECT id, scope, workspace_id, agent_id, name, command, args, env, ' +
+      'cwd, enabled, list_timeout_ms, call_timeout_ms, created_at ' +
+      'FROM mcp_servers ' +
+      'WHERE scope = 0 OR (scope = 1 AND workspace_id = ?) ' +
+      'OR (scope = 2 AND agent_id = ? AND ? <> '''')');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not load mcp servers', DbErrorText));
+      Stmt.BindInt(1, AContext.WorkspaceId);
+      Stmt.BindText(2, AContext.AgentId);
+      Stmt.BindText(3, AContext.AgentId);
+      N := 0;
+      while Stmt.Step = SQLITE_ROW do
+      begin
+        Row := Default(TMcpServerRow);
+        Row.Id := Stmt.ColInt(0);
+        Row.Scope := TMcpScope(Stmt.ColInt(1));
+        Row.WorkspaceId := Stmt.ColInt(2);
+        Row.AgentId := Stmt.ColText(3);
+        Row.Name := Stmt.ColText(4);
+        Row.Command := Stmt.ColText(5);
+        DecodeMcpStrings(Stmt.ColText(6), Row.Args);
+        DecodeMcpStrings(Stmt.ColText(7), Row.Env);
+        Row.WorkingDir := Stmt.ColText(8);
+        Row.Enabled := Stmt.ColInt(9) <> 0;
+        Row.ListTimeoutMs := Stmt.ColInt(10);
+        Row.CallTimeoutMs := Stmt.ColInt(11);
+        Row.CreatedAt := Stmt.ColInt64(12);
+        SetLength(ARows, N + 1);
+        ARows[N] := Row;
+        Inc(N);
+      end;
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.SaveMcpServer(const ARow: TMcpServerRow;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+  Msg: string;
+begin
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    if not ValidateMcpServerRow(ARow, Msg) then
+      Exit(Fail(AError, seInvalidArgument, Msg, ''));
+    Stmt := TStmt.Create(FDb,
+      'INSERT INTO mcp_servers (scope, workspace_id, agent_id, name, command, ' +
+      'args, env, cwd, enabled, list_timeout_ms, call_timeout_ms, created_at) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
+      'ON CONFLICT(scope, workspace_id, agent_id, name) DO UPDATE SET ' +
+      'command = excluded.command, args = excluded.args, env = excluded.env, ' +
+      'cwd = excluded.cwd, enabled = excluded.enabled, ' +
+      'list_timeout_ms = excluded.list_timeout_ms, ' +
+      'call_timeout_ms = excluded.call_timeout_ms');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not save mcp server', DbErrorText));
+      Stmt.BindInt(1, Ord(ARow.Scope));
+      Stmt.BindInt(2, ARow.WorkspaceId);
+      Stmt.BindText(3, ARow.AgentId);
+      Stmt.BindText(4, ARow.Name);
+      Stmt.BindText(5, ARow.Command);
+      Stmt.BindText(6, EncodeMcpStrings(ARow.Args));
+      Stmt.BindText(7, EncodeMcpStrings(ARow.Env));
+      Stmt.BindText(8, ARow.WorkingDir);
+      Stmt.BindInt(9, Ord(ARow.Enabled));
+      Stmt.BindInt(10, ARow.ListTimeoutMs);
+      Stmt.BindInt(11, ARow.CallTimeoutMs);
+      Stmt.BindInt64(12, NowMs);
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not save mcp server', DbErrorText));
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.RemoveMcpServer(const ARow: TMcpServerRow;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb,
+      'DELETE FROM mcp_servers WHERE scope = ? AND workspace_id = ? AND ' +
+      'agent_id = ? AND name = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not remove mcp server', DbErrorText));
+      Stmt.BindInt(1, Ord(ARow.Scope));
+      Stmt.BindInt(2, ARow.WorkspaceId);
+      Stmt.BindText(3, ARow.AgentId);
+      Stmt.BindText(4, ARow.Name);
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not remove mcp server', DbErrorText));
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.ListMcpServers(out ARows: TMcpServerRowArray;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+  N: Integer;
+  Row: TMcpServerRow;
+begin
+  AError := OkError;
+  ARows := nil;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb,
+      'SELECT id, scope, workspace_id, agent_id, name, command, args, env, ' +
+      'cwd, enabled, list_timeout_ms, call_timeout_ms, created_at ' +
+      'FROM mcp_servers');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not list mcp servers', DbErrorText));
+      N := 0;
+      while Stmt.Step = SQLITE_ROW do
+      begin
+        Row := Default(TMcpServerRow);
+        Row.Id := Stmt.ColInt(0);
+        Row.Scope := TMcpScope(Stmt.ColInt(1));
+        Row.WorkspaceId := Stmt.ColInt(2);
+        Row.AgentId := Stmt.ColText(3);
+        Row.Name := Stmt.ColText(4);
+        Row.Command := Stmt.ColText(5);
+        DecodeMcpStrings(Stmt.ColText(6), Row.Args);
+        DecodeMcpStrings(Stmt.ColText(7), Row.Env);
+        Row.WorkingDir := Stmt.ColText(8);
+        Row.Enabled := Stmt.ColInt(9) <> 0;
+        Row.ListTimeoutMs := Stmt.ColInt(10);
+        Row.CallTimeoutMs := Stmt.ColInt(11);
+        Row.CreatedAt := Stmt.ColInt64(12);
+        SetLength(ARows, N + 1);
+        ARows[N] := Row;
+        Inc(N);
+      end;
     finally
       Stmt.Free;
     end;
