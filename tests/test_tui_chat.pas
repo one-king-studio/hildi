@@ -17,7 +17,9 @@ type
   private
     FTheme: TTheme;
     FToggles: Integer;
+    FNeedOlder: Integer;
     procedure OnToggle(Sender: TObject);
+    procedure NoteNeedOlder(Sender: TObject);
     function Rc(AX, AY, AW, AH: Integer): TRect;
     function Avail(AW, AH: Integer): TSize;
     function MouseEvent(AX, AY: Integer): TInputEvent;
@@ -55,6 +57,7 @@ type
     procedure TestStreamRemoveDropsOneBlock;
     procedure TestStreamKeepsTheNewestBlockVisible;
     procedure TestStreamReservesTheBottomInset;
+    procedure TestStreamFiresNeedOlderAtTheTop;
     procedure TestStackMaterializesOnlyTheWindow;
     procedure TestStackLayoutDoesNotThrashAcrossMeasureAndArrange;
     procedure TestStreamWidthFollowsTheViewport;
@@ -70,11 +73,17 @@ procedure TTuiChatTest.SetUp;
 begin
   FTheme := DarkTheme;
   FToggles := 0;
+  FNeedOlder := 0;
 end;
 
 procedure TTuiChatTest.OnToggle(Sender: TObject);
 begin
   Inc(FToggles);
+end;
+
+procedure TTuiChatTest.NoteNeedOlder(Sender: TObject);
+begin
+  Inc(FNeedOlder);
 end;
 
 function TTuiChatTest.Rc(AX, AY, AW, AH: Integer): TRect;
@@ -976,6 +985,34 @@ begin
     It.Render(S);
   finally
     It.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestStreamFiresNeedOlderAtTheTop;
+var
+  St: TChatStream;
+  E: TInputEvent;
+  I: Integer;
+begin
+  St := TChatStream.Create(FTheme);
+  try
+    St.OnNeedOlder := NoteNeedOlder;
+    for I := 1 to 40 do
+      St.Add(ckAssistant, '', 'line ' + IntToStr(I));
+    St.Arrange(Rc(0, 0, 30, 6));
+    { At the top, a scroll-up asks the host for older history. }
+    St.ScrollOffset := 0;
+    E := Default(TInputEvent);
+    E.Kind := ikKey;
+    E.Key.Kind := kkUp;
+    St.HandleEvent(E);
+    AssertEquals('fired at the top', 1, FNeedOlder);
+    { A scroll-down is not a request for older history. }
+    E.Key.Kind := kkDown;
+    St.HandleEvent(E);
+    AssertEquals('not on a scroll-down', 1, FNeedOlder);
+  finally
+    St.Free;
   end;
 end;
 
