@@ -5,8 +5,8 @@
 
 ## Overview
 
-Keyframes (keyframes) in one session, a resume window, FTS5 recall, and the
-operator UX. TDD-first. Ordered: build flag → store (keyframes + window + FTS) →
+Checkpoints (checkpoints) in one session, a resume window, FTS5 recall, and the
+operator UX. TDD-first. Ordered: build flag → store (checkpoints + window + FTS) →
 protocol/runtime → TUI.
 
 ## Implementation Tasks
@@ -16,13 +16,13 @@ protocol/runtime → TUI.
 - [x] Add `-DSQLITE_ENABLE_FTS5` to `SQLITE_CCFLAGS` in the Makefile; rebuild
       `libsqlite3.a`; assert `messages_fts` can be created (a smoke test).
 
-### Phase 1: Store — keyframes (`hildegard.helper.store`)
+### Phase 1: Store — checkpoints (`hildegard.helper.store`)
 
-- [x] **Test**: `TestSaveKeyframeAtHwm`, `TestLatestKeyframe`,
-      `TestListKeyframes` in `tests/test_store.pas` — red.
-- [x] **Implement**: migration (v-next) `session_keyframes` table;
-      `SaveKeyframe`/`LatestKeyframe`/`ListKeyframes`.
-- [x] **Test**: `TestQueryActiveMessages` (after-keyframe only; all when none).
+- [x] **Test**: `TestSaveCheckpointAtHwm`, `TestLatestCheckpoint`,
+      `TestListCheckpoints` in `tests/test_store.pas` — red.
+- [x] **Implement**: migration (v-next) `session_checkpoints` table;
+      `SaveCheckpoint`/`LatestCheckpoint`/`ListCheckpoints`.
+- [x] **Test**: `TestQueryActiveMessages` (after-checkpoint only; all when none).
 - [x] **Implement**: `QueryActiveMessages`.
 - [x] **Test**: `TestQueryMessagesBefore` (archived page, oldest first).
 - [x] **Implement**: `QueryMessagesBefore`.
@@ -41,9 +41,9 @@ protocol/runtime → TUI.
 - [x] **Add** `scCheckpoint`, `scCheckpointCommit`; `ekCheckpointReady`,
       `ekCheckpointCommitted`; `TSessionCommand.CheckpointText`.
 - [x] **Test**: `TestCheckpointDraft` (fake transport; session unchanged),
-      `TestCheckpointCommitKeyframes` (runtime).
+      `TestCheckpointCommitCheckpoints` (runtime).
 - [x] **Implement**: `THarnessSession.DraftCheckpoint` (one bounded request);
-      the runtime's `scCheckpoint`/`scCheckpointCommit` handling (keyframe at HWM).
+      the runtime's `scCheckpoint`/`scCheckpointCommit` handling (checkpoint at HWM).
 - [x] **Test**: message count unchanged after a checkpoint.
 
 ### Phase 4: Recall tool
@@ -59,10 +59,10 @@ protocol/runtime → TUI.
       will other command surfaces. This is its own small component, built once.
 - [x] **Checkpoint UX**: the tool-selection surface offers `/checkpoint` → the agent
       drafts and commits in one action; refuse empty.
-- [x] **Resume rendering**: prepend the latest keyframe's summary as the
+- [x] **Resume rendering**: prepend the latest checkpoint's summary as the
       segment's opening block.
-- [ ] **Back-pagination**: load the prior segment on scroll; a "— checkpoint —"
-      boundary marker.
+- [x] **Back-pagination**: load the prior segment on scroll; a "— checkpoint —"
+      boundary marker. Implemented; the trigger is tested, the anchor is not.
 
       Design (checked against the current code — `TChatStream` has `Add`/`Clear`/
       `ItemAt`, and `TScrollContainer` exposes `ScrollY`/`MaxScrollY`/`ScrollTo`):
@@ -79,17 +79,19 @@ protocol/runtime → TUI.
         `ScrollOffset := ScrollOffset + (ContentHeight_after - ContentHeight_before)`
         so the visible content stays put and the operator can keep scrolling up.
       - The marker is a divider-style block (`ckTurn`), "— checkpoint —".
-- [ ] **Nudge**: hint `/checkpoint` past the threshold (never triggers). The
-      context percentage is already computed for the session header; surface the
-      hint in the CTA/status line when it crosses the threshold.
-- [ ] **Test**: the nudge threshold; the boundary renders; back-pagination
-      prepends a page and keeps the scroll anchor.
+- [x] **Nudge**: hint `/checkpoint` past the threshold (never triggers).
+      Implemented at 80% in the CTA hints (`UpdateStats`); not yet tested.
+- [x] **Test**: the trigger (`TestStreamFiresNeedOlderAtTheTop`), the metric
+      (`TestSessionTotalsContextIsTheLatestRequest`), and the checkpoint turn
+      (`TestCheckpointTurnRecords`).
+- [ ] **Test**: the back-pagination anchor restore, the header `page N`, and the
+      nudge threshold.
 
 ### Phase 6: Validation
 
-- [ ] `make test`, `make test-leak`, `make check` — green.
-- [ ] **Manual**: a live session checkpoint — prompt shrinks, message count
-      unchanged, back-pagination shows the archived segment, recall finds an
+- [x] `make test`, `make test-leak`, `make check` — green (1021 tests).
+- [ ] **Manual** (operator): a live session checkpoint — prompt shrinks, message
+      count unchanged, back-pagination shows the archived segment, recall finds an
       archived message.
 
 ## Redesign: the checkpoint as a turn (DO THIS)
@@ -143,7 +145,7 @@ active window), FTS recall, `Compose` resume, the palette/tray.
 
 ```
 Makefile                                  (-DSQLITE_ENABLE_FTS5)
-src/hildegard.helper.store.pas            (keyframes, window, FTS)
+src/hildegard.helper.store.pas            (checkpoints, window, FTS)
 src/hildegard.helper.session.protocol.pas (checkpoint verbs/events)
 src/hildegard.helper.session.runtime.pas  (checkpoint handling)
 src/hildegard.helper.harness.session.pas  (DraftCheckpoint)
@@ -154,9 +156,9 @@ tests/test_store.pas, test_session_runtime.pas, test_recall_tool.pas
 
 ## Notes & Considerations
 
-- **Non-destructive is the invariant**: a checkpoint inserts one keyframe row; no
+- **Non-destructive is the invariant**: a checkpoint inserts one checkpoint row; no
   message is ever deleted/rewritten. A test asserts the message count is
   unchanged across a checkpoint.
 - **FTS drift**: index in the append transaction; backfill on migration.
-- **Keyframe density**: manual-only in v1.
+- **Checkpoint density**: manual-only in v1.
 - Record deviations from the SPEC here.

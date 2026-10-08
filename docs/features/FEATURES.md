@@ -99,11 +99,14 @@ in `../guidelines/spec-driven-development.md`:
 
 - **Context Checkpoint** (`Context_Checkpoint/FEATURE.md`) — replace destructive
   compaction with a **recoverable checkpoint** in one continuous session: a
-  checkpoint archives the messages before it behind a **keyframe**, resume
-  starts from the latest keyframe forward, and the archived messages stay intact
-  (back-pagination) and are recallable via whole-session SQLite FTS5 weighted
-  toward tool reasons/names. One session id. Implemented (store, protocol,
-  runtime, recall, palette); the TUI resume/back-pagination is in progress.
+  checkpoint archives the messages before it, resume starts from the latest
+  checkpoint forward, and the archived messages stay intact (back-pagination) and
+  are recallable via whole-session SQLite FTS5 weighted toward tool
+  reasons/names. One session id. Implemented: the checkpoint is an ordinary
+  ambient turn whose reply is the document, recorded at the boundary; resume and
+  the TUI use the active window; back-pagination, the `page N` header, the
+  per-page context metric, and the nudge are in. The live manual sign-off is
+  pending.
 
 ## Existing Behaviour (to be documented)
 

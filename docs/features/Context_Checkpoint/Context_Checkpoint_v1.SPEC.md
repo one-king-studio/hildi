@@ -2,7 +2,7 @@
 
 **Related Feature:** [FEATURE.md](FEATURE.md)
 
-**Depends on:** `hildegard.helper.store` (messages, keyframes, FTS),
+**Depends on:** `hildegard.helper.store` (messages, checkpoints, FTS),
 `hildegard.helper.session.protocol`, `hildegard.helper.session.runtime`,
 `hildegard.helper.harness.session` / `view`, `hildegard.helper.tui.app`,
 `hildegard.helper.recall.tool`.
@@ -24,12 +24,12 @@ the turn boundary when the turn completes.
 
 ### Functional
 
-- [ ] **Store: keyframes.** A `session_keyframes` table (migration) with
-      `(session_id, seq, summary, created_at)`. `SaveKeyframe` records a
-      keyframe at the current message high-water mark; `LatestKeyframe` returns
-      the most recent; `ListKeyframes` returns all (for a chain view).
+- [ ] **Store: checkpoints.** A `session_checkpoints` table (migration) with
+      `(session_id, seq, summary, created_at)`. `SaveCheckpoint` records a
+      checkpoint at the current message high-water mark; `LatestCheckpoint` returns
+      the most recent; `ListCheckpoints` returns all (for a chain view).
 - [ ] **Store: resume window.** `QueryActiveMessages(session, out msgs)` returns
-      messages with `seq > latestKeyframe.seq` (or all when no keyframe).
+      messages with `seq > latestCheckpoint.seq` (or all when no checkpoint).
       `QueryMessagesBefore(session, seq, limit, out msgs)` returns the archived
       page for back-pagination.
 - [ ] **Store: FTS5.** A `messages_fts` virtual table (FTS5) over message
@@ -49,7 +49,7 @@ the turn boundary when the turn completes.
       session's **active window** becomes "summary + messages after the boundary".
       Nothing is deleted. A failed or empty turn records nothing.
 - [ ] **Resume**: opening/attaching a session loads the active window — the
-      latest keyframe's summary prepended, then messages after its `seq`. The
+      latest checkpoint's summary prepended, then messages after its `seq`. The
       TUI renders the summary as the segment's opening block.
 - [ ] **Back-pagination**: the TUI can load the previous segment
       (`QueryMessagesBefore`) with a visible "— checkpoint —" boundary.
@@ -61,7 +61,7 @@ the turn boundary when the turn completes.
 
 ### Non-Functional
 
-- [ ] **Non-destructive**: a checkpoint inserts one keyframe row; no message is
+- [ ] **Non-destructive**: a checkpoint inserts one checkpoint row; no message is
       deleted, rewritten, or reordered.
 - [ ] Indexing is incremental and in the append transaction (no drift).
 - [ ] `make check` green; leak-clean.
@@ -72,26 +72,26 @@ the turn boundary when the turn completes.
 unit hildegard.helper.store;   // additions
 
 type
-  TKeyframeRecord = record
+  TCheckpointRecord = record
     SessionId: string;
     Seq: Int64;              // the boundary: messages with seq <= Seq are archived
     Summary: string;         // the checkpoint document (prose)
     CreatedAtMs: Int64;
   end;
-  TKeyframeArray = array of TKeyframeRecord;
+  TCheckpointArray = array of TCheckpointRecord;
 
   TSqliteStore = class
     // ... existing ...
-    { Record a keyframe at the session's current message HWM. }
-    function SaveKeyframe(const ASessionId, ASummary: string;
+    { Record a checkpoint at the session's current message HWM. }
+    function SaveCheckpoint(const ASessionId, ASummary: string;
       out ASeq: Int64; out AError: TStoreError): Boolean;
-    { The most recent keyframe; seNotFound when none. }
-    function LatestKeyframe(const ASessionId: string; out ASnap: TKeyframeRecord;
+    { The most recent checkpoint; seNotFound when none. }
+    function LatestCheckpoint(const ASessionId: string; out ASnap: TCheckpointRecord;
       out AError: TStoreError): Boolean;
-    { All keyframes, oldest first. }
-    function ListKeyframes(const ASessionId: string; out ASnaps: TKeyframeArray;
+    { All checkpoints, oldest first. }
+    function ListCheckpoints(const ASessionId: string; out ASnaps: TCheckpointArray;
       out AError: TStoreError): Boolean;
-    { Active window: messages with seq > latest keyframe seq (all when none). }
+    { Active window: messages with seq > latest checkpoint seq (all when none). }
     function QueryActiveMessages(const ASessionId: string;
       out AMessages: TMessageRecordArray; out AError: TStoreError): Boolean;
     { Archived page for back-pagination: the last ALimit messages with
@@ -121,11 +121,11 @@ type
 
 ### Data Contracts
 
-- **Keyframe boundary.** `Seq` = the message HWM at checkpoint time. The active
+- **Checkpoint boundary.** `Seq` = the message HWM at checkpoint time. The active
   window is strictly `seq > Seq`; the archived set is `seq <= Seq`.
 - **Summary block.** On resume, the summary is presented as the opening context
   of the segment (a system/ambient block). It is **not** a stored message row
-  (keeps role counts honest); it comes from the keyframe.
+  (keeps role counts honest); it comes from the checkpoint.
 - **FTS schema** (v1):
   ```sql
   CREATE VIRTUAL TABLE messages_fts USING fts5(
@@ -151,24 +151,24 @@ type
 ### Prior Art & Reuse
 
 - **`QueryMessages` / `MessageHighWaterMark`** — the message reads the window
-  builds on; the keyframe is anchored to the HWM.
+  builds on; the checkpoint is anchored to the HWM.
 - **`AppendMessage`** — where FTS indexing hooks in.
 - **`recall_tool_result`** — the recall surface; extended to FTS.
 - **Runtime Lifecycle** — unchanged; the session keeps running (no switch, no
   runtime churn).
-- **Genuine gap:** the keyframe table, the active-window queries, the FTS table
+- **Genuine gap:** the checkpoint table, the active-window queries, the FTS table
   + build flag, the protocol verbs, and the TUI UX.
 
 ### Component Boundaries
 
-- **Responsibilities:** keyframe persistence, the active window, FTS recall, the
+- **Responsibilities:** checkpoint persistence, the active window, FTS recall, the
   checkpoint UX.
 - **Dependencies:** the store (SQL), the loop (draft), the TUI.
-- **Side effects:** inserts a keyframe row and FTS rows; never deletes.
+- **Side effects:** inserts a checkpoint row and FTS rows; never deletes.
 
 ## Validation Rules
 
-- A keyframe on a session with no messages past the last keyframe is refused.
+- A checkpoint on a session with no messages past the last checkpoint is refused.
 - An empty/whitespace summary is refused.
 
 ## Error Handling
@@ -181,9 +181,9 @@ type
 
 ### Unit Tests (`tests/test_store.pas`)
 
-- [ ] `SaveKeyframe` records at the HWM; `LatestKeyframe`/`ListKeyframes` return
-      it; a second keyframe lists after the first.
-- [ ] `QueryActiveMessages` returns only messages after the latest keyframe;
+- [ ] `SaveCheckpoint` records at the HWM; `LatestCheckpoint`/`ListCheckpoints` return
+      it; a second checkpoint lists after the first.
+- [ ] `QueryActiveMessages` returns only messages after the latest checkpoint;
       all messages when none.
 - [ ] `QueryMessagesBefore` returns the archived page, oldest first.
 - [ ] `SearchMessages` finds an archived message by `tool_reason`; a
@@ -210,7 +210,7 @@ type
 
 ## Security Considerations
 
-- Driver-only checkpoint; the keyframe summary is the agent-generated document.
+- Driver-only checkpoint; the checkpoint summary is the agent-generated document.
 - FTS queries are parameterized (no injection via the query string; the MATCH
   term is bound).
 
@@ -221,5 +221,5 @@ type
 
 ## Future Considerations
 
-- Structured memory (a separate feature); automatic checkpoint; a keyframe browser;
+- Structured memory (a separate feature); automatic checkpoint; a checkpoint browser;
   archived-only recall scope (a query flag).
