@@ -235,7 +235,7 @@ var
 begin
   Result := nil;
   if (FStore <> nil) and (FSessionId <> '') then
-    FStore.QueryMessages(FSessionId, Result, Err);
+    FStore.QueryActiveMessages(FSessionId, Result, Err);
 end;
 
 function TSessionView.LastTurn: TTurnRecord;

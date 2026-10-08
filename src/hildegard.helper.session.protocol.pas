@@ -40,7 +40,7 @@ type
     ekAmbient, ekSubagent, ekSubagentAsk,
     { Context checkpoint: a draft is ready (Text), and a checkpoint was committed
       (TurnSeq = the checkpoint boundary seq). Appended last. }
-    ekCheckpointReady, ekCheckpointCommitted);
+    ekCheckpointCommitted);
 
   { One streamed event. A flat record with optional fields, the same shape as
     TTurnEvent: only the fields named by Kind are meaningful. }
@@ -86,7 +86,7 @@ type
     scAbortSubagent, scReleaseSubagent,
     { Context checkpoint: request a draft, then commit an edited one. Driver-only.
       Appended last so stored ordinals are unchanged. }
-    scCheckpoint, scCheckpointCommit);
+    scCheckpoint);
 
   { One client command. Id is echoed in the reply. }
   TSessionCommand = record
@@ -99,8 +99,7 @@ type
     Choice: TApprovalChoice;    // approve
     { The child session an abort/release subagent command acts on. }
     SessionId: string;
-    { scCheckpointCommit: the (edited) checkpoint document to checkpoint. }
-    CheckpointText: string;
+    { scCheckpoint: no payload; it starts a checkpoint turn. }
   end;
 
   TSessionHello = record
@@ -182,7 +181,7 @@ const
     'drive_requested', 'drive_granted', 'drive_released',
     'turn_finished', 'error', 'gap', 'loop_exited', 'reasoning_done',
     'tool_output', 'ambient', 'subagent', 'subagent_ask',
-    'checkpoint_ready', 'checkpoint_committed');
+    'checkpoint_committed');
 
   MessageKindNames: array[TSessionMessageKind] of string = (
     'hello', 'attached', 'event', 'reply', 'detached', 'error',
@@ -193,7 +192,7 @@ const
   CommandKindNames: array[TSessionCommandKind] of string = (
     'attach', 'detach', 'prompt', 'approve', 'interrupt',
     'claim_drive', 'release_drive', 'ping', 'shutdown',
-    'abort_subagent', 'release_subagent', 'checkpoint', 'checkpoint_commit');
+    'abort_subagent', 'release_subagent', 'checkpoint');
 
 { --- enum <-> wire ------------------------------------------------------ }
 
@@ -575,8 +574,6 @@ begin
         PutStr(O, 'reason', E.Ask.Reason);
         O.Add('options', EncodeOptions(E.Ask.Options));
       end;
-    ekCheckpointReady:
-      PutStr(O, 'text', E.Text);
     ekCheckpointCommitted:
       PutInt(O, 'turn_seq', E.TurnSeq);
   end;
@@ -689,8 +686,6 @@ begin
         E.Ask.Reason := OptStr(O, 'reason');
         DecodeOptions(O, E.Ask);
       end;
-    ekCheckpointReady:
-      E.Text := OptStr(O, 'text');
     ekCheckpointCommitted:
       E.TurnSeq := OptInt64(O, 'turn_seq', 0);
   end;
@@ -712,8 +707,6 @@ begin
       end;
     scAbortSubagent, scReleaseSubagent:
       PutStr(O, 'session', C.SessionId);
-    scCheckpointCommit:
-      PutStr(O, 'text', C.CheckpointText);
     scAttach, scDetach, scInterrupt, scClaimDrive, scReleaseDrive, scPing,
     scShutdown, scCheckpoint:
       ;   // no payload beyond the name
@@ -748,8 +741,6 @@ begin
       end;
     scAbortSubagent, scReleaseSubagent:
       C.SessionId := OptStr(O, 'session');
-    scCheckpointCommit:
-      C.CheckpointText := OptStr(O, 'text');
     scAttach, scDetach, scInterrupt, scClaimDrive, scReleaseDrive, scPing,
     scShutdown, scCheckpoint:
       ;

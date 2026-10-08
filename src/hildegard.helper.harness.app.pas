@@ -22,6 +22,7 @@ uses
   hildegard.helper.tui.panel, hildegard.helper.tui.theme,
   hildegard.helper.tui.app, hildegard.helper.harness.turn,
   hildegard.helper.harness.driver, hildegard.helper.harness.view,
+  hildegard.helper.store,
   hildegard.helper.harness.stats, hildegard.helper.session,
   hildegard.helper.harness.subagent, hildegard.helper.harness.subagent.spy,
   hildegard.helper.tui.sidebar, hildegard.helper.tui.list,
@@ -497,6 +498,8 @@ procedure THarnessApp.RenderHistory;
 var
   History: TMessageRecordArray;
   Turns: TTurnRecordArray;
+  Checkpoint: TCheckpointRecord;
+  StoreErr: TStoreError;
   I, Head, CurrentTurn: Integer;
   Rec: TMessageRecord;
   ToolBlocks: array of TChatItem;
@@ -522,6 +525,13 @@ begin
   Head := 0;
   CurrentTurn := 0;
   ToolBlocks := nil;
+  { The active window starts at the latest checkpoint. Render its document as the
+    segment's opening block, so the operator sees what the agent was briefed with
+    (the archived messages remain reachable by back-pagination). }
+  Checkpoint := Default(TCheckpointRecord);
+  if (FSession.Store <> nil) and
+    FSession.Store.LatestCheckpoint(FSession.SessionId, Checkpoint, StoreErr) then
+    FPanel.Stream.Add(ckAmbient, 'checkpoint', Checkpoint.Summary);
   for I := 0 to High(History) do
   begin
     Rec := History[I];
@@ -860,9 +870,10 @@ begin
       HandleSubagentEvent(E);
     teCheckpointCommitted:
       begin
-        { A checkpoint was recorded; show it as an ambient note. }
-        FPanel.Stream.Add(ckAmbient, '',
-          Format('checkpoint recorded (at seq %d)', [E.ElapsedMs]));
+        { A checkpoint was recorded: the active window is now the document plus
+          everything after the boundary. Rebuild the transcript from it. }
+        FPanel.Stream.Clear;
+        RenderHistory;
         FApp.Invalidate;
       end;
     teDone:

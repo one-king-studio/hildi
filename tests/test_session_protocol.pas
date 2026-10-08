@@ -161,8 +161,6 @@ begin
         AEvent.Ask.Options[0].Key := 'once';
         AEvent.Ask.Options[0].Caption := 'Allow once';
       end;
-    ekCheckpointReady:
-      AEvent.Text := 'the checkpoint document';
     ekCheckpointCommitted:
       AEvent.TurnSeq := 42;
   end;

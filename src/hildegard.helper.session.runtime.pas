@@ -132,8 +132,6 @@ type
     { Context checkpoint: draft a summary, then commit it as a checkpoint. }
     procedure HandleCheckpoint(AClient: TClientConn;
       const ACommand: TSessionCommand);
-    procedure HandleCheckpointCommit(AClient: TClientConn;
-      const ACommand: TSessionCommand);
     procedure HandlePrompt(AClient: TClientConn;
       const ACommand: TSessionCommand);
     procedure HandleApprove(AClient: TClientConn;
@@ -830,8 +828,6 @@ begin
       ReplyTo(AClient, ACommand.Id, True, '');
     scCheckpoint:
       HandleCheckpoint(AClient, ACommand);
-    scCheckpointCommit:
-      HandleCheckpointCommit(AClient, ACommand);
     scShutdown:
       begin
         if AClient.Role <> srDrive then
@@ -898,37 +894,6 @@ begin
     Broadcast(E);
     Exit;
   end;
-  E := EmitEvent(ekCheckpointCommitted);
-  E.TurnSeq := Seq;
-  E.Text := 'checkpoint committed';
-  Broadcast(E);
-end;
-
-procedure TSessionRuntime.HandleCheckpointCommit(AClient: TClientConn;
-  const ACommand: TSessionCommand);
-var
-  Seq: Int64;
-  Err: TStoreError;
-  E: TSessionEvent;
-begin
-  if AClient.Role <> srDrive then
-  begin
-    ReplyTo(AClient, ACommand.Id, False, 'not_driver');
-    Exit;
-  end;
-  if Trim(ACommand.CheckpointText) = '' then
-  begin
-    ReplyTo(AClient, ACommand.Id, False, 'empty_checkpoint');
-    Exit;
-  end;
-  if (FSession.View.Store = nil) or
-    not FSession.View.Store.SaveCheckpoint(FSessionId, ACommand.CheckpointText, Seq,
-      Err) then
-  begin
-    ReplyTo(AClient, ACommand.Id, False, 'checkpoint_failed');
-    Exit;
-  end;
-  ReplyTo(AClient, ACommand.Id, True, '');
   E := EmitEvent(ekCheckpointCommitted);
   E.TurnSeq := Seq;
   E.Text := 'checkpoint committed';

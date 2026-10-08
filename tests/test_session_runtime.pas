@@ -100,7 +100,7 @@ type
     procedure TestClaimDriveNeedsConsent;
     procedure TestIdleExit;
     procedure TestRecoversInterruptedTurn;
-    procedure TestCheckpointCommitRecords;
+    procedure TestCheckpointTurnRecords;
     procedure TestShutdownCommandStopsRuntime;
     procedure TestShutdownFromNonDriverRefused;
     procedure TestNoClientsExitAfterGrace;
@@ -925,7 +925,7 @@ begin
   end;
 end;
 
-procedure TSessionRuntimeTest.TestCheckpointCommitRecords;
+procedure TSessionRuntimeTest.TestCheckpointTurnRecords;
 var
   Id: string;
   Fake: TFakeTransport;
@@ -947,6 +947,9 @@ begin
   try
     { A turn so the session has messages to hand off. }
     Fake.AddResponse([TextDelta('hello'), FinishFrame('stop'), DoneFrame]);
+    { The checkpoint turn's assistant reply is the checkpoint document. }
+    Fake.AddResponse([TextDelta('Objective: test the checkpoint.'),
+      FinishFrame('stop'), DoneFrame]);
     Rt := MakeRuntime(Id, Fake);
     Th := TRuntimeThread.Create(Rt);
     try
@@ -964,11 +967,12 @@ begin
         { Wait for the turn to finish so the message is committed. }
         AssertTrue('turn finished', WaitCount(Sink, ekTurnFinished, 1, 5000));
         Cmd := Default(TSessionCommand);
-        Cmd.Kind := scCheckpointCommit;
+        Cmd.Kind := scCheckpoint;
         Cmd.Id := 'h1';
-        Cmd.CheckpointText := 'Objective: test the checkpoint.';
-        AssertTrue('commit', Client.SendAndWait(Cmd, 3000, Reply));
+        AssertTrue('checkpoint', Client.SendAndWait(Cmd, 3000, Reply));
         AssertTrue('reply ok', Reply.Ok);
+        AssertTrue('committed',
+          WaitCount(Sink, ekCheckpointCommitted, 1, 5000));
       finally
         Client.Free;
         Sink := nil;

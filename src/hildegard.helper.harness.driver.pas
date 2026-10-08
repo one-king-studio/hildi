@@ -225,9 +225,6 @@ begin
         E.Kind := teCheckpointCommitted;
         E.ElapsedMs := AEvent.TurnSeq;   { the checkpoint boundary seq }
       end;
-    ekCheckpointReady:
-      { The draft is shown by the runtime's own flow; nothing to render. }
-      Exit(False);
   else
     { loop_started, turn_started, approval_resolved, drive_*, gap, loop_exited:
       nothing for the UI to render; a gap is resynced from the ledger. Do NOT
