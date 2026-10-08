@@ -10,7 +10,8 @@ interface
 
 uses
   hildegard.helper.approval, hildegard.helper.harness.turn,
-  hildegard.helper.harness.driver, hildegard.helper.harness.session;
+  hildegard.helper.harness.driver, hildegard.helper.harness.session,
+  hildegard.helper.store;
 
 { The in-process driver over a session that has a built loop. }
 function LocalDriver(ASession: THarnessSession): ISessionDriver;
@@ -34,6 +35,7 @@ type
     procedure AnswerAsk(const AAskRef: string; const AChoice: TApprovalChoice);
     procedure AbortSubagent(const ASessionId: string);
     procedure ReleaseSubagent(const ASessionId: string);
+    procedure Handoff;
     function PopEvent(out AEvent: TTurnEvent): Boolean;
     procedure Close;
   end;
@@ -94,6 +96,33 @@ end;
 
 procedure TLocalDriver.ReleaseSubagent(const ASessionId: string);
 begin
+end;
+
+procedure TLocalDriver.Handoff;
+var
+  Text, Err: string;
+  Seq: Int64;
+  StoreErr: TStoreError;
+  E: TTurnEvent;
+begin
+  { The in-process path drafts and snapshots directly (no wire round-trip). }
+  if not FSession.DraftHandoff(Text, Err) then
+  begin
+    E := Default(TTurnEvent);
+    E.Kind := teError;
+    E.Text := 'handoff draft failed';
+    E.Detail := Err;
+    FSession.Queue.Push(E);
+    Exit;
+  end;
+  if FSession.View.Store.SaveSnapshot(FSession.View.SessionId, Text, Seq,
+    StoreErr) then
+  begin
+    E := Default(TTurnEvent);
+    E.Kind := teHandoffCommitted;
+    E.ElapsedMs := Seq;   { carry the snapshot boundary seq }
+    FSession.Queue.Push(E);
+  end;
 end;
 
 function TLocalDriver.PopEvent(out AEvent: TTurnEvent): Boolean;

@@ -850,6 +850,8 @@ procedure TSessionRuntime.HandleHandoff(AClient: TClientConn;
   const ACommand: TSessionCommand);
 var
   Text, Err: string;
+  Seq: Int64;
+  StoreErr: TStoreError;
   E: TSessionEvent;
 begin
   if AClient.Role <> srDrive then
@@ -858,6 +860,7 @@ begin
     Exit;
   end;
   ReplyTo(AClient, ACommand.Id, True, '');
+  { One action (no edit step): draft the handoff, then record it as a snapshot. }
   if not FSession.DraftHandoff(Text, Err) then
   begin
     E := EmitEvent(ekError);
@@ -868,6 +871,19 @@ begin
   end;
   E := EmitEvent(ekHandoffReady);
   E.Text := Text;
+  Broadcast(E);
+  if (FSession.View.Store = nil) or
+    not FSession.View.Store.SaveSnapshot(FSessionId, Text, Seq, StoreErr) then
+  begin
+    E := EmitEvent(ekError);
+    E.Text := 'handoff snapshot failed';
+    E.Detail := StoreErr.Message;
+    Broadcast(E);
+    Exit;
+  end;
+  E := EmitEvent(ekHandoffCommitted);
+  E.TurnSeq := Seq;
+  E.Text := 'handoff committed';
   Broadcast(E);
 end;
 

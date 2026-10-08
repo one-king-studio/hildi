@@ -35,7 +35,10 @@ type
     { Subagent events, appended last so stored ordinals are unchanged:
       teSubagent is a roster update; teSubagentAsk is a child's approval ask
       relayed up; teAmbient is a delivered async-task result. }
-    teSubagent, teSubagentAsk, teAmbient
+    teSubagent, teSubagentAsk, teAmbient,
+    { Context handoff: a snapshot was recorded (ElapsedMs carries its boundary
+      seq). Appended last so stored ordinals are unchanged. }
+    teHandoffCommitted
   );
 
   TTurnEvent = record

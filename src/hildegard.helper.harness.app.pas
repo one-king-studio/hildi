@@ -17,6 +17,7 @@ uses
   hildegard.helper.tui.surface, hildegard.helper.tui.widget,
   hildegard.helper.tui.text, hildegard.helper.tui.chat,
   hildegard.helper.tui.compose, hildegard.helper.tui.chatpanel,
+  hildegard.helper.tui.palette,
   hildegard.helper.tui.approvalmodal,
   hildegard.helper.tui.panel, hildegard.helper.tui.theme,
   hildegard.helper.tui.app, hildegard.helper.harness.turn,
@@ -135,6 +136,11 @@ type
     procedure SyncBusy;
     procedure OnLoop;
     procedure Invalidate(Sender: TObject);
+    { The compose changed: show/hide and filter the command palette. }
+    procedure ComposeChanged(Sender: TObject);
+    { Run a command from the palette. }
+    procedure RunCommand(const AName: string);
+    function DefaultCommands: TCommandArray;
     function GetModalActive: Boolean;
     function GetPromptActive: Boolean;
     procedure Quit(Sender: TObject);
@@ -323,7 +329,11 @@ begin
   FPanel.Stream.OnToggle := Invalidate;
   FPanel.Stream.OnChange := Invalidate;
   FPanel.Compose.OnSubmit := Submit;
-  FPanel.Compose.OnChange := Invalidate;
+  FPanel.Compose.OnChange := ComposeChanged;
+  { The command palette: registered commands, shown when the compose starts
+    with '/'. }
+  FPanel.Palette.SetCommands(DefaultCommands);
+  FPanel.Palette.OnRun := RunCommand;
   { The session id and stats live on the messages panel's top border; the status
     bar keeps the workspace. The toolbar holds the run state and the hints. }
   FStatusText := FSession.WorkspaceRoot;
@@ -347,6 +357,43 @@ end;
 procedure THarnessApp.Invalidate(Sender: TObject);
 begin
   UpdateCta;
+  FApp.Invalidate;
+end;
+
+{ The registered commands. The palette is the entry point; commands are not
+  keybindings. }
+function THarnessApp.DefaultCommands: TCommandArray;
+begin
+  Result := nil;
+  SetLength(Result, 1);
+  Result[0].Name := 'handoff';
+  Result[0].Description := 'hand off this session (archive context)';
+end;
+
+procedure THarnessApp.ComposeChanged(Sender: TObject);
+var
+  Text: string;
+begin
+  UpdateCta;
+  Text := string(FPanel.Compose.Text);
+  { The palette shows while the box holds a lone '/command' token. }
+  if (Text <> '') and (Text[1] = '/') and (Pos(' ', Text) = 0) and
+    (Pos(#10, Text) = 0) then
+  begin
+    FPanel.Palette.Filter(Text);
+    FPanel.SetPaletteActive(True);
+  end
+  else
+    FPanel.SetPaletteActive(False);
+  FApp.Invalidate;
+end;
+
+procedure THarnessApp.RunCommand(const AName: string);
+begin
+  FPanel.SetPaletteActive(False);
+  FPanel.Compose.Clear;
+  if (AName = 'handoff') and (FDriver <> nil) then
+    FDriver.Handoff;
   FApp.Invalidate;
 end;
 
@@ -804,6 +851,13 @@ begin
       end;
     teSubagent, teSubagentAsk, teAmbient:
       HandleSubagentEvent(E);
+    teHandoffCommitted:
+      begin
+        { A handoff snapshot was recorded; show it as an ambient note. }
+        FPanel.Stream.Add(ckAmbient, '',
+          Format('handoff recorded (snapshot at seq %d)', [E.ElapsedMs]));
+        FApp.Invalidate;
+      end;
     teDone:
       begin
         { A successful loop ends with its metrics. }

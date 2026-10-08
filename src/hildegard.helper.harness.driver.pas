@@ -33,6 +33,8 @@ type
     procedure AbortSubagent(const ASessionId: string);
     { Release a subagent by its session id (detach without aborting). }
     procedure ReleaseSubagent(const ASessionId: string);
+    { Context handoff: ask the runtime to draft and commit a snapshot. }
+    procedure Handoff;
     { UI thread: pop the next event, if any. }
     function PopEvent(out AEvent: TTurnEvent): Boolean;
     { Release the connection and join any thread. Idempotent. }
@@ -96,6 +98,7 @@ type
     procedure AnswerAsk(const AAskRef: string; const AChoice: TApprovalChoice);
     procedure AbortSubagent(const ASessionId: string);
     procedure ReleaseSubagent(const ASessionId: string);
+    procedure Handoff;
     function PopEvent(out AEvent: TTurnEvent): Boolean;
     procedure Close;
   end;
@@ -217,6 +220,14 @@ begin
         E.Text := AEvent.Text;
         E.ElapsedMs := AEvent.ElapsedMs;
       end;
+    ekHandoffCommitted:
+      begin
+        E.Kind := teHandoffCommitted;
+        E.ElapsedMs := AEvent.TurnSeq;   { the snapshot boundary seq }
+      end;
+    ekHandoffReady:
+      { The draft is shown by the runtime's own flow; nothing to render. }
+      Exit(False);
   else
     { loop_started, turn_started, approval_resolved, drive_*, gap, loop_exited:
       nothing for the UI to render; a gap is resynced from the ledger. Do NOT
@@ -361,6 +372,12 @@ end;
 procedure TRemoteDriver.ReleaseSubagent(const ASessionId: string);
 begin
   SendCommand(scReleaseSubagent, '', '', Default(TApprovalChoice), ASessionId);
+end;
+
+procedure TRemoteDriver.Handoff;
+begin
+  { One action: the runtime drafts the handoff and records the snapshot. }
+  SendCommand(scHandoff, '', '', Default(TApprovalChoice), '');
 end;
 
 function TRemoteDriver.PopEvent(out AEvent: TTurnEvent): Boolean;

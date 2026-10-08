@@ -20,7 +20,7 @@ uses
   hildegard.helper.tui.text, hildegard.helper.tui.panel,
   hildegard.helper.tui.theme, hildegard.helper.tui.chat,
   hildegard.helper.tui.grapheme,
-  hildegard.helper.tui.compose;
+  hildegard.helper.tui.compose, hildegard.helper.tui.palette;
 
 type
   { What the run is doing, shown at the left of the toolbar. psThinking and
@@ -37,6 +37,8 @@ type
     FStateBlock: TTextBlock;
     FHintsBlock: TTextBlock;
     FCompose: TComposeBox;
+    FPalette: TCommandPalette;
+    FPaletteActive: Boolean;
     FStatus: TTextBlock;
     FStats: TTextBlock;
     FStatusText: string;
@@ -61,6 +63,11 @@ type
     function Animating: Boolean; override;
     property Stream: TChatStream read FStream;
     property Compose: TComposeBox read FCompose;
+    { The typeahead command palette shown above the composer. }
+    property Palette: TCommandPalette read FPalette;
+    { Show or hide the palette above the composer. }
+    procedure SetPaletteActive(AValue: Boolean);
+    function PaletteActive: Boolean;
     { The left part of the status row (the workspace). }
     procedure SetStatus(const AText: string);
     { The right-aligned metrics line, sharing the status row. }
@@ -192,6 +199,9 @@ begin
 
   FCompose := TComposeBox.Create(ATheme, AInfo);
 
+  FPalette := TCommandPalette.Create(ATheme);
+  FPaletteActive := False;
+
   FStatus := TTextBlock.Create([], wmNone);
   FStats := TTextBlock.Create([], wmNone);
   FStats.Align := taRight;
@@ -209,6 +219,7 @@ begin
   FMessages.Free;
   FCta.Free;
   FCompose.Free;
+  FPalette.Free;
   FStatus.Free;
   FStats.Free;
   inherited Destroy;
@@ -233,7 +244,7 @@ end;
 
 procedure TChatPanel.Arrange(const ABounds: TRect);
 var
-  MessagesH, ComposeH, MaxH, ComposeY, ChromeW, ChromeX: Integer;
+  MessagesH, ComposeH, MaxH, ComposeY, ChromeW, ChromeX, PalH: Integer;
 begin
   inherited Arrange(ABounds);
   MessagesH := ABounds.H - 1;   { the status line }
@@ -259,6 +270,16 @@ begin
   FStream.BottomInset := ABounds.Y + MessagesH - ComposeY;
 
   FMessages.Arrange(Rc(ABounds.X, ABounds.Y, ABounds.W, MessagesH));
+  { The palette sits above the composer, overlaying the messages too. }
+  if FPaletteActive then
+  begin
+    PalH := FPalette.Measure(Default(TSize)).H;
+    FPalette.Visible := True;
+    FPalette.Arrange(Rc(ABounds.X, ComposeY - PalH, ABounds.W, PalH));
+    FStream.BottomInset := ABounds.Y + MessagesH - (ComposeY - PalH);
+  end
+  else
+    FPalette.Visible := False;
   FCompose.Arrange(Rc(ABounds.X, ComposeY, ABounds.W, ComposeH));
   { The toolbar and the status row share the same inset, so their content lines
     up and neither touches the panel edge. }
@@ -277,12 +298,17 @@ begin
   FMessages.Render(S);
   FCta.Render(S);
   FCompose.Render(S);
+  if FPaletteActive then
+    FPalette.Render(S);
   FStatus.Render(S);
   FStats.Render(S);
 end;
 
 function TChatPanel.HandleEvent(const E: TInputEvent): Boolean;
 begin
+  { When the palette is up, it takes the keys first (Up/Down/Enter/Escape). }
+  if FPaletteActive and FPalette.HandleEvent(E) then
+    Exit(True);
   if FCompose.HandleEvent(E) then
     Exit(True);
   if FMessages.HandleEvent(E) then
@@ -388,6 +414,16 @@ end;
 procedure TChatPanel.SetComposeActive(AValue: Boolean);
 begin
   FCompose.Edit.Active := AValue;
+end;
+
+procedure TChatPanel.SetPaletteActive(AValue: Boolean);
+begin
+  FPaletteActive := AValue;
+end;
+
+function TChatPanel.PaletteActive: Boolean;
+begin
+  Result := FPaletteActive;
 end;
 
 procedure TChatPanel.SetCta(AKind: TCtaKind);
