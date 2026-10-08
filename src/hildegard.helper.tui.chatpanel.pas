@@ -245,6 +245,7 @@ end;
 procedure TChatPanel.Arrange(const ABounds: TRect);
 var
   MessagesH, ComposeH, MaxH, ComposeY, ChromeW, ChromeX, PalH: Integer;
+  PalSize: TSize;
 begin
   inherited Arrange(ABounds);
   MessagesH := ABounds.H - 1;   { the status line }
@@ -270,12 +271,18 @@ begin
   FStream.BottomInset := ABounds.Y + MessagesH - ComposeY;
 
   FMessages.Arrange(Rc(ABounds.X, ABounds.Y, ABounds.W, MessagesH));
-  { The palette sits above the composer, overlaying the messages too. }
+  { The palette sits above the composer, overlaying the messages too. It is not
+    full width: it hugs its content (the palette measures itself). }
+  { The palette is a full-width tray spanning the messages panel's inner width
+    (inside its border), sliding out from the composer. }
   if FPaletteActive then
   begin
-    PalH := FPalette.Measure(Default(TSize)).H;
+    PalSize := Default(TSize);
+    PalSize.W := ABounds.W - 2;   { the messages panel border }
+    PalSize.H := ABounds.H;
+    PalH := FPalette.Measure(PalSize).H;
     FPalette.Visible := True;
-    FPalette.Arrange(Rc(ABounds.X, ComposeY - PalH, ABounds.W, PalH));
+    FPalette.Arrange(Rc(ABounds.X + 1, ComposeY - PalH, ABounds.W - 2, PalH));
     FStream.BottomInset := ABounds.Y + MessagesH - (ComposeY - PalH);
   end
   else
