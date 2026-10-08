@@ -393,7 +393,14 @@ begin
   FPanel.SetPaletteActive(False);
   FPanel.Compose.Clear;
   if (AName = 'checkpoint') and (FDriver <> nil) then
+  begin
+    { The runtime drafts synchronously; show the state now so the operator sees
+      the checkpoint is in progress (and not a silent freeze). }
+    SetState(psThinking, 'checkpointing');
+    FBusy := True;
+    SyncBusy;
     FDriver.Checkpoint;
+  end;
   FApp.Invalidate;
 end;
 

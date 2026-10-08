@@ -864,7 +864,7 @@ begin
   if not FSession.DraftCheckpoint(Text, Err) then
   begin
     E := EmitEvent(ekError);
-    E.Text := 'checkpoint draft failed';
+    E.Text := 'checkpoint draft failed: ' + Err;
     E.Detail := Err;
     Broadcast(E);
     Exit;
