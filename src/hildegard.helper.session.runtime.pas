@@ -126,6 +126,11 @@ type
       const ACommand: TSessionCommand);
     procedure HandleCommand(AClient: TClientConn;
       const ACommand: TSessionCommand);
+    { Context handoff: draft a summary, then commit it as a snapshot. }
+    procedure HandleHandoff(AClient: TClientConn;
+      const ACommand: TSessionCommand);
+    procedure HandleHandoffCommit(AClient: TClientConn;
+      const ACommand: TSessionCommand);
     procedure HandlePrompt(AClient: TClientConn;
       const ACommand: TSessionCommand);
     procedure HandleApprove(AClient: TClientConn;
@@ -817,6 +822,10 @@ begin
       HandleRelease(AClient, ACommand);
     scPing:
       ReplyTo(AClient, ACommand.Id, True, '');
+    scHandoff:
+      HandleHandoff(AClient, ACommand);
+    scHandoffCommit:
+      HandleHandoffCommit(AClient, ACommand);
     scShutdown:
       begin
         if AClient.Role <> srDrive then
@@ -835,6 +844,62 @@ begin
     scReleaseSubagent:
       HandleReleaseSubagent(AClient, ACommand);
   end;
+end;
+
+procedure TSessionRuntime.HandleHandoff(AClient: TClientConn;
+  const ACommand: TSessionCommand);
+var
+  Text, Err: string;
+  E: TSessionEvent;
+begin
+  if AClient.Role <> srDrive then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'not_driver');
+    Exit;
+  end;
+  ReplyTo(AClient, ACommand.Id, True, '');
+  if not FSession.DraftHandoff(Text, Err) then
+  begin
+    E := EmitEvent(ekError);
+    E.Text := 'handoff draft failed';
+    E.Detail := Err;
+    Broadcast(E);
+    Exit;
+  end;
+  E := EmitEvent(ekHandoffReady);
+  E.Text := Text;
+  Broadcast(E);
+end;
+
+procedure TSessionRuntime.HandleHandoffCommit(AClient: TClientConn;
+  const ACommand: TSessionCommand);
+var
+  Seq: Int64;
+  Err: TStoreError;
+  E: TSessionEvent;
+begin
+  if AClient.Role <> srDrive then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'not_driver');
+    Exit;
+  end;
+  if Trim(ACommand.HandoffText) = '' then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'empty_handoff');
+    Exit;
+  end;
+  if (FSession.View.Store = nil) or
+    not FSession.View.Store.SaveSnapshot(FSessionId, ACommand.HandoffText, Seq,
+      Err) then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'snapshot_failed');
+    Exit;
+  end;
+  ReplyTo(AClient, ACommand.Id, True, '');
+  E := EmitEvent(ekHandoffCommitted);
+  E.TurnSeq := Seq;
+  E.Text := 'handoff committed';
+  Broadcast(E);
 end;
 
 procedure TSessionRuntime.HandlePrompt(AClient: TClientConn;

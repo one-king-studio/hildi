@@ -37,7 +37,10 @@ type
     { Subagent events, appended last so stored ordinals are unchanged:
       ekAmbient is a delivered subagent result; ekSubagent is a roster update;
       ekSubagentAsk is a child's approval ask relayed up. }
-    ekAmbient, ekSubagent, ekSubagentAsk);
+    ekAmbient, ekSubagent, ekSubagentAsk,
+    { Context handoff: a draft is ready (Text), and a snapshot was committed
+      (TurnSeq = the snapshot boundary seq). Appended last. }
+    ekHandoffReady, ekHandoffCommitted);
 
   { One streamed event. A flat record with optional fields, the same shape as
     TTurnEvent: only the fields named by Kind are meaningful. }
@@ -80,7 +83,10 @@ type
       ordinals are unchanged. }
     scShutdown,
     { Operator subagent actions, appended last. }
-    scAbortSubagent, scReleaseSubagent);
+    scAbortSubagent, scReleaseSubagent,
+    { Context handoff: request a draft, then commit an edited one. Driver-only.
+      Appended last so stored ordinals are unchanged. }
+    scHandoff, scHandoffCommit);
 
   { One client command. Id is echoed in the reply. }
   TSessionCommand = record
@@ -93,6 +99,8 @@ type
     Choice: TApprovalChoice;    // approve
     { The child session an abort/release subagent command acts on. }
     SessionId: string;
+    { scHandoffCommit: the (edited) handoff document to snapshot. }
+    HandoffText: string;
   end;
 
   TSessionHello = record
@@ -173,7 +181,8 @@ const
     'approval_request', 'approval_resolved',
     'drive_requested', 'drive_granted', 'drive_released',
     'turn_finished', 'error', 'gap', 'loop_exited', 'reasoning_done',
-    'tool_output', 'ambient', 'subagent', 'subagent_ask');
+    'tool_output', 'ambient', 'subagent', 'subagent_ask',
+    'handoff_ready', 'handoff_committed');
 
   MessageKindNames: array[TSessionMessageKind] of string = (
     'hello', 'attached', 'event', 'reply', 'detached', 'error',
@@ -184,7 +193,7 @@ const
   CommandKindNames: array[TSessionCommandKind] of string = (
     'attach', 'detach', 'prompt', 'approve', 'interrupt',
     'claim_drive', 'release_drive', 'ping', 'shutdown',
-    'abort_subagent', 'release_subagent');
+    'abort_subagent', 'release_subagent', 'handoff', 'handoff_commit');
 
 { --- enum <-> wire ------------------------------------------------------ }
 
@@ -566,6 +575,10 @@ begin
         PutStr(O, 'reason', E.Ask.Reason);
         O.Add('options', EncodeOptions(E.Ask.Options));
       end;
+    ekHandoffReady:
+      PutStr(O, 'text', E.Text);
+    ekHandoffCommitted:
+      PutInt(O, 'turn_seq', E.TurnSeq);
   end;
 end;
 
@@ -676,6 +689,10 @@ begin
         E.Ask.Reason := OptStr(O, 'reason');
         DecodeOptions(O, E.Ask);
       end;
+    ekHandoffReady:
+      E.Text := OptStr(O, 'text');
+    ekHandoffCommitted:
+      E.TurnSeq := OptInt64(O, 'turn_seq', 0);
   end;
   Result := True;
 end;
@@ -695,8 +712,10 @@ begin
       end;
     scAbortSubagent, scReleaseSubagent:
       PutStr(O, 'session', C.SessionId);
+    scHandoffCommit:
+      PutStr(O, 'text', C.HandoffText);
     scAttach, scDetach, scInterrupt, scClaimDrive, scReleaseDrive, scPing,
-    scShutdown:
+    scShutdown, scHandoff:
       ;   // no payload beyond the name
   end;
 end;
@@ -729,8 +748,10 @@ begin
       end;
     scAbortSubagent, scReleaseSubagent:
       C.SessionId := OptStr(O, 'session');
+    scHandoffCommit:
+      C.HandoffText := OptStr(O, 'text');
     scAttach, scDetach, scInterrupt, scClaimDrive, scReleaseDrive, scPing,
-    scShutdown:
+    scShutdown, scHandoff:
       ;
   end;
   Result := True;

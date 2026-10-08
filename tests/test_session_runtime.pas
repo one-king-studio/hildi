@@ -100,6 +100,7 @@ type
     procedure TestClaimDriveNeedsConsent;
     procedure TestIdleExit;
     procedure TestRecoversInterruptedTurn;
+    procedure TestHandoffCommitSnapshots;
     procedure TestShutdownCommandStopsRuntime;
     procedure TestShutdownFromNonDriverRefused;
     procedure TestNoClientsExitAfterGrace;
@@ -919,6 +920,85 @@ begin
     AssertTrue('query', Store.QueryTurns(Id, Turns, Err));
     AssertEquals('one turn', 1, Length(Turns));
     AssertEquals('recovered to cancelled', Ord(tsCancelled), Ord(Turns[0].Status));
+  finally
+    Store.Free;
+  end;
+end;
+
+procedure TSessionRuntimeTest.TestHandoffCommitSnapshots;
+var
+  Id: string;
+  Fake: TFakeTransport;
+  Rt: TSessionRuntime;
+  Th: TRuntimeThread;
+  Sink: TRecordingSink;
+  Client: TSessionClient;
+  Store: TSqliteStore;
+  Cfg: TStoreConfig;
+  Err: string;
+  StoreErr: TStoreError;
+  Cmd: TSessionCommand;
+  Reply: TSessionMessage;
+  Snap: TSnapshotRecord;
+  Before, After: TMessageRecordArray;
+begin
+  Id := NewSession;
+  Fake := TFakeTransport.Create;
+  try
+    { A turn so the session has messages to hand off. }
+    Fake.AddResponse([TextDelta('hello'), FinishFrame('stop'), DoneFrame]);
+    Rt := MakeRuntime(Id, Fake);
+    Th := TRuntimeThread.Create(Rt);
+    try
+      Th.Start;
+      AssertTrue('bound', WaitForSocket(Id, 5000));
+      Sink := TRecordingSink.Create;
+      Client := TSessionClient.Open(MakeClientConfig(Id, srDrive), Sink, Err);
+      AssertNotNull('attach: ' + Err, Client);
+      try
+        Cmd := Default(TSessionCommand);
+        Cmd.Kind := scPrompt;
+        Cmd.Id := 'p1';
+        Cmd.Text := 'hi';
+        AssertTrue('prompt', Client.SendAndWait(Cmd, 3000, Reply));
+        { Wait for the turn to finish so the message is committed. }
+        AssertTrue('turn finished', WaitCount(Sink, ekTurnFinished, 1, 5000));
+        Cmd := Default(TSessionCommand);
+        Cmd.Kind := scHandoffCommit;
+        Cmd.Id := 'h1';
+        Cmd.HandoffText := 'Objective: test the handoff.';
+        AssertTrue('commit', Client.SendAndWait(Cmd, 3000, Reply));
+        AssertTrue('reply ok', Reply.Ok);
+      finally
+        Client.Free;
+        Sink := nil;
+      end;
+    finally
+      if not Th.Finished then
+        Rt.Stop;
+      WaitFinished(Th, 3000);
+      Th.Free;
+      DeleteSocket(Id);
+    end;
+  finally
+    Fake.Free;
+  end;
+
+  { The snapshot exists; the messages are intact (nothing deleted). }
+  Cfg := Default(TStoreConfig);
+  Cfg.DatabasePath := FDbPath;
+  Cfg.BusyTimeoutMs := 5000;
+  Store := TSqliteStore.Create(Cfg);
+  try
+    AssertTrue('open', Store.Open(StoreErr));
+    AssertTrue('latest snapshot', Store.LatestSnapshot(Id, Snap, StoreErr));
+    AssertEquals('summary', 'Objective: test the handoff.', Snap.Summary);
+    AssertTrue('active window', Store.QueryActiveMessages(Id, After, StoreErr));
+    AssertTrue('all messages', Store.QueryMessages(Id, Before, StoreErr));
+    { The snapshot boundary is the message HWM, so the active window is empty
+      and the full history is intact. }
+    AssertEquals('active empty after snapshot', 0, Length(After));
+    AssertTrue('history preserved', Length(Before) > 0);
   finally
     Store.Free;
   end;

@@ -161,6 +161,10 @@ begin
         AEvent.Ask.Options[0].Key := 'once';
         AEvent.Ask.Options[0].Caption := 'Allow once';
       end;
+    ekHandoffReady:
+      AEvent.Text := 'the handoff document';
+    ekHandoffCommitted:
+      AEvent.TurnSeq := 42;
   end;
 end;
 
