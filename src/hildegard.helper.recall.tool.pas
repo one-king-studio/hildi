@@ -13,8 +13,8 @@ unit hildegard.helper.recall.tool;
 interface
 
 uses
-  SysUtils, hildegard.helper.store, hildegard.helper.session,
-  hildegard.helper.llm, hildegard.helper.agent;
+  SysUtils, fpjson, jsonparser, hildegard.helper.store,
+  hildegard.helper.session, hildegard.helper.llm, hildegard.helper.agent;
 
 const
   RecallToolName = 'recall_tool_result';
@@ -42,13 +42,13 @@ type
     function Recall(const AArgumentsJson: string;
       out AResult: string; out AError: string;
       AObserver: TToolObserver = nil): Boolean;
+    { Full-text search of the whole session (archived included). }
+    function Search(ARoot: TJSONObject; out AResult: string;
+      out AError: string): Boolean;
     procedure Register(ATools: TToolRegistry);
   end;
 
 implementation
-
-uses
-  fpjson, jsonparser;
 
 function ResolveToolResultCap(AValue: Integer): Integer;
 var
@@ -83,16 +83,70 @@ var
 begin
   Spec.Name := RecallToolName;
   Spec.Description :=
-    'Read a window of a tool result that was truncated in the prompt. Pass ' +
-    'the message_id from the truncation marker, an offset (0-based), and a ' +
-    'limit; returns that slice of the stored output.';
+    'Recall from this session. Either read a window of a truncated tool ' +
+    'result (pass message_id from a truncation marker, plus optional ' +
+    'offset/limit), or full-text search the whole session including archived ' +
+    'messages (pass query, plus an optional scope: content, tool_reason, ' +
+    'tool_name, or tool_arguments).';
   Spec.ParametersJson :=
     '{"type":"object","properties":{' +
     '"message_id":{"type":"integer","description":"from the truncation marker"},' +
     '"offset":{"type":"integer","description":"0-based byte offset"},' +
-    '"limit":{"type":"integer","description":"maximum bytes to return"}},' +
-    '"required":["message_id"]}';
+    '"limit":{"type":"integer","description":"maximum bytes to return"},' +
+    '"query":{"type":"string","description":"full-text search term"},' +
+    '"scope":{"type":"string","enum":["content","tool_reason","tool_name",' +
+    '"tool_arguments"],"description":"restrict the search to one column"}},' +
+    '"required":[]}';
   ATools.Add(Spec, Recall);
+end;
+
+function TRecallTool.Search(ARoot: TJSONObject; out AResult: string;
+  out AError: string): Boolean;
+var
+  Query, Scope: string;
+  V: TJSONData;
+  Cols: array of string;
+  Msgs: TMessageRecordArray;
+  StoreErr: TStoreError;
+  I: Integer;
+  Line: string;
+begin
+  AResult := '';
+  AError := '';
+  V := ARoot.Find('query');
+  Query := V.AsString;
+  Scope := '';
+  V := ARoot.Find('scope');
+  if (V <> nil) and (V.JSONType = jtString) then
+    Scope := V.AsString;
+  SetLength(Cols, 0);
+  if Scope <> '' then
+  begin
+    SetLength(Cols, 1);
+    Cols[0] := Scope;
+  end;
+  if not FStore.SearchMessages(FSessionId, Query, Cols, 20, Msgs, StoreErr) then
+  begin
+    AError := 'search failed: ' + StoreErr.Message;
+    Exit(False);
+  end;
+  if Length(Msgs) = 0 then
+  begin
+    AResult := '(no matches)';
+    Exit(True);
+  end;
+  for I := 0 to High(Msgs) do
+  begin
+    Line := Format('[seq %d, role %d] %s',
+      [Msgs[I].Seq, Ord(Msgs[I].Role),
+       Copy(Msgs[I].Content, 1, 200)]);
+    if Msgs[I].ToolReason <> '' then
+      Line := Line + ' (reason: ' + Copy(Msgs[I].ToolReason, 1, 100) + ')';
+    if AResult <> '' then
+      AResult := AResult + LineEnding;
+    AResult := AResult + Line;
+  end;
+  Result := True;
 end;
 
 function TRecallTool.Recall(const AArgumentsJson: string;
@@ -123,6 +177,13 @@ begin
       Exit(False);
     end;
     Root := TJSONObject(Data);
+
+    { Search mode: a `query` searches the whole session (archived included). }
+    V := Root.Find('query');
+    if (V <> nil) and (V.JSONType = jtString) and (V.AsString <> '') then
+    begin
+      Exit(Search(Root, AResult, AError));
+    end;
 
     V := Root.Find('message_id');
     if (V = nil) or (V.JSONType <> jtNumber) then

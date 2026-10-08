@@ -36,6 +36,8 @@ type
     procedure TestRecallNonToolIdFails;
     procedure TestRecallNegativeOffsetFails;
     procedure TestRecallRegistersTheTool;
+    procedure TestRecallSearchFindsMessage;
+    procedure TestRecallSearchNoMatch;
   end;
 
 implementation
@@ -188,6 +190,25 @@ begin
   finally
     Tools.Free;
   end;
+end;
+
+procedure TRecallToolTest.TestRecallSearchFindsMessage;
+var
+  Res, Err: string;
+begin
+  { The seeded tool result content is '0123456789abcdefghij' — one FTS token. }
+  AssertTrue('search', FTool.Recall(
+    '{"query":"0123456789abcdefghij","reason":"r"}', Res, Err));
+  AssertTrue('found', Pos('0123456789abcdefghij', Res) > 0);
+end;
+
+procedure TRecallToolTest.TestRecallSearchNoMatch;
+var
+  Res, Err: string;
+begin
+  AssertTrue('search', FTool.Recall(
+    '{"query":"zzznomatch","reason":"r"}', Res, Err));
+  AssertEquals('no matches', '(no matches)', Res);
 end;
 
 initialization
