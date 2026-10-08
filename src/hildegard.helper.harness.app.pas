@@ -69,6 +69,13 @@ type
     FSpy: TSubagentSpy;
     FSpyId: string;
     FAskRefIsChild: Boolean;
+    { Back-pagination: how many archived pages are shown above the boundary, and
+      the anchor (the scroll offset and content height before a prepend) applied
+      on the next frame, once the layout is current. }
+    FOlderPages: Integer;
+    FAnchorBase: Integer;
+    FAnchorHeightBefore: Integer;
+    FAnchorPending: Boolean;
     { Queued prompts shown as 'Queued' boxes at the end of the stream, removed
       when they are injected as a real user turn. }
     FQueuedBlocks: array of TChatItem;
@@ -137,6 +144,8 @@ type
     procedure SyncBusy;
     procedure OnLoop;
     procedure Invalidate(Sender: TObject);
+    { The transcript reached the top: prepend the next archived page. }
+    procedure NeedOlderHistory(Sender: TObject);
     { The compose changed: show/hide and filter the command palette. }
     procedure ComposeChanged(Sender: TObject);
     { Run a command from the palette. }
@@ -329,6 +338,7 @@ begin
     CtaHints);
   FPanel.Stream.OnToggle := Invalidate;
   FPanel.Stream.OnChange := Invalidate;
+  FPanel.Stream.OnNeedOlder := NeedOlderHistory;
   FPanel.Compose.OnSubmit := Submit;
   FPanel.Compose.OnChange := ComposeChanged;
   { The command palette: registered commands, shown when the compose starts
@@ -499,6 +509,7 @@ var
   History: TMessageRecordArray;
   Turns: TTurnRecordArray;
   Checkpoint: TCheckpointRecord;
+  Archived: TMessageRecordArray;
   StoreErr: TStoreError;
   I, Head, CurrentTurn: Integer;
   Rec: TMessageRecord;
@@ -525,13 +536,24 @@ begin
   Head := 0;
   CurrentTurn := 0;
   ToolBlocks := nil;
-  { The active window starts at the latest checkpoint. Render its document as the
-    segment's opening block, so the operator sees what the agent was briefed with
-    (the archived messages remain reachable by back-pagination). }
+  { The active window starts at the latest checkpoint. Render the archived prefix
+    (back-pagination), the boundary marker, then the document as the segment's
+    opening block, so the operator sees what the agent was briefed with. }
   Checkpoint := Default(TCheckpointRecord);
   if (FSession.Store <> nil) and
     FSession.Store.LatestCheckpoint(FSession.SessionId, Checkpoint, StoreErr) then
+  begin
+    if FOlderPages > 0 then
+    begin
+      Archived := nil;
+      if FSession.Store.QueryMessagesBefore(FSession.SessionId, Checkpoint.Seq,
+        FOlderPages * 20, Archived, StoreErr) then
+        for I := 0 to High(Archived) do
+          FPanel.Stream.Add(ckAssistant, '', Archived[I].Content);
+    end;
+    FPanel.Stream.Add(ckTurn, '', '— checkpoint —');
     FPanel.Stream.Add(ckAmbient, 'checkpoint', Checkpoint.Summary);
+  end;
   for I := 0 to High(History) do
   begin
     Rec := History[I];
@@ -1004,6 +1026,23 @@ begin
   FApp.Busy := FBusy;
 end;
 
+procedure THarnessApp.NeedOlderHistory(Sender: TObject);
+var
+  HeightBefore: Integer;
+begin
+  { Prepend one more archived page. The new scroll offset is relative to the
+    taller content, so record where we were and apply the offset on the next
+    frame, once the layout has run and the content height is current. }
+  HeightBefore := FPanel.Stream.ContentHeight;
+  FAnchorBase := FPanel.Stream.ScrollOffset;
+  FAnchorHeightBefore := HeightBefore;
+  Inc(FOlderPages);
+  FPanel.Stream.Clear;
+  RenderHistory;
+  FAnchorPending := True;
+  FApp.Invalidate;
+end;
+
 procedure THarnessApp.OnLoop;
 begin
   { Drain each iteration, then reflect the resulting busy state so Run picks the
@@ -1014,6 +1053,14 @@ begin
   SyncBusy;
   { The caret is steady while the terminal is unfocused (DECSET 1004). }
   FPanel.Compose.Edit.Blinking := FApp.TerminalFocused;
+  { Back-pagination anchor: the layout has run by now, so the content height is
+    current and the offset can be applied without the scroll jumping. }
+  if FAnchorPending then
+  begin
+    FAnchorPending := False;
+    FPanel.Stream.ScrollOffset := FAnchorBase +
+      (FPanel.Stream.ContentHeight - FAnchorHeightBefore);
+  end;
 end;
 
 function THarnessApp.Step: Boolean;
