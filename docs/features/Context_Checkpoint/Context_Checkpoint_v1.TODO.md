@@ -63,8 +63,27 @@ protocol/runtime → TUI.
       segment's opening block.
 - [ ] **Back-pagination**: load the prior segment on scroll; a "— checkpoint —"
       boundary marker.
-- [ ] **Nudge**: hint `/checkpoint` past the threshold (never triggers).
-- [ ] **Test**: the nudge threshold; the boundary renders.
+
+      Design (checked against the current code — `TChatStream` has `Add`/`Clear`/
+      `ItemAt`, and `TScrollContainer` exposes `ScrollY`/`MaxScrollY`/`ScrollTo`):
+      - `TChatStream` gains `OnNeedOlder: TNotifyEvent`, fired from `HandleEvent`
+        when a scroll-up leaves `FScroll.ScrollY <= 0` (the top) and there is more
+        archived history; plus a `ContentHeight` and a `ScrollOffset` passthrough
+        so the app can restore the anchor.
+      - The app keeps `FOlderPages: Integer` (0 at first). `RenderHistory` renders
+        `QueryMessagesBefore(session, checkpoint.seq, FOlderPages * PageSize)` as
+        the archived prefix, then a `— checkpoint —` marker, then the checkpoint
+        document, then the active window.
+      - On `OnNeedOlder`: `Inc(FOlderPages)`, note `ContentHeight` and
+        `ScrollOffset`, `RenderHistory`, then
+        `ScrollOffset := ScrollOffset + (ContentHeight_after - ContentHeight_before)`
+        so the visible content stays put and the operator can keep scrolling up.
+      - The marker is a divider-style block (`ckTurn`), "— checkpoint —".
+- [ ] **Nudge**: hint `/checkpoint` past the threshold (never triggers). The
+      context percentage is already computed for the session header; surface the
+      hint in the CTA/status line when it crosses the threshold.
+- [ ] **Test**: the nudge threshold; the boundary renders; back-pagination
+      prepends a page and keeps the scroll anchor.
 
 ### Phase 6: Validation
 
