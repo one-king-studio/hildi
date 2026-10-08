@@ -52,7 +52,7 @@ type
 implementation
 
 uses
-  ctypes, SysUtils, baseunix;
+  ctypes, SysUtils, baseunix, hildegard.helper.tui.input.fd;
 
 function c_isatty(Fd: cint): cint; cdecl; external 'c' name 'isatty';
 function c_tcflush(Fd, Queue: cint): cint; cdecl; external 'c' name 'tcflush';
@@ -266,31 +266,29 @@ end;
 
 procedure TInputSourceTerminal.ReadAvailable;
 var
-  Fds: TFDSet;
-  TV: TTimeVal;
-  Bytes: array[0..63] of Byte;
-  Data: array of Byte;
-  N, I: Integer;
+  Data: TInputBytes;
+  I: Integer;
   Hex: string;
+  R: TInputReadResult;
 begin
-  fpFD_ZERO(Fds);
-  fpFD_SET(FInputFd, Fds);
-  TV.tv_sec := 0;
-  TV.tv_usec := 0;
-  if fpSelect(FInputFd + 1, @Fds, nil, nil, @TV) <= 0 then
+  R := ReadInputFd(FInputFd, Data);
+  if R = irEof then
+  begin
+    { The terminal hung up (its pty master closed). A hung-up fd stays
+      select-readable and read returns 0 forever, so ignoring EOF leaves the app
+      loop spinning at 100% CPU; stop through the normal path so the terminal is
+      restored. }
+    GTerminated := 1;
     Exit;
-  N := fpRead(FInputFd, @Bytes[0], SizeOf(Bytes));
-  if N <= 0 then
-    Exit;
-  SetLength(Data, N);
-  for I := 0 to N - 1 do
-    Data[I] := Bytes[I];
+  end;
+  if R <> irData then
+    Exit;   { irNone (nothing ready) or irError (e.g. EINTR) }
   FDecoder.Feed(Data);
   if FTrace then
   begin
     Hex := '';
-    for I := 0 to N - 1 do
-      Hex := Hex + IntToHex(Bytes[I], 2) + ' ';
+    for I := 0 to Length(Data) - 1 do
+      Hex := Hex + IntToHex(Data[I], 2) + ' ';
     TraceLine('bytes ' + Hex);
   end;
 end;

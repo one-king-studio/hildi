@@ -9,9 +9,9 @@ unit test_tui_input;
 interface
 
 uses
-  SysUtils, fpcunit, testregistry,
+  SysUtils, baseunix, fpcunit, testregistry,
   hildegard.helper.tui.base, hildegard.helper.tui.input,
-  hildegard.helper.tui.input.decode;
+  hildegard.helper.tui.input.decode, hildegard.helper.tui.input.fd;
 
 type
   TTuiInputTest = class(TTestCase)
@@ -50,6 +50,9 @@ type
     procedure TestResizeSettlerWaitsForAPause;
     procedure TestResizeSettlerRestartsWhileMoving;
     procedure TestResizeSettlerIgnoresTheCurrentSize;
+    { Input fd reads: EOF (a hung-up terminal) must be reported, not ignored. }
+    procedure TestReadInputFdReportsData;
+    procedure TestReadInputFdReportsEofOnHangup;
   end;
 
 implementation
@@ -750,6 +753,40 @@ begin
   AssertFalse('the current size is not a resize',
     S.Feed(100, 24, 5000, 80, C, R));
   AssertFalse('and leaves nothing pending', S.Pending);
+end;
+
+procedure TTuiInputTest.TestReadInputFdReportsData;
+var
+  Fd: Integer;
+  Data: TInputBytes;
+begin
+  { /dev/zero is always readable and never ends. }
+  Fd := fpOpen('/dev/zero', O_RDONLY);
+  AssertTrue('opened /dev/zero', Fd >= 0);
+  try
+    AssertTrue('bytes reported', ReadInputFd(Fd, Data) = irData);
+    AssertTrue('some bytes read', Length(Data) > 0);
+  finally
+    fpClose(Fd);
+  end;
+end;
+
+procedure TTuiInputTest.TestReadInputFdReportsEofOnHangup;
+var
+  Fd: Integer;
+  Data: TInputBytes;
+begin
+  { A hung-up terminal behaves like /dev/null: select reports it readable
+    forever and read returns 0. If EOF is not reported the app's event loop
+    never blocks and spins at 100% CPU. }
+  Fd := fpOpen('/dev/null', O_RDONLY);
+  AssertTrue('opened /dev/null', Fd >= 0);
+  try
+    AssertTrue('eof reported', ReadInputFd(Fd, Data) = irEof);
+    AssertEquals('no bytes on eof', 0, Length(Data));
+  finally
+    fpClose(Fd);
+  end;
 end;
 
 initialization
