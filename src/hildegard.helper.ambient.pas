@@ -52,22 +52,40 @@ const
 function FormatAmbient(const AText, ARefSessionId, ALabel, ASource,
   AStatus: string; ATimestampMs: Int64): string;
 
-{ Escape XML special characters in a string. }
-function EscapeXml(const AText: string): string;
+{ Escape XML special characters in an element's *content*: only &, <, >.
+  Quotes need not be escaped in content (they only matter inside attribute
+  values), so leaving them alone avoids noise like &apos; in code the model
+  reads back. }
+function EscapeXmlContent(const AText: string): string;
+
+{ Escape XML special characters in an attribute *value*: also the quotes. }
+function EscapeXmlAttr(const AText: string): string;
 
 implementation
 
 uses
   DateUtils;
 
-function EscapeXml(const AText: string): string;
+function EscapeXmlContent(const AText: string): string;
 begin
   Result := AText;
   Result := StringReplace(Result, '&', '&amp;', [rfReplaceAll]);
   Result := StringReplace(Result, '<', '&lt;', [rfReplaceAll]);
   Result := StringReplace(Result, '>', '&gt;', [rfReplaceAll]);
+end;
+
+function EscapeXmlAttr(const AText: string): string;
+begin
+  Result := EscapeXmlContent(AText);
   Result := StringReplace(Result, '"', '&quot;', [rfReplaceAll]);
   Result := StringReplace(Result, '''', '&apos;', [rfReplaceAll]);
+end;
+
+{ Kept as the attribute escaper (the general, safe form) for existing callers
+  and tests. }
+function EscapeXml(const AText: string): string;
+begin
+  Result := EscapeXmlAttr(AText);
 end;
 
 function IsoUtc(AMs: Int64): string;
@@ -83,11 +101,11 @@ function FormatAmbient(const AText, ARefSessionId, ALabel, ASource,
 begin
   Result :=
     '<ambient timestamp="' + IsoUtc(ATimestampMs) + '">' + LineEnding +
-    '  <message source="' + EscapeXml(ASource) +
-    '" id="' + EscapeXml(ARefSessionId) +
-    '" label="' + EscapeXml(ALabel) +
-    '" status="' + EscapeXml(AStatus) + '">' + LineEnding +
-    EscapeXml(AText) + LineEnding +
+    '  <message source="' + EscapeXmlAttr(ASource) +
+    '" id="' + EscapeXmlAttr(ARefSessionId) +
+    '" label="' + EscapeXmlAttr(ALabel) +
+    '" status="' + EscapeXmlAttr(AStatus) + '">' + LineEnding +
+    EscapeXmlContent(AText) + LineEnding +
     '  </message>' + LineEnding + LineEnding +
     '  <instructions>' + LineEnding +
     AmbientInstructions + LineEnding +

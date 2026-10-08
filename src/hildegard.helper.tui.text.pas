@@ -62,6 +62,10 @@ type
     { The number of lines the block wraps to at AWidth, without disturbing the
       cached layout. Used by callers that search over widths. }
     function LineCountAt(AWidth: Integer): Integer;
+    { The wrapped lines at AWidth, as plain strings, without disturbing the
+      cached layout. Used to build a condensed view (first + ellipsis + tail)
+      and a live tail. }
+    function WrappedRows(AWidth: Integer): array of string;
     property Align: TTextAlign read FAlign write FAlign;
     { When > 0 and wrapping is on, Measure wraps at this many columns instead of
       max-content (the longest word). Callers in a fixed-size viewport set it so
@@ -323,6 +327,26 @@ begin
   if AWidth < 1 then
     AWidth := 1;
   Result := Length(WrapClusters(CachedClusters, AWidth, FHangIndent, FWrap));
+end;
+
+function TTextBlock.WrappedRows(AWidth: Integer): array of string;
+var
+  Lines: TStyledLines;
+  I, J: Integer;
+  S: UnicodeString;
+begin
+  Result := nil;
+  if AWidth < 1 then
+    AWidth := 1;
+  Lines := WrapClusters(CachedClusters, AWidth, FHangIndent, FWrap);
+  SetLength(Result, Length(Lines));
+  for I := 0 to High(Lines) do
+  begin
+    S := '';
+    for J := 0 to High(Lines[I]) do
+      S := S + Lines[I][J].Ch;
+    Result[I] := string(S);
+  end;
 end;
 
 procedure TTextBlock.Render(const S: ISurface);

@@ -392,17 +392,17 @@ var
   It: TChatItem;
   S: TSurfaceMemory;
 begin
-  S := TSurfaceMemory.Create(30, 1);
+  { A short thought is a box (not a collapsed rule): rounded top-left corner and
+    the label in the title. }
+  S := TSurfaceMemory.Create(30, 3);
   try
     It := TChatItem.Create(ckThought, 'Thought', 'body', FTheme);
     try
       It.Expanded := False;
-      It.Arrange(Rc(0, 0, 30, 1));
+      It.Arrange(Rc(0, 0, 30, 3));
       It.Render(S);
-      AssertEquals('rule starts at column 1', '─', S.CellAt(1, 0).Ch);
+      AssertEquals('rounded top-left', '╭', S.CellAt(0, 0).Ch);
       AssertTrue('label shown', Pos('Thought', S.RowText(0, 0, 30)) > 0);
-      AssertTrue('collapse marker shown', Pos('▼', S.RowText(0, 0, 30)) > 0);
-      AssertTrue('dimmed', sfDim in S.CellAt(1, 0).Attr.Style);
     finally
       It.Free;
     end;
@@ -440,18 +440,19 @@ var
   It: TChatItem;
   S: TSurfaceMemory;
 begin
-  S := TSurfaceMemory.Create(60, 1);
+  { A short tool is a box; the reason is the title and the border uses the tool
+    colour (23), not the dimmed accent. }
+  S := TSurfaceMemory.Create(60, 3);
   try
     It := TChatItem.Create(ckTool, 'looking for the build file', 'body', FTheme);
     try
       It.Expanded := False;
-      It.Arrange(Rc(0, 0, 60, 1));
+      It.Arrange(Rc(0, 0, 60, 3));
       It.Render(S);
-      AssertEquals('thin rule at column 1', '─', S.CellAt(1, 0).Ch);
+      AssertEquals('rounded top-left', '╭', S.CellAt(0, 0).Ch);
       AssertTrue('reason shown as the title',
         Pos('looking for the build file', S.RowText(0, 0, 60)) > 0);
-      AssertTrue('full contrast, not dimmed',
-        not (sfDim in S.CellAt(1, 0).Attr.Style));
+      AssertEquals('tool border colour', 23, S.CellAt(0, 0).Attr.Fg);
     finally
       It.Free;
     end;
@@ -519,7 +520,7 @@ begin
       for I := 0 to H - 1 do
         Full := Full + S.RowText(I, 0, 40) + UnicodeString(#10);
       AssertTrue('live title', Pos('Thinking...', Full) > 0);
-      AssertTrue('a leading ellipsis line', Pos('...', Full) > 0);
+      AssertFalse('no ellipsis line in the live tail', Pos('...', Full) > 0);
       AssertTrue('the tail is shown', Pos('jj', Full) > 0);
       AssertFalse('the head is dropped', Pos('aa', Full) > 0);
 
@@ -551,8 +552,8 @@ begin
       It.Expanded := True;
       It.Arrange(Rc(0, 0, 30, It.Measure(Avail(30, 0)).H));
       It.Render(S);
-      AssertEquals('box top-left', '┌', S.CellAt(0, 0).Ch);
-      AssertEquals('box bottom-left', '└', S.CellAt(0, It.Bounds.H - 1).Ch);
+      AssertEquals('box top-left', '╭', S.CellAt(0, 0).Ch);
+      AssertEquals('box bottom-left', '╰', S.CellAt(0, It.Bounds.H - 1).Ch);
       AssertTrue('label in the top border',
         Pos('Thought', S.RowText(0, 0, 30)) > 0);
       AssertTrue('body rendered', Pos('the body', S.RowText(1, 0, 30)) > 0);

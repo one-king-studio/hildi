@@ -30,6 +30,14 @@ const
   QueuedBorderFg = 135;
   { The tool box border colour. }
   ToolBorderFg = 23;
+  { A condensed body (a thought/tool/ambient whose full body wraps to more than
+    this many rows) shows the first row, an ellipsis, and the last
+    CondensedTail rows. }
+  CondenseThreshold = 7;
+  CondensedTail = 3;
+  { A condensed body wrapping to more than this many rows shows the
+    double-headed vertical arrow caret; a shorter one needs no caret. }
+  CaretThreshold = 8;
 
 type
   { One block in the stream. Mutable, so a stream can append into it. Its
@@ -41,6 +49,10 @@ type
     FLabel: string;
     FBody: string;
     FText: TTextBlock;
+    { The full-body wrap source for a thought/tool block, so a condensed view
+      (first + ellipsis + last N) or a live tail can be computed from the
+      wrapped rows. Nil for other kinds. }
+    FSrc: TTextBlock;
     FMarkdown: TMarkdownView;   { assistant bodies only; nil otherwise }
     FExpanded: Boolean;
     FTheme: TTheme;
@@ -56,14 +68,23 @@ type
     FHeightWidth: Integer;
     FHeight: Integer;
     FMeasureCount: Integer;
+    { Bumped whenever the drawn body's text changes (SetText/AppendText/expand),
+      so a per-width display cache knows to rebuild. }
+    FTextVer: Integer;
+    FAppliedVer: Integer;
+    FAppliedWidth: Integer;
+    FAppliedSrc: Integer;
     function Inset: Integer;
     function BodyAttr: TAttr;
-    function EffectiveExpanded: Boolean;
-    function DisplayBody: string;
     procedure Rebuild;
     procedure EnsureBody;
     procedure ArrangeBody(const ABounds: TRect);
     procedure BodyRows(AWidth: Integer; out ATextRows, ALines: Integer);
+    function InnerWidth(AWidth: Integer): Integer;
+    function Condenseable: Boolean;
+    { Refresh the drawn body for AWidth: a live tail, a condensed view, or the
+      full body. Rebuilds only when the text version or the width changed. }
+    procedure ApplyDisplay(AWidth: Integer);
     function Boxed: Boolean;
     procedure InvalidateHeight;
     procedure SetExpanded(AValue: Boolean);
@@ -289,12 +310,15 @@ begin
   FBody := AText;
   FTheme := ATheme;
   FExpanded := (AKind = ckUser) or (AKind = ckAssistant) or
-    (AKind = ckError) or (AKind = ckThinking) or (AKind = ckQueued) or
-    (AKind = ckAmbient);
+    (AKind = ckError) or (AKind = ckThinking) or (AKind = ckQueued);
   FLiveStarted := False;
   FHeightValid := False;
   FHeightWidth := 0;
   FHeight := 0;
+  FTextVer := 1;
+  FAppliedVer := 0;
+  FAppliedWidth := 0;
+  FAppliedSrc := 0;
   { The rendered body is built lazily by Materialize, so a large history does
     not hold every block's layout at once. }
 end;
@@ -302,6 +326,7 @@ end;
 destructor TChatItem.Destroy;
 begin
   FText.Free;
+  FSrc.Free;
   FMarkdown.Free;
   inherited Destroy;
 end;
@@ -348,19 +373,6 @@ begin
   Result := Result + '…';
 end;
 
-function TChatItem.EffectiveExpanded: Boolean;
-begin
-  Result := FExpanded or FLive;
-end;
-
-function TChatItem.DisplayBody: string;
-begin
-  if FLive then
-    Result := string(TailLines(UnicodeString(FBody), LiveTailLines))
-  else
-    Result := FBody;
-end;
-
 procedure TChatItem.Rebuild;
 var
   One: TSpan;
@@ -368,11 +380,11 @@ begin
   EnsureBody;
   if FMarkdown <> nil then
   begin
-    FMarkdown.SetSource(DisplayBody);
+    FMarkdown.SetSource(FBody);
     Exit;
   end;
   One := Default(TSpan);
-  One.Text := UnicodeString(DisplayBody);
+  One.Text := UnicodeString(FBody);
   One.Attr := BodyAttr;
   FText.SetSpans([One]);
 end;
@@ -394,15 +406,21 @@ begin
     Exit;
   EnsureBody;
   Rebuild;
+  { Rebuild sets the full body; force ApplyDisplay to re-derive the condensed
+    view (a re-materialized block must not show the full body). }
+  FAppliedVer := 0;
 end;
 
 procedure TChatItem.Dematerialize;
 begin
   { The rendered body is dropped; a later AppendText must rebuild the stream
-    from the whole body, so clear the streaming flag too. }
+    from the whole body, so clear the streaming flag too. The full-body wrap
+    source is released with it and rebuilt on the next materialize. }
   FLiveStarted := False;
   FreeAndNil(FText);
   FreeAndNil(FMarkdown);
+  FreeAndNil(FSrc);
+  FAppliedSrc := 0;
 end;
 
 function TChatItem.Materialized: Boolean;
@@ -420,6 +438,7 @@ begin
   if AValue = FExpanded then
     Exit;
   FExpanded := AValue;
+  Inc(FTextVer);
   InvalidateHeight;
   if Assigned(FOnChange) then
     FOnChange(Self);
@@ -430,8 +449,8 @@ begin
   if AValue = FLive then
     Exit;
   FLive := AValue;
+  Inc(FTextVer);
   InvalidateHeight;
-  Rebuild;
   if Assigned(FOnChange) then
     FOnChange(Self);
 end;
@@ -442,6 +461,7 @@ begin
     Exit;
   FBody := AText;
   FLiveStarted := False;
+  Inc(FTextVer);
   InvalidateHeight;
   if FMarkdown <> nil then
     FMarkdown.SetSource(AText)
@@ -456,6 +476,7 @@ begin
   if AText = '' then
     Exit;
   FBody := FBody + AText;
+  Inc(FTextVer);
   InvalidateHeight;
   { Feed the markdown parser incrementally; it never re-parses a closed block.
     The view must be built in streaming mode from the first chunk, so build it
@@ -519,7 +540,7 @@ end;
 function TChatItem.Inset: Integer;
 begin
   if (FKind = ckUser) or (FKind = ckQueued) or (FKind = ckAmbient) or
-    ((FKind in [ckThought, ckTool]) and EffectiveExpanded) then
+    (FKind in [ckThought, ckTool]) then
     Result := 4
   else if (FKind = ckAssistant) or (FKind = ckError) then
     Result := 1
@@ -527,10 +548,94 @@ begin
     Result := 0;
 end;
 
+function TChatItem.InnerWidth(AWidth: Integer): Integer;
+begin
+  Result := AWidth - Inset;
+  if Result < 1 then
+    Result := 1;
+end;
+
+function TChatItem.Condenseable: Boolean;
+begin
+  Result := (FKind in [ckThought, ckTool, ckAmbient]);
+end;
+
+procedure TChatItem.ApplyDisplay(AWidth: Integer);
+var
+  Rows: array of string;
+  I: Integer;
+  Res: string;
+  One: TSpan;
+begin
+  if FText = nil then
+    Exit;
+  if (FAppliedVer = FTextVer) and (FAppliedWidth = AWidth) then
+    Exit;
+  if not Condenseable then
+  begin
+    One := Default(TSpan);
+    One.Text := UnicodeString(FBody);
+    One.Attr := BodyAttr;
+    FText.SetSpans([One]);
+  end
+  else
+  begin
+    if (FSrc = nil) or (FAppliedSrc <> FTextVer) then
+    begin
+      if FSrc = nil then
+        FSrc := TTextBlock.Create([], wmWord);
+      FSrc.SetText(FBody, FTheme.Text);
+      FAppliedSrc := FTextVer;
+    end;
+    Rows := FSrc.WrappedRows(InnerWidth(AWidth));
+    if Length(Rows) = 0 then
+      Res := ''
+    else if FLive then
+    begin
+      { The last LiveTailLines wrapped rows: a stable row count while
+        streaming. }
+      I := Length(Rows) - LiveTailLines;
+      if I < 0 then
+        I := 0;
+      Res := '';
+      while I <= High(Rows) do
+      begin
+        if Res <> '' then
+          Res := Res + #10;
+        Res := Res + Rows[I];
+        Inc(I);
+      end;
+    end
+    else if (not FExpanded) and (Length(Rows) > CondenseThreshold) then
+    begin
+      { First row, an ellipsis, then the last CondensedTail rows. }
+      Res := Rows[0] + #10 + '…' + #10;
+      I := Length(Rows) - CondensedTail;
+      if I < 1 then
+        I := 1;
+      while I <= High(Rows) do
+      begin
+        Res := Res + Rows[I];
+        if I < High(Rows) then
+          Res := Res + #10;
+        Inc(I);
+      end;
+    end
+    else
+      Res := FBody;
+    One := Default(TSpan);
+    One.Text := UnicodeString(Res);
+    One.Attr := BodyAttr;
+    FText.SetSpans([One]);
+  end;
+  FAppliedVer := FTextVer;
+  FAppliedWidth := AWidth;
+end;
+
 function TChatItem.Boxed: Boolean;
 begin
   Result := (FKind = ckUser) or (FKind = ckQueued) or (FKind = ckAmbient) or
-    ((FKind in [ckThought, ckTool]) and EffectiveExpanded);
+    (FKind in [ckThought, ckTool]);
 end;
 
 procedure TChatItem.BodyRows(AWidth: Integer; out ATextRows, ALines: Integer);
@@ -549,13 +654,11 @@ begin
   end
   else
   begin
+    ApplyDisplay(AWidth);
     FText.WrapWidth := InnerW;
     ALines := FText.Measure(Default(TSize)).H;
   end;
-  if (not EffectiveExpanded) and (ALines > CollapsedLines) then
-    ATextRows := CollapsedLines
-  else
-    ATextRows := ALines;
+  ATextRows := ALines;
 end;
 
 function TChatItem.Measure(const AAvail: TSize): TSize;
@@ -583,7 +686,7 @@ begin
     ckUser, ckQueued, ckAmbient:
       begin
         BodyRows(AAvail.W, TextRows, Lines);
-        Result.H := TextRows + 2;   { top border, body, heavy bottom }
+        Result.H := TextRows + 2;   { top border, body, bottom border }
       end;
     ckAssistant, ckError:
       begin
@@ -593,13 +696,12 @@ begin
     ckThinking, ckTurn:
       Result.H := 1;
     ckThought, ckTool:
-      if EffectiveExpanded then
       begin
+        { A thought/tool is always a box: a condensed view (or the full body
+          when it is short, or a live tail while streaming) plus the borders. }
         BodyRows(AAvail.W, TextRows, Lines);
-        Result.H := TextRows + 2;   { top border, body, bottom border }
-      end
-      else
-        Result.H := 1;              { collapsed rule line }
+        Result.H := TextRows + 2;
+      end;
   end;
   if Result.H < 1 then
     Result.H := 1;
@@ -644,12 +746,12 @@ end;
 
 procedure TChatItem.Render(const S: ISurface);
 var
-  L, R, T, B, TextRows, Lines, X, I, TitleMaxW: Integer;
+  L, R, T, B, X, I, TitleMaxW: Integer;
   InnerW: Integer;
   Border, SurfaceAttr, TitleAttr: TAttr;
   Clip: TRect;
   Title, DispLabel: UnicodeString;
-  RuleCh, MarkCh: UnicodeString;
+  MarkCh: UnicodeString;
 begin
   if (FBounds.W < 1) or (FBounds.H < 1) then
     Exit;
@@ -658,6 +760,7 @@ begin
     Materialize;
     ArrangeBody(FBounds);
   end;
+  ApplyDisplay(FBounds.W);
 
   case FKind of
     ckAssistant:
@@ -690,7 +793,6 @@ begin
   R := FBounds.X + FBounds.W - 1;
   T := FBounds.Y;
   B := FBounds.Y + FBounds.H - 1;
-  BodyRows(FBounds.W, TextRows, Lines);
 
   { Keep the title inside the block: a long reason is truncated with an
     ellipsis rather than pushing the rule and mark off the edge. }
@@ -699,35 +801,14 @@ begin
     TitleMaxW := 1;
   DispLabel := TruncateTitle(UnicodeString(FLabel), TitleMaxW);
 
-  if (not EffectiveExpanded) and (FKind in [ckThought, ckTool]) then
-  begin
-    { Both collapse to a thin rule; a tool's is full contrast, so the reasons
-      read as a story of the agent's decisions. }
-    RuleCh := '─';
-    MarkCh := '▼';
-  end
+  { A condensed thought/tool (> CondenseThreshold wrapped rows, not expanded)
+    shows the double-headed vertical arrow as its caret; a shorter one needs no
+    caret, and a live block never shows one. }
+  if Condenseable and (not FLive) and (not FExpanded) and (FSrc <> nil) and
+    (FSrc.LineCountAt(InnerWidth(FBounds.W)) > CaretThreshold) then
+    MarkCh := '↕'
   else
-  begin
-    RuleCh := '';
-    MarkCh := '▲';
-  end;
-
-  { Collapsed rule line: ' ─ Label ───── ▼ ─', one leading space, running to the
-    block's right edge (a space remains before the scrollbar column). }
-  if RuleCh <> '' then
-  begin
-    Title := ' ' + RuleCh + ' ' + DispLabel + ' ';
-    I := FBounds.W - StringWidth(Title) - 5;
-    if I < 1 then
-      I := 1;
-    if FKind = ckTool then
-      PutText(S, L, T, Title + Rep(RuleCh, I) + ' ' + MarkCh + ' ' + RuleCh,
-        FTheme.Text)
-    else
-      PutText(S, L, T, Title + Rep(RuleCh, I) + ' ' + MarkCh + ' ' + RuleCh,
-        FTheme.Muted);
-    Exit;
-  end;
+    MarkCh := '';
 
   { Boxed kinds. }
   if (FKind = ckUser) or (FKind = ckQueued) then
@@ -820,15 +901,19 @@ begin
   end
   else
   begin
-    { ╭─ Label ───── ▲ ─╮ }
+    { ╭─ Label ───── ↕ ─╮ (the caret is ↕ only when the condensed view is long,
+      else a blank) }
     InnerW := FBounds.W - 4;
     if InnerW < 1 then
       InnerW := 1;
     Title := '╭─ ' + DispLabel + ' ';
-    I := FBounds.W - StringWidth(Title) - 5;
+    I := FBounds.W - StringWidth(Title) - StringWidth(MarkCh) - 5;
     if I < 1 then
       I := 1;
-    PutText(S, L, T, Title + Rep('─', I) + ' ▲ ─╮', Border);
+    if MarkCh = '' then
+      PutText(S, L, T, Title + Rep('─', I) + ' ─╮', Border)
+    else
+      PutText(S, L, T, Title + Rep('─', I) + ' ' + MarkCh + ' ─╮', Border);
     PutCh(S, L, B, '╰', Border);
     PutCh(S, R, B, '╯', Border);
     for X := L + 1 to R - 1 do
@@ -848,7 +933,7 @@ end;
 function TChatItem.HandleEvent(const E: TInputEvent): Boolean;
 begin
   Result := False;
-  if not (FKind in [ckThought, ckTool]) then
+  if not (FKind in [ckThought, ckTool, ckAmbient]) then
     Exit;
   if FLive then
     Exit;   { a live block is not toggleable; it settles when the stream ends }
@@ -858,6 +943,7 @@ begin
   then
   begin
     FExpanded := not FExpanded;
+    Inc(FTextVer);
     InvalidateHeight;
     if Assigned(FOnToggle) then
       FOnToggle(Self);
