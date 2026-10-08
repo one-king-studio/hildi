@@ -24,6 +24,7 @@ uses
   test_tui_compose, test_tui_chatpanel, test_recall_tool, test_harness_stats,
   test_tui_compact, test_markdown, test_markdownview, test_tls,
   test_session_protocol, test_session_runtime, test_session_client,
+  test_session_socket,
   test_harness_driver, test_jsonrpc, test_stdio_child, test_mcp_config,
   test_mcp_client, test_subagent, test_subagent_supervisor,
   test_mcp_cli, test_mcp_http, test_mcp_oauth,

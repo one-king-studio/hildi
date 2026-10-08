@@ -1485,6 +1485,11 @@ begin
     Inc(I);
   end;
 
+  { Tidy the runtime directory: remove files left by sessions that were killed
+    rather than idle-exiting (a clean exit unlinks its own socket). Best effort;
+    a live socket is never touched. }
+  SweepRuntimeDir(RuntimeDir, SocketSweepGraceMs, LogSweepKeepMs);
+
   Cfg := Default(TSessionRuntimeConfig);
   Cfg.SessionId := SessionId;
   Cfg.WorkspacePath := Workspace;

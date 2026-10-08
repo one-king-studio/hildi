@@ -29,6 +29,21 @@ function SocketPathFor(const ASessionId: string): string;
 { True when a runtime is listening on the session's socket (a live connect). }
 function SessionSocketReady(const ASessionId: string): Boolean;
 
+const
+  { A socket younger than this may be mid-bind (bind creates the file before
+    listen), so the sweep leaves it for a live runtime to own. }
+  SocketSweepGraceMs = 60000;
+  { A log is kept while its runtime is live, and for this long afterwards so a
+    crash log can still be read. }
+  LogSweepKeepMs = 60 * 60 * 1000;
+
+{ Remove stale runtime files from ADir, best effort. A <session>.sock whose
+  runtime is not live (the connect probe fails) and that is at least
+  ASocketGraceMs old is unlinked. A <session>.log is unlinked once its runtime is
+  not live and the log is at least ALogKeepMs old. A live runtime's socket and
+  log are never touched. }
+procedure SweepRuntimeDir(const ADir: string; ASocketGraceMs, ALogKeepMs: Int64);
+
 function NowMs: Int64;
 function ShellQuote(const AValue: string): string;
 function ConnectProbe(const APath: string): Boolean;
@@ -212,6 +227,59 @@ begin
       Exit(False);
   end;
 end;
+
+{ The file's mtime in ms since the epoch, or 0 when it cannot be read (so a
+  dead file is swept rather than kept). }
+function FileMTimeMs(const APath: string): Int64;
+var
+  DT: TDateTime;
+begin
+  if not FileAge(APath, DT) then
+    Exit(0);
+  Result := Trunc((DT - EncodeDate(1970, 1, 1)) * MSecsPerDay);
+end;
+
+procedure SweepRuntimeDir(const ADir: string; ASocketGraceMs, ALogKeepMs: Int64);
+var
+  SR: TSearchRec;
+  Path, Name: string;
+  Now_: Int64;
+begin
+  if ADir = '' then
+    Exit;
+  Now_ := NowMs;
+  if FindFirst(IncludeTrailingPathDelimiter(ADir) + '*', faAnyFile, SR) <> 0 then
+    Exit;
+  try
+    repeat
+      Name := SR.Name;
+      if (Name = '') or (Name = '.') or (Name = '..') then
+        Continue;
+      Path := IncludeTrailingPathDelimiter(ADir) + Name;
+      if ExtractFileExt(Name) = '.sock' then
+      begin
+        if ConnectProbe(Path) then
+          Continue;                       { a live runtime owns it }
+        if (ASocketGraceMs > 0) and
+          (Now_ - FileMTimeMs(Path) < ASocketGraceMs) then
+          Continue;                       { possibly mid-bind }
+        fpUnlink(PAnsiChar(AnsiString(Path)));
+      end
+      else if ExtractFileExt(Name) = '.log' then
+      begin
+        { Keep a log while its runtime is live, and for a while afterwards so a
+          crash log can still be read. }
+        if ConnectProbe(ChangeFileExt(Path, '.sock')) then
+          Continue;
+        if (ALogKeepMs > 0) and (Now_ - FileMTimeMs(Path) < ALogKeepMs) then
+          Continue;
+        fpUnlink(PAnsiChar(AnsiString(Path)));
+      end;
+    until FindNext(SR) <> 0;
+  finally
+    FindClose(SR);
+  end;
+end;
 {$else}
 function NowMs: Int64;
 begin
@@ -254,6 +322,10 @@ begin
 end;
 
 procedure SetNoSigPipe(AFd: Integer);
+begin
+end;
+
+procedure SweepRuntimeDir(const ADir: string; ASocketGraceMs, ALogKeepMs: Int64);
 begin
 end;
 {$endif}
