@@ -474,10 +474,6 @@ begin
 end;
 
 procedure THarnessApp.UpdateStats;
-const
-  { Past this share of the context window, hint at /checkpoint. The nudge never
-    triggers it; the operator decides. }
-  CheckpointNudgePercent = 80;
 var
   Context: Integer;
 begin
@@ -488,8 +484,7 @@ begin
   UpdateHeader;
   { The checkpoint nudge: advisory only. }
   Context := FSession.SessionTotals.ContextTokens;
-  if (FSession.MaxContextTokens > 0) and
-    (Context * 100 >= FSession.MaxContextTokens * CheckpointNudgePercent) then
+  if CheckpointNudgeNeeded(Context, FSession.MaxContextTokens) then
     FHintsText := CtaHints + ' · /checkpoint to continue'
   else
     FHintsText := CtaHints;

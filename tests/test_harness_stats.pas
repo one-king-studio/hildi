@@ -26,6 +26,7 @@ type
     procedure TestFormatContextUsageNoLimit;
     procedure TestFormatSessionStats;
     procedure TestFormatSessionStatsEmpty;
+    procedure TestCheckpointNudgeNeeded;
   end;
 
 implementation
@@ -128,6 +129,14 @@ begin
   AssertEquals('seconds', '3.4s', FormatDurationMs(3400));
   AssertEquals('minutes', '2m05s', FormatDurationMs(125000));
   AssertEquals('hours', '1h30m', FormatDurationMs(5400000));
+end;
+
+procedure THarnessStatsTest.TestCheckpointNudgeNeeded;
+begin
+  AssertFalse('below the threshold', CheckpointNudgeNeeded(79, 100));
+  AssertTrue('at the threshold', CheckpointNudgeNeeded(80, 100));
+  AssertTrue('above the threshold', CheckpointNudgeNeeded(95, 100));
+  AssertFalse('no limit disables it', CheckpointNudgeNeeded(100, 0));
 end;
 
 initialization

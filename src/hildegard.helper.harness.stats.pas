@@ -34,6 +34,11 @@ function FormatContextUsage(ATokens, ALimit: Integer): string;
   requests. `in`/`out` are the billed sums over every request. }
 function FormatSessionStats(const ATurn: TTurnRecord): string;
 
+{ True when the context in play has crossed the checkpoint-nudge threshold (80%
+  of the limit). Advisory only: the operator triggers the checkpoint. A
+  non-positive limit disables the nudge. }
+function CheckpointNudgeNeeded(ATokens, ALimit: Integer): Boolean;
+
 implementation
 
 const
@@ -161,6 +166,11 @@ begin
       '% cached';
   Result := Result + ' · ' + FormatDurationMs(ATurn.DurationMs) + ' · ' +
     IntToStr(ATurn.RequestCount) + ' req';
+end;
+
+function CheckpointNudgeNeeded(ATokens, ALimit: Integer): Boolean;
+begin
+  Result := (ALimit > 0) and (ATokens * 100 >= ALimit * 80);
 end;
 
 end.
