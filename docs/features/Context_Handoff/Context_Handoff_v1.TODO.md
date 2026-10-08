@@ -54,8 +54,11 @@ protocol/runtime → TUI.
 
 ### Phase 5: TUI
 
-- [ ] **Handoff UX**: `/handoff` → draft in an editable buffer → commit;
-      refuse empty.
+- [ ] **Tool-selection component**: a reusable picker/surface for choosing an
+      action (not a bare keybinding) — the handoff entry point uses it, and so
+      will other command surfaces. This is its own small component, built once.
+- [ ] **Handoff UX**: the tool-selection surface offers `/handoff` → draft in an
+      editable buffer → commit; refuse empty.
 - [ ] **Resume rendering**: prepend the latest snapshot's summary as the
       segment's opening block.
 - [ ] **Back-pagination**: load the prior segment on scroll; a "— handoff —"
