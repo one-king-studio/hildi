@@ -11,7 +11,7 @@
 
 Implement the keyframe handoff: a **snapshot** table, a **resume window** that
 starts from the latest snapshot, a **whole-session FTS5 recall**, and the
-operator UX (`/handoff`, edit, boundary, back-pagination). **One session id**;
+operator UX (`/handoff`, boundary, back-pagination). **One session id**;
 nothing is deleted.
 
 ## Requirements
@@ -33,14 +33,14 @@ nothing is deleted.
       messages.
 - [ ] **Build**: the vendored SQLite compiles with `-DSQLITE_ENABLE_FTS5`.
 - [ ] **Protocol**: `scHandoff` (driver-only) requests a draft;
-      `scHandoffCommit` (driver-only, carries the edited text) records the
+      `scHandoffCommit` (driver-only, carries the agent's text) records the
       snapshot. Events: `ekHandoffReady` (draft), `ekHandoffCommitted` (the
       snapshot seq).
 - [ ] **Draft**: the runtime runs one bounded LLM request (a handoff
       instruction) and emits the draft; the session is not modified.
 - [ ] **Commit**: the runtime records a snapshot at the current HWM with the
-      (edited) summary; the session's **active window** becomes "summary +
-      messages after the boundary". Nothing is deleted.
+      agent-generated summary; the session's **active window** becomes "summary
+      + messages after the boundary". Nothing is deleted.
 - [ ] **Resume**: opening/attaching a session loads the active window — the
       latest snapshot's summary prepended, then messages after its `seq`. The
       TUI renders the summary as the segment's opening block.
@@ -112,7 +112,7 @@ type
     ekHandoffReady, ekHandoffCommitted);
   TSessionCommand = record
     // ... existing ...
-    HandoffText: string;   // scHandoffCommit: the (edited) document
+    HandoffText: string;   // scHandoffCommit: the agent-generated document
   end;
 ```
 
@@ -204,7 +204,7 @@ type
 
 ## Security Considerations
 
-- Driver-only handoff; the snapshot summary is the operator's (editable).
+- Driver-only handoff; the snapshot summary is the agent-generated document.
 - FTS queries are parameterized (no injection via the query string; the MATCH
   term is bound).
 

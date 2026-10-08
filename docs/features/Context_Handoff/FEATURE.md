@@ -47,7 +47,8 @@ footage before it still on disk.
 
 - A deliberate, operator-owned **handoff** (`/handoff`), with a **threshold
   nudge** (e.g. 80% context) that never fires automatically.
-- The **agent writes** the handoff; the **operator reviews and edits** it.
+- The **agent writes** the handoff (one action); the operator triggers it but
+  does not edit it.
 - A handoff records a **snapshot** at the current message boundary; messages
   before it are **archived** (frozen from the prompt, retained in the store).
 - **Resume always starts from the latest snapshot forward** — the snapshot's
@@ -63,8 +64,8 @@ footage before it still on disk.
 
 - As an **operator**, I want to keep working past the context limit without
   losing detail, in the **same session**, so nothing is unrecoverable.
-- As an **operator**, I want to review/edit the handoff before it takes effect,
-  so the continuation starts with *my* framing.
+- As an **operator**, I want the handoff written by the agent in one action, so
+  continuing past the context limit is a single command.
 - As an **operator**, I want to scroll back past a handoff to see exactly what
   was said, so the summary never has to be perfect.
 - As the **agent**, I want to search my whole history (including archived) by
@@ -79,8 +80,8 @@ footage before it still on disk.
 
 - [ ] `/handoff` (operator) triggers a handoff; a **nudge** suggests it past a
       configurable context threshold but never triggers it.
-- [ ] The agent generates a **handoff document**; the operator may **edit** it
-      before confirming.
+- [ ] The agent generates a **handoff document**; the operator triggers it (no
+      edit step).
 - [ ] On confirm, a **snapshot** is recorded for the session at the current
       message high-water mark: `session_snapshots(session_id, seq, summary,
       created_at)`.
@@ -153,7 +154,8 @@ footage before it still on disk.
   budget; if it cannot fit, tell the operator.
 - **FTS index drift** (messages added but not indexed). Mitigation: index on
   append in the same store transaction; a backfill on migration.
-- **A bad summary.** Mitigation: operator edits it; archived messages remain.
+- **A bad summary.** Mitigation: archived messages remain fully retrievable, so
+  the summary never has to be perfect.
 - **Snapshot density** (too few = big summaries; too many = churn). Mitigation:
   manual-only in v1; density is a later knob.
 
