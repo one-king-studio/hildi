@@ -747,11 +747,11 @@ end;
 procedure TChatItem.Render(const S: ISurface);
 var
   L, R, T, B, X, I, TitleMaxW: Integer;
-  InnerW: Integer;
   Border, SurfaceAttr, TitleAttr: TAttr;
   Clip: TRect;
   Title, DispLabel: UnicodeString;
   MarkCh: UnicodeString;
+  Right: UnicodeString;
 begin
   if (FBounds.W < 1) or (FBounds.H < 1) then
     Exit;
@@ -902,18 +902,17 @@ begin
   else
   begin
     { ╭─ Label ───── ↕ ─╮ (the caret is ↕ only when the condensed view is long,
-      else a blank) }
-    InnerW := FBounds.W - 4;
-    if InnerW < 1 then
-      InnerW := 1;
+      else a blank). The rule fills the width exactly, so the right corner
+      aligns with the right border. }
     Title := '╭─ ' + DispLabel + ' ';
-    I := FBounds.W - StringWidth(Title) - StringWidth(MarkCh) - 5;
+    if MarkCh = '' then
+      Right := '╮'
+    else
+      Right := ' ' + MarkCh + ' ─╮';
+    I := FBounds.W - StringWidth(Title) - StringWidth(Right);
     if I < 1 then
       I := 1;
-    if MarkCh = '' then
-      PutText(S, L, T, Title + Rep('─', I) + ' ─╮', Border)
-    else
-      PutText(S, L, T, Title + Rep('─', I) + ' ' + MarkCh + ' ─╮', Border);
+    PutText(S, L, T, Title + Rep('─', I) + Right, Border);
     PutCh(S, L, B, '╰', Border);
     PutCh(S, R, B, '╯', Border);
     for X := L + 1 to R - 1 do
