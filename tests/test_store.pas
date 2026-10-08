@@ -82,7 +82,7 @@ type
     procedure TestClearOAuthToken;
     procedure TestFinalizeRunningTurns;
     procedure TestBeginTurnSelfHeals;
-    procedure TestSnapshotAndActiveWindow;
+    procedure TestCheckpointAndActiveWindow;
     procedure TestQueryMessagesBefore;
     procedure TestFtsSearchScoped;
   end;
@@ -1609,15 +1609,15 @@ begin
   end;
 end;
 
-procedure TStoreTest.TestSnapshotAndActiveWindow;
+procedure TStoreTest.TestCheckpointAndActiveWindow;
 var
   S: TSqliteStore;
   Err: TStoreError;
   Ws: Integer;
   Sid: string;
   Seq: Int64;
-  Snap: TSnapshotRecord;
-  SnapList: TSnapshotArray;
+  Snap: TCheckpointRecord;
+  SnapList: TCheckpointArray;
   Msgs: TMessageRecordArray;
   M: TMessageRecord;
 begin
@@ -1632,20 +1632,20 @@ begin
     S.AppendMessage(M, Err);
     M.Content := 'second';
     S.AppendMessage(M, Err);
-    { Snapshot at the HWM (seq 2). }
-    AssertTrue('save snapshot', S.SaveSnapshot(Sid, 'we did X', Seq, Err));
+    { Checkpoint at the HWM (seq 2). }
+    AssertTrue('save checkpoint', S.SaveCheckpoint(Sid, 'we did X', Seq, Err));
     AssertEquals('boundary', 2, Seq);
-    { A message after the snapshot is in the active window. }
+    { A message after the checkpoint is in the active window. }
     M.Content := 'third';
     S.AppendMessage(M, Err);
 
-    AssertTrue('latest', S.LatestSnapshot(Sid, Snap, Err));
+    AssertTrue('latest', S.LatestCheckpoint(Sid, Snap, Err));
     AssertEquals('summary', 'we did X', Snap.Summary);
-    AssertTrue('list', S.ListSnapshots(Sid, SnapList, Err));
-    AssertEquals('one snapshot', 1, Length(SnapList));
+    AssertTrue('list', S.ListCheckpoints(Sid, SnapList, Err));
+    AssertEquals('one checkpoint', 1, Length(SnapList));
 
     AssertTrue('active', S.QueryActiveMessages(Sid, Msgs, Err));
-    AssertEquals('only the post-snapshot message', 1, Length(Msgs));
+    AssertEquals('only the post-checkpoint message', 1, Length(Msgs));
     AssertEquals('content', 'third', Msgs[0].Content);
   finally
     S.Free;
@@ -1675,7 +1675,7 @@ begin
       M.Content := 'msg' + IntToStr(I);
       S.AppendMessage(M, Err);
     end;
-    AssertTrue('snapshot', S.SaveSnapshot(Sid, 'summary', Seq, Err));
+    AssertTrue('checkpoint', S.SaveCheckpoint(Sid, 'summary', Seq, Err));
     { The page before the boundary, newest 2, returned oldest first. }
     AssertTrue('before', S.QueryMessagesBefore(Sid, Seq, 2, Msgs, Err));
     AssertEquals('two', 2, Length(Msgs));

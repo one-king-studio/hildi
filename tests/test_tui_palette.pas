@@ -30,7 +30,7 @@ function TTuiPaletteTest.Cmds: TCommandArray;
 begin
   Result := nil;
   SetLength(Result, 3);
-  Result[0].Name := 'handoff';
+  Result[0].Name := 'checkpoint';
   Result[0].Description := 'hand off the session';
   Result[1].Name := 'help';
   Result[1].Description := 'show help';
@@ -47,18 +47,18 @@ procedure TTuiPaletteTest.TestFilterByPrefix;
 var
   R: TCommandArray;
 begin
-  R := FilterCommands(Cmds, 'ha');
+  R := FilterCommands(Cmds, 'ch');
   AssertEquals('one', 1, Length(R));
-  AssertEquals('handoff', 'handoff', R[0].Name);
+  AssertEquals('checkpoint', 'checkpoint', R[0].Name);
 end;
 
 procedure TTuiPaletteTest.TestFilterIgnoresLeadingSlash;
 var
   R: TCommandArray;
 begin
-  R := FilterCommands(Cmds, '/hand');
+  R := FilterCommands(Cmds, '/che');
   AssertEquals('one', 1, Length(R));
-  AssertEquals('handoff', 'handoff', R[0].Name);
+  AssertEquals('checkpoint', 'checkpoint', R[0].Name);
 end;
 
 procedure TTuiPaletteTest.TestFilterCaseInsensitive;
@@ -85,7 +85,7 @@ begin
     T := Cmds;
     P.SetCommands(T);
     AssertEquals('all visible', 3, P.VisibleCount);
-    AssertEquals('first selected', 'handoff', P.SelectedName);
+    AssertEquals('first selected', 'checkpoint', P.SelectedName);
     P.Filter('/cl');
     AssertEquals('one visible', 1, P.VisibleCount);
     AssertEquals('clear selected', 'clear', P.SelectedName);

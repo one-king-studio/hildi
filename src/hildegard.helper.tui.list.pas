@@ -15,6 +15,7 @@ type
   TListView = class(TFocusable)
   private
     FItems: TStringList;
+    FDetails: TStringList;   // parallel to FItems; right-aligned, may be ''
     FSelected: Integer;
     FTheme: TTheme;
     FOnActivate: TNotifyEvent;
@@ -23,7 +24,9 @@ type
   public
     constructor Create(const ATheme: TTheme);
     destructor Destroy; override;
-    procedure AddItem(const AText: string);
+    procedure AddItem(const AText: string); overload;
+    { Add an item with a right-aligned detail (e.g. a description). }
+    procedure AddItem(const AText, ADetail: string); overload;
     procedure Clear;
     function Count: Integer;
     function ItemAt(AIndex: Integer): string;
@@ -41,6 +44,7 @@ constructor TListView.Create(const ATheme: TTheme);
 begin
   inherited Create;
   FItems := TStringList.Create;
+  FDetails := TStringList.Create;
   FTheme := ATheme;
   FSelected := -1;
 end;
@@ -48,12 +52,19 @@ end;
 destructor TListView.Destroy;
 begin
   FItems.Free;
+  FDetails.Free;
   inherited Destroy;
 end;
 
 procedure TListView.AddItem(const AText: string);
 begin
+  AddItem(AText, '');
+end;
+
+procedure TListView.AddItem(const AText, ADetail: string);
+begin
   FItems.Add(AText);
+  FDetails.Add(ADetail);
   if FSelected < 0 then
     FSelected := 0;
 end;
@@ -61,6 +72,7 @@ end;
 procedure TListView.Clear;
 begin
   FItems.Clear;
+  FDetails.Clear;
   FSelected := -1;
 end;
 
@@ -123,9 +135,9 @@ end;
 
 procedure TListView.Render(const S: ISurface);
 var
-  I, J, X: Integer;
-  Line: string;
-  A: TAttr;
+  I, J, X, DX: Integer;
+  Line, Detail: string;
+  A, DA: TAttr;
   C: TCell;
 begin
   if (FBounds.W <= 0) or (FBounds.H <= 0) then
@@ -152,6 +164,28 @@ begin
       C.Ch := UnicodeString(Line[J]);
       C.Attr := A;
       S.Put(X, FBounds.Y + I, C);
+    end;
+    { The detail, right-aligned, dimmed, when it fits clear of the name. }
+    if (I < FDetails.Count) and (FDetails[I] <> '') then
+    begin
+      Detail := FDetails[I];
+      DA := FTheme.Muted;
+      if I = FSelected then
+        DA := FTheme.Accent;
+      DX := FBounds.X + FBounds.W - Length(Detail);
+      if DX > FBounds.X + Length(Line) + 2 then
+      begin
+        for J := 1 to Length(Detail) do
+        begin
+          X := DX + J - 1;
+          if X >= FBounds.X + FBounds.W then
+            Break;
+          C := Default(TCell);
+          C.Ch := UnicodeString(Detail[J]);
+          C.Attr := DA;
+          S.Put(X, FBounds.Y + I, C);
+        end;
+      end;
     end;
   end;
 end;

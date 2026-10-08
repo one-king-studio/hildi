@@ -38,9 +38,9 @@ type
       ekAmbient is a delivered subagent result; ekSubagent is a roster update;
       ekSubagentAsk is a child's approval ask relayed up. }
     ekAmbient, ekSubagent, ekSubagentAsk,
-    { Context handoff: a draft is ready (Text), and a snapshot was committed
-      (TurnSeq = the snapshot boundary seq). Appended last. }
-    ekHandoffReady, ekHandoffCommitted);
+    { Context checkpoint: a draft is ready (Text), and a checkpoint was committed
+      (TurnSeq = the checkpoint boundary seq). Appended last. }
+    ekCheckpointReady, ekCheckpointCommitted);
 
   { One streamed event. A flat record with optional fields, the same shape as
     TTurnEvent: only the fields named by Kind are meaningful. }
@@ -84,9 +84,9 @@ type
     scShutdown,
     { Operator subagent actions, appended last. }
     scAbortSubagent, scReleaseSubagent,
-    { Context handoff: request a draft, then commit an edited one. Driver-only.
+    { Context checkpoint: request a draft, then commit an edited one. Driver-only.
       Appended last so stored ordinals are unchanged. }
-    scHandoff, scHandoffCommit);
+    scCheckpoint, scCheckpointCommit);
 
   { One client command. Id is echoed in the reply. }
   TSessionCommand = record
@@ -99,8 +99,8 @@ type
     Choice: TApprovalChoice;    // approve
     { The child session an abort/release subagent command acts on. }
     SessionId: string;
-    { scHandoffCommit: the (edited) handoff document to snapshot. }
-    HandoffText: string;
+    { scCheckpointCommit: the (edited) checkpoint document to checkpoint. }
+    CheckpointText: string;
   end;
 
   TSessionHello = record
@@ -182,7 +182,7 @@ const
     'drive_requested', 'drive_granted', 'drive_released',
     'turn_finished', 'error', 'gap', 'loop_exited', 'reasoning_done',
     'tool_output', 'ambient', 'subagent', 'subagent_ask',
-    'handoff_ready', 'handoff_committed');
+    'checkpoint_ready', 'checkpoint_committed');
 
   MessageKindNames: array[TSessionMessageKind] of string = (
     'hello', 'attached', 'event', 'reply', 'detached', 'error',
@@ -193,7 +193,7 @@ const
   CommandKindNames: array[TSessionCommandKind] of string = (
     'attach', 'detach', 'prompt', 'approve', 'interrupt',
     'claim_drive', 'release_drive', 'ping', 'shutdown',
-    'abort_subagent', 'release_subagent', 'handoff', 'handoff_commit');
+    'abort_subagent', 'release_subagent', 'checkpoint', 'checkpoint_commit');
 
 { --- enum <-> wire ------------------------------------------------------ }
 
@@ -575,9 +575,9 @@ begin
         PutStr(O, 'reason', E.Ask.Reason);
         O.Add('options', EncodeOptions(E.Ask.Options));
       end;
-    ekHandoffReady:
+    ekCheckpointReady:
       PutStr(O, 'text', E.Text);
-    ekHandoffCommitted:
+    ekCheckpointCommitted:
       PutInt(O, 'turn_seq', E.TurnSeq);
   end;
 end;
@@ -689,9 +689,9 @@ begin
         E.Ask.Reason := OptStr(O, 'reason');
         DecodeOptions(O, E.Ask);
       end;
-    ekHandoffReady:
+    ekCheckpointReady:
       E.Text := OptStr(O, 'text');
-    ekHandoffCommitted:
+    ekCheckpointCommitted:
       E.TurnSeq := OptInt64(O, 'turn_seq', 0);
   end;
   Result := True;
@@ -712,10 +712,10 @@ begin
       end;
     scAbortSubagent, scReleaseSubagent:
       PutStr(O, 'session', C.SessionId);
-    scHandoffCommit:
-      PutStr(O, 'text', C.HandoffText);
+    scCheckpointCommit:
+      PutStr(O, 'text', C.CheckpointText);
     scAttach, scDetach, scInterrupt, scClaimDrive, scReleaseDrive, scPing,
-    scShutdown, scHandoff:
+    scShutdown, scCheckpoint:
       ;   // no payload beyond the name
   end;
 end;
@@ -748,10 +748,10 @@ begin
       end;
     scAbortSubagent, scReleaseSubagent:
       C.SessionId := OptStr(O, 'session');
-    scHandoffCommit:
-      C.HandoffText := OptStr(O, 'text');
+    scCheckpointCommit:
+      C.CheckpointText := OptStr(O, 'text');
     scAttach, scDetach, scInterrupt, scClaimDrive, scReleaseDrive, scPing,
-    scShutdown, scHandoff:
+    scShutdown, scCheckpoint:
       ;
   end;
   Result := True;

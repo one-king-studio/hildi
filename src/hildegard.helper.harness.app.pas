@@ -366,8 +366,8 @@ function THarnessApp.DefaultCommands: TCommandArray;
 begin
   Result := nil;
   SetLength(Result, 1);
-  Result[0].Name := 'handoff';
-  Result[0].Description := 'hand off this session (archive context)';
+  Result[0].Name := 'checkpoint';
+  Result[0].Description := 'create a checkpoint for this session';
 end;
 
 procedure THarnessApp.ComposeChanged(Sender: TObject);
@@ -392,8 +392,8 @@ procedure THarnessApp.RunCommand(const AName: string);
 begin
   FPanel.SetPaletteActive(False);
   FPanel.Compose.Clear;
-  if (AName = 'handoff') and (FDriver <> nil) then
-    FDriver.Handoff;
+  if (AName = 'checkpoint') and (FDriver <> nil) then
+    FDriver.Checkpoint;
   FApp.Invalidate;
 end;
 
@@ -851,11 +851,11 @@ begin
       end;
     teSubagent, teSubagentAsk, teAmbient:
       HandleSubagentEvent(E);
-    teHandoffCommitted:
+    teCheckpointCommitted:
       begin
-        { A handoff snapshot was recorded; show it as an ambient note. }
+        { A checkpoint was recorded; show it as an ambient note. }
         FPanel.Stream.Add(ckAmbient, '',
-          Format('handoff recorded (snapshot at seq %d)', [E.ElapsedMs]));
+          Format('checkpoint recorded (at seq %d)', [E.ElapsedMs]));
         FApp.Invalidate;
       end;
     teDone:

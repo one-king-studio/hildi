@@ -35,7 +35,7 @@ type
     procedure AnswerAsk(const AAskRef: string; const AChoice: TApprovalChoice);
     procedure AbortSubagent(const ASessionId: string);
     procedure ReleaseSubagent(const ASessionId: string);
-    procedure Handoff;
+    procedure Checkpoint;
     function PopEvent(out AEvent: TTurnEvent): Boolean;
     procedure Close;
   end;
@@ -98,29 +98,29 @@ procedure TLocalDriver.ReleaseSubagent(const ASessionId: string);
 begin
 end;
 
-procedure TLocalDriver.Handoff;
+procedure TLocalDriver.Checkpoint;
 var
   Text, Err: string;
   Seq: Int64;
   StoreErr: TStoreError;
   E: TTurnEvent;
 begin
-  { The in-process path drafts and snapshots directly (no wire round-trip). }
-  if not FSession.DraftHandoff(Text, Err) then
+  { The in-process path drafts and checkpoints directly (no wire round-trip). }
+  if not FSession.DraftCheckpoint(Text, Err) then
   begin
     E := Default(TTurnEvent);
     E.Kind := teError;
-    E.Text := 'handoff draft failed';
+    E.Text := 'checkpoint draft failed';
     E.Detail := Err;
     FSession.Queue.Push(E);
     Exit;
   end;
-  if FSession.View.Store.SaveSnapshot(FSession.View.SessionId, Text, Seq,
+  if FSession.View.Store.SaveCheckpoint(FSession.View.SessionId, Text, Seq,
     StoreErr) then
   begin
     E := Default(TTurnEvent);
-    E.Kind := teHandoffCommitted;
-    E.ElapsedMs := Seq;   { carry the snapshot boundary seq }
+    E.Kind := teCheckpointCommitted;
+    E.ElapsedMs := Seq;   { carry the checkpoint boundary seq }
     FSession.Queue.Push(E);
   end;
 end;

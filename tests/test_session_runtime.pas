@@ -100,7 +100,7 @@ type
     procedure TestClaimDriveNeedsConsent;
     procedure TestIdleExit;
     procedure TestRecoversInterruptedTurn;
-    procedure TestHandoffCommitSnapshots;
+    procedure TestCheckpointCommitRecords;
     procedure TestShutdownCommandStopsRuntime;
     procedure TestShutdownFromNonDriverRefused;
     procedure TestNoClientsExitAfterGrace;
@@ -925,7 +925,7 @@ begin
   end;
 end;
 
-procedure TSessionRuntimeTest.TestHandoffCommitSnapshots;
+procedure TSessionRuntimeTest.TestCheckpointCommitRecords;
 var
   Id: string;
   Fake: TFakeTransport;
@@ -939,7 +939,7 @@ var
   StoreErr: TStoreError;
   Cmd: TSessionCommand;
   Reply: TSessionMessage;
-  Snap: TSnapshotRecord;
+  Snap: TCheckpointRecord;
   Before, After: TMessageRecordArray;
 begin
   Id := NewSession;
@@ -964,9 +964,9 @@ begin
         { Wait for the turn to finish so the message is committed. }
         AssertTrue('turn finished', WaitCount(Sink, ekTurnFinished, 1, 5000));
         Cmd := Default(TSessionCommand);
-        Cmd.Kind := scHandoffCommit;
+        Cmd.Kind := scCheckpointCommit;
         Cmd.Id := 'h1';
-        Cmd.HandoffText := 'Objective: test the handoff.';
+        Cmd.CheckpointText := 'Objective: test the checkpoint.';
         AssertTrue('commit', Client.SendAndWait(Cmd, 3000, Reply));
         AssertTrue('reply ok', Reply.Ok);
       finally
@@ -984,20 +984,20 @@ begin
     Fake.Free;
   end;
 
-  { The snapshot exists; the messages are intact (nothing deleted). }
+  { The checkpoint exists; the messages are intact (nothing deleted). }
   Cfg := Default(TStoreConfig);
   Cfg.DatabasePath := FDbPath;
   Cfg.BusyTimeoutMs := 5000;
   Store := TSqliteStore.Create(Cfg);
   try
     AssertTrue('open', Store.Open(StoreErr));
-    AssertTrue('latest snapshot', Store.LatestSnapshot(Id, Snap, StoreErr));
-    AssertEquals('summary', 'Objective: test the handoff.', Snap.Summary);
+    AssertTrue('latest checkpoint', Store.LatestCheckpoint(Id, Snap, StoreErr));
+    AssertEquals('summary', 'Objective: test the checkpoint.', Snap.Summary);
     AssertTrue('active window', Store.QueryActiveMessages(Id, After, StoreErr));
     AssertTrue('all messages', Store.QueryMessages(Id, Before, StoreErr));
-    { The snapshot boundary is the message HWM, so the active window is empty
+    { The checkpoint boundary is the message HWM, so the active window is empty
       and the full history is intact. }
-    AssertEquals('active empty after snapshot', 0, Length(After));
+    AssertEquals('active empty after checkpoint', 0, Length(After));
     AssertTrue('history preserved', Length(Before) > 0);
   finally
     Store.Free;

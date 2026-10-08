@@ -221,18 +221,18 @@ type
     function MessageHighWaterMark(const ASessionId: string; out ASeq: Int64;
       out AError: TStoreError): Boolean;
 
-    { Record a context-handoff snapshot at the session's current message HWM.
+    { Record a context-checkpoint checkpoint at the session's current message HWM.
       The summary stands in for every message with seq <= ASeq. }
-    function SaveSnapshot(const ASessionId, ASummary: string;
+    function SaveCheckpoint(const ASessionId, ASummary: string;
       out ASeq: Int64; out AError: TStoreError): Boolean;
-    { The most recent snapshot; seNotFound when none. }
-    function LatestSnapshot(const ASessionId: string;
-      out ASnap: TSnapshotRecord; out AError: TStoreError): Boolean;
-    { All snapshots for a session, oldest first. }
-    function ListSnapshots(const ASessionId: string; out ASnaps: TSnapshotArray;
+    { The most recent checkpoint; seNotFound when none. }
+    function LatestCheckpoint(const ASessionId: string;
+      out ASnap: TCheckpointRecord; out AError: TStoreError): Boolean;
+    { All checkpoints for a session, oldest first. }
+    function ListCheckpoints(const ASessionId: string; out ASnaps: TCheckpointArray;
       out AError: TStoreError): Boolean;
-    { The active window: messages with seq > the latest snapshot's seq (all
-      messages when there is no snapshot). }
+    { The active window: messages with seq > the latest checkpoint's seq (all
+      messages when there is no checkpoint). }
     function QueryActiveMessages(const ASessionId: string;
       out AMessages: TMessageRecordArray; out AError: TStoreError): Boolean;
     { Messages with seq > AAfterSeq, oldest first. }
@@ -483,12 +483,12 @@ begin
       'updated_at INTEGER NOT NULL, ' +
       'UNIQUE (scope, workspace_id, server_name))'
   ];
-  { v9: context-handoff snapshots (keyframes) and a whole-session FTS5 index.
+  { v9: context-checkpoint checkpoints (keyframes) and a whole-session FTS5 index.
     Additive. FTS5 requires SQLITE_ENABLE_FTS5 at build time. }
   Result[8].Version := 9;
-  Result[8].Name := 'context snapshots and fts';
+  Result[8].Name := 'context checkpoints and fts';
   Result[8].Statements := [
-    'CREATE TABLE session_snapshots (' +
+    'CREATE TABLE session_checkpoints (' +
       'session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, ' +
       'seq INTEGER NOT NULL, ' +
       'summary TEXT NOT NULL, ' +
@@ -2673,9 +2673,9 @@ begin
   end;
 end;
 
-{ --- context handoff: snapshots, window, recall (v9) ------------------- }
+{ --- context checkpoint: checkpoints, window, recall (v9) ------------------- }
 
-function TSqliteStore.SaveSnapshot(const ASessionId, ASummary: string;
+function TSqliteStore.SaveCheckpoint(const ASessionId, ASummary: string;
   out ASeq: Int64; out AError: TStoreError): Boolean;
 var
   Stmt: TStmt;
@@ -2689,26 +2689,26 @@ begin
     if ASessionId = '' then
       Exit(Fail(AError, seInvalidArgument, 'session id is required', ''));
     if Trim(ASummary) = '' then
-      Exit(Fail(AError, seInvalidArgument, 'snapshot summary is required', ''));
+      Exit(Fail(AError, seInvalidArgument, 'checkpoint summary is required', ''));
     if not MessageHighWaterMark(ASessionId, ASeq, AError) then
       Exit(False);
     if ASeq = 0 then
       Exit(Fail(AError, seInvalidArgument, 'session has no messages to hand off',
         ''));
     Stmt := TStmt.Create(FDb,
-      'INSERT INTO session_snapshots (session_id, seq, summary, created_at) ' +
+      'INSERT INTO session_checkpoints (session_id, seq, summary, created_at) ' +
       'VALUES (?, ?, ?, ?) ' +
       'ON CONFLICT(session_id, seq) DO UPDATE SET summary = excluded.summary, ' +
       'created_at = excluded.created_at');
     try
       if not Stmt.Valid then
-        Exit(Fail(AError, seError, 'could not save snapshot', DbErrorText));
+        Exit(Fail(AError, seError, 'could not save checkpoint', DbErrorText));
       Stmt.BindText(1, ASessionId);
       Stmt.BindInt64(2, ASeq);
       Stmt.BindText(3, ASummary);
       Stmt.BindInt64(4, NowMs);
       if Stmt.Step <> SQLITE_DONE then
-        Exit(Fail(AError, seError, 'could not save snapshot', DbErrorText));
+        Exit(Fail(AError, seError, 'could not save checkpoint', DbErrorText));
     finally
       Stmt.Free;
     end;
@@ -2718,26 +2718,26 @@ begin
   end;
 end;
 
-function TSqliteStore.LatestSnapshot(const ASessionId: string;
-  out ASnap: TSnapshotRecord; out AError: TStoreError): Boolean;
+function TSqliteStore.LatestCheckpoint(const ASessionId: string;
+  out ASnap: TCheckpointRecord; out AError: TStoreError): Boolean;
 var
   Stmt: TStmt;
 begin
   AError := OkError;
-  ASnap := Default(TSnapshotRecord);
+  ASnap := Default(TCheckpointRecord);
   FLock.Acquire;
   try
     if not EnsureOpen(AError) then
       Exit(False);
     Stmt := TStmt.Create(FDb,
-      'SELECT seq, summary, created_at FROM session_snapshots ' +
+      'SELECT seq, summary, created_at FROM session_checkpoints ' +
       'WHERE session_id = ? ORDER BY seq DESC LIMIT 1');
     try
       if not Stmt.Valid then
-        Exit(Fail(AError, seError, 'could not read snapshot', DbErrorText));
+        Exit(Fail(AError, seError, 'could not read checkpoint', DbErrorText));
       Stmt.BindText(1, ASessionId);
       if Stmt.Step <> SQLITE_ROW then
-        Exit(Fail(AError, seNotFound, 'no snapshot for session', ASessionId));
+        Exit(Fail(AError, seNotFound, 'no checkpoint for session', ASessionId));
       ASnap.SessionId := ASessionId;
       ASnap.Seq := Stmt.ColInt64(0);
       ASnap.Summary := Stmt.ColText(1);
@@ -2751,12 +2751,12 @@ begin
   end;
 end;
 
-function TSqliteStore.ListSnapshots(const ASessionId: string;
-  out ASnaps: TSnapshotArray; out AError: TStoreError): Boolean;
+function TSqliteStore.ListCheckpoints(const ASessionId: string;
+  out ASnaps: TCheckpointArray; out AError: TStoreError): Boolean;
 var
   Stmt: TStmt;
   N: Integer;
-  Snap: TSnapshotRecord;
+  Snap: TCheckpointRecord;
 begin
   AError := OkError;
   ASnaps := nil;
@@ -2765,16 +2765,16 @@ begin
     if not EnsureOpen(AError) then
       Exit(False);
     Stmt := TStmt.Create(FDb,
-      'SELECT seq, summary, created_at FROM session_snapshots ' +
+      'SELECT seq, summary, created_at FROM session_checkpoints ' +
       'WHERE session_id = ? ORDER BY seq ASC');
     try
       if not Stmt.Valid then
-        Exit(Fail(AError, seError, 'could not list snapshots', DbErrorText));
+        Exit(Fail(AError, seError, 'could not list checkpoints', DbErrorText));
       Stmt.BindText(1, ASessionId);
       N := 0;
       while Stmt.Step = SQLITE_ROW do
       begin
-        Snap := Default(TSnapshotRecord);
+        Snap := Default(TCheckpointRecord);
         Snap.SessionId := ASessionId;
         Snap.Seq := Stmt.ColInt64(0);
         Snap.Summary := Stmt.ColText(1);
@@ -2795,15 +2795,15 @@ end;
 function TSqliteStore.QueryActiveMessages(const ASessionId: string;
   out AMessages: TMessageRecordArray; out AError: TStoreError): Boolean;
 var
-  Snap: TSnapshotRecord;
+  Snap: TCheckpointRecord;
   Boundary: Int64;
 begin
   Boundary := 0;
-  if LatestSnapshot(ASessionId, Snap, AError) then
+  if LatestCheckpoint(ASessionId, Snap, AError) then
     Boundary := Snap.Seq
   else if AError.Code <> seNotFound then
     Exit(False);
-  { Messages with seq > boundary (all when no snapshot). }
+  { Messages with seq > boundary (all when no checkpoint). }
   Result := QueryMessagesAfter(ASessionId, Boundary, AMessages, AError);
 end;
 

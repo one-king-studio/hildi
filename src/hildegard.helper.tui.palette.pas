@@ -1,6 +1,6 @@
 unit hildegard.helper.tui.palette;
 { A typeahead command palette: a selectable list of commands shown above the
-  composer. It is the reusable "choose an action" surface — the handoff (and
+  composer. It is the reusable "choose an action" surface — the checkpoint (and
   future commands) register here rather than each adding a keybinding.
 
   The host shows it when the composer text begins with '/', feeds the typed
@@ -21,7 +21,7 @@ uses
   hildegard.helper.tui.theme, hildegard.helper.tui.list;
 type
   TCommand = record
-    Name: string;          // e.g. 'handoff' (no slash)
+    Name: string;          // e.g. 'checkpoint' (no slash)
     Description: string;   // a one-line summary
   end;
   TCommandArray = array of TCommand;
@@ -136,7 +136,8 @@ begin
   FVisibleCommands := FilterCommands(FCommands, APrefix);
   FList.Clear;
   for I := 0 to High(FVisibleCommands) do
-    FList.AddItem(FVisibleCommands[I].Name);
+    FList.AddItem('/' + FVisibleCommands[I].Name,
+      FVisibleCommands[I].Description);
   FSelected := FList.Selected;
 end;
 
@@ -170,38 +171,52 @@ begin
   N := Length(FVisibleCommands);
   if N > PaletteMaxRows then
     N := PaletteMaxRows;
-  { A title row plus one row per visible command (when any). }
+  { A titled box: the top border, one row per visible command, the bottom
+    border (when any). }
   if N = 0 then
     Result.H := 0
   else
-    Result.H := N + 1;
+    Result.H := N + 2;
 end;
 
 procedure TCommandPalette.Arrange(const ABounds: TRect);
 begin
   inherited Arrange(ABounds);
-  if ABounds.H > 1 then
-    FList.Arrange(Rc(ABounds.X, ABounds.Y + 1, ABounds.W, ABounds.H - 1));
+  { Inset by one for the box border. }
+  if ABounds.H > 2 then
+    FList.Arrange(Rc(ABounds.X + 1, ABounds.Y + 1, ABounds.W - 2,
+      ABounds.H - 2));
 end;
 
 procedure TCommandPalette.Render(const S: ISurface);
 var
-  I, Row: Integer;
-  A: TAttr;
+  L, R, T, B, X: Integer;
+  Border: TAttr;
 begin
-  if (FBounds.W <= 0) or (FBounds.H <= 0) then
+  if (FBounds.W < 4) or (FBounds.H < 3) then
     Exit;
-  { Title row. }
-  PutText(S, FBounds.X + 1, FBounds.Y, 'commands', FTheme.Muted);
-  FList.Render(S);
-  { Dim the description of the selected command to the right, when it fits. }
-  if (FSelected >= 0) and (FSelected <= High(FVisibleCommands)) then
+  L := FBounds.X;
+  R := FBounds.X + FBounds.W - 1;
+  T := FBounds.Y;
+  B := FBounds.Y + FBounds.H - 1;
+  Border := WithStyle(FTheme.Accent, [sfDim]);
+  { A rounded box, titled 'commands' on the top border, per the design. }
+  PutCh(S, L, T, '╭', Border);
+  PutCh(S, R, T, '╮', Border);
+  PutCh(S, L, B, '╰', Border);
+  PutCh(S, R, B, '╯', Border);
+  for X := L + 1 to R - 1 do
   begin
-    Row := FBounds.Y + 1 + FSelected;
-    A := FTheme.Muted;
-    PutText(S, FBounds.X + 12, Row,
-      UnicodeString(FVisibleCommands[FSelected].Description), A);
+    PutCh(S, X, T, '─', Border);
+    PutCh(S, X, B, '─', Border);
   end;
+  PutText(S, L + 2, T, ' commands ', FTheme.Muted);
+  for X := T + 1 to B - 1 do
+  begin
+    PutCh(S, L, X, '│', Border);
+    PutCh(S, R, X, '│', Border);
+  end;
+  FList.Render(S);
 end;
 
 procedure TCommandPalette.Activate(Sender: TObject);

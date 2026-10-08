@@ -98,16 +98,16 @@ type
 
   TTurnRecordArray = array of TTurnRecord;
 
-  { A context-handoff snapshot (keyframe): a summary standing in for every
+  { A context-checkpoint checkpoint (keyframe): a summary standing in for every
     message up to and including Seq. Messages after Seq are the active window. }
-  TSnapshotRecord = record
+  TCheckpointRecord = record
     SessionId: string;
     Seq: Int64;            // boundary: messages with seq <= Seq are archived
-    Summary: string;       // the handoff document (prose)
+    Summary: string;       // the checkpoint document (prose)
     CreatedAtMs: Int64;
   end;
 
-  TSnapshotArray = array of TSnapshotRecord;
+  TCheckpointArray = array of TCheckpointRecord;
 
   { A session listing entry. }
   TSessionSummary = record

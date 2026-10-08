@@ -126,10 +126,10 @@ type
       const ACommand: TSessionCommand);
     procedure HandleCommand(AClient: TClientConn;
       const ACommand: TSessionCommand);
-    { Context handoff: draft a summary, then commit it as a snapshot. }
-    procedure HandleHandoff(AClient: TClientConn;
+    { Context checkpoint: draft a summary, then commit it as a checkpoint. }
+    procedure HandleCheckpoint(AClient: TClientConn;
       const ACommand: TSessionCommand);
-    procedure HandleHandoffCommit(AClient: TClientConn;
+    procedure HandleCheckpointCommit(AClient: TClientConn;
       const ACommand: TSessionCommand);
     procedure HandlePrompt(AClient: TClientConn;
       const ACommand: TSessionCommand);
@@ -822,10 +822,10 @@ begin
       HandleRelease(AClient, ACommand);
     scPing:
       ReplyTo(AClient, ACommand.Id, True, '');
-    scHandoff:
-      HandleHandoff(AClient, ACommand);
-    scHandoffCommit:
-      HandleHandoffCommit(AClient, ACommand);
+    scCheckpoint:
+      HandleCheckpoint(AClient, ACommand);
+    scCheckpointCommit:
+      HandleCheckpointCommit(AClient, ACommand);
     scShutdown:
       begin
         if AClient.Role <> srDrive then
@@ -846,7 +846,7 @@ begin
   end;
 end;
 
-procedure TSessionRuntime.HandleHandoff(AClient: TClientConn;
+procedure TSessionRuntime.HandleCheckpoint(AClient: TClientConn;
   const ACommand: TSessionCommand);
 var
   Text, Err: string;
@@ -860,34 +860,34 @@ begin
     Exit;
   end;
   ReplyTo(AClient, ACommand.Id, True, '');
-  { One action (no edit step): draft the handoff, then record it as a snapshot. }
-  if not FSession.DraftHandoff(Text, Err) then
+  { One action (no edit step): draft the checkpoint, then record it as a checkpoint. }
+  if not FSession.DraftCheckpoint(Text, Err) then
   begin
     E := EmitEvent(ekError);
-    E.Text := 'handoff draft failed';
+    E.Text := 'checkpoint draft failed';
     E.Detail := Err;
     Broadcast(E);
     Exit;
   end;
-  E := EmitEvent(ekHandoffReady);
+  E := EmitEvent(ekCheckpointReady);
   E.Text := Text;
   Broadcast(E);
   if (FSession.View.Store = nil) or
-    not FSession.View.Store.SaveSnapshot(FSessionId, Text, Seq, StoreErr) then
+    not FSession.View.Store.SaveCheckpoint(FSessionId, Text, Seq, StoreErr) then
   begin
     E := EmitEvent(ekError);
-    E.Text := 'handoff snapshot failed';
+    E.Text := 'checkpoint checkpoint failed';
     E.Detail := StoreErr.Message;
     Broadcast(E);
     Exit;
   end;
-  E := EmitEvent(ekHandoffCommitted);
+  E := EmitEvent(ekCheckpointCommitted);
   E.TurnSeq := Seq;
-  E.Text := 'handoff committed';
+  E.Text := 'checkpoint committed';
   Broadcast(E);
 end;
 
-procedure TSessionRuntime.HandleHandoffCommit(AClient: TClientConn;
+procedure TSessionRuntime.HandleCheckpointCommit(AClient: TClientConn;
   const ACommand: TSessionCommand);
 var
   Seq: Int64;
@@ -899,22 +899,22 @@ begin
     ReplyTo(AClient, ACommand.Id, False, 'not_driver');
     Exit;
   end;
-  if Trim(ACommand.HandoffText) = '' then
+  if Trim(ACommand.CheckpointText) = '' then
   begin
-    ReplyTo(AClient, ACommand.Id, False, 'empty_handoff');
+    ReplyTo(AClient, ACommand.Id, False, 'empty_checkpoint');
     Exit;
   end;
   if (FSession.View.Store = nil) or
-    not FSession.View.Store.SaveSnapshot(FSessionId, ACommand.HandoffText, Seq,
+    not FSession.View.Store.SaveCheckpoint(FSessionId, ACommand.CheckpointText, Seq,
       Err) then
   begin
-    ReplyTo(AClient, ACommand.Id, False, 'snapshot_failed');
+    ReplyTo(AClient, ACommand.Id, False, 'checkpoint_failed');
     Exit;
   end;
   ReplyTo(AClient, ACommand.Id, True, '');
-  E := EmitEvent(ekHandoffCommitted);
+  E := EmitEvent(ekCheckpointCommitted);
   E.TurnSeq := Seq;
-  E.Text := 'handoff committed';
+  E.Text := 'checkpoint committed';
   Broadcast(E);
 end;
 
