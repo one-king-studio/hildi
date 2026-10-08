@@ -221,6 +221,35 @@ type
     function MessageHighWaterMark(const ASessionId: string; out ASeq: Int64;
       out AError: TStoreError): Boolean;
 
+    { Record a context-handoff snapshot at the session's current message HWM.
+      The summary stands in for every message with seq <= ASeq. }
+    function SaveSnapshot(const ASessionId, ASummary: string;
+      out ASeq: Int64; out AError: TStoreError): Boolean;
+    { The most recent snapshot; seNotFound when none. }
+    function LatestSnapshot(const ASessionId: string;
+      out ASnap: TSnapshotRecord; out AError: TStoreError): Boolean;
+    { All snapshots for a session, oldest first. }
+    function ListSnapshots(const ASessionId: string; out ASnaps: TSnapshotArray;
+      out AError: TStoreError): Boolean;
+    { The active window: messages with seq > the latest snapshot's seq (all
+      messages when there is no snapshot). }
+    function QueryActiveMessages(const ASessionId: string;
+      out AMessages: TMessageRecordArray; out AError: TStoreError): Boolean;
+    { Messages with seq > AAfterSeq, oldest first. }
+    function QueryMessagesAfter(const ASessionId: string; AAfterSeq: Int64;
+      out AMessages: TMessageRecordArray; out AError: TStoreError): Boolean;
+    { An archived page for back-pagination: the last ALimit messages with
+      seq <= ABeforeSeq, oldest first. }
+    function QueryMessagesBefore(const ASessionId: string; ABeforeSeq: Int64;
+      ALimit: Integer; out AMessages: TMessageRecordArray;
+      out AError: TStoreError): Boolean;
+    { Whole-session full-text search (FTS5). AColumns empty searches every
+      column; otherwise restrict to the named ones (content, tool_reason,
+      tool_name, tool_arguments, label). }
+    function SearchMessages(const ASessionId, AQuery: string;
+      const AColumns: array of string; ALimit: Integer;
+      out AMessages: TMessageRecordArray; out AError: TStoreError): Boolean;
+
     { The live-runtime row (v2). Advisory discovery/display; the socket is the
       authority on liveness. Register upserts; Load is seNotFound when absent. }
     function RegisterRuntime(const ARow: TSessionRuntimeRow;
@@ -268,7 +297,7 @@ end;
 function DefaultMigrations: TMigrationArray;
 begin
   Result := nil;
-  SetLength(Result, 8);
+  SetLength(Result, 9);
   Result[0].Version := 1;
   Result[0].Name := 'session history';
   Result[0].Statements := [
@@ -453,6 +482,26 @@ begin
       'token_scope TEXT NOT NULL DEFAULT '''', ' +
       'updated_at INTEGER NOT NULL, ' +
       'UNIQUE (scope, workspace_id, server_name))'
+  ];
+  { v9: context-handoff snapshots (keyframes) and a whole-session FTS5 index.
+    Additive. FTS5 requires SQLITE_ENABLE_FTS5 at build time. }
+  Result[8].Version := 9;
+  Result[8].Name := 'context snapshots and fts';
+  Result[8].Statements := [
+    'CREATE TABLE session_snapshots (' +
+      'session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, ' +
+      'seq INTEGER NOT NULL, ' +
+      'summary TEXT NOT NULL, ' +
+      'created_at INTEGER NOT NULL, ' +
+      'PRIMARY KEY (session_id, seq))',
+    'CREATE VIRTUAL TABLE messages_fts USING fts5(' +
+      'content, tool_reason, tool_name, tool_arguments, label, ' +
+      'session_id UNINDEXED, message_id UNINDEXED, tokenize=''unicode61'')',
+    'INSERT INTO messages_fts ' +
+      '(content, tool_reason, tool_name, tool_arguments, label, session_id, ' +
+      'message_id) ' +
+      'SELECT content, tool_reason, tool_name, tool_arguments, label, ' +
+      'session_id, id FROM messages'
   ];
 end;
 
@@ -2357,6 +2406,27 @@ begin
     finally
       Stmt.Free;
     end;
+    { Index the message for recall (same critical section). }
+    Stmt := TStmt.Create(FDb,
+      'INSERT INTO messages_fts ' +
+      '(content, tool_reason, tool_name, tool_arguments, label, session_id, ' +
+      'message_id) VALUES (?, ?, ?, ?, ?, ?, ?)');
+    try
+      if Stmt.Valid then
+      begin
+        Stmt.BindText(1, AMessage.Content);
+        Stmt.BindText(2, AMessage.ToolReason);
+        Stmt.BindText(3, AMessage.ToolName);
+        Stmt.BindText(4, AMessage.ToolArguments);
+        Stmt.BindText(5, AMessage.LabelText);
+        Stmt.BindText(6, AMessage.SessionId);
+        Stmt.BindInt64(7, sqlite3_last_insert_rowid(FDb));
+        if Stmt.Step <> SQLITE_DONE then
+          Exit(Fail(AError, seError, 'could not index message', DbErrorText));
+      end;
+    finally
+      Stmt.Free;
+    end;
     Result := True;
   finally
     FLock.Release;
@@ -2594,6 +2664,346 @@ begin
       Stmt.BindText(1, ASessionId);
       if Stmt.Step = SQLITE_ROW then
         ASeq := Stmt.ColInt64(0);
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+{ --- context handoff: snapshots, window, recall (v9) ------------------- }
+
+function TSqliteStore.SaveSnapshot(const ASessionId, ASummary: string;
+  out ASeq: Int64; out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  ASeq := 0;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    if ASessionId = '' then
+      Exit(Fail(AError, seInvalidArgument, 'session id is required', ''));
+    if Trim(ASummary) = '' then
+      Exit(Fail(AError, seInvalidArgument, 'snapshot summary is required', ''));
+    if not MessageHighWaterMark(ASessionId, ASeq, AError) then
+      Exit(False);
+    if ASeq = 0 then
+      Exit(Fail(AError, seInvalidArgument, 'session has no messages to hand off',
+        ''));
+    Stmt := TStmt.Create(FDb,
+      'INSERT INTO session_snapshots (session_id, seq, summary, created_at) ' +
+      'VALUES (?, ?, ?, ?) ' +
+      'ON CONFLICT(session_id, seq) DO UPDATE SET summary = excluded.summary, ' +
+      'created_at = excluded.created_at');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not save snapshot', DbErrorText));
+      Stmt.BindText(1, ASessionId);
+      Stmt.BindInt64(2, ASeq);
+      Stmt.BindText(3, ASummary);
+      Stmt.BindInt64(4, NowMs);
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not save snapshot', DbErrorText));
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.LatestSnapshot(const ASessionId: string;
+  out ASnap: TSnapshotRecord; out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  ASnap := Default(TSnapshotRecord);
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb,
+      'SELECT seq, summary, created_at FROM session_snapshots ' +
+      'WHERE session_id = ? ORDER BY seq DESC LIMIT 1');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not read snapshot', DbErrorText));
+      Stmt.BindText(1, ASessionId);
+      if Stmt.Step <> SQLITE_ROW then
+        Exit(Fail(AError, seNotFound, 'no snapshot for session', ASessionId));
+      ASnap.SessionId := ASessionId;
+      ASnap.Seq := Stmt.ColInt64(0);
+      ASnap.Summary := Stmt.ColText(1);
+      ASnap.CreatedAtMs := Stmt.ColInt64(2);
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.ListSnapshots(const ASessionId: string;
+  out ASnaps: TSnapshotArray; out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+  N: Integer;
+  Snap: TSnapshotRecord;
+begin
+  AError := OkError;
+  ASnaps := nil;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb,
+      'SELECT seq, summary, created_at FROM session_snapshots ' +
+      'WHERE session_id = ? ORDER BY seq ASC');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not list snapshots', DbErrorText));
+      Stmt.BindText(1, ASessionId);
+      N := 0;
+      while Stmt.Step = SQLITE_ROW do
+      begin
+        Snap := Default(TSnapshotRecord);
+        Snap.SessionId := ASessionId;
+        Snap.Seq := Stmt.ColInt64(0);
+        Snap.Summary := Stmt.ColText(1);
+        Snap.CreatedAtMs := Stmt.ColInt64(2);
+        SetLength(ASnaps, N + 1);
+        ASnaps[N] := Snap;
+        Inc(N);
+      end;
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.QueryActiveMessages(const ASessionId: string;
+  out AMessages: TMessageRecordArray; out AError: TStoreError): Boolean;
+var
+  Snap: TSnapshotRecord;
+  Boundary: Int64;
+begin
+  Boundary := 0;
+  if LatestSnapshot(ASessionId, Snap, AError) then
+    Boundary := Snap.Seq
+  else if AError.Code <> seNotFound then
+    Exit(False);
+  { Messages with seq > boundary (all when no snapshot). }
+  Result := QueryMessagesAfter(ASessionId, Boundary, AMessages, AError);
+end;
+
+function TSqliteStore.QueryMessagesAfter(const ASessionId: string;
+  AAfterSeq: Int64; out AMessages: TMessageRecordArray;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+  N: Integer;
+  Rec: TMessageRecord;
+begin
+  AError := OkError;
+  AMessages := nil;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb,
+      'SELECT id, session_id, turn_id, request_id, seq, role, content, ' +
+      'tool_call_id, tool_name, tool_arguments, tool_reason, tool_ok, ' +
+      'created_at, duration_ms, ref_session_id, label, source, status ' +
+      'FROM messages WHERE session_id = ? AND seq > ? ORDER BY seq ASC');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not read messages', DbErrorText));
+      Stmt.BindText(1, ASessionId);
+      Stmt.BindInt64(2, AAfterSeq);
+      N := 0;
+      while Stmt.Step = SQLITE_ROW do
+      begin
+        Rec := Default(TMessageRecord);
+        Rec.Id := Stmt.ColInt64(0);
+        Rec.SessionId := Stmt.ColText(1);
+        Rec.TurnId := Stmt.ColInt64(2);
+        Rec.RequestId := Stmt.ColInt64(3);
+        Rec.Seq := Stmt.ColInt64(4);
+        Rec.Role := TMessageRole(Stmt.ColInt(5));
+        Rec.Content := Stmt.ColText(6);
+        Rec.ToolCallId := Stmt.ColText(7);
+        Rec.ToolName := Stmt.ColText(8);
+        Rec.ToolArguments := Stmt.ColText(9);
+        Rec.ToolReason := Stmt.ColText(10);
+        Rec.ToolOk := Stmt.ColInt(11) <> 0;
+        Rec.CreatedAtMs := Stmt.ColInt64(12);
+        Rec.DurationMs := Stmt.ColInt64(13);
+        Rec.RefSessionId := Stmt.ColText(14);
+        Rec.LabelText := Stmt.ColText(15);
+        Rec.Source := Stmt.ColText(16);
+        Rec.Status := Stmt.ColText(17);
+        SetLength(AMessages, N + 1);
+        AMessages[N] := Rec;
+        Inc(N);
+      end;
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.QueryMessagesBefore(const ASessionId: string;
+  ABeforeSeq: Int64; ALimit: Integer; out AMessages: TMessageRecordArray;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+  N, I, J: Integer;
+  Rec: TMessageRecord;
+  Tmp: TMessageRecord;
+begin
+  AError := OkError;
+  AMessages := nil;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    { The last ALimit messages at or before the boundary, newest first, then
+      reversed to oldest first. }
+    Stmt := TStmt.Create(FDb,
+      'SELECT id, session_id, turn_id, request_id, seq, role, content, ' +
+      'tool_call_id, tool_name, tool_arguments, tool_reason, tool_ok, ' +
+      'created_at, duration_ms, ref_session_id, label, source, status ' +
+      'FROM messages WHERE session_id = ? AND seq <= ? ' +
+      'ORDER BY seq DESC LIMIT ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not read messages', DbErrorText));
+      Stmt.BindText(1, ASessionId);
+      Stmt.BindInt64(2, ABeforeSeq);
+      Stmt.BindInt(3, ALimit);
+      N := 0;
+      while Stmt.Step = SQLITE_ROW do
+      begin
+        Rec := Default(TMessageRecord);
+        Rec.Id := Stmt.ColInt64(0);
+        Rec.SessionId := Stmt.ColText(1);
+        Rec.TurnId := Stmt.ColInt64(2);
+        Rec.RequestId := Stmt.ColInt64(3);
+        Rec.Seq := Stmt.ColInt64(4);
+        Rec.Role := TMessageRole(Stmt.ColInt(5));
+        Rec.Content := Stmt.ColText(6);
+        Rec.ToolCallId := Stmt.ColText(7);
+        Rec.ToolName := Stmt.ColText(8);
+        Rec.ToolArguments := Stmt.ColText(9);
+        Rec.ToolReason := Stmt.ColText(10);
+        Rec.ToolOk := Stmt.ColInt(11) <> 0;
+        Rec.CreatedAtMs := Stmt.ColInt64(12);
+        Rec.DurationMs := Stmt.ColInt64(13);
+        Rec.RefSessionId := Stmt.ColText(14);
+        Rec.LabelText := Stmt.ColText(15);
+        Rec.Source := Stmt.ColText(16);
+        Rec.Status := Stmt.ColText(17);
+        SetLength(AMessages, N + 1);
+        AMessages[N] := Rec;
+        Inc(N);
+      end;
+    finally
+      Stmt.Free;
+    end;
+    for I := 0 to (N div 2) - 1 do
+    begin
+      J := N - 1 - I;
+      Tmp := AMessages[I];
+      AMessages[I] := AMessages[J];
+      AMessages[J] := Tmp;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.SearchMessages(const ASessionId, AQuery: string;
+  const AColumns: array of string; ALimit: Integer;
+  out AMessages: TMessageRecordArray; out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+  MatchExpr, Col: string;
+  N: Integer;
+  Rec: TMessageRecord;
+begin
+  AError := OkError;
+  AMessages := nil;
+  if Trim(AQuery) = '' then
+    Exit(Fail(AError, seInvalidArgument, 'search query is required', ''));
+  { Build the MATCH expression: optionally column-scoped, e.g.
+    'tool_reason:"concrete"'. The term is bound, so no injection. }
+  MatchExpr := '';
+  for Col in AColumns do
+    if MatchExpr = '' then
+      MatchExpr := Col + ':'
+    else
+      MatchExpr := MatchExpr + ' OR ' + Col + ':';
+  MatchExpr := MatchExpr + '"' + StringReplace(AQuery, '"', '""',
+    [rfReplaceAll]) + '"';
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb,
+      'SELECT m.id, m.session_id, m.turn_id, m.request_id, m.seq, m.role, ' +
+      'm.content, m.tool_call_id, m.tool_name, m.tool_arguments, ' +
+      'm.tool_reason, m.tool_ok, m.created_at, m.duration_ms, ' +
+      'm.ref_session_id, m.label, m.source, m.status ' +
+      'FROM messages m JOIN messages_fts f ON f.message_id = m.id ' +
+      'WHERE f.messages_fts MATCH ? AND f.session_id = ? ' +
+      'ORDER BY m.seq ASC LIMIT ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not search messages', DbErrorText));
+      Stmt.BindText(1, MatchExpr);
+      Stmt.BindText(2, ASessionId);
+      Stmt.BindInt(3, ALimit);
+      N := 0;
+      while Stmt.Step = SQLITE_ROW do
+      begin
+        Rec := Default(TMessageRecord);
+        Rec.Id := Stmt.ColInt64(0);
+        Rec.SessionId := Stmt.ColText(1);
+        Rec.TurnId := Stmt.ColInt64(2);
+        Rec.RequestId := Stmt.ColInt64(3);
+        Rec.Seq := Stmt.ColInt64(4);
+        Rec.Role := TMessageRole(Stmt.ColInt(5));
+        Rec.Content := Stmt.ColText(6);
+        Rec.ToolCallId := Stmt.ColText(7);
+        Rec.ToolName := Stmt.ColText(8);
+        Rec.ToolArguments := Stmt.ColText(9);
+        Rec.ToolReason := Stmt.ColText(10);
+        Rec.ToolOk := Stmt.ColInt(11) <> 0;
+        Rec.CreatedAtMs := Stmt.ColInt64(12);
+        Rec.DurationMs := Stmt.ColInt64(13);
+        Rec.RefSessionId := Stmt.ColText(14);
+        Rec.LabelText := Stmt.ColText(15);
+        Rec.Source := Stmt.ColText(16);
+        Rec.Status := Stmt.ColText(17);
+        SetLength(AMessages, N + 1);
+        AMessages[N] := Rec;
+        Inc(N);
+      end;
     finally
       Stmt.Free;
     end;

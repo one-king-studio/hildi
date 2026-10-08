@@ -25,10 +25,10 @@ SQLITE_LIBDIR   := $(LIBSTATIC)
 SQLITE_AR       := $(SQLITE_LIBDIR)/libsqlite3.a
 UNAME_S         := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
-SQLITE_CCFLAGS  := -O2 -DSQLITE_THREADSAFE=1 -mmacosx-version-min=11.0
+SQLITE_CCFLAGS  := -O2 -DSQLITE_THREADSAFE=1 -DSQLITE_ENABLE_FTS5 -mmacosx-version-min=11.0
 MBEDTLS_CCFLAGS  := -O2 -mmacosx-version-min=11.0
 else
-SQLITE_CCFLAGS  := -O2 -fPIC -DSQLITE_THREADSAFE=1
+SQLITE_CCFLAGS  := -O2 -fPIC -DSQLITE_THREADSAFE=1 -DSQLITE_ENABLE_FTS5
 MBEDTLS_CCFLAGS  := -O2 -fPIC
 endif
 # Link the static archive explicitly (-k), so a system libsqlite3 is never used.

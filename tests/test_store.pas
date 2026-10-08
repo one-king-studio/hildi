@@ -82,6 +82,9 @@ type
     procedure TestClearOAuthToken;
     procedure TestFinalizeRunningTurns;
     procedure TestBeginTurnSelfHeals;
+    procedure TestSnapshotAndActiveWindow;
+    procedure TestQueryMessagesBefore;
+    procedure TestFtsSearchScoped;
   end;
 
 implementation
@@ -1601,6 +1604,129 @@ begin
     AssertEquals('two turns', 2, Length(Turns));
     AssertEquals('prior self-healed', Ord(tsCancelled), Ord(Turns[0].Status));
     AssertEquals('new one running', Ord(tsRunning), Ord(Turns[1].Status));
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestSnapshotAndActiveWindow;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws: Integer;
+  Sid: string;
+  Seq: Int64;
+  Snap: TSnapshotRecord;
+  SnapList: TSnapshotArray;
+  Msgs: TMessageRecordArray;
+  M: TMessageRecord;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, Sid, Err);
+    M := Default(TMessageRecord);
+    M.SessionId := Sid;
+    M.Role := mrUser;
+    M.Content := 'first';
+    S.AppendMessage(M, Err);
+    M.Content := 'second';
+    S.AppendMessage(M, Err);
+    { Snapshot at the HWM (seq 2). }
+    AssertTrue('save snapshot', S.SaveSnapshot(Sid, 'we did X', Seq, Err));
+    AssertEquals('boundary', 2, Seq);
+    { A message after the snapshot is in the active window. }
+    M.Content := 'third';
+    S.AppendMessage(M, Err);
+
+    AssertTrue('latest', S.LatestSnapshot(Sid, Snap, Err));
+    AssertEquals('summary', 'we did X', Snap.Summary);
+    AssertTrue('list', S.ListSnapshots(Sid, SnapList, Err));
+    AssertEquals('one snapshot', 1, Length(SnapList));
+
+    AssertTrue('active', S.QueryActiveMessages(Sid, Msgs, Err));
+    AssertEquals('only the post-snapshot message', 1, Length(Msgs));
+    AssertEquals('content', 'third', Msgs[0].Content);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestQueryMessagesBefore;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws: Integer;
+  Sid: string;
+  Seq: Int64;
+  Msgs: TMessageRecordArray;
+  M: TMessageRecord;
+  I: Integer;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, Sid, Err);
+    for I := 1 to 5 do
+    begin
+      M := Default(TMessageRecord);
+      M.SessionId := Sid;
+      M.Role := mrUser;
+      M.Content := 'msg' + IntToStr(I);
+      S.AppendMessage(M, Err);
+    end;
+    AssertTrue('snapshot', S.SaveSnapshot(Sid, 'summary', Seq, Err));
+    { The page before the boundary, newest 2, returned oldest first. }
+    AssertTrue('before', S.QueryMessagesBefore(Sid, Seq, 2, Msgs, Err));
+    AssertEquals('two', 2, Length(Msgs));
+    AssertEquals('oldest first', 'msg4', Msgs[0].Content);
+    AssertEquals('then', 'msg5', Msgs[1].Content);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestFtsSearchScoped;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws: Integer;
+  Sid: string;
+  Msgs: TMessageRecordArray;
+  M: TMessageRecord;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, Sid, Err);
+    { A tool call whose REASON mentions concrete, whose content does not. }
+    M := Default(TMessageRecord);
+    M.SessionId := Sid;
+    M.Role := mrToolCall;
+    M.ToolName := 'run_command';
+    M.ToolReason := 'check the concrete pour';
+    M.Content := 'unrelated prose';
+    S.AppendMessage(M, Err);
+    { Another whose content mentions concrete. }
+    M := Default(TMessageRecord);
+    M.SessionId := Sid;
+    M.Role := mrAssistant;
+    M.ToolReason := '';
+    M.ToolName := '';
+    M.Content := 'we poured concrete today';
+    S.AppendMessage(M, Err);
+
+    { Content-scoped search finds only the prose message. }
+    AssertTrue('content search', S.SearchMessages(Sid, 'concrete', ['content'],
+      10, Msgs, Err));
+    AssertEquals('one content hit', 1, Length(Msgs));
+    AssertEquals('the prose one', 'we poured concrete today', Msgs[0].Content);
+
+    { tool_reason-scoped search finds only the tool call. }
+    AssertTrue('reason search', S.SearchMessages(Sid, 'concrete', ['tool_reason'],
+      10, Msgs, Err));
+    AssertEquals('one reason hit', 1, Length(Msgs));
+    AssertEquals('the tool call', 'run_command', Msgs[0].ToolName);
   finally
     S.Free;
   end;
