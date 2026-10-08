@@ -31,7 +31,7 @@ var
   Fds: TFDSet;
   TV: TTimeVal;
   Buf: array[0..255] of Byte;
-  N: Integer;
+  N, R: Integer;
 begin
   AData := nil;
   if AFd < 0 then
@@ -40,7 +40,17 @@ begin
   fpFD_SET(AFd, Fds);
   TV.tv_sec := 0;
   TV.tv_usec := 0;
-  if fpSelect(AFd + 1, @Fds, nil, nil, @TV) <= 0 then
+  R := fpSelect(AFd + 1, @Fds, nil, nil, @TV);
+  if R < 0 then
+  begin
+    { EINTR is transient (nothing to report); anything else - notably EBADF on a
+      closed fd - means the fd is unusable, so report end of file and let the
+      caller stop rather than spin. }
+    if fpGetErrno = ESysEINTR then
+      Exit(irNone);
+    Exit(irEof);
+  end;
+  if R = 0 then
     Exit(irNone);
   N := fpRead(AFd, @Buf[0], SizeOf(Buf));
   if N = 0 then

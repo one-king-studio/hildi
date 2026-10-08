@@ -53,6 +53,7 @@ type
     { Input fd reads: EOF (a hung-up terminal) must be reported, not ignored. }
     procedure TestReadInputFdReportsData;
     procedure TestReadInputFdReportsEofOnHangup;
+    procedure TestReadInputFdReportsEofOnClosedFd;
   end;
 
 implementation
@@ -787,6 +788,19 @@ begin
   finally
     fpClose(Fd);
   end;
+end;
+
+procedure TTuiInputTest.TestReadInputFdReportsEofOnClosedFd;
+var
+  Fd: Integer;
+  Data: TInputBytes;
+begin
+  Fd := fpOpen('/dev/null', O_RDONLY);
+  AssertTrue('opened /dev/null', Fd >= 0);
+  fpClose(Fd);
+  { select on the closed fd fails with EBADF; that must read as "input gone",
+    not "nothing ready", or the loop spins on a dead descriptor. }
+  AssertTrue('eof on a closed fd', ReadInputFd(Fd, Data) = irEof);
 end;
 
 initialization
