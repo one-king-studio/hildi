@@ -79,6 +79,9 @@ type
     FSeq: Int64;
     FTurnActive: Boolean;
     FWorker: TTurnWorker;
+    { The turn in flight is a checkpoint turn: on completion the runtime records a
+      checkpoint at the boundary from the assistant's reply. }
+    FCheckpointTurn: Boolean;
     FDriver: string;
     FPendingDriver: string;
     FPendingSince: Int64;
@@ -148,6 +151,9 @@ type
     { Drain child events for the runtime loop; relay them as events. }
     procedure DrainSubagents;
     procedure StartAmbientTurn;
+    { Record a checkpoint for a completed checkpoint turn (the assistant's reply)
+      at the current message boundary. }
+    procedure CommitCheckpoint(const ADocument: string);
     procedure StartTurn(const AText: string);
     procedure FinishTurn;
     procedure DrainTurn;
@@ -848,35 +854,46 @@ end;
 
 procedure TSessionRuntime.HandleCheckpoint(AClient: TClientConn;
   const ACommand: TSessionCommand);
-var
-  Text, Err: string;
-  Seq: Int64;
-  StoreErr: TStoreError;
-  E: TSessionEvent;
 begin
   if AClient.Role <> srDrive then
   begin
     ReplyTo(AClient, ACommand.Id, False, 'not_driver');
     Exit;
   end;
+  if FWorker <> nil then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'busy');
+    Exit;
+  end;
   ReplyTo(AClient, ACommand.Id, True, '');
-  { One action (no edit step): draft the checkpoint, then record it as a checkpoint. }
-  if not FSession.DraftCheckpoint(Text, Err) then
+  { The checkpoint is an ordinary turn. Queue the summarization instruction as an
+    ambient message and run an ambient turn: it streams like any turn, the
+    assistant's reply is the document, and the ledger records it. The checkpoint
+    itself is committed when the turn completes (see HandleTurnEvent, teDone). }
+  FSession.Loop.PromptQueue.PushAmbient(CheckpointInstruction, '',
+    'checkpoint', 'checkpoint', 'running', 0);
+  FCheckpointTurn := True;
+  StartAmbientTurn;
+end;
+
+procedure TSessionRuntime.CommitCheckpoint(const ADocument: string);
+var
+  Seq: Int64;
+  StoreErr: TStoreError;
+  E: TSessionEvent;
+begin
+  if Trim(ADocument) = '' then
   begin
     E := EmitEvent(ekError);
-    E.Text := 'checkpoint draft failed: ' + Err;
-    E.Detail := Err;
+    E.Text := 'checkpoint produced no document';
     Broadcast(E);
     Exit;
   end;
-  E := EmitEvent(ekCheckpointReady);
-  E.Text := Text;
-  Broadcast(E);
   if (FSession.View.Store = nil) or
-    not FSession.View.Store.SaveCheckpoint(FSessionId, Text, Seq, StoreErr) then
+    not FSession.View.Store.SaveCheckpoint(FSessionId, ADocument, Seq, StoreErr) then
   begin
     E := EmitEvent(ekError);
-    E.Text := 'checkpoint checkpoint failed';
+    E.Text := 'checkpoint failed';
     E.Detail := StoreErr.Message;
     Broadcast(E);
     Exit;
@@ -1301,10 +1318,16 @@ begin
         E.Usage := Turn.Usage;
         E.ElapsedMs := AEvent.ElapsedMs;
         Broadcast(E);
+        if FCheckpointTurn then
+        begin
+          FCheckpointTurn := False;
+          CommitCheckpoint(AEvent.Answer);
+        end;
         FinishTurn;
       end;
     teError:
       begin
+        FCheckpointTurn := False;
         E := EmitEvent(ekError);
         E.ErrorCode := SessionErrorCodeToWire(AEvent.ErrorCode);
         E.Text := AEvent.Text;

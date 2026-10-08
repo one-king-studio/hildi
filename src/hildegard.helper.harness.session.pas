@@ -64,9 +64,6 @@ type
     property Tools: TToolRegistry read FTools;
     property Queue: TTurnQueue read FQueue;
     property Gate: TApprovalGate read FGate;
-    { Generate a context-checkpoint draft from the current conversation. One
-      bounded LLM request; the session is not modified. }
-    function DraftCheckpoint(out AText: string; out AError: string): Boolean;
     { The session's approval service, so the runtime can hand it to the
       delegation tools. }
     property ApprovalService: IApprovalService read FApprovalService;
@@ -74,6 +71,20 @@ type
     { Cancel pending approvals; frees owned objects. Idempotent. }
     procedure Close;
   end;
+
+const
+  { The instruction that turns the current conversation into a checkpoint. The
+    checkpoint is an ordinary turn: the runtime queues this as an ambient message
+    and runs an ambient turn; the assistant's reply is the document. }
+  CheckpointInstruction =
+    'Write a checkpoint document so another agent can continue this work with no ' +
+    'other context. Be concise but complete. Cover, as headed sections: ' +
+    '(1) Objective - what we are doing and why; ' +
+    '(2) Decisions - each decision and its rationale; ' +
+    '(3) State - what is done, in progress, and uncommitted; ' +
+    '(4) Gotchas - pitfalls, constraints, and things that bit us; ' +
+    '(5) Open threads - what to do next. Write it as the document itself, ' +
+    'not as commentary about it.';
 
 implementation
 
@@ -176,55 +187,6 @@ begin
   Rows := nil;
   if FView.Store.LoadMcpServers(Ctx, Rows, StoreErr) then
     Result.Servers := ResolveMcpConfig(Rows, Ctx);
-end;
-
-const
-  { The instruction that turns the current conversation into a checkpoint. }
-  CheckpointInstruction =
-    'Write a checkpoint document so another agent can continue this work with no ' +
-    'other context. Be concise but complete. Cover, as headed sections: ' +
-    '(1) Objective - what we are doing and why; ' +
-    '(2) Decisions - each decision and its rationale; ' +
-    '(3) State - what is done, in progress, and uncommitted; ' +
-    '(4) Gotchas - pitfalls, constraints, and things that bit us; ' +
-    '(5) Open threads - what to do next. Write it as the document itself, ' +
-    'not as commentary about it.';
-
-function THarnessSession.DraftCheckpoint(out AText: string;
-  out AError: string): Boolean;
-var
-  Request: TChatRequest;
-  Msgs: TChatMessageArray;
-  Msg: TChatMessage;
-  ChatRes: TChatResult;
-  LLMErr: TLLMError;
-begin
-  AText := '';
-  AError := '';
-  if FClient = nil then
-  begin
-    AError := 'no client';
-    Exit(False);
-  end;
-  { One bounded request: the current conversation, plus a checkpoint instruction.
-    No tools, no persistence — the session is untouched. }
-  Msgs := FConversation.Messages;
-  Msg := Default(TChatMessage);
-  Msg.Role := crUser;
-  Msg.Content := CheckpointInstruction;
-  SetLength(Msgs, Length(Msgs) + 1);
-  Msgs[High(Msgs)] := Msg;
-  Request := Default(TChatRequest);
-  Request.Messages := Msgs;
-  if not FClient.Complete(Request, nil, ChatRes, LLMErr) then
-  begin
-    AError := LLMErr.Message;
-    Exit(False);
-  end;
-  AText := ChatRes.Message.Content;
-  Result := AText <> '';
-  if not Result then
-    AError := 'empty checkpoint';
 end;
 
 function THarnessSession.Init(const AConfig: THarnessSessionConfig;

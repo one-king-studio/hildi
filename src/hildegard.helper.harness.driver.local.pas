@@ -27,6 +27,9 @@ type
   private
     FSession: THarnessSession;
     FWorker: TTurnWorker;
+    { The turn in flight is a checkpoint turn: on completion the driver records a
+      checkpoint from the assistant's reply. }
+    FCheckpointTurn: Boolean;
   public
     constructor Create(ASession: THarnessSession);
     procedure StartTurn(const AText: string);
@@ -100,32 +103,39 @@ end;
 
 procedure TLocalDriver.Checkpoint;
 var
-  Text, Err: string;
-  Seq: Int64;
-  StoreErr: TStoreError;
   E: TTurnEvent;
 begin
-  { The in-process path drafts and checkpoints directly (no wire round-trip). }
-  if not FSession.DraftCheckpoint(Text, Err) then
+  { The checkpoint is an ordinary (ambient) turn, exactly as over the wire: the
+    summarization instruction is queued as an ambient message and the assistant's
+    reply is the document. The checkpoint is recorded when the turn completes
+    (see PopEvent). }
+  if FWorker <> nil then
+  begin
+    if not FWorker.Finished then
+      FWorker.WaitFor;
+    FWorker.Free;
+    FWorker := nil;
+  end;
+  if FSession.View.Store = nil then
   begin
     E := Default(TTurnEvent);
     E.Kind := teError;
-    E.Text := 'checkpoint draft failed';
-    E.Detail := Err;
+    E.Text := 'checkpoint needs a store';
     FSession.Queue.Push(E);
     Exit;
   end;
-  if FSession.View.Store.SaveCheckpoint(FSession.View.SessionId, Text, Seq,
-    StoreErr) then
-  begin
-    E := Default(TTurnEvent);
-    E.Kind := teCheckpointCommitted;
-    E.ElapsedMs := Seq;   { carry the checkpoint boundary seq }
-    FSession.Queue.Push(E);
-  end;
+  FSession.Loop.PromptQueue.PushAmbient(CheckpointInstruction, '',
+    'checkpoint', 'checkpoint', 'running', 0);
+  FCheckpointTurn := True;
+  FWorker := TTurnWorker.CreateAmbient(FSession.Loop, FSession.Queue);
+  FWorker.Start;
 end;
 
 function TLocalDriver.PopEvent(out AEvent: TTurnEvent): Boolean;
+var
+  Seq: Int64;
+  StoreErr: TStoreError;
+  E: TTurnEvent;
 begin
   Result := FSession.Queue.Pop(AEvent);
   if not Result then
@@ -136,6 +146,21 @@ begin
     AEvent.Kind := teUserMessage;
   if AEvent.Kind = teApprovalAsk then
     AEvent.AskRef := IntToStr(AEvent.RequestId);
+  { A completed checkpoint turn: record the checkpoint at the boundary from the
+    assistant's reply, then surface it. }
+  if FCheckpointTurn and (AEvent.Kind in [teDone, teError]) then
+  begin
+    FCheckpointTurn := False;
+    if (AEvent.Kind = teDone) and (FSession.View.Store <> nil) and
+      FSession.View.Store.SaveCheckpoint(FSession.View.SessionId, AEvent.Answer,
+        Seq, StoreErr) then
+    begin
+      E := Default(TTurnEvent);
+      E.Kind := teCheckpointCommitted;
+      E.ElapsedMs := Seq;
+      FSession.Queue.Push(E);
+    end;
+  end;
 end;
 
 procedure TLocalDriver.Close;
