@@ -1,29 +1,29 @@
-# Component Specification: Context Handoff v1
+# Component Specification: Context Checkpoint v1
 
 **Related Feature:** [FEATURE.md](FEATURE.md)
 
-**Depends on:** `hildegard.helper.store` (messages, snapshots, FTS),
+**Depends on:** `hildegard.helper.store` (messages, keyframes, FTS),
 `hildegard.helper.session.protocol`, `hildegard.helper.session.runtime`,
 `hildegard.helper.harness.session` / `view`, `hildegard.helper.tui.app`,
 `hildegard.helper.recall.tool`.
 
 ## Purpose
 
-Implement the keyframe handoff: a **snapshot** table, a **resume window** that
-starts from the latest snapshot, a **whole-session FTS5 recall**, and the
-operator UX (`/handoff`, boundary, back-pagination). **One session id**;
+Implement the keyframe checkpoint: a **keyframe** table, a **resume window** that
+starts from the latest keyframe, a **whole-session FTS5 recall**, and the
+operator UX (`/checkpoint`, boundary, back-pagination). **One session id**;
 nothing is deleted.
 
 ## Requirements
 
 ### Functional
 
-- [ ] **Store: snapshots.** A `session_snapshots` table (migration) with
-      `(session_id, seq, summary, created_at)`. `SaveSnapshot` records a
-      snapshot at the current message high-water mark; `LatestSnapshot` returns
-      the most recent; `ListSnapshots` returns all (for a chain view).
+- [ ] **Store: keyframes.** A `session_keyframes` table (migration) with
+      `(session_id, seq, summary, created_at)`. `SaveKeyframe` records a
+      keyframe at the current message high-water mark; `LatestKeyframe` returns
+      the most recent; `ListKeyframes` returns all (for a chain view).
 - [ ] **Store: resume window.** `QueryActiveMessages(session, out msgs)` returns
-      messages with `seq > latestSnapshot.seq` (or all when no snapshot).
+      messages with `seq > latestKeyframe.seq` (or all when no keyframe).
       `QueryMessagesBefore(session, seq, limit, out msgs)` returns the archived
       page for back-pagination.
 - [ ] **Store: FTS5.** A `messages_fts` virtual table (FTS5) over message
@@ -32,29 +32,29 @@ nothing is deleted.
       `tool_arguments`, `content`, `label`). A migration backfills existing
       messages.
 - [ ] **Build**: the vendored SQLite compiles with `-DSQLITE_ENABLE_FTS5`.
-- [ ] **Protocol**: `scHandoff` (driver-only) requests a draft;
-      `scHandoffCommit` (driver-only, carries the agent's text) records the
-      snapshot. Events: `ekHandoffReady` (draft), `ekHandoffCommitted` (the
-      snapshot seq).
-- [ ] **Draft**: the runtime runs one bounded LLM request (a handoff
+- [ ] **Protocol**: `scCheckpoint` (driver-only) requests a draft;
+      `scCheckpointCommit` (driver-only, carries the agent's text) records the
+      keyframe. Events: `ekCheckpointReady` (draft), `ekCheckpointCommitted` (the
+      keyframe seq).
+- [ ] **Draft**: the runtime runs one bounded LLM request (a checkpoint
       instruction) and emits the draft; the session is not modified.
-- [ ] **Commit**: the runtime records a snapshot at the current HWM with the
+- [ ] **Commit**: the runtime records a keyframe at the current HWM with the
       agent-generated summary; the session's **active window** becomes "summary
       + messages after the boundary". Nothing is deleted.
 - [ ] **Resume**: opening/attaching a session loads the active window — the
-      latest snapshot's summary prepended, then messages after its `seq`. The
+      latest keyframe's summary prepended, then messages after its `seq`. The
       TUI renders the summary as the segment's opening block.
 - [ ] **Back-pagination**: the TUI can load the previous segment
-      (`QueryMessagesBefore`) with a visible "— handoff —" boundary.
+      (`QueryMessagesBefore`) with a visible "— checkpoint —" boundary.
 - [ ] **Recall**: `recall_tool_result` (or a new recall tool) searches the FTS
       index across **archived and current** messages; a query may scope to
       structured columns so it does not scan `content`.
-- [ ] **Nudge**: the TUI hints `/handoff` past a configurable threshold; never
+- [ ] **Nudge**: the TUI hints `/checkpoint` past a configurable threshold; never
       triggers.
 
 ### Non-Functional
 
-- [ ] **Non-destructive**: a handoff inserts one snapshot row; no message is
+- [ ] **Non-destructive**: a checkpoint inserts one keyframe row; no message is
       deleted, rewritten, or reordered.
 - [ ] Indexing is incremental and in the append transaction (no drift).
 - [ ] `make check` green; leak-clean.
@@ -65,26 +65,26 @@ nothing is deleted.
 unit hildegard.helper.store;   // additions
 
 type
-  TSnapshotRecord = record
+  TKeyframeRecord = record
     SessionId: string;
     Seq: Int64;              // the boundary: messages with seq <= Seq are archived
-    Summary: string;         // the handoff document (prose)
+    Summary: string;         // the checkpoint document (prose)
     CreatedAtMs: Int64;
   end;
-  TSnapshotArray = array of TSnapshotRecord;
+  TKeyframeArray = array of TKeyframeRecord;
 
   TSqliteStore = class
     // ... existing ...
-    { Record a snapshot at the session's current message HWM. }
-    function SaveSnapshot(const ASessionId, ASummary: string;
+    { Record a keyframe at the session's current message HWM. }
+    function SaveKeyframe(const ASessionId, ASummary: string;
       out ASeq: Int64; out AError: TStoreError): Boolean;
-    { The most recent snapshot; seNotFound when none. }
-    function LatestSnapshot(const ASessionId: string; out ASnap: TSnapshotRecord;
+    { The most recent keyframe; seNotFound when none. }
+    function LatestKeyframe(const ASessionId: string; out ASnap: TKeyframeRecord;
       out AError: TStoreError): Boolean;
-    { All snapshots, oldest first. }
-    function ListSnapshots(const ASessionId: string; out ASnaps: TSnapshotArray;
+    { All keyframes, oldest first. }
+    function ListKeyframes(const ASessionId: string; out ASnaps: TKeyframeArray;
       out AError: TStoreError): Boolean;
-    { Active window: messages with seq > latest snapshot seq (all when none). }
+    { Active window: messages with seq > latest keyframe seq (all when none). }
     function QueryActiveMessages(const ASessionId: string;
       out AMessages: TMessageRecordArray; out AError: TStoreError): Boolean;
     { Archived page for back-pagination: the last ALimit messages with
@@ -106,23 +106,23 @@ unit hildegard.helper.session.protocol;   // additions
 type
   TSessionCommandKind = (
     // ... scShutdown ...
-    scHandoff, scHandoffCommit);
+    scCheckpoint, scCheckpointCommit);
   TSessionEventKind = (
     // ... ekLoopExited ...
-    ekHandoffReady, ekHandoffCommitted);
+    ekCheckpointReady, ekCheckpointCommitted);
   TSessionCommand = record
     // ... existing ...
-    HandoffText: string;   // scHandoffCommit: the agent-generated document
+    CheckpointText: string;   // scCheckpointCommit: the agent-generated document
   end;
 ```
 
 ### Data Contracts
 
-- **Snapshot boundary.** `Seq` = the message HWM at handoff time. The active
+- **Keyframe boundary.** `Seq` = the message HWM at checkpoint time. The active
   window is strictly `seq > Seq`; the archived set is `seq <= Seq`.
 - **Summary block.** On resume, the summary is presented as the opening context
   of the segment (a system/ambient block). It is **not** a stored message row
-  (keeps role counts honest); it comes from the snapshot.
+  (keeps role counts honest); it comes from the keyframe.
 - **FTS schema** (v1):
   ```sql
   CREATE VIRTUAL TABLE messages_fts USING fts5(
@@ -139,47 +139,47 @@ type
 
 ### Event Contracts
 
-- `ekHandoffReady` carries the draft in `Text`.
-- `ekHandoffCommitted` carries the snapshot `seq` (reuse `TurnSeq` or a new
-  field) and reason `handoff`.
+- `ekCheckpointReady` carries the draft in `Text`.
+- `ekCheckpointCommitted` carries the keyframe `seq` (reuse `TurnSeq` or a new
+  field) and reason `checkpoint`.
 
 ## Architecture
 
 ### Prior Art & Reuse
 
 - **`QueryMessages` / `MessageHighWaterMark`** — the message reads the window
-  builds on; the snapshot is anchored to the HWM.
+  builds on; the keyframe is anchored to the HWM.
 - **`AppendMessage`** — where FTS indexing hooks in.
 - **`recall_tool_result`** — the recall surface; extended to FTS.
 - **Runtime Lifecycle** — unchanged; the session keeps running (no switch, no
   runtime churn).
-- **Genuine gap:** the snapshot table, the active-window queries, the FTS table
+- **Genuine gap:** the keyframe table, the active-window queries, the FTS table
   + build flag, the protocol verbs, and the TUI UX.
 
 ### Component Boundaries
 
-- **Responsibilities:** snapshot persistence, the active window, FTS recall, the
-  handoff UX.
+- **Responsibilities:** keyframe persistence, the active window, FTS recall, the
+  checkpoint UX.
 - **Dependencies:** the store (SQL), the loop (draft), the TUI.
-- **Side effects:** inserts a snapshot row and FTS rows; never deletes.
+- **Side effects:** inserts a keyframe row and FTS rows; never deletes.
 
 ## Validation Rules
 
-- A snapshot on a session with no messages past the last snapshot is refused.
+- A keyframe on a session with no messages past the last keyframe is refused.
 - An empty/whitespace summary is refused.
 
 ## Error Handling
 
-- Draft failure ⇒ `ekError`, no snapshot.
-- Snapshot/FTS failure ⇒ `ekError`, session unchanged.
+- Draft failure ⇒ `ekError`, no keyframe.
+- Keyframe/FTS failure ⇒ `ekError`, session unchanged.
 
 ## Testing Requirements
 
 ### Unit Tests (`tests/test_store.pas`)
 
-- [ ] `SaveSnapshot` records at the HWM; `LatestSnapshot`/`ListSnapshots` return
-      it; a second snapshot lists after the first.
-- [ ] `QueryActiveMessages` returns only messages after the latest snapshot;
+- [ ] `SaveKeyframe` records at the HWM; `LatestKeyframe`/`ListKeyframes` return
+      it; a second keyframe lists after the first.
+- [ ] `QueryActiveMessages` returns only messages after the latest keyframe;
       all messages when none.
 - [ ] `QueryMessagesBefore` returns the archived page, oldest first.
 - [ ] `SearchMessages` finds an archived message by `tool_reason`; a
@@ -189,8 +189,8 @@ type
 
 ### Integration Tests (`tests/test_session_runtime.pas`)
 
-- [ ] `scHandoff` emits `ekHandoffReady`; `scHandoffCommit` records a snapshot
-      and emits `ekHandoffCommitted`; the message count is unchanged.
+- [ ] `scCheckpoint` emits `ekCheckpointReady`; `scCheckpointCommit` records a keyframe
+      and emits `ekCheckpointCommitted`; the message count is unchanged.
 
 ### TUI Tests
 
@@ -204,7 +204,7 @@ type
 
 ## Security Considerations
 
-- Driver-only handoff; the snapshot summary is the agent-generated document.
+- Driver-only checkpoint; the keyframe summary is the agent-generated document.
 - FTS queries are parameterized (no injection via the query string; the MATCH
   term is bound).
 
@@ -215,5 +215,5 @@ type
 
 ## Future Considerations
 
-- Structured memory (a separate feature); automatic handoff; a snapshot browser;
+- Structured memory (a separate feature); automatic checkpoint; a keyframe browser;
   archived-only recall scope (a query flag).

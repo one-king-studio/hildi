@@ -44,7 +44,7 @@ in `../guidelines/spec-driven-development.md`:
 | [Sandboxed Script Compute](Sandboxed_Script_Compute/FEATURE.md) | Proposed | - | An in-process, capability-free compute tier: the model writes small scripts for deterministic data/text work between "think" and "act". Embeds GocciaScript (MIT, FPC-native ECMAScript) core-only with `TGocciaCapabilities.None`, caps, and a timeout — no filesystem, network, or exec. Sequenced after the critical path; the first task is a spike that measures the release-binary delta before a SPEC is written. |
 | [Skills](Skills/FEATURE.md) | Proposed | - | On-demand capabilities, shaped like Anthropic's Agent Skills: a manifest (name, description, when-to-use, **and loaded/unloaded state**) is always in the wrapped prompt; `load_skill(name)` activates a skill's instructions and tools; activation **decays by idle time** rather than per turn. No `list_available_skills` — availability is context. MCP is the first provider. |
 | [Lazy MCP](Lazy_MCP/FEATURE.md) | Proposed | - | MCP servers connect **on load**, not at runtime startup. Today they connect before the socket is bound — ~2 s of blank TUI (measured) and a launch failure when a server is slow. A connection is a skill (`mcp_<id>`); loading it connects, discovers, and registers `mcp_<id>_<tool>` tools, kept alive by use and released on idle. |
-| [TUI Startup](TUI_Startup/FEATURE.md) | Proposed | - | The TUI paints a connecting frame **before** it connects to (or spawns) the runtime, and loads the transcript tail-first with **scroll-to-top back-pagination** (the same primitive `Context_Handoff` needs). The safety net for the blank-startup window; Lazy MCP removes the current ~2 s cause. |
+| [TUI Startup](TUI_Startup/FEATURE.md) | Proposed | - | The TUI paints a connecting frame **before** it connects to (or spawns) the runtime, and loads the transcript tail-first with **scroll-to-top back-pagination** (the same primitive `Context_Checkpoint` needs). The safety net for the blank-startup window; Lazy MCP removes the current ~2 s cause. |
 
 ## Parked (ideated, awaiting a need)
 
@@ -97,12 +97,13 @@ in `../guidelines/spec-driven-development.md`:
   calls) that long-running commands make likely. Spec'd (v1); not yet
   implemented.
 
-- **Context Handoff** (`Context_Handoff/FEATURE.md`) — replace destructive
-  compaction with a **generative, recoverable** handoff: the agent writes a
-  summary, the operator edits it, a **child session** is seeded with it and
-  linked to the predecessor, and the TUI switches. The old session stays intact
-  and the successor can recall from it, so the prompt shrinks without anything
-  becoming unrecoverable. Spec'd (v1); not yet implemented.
+- **Context Checkpoint** (`Context_Checkpoint/FEATURE.md`) — replace destructive
+  compaction with a **recoverable checkpoint** in one continuous session: a
+  checkpoint archives the messages before it behind a **keyframe**, resume
+  starts from the latest keyframe forward, and the archived messages stay intact
+  (back-pagination) and are recallable via whole-session SQLite FTS5 weighted
+  toward tool reasons/names. One session id. Implemented (store, protocol,
+  runtime, recall, palette); the TUI resume/back-pagination is in progress.
 
 ## Existing Behaviour (to be documented)
 
