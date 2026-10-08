@@ -467,18 +467,20 @@ var
   S: TSurfaceMemory;
   R: UnicodeString;
 begin
-  S := TSurfaceMemory.Create(30, 1);
+  { A box needs a top and a bottom row: the title rides the top border, and the
+    bottom border is drawn below it. }
+  S := TSurfaceMemory.Create(30, 3);
   try
     It := TChatItem.Create(ckTool,
       'a reason that is far too long to fit in this narrow block', 'body',
       FTheme);
     try
-      It.Arrange(Rc(0, 0, 30, 1));
+      It.Arrange(Rc(0, 0, 30, 3));
       It.Render(S);
       R := S.RowText(0, 0, 30);
       AssertTrue('title ends with an ellipsis', Pos('…', R) > 0);
-      { The rule and the mark still fit: the title cannot push them off. }
-      AssertTrue('the collapse mark survives', Pos('▼', R) > 0);
+      { The chrome still fits: the title cannot push the corner off. }
+      AssertEquals('rounded top-left', '╭', S.CellAt(0, 0).Ch);
     finally
       It.Free;
     end;
@@ -520,7 +522,8 @@ begin
       for I := 0 to H - 1 do
         Full := Full + S.RowText(I, 0, 40) + UnicodeString(#10);
       AssertTrue('live title', Pos('Thinking...', Full) > 0);
-      AssertFalse('no ellipsis line in the live tail', Pos('...', Full) > 0);
+      AssertFalse('no ellipsis marker in the live tail',
+        Pos(UnicodeString('…'), Full) > 0);
       AssertTrue('the tail is shown', Pos('jj', Full) > 0);
       AssertFalse('the head is dropped', Pos('aa', Full) > 0);
 
@@ -528,9 +531,9 @@ begin
       It.Live := False;
       It.Label_ := 'Thought';
       It.Expanded := False;
-      It.Arrange(Rc(0, 0, 40, 1));
+      It.Arrange(Rc(0, 0, 40, It.Measure(Avail(40, 0)).H));
       It.Render(S);
-      AssertTrue('settled into a Thought rule',
+      AssertTrue('settled into a Thought box',
         Pos('Thought', S.RowText(0, 0, 40)) > 0);
     finally
       It.Free;
@@ -900,18 +903,23 @@ var
 begin
   St := TChatStream.Create(FTheme);
   try
-    for I := 1 to 4 do
+    for I := 1 to 2 do
       St.Add(ckAssistant, '', 'line ' + IntToStr(I));
-    It := St.Add(ckThought, 'Thought', 'one' + #10 + 'two' + #10 + 'three');
+    { A body long enough to condense (past CondenseThreshold wrapped rows), so
+      expanding actually changes the block's height. }
+    It := St.Add(ckThought, 'Thought',
+      'one' + #10 + 'two' + #10 + 'three' + #10 + 'four' + #10 + 'five' +
+      #10 + 'six' + #10 + 'seven' + #10 + 'eight' + #10 + 'nine' + #10 +
+      'ten' + #10 + 'eleven' + #10 + 'twelve');
     It.Expanded := False;
     { Following puts the newest block at the bottom of the viewport. }
-    St.Arrange(Rc(0, 0, 30, 6));
+    St.Arrange(Rc(0, 0, 30, 12));
     TopBefore := It.Bounds.Y;
     AssertTrue('the block is visible', TopBefore >= 0);
     AssertTrue('click expands it',
       It.HandleEvent(MouseEvent(It.Bounds.X + 1, TopBefore)));
     AssertTrue('expanded', It.Expanded);
-    St.Arrange(Rc(0, 0, 30, 6));
+    St.Arrange(Rc(0, 0, 30, 12));
     TopAfter := It.Bounds.Y;
     AssertEquals('the block top stayed on the same row', TopBefore, TopAfter);
   finally
@@ -928,18 +936,23 @@ var
 begin
   St := TChatStream.Create(FTheme);
   try
-    for I := 1 to 4 do
+    for I := 1 to 2 do
       St.Add(ckAssistant, '', 'line ' + IntToStr(I));
-    It := St.Add(ckThought, 'Thought', 'one' + #10 + 'two' + #10 + 'three');
+    { A body long enough to condense (past CondenseThreshold wrapped rows), so
+      expanding actually changes the block's height. }
+    It := St.Add(ckThought, 'Thought',
+      'one' + #10 + 'two' + #10 + 'three' + #10 + 'four' + #10 + 'five' +
+      #10 + 'six' + #10 + 'seven' + #10 + 'eight' + #10 + 'nine' + #10 +
+      'ten' + #10 + 'eleven' + #10 + 'twelve');
     It.Expanded := False;
-    St.Arrange(Rc(0, 0, 30, 6));
+    St.Arrange(Rc(0, 0, 30, 12));
     TopBefore := It.Bounds.Y;
     { Through the stream, as the app delivers it: the click reaches the block and
       must not be mistaken for a scroll that resumes following. }
     AssertTrue('stream handled the click',
       St.HandleEvent(MouseEvent(It.Bounds.X + 1, TopBefore)));
     AssertTrue('expanded', It.Expanded);
-    St.Arrange(Rc(0, 0, 30, 6));
+    St.Arrange(Rc(0, 0, 30, 12));
     TopAfter := It.Bounds.Y;
     AssertEquals('the block top stayed on the same row', TopBefore, TopAfter);
   finally

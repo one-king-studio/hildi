@@ -32,6 +32,10 @@ type
   end;
   TStyledClusters = array of TStyledCluster;
   TStyledLines = array of TStyledClusters;
+  { The wrapped lines of a text block, as Unicode strings. AnsiString would be
+    lossy here: the toolkit works in UnicodeString, and the conversion would
+    corrupt non-ASCII under an ASCII-only widestring manager. }
+  TWrappedRows = array of UnicodeString;
 
   { A leaf that holds styled text, measured and wrapped in display columns. The
     cluster build and the wrap are cached and only redone when the spans or the
@@ -65,7 +69,7 @@ type
     { The wrapped lines at AWidth, as plain strings, without disturbing the
       cached layout. Used to build a condensed view (first + ellipsis + tail)
       and a live tail. }
-    function WrappedRows(AWidth: Integer): array of string;
+    function WrappedRows(AWidth: Integer): TWrappedRows;
     property Align: TTextAlign read FAlign write FAlign;
     { When > 0 and wrapping is on, Measure wraps at this many columns instead of
       max-content (the longest word). Callers in a fixed-size viewport set it so
@@ -329,7 +333,7 @@ begin
   Result := Length(WrapClusters(CachedClusters, AWidth, FHangIndent, FWrap));
 end;
 
-function TTextBlock.WrappedRows(AWidth: Integer): array of string;
+function TTextBlock.WrappedRows(AWidth: Integer): TWrappedRows;
 var
   Lines: TStyledLines;
   I, J: Integer;
@@ -345,7 +349,7 @@ begin
     S := '';
     for J := 0 to High(Lines[I]) do
       S := S + Lines[I][J].Ch;
-    Result[I] := string(S);
+    Result[I] := S;
   end;
 end;
 

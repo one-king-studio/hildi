@@ -562,9 +562,9 @@ end;
 
 procedure TChatItem.ApplyDisplay(AWidth: Integer);
 var
-  Rows: array of string;
+  Rows: TWrappedRows;
   I: Integer;
-  Res: string;
+  Res: UnicodeString;
   One: TSpan;
 begin
   if FText = nil then
@@ -622,7 +622,7 @@ begin
       end;
     end
     else
-      Res := FBody;
+      Res := UnicodeString(FBody);
     One := Default(TSpan);
     One.Text := UnicodeString(Res);
     One.Attr := BodyAttr;
