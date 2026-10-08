@@ -94,6 +94,13 @@ in `../guidelines/spec-driven-development.md`:
   calls) that long-running commands make likely. Spec'd (v1); not yet
   implemented.
 
+- **Context Handoff** (`Context_Handoff/FEATURE.md`) — replace destructive
+  compaction with a **generative, recoverable** handoff: the agent writes a
+  summary, the operator edits it, a **child session** is seeded with it and
+  linked to the predecessor, and the TUI switches. The old session stays intact
+  and the successor can recall from it, so the prompt shrinks without anything
+  becoming unrecoverable. Spec'd (v1); not yet implemented.
+
 ## Existing Behaviour (to be documented)
 
 The foundation below is implemented and tested, but predates this documentation
