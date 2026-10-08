@@ -13,63 +13,63 @@ protocol/runtime → TUI.
 
 ### Phase 0: Build
 
-- [ ] Add `-DSQLITE_ENABLE_FTS5` to `SQLITE_CCFLAGS` in the Makefile; rebuild
+- [x] Add `-DSQLITE_ENABLE_FTS5` to `SQLITE_CCFLAGS` in the Makefile; rebuild
       `libsqlite3.a`; assert `messages_fts` can be created (a smoke test).
 
 ### Phase 1: Store — keyframes (`hildegard.helper.store`)
 
-- [ ] **Test**: `TestSaveKeyframeAtHwm`, `TestLatestKeyframe`,
+- [x] **Test**: `TestSaveKeyframeAtHwm`, `TestLatestKeyframe`,
       `TestListKeyframes` in `tests/test_store.pas` — red.
-- [ ] **Implement**: migration (v-next) `session_keyframes` table;
+- [x] **Implement**: migration (v-next) `session_keyframes` table;
       `SaveKeyframe`/`LatestKeyframe`/`ListKeyframes`.
-- [ ] **Test**: `TestQueryActiveMessages` (after-keyframe only; all when none).
-- [ ] **Implement**: `QueryActiveMessages`.
-- [ ] **Test**: `TestQueryMessagesBefore` (archived page, oldest first).
-- [ ] **Implement**: `QueryMessagesBefore`.
+- [x] **Test**: `TestQueryActiveMessages` (after-keyframe only; all when none).
+- [x] **Implement**: `QueryActiveMessages`.
+- [x] **Test**: `TestQueryMessagesBefore` (archived page, oldest first).
+- [x] **Implement**: `QueryMessagesBefore`.
 
 ### Phase 2: Store — FTS5 recall
 
-- [ ] **Test**: `TestFtsIndexesOnAppend`, `TestSearchByToolReason`,
+- [x] **Test**: `TestFtsIndexesOnAppend`, `TestSearchByToolReason`,
       `TestColumnScopedSearchSkipsContent` — red.
-- [ ] **Implement**: `messages_fts` virtual table (migration); index on
+- [x] **Implement**: `messages_fts` virtual table (migration); index on
       `AppendMessage` (same transaction); backfill migration.
-- [ ] **Implement**: `SearchMessages` (whole + column-scoped).
-- [ ] **Refactor**; `make check`.
+- [x] **Implement**: `SearchMessages` (whole + column-scoped).
+- [x] **Refactor**; `make check`.
 
 ### Phase 3: Protocol & runtime
 
-- [ ] **Add** `scCheckpoint`, `scCheckpointCommit`; `ekCheckpointReady`,
+- [x] **Add** `scCheckpoint`, `scCheckpointCommit`; `ekCheckpointReady`,
       `ekCheckpointCommitted`; `TSessionCommand.CheckpointText`.
-- [ ] **Test**: `TestCheckpointDraft` (fake transport; session unchanged),
+- [x] **Test**: `TestCheckpointDraft` (fake transport; session unchanged),
       `TestCheckpointCommitKeyframes` (runtime).
-- [ ] **Implement**: `THarnessSession.DraftCheckpoint` (one bounded request);
+- [x] **Implement**: `THarnessSession.DraftCheckpoint` (one bounded request);
       the runtime's `scCheckpoint`/`scCheckpointCommit` handling (keyframe at HWM).
-- [ ] **Test**: message count unchanged after a checkpoint.
+- [x] **Test**: message count unchanged after a checkpoint.
 
 ### Phase 4: Recall tool
 
-- [ ] **Test**: `recall` finds an archived message by tool reason via FTS.
-- [ ] **Implement**: extend `recall_tool_result` (or add a recall) to search
+- [x] **Test**: `recall` finds an archived message by tool reason via FTS.
+- [x] **Implement**: extend `recall_tool_result` (or add a recall) to search
       `SearchMessages` with optional column scope.
 
 ### Phase 5: TUI
 
-- [ ] **Tool-selection component**: a reusable picker/surface for choosing an
+- [x] **Tool-selection component**: a reusable picker/surface for choosing an
       action (not a bare keybinding) — the checkpoint entry point uses it, and so
       will other command surfaces. This is its own small component, built once.
-- [ ] **Checkpoint UX**: the tool-selection surface offers `/checkpoint` → the agent
+- [x] **Checkpoint UX**: the tool-selection surface offers `/checkpoint` → the agent
       drafts and commits in one action; refuse empty.
-- [ ] **Resume rendering**: prepend the latest keyframe's summary as the
+- [x] **Resume rendering**: prepend the latest keyframe's summary as the
       segment's opening block.
-- [ ] **Back-pagination**: load the prior segment on scroll; a "— checkpoint —"
+- [x] **Back-pagination**: load the prior segment on scroll; a "— checkpoint —"
       boundary marker.
-- [ ] **Nudge**: hint `/checkpoint` past the threshold (never triggers).
-- [ ] **Test**: the nudge threshold; the boundary renders.
+- [x] **Nudge**: hint `/checkpoint` past the threshold (never triggers).
+- [x] **Test**: the nudge threshold; the boundary renders.
 
 ### Phase 6: Validation
 
-- [ ] `make test`, `make test-leak`, `make check` — green.
-- [ ] **Manual**: a live session checkpoint — prompt shrinks, message count
+- [x] `make test`, `make test-leak`, `make check` — green.
+- [x] **Manual**: a live session checkpoint — prompt shrinks, message count
       unchanged, back-pagination shows the archived segment, recall finds an
       archived message.
 
