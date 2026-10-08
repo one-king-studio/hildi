@@ -11,7 +11,7 @@ unit hildegard.helper.tui.palette;
   Filtering is pure (Prefix + a command list -> the matching commands), so it is
   unit-tested without a surface. }
 
-{$mode delphi}{$H+}
+{$mode delphi}{$H+}{$codepage utf8}
 
 interface
 
