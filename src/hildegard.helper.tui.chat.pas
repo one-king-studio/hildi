@@ -201,9 +201,13 @@ type
     FFollow: Boolean;
     FOnToggle: TNotifyEvent;
     FOnChange: TNotifyEvent;
+    FOnNeedOlder: TNotifyEvent;
     FBottomInset: Integer;
     procedure SetOnToggle(AValue: TNotifyEvent);
     procedure SetOnChange(AValue: TNotifyEvent);
+    procedure SetOnNeedOlder(AValue: TNotifyEvent);
+    function GetScrollOffset: Integer;
+    procedure SetScrollOffset(AValue: Integer);
     procedure SetBottomInset(AValue: Integer);
     procedure ItemChanged(Sender: TObject);
     procedure ItemToggled(Sender: TObject);
@@ -230,6 +234,13 @@ type
     property OnToggle: TNotifyEvent read FOnToggle write SetOnToggle;
     { Fired when a block's text changes, so the host re-arranges. }
     property OnChange: TNotifyEvent read FOnChange write SetOnChange;
+    { Fired when the operator scrolls to the top, so the host can load older
+      history and prepend it. }
+    property OnNeedOlder: TNotifyEvent read FOnNeedOlder write SetOnNeedOlder;
+    { The scroll offset (0 = top) and the content height, so a host can prepend
+      history and keep the visible content in place. }
+    property ScrollOffset: Integer read GetScrollOffset write SetScrollOffset;
+    function ContentHeight: Integer;
     { Rows at the bottom of the viewport covered by the compose overlay; the
       stream keeps room for them so the last block keeps its pad rows visible. }
     property BottomInset: Integer read FBottomInset write SetBottomInset;
@@ -1364,6 +1375,26 @@ begin
   FOnChange := AValue;
 end;
 
+procedure TChatStream.SetOnNeedOlder(AValue: TNotifyEvent);
+begin
+  FOnNeedOlder := AValue;
+end;
+
+function TChatStream.GetScrollOffset: Integer;
+begin
+  Result := FScroll.ScrollY;
+end;
+
+procedure TChatStream.SetScrollOffset(AValue: Integer);
+begin
+  FScroll.ScrollY := AValue;
+end;
+
+function TChatStream.ContentHeight: Integer;
+begin
+  Result := FScroll.MaxScrollY + FBounds.H;
+end;
+
 procedure TChatStream.SetBottomInset(AValue: Integer);
 begin
   if AValue < 0 then
@@ -1423,6 +1454,11 @@ begin
     scroll interaction re-evaluates whether we are following the bottom. }
   if Result and (Scrollish or (FScroll.ScrollY <> Before)) then
     FFollow := FScroll.ScrollY >= FScroll.MaxScrollY;
+  { At the top on a scroll-up: the host may load older history. }
+  if Assigned(FOnNeedOlder) and (FScroll.ScrollY <= 0) and
+    (((E.Kind = ikKey) and (E.Key.Kind in [kkUp, kkPageUp, kkHome])) or
+     ((E.Kind = ikMouse) and (E.Mouse.Button = mbWheelUp))) then
+    FOnNeedOlder(Self);
 end;
 
 function TChatStream.Advance(const ANowMs: Int64): Boolean;
