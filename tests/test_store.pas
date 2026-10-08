@@ -56,6 +56,7 @@ type
     procedure TestMostRecentTurnReturnsLatest;
     procedure TestMostRecentTurnNotFound;
     procedure TestSessionTotalsContextAndGenerated;
+    procedure TestSessionTotalsContextIsTheLatestRequest;
     procedure TestSessionTotalsEmpty;
 
     procedure TestRuntimeMigrationIsAdditive;
@@ -963,6 +964,50 @@ begin
     AssertEquals('final context', 20, Totals.ContextTokens);
     AssertEquals('requests summed', 2, Totals.RequestCount);
     AssertTrue('duration summed', Totals.DurationMs >= 0);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestSessionTotalsContextIsTheLatestRequest;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws: Integer;
+  Sid: string;
+  T1, T2, T3, R: Int64;
+  Totals: TTurnRecord;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, Sid, Err);
+    { Page 1: the context grows to 40 (the peak). }
+    S.BeginTurn(Sid, T1, Err);
+    S.BeginRequest(T1, 'm', 1, R, Err);
+    S.FinishRequest(R, True, 'stop', 0, '', '',
+      MakeUsage(10, 1, 11, 0, 0), 1, 1, Err);
+    S.FinishTurn(T1, tsCompleted, 'stop', 0, '', '', Err);
+    S.BeginTurn(Sid, T2, Err);
+    S.BeginRequest(T2, 'm', 1, R, Err);
+    S.FinishRequest(R, True, 'stop', 0, '', '',
+      MakeUsage(40, 1, 41, 0, 0), 1, 1, Err);
+    S.FinishTurn(T2, tsCompleted, 'stop', 0, '', '', Err);
+    { A continuation's prompt shrinks: the context must follow the latest
+      request, not the peak. (SessionTotals is checkpoint-agnostic, so no
+      checkpoint row is needed to exercise this.) }
+    S.BeginTurn(Sid, T3, Err);
+    S.BeginRequest(T3, 'm', 1, R, Err);
+    S.FinishRequest(R, True, 'stop', 0, '', '',
+      MakeUsage(12, 1, 13, 0, 0), 1, 1, Err);
+    S.FinishTurn(T3, tsCompleted, 'stop', 0, '', '', Err);
+
+    AssertTrue('totals', S.SessionTotals(Sid, Totals, Err));
+    { The context in play is the current page (12), not the page-1 peak (40). }
+    AssertEquals('context is the latest page', 12, Totals.ContextTokens);
+    { The billed totals still span every page. }
+    AssertEquals('billed prompt across pages', 62, Totals.Usage.PromptTokens);
+    AssertEquals('requests across pages', 3, Totals.RequestCount);
   finally
     S.Free;
   end;
