@@ -75,11 +75,11 @@ protocol/runtime → TUI.
 
 ## Redesign: the checkpoint as a turn (DO THIS)
 
-**Status: the current one-action `scCheckpoint` path FAILS live** ("checkpoint
-draft failed"). It runs `THarnessSession.DraftCheckpoint` — a separate,
-synchronous `FClient.Complete` — which (a) blocks the runtime with no progress
-shown, and (b) swallows the failure reason. Replace it with a **turn-based**
-design that reuses the normal loop.
+**Status: DONE** (commits `a80450b`, `b33a132`). The one-action `scCheckpoint`
+path used to run `THarnessSession.DraftCheckpoint` — a separate, synchronous
+`FClient.Complete` — which blocked the runtime with no progress shown and
+swallowed the failure reason. It is now a **turn-based** design that reuses the
+normal loop.
 
 **The flow:**
 

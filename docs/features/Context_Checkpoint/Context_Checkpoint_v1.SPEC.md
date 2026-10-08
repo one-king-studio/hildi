@@ -9,10 +9,16 @@
 
 ## Purpose
 
-Implement the keyframe checkpoint: a **keyframe** table, a **resume window** that
-starts from the latest keyframe, a **whole-session FTS5 recall**, and the
-operator UX (`/checkpoint`, boundary, back-pagination). **One session id**;
-nothing is deleted.
+Implement the checkpoint: a **checkpoint** table, a **resume window** that starts
+from the latest checkpoint, a **whole-session FTS5 recall**, and the operator UX
+(`/checkpoint`, boundary, back-pagination). **One session id**; nothing is
+deleted.
+
+The checkpoint document is produced by an **ordinary turn**, not an out-of-band
+call (see the FEATURE decision): `/checkpoint` queues the summarization
+instruction as an **ambient** message and runs an ambient turn, the assistant's
+reply to that turn *is* the document, and the runtime records the checkpoint at
+the turn boundary when the turn completes.
 
 ## Requirements
 
@@ -32,15 +38,16 @@ nothing is deleted.
       `tool_arguments`, `content`, `label`). A migration backfills existing
       messages.
 - [ ] **Build**: the vendored SQLite compiles with `-DSQLITE_ENABLE_FTS5`.
-- [ ] **Protocol**: `scCheckpoint` (driver-only) requests a draft;
-      `scCheckpointCommit` (driver-only, carries the agent's text) records the
-      keyframe. Events: `ekCheckpointReady` (draft), `ekCheckpointCommitted` (the
-      keyframe seq).
-- [ ] **Draft**: the runtime runs one bounded LLM request (a checkpoint
-      instruction) and emits the draft; the session is not modified.
-- [ ] **Commit**: the runtime records a keyframe at the current HWM with the
-      agent-generated summary; the session's **active window** becomes "summary
-      + messages after the boundary". Nothing is deleted.
+- [ ] **Protocol**: `scCheckpoint` (driver-only) starts a **checkpoint turn**.
+      Event: `ekCheckpointCommitted` carries the recorded boundary `seq`, so the
+      client reloads the transcript.
+- [ ] **The turn**: the runtime queues the summarization instruction as an
+      **ambient** message and runs an ambient turn; it streams like any turn and
+      the ledger records it.
+- [ ] **Commit**: when that turn completes normally the runtime records a
+      checkpoint at the current HWM with the assistant's reply as the summary; the
+      session's **active window** becomes "summary + messages after the boundary".
+      Nothing is deleted. A failed or empty turn records nothing.
 - [ ] **Resume**: opening/attaching a session loads the active window — the
       latest keyframe's summary prepended, then messages after its `seq`. The
       TUI renders the summary as the segment's opening block.
@@ -106,14 +113,10 @@ unit hildegard.helper.session.protocol;   // additions
 type
   TSessionCommandKind = (
     // ... scShutdown ...
-    scCheckpoint, scCheckpointCommit);
+    scCheckpoint);            // start a checkpoint turn
   TSessionEventKind = (
     // ... ekLoopExited ...
-    ekCheckpointReady, ekCheckpointCommitted);
-  TSessionCommand = record
-    // ... existing ...
-    CheckpointText: string;   // scCheckpointCommit: the agent-generated document
-  end;
+    ekCheckpointCommitted);   // recorded at TurnSeq
 ```
 
 ### Data Contracts
@@ -139,9 +142,9 @@ type
 
 ### Event Contracts
 
-- `ekCheckpointReady` carries the draft in `Text`.
-- `ekCheckpointCommitted` carries the keyframe `seq` (reuse `TurnSeq` or a new
-  field) and reason `checkpoint`.
+- `ekCheckpointCommitted` carries the recorded boundary `seq` (reuse `TurnSeq`).
+  There is no draft event: the document streams as the checkpoint turn's
+  assistant reply.
 
 ## Architecture
 
@@ -170,8 +173,9 @@ type
 
 ## Error Handling
 
-- Draft failure ⇒ `ekError`, no keyframe.
-- Keyframe/FTS failure ⇒ `ekError`, session unchanged.
+- A checkpoint turn that fails (`teError`) or returns an empty document ⇒ no
+  checkpoint; the turn's error is surfaced as usual.
+- Checkpoint/FTS failure ⇒ `ekError`, session unchanged.
 
 ## Testing Requirements
 
@@ -189,8 +193,10 @@ type
 
 ### Integration Tests (`tests/test_session_runtime.pas`)
 
-- [ ] `scCheckpoint` emits `ekCheckpointReady`; `scCheckpointCommit` records a keyframe
-      and emits `ekCheckpointCommitted`; the message count is unchanged.
+- [ ] `scCheckpoint` starts an ambient checkpoint turn; when it completes the
+      runtime records a checkpoint and emits `ekCheckpointCommitted`; the message
+      count is unchanged (nothing archived is deleted).
+- [ ] A checkpoint turn that fails records no checkpoint.
 
 ### TUI Tests
 

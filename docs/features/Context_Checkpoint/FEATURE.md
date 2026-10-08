@@ -16,9 +16,9 @@ chain is one group, and recall is a query within the same session rather than a
 cross-session lookup. It is the session-scoped sibling of the hand-maintained
 `HANDOFF.md`.
 
-> Name note: `Session_Checkpoint/` already exists for a **different, superseded**
-> meaning (moving a live loop between devices). This feature is **Context
-> Checkpoint**.
+> Name note: `Session_Handoff/` already exists for a **different, superseded**
+> meaning (exclusive session ownership; moving a live loop between devices). This
+> feature is **Context Checkpoint**.
 
 ## Problem Statement
 
