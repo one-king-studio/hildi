@@ -184,3 +184,24 @@ footage before it still on disk.
   new surface is keyframes, the resume window, FTS recall, and the TUI UX.
 - The distinction from compaction, in one line: **compaction replaces history; a
   checkpoint freezes it behind a keyframe and keeps it.**
+
+## Decisions
+
+- **2026-10-08 — The checkpoint is a turn, not an out-of-band call.** An earlier
+  build produced the checkpoint document with a separate, synchronous
+  `FClient.Complete` (`DraftCheckpoint`). It failed live with a bare
+  "checkpoint draft failed" — the call blocked the runtime with no progress
+  shown and swallowed the failure reason.
+
+  **Decision:** the checkpoint is an ordinary **turn**. `/checkpoint` submits a
+  summarization prompt as an **ambient** message; the assistant's response to
+  that turn *is* the checkpoint document; and that turn is simultaneously the
+  **last turn of the previous chain and the first turn of the next chain**. On
+  completion, the checkpoint is recorded at the boundary and the view reloads,
+  leaving a blank slate to continue. Streaming, progress, the ledger, and error
+  handling come free from the normal turn path. The out-of-band
+  `scCheckpoint`/`DraftCheckpoint` path is removed. See the TODO for the change
+  list.
+- **One session, one chain.** The checkpoint does not create a session or a
+  child; it archives the messages behind a boundary and re-seeds the chain from
+  the document. Recall and back-pagination are queries within the same session.

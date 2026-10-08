@@ -61,17 +61,64 @@ protocol/runtime → TUI.
       drafts and commits in one action; refuse empty.
 - [x] **Resume rendering**: prepend the latest keyframe's summary as the
       segment's opening block.
-- [x] **Back-pagination**: load the prior segment on scroll; a "— checkpoint —"
+- [ ] **Back-pagination**: load the prior segment on scroll; a "— checkpoint —"
       boundary marker.
-- [x] **Nudge**: hint `/checkpoint` past the threshold (never triggers).
-- [x] **Test**: the nudge threshold; the boundary renders.
+- [ ] **Nudge**: hint `/checkpoint` past the threshold (never triggers).
+- [ ] **Test**: the nudge threshold; the boundary renders.
 
 ### Phase 6: Validation
 
-- [x] `make test`, `make test-leak`, `make check` — green.
-- [x] **Manual**: a live session checkpoint — prompt shrinks, message count
+- [ ] `make test`, `make test-leak`, `make check` — green.
+- [ ] **Manual**: a live session checkpoint — prompt shrinks, message count
       unchanged, back-pagination shows the archived segment, recall finds an
       archived message.
+
+## Redesign: the checkpoint as a turn (DO THIS)
+
+**Status: the current one-action `scCheckpoint` path FAILS live** ("checkpoint
+draft failed"). It runs `THarnessSession.DraftCheckpoint` — a separate,
+synchronous `FClient.Complete` — which (a) blocks the runtime with no progress
+shown, and (b) swallows the failure reason. Replace it with a **turn-based**
+design that reuses the normal loop.
+
+**The flow:**
+
+1. `/checkpoint` (app) submits a **summarization prompt as a normal turn** — the
+   prompt is an **ambient** message ("summarize this session into a checkpoint
+   document"), so the operator sees it stream like any turn.
+2. The assistant's **response to that turn is the checkpoint document**.
+3. The **entire checkpoint turn is the last turn of the previous chain and the
+   first turn of the next chain** — it bridges them.
+4. Record the checkpoint at the boundary (the turn's HWM), then **reload** the
+   view: the new chain is `[system prompt] + [the checkpoint turn] + future`,
+   leaving the operator a blank slate to continue.
+
+**Why:** streaming, progress, the ledger, and error handling all come for free
+from the normal turn path — the exact things the out-of-band call lacked.
+
+**Changes:**
+
+- **Delete** the out-of-band path: `scCheckpoint`/`scCheckpointCommit`,
+  `ekCheckpointReady`/`ekCheckpointCommitted`, `THarnessSession.DraftCheckpoint`,
+  the runtime's `HandleCheckpoint`/`HandleCheckpointCommit`, and
+  `TCommandPalette`'s draft handling.
+- **Loop prompt role** (`hildegard.helper.agent` ~line 1262): allow the turn's
+  user prompt to be appended as **`mrAmbient`** (a flag on the loop or a
+  checkpoint-turn marker), so the prompt is an ambient block.
+- **Runtime**: on `teDone` for a checkpoint turn, `SaveCheckpoint(session,
+  <assistant response>, <boundary = the turn's HWM>)`, then emit an event the
+  app uses to **reload** the transcript from the new chain.
+- **App**: `/checkpoint` runs the summarization turn (set a `FCheckpointTurn`
+  flag); on the terminal event, clear the stream and re-render from the
+  checkpoint. Show a `checkpointing` state (already added in `1c3415d`).
+- **`Compose`** already resumes from the checkpoint (system + context + after the
+  boundary) — the new chain falls out of it. Verify the checkpoint *turn's*
+  messages land correctly (the ambient prompt and its assistant reply are at/below
+  the boundary, so they are the bridge; the document re-injects as the context
+  block).
+
+**Keep:** the store (`session_checkpoints`, `SaveCheckpoint`, `LatestCheckpoint`,
+active window), FTS recall, `Compose` resume, the palette/tray.
 
 ## Files to Create/Modify
 
