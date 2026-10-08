@@ -33,6 +33,7 @@ type
     procedure TestRestoreAfterReopen;
     procedure TestTailKeepsSystemAndRecent;
     procedure TestTailDropsOrphanTools;
+    procedure TestResumeFromCheckpointShrinksContext;
     procedure TestAppendMapsRolesAndToolFields;
     procedure TestQueryMessagesReturnsAllBlocks;
     procedure TestBeginFinishTurnAndRequestRecorded;
@@ -693,6 +694,64 @@ begin
   AssertTrue('status attr', Pos('status="completed"', S) > 0);
   AssertTrue('timestamp attr', Pos('timestamp="', S) > 0);
   AssertTrue('instructions block', Pos('<instructions>', S) > 0);
+end;
+
+procedure TSessionTest.TestResumeFromCheckpointShrinksContext;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  SessionId: string;
+  WorkspaceId: Integer;
+  Conv: IConversationStore;
+  Msgs: TChatMessageArray;
+  Seq: Int64;
+  I: Integer;
+  Sys, PlainAsst: TChatMessage;
+  Checked: TCheckpointRecord;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', WorkspaceId, Err);
+    S.CreateSession(WorkspaceId, SessionId, Err);
+    Conv := TSqliteConversationStore.Create(S, SessionId);
+    { A system prompt and several turns of plain history. }
+    Sys := Default(TChatMessage);
+    Sys.Role := crSystem;
+    Sys.Content := 'you are a test';
+    Conv.Append(Sys);
+    for I := 1 to 5 do
+    begin
+      Conv.Append(UserMsg('turn ' + IntToStr(I)));
+      PlainAsst := Default(TChatMessage);
+      PlainAsst.Role := crAssistant;
+      PlainAsst.Content := 'reply ' + IntToStr(I);
+      Conv.Append(PlainAsst);
+    end;
+    { Before the checkpoint: the full history replays. }
+    Msgs := Conv.Messages;
+    AssertTrue('full history replays', Length(Msgs) >= 11);
+
+    { Record a checkpoint at the current HWM. }
+    AssertTrue('checkpoint', S.SaveCheckpoint(SessionId, 'we did turns 1-5', Seq,
+      Err));
+    AssertEquals('boundary is the hwm', 11, Seq);
+    Checked := Default(TCheckpointRecord);
+    AssertTrue('latest finds it', S.LatestCheckpoint(SessionId, Checked, Err));
+
+    { Resume: the system prompt + the checkpoint context, and the archived
+      turns are gone from the prompt. }
+    Msgs := Conv.Messages;
+    AssertEquals('system + checkpoint context', 2, Length(Msgs));
+    AssertEquals('system first', Ord(crSystem), Ord(Msgs[0].Role));
+    AssertEquals('context is system', Ord(crSystem), Ord(Msgs[1].Role));
+    AssertTrue('carries the summary', Pos('we did turns 1-5', Msgs[1].Content) > 0);
+    AssertTrue('marked as carried-forward',
+      Pos('carried forward', Msgs[1].Content) > 0);
+    AssertTrue('marked as carried-forward',
+      Pos('carried forward', Msgs[1].Content) > 0);
+  finally
+    S.Free;
+  end;
 end;
 
 initialization

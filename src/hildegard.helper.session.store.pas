@@ -55,6 +55,13 @@ type
 
 implementation
 
+const
+  { Prefixes the checkpoint summary injected on resume, so the model knows this
+    is carried-forward context, not a user turn. }
+  CheckpointContextHeader =
+    '[Context carried forward from an earlier checkpoint of this session]' +
+    LineEnding + LineEnding;
+
 procedure AddMessage(var AList: TChatMessageArray;
   const AMessage: TChatMessage);
 begin
@@ -231,7 +238,10 @@ end;
 function TSqliteConversationStore.Compose: TChatMessageArray;
 var
   Msgs: TMessageRecordArray;
+  Snap: TCheckpointRecord;
   Err: TStoreError;
+  Boundary: Int64;
+  HasCp: Boolean;
   I, J: Integer;
   Msg: TChatMessage;
   Call: TChatToolCall;
@@ -239,9 +249,40 @@ begin
   Result := nil;
   if not FStore.QueryMessages(FSessionId, Msgs, Err) then
     Exit;
+  { Resume from the latest checkpoint. The prompt is: the leading system
+    message(s) (setup, always kept), then the checkpoint's summary as a context
+    block, then every message after the boundary. Messages at or before the
+    boundary are archived (not replayed). }
+  Boundary := 0;
+  HasCp := FStore.LatestCheckpoint(FSessionId, Snap, Err);
+  if HasCp then
+    Boundary := Snap.Seq;
+  { Leading system messages, always. }
   I := 0;
+  while (I <= High(Msgs)) and (Msgs[I].Role = mrSystem) do
+  begin
+    Msg := Default(TChatMessage);
+    Msg.Role := crSystem;
+    Msg.Content := Msgs[I].Content;
+    AddMessage(Result, Msg);
+    Inc(I);
+  end;
+  { The checkpoint context block, after the system prompt. }
+  if HasCp then
+  begin
+    Msg := Default(TChatMessage);
+    Msg.Role := crSystem;
+    Msg.Content := CheckpointContextHeader + Snap.Summary;
+    AddMessage(Result, Msg);
+  end;
   while I <= High(Msgs) do
   begin
+    { Archived (before the checkpoint): not replayed. }
+    if (Boundary > 0) and (Msgs[I].Seq <= Boundary) then
+    begin
+      Inc(I);
+      Continue;
+    end;
     case Msgs[I].Role of
       mrSystem:
         begin
