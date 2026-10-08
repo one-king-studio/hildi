@@ -2156,11 +2156,16 @@ begin
       Exit(False);
     { Every request bills its whole (re-sent) context, so the prompt sum is the
       billed input; the output and reasoning tokens are likewise summed. The
-      final context is the largest prompt ever sent (the window in play). }
+      context in play is the *most recent* request's prompt, not the largest ever
+      sent: a checkpoint shrinks the prompt, so MAX would report the
+      pre-checkpoint peak instead of the current page. }
     Stmt := TStmt.Create(FDb,
       'SELECT COUNT(*), COALESCE(SUM(r.prompt_tokens), 0), ' +
       'COALESCE(SUM(r.completion_tokens), 0), COALESCE(SUM(r.cached_tokens), 0), ' +
-      'COALESCE(SUM(r.reasoning_tokens), 0), COALESCE(MAX(r.prompt_tokens), 0), ' +
+      'COALESCE(SUM(r.reasoning_tokens), 0), ' +
+      '(SELECT COALESCE(r2.prompt_tokens, 0) FROM requests r2 ' +
+        'JOIN turns t3 ON t3.id = r2.turn_id WHERE t3.session_id = ? ' +
+        'ORDER BY r2.id DESC LIMIT 1), ' +
       '(SELECT COALESCE(SUM(t2.duration_ms), 0) FROM turns t2 ' +
         'WHERE t2.session_id = ?) ' +
       'FROM requests r JOIN turns t ON t.id = r.turn_id ' +
@@ -2171,6 +2176,7 @@ begin
           DbErrorText));
       Stmt.BindText(1, ASessionId);
       Stmt.BindText(2, ASessionId);
+      Stmt.BindText(3, ASessionId);
       if Stmt.Step <> SQLITE_ROW then
         Exit(True);   // no row (impossible for an aggregate); the zero record
       ATurn.RequestCount := Stmt.ColInt(0);
