@@ -146,6 +146,8 @@ type
     procedure Invalidate(Sender: TObject);
     { The transcript reached the top: prepend the next archived page. }
     procedure NeedOlderHistory(Sender: TObject);
+    { The continuation page: one more than the session's checkpoint count. }
+    function PageNumber: Integer;
     { The compose changed: show/hide and filter the command palette. }
     procedure ComposeChanged(Sender: TObject);
     { Run a command from the palette. }
@@ -441,14 +443,34 @@ begin
     FPanel.SetCta(ckNone);
 end;
 
+function THarnessApp.PageNumber: Integer;
+var
+  Snaps: TCheckpointArray;
+  Err: TStoreError;
+begin
+  { A checkpoint starts a new page; the session begins on page 1. }
+  Result := 1;
+  if (FSession.Store <> nil) and
+    FSession.Store.ListCheckpoints(FSession.SessionId, Snaps, Err) then
+    Result := Length(Snaps) + 1;
+end;
+
 procedure THarnessApp.UpdateHeader;
+var
+  Context: string;
+  Page: Integer;
 begin
   { Read the persisted session, so a live session and a resumed one show the
     same header. The header carries only the context; the consumption is on the
     status bar. }
-  FPanel.SetHeader(Copy(FSession.SessionId, 1, 12),
-    FormatContextUsage(FSession.SessionTotals.ContextTokens,
-      FSession.MaxContextTokens));
+  Context := FormatContextUsage(FSession.SessionTotals.ContextTokens,
+    FSession.MaxContextTokens);
+  { A continuation session runs on pages (one per checkpoint): say so, so the
+    operator knows the context is against the current page, not the whole run. }
+  Page := PageNumber;
+  if Page > 1 then
+    Context := Format('page %d · %s', [Page, Context]);
+  FPanel.SetHeader(Copy(FSession.SessionId, 1, 12), Context);
 end;
 
 procedure THarnessApp.UpdateStats;
