@@ -91,8 +91,8 @@ footage before it still on disk.
 - [ ] **Nothing destructive**: a checkpoint adds a checkpoint row; it never deletes,
       rewrites, or reorders messages. The archived messages remain byte-for-byte.
 - [ ] **Back-pagination**: the TUI can load messages before the checkpoint
-      boundary (the previous segment), with a visible "— checkpoint —" boundary
-      marker.
+      boundary (the previous segment); the checkpoint's ambient box is the
+      visible boundary (no separate marker).
 - [ ] **Recall**: a whole-session FTS5 index over messages lets the agent search
       **archived and current** messages; the query can scope to structured
       columns (tool reason/name/arguments/label) to avoid scanning `content`.

@@ -61,8 +61,9 @@ protocol/runtime → TUI.
       drafts and commits in one action; refuse empty.
 - [x] **Resume rendering**: prepend the latest checkpoint's summary as the
       segment's opening block.
-- [x] **Back-pagination**: load the prior segment on scroll; a "— checkpoint —"
-      boundary marker. Implemented; the trigger is tested, the anchor is not.
+- [x] **Back-pagination**: load the prior segment on scroll; the checkpoint's
+      ambient box is the boundary. Implemented; the trigger is tested, the anchor
+      is not.
 
       Design (checked against the current code — `TChatStream` has `Add`/`Clear`/
       `ItemAt`, and `TScrollContainer` exposes `ScrollY`/`MaxScrollY`/`ScrollTo`):
@@ -72,13 +73,14 @@ protocol/runtime → TUI.
         so the app can restore the anchor.
       - The app keeps `FOlderPages: Integer` (0 at first). `RenderHistory` renders
         `QueryMessagesBefore(session, checkpoint.seq, FOlderPages * PageSize)` as
-        the archived prefix, then a `— checkpoint —` marker, then the checkpoint
-        document, then the active window.
+        the archived prefix, then the checkpoint's ambient box (its document is
+        the boundary), then the active window.
       - On `OnNeedOlder`: `Inc(FOlderPages)`, note `ContentHeight` and
         `ScrollOffset`, `RenderHistory`, then
         `ScrollOffset := ScrollOffset + (ContentHeight_after - ContentHeight_before)`
         so the visible content stays put and the operator can keep scrolling up.
-      - The marker is a divider-style block (`ckTurn`), "— checkpoint —".
+      - No separate boundary marker: the checkpoint's ambient box *is* the
+        boundary, immediately following the archived page.
 - [x] **Nudge**: hint `/checkpoint` past the threshold (never triggers).
       Implemented at 80% in the CTA hints (`UpdateStats`); not yet tested.
 - [x] **Test**: the trigger (`TestStreamFiresNeedOlderAtTheTop`), the metric

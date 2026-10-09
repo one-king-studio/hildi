@@ -55,6 +55,9 @@ frame.
 - Bullets: `• ◦ ‣ · ∙`
 - Status: `✓ ✗ ✔ ✘ ☐ ☑ ☒ ⚠ ℹ`
 - Chevrons/pointers: `❯ ›` (prompt, list cursor)
+- Disclosure: `▼ ▲` — a collapsible container's caret. It rides the bottom
+  border (on the box's own background, with a blank cell of gap each side):
+  `▼` while collapsed, `▲` when expanded.
 
 **Avoid** for layout-critical UI: emoji (ambiguous width), Nerd Font icons
 (absent font), and box drawing beyond the common BMP ranges. They are fine inside

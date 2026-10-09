@@ -52,7 +52,8 @@ the turn boundary when the turn completes.
       latest checkpoint's summary prepended, then messages after its `seq`. The
       TUI renders the summary as the segment's opening block.
 - [ ] **Back-pagination**: the TUI can load the previous segment
-      (`QueryMessagesBefore`) with a visible "— checkpoint —" boundary.
+      (`QueryMessagesBefore`) with the checkpoint's ambient box as the visible
+      boundary (no separate marker).
 - [ ] **Recall**: `recall_tool_result` (or a new recall tool) searches the FTS
       index across **archived and current** messages; a query may scope to
       structured columns so it does not scan `content`.
