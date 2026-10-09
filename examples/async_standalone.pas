@@ -10,7 +10,7 @@ program async_standalone;
 
 uses
   {$ifdef unix}cthreads,{$endif}
-  SysUtils, async.base, async.scheduler, async.future;
+  SysUtils, async.base, async.scheduler, async.future, async.queue;
 
 type
   TCounter = class
@@ -28,6 +28,8 @@ var
   Sched: IAsyncScheduler;
   Counter: TCounter;
   Fut: TFuture<Integer>;
+  Mail: TBoundedQueue<Integer>;
+  Popped: Integer;
 begin
   Sched := TQueueScheduler.Create;
   Counter := TCounter.Create;
@@ -46,6 +48,17 @@ begin
         raise Exception.CreateFmt('expected 5, got %d', [Counter.Count]);
     finally
       Fut.Free;
+    end;
+    Mail := TBoundedQueue<Integer>.Create(2);
+    try
+      Mail.Push(1);
+      Mail.Push(2);
+      if Mail.Push(3) then
+        raise Exception.Create('expected the bound to drop the oldest');
+      if not Mail.TryPop(Popped) or (Popped <> 2) then
+        raise Exception.Create('expected 2 after the drop');
+    finally
+      Mail.Free;
     end;
     WriteLn('async standalone ok');
   finally

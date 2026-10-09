@@ -20,6 +20,8 @@ expresses the next requirement, watch it fail, implement the minimum, refactor,
 - [x] **Test**: asap is FIFO with a head index; a nested drain does not re-run the
       in-flight job.
 - [x] **Implement**: `async.scheduler` queue + asap, with cancellable jobs.
+- [x] **Implement**: `async.queue` — `TBoundedQueue<T>`, the thread-safe bounded
+      mailbox (drop-oldest on overflow, with a `Dropped` count) the TUI needs.
 
 ## Phase 2 — Context
 
