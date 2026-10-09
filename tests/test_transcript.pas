@@ -105,8 +105,8 @@ end;
 
 procedure TurnEmptyTool(W: TTranscriptWriter);
 begin
-  W.OnToolCall('id1', 'glob', '{"reason":"find"}', 'find');
-  W.OnToolResult('id1', 'glob', '', True);
+  W.OnToolCall('id1', 'file_glob', '{"reason":"find"}', 'find');
+  W.OnToolResult('id1', 'file_glob', '', True);
   W.EndTurn;
 end;
 

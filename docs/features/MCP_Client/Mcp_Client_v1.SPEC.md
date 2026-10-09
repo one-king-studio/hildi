@@ -217,7 +217,7 @@ const
   case the second server's tool is suffixed `_2`, `_3`, … deterministically in
   the manager's server order (which is name-sorted; see `Config_v1.SPEC.md`).
   The SPEC requires a collision test.
-- **Native tools keep bare names** (`read_file`, `run_command`); an MCP tool
+- **Native tools keep bare names** (`file_read`, `run_command`); an MCP tool
   whose server/tool happen to normalize to a native name is still prefixed
   `mcp_`, so it cannot shadow a native tool.
 

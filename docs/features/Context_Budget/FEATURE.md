@@ -20,7 +20,7 @@ produces a tree of partials of the thing being inspected.
 ## Problem Statement
 
 Tool output is unbounded. Today the SQLite adapter recomposes the full
-conversation for every request, so a large `run_command` or `read_file` result
+conversation for every request, so a large `run_command` or `file_read` result
 is re-sent on every subsequent request in the loop and on every resumed turn.
 That is the dominant cost of a long session and the most likely way to exceed a
 model's context window. Truncating and forgetting would lose the operator's

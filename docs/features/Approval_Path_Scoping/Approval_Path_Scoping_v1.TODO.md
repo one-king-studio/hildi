@@ -89,7 +89,7 @@ docs/features/FEATURES.md                 (status)
 ## Notes & Considerations
 
 - **The path is declared on the subject.** The engine never parses params, so
-  `glob`/`grep` (which pass `[pattern, path]`) scope on the directory by setting
+  `file_glob`/`file_grep` (which pass `[pattern, path]`) scope on the directory by setting
   `Subject.Path`. This is why no per-ref path index is needed.
 - **`never` is a blanket ref deny** in the ask; the engine supports scoped
   deny rules (directory/extension) and they are tested, but authoring them from

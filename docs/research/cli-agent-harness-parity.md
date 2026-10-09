@@ -66,14 +66,14 @@ of writing, not aspirations.
 | Feature | hildegard-helper | OpenCode | Codex CLI | Claude Code | Pi | DeepSeek Harness |
 | ------- | ---------------- | -------- | --------- | ----------- | -- | ---------------- |
 | Shell execution | ✅ `run_command` | ✅ `bash` | ✅ | ✅ `Bash` | ✅ | ✅ |
-| Read / write / edit files | ✅ `read_file`/`write_file`/`edit_file` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Glob / grep search | ✅ `glob`/`grep` | ✅ (ripgrep) | ✅ | ✅ | ✅ | ✅ |
+| Read / write / edit files | ✅ `file_read`/`file_write`/`file_edit` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Glob / grep search | ✅ `file_glob`/`file_grep` | ✅ (ripgrep) | ✅ | ✅ | ✅ | ✅ |
 | Web search | ✗ | ✅ (Exa/Parallel) | ✅ `--search` | ✅ | ◐ (extensions) | ✅ |
 | Web fetch | ✗ (TLS is ready) | ✅ `webfetch` | ✅ | ✅ `WebFetch` | ◐ (extensions) | ✅ |
 | LSP / code intelligence | ✗ | ✅ (experimental tool) | ◐ | ✅ code-intelligence plugins | ◐ (extension) | ◐ (plugin) |
 | Todo list | ✗ | ✅ `todowrite` | ◐ | ✅ | ✗ (TODO.md) | ✅ |
 | Ask-the-user tool | ◐ approval modal only | ✅ `question` | ◐ | ✅ | ◐ | ✅ |
-| Apply patch | ◐ via `edit_file` | ✅ `apply_patch` | ✅ | ✅ | ✅ | ✅ |
+| Apply patch | ◐ via `file_edit` | ✅ `apply_patch` | ✅ | ✅ | ✅ | ✅ |
 | Browser automation | ✗ | ✅ (MCP / plugin) | ✅ | ✅ Chrome | ◐ (extension) | ◐ (plugin) |
 | Image / vision input | ✗ | ✅ drag-drop images | ✅ `--image` | ✅ | ✅ | ✅ |
 | Scripted tool composition | ◐ proposed (Composed Tool Sandbox) | ◐ | ◐ sandbox | ◐ | ✅ Codemode JS sandbox | ◐ (plugin) |

@@ -19,7 +19,7 @@ answered back to the model so the ledger stays valid and it can resubmit.
 ## Problem Statement
 
 A coding agent's completion tokens are dominated by tool-call arguments, not
-prose: a large `write_file` or a long explanation will hit the ceiling. Today
+prose: a large `file_write` or a long explanation will hit the ceiling. Today
 that is unrecoverable. The model may have produced a nearly complete answer or a
 nearly complete file body, and the harness discards it and fails the turn. The
 operator sees an error block and has to re-prompt from scratch.

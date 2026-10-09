@@ -442,10 +442,10 @@ begin
   SideText := TTextBlock.Create([], wmNone);
   SideText.SetText(
     'Tools' + #10 + '' + #10 +
-    '  read_file      idle' + #10 +
-    '  write_file     idle' + #10 +
+    '  file_read      idle' + #10 +
+    '  file_write     idle' + #10 +
     '  run_command    idle' + #10 +
-    '  grep           idle' + #10 + '' + #10 +
+    '  file_grep      idle' + #10 + '' + #10 +
     'Context' + #10 + '' + #10 +
     '  workspace  hildegard-helper' + #10 +
     '  model      fireworks' + #10 +

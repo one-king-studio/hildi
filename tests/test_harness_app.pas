@@ -494,7 +494,7 @@ begin
   { A tool that produced nothing still ran; the block shows a marker. }
   E := Default(TTurnEvent);
   E.Kind := teToolResult;
-  E.ToolName := 'glob';
+  E.ToolName := 'file_glob';
   E.Text := '';
   E.ToolOk := True;
   FSession.Queue.Push(E);

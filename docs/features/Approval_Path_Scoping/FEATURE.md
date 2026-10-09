@@ -5,7 +5,7 @@
 Tool Approvals v1 matches rules on a tool `ref` plus an exact-or-prefix
 parameter list. The file tools put a **workspace-relative path** in that list —
 the only parameter for `read`/`write`/`edit`/`list`, and the second of two for
-`glob`/`grep` (which lead with the pattern) — so the practical scoping
+`file_glob`/`file_grep` (which lead with the pattern) — so the practical scoping
 granularities today are "this exact operation" and "all file operations." This
 feature adds **path-shaped scoping** to the approval engine:
 
@@ -57,7 +57,7 @@ new scope axis, no policy language, no glob engine.
   persistable **`never`** (a deny rule), so refusal can be expressed as a
   durable rule rather than only a one-off Escape.
 - The path a directory/extension rule matches is declared by the tool **on the
-  subject**, so `glob`/`grep` scope on the directory they searched, not the
+  subject**, so `file_glob`/`file_grep` scope on the directory they searched, not the
   pattern. The engine stays generic and never parses the params array.
 - **Each tool owns its own approval definition.** The file tool adds the path
   options to its asks; the command tool keeps its own options unchanged; there
@@ -103,7 +103,7 @@ Matching semantics
       is inside the directory at any depth (`docs` matches `docs/a.md` and
       `docs/x/b.md`, not `docs.md`, not `src/docs/a.md`).
 - [ ] The path a rule scopes on is declared by the tool **on the subject** (the
-      file tool sets the operation's workspace-relative path; `glob`/`grep` set
+      file tool sets the operation's workspace-relative path; `file_glob`/`file_grep` set
       the directory, not the pattern). The engine stays generic and does not
       parse the params array, so a rule saved against `[pattern, path]` still
       matches byte-for-byte.
@@ -241,7 +241,7 @@ Engine
 - Sequencing: independent of TLS; pairs naturally with Session Handoff
   (session-scoped grants are the per-agent mechanism). SPEC should land
   before or with the Handoff SPEC so the two session models agree.
-- **`file:list` breadth.** `list_dir` takes a `recursive` flag (`files.pas`)
+- **`file:list` breadth.** `file_list` takes a `recursive` flag (`files.pas`)
   but the approval subject is `[path]` only — `recursive` is not a parameter. So
   any `file:list` grant, including a directory one, covers recursive listing of
   that directory. Adding `recursive` to the subject would make existing `[path]`

@@ -20,20 +20,20 @@ a failing test; `make check` before moving on.
 - [x] **Implement**: `ResolvePath` (root + containment), `Approve` (ask/options
       mirroring `TCommandTool`), and the JSON arg helpers
 
-### Phase 2: read_file, write_file, edit_file
+### Phase 2: file_read, file_write, file_edit
 
-- [x] **Test**: `read_file` numbered lines, `offset`/`limit`, missing/dir errors,
+- [x] **Test**: `file_read` numbered lines, `offset`/`limit`, missing/dir errors,
       truncation
 - [x] **Implement**: `ReadFile`
-- [x] **Test**: `write_file` creates parents, overwrites, reports bytes; refused
+- [x] **Test**: `file_write` creates parents, overwrites, reports bytes; refused
       write leaves no file
 - [x] **Implement**: `WriteFile` (temp file + rename)
-- [x] **Test**: `edit_file` single replace, `replace_all`, not-found, ambiguous
+- [x] **Test**: `file_edit` single replace, `replace_all`, not-found, ambiguous
 - [x] **Implement**: `EditFile`
 
-### Phase 3: list_dir, glob, grep
+### Phase 3: file_list, file_glob, file_grep
 
-- [x] **Test**: `list_dir` sorted, dirs suffixed, recursive, missing dir
+- [x] **Test**: `file_list` sorted, dirs suffixed, recursive, missing dir
 - [x] **Implement**: `ListDir`
 - [x] **Test**: glob `*`/`?`/`**`, sorted relative paths, no matches
 - [x] **Implement**: `Glob` + the matcher

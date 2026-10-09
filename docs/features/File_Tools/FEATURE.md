@@ -3,8 +3,8 @@
 ## Overview
 
 Native, approval-gated tools for reading, writing, editing, listing, and
-searching files inside the active workspace: `read_file`, `write_file`,
-`edit_file`, `list_dir`, `glob`, and `grep`. They sit beside `run_command` in the
+searching files inside the active workspace: `file_read`, `file_write`,
+`file_edit`, `file_list`, `file_glob`, and `file_grep`. They sit beside `run_command` in the
 tool registry and share the same trust model: nothing runs without an approval
 decision, and every path is resolved against the workspace root.
 
@@ -38,7 +38,7 @@ exists - so only the tool layer and a small glob matcher are new.
 - As an **operator**, I want to approve each file operation (read or write) with
   the same once/exact/wildcard/deny choices as commands, so I stay in control.
 - As an **operator**, I want the agent to discover files by name and content
-  (`glob`, `grep`) instead of guessing paths.
+  (`file_glob`, `file_grep`) instead of guessing paths.
 - As a **harness author**, I want file access confined to the workspace and
   bounded, so a confused model cannot read or dump the whole disk.
 
@@ -46,19 +46,19 @@ exists - so only the tool layer and a small glob matcher are new.
 
 ### Functional Requirements
 
-- [ ] `read_file(path, offset?, limit?)` returns the file's text (optionally a
+- [ ] `file_read(path, offset?, limit?)` returns the file's text (optionally a
       line range) for a file under the root; a directory or missing file is an
       error.
-- [ ] `write_file(path, content)` creates or overwrites a file, creating parent
+- [ ] `file_write(path, content)` creates or overwrites a file, creating parent
       directories as needed, and reports bytes written.
-- [ ] `edit_file(path, old_string, new_string, replace_all?)` replaces an exact
+- [ ] `file_edit(path, old_string, new_string, replace_all?)` replaces an exact
       string; zero matches is an error; more than one match without
       `replace_all` is an error (ambiguous); it reports the replacement count.
-- [ ] `list_dir(path?, recursive?)` lists entries under a directory, one per
+- [ ] `file_list(path?, recursive?)` lists entries under a directory, one per
       line, directories suffixed `/`.
-- [ ] `glob(pattern, path?)` returns workspace-relative paths matching `*`, `?`,
+- [ ] `file_glob(pattern, path?)` returns workspace-relative paths matching `*`, `?`,
       and `**`, sorted.
-- [ ] `grep(pattern, path?, ignore_case?, max_results?)` returns
+- [ ] `file_grep(pattern, path?, ignore_case?, max_results?)` returns
       `path:line: text` for lines containing the pattern.
 - [ ] Every tool resolves approval before acting; a denial returns the batch
       reason and performs no I/O.
@@ -117,8 +117,8 @@ exists - so only the tool layer and a small glob matcher are new.
 - **Path escape via symlink or `..`.** Mitigation: resolve against the root and
   require containment; document that this is a guardrail, not an OS sandbox
   (same stance as the command policy).
-- **Huge files / unbounded search.** Mitigation: byte caps on read/list/glob/grep
-  and a result cap on grep.
+- **Huge files / unbounded search.** Mitigation: byte caps on read/list/file_glob/file_grep
+  and a result cap on file_grep.
 - **Glob matcher complexity.** Mitigation: a small, table-tested matcher for
   `*`/`?`/`**`; unsupported syntax matches literally.
 
@@ -127,7 +127,7 @@ exists - so only the tool layer and a small glob matcher are new.
 - A filesystem sandbox or permission model beyond workspace containment.
 - Binary-safe reads (v1 reads text; binary content is reported, not decoded).
 - Patch/diff application, multi-file transactions, or undo.
-- Regex `grep` (v1 is a plain substring match; `ignore_case` supported).
+- Regex `file_grep` (v1 is a plain substring match; `ignore_case` supported).
 - Editing outside the workspace root.
 
 ## Future Considerations

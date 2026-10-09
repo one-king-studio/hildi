@@ -1,6 +1,7 @@
 unit hildegard.helper.files;
-{ Approval-gated file tools for the agent: read_file, write_file, edit_file,
-  list_dir, glob, and grep. Mirrors TCommandTool: parse the JSON arguments,
+{ Approval-gated file tools for the agent: file_read, file_write, file_edit,
+  file_list, file_glob, and file_grep. Mirrors TCommandTool: parse the JSON
+  arguments,
   resolve approval, act, and report text (or False + error). Every path is
   resolved against the workspace root; escapes are refused.
 
@@ -471,7 +472,7 @@ begin
     Result := ':' + IntToStr(AOffset) + '-';
 end;
 
-{ --- read_file ---------------------------------------------------------- }
+{ --- file_read ---------------------------------------------------------- }
 
 function TFileTool.ReadFile(const AArgumentsJson: string;
   out AResult: string; out AError: string;
@@ -550,7 +551,7 @@ begin
   end;
 end;
 
-{ --- write_file --------------------------------------------------------- }
+{ --- file_write --------------------------------------------------------- }
 
 function TFileTool.WriteFile(const AArgumentsJson: string;
   out AResult: string; out AError: string;
@@ -592,7 +593,7 @@ begin
   end;
 end;
 
-{ --- edit_file ---------------------------------------------------------- }
+{ --- file_edit ---------------------------------------------------------- }
 
 function TFileTool.EditFile(const AArgumentsJson: string;
   out AResult: string; out AError: string;
@@ -688,7 +689,7 @@ begin
   end;
 end;
 
-{ --- list_dir ----------------------------------------------------------- }
+{ --- file_list ----------------------------------------------------------- }
 
 function TFileTool.ListDir(const AArgumentsJson: string;
   out AResult: string; out AError: string;
@@ -900,7 +901,7 @@ procedure TFileTool.Register(ATools: TToolRegistry);
 var
   Spec: TToolSpec;
 begin
-  Spec.Name := 'read_file';
+  Spec.Name := 'file_read';
   Spec.Description := 'Read a text file inside the workspace. ' +
     'Requires a short reason. Gated by approval.';
   Spec.ParametersJson :=
@@ -912,7 +913,7 @@ begin
     '},"required":["path","reason"]}';
   ATools.Add(Spec, ReadFile);
 
-  Spec.Name := 'write_file';
+  Spec.Name := 'file_write';
   Spec.Description := 'Create or overwrite a file inside the workspace. ' +
     'Requires a short reason. Gated by approval.';
   Spec.ParametersJson :=
@@ -923,7 +924,7 @@ begin
     '},"required":["path","content","reason"]}';
   ATools.Add(Spec, WriteFile);
 
-  Spec.Name := 'edit_file';
+  Spec.Name := 'file_edit';
   Spec.Description := 'Replace an exact string in a file inside the workspace. ' +
     'Fails if the string is absent or ambiguous (unless replace_all). ' +
     'Requires a short reason. Gated by approval.';
@@ -937,7 +938,7 @@ begin
     '},"required":["path","old_string","new_string","reason"]}';
   ATools.Add(Spec, EditFile);
 
-  Spec.Name := 'list_dir';
+  Spec.Name := 'file_list';
   Spec.Description := 'List directory entries inside the workspace. ' +
     'Requires a short reason. Gated by approval.';
   Spec.ParametersJson :=
@@ -948,7 +949,7 @@ begin
     '},"required":["reason"]}';
   ATools.Add(Spec, ListDir);
 
-  Spec.Name := 'glob';
+  Spec.Name := 'file_glob';
   Spec.Description := 'Find files by path pattern (*, ?, **) inside the ' +
     'workspace. Requires a short reason. Gated by approval.';
   Spec.ParametersJson :=
@@ -959,7 +960,7 @@ begin
     '},"required":["pattern","reason"]}';
   ATools.Add(Spec, Glob);
 
-  Spec.Name := 'grep';
+  Spec.Name := 'file_grep';
   Spec.Description := 'Search file contents for a substring inside the ' +
     'workspace. Requires a short reason. Gated by approval.';
   Spec.ParametersJson :=

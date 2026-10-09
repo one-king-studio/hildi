@@ -588,8 +588,8 @@ a marker hue, no longer on code</pre>
     parts.push('');
     parts.push.apply(parts, renderTable(
       ['Tool','What it does','Approval'],
-      [['read_file','Read a file from the workspace, bounded by the output budget','yes'],
-       ['grep','Search file contents for a pattern, with a bounded result','no'],
+      [['file_read','Read a file from the workspace, bounded by the output budget','yes'],
+       ['file_grep','Search file contents for a pattern, with a bounded result','no'],
        ['run_command','Run a shell command in the workspace','yes']],
       ['left','left','center'], 60));
     const wideHead=['#','Notes','Detail'];
@@ -876,9 +876,9 @@ const MOCK = (function(){
   const left=[
     [['> explain the pool','acc']],
     [['The pool runs up to N commands at once…','m']],
-    [['[tool] read_file  (look at the pool)','t']],
+    [['[tool] file_read  (look at the pool)','t']],
     [['  src/hildegard.helper.pool.pas','m']],
-    [['[result] read_file: ok','m']],
+    [['[result] file_read: ok','m']],
     []
   ];
   const right=[

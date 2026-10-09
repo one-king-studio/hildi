@@ -116,14 +116,14 @@ Agents reach for `bash` when a tool is missing. The strategies, grouped (the
 
 | Strategy | The bash idiom | First-class tool |
 | --- | --- | --- |
-| In-place line substitution | `sed -i`, `perl -pi -e`, `awk …>tmp&&mv`, `ed`/`ex`/`vim -c`, `python -c` | regex `edit_file` (pattern + flags) |
-| Whole-file overwrite | `cat > f <<'EOF'`, `printf '…' > f`, `tee` | `write_file` (already; make it the obvious path) |
-| Append | `>>`, `tee -a` | `append_file` (or `write_file` with a mode) |
-| Multi-file search/replace | `grep -rl X \| xargs sed -i`, `find … -exec sed` | `search_replace` over a glob, with a dry-run count |
-| Structured edits | `jq`, `yq`, `xmlstarlet` | `edit_json` / `edit_yaml` (path + value, validated) |
-| Patch application | `patch -p1`, `git apply`, `diff -u \| patch` | `apply_patch` (unified diff) |
-| File/dir ops | `mv`, `cp`, `rm`, `mkdir -p`, `touch`, `ln`, `chmod`, `truncate` | `move`/`copy`/`delete`/`mkdir` |
-| Line-range ops | `head`/`tail`, `sed -n 'a,bp'`, `sort -o`, `uniq -o` | `read_file` with a range |
+| In-place line substitution | `sed -i`, `perl -pi -e`, `awk …>tmp&&mv`, `ed`/`ex`/`vim -c`, `python -c` | regex `file_edit` (pattern + flags) |
+| Whole-file overwrite | `cat > f <<'EOF'`, `printf '…' > f`, `tee` | `file_write` (already; make it the obvious path) |
+| Append | `>>`, `tee -a` | `file_append` (or `file_write` with a mode) |
+| Multi-file search/replace | `grep -rl X \| xargs sed -i`, `find … -exec sed` | `file_search_replace` over a glob, with a dry-run count |
+| Structured edits | `jq`, `yq`, `xmlstarlet` | `json_edit` / `yaml_edit` (path + value, validated) |
+| Patch application | `patch -p1`, `git apply`, `diff -u \| patch` | `patch_apply` (unified diff) |
+| File/dir ops | `mv`, `cp`, `rm`, `mkdir -p`, `touch`, `ln`, `chmod`, `truncate` | `file_move`/`file_copy`/`file_delete`/`file_mkdir` |
+| Line-range ops | `head`/`tail`, `sed -n 'a,bp'`, `sort -o`, `uniq -o` | `file_read` with a range |
 | Revert | `git checkout -- f`, `cp f.bak f` | the snapshot undo (see `Workspace_Snapshots`) |
 
 The point is not to ban `bash` (you cannot); it is to make the **gated** path the
@@ -141,8 +141,8 @@ The full picture, in the order it lands:
    engine with the harness's tools **injected as native functions/objects**. One
    script, N tool calls; every call the same gated, approval-checked,
    snapshot-intercepted path as a direct call.
-3. **First-class edit tools** — the table above: `apply_patch`, a regex
-   `edit_file`, `search_replace`, `edit_json`/`edit_yaml`, file ops. These make the
+3. **First-class edit tools** — the table above: `patch_apply`, a regex
+   `file_edit`, `file_search_replace`, `json_edit`/`yaml_edit`, file ops. These make the
    gated path the *easy* path, so the sandbox is an optimization rather than a
    requirement.
 4. **Snapshots** (`Workspace_Snapshots`) — every tool-driven file change is

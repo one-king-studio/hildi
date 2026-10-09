@@ -39,7 +39,7 @@ The engine stays generic: it matches the new dimensions against a path the
 **File tools** (`hildegard.helper.files`)
 
 - [ ] `Approve` takes the operation's workspace-relative path and sets
-      `Subject.Path`; `glob`/`grep` pass the searched directory, not the pattern.
+      `Subject.Path`; `file_glob`/`file_grep` pass the searched directory, not the pattern.
 - [ ] A `file:write`/`file:edit` ask offers: `once`, `exact`, `dir`, `ext`,
       `dir_ext`, `any`, `never`. A read-shaped ask (`file:read`/`file:list`/
       `file:glob`/`file:grep`) offers: `once`, `exact`, `dir`, `any`, `never`

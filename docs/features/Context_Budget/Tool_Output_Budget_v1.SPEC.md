@@ -74,7 +74,7 @@ Marker appended to a capped prompt result:
 
 - The persisted tool message is the artifact - no new table, no file store.
 - The recall tool is a normal `TToolRegistry` tool with a bound handler, like
-  `run_command` and `read_file`.
+  `run_command` and `file_read`.
 
 ### Component Boundaries
 

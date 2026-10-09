@@ -85,7 +85,8 @@ Sub-decisions, each load-bearing:
 ## User Stories
 
 - As an **operator**, I want "read 40 files and rename a symbol in each" to be one
-  approved script, so I approve a *class* of operation instead of 40 times.
+  script rather than 40 model turns — while still being asked to approve the
+  mutations, with the option to pre-grant a class so it is not 40 prompts.
 - As an **operator**, I want a script to be *unable* to run a shell command, so the
   sandbox cannot become the bash backdoor I was trying to remove.
 - As an **operator**, I want every file the script changes to appear in the turn's
@@ -105,14 +106,19 @@ Sub-decisions, each load-bearing:
 ### Functional Requirements
 
 - [ ] A `run_script` tool is registered and advertised like every other tool
-      (required non-empty `reason`; approval-gated as the class `script:run`).
+      (required non-empty `reason`; approval-gated as the class `script:run`). The
+      reason is the **script's**; it flows to every sub-call.
 - [ ] Execution is in-process, core-language-only, with
       `TGocciaCapabilities.None`: no filesystem, network, FFI, exec, or
       time-of-day; no runtime globals.
 - [ ] The harness's world-touching tools are injected as **one global `tools`
       object** (snake_case, async). Each method routes to the same registered tool
-      — same approval ref, same `reason` requirement, same audit row, same
-      snapshot interception as a direct call.
+      and resolves **its own** approval ask — same ref, same options, same audit
+      row, same snapshot interception as a direct call — with the script's reason
+      flowing to every sub-call.
+- [ ] Each method returns a Promise and **blocks on its approval** (the engine
+      parks on the `await`; the host pumps the ask off the engine thread), so the
+      script sees an ordinary `await` and needs no approval concept of its own.
 - [ ] The shell is **not reachable** from a script: no `command_run` method is
       injected, and no capability grants exec.
 - [ ] `recall` is **not injected** (harness-internal, ungated, not a tool to
@@ -125,7 +131,8 @@ Sub-decisions, each load-bearing:
       `AnsiString` converts explicitly to and from the engine's UTF-16 `string`);
       no host object crosses the boundary.
 - [ ] A denied tool call inside a script surfaces as a script-level error naming
-      the tool and the denial, never a host path.
+      the tool and the denial, never a host path; the script may catch it and
+      continue, exactly as it catches any other rejection.
 
 ### Non-Functional Requirements
 
@@ -176,39 +183,74 @@ for (const f of files) {
 await tools.patch_apply(patchText, { dryRun: true });
 ```
 
-| VM method | Replaces | Notes |
-| --- | --- | --- |
-| `file_read(path, opts?)` | `cat`, `head`, `tail`, `sed -n 'a,bp'` | `opts`: `{ offset, limit }` for a line range |
-| `file_write(path, content)` | `cat > f <<EOF`, `printf > f`, `tee` | atomic; the existing `write_file` |
-| `file_append(path, content)` | `>>`, `tee -a` | |
-| `file_edit(path, old, new, opts?)` | `ed`/`ex`, small `sed` | exact-string replace; the existing `edit_file` |
-| `file_replace_regex(path, pattern, repl, opts?)` | `sed -i`, `perl -pi -e`, `python -c` | `opts`: `{ all, flags }` |
-| `file_search_replace(glob, pattern, repl, opts?)` | `grep -rl X \| xargs sed -i`, `find … -exec sed` | `opts`: `{ dryRun, all, flags }`; returns changed paths + counts |
-| `file_delete(path)` | `rm` | |
-| `file_move(src, dst)` | `mv` | |
-| `file_copy(src, dst)` | `cp` | |
-| `file_mkdir(path)` | `mkdir -p` | |
-| `file_list(path, opts?)` | `ls`, `find` | the existing `list_dir` |
-| `file_glob(pattern)` | `find -name`, shell globs | the existing `glob` |
-| `file_grep(pattern, opts?)` | `grep`, `rg` | the existing `grep`; `opts`: `{ glob, context }` |
-| `file_stat(path)` | `stat`, `ls -l` | size, mtime, mode |
-| `json_read(path, pointer?)` | `jq` | |
-| `json_edit(path, pointer, value)` | `jq '…' > f` | validated; the edit is a JSON patch |
-| `yaml_read(path, path_expr?)` | `yq` | |
-| `yaml_edit(path, path_expr, value)` | `yq -i` | validated |
-| `patch_apply(patch, opts?)` | `patch -p1`, `git apply` | `opts`: `{ strip, dryRun }`; unified diff |
+### Tool reference
+
+Each method is a thin, **async** wrapper over a registered tool. "Returns" is
+indicative — the SPEC pins the exact shape. Every method carries the script's
+`reason` and is gated exactly like the tool it wraps.
+
+**Reading and writing files**
+
+- `file_read(path, opts?) → { content, lines, truncated }` — read a text file in
+  the workspace. `opts.offset` (1-based first line) and `opts.limit` (max lines;
+  `0` = all) select a range. Output is bounded; a large read sets `truncated`.
+  Replaces `cat`, `head`, `tail`, `sed -n 'a,bp'`.
+- `file_write(path, content) → { bytes }` — create or overwrite a file atomically.
+  Replaces `cat > f <<EOF`, `printf > f`, `tee`. *The existing `file_write`.*
+- `file_append(path, content) → { bytes }` — append; creates the file if absent.
+  Replaces `>>`, `tee -a`.
+- `file_edit(path, old, new, opts?) → { replaced }` — replace an exact string;
+  fails if it is absent or ambiguous unless `opts.all`. Replaces `ed`/`ex`, small
+  `sed`. *The existing `file_edit`.*
+- `file_replace_regex(path, pattern, repl, opts?) → { replaced }` — regex replace
+  within one file. `opts.all` (every match), `opts.flags`. Replaces `sed -i`,
+  `perl -pi -e`, `python -c`.
+- `file_search_replace(glob, pattern, repl, opts?) → { files, replacements }` —
+  regex replace across the files matching the `glob` pattern. `opts.dryRun` returns the count
+  and the paths without writing. Replaces `grep -rl X | xargs sed -i`,
+  `find … -exec sed`.
+
+**Filesystem operations**
+
+- `file_delete(path) → { deleted }` — remove a file. Replaces `rm`.
+- `file_move(src, dst) → { moved }` — rename or move. Replaces `mv`.
+- `file_copy(src, dst) → { copied }` — copy. Replaces `cp`.
+- `file_mkdir(path) → { created }` — create a directory and its parents. Replaces
+  `mkdir -p`.
+- `file_list(path, opts?) → { entries }` — list a directory; `opts.recursive`.
+  Replaces `ls`, `find`. *The existing `file_list`.*
+- `file_glob(pattern) → [paths]` — find files by path pattern (`*`, `?`, `**`).
+  Replaces `find -name`, shell globs. *The existing `file_glob`.*
+- `file_grep(pattern, opts?) → [matches]` — search file contents; `opts.glob`,
+  `opts.context`. Replaces `grep`, `rg`. *The existing `file_grep`.*
+- `file_stat(path) → { size, mtime, mode, type }` — stat a path. Replaces `stat`,
+  `ls -l`.
+
+**Structured formats**
+
+- `json_read(path, pointer?) → value` — parse JSON, optionally at a JSON pointer.
+  Replaces `jq`.
+- `json_edit(path, pointer, value) → { written }` — set a JSON pointer and write
+  back, validated (a parse failure never writes). Replaces `jq '…' > f`.
+- `yaml_read(path, path_expr?) → value` — parse YAML. Replaces `yq`.
+- `yaml_edit(path, path_expr, value) → { written }` — set a path and write back,
+  validated. Replaces `yq -i`.
+
+**Patches**
+
+- `patch_apply(patch, opts?) → { applied, rejected }` — apply a unified diff;
+  `opts.strip` (default 1), `opts.dryRun`. Replaces `patch -p1`, `git apply`.
 
 Design points to pin:
 
 - **No `command_run` in the sandbox.** The shell is the one mutation path we cannot
   observe, snapshot, or scope: we do not know which files it changed, so the
-  snapshot store has a hole — and inside a script its approval collapses into the
-  script's single approval, so one "yes" would cover arbitrary shell. The sandbox's
-  contract is that the only way to touch the world is through the typed, gated,
-  intercepted tools; `command_run` breaks it. The agent keeps `run_command` as a
-  **separate, first-class tool call** — its own reason, its own approval, its own
-  audit row. The ergonomic cost is a separate build/test call after the script,
-  which is the clearer shape anyway.
+  snapshot store has a hole. The sandbox's contract is that the only way to touch
+  the world is through the typed, gated, intercepted tools; `command_run` breaks it
+  — a script could `sh -c` its way around every one of them. The agent keeps
+  `run_command` as a **separate, first-class tool call** — its own reason, its own
+  approval, its own audit row. The ergonomic cost is a separate build/test call
+  after the script, which is the clearer shape anyway.
 - **No `recall` in the sandbox — and `recall` is not a gated tool.** `recall` reads
   back a tool result the harness itself spilled into its own artifact store
   (`Context_Budget`). It touches nothing outside the harness, so it is a
@@ -224,20 +266,34 @@ Design points to pin:
   to the same tool, so the approval ref, the `reason` requirement, the audit row,
   and the snapshot interception are identical to a direct call. If a method
   bypassed that, the sandbox would be an ungated shell one level up.
-- **Naming.** The VM surface is snake_case noun-verb (`file_read`); the harness's
-  current names are verb-noun (`read_file`). Either rename the tools to match (and
-  migrate the approval refs) or expose the VM names as aliases in the view — a
-  decision, not an accident.
-- **The `reason`.** The harness requires a non-empty `reason` per tool call. In the
-  sandbox the *script* is the one model tool call and carries one reason; the
-  `tools.*` sub-calls inherit it. Confirm that is acceptable, or have the script
-  pass a reason per call.
-- **Approval.** Whether each `tools.*` call prompts, or the outer script call is
-  approved once and the sub-calls are covered by it, is a policy decision — but the
-  default must not be "a script runs N mutations unapproved".
-- **Async by construction.** Native callbacks that block would stall the engine's
-  thread; returning a Promise (resolved on completion) keeps `await` honest and
-  lets the host run the work off the engine thread.
+- **Naming — the existing file tools are renamed to match.** The VM surface is
+  snake_case noun-verb (`file_read`); the harness's current names are verb-noun
+  (`read_file`). **Decision: rename the existing file tools to the VM names** —
+  `read_file`→`file_read`, `write_file`→`file_write`, `edit_file`→`file_edit`,
+  `list_dir`→`file_list`, `glob`→`file_glob`, `grep`→`file_grep` — so the VM uses
+  the *same* names rather than an alias layer. `run_command` and
+  `recall_tool_result` keep their names (not file tools; the shell and recall stay
+  outside the sandbox anyway).
+- **The `reason` — one per script.** The harness requires a non-empty `reason` per
+  tool call. In the sandbox the *script* is the one model tool call and carries one
+  reason; the `tools.*` sub-calls **inherit it** rather than inventing their own.
+  The reason describes the whole script ("rename the symbol across `src/`"), which
+  is what the operator is approving; N per-call reasons would be noise the model has
+  to fabricate.
+- **Approval — every sub-call pipes through the normal flow.** There is no "one
+  approval covers the script" shortcut: each `tools.*` call resolves its own ask
+  exactly as a direct call would (same ref, same `once`/`exact`/`dir`/… options,
+  same audit row). The `run_script` call is approved as `script:run`, but that
+  grants *the script*, not its mutations — so a script can never run N mutations
+  under one "yes". The cost is N prompts; the operator can pre-grant a class
+  (`file:write` on a directory, say) to keep it quiet.
+- **Async by construction — it is *how* approval blocks.** Every injected method
+  returns a Promise, and that is not cosmetic: an approval ask is a *wait* (the
+  operator has to answer), and a synchronous native callback would freeze the engine
+  while it waited. The Promise lets the call **block on the approval** — the engine
+  parks on the `await`, the host pumps the ask off the engine thread, and the script
+  simply sees an `await` that took a while. It cannot tell a fast call from an
+  approved one, so it needs no approval concept of its own.
 - **Return values are structured, not text.** A tool returns a value the script
   composes (a list of paths, a parsed object) — the point of code over a shell
   pipe. Text-only tools throw that away.
@@ -295,9 +351,6 @@ Design points to pin:
   `EInvalidPointer`, `EDivByZero`, `EPrivilege`, `EExternalException` are re-raised
   past every guest `catch` and mean the process is no longer trustworthy.
   Mitigation: report and exit; never resume.
-- **Approval collapse.** If the script's sub-calls are covered by one approval, a
-  script could run N mutations under one "yes". Mitigation: make the policy
-  explicit; the default must not be silent.
 - **A capability-free sandbox is still a compute cost.** Cap time, instructions,
   and memory; run it off the UI thread; a script can loop.
 
@@ -325,8 +378,6 @@ Design points to pin:
 - **The engine's capability model** (immutable sets, deny-wins, nested contexts only
   narrow, auditable denials) as a cited reference in the Remote Agent Link SPEC's
   request-scoping design.
-- **Unify the VM surface with the tool names** — rename `read_file` → `file_read`
-  (and migrate the approval refs) or keep the aliases in the view.
 
 ## Notes
 

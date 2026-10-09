@@ -6,7 +6,7 @@
 
 A single component, `TFileTool`, that registers six approval-gated file tools
 with a `TToolRegistry` and executes them inside the active workspace:
-`read_file`, `write_file`, `edit_file`, `list_dir`, `glob`, `grep`.
+`file_read`, `file_write`, `file_edit`, `file_list`, `file_glob`, `file_grep`.
 
 It follows `TCommandTool` exactly: the component owns an `IApprovalService`,
 resolves an approval ask before acting, and reports failures as `False` +
@@ -37,7 +37,7 @@ type
   TFileToolConfig = record
     Root: string;             // workspace root; '' => process cwd
     MaxReadBytes: Integer;    // 0 => DefaultMaxReadBytes
-    MaxOutputBytes: Integer;  // 0 => DefaultMaxOutputBytes (list/glob/grep)
+    MaxOutputBytes: Integer;  // 0 => DefaultMaxOutputBytes (list/file_glob/file_grep)
   end;
 
   { Six gated file tools. Owns no threads. Handlers match TToolHandler. }
@@ -75,12 +75,12 @@ const
 Every schema is an object; the registry auto-injects the required string
 `reason`.
 
-- `read_file`: `path` (string, req), `offset` (integer), `limit` (integer).- `write_file`: `path` (string, req), `content` (string, req).
-- `edit_file`: `path`, `old_string`, `new_string` (all string, req),
+- `file_read`: `path` (string, req), `offset` (integer), `limit` (integer).- `file_write`: `path` (string, req), `content` (string, req).
+- `file_edit`: `path`, `old_string`, `new_string` (all string, req),
   `replace_all` (boolean).
-- `list_dir`: `path` (string), `recursive` (boolean).
-- `glob`: `pattern` (string, req), `path` (string).
-- `grep`: `pattern` (string, req), `path` (string), `ignore_case` (boolean),
+- `file_list`: `path` (string), `recursive` (boolean).
+- `file_glob`: `pattern` (string, req), `path` (string).
+- `file_grep`: `pattern` (string, req), `path` (string), `ignore_case` (boolean),
   `max_results` (integer).
 
 ### Approval contract
@@ -89,12 +89,12 @@ One ask per call. Subject refs and params:
 
 | Tool | Ref | Params |
 | --- | --- | --- |
-| read_file | `file:read` | `[relpath]` |
-| write_file | `file:write` | `[relpath]` |
-| edit_file | `file:edit` | `[relpath]` |
-| list_dir | `file:list` | `[relpath]` |
-| glob | `file:glob` | `[pattern, relpath]` |
-| grep | `file:grep` | `[pattern, relpath]` |
+| file_read | `file:read` | `[relpath]` |
+| file_write | `file:write` | `[relpath]` |
+| file_edit | `file:edit` | `[relpath]` |
+| file_list | `file:list` | `[relpath]` |
+| file_glob | `file:glob` | `[pattern, relpath]` |
+| file_grep | `file:grep` | `[pattern, relpath]` |
 
 Options mirror `run_command`: `once` (no persist), `exact` (persist `=<params>`),
 `any` (persist, any params). `Summary` is a short human line (e.g.
@@ -129,7 +129,7 @@ Gap designed here: the tool handlers, the glob matcher, and path containment.
 1. **Parse** the JSON arguments; missing required fields -> error.
 2. **Resolve** the path against the root; refuse if it escapes.
 3. **Approve** via `IApprovalService.Resolve`; deny -> error, no I/O.
-4. **Act** (read/write/edit/list/glob/grep) with byte/result caps.
+4. **Act** (read/write/edit/list/file_glob/file_grep) with byte/result caps.
 5. **Report** text in `AResult`, or `False` + `AError`.
 
 ### Integration Patterns
@@ -147,15 +147,15 @@ Gap designed here: the tool handlers, the glob matcher, and path containment.
 - `offset`/`limit`/`max_results` are non-negative integers; `0` means "default"
   for `limit`/`max_results`.
 - `path` resolves under the root; `..` and absolute escapes are refused.
-- `edit_file` requires `old_string` non-empty; `new_string` may be empty.
+- `file_edit` requires `old_string` non-empty; `new_string` may be empty.
 
 ### Output Guarantees
 
-- `read_file` returns the file's text (optionally a line range); no line-number
+- `file_read` returns the file's text (optionally a line range); no line-number
   prefixes.
-- `list_dir` directories end with `/`; entries are sorted.
-- `glob` results are workspace-relative and sorted.
-- `grep` lines are `relpath:lineno: text`.
+- `file_list` directories end with `/`; entries are sorted.
+- `file_glob` results are workspace-relative and sorted.
+- `file_grep` lines are `relpath:lineno: text`.
 - Any truncated result ends with a `[truncated]` marker line.
 
 ## Error Handling
@@ -173,15 +173,15 @@ Failures return `False` with a human-readable `AError`:
 
 ### Unit Tests
 
-- [ ] `read_file`: text content; `offset`/`limit`; missing file; directory;
+- [ ] `file_read`: text content; `offset`/`limit`; missing file; directory;
       truncation at `MaxReadBytes`.
-- [ ] `write_file`: creates parents; overwrites; reports bytes; refused write
+- [ ] `file_write`: creates parents; overwrites; reports bytes; refused write
       leaves no file.
-- [ ] `edit_file`: single replace; `replace_all`; not-found; ambiguous (no
+- [ ] `file_edit`: single replace; `replace_all`; not-found; ambiguous (no
       `replace_all`).
-- [ ] `list_dir`: entries sorted, dirs suffixed; recursive; missing dir.
-- [ ] `glob`: `*`, `?`, `**`; sorted relative paths; no matches -> empty.
-- [ ] `grep`: matches with `path:line: text`; `ignore_case`; `max_results` cap.
+- [ ] `file_list`: entries sorted, dirs suffixed; recursive; missing dir.
+- [ ] `file_glob`: `*`, `?`, `**`; sorted relative paths; no matches -> empty.
+- [ ] `file_grep`: matches with `path:line: text`; `ignore_case`; `max_results` cap.
 - [ ] Approval: each tool refuses on deny with the batch reason; no service ->
       error.
 - [ ] Containment: `../` and absolute paths outside the root are refused.
