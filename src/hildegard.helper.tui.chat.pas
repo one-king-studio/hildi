@@ -173,6 +173,9 @@ type
     FLayoutH: array of Integer;   { each block's height }
     function Count: Integer;
     function ItemAt(AIndex: Integer): TChatItem;
+    { The content offset (row, relative to the stack) of a block's top, or -1.
+      The layout is current after the last arrange. }
+    function OffsetOf(AItem: TChatItem): Integer;
     { The width an item is measured and arranged at: the stack's width less the
       one-column inset on each side. Measure and Arrange must agree, or the text
       layout cache thrashes between two widths. }
@@ -278,6 +281,8 @@ type
     function ContentHeight: Integer;
     { The furthest the view can scroll (0 when the content fits). }
     function MaxScroll: Integer;
+    { The content offset of a block's top, or -1. }
+    function OffsetOf(AItem: TChatItem): Integer;
     { True while the view is pinned to the bottom, so new content follows. }
     property Following: Boolean read FFollow;
     { True between PreserveAnchor and the next Arrange (a prepend is in flight),
@@ -1165,6 +1170,19 @@ begin
   Result := FItems[AIndex];
 end;
 
+function TChatStack.OffsetOf(AItem: TChatItem): Integer;
+var
+  I: Integer;
+begin
+  Result := -1;
+  for I := 0 to Count - 1 do
+    if ItemAt(I) = AItem then
+    begin
+      EnsureLayout(ItemWidth(FBounds.W));
+      Exit(FLayoutY[I]);
+    end;
+end;
+
 function TChatStack.ItemWidth(AStackWidth: Integer): Integer;
 begin
   Result := AStackWidth - 2;
@@ -1579,6 +1597,11 @@ end;
 function TChatStream.MaxScroll: Integer;
 begin
   Result := FScroll.MaxScrollY;
+end;
+
+function TChatStream.OffsetOf(AItem: TChatItem): Integer;
+begin
+  Result := FStack.OffsetOf(AItem);
 end;
 
 procedure TChatStream.SetBottomInset(AValue: Integer);

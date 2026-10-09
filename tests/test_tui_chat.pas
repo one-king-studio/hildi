@@ -69,6 +69,7 @@ type
     procedure TestPreserveAnchorKeepsTheVisibleContent;
     procedure TestScrollToStopsFollowingAndMoves;
     procedure TestScrollNotifiesTheHost;
+    procedure TestOffsetOfReportsTheBlockTop;
     procedure TestStackMaterializesOnlyTheWindow;
     procedure TestStackLayoutDoesNotThrashAcrossMeasureAndArrange;
     procedure TestStreamWidthFollowsTheViewport;
@@ -1265,6 +1266,24 @@ begin
     E.Key.Kind := kkUp;
     St.HandleEvent(E);
     AssertEquals('scrolling notified the host', 1, FScrolled);
+  finally
+    St.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestOffsetOfReportsTheBlockTop;
+var
+  St: TChatStream;
+  A, B: TChatItem;
+begin
+  St := TChatStream.Create(FTheme);
+  try
+    A := St.Add(ckAssistant, '', 'line one');
+    B := St.Add(ckAssistant, '', 'line two');
+    St.Arrange(Rc(0, 0, 30, 10));
+    AssertEquals('first block at the top', 0, St.OffsetOf(A));
+    { The second block sits below the first plus the one-row gap. }
+    AssertEquals('second block one row + gap down', 2, St.OffsetOf(B));
   finally
     St.Free;
   end;

@@ -77,6 +77,10 @@ type
     FPageDragging: Boolean;
     FPageDragRow: Integer;
     FPageCount: Integer;
+    { The checkpoint's ambient block, so the app can find the page boundary (the
+      block sits exactly at the boundary between the archived and current pages).
+      Nil when there is no checkpoint. }
+    FCheckpointBlock: TChatItem;
     { Queued prompts shown as 'Queued' boxes at the end of the stream, removed
       when they are injected as a real user turn. }
     FQueuedBlocks: array of TChatItem;
@@ -582,6 +586,7 @@ begin
     (back-pagination), the boundary marker, then the document as the segment's
     opening block, so the operator sees what the agent was briefed with. }
   Checkpoint := Default(TCheckpointRecord);
+  FCheckpointBlock := nil;
   if (FSession.Store <> nil) and
     FSession.Store.LatestCheckpoint(FSession.SessionId, Checkpoint, StoreErr) then
   begin
@@ -598,6 +603,7 @@ begin
       space). No separate "— checkpoint —" marker is drawn: the box itself is
       the boundary, and it immediately follows the archived page. }
     FPanel.Stream.Add(ckAmbient, 'checkpoint', Checkpoint.Summary);
+    FCheckpointBlock := FPanel.Stream.Last;
   end;
   for I := 0 to High(History) do
   begin
@@ -1139,22 +1145,29 @@ end;
 
 procedure THarnessApp.StreamScrolled(Sender: TObject);
 var
-  MaxScroll, Page: Integer;
+  Boundary: Integer;
+  BoundaryPage: Integer;
 begin
-  { The active page follows the scroll position: the viewport's fraction of the
-    scroll range maps onto the pages, so scrolling up into an earlier page moves
-    the heavy segment up. }
+  { The active page is discrete: it changes only when the viewport crosses the
+    checkpoint boundary. Above the boundary is the archived (earlier) page; at or
+    below it is the current page. }
   if FPageCount < 2 then
     Exit;
-  MaxScroll := FPanel.Stream.MaxScroll;
-  if MaxScroll <= 0 then
+  if FCheckpointBlock = nil then
+  begin
+    FPanel.SetPageIndex(FPageCount - 1);
     Exit;
-  Page := (FPanel.Stream.ScrollOffset * (FPageCount - 1)) div MaxScroll;
-  if Page < 0 then
-    Page := 0;
-  if Page > FPageCount - 1 then
-    Page := FPageCount - 1;
-  FPanel.SetPageIndex(Page);
+  end;
+  Boundary := FPanel.Stream.OffsetOf(FCheckpointBlock);
+  if Boundary < 0 then
+    Exit;
+  { The page the boundary sits on: pageCount - 1 pages are archived before it,
+    the boundary is the start of the current page. }
+  BoundaryPage := FPageCount - 1;
+  if FPanel.Stream.ScrollOffset < Boundary then
+    FPanel.SetPageIndex(BoundaryPage - 1)
+  else
+    FPanel.SetPageIndex(BoundaryPage);
 end;
 
 procedure THarnessApp.OnLoop;
