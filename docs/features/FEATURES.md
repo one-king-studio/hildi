@@ -105,9 +105,36 @@ in `../guidelines/spec-driven-development.md`:
   are recallable via whole-session SQLite FTS5 weighted toward tool
   reasons/names. One session id. Implemented: the checkpoint is an ordinary
   ambient turn whose reply is the document, recorded at the boundary; resume and
-  the TUI use the active window; back-pagination, the `page N` header, the
-  per-page context metric, and the nudge are in. The live manual sign-off is
-  pending.
+  the TUI use the active window; back-pagination, the left-border page gauge
+  (which doubles as the coarse scroll), the per-page context metric, and the
+  nudge are in. The live manual sign-off is pending.
+
+## Backlog (low priority)
+
+Bugs and improvements, not yet scoped into a feature. When one is picked up,
+move it into its own feature directory (or the relevant existing one) and give
+it the usual artifact chain.
+
+- **The run-state label says `thinking` when it should say `working`.** The
+  label is `thinking` for the whole turn, including while the model is calling
+  tools or waiting on a tool result, so it misdescribes what the agent is
+  actually doing. It should reflect the phase (`working`, `calling tools`,
+  `waiting`, …). Touches the harness run state
+  (`hildegard.helper.harness.app`, `TChatPanel.SetState`) and the events that
+  drive it. (TUI_Harness, Live_Turn_Control.)
+
+- **`run_command` should echo the command before streaming its output.** Today
+  the tool block stays blank until the first output chunk arrives, so a slow or
+  silent command looks frozen. Print the resolved command line into the block
+  the moment the tool starts, then stream stdout/stderr into it. (Tool_Streaming,
+  Command_Tool.)
+
+- **Background (non-blocking) tasks, so the UI does not freeze.** A long tool
+  call blocks the turn until it returns, and the UI stops showing progress.
+  Support running a task in the background: the operator can keep working (or
+  the turn continues) and the result is delivered when it lands — likely riding
+  the subagent pool (`hildegard.helper.pool`) and the ambient-record path. Needs
+  a scoped design. (Agent_Loop, Subagents, Tool_Streaming.)
 
 ## Existing Behaviour (to be documented)
 
