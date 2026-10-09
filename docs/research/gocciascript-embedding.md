@@ -195,11 +195,19 @@ The methods, and the bash idiom each replaces:
 | `yaml_read(path, path_expr?)` | `yq` | |
 | `yaml_edit(path, path_expr, value)` | `yq -i` | validated |
 | `patch_apply(patch, opts?)` | `patch -p1`, `git apply` | `opts`: `{ strip, dryRun }`; unified diff |
-| `command_run(command, opts?)` | the shell itself | the existing `run_command` — still gated, still there for what the tools cannot express |
-| `recall(id, opts?)` | — | the existing `recall_tool_result` |
+| `recall(id, opts?)` | — | the existing `recall_tool_result` (read-only) |
 
 Design points to pin:
 
+- **No `command_run` in the sandbox.** The shell is the one mutation path we
+  cannot observe, snapshot, or scope: we do not know which files it changed, so
+  the snapshot store has a hole — and inside a script its approval collapses into
+  the script's single approval, so one "yes" would cover arbitrary shell. The
+  sandbox's contract is that the only way to touch the world is through the typed,
+  gated, intercepted tools; `command_run` breaks it. The agent keeps `run_command`
+  as a **separate, first-class tool call** (its own reason, its own approval, its
+  own audit row) — it just cannot hide one inside a script. The ergonomic cost is
+  a separate build/test call after the script, which is the clearer shape anyway.
 - **It is a *view* over the registry, not a second registry.** Each method routes
   to the same tool, so the approval ref, the `reason` requirement, the audit row,
   and the snapshot interception are identical to a direct call. If a method
