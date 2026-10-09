@@ -12,12 +12,14 @@ Notes from the GocciaScript source and docs, for the two things we want from it:
 
 ## Where the source lives
 
-A clone was at **`/private/tmp/goccia`** (upstream HEAD `531fb52`). It is in
-`/tmp`, so it is **volatile** — macOS clears it on reboot. If it is still there,
-move it out (`mv /private/tmp/goccia ~/Code/goccia`) or vendor it as a pinned
-submodule, as `Sandboxed_Script_Compute` intends. The useful material is its
-`docs/`: `embedding.md`, `capability-audit.md`, `permissions.md`,
-`architecture.md`, `bytecode-vm.md`, `host-environment.md`, `built-ins-ffi.md`.
+**Vendored** at `deps/goccia/` by `scripts/fetch-goccia.sh`, which pins upstream
+commit `531fb523efe10375858ac29faf3da5dd15195418`, verifies the archive's SHA-256
+(`c0a97fe9…`), and extracts it — the project's `deps/` pattern, like SQLite and
+mbedTLS: fetched, not committed. The script is idempotent; re-run it any time.
+
+The useful material is its `docs/`: `embedding.md`, `capability-audit.md`,
+`permissions.md`, `architecture.md`, `bytecode-vm.md`, `host-environment.md`,
+`built-ins-ffi.md`.
 
 GocciaScript is an MIT, FPC-native ECMAScript engine (tree-walk interpreter and a
 bytecode VM), embeddable from Pascal.
@@ -107,7 +109,33 @@ functions go through the same approval gate and the same file-modification
 interception as a direct tool call — otherwise the gate has just moved one level
 up and we have re-created the ungated shell.
 
-## The bash fallbacks worth replacing with first-class tools
+## End to end
+
+The full picture, in the order it would land:
+
+1. **Vendor** — `scripts/fetch-goccia.sh` → `deps/goccia/` (pinned, checksummed).
+   *Done.*
+2. **Compute tier** (`Sandboxed_Script_Compute`) — a capability-free engine: no
+   FS, net, or exec; a timeout, an instruction cap, a memory cap; the script's
+   output is the tool result. The model's "think in code" step for deterministic
+   data/text work.
+3. **Composed-tool sandbox** — the same capability-free engine, but with the
+   harness's tools **injected as native functions/objects**. The model writes one
+   script that loops and chains tool calls; every call is the same gated,
+   approval-checked, snapshot-intercepted path as a direct call. One turn, N tool
+   calls.
+4. **First-class edit tools** — the table above: `apply_patch`, a regex
+   `edit_file`, `search_replace`, `edit_json`/`edit_yaml`, file ops. These make the
+   gated path the *easy* path, so the sandbox is an optimization rather than a
+   requirement.
+5. **Snapshots** (`Workspace_Snapshots`) — every tool-driven file change is
+   intercepted and recorded, so the operator can see a turn's diff and undo it.
+   The sandbox's calls go through the same interception, or the feature has a hole.
+
+The ordering matters: (1) unblocks (2) and (3); (4) is independently valuable and
+shrinks the need for (3); (5) is what makes all of it safe to let run.
+
+
 
 Agents reach for `bash` when a tool is missing. The strategies, grouped (the
 *group* is the tool to add):
@@ -131,7 +159,9 @@ to use it at all.
 
 ## Risks / caveats
 
-- **The `/tmp` clone is volatile.** Move or vendor it (above) before it is lost.
+- **The vendored source is fetched, not committed.** `scripts/fetch-goccia.sh`
+  pins the commit and verifies the archive; re-run it after a `make clean` or on a
+  fresh checkout.
 - **A capability-free sandbox is still a compute cost.** Cap time, instructions,
   and memory; run it off the UI thread; a script can loop.
 - **Realm bleed.** Recreate the engine per script for untrusted input; a reused
@@ -146,9 +176,10 @@ to use it at all.
 
 ## Sources
 
-- `/private/tmp/goccia` (clone, HEAD `531fb52`): `docs/embedding.md`,
-  `docs/permissions.md`, `docs/capability-audit.md`, `docs/architecture.md`,
-  `docs/bytecode-vm.md`, `docs/host-environment.md`, `docs/built-ins-ffi.md`.
+- `deps/goccia` (vendored by `scripts/fetch-goccia.sh`, commit `531fb52…`):
+  `docs/embedding.md`, `docs/permissions.md`, `docs/capability-audit.md`,
+  `docs/architecture.md`, `docs/bytecode-vm.md`, `docs/host-environment.md`,
+  `docs/built-ins-ffi.md`.
 - `docs/features/Sandboxed_Script_Compute/FEATURE.md` (the compute tier).
 - `docs/research/cli-agent-harness-parity.md` (the field's "code execution /
   Codemode" direction: opencode, Pi).
