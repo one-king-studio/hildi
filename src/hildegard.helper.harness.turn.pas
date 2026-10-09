@@ -17,6 +17,7 @@ interface
 
 uses
   Classes, SysUtils, SyncObjs,
+  async.queue,
   hildegard.helper.llm, hildegard.helper.approval;
 
 type
@@ -65,20 +66,20 @@ type
     SubSource: string;
   end;
 
-  { A thread-safe FIFO. Push from the worker thread, Pop from the UI thread.
-    Unbounded; a turn's output bounds its size in practice. The backing array is
-    released once fully drained, so memory does not grow across turns. }
+  { A thread-safe, BOUNDED FIFO. Push from the worker thread, Pop from the UI
+    thread. Bounded so a fast producer cannot starve the consumer: on overflow
+    the oldest event is dropped and counted (async.queue's TBoundedQueue). }
   TTurnQueue = class
   private
-    FLock: TCriticalSection;
-    FItems: array of TTurnEvent;
-    FHead: Integer;
+    FItems: TBoundedQueue<TTurnEvent>;
+    function GetDropped: Int64;
   public
     constructor Create;
     destructor Destroy; override;
     procedure Push(const AEvent: TTurnEvent);
     function Pop(out AEvent: TTurnEvent): Boolean;
     function IsEmpty: Boolean;
+    property Dropped: Int64 read GetDropped;
   end;
 
   { Bridges the worker's approval prompt to the UI thread. The worker's Ask
@@ -118,6 +119,10 @@ const
     proceeds, so a disconnected driver never blocks the turn forever. }
   DefaultApprovalTimeoutMs = 300000;
 
+  { The mailbox bound. On overflow the oldest event is dropped, so a streaming
+    tool cannot grow the queue without limit. }
+  TurnQueueCapacity = 4096;
+
 implementation
 
 { TTurnQueue }
@@ -125,54 +130,33 @@ implementation
 constructor TTurnQueue.Create;
 begin
   inherited Create;
-  FLock := TCriticalSection.Create;
-  FHead := 0;
+  FItems := TBoundedQueue<TTurnEvent>.Create(TurnQueueCapacity);
 end;
 
 destructor TTurnQueue.Destroy;
 begin
-  FLock.Free;
+  FItems.Free;
   inherited Destroy;
 end;
 
 procedure TTurnQueue.Push(const AEvent: TTurnEvent);
 begin
-  FLock.Acquire;
-  try
-    SetLength(FItems, Length(FItems) + 1);
-    FItems[High(FItems)] := AEvent;
-  finally
-    FLock.Release;
-  end;
+  FItems.Push(AEvent);
 end;
 
 function TTurnQueue.Pop(out AEvent: TTurnEvent): Boolean;
 begin
-  FLock.Acquire;
-  try
-    Result := FHead < Length(FItems);
-    if not Result then
-      Exit;
-    AEvent := FItems[FHead];
-    Inc(FHead);
-    if FHead >= Length(FItems) then
-    begin
-      FItems := nil;
-      FHead := 0;
-    end;
-  finally
-    FLock.Release;
-  end;
+  Result := FItems.TryPop(AEvent);
 end;
 
 function TTurnQueue.IsEmpty: Boolean;
 begin
-  FLock.Acquire;
-  try
-    Result := FHead >= Length(FItems);
-  finally
-    FLock.Release;
-  end;
+  Result := FItems.IsEmpty;
+end;
+
+function TTurnQueue.GetDropped: Int64;
+begin
+  Result := FItems.Dropped;
 end;
 
 { TApprovalGate }

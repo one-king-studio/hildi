@@ -1068,13 +1068,23 @@ begin
 end;
 
 procedure THarnessApp.DrainQueue;
+const
+  { A per-frame budget: drain at most this many events, then return so the loop
+    can render and poll input. An unbounded drain starves both when a producer
+    streams faster than the UI consumes. }
+  DrainBudget = 256;
 var
   E: TTurnEvent;
+  I: Integer;
 begin
   if FDriver = nil then
     Exit;
-  while FDriver.PopEvent(E) do
+  for I := 0 to DrainBudget - 1 do
+  begin
+    if not FDriver.PopEvent(E) then
+      Break;
     HandleTurnEvent(E);
+  end;
 end;
 
 procedure THarnessApp.SyncBusy;
