@@ -10,7 +10,7 @@ program async_standalone;
 
 uses
   {$ifdef unix}cthreads,{$endif}
-  SysUtils, async.base, async.scheduler, async.future, async.queue;
+  SysUtils, async.base, async.scheduler, async.future, async.queue, async.timers;
 
 type
   TCounter = class
@@ -30,6 +30,7 @@ var
   Fut: TFuture<Integer>;
   Mail: TBoundedQueue<Integer>;
   Popped: Integer;
+  Clock: TVirtualScheduler;
 begin
   Sched := TQueueScheduler.Create;
   Counter := TCounter.Create;
@@ -59,6 +60,17 @@ begin
         raise Exception.Create('expected 2 after the drop');
     finally
       Mail.Free;
+    end;
+    Clock := TVirtualScheduler.Create;
+    try
+      Clock.Schedule(Counter.Bump, 10);
+      if Counter.Count <> 5 then
+        raise Exception.Create('a future timer must not run yet');
+      Clock.Advance(10);
+      if Counter.Count <> 6 then
+        raise Exception.Create('advance must run the due timer');
+    finally
+      Clock.Free;
     end;
     WriteLn('async standalone ok');
   finally

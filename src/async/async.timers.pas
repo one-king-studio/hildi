@@ -1,0 +1,212 @@
+unit async.timers;
+{ Timer schedulers: ordered delivery of continuations at a due time.
+
+  TVirtualScheduler runs on a VIRTUAL clock - no wall time passes, and the owner
+  decides when the clock moves (Advance). That is what makes every time-based
+  operator testable without sleeps. TRealScheduler is the same queue driven by the
+  monotonic wall clock.
+
+  The queue holds entry OBJECTS, not records: TList<T>.Delete moves elements with
+  a raw System.Move, which corrupts a managed field, so a record with an interface
+  member cannot live in a TList.
+
+  See docs/features/Async_Core/Async_Core_v1.SPEC.md. }
+
+{$mode delphi}{$H+}
+
+interface
+
+uses
+  SysUtils, SyncObjs, Generics.Collections,
+  async.base, async.scheduler;
+
+type
+  TTimerEntry = class
+  public
+    Due: Int64;
+    Seq: Int64;
+    Job: IAsyncJob;
+  end;
+
+  { The shared ordered timer queue. Subclasses supply the clock. }
+  TBaseTimerScheduler = class(TInterfacedObject, IAsyncScheduler)
+  private
+    FLock: TCriticalSection;
+    FTimers: TList<TTimerEntry>;
+    FSeq: Int64;
+  protected
+    { The current time in milliseconds. }
+    function Clock: Int64; virtual; abstract;
+    { Remove and hand back the earliest timer due at or before AUntil, or nil.
+      Ownership transfers to the caller. }
+    function TakeEarliestDue(const AUntil: Int64): TTimerEntry;
+    procedure RunDue(const AUntil: Int64);
+  public
+    constructor Create;
+    destructor Destroy; override;
+    function Schedule(const AWork: TNotify; const ADelayMs: Integer): ISubscription; virtual;
+    procedure Drain; virtual;
+    function HasPending: Boolean;
+  end;
+
+  { A virtual clock. Advance moves it and runs whatever became due, in due order
+    (FIFO for equal due), including timers scheduled while it runs. }
+  TVirtualScheduler = class(TBaseTimerScheduler)
+  private
+    FNow: Int64;
+  protected
+    function Clock: Int64; override;
+  public
+    procedure Advance(const AMs: Int64);
+    property Now: Int64 read FNow;
+  end;
+
+  { The same queue on the monotonic wall clock. The owner drives it (Drain runs
+    what is due); it never blocks. }
+  TRealScheduler = class(TBaseTimerScheduler)
+  protected
+    function Clock: Int64; override;
+  end;
+
+implementation
+
+{ TBaseTimerScheduler }
+
+constructor TBaseTimerScheduler.Create;
+begin
+  inherited Create;
+  FLock := TCriticalSection.Create;
+  FTimers := TList<TTimerEntry>.Create;
+  FSeq := 0;
+end;
+
+destructor TBaseTimerScheduler.Destroy;
+var
+  I: Integer;
+begin
+  for I := 0 to FTimers.Count - 1 do
+    FTimers[I].Free;
+  FTimers.Free;
+  FLock.Free;
+  inherited;
+end;
+
+function TBaseTimerScheduler.Schedule(const AWork: TNotify;
+  const ADelayMs: Integer): ISubscription;
+var
+  Entry: TTimerEntry;
+begin
+  if ADelayMs < 0 then
+    raise EArgumentException.Create('delay must not be negative');
+  Entry := TTimerEntry.Create;
+  Entry.Due := Clock + ADelayMs;
+  Entry.Seq := FSeq;
+  Entry.Job := TAsyncJob.Create(AWork);
+  Inc(FSeq);
+  FLock.Acquire;
+  try
+    FTimers.Add(Entry);
+  finally
+    FLock.Release;
+  end;
+  Result := Entry.Job;
+end;
+
+function TBaseTimerScheduler.TakeEarliestDue(
+  const AUntil: Int64): TTimerEntry;
+var
+  I, Best: Integer;
+begin
+  Result := nil;
+  Best := -1;
+  FLock.Acquire;
+  try
+    for I := 0 to FTimers.Count - 1 do
+    begin
+      if FTimers[I].Due > AUntil then
+        Continue;
+      if (Best < 0) or (FTimers[I].Due < FTimers[Best].Due) or
+         ((FTimers[I].Due = FTimers[Best].Due) and
+          (FTimers[I].Seq < FTimers[Best].Seq)) then
+        Best := I;
+    end;
+    if Best >= 0 then
+    begin
+      Result := FTimers[Best];
+      FTimers.Delete(Best);
+    end;
+  finally
+    FLock.Release;
+  end;
+end;
+
+procedure TBaseTimerScheduler.RunDue(const AUntil: Int64);
+var
+  Entry: TTimerEntry;
+  Work: TNotify;
+begin
+  Entry := TakeEarliestDue(AUntil);
+  while Entry <> nil do
+  begin
+    Work := Entry.Job.TakeWork;
+    Entry.Free;
+    if Assigned(Work) then
+      Work();
+    Entry := TakeEarliestDue(AUntil);
+  end;
+end;
+
+procedure TBaseTimerScheduler.Drain;
+begin
+  RunDue(Clock);
+end;
+
+function TBaseTimerScheduler.HasPending: Boolean;
+begin
+  FLock.Acquire;
+  try
+    Result := FTimers.Count > 0;
+  finally
+    FLock.Release;
+  end;
+end;
+
+{ TVirtualScheduler }
+
+function TVirtualScheduler.Clock: Int64;
+begin
+  Result := FNow;
+end;
+
+procedure TVirtualScheduler.Advance(const AMs: Int64);
+var
+  Target: Int64;
+  Entry: TTimerEntry;
+  Work: TNotify;
+begin
+  if AMs < 0 then
+    raise EArgumentException.Create('advance must not be negative');
+  Target := FNow + AMs;
+  { Run due timers in order, moving the clock to each due time so a timer sees
+    the right Now; nested timers become due as the clock moves. }
+  Entry := TakeEarliestDue(Target);
+  while Entry <> nil do
+  begin
+    FNow := Entry.Due;
+    Work := Entry.Job.TakeWork;
+    Entry.Free;
+    if Assigned(Work) then
+      Work();
+    Entry := TakeEarliestDue(Target);
+  end;
+  FNow := Target;
+end;
+
+{ TRealScheduler }
+
+function TRealScheduler.Clock: Int64;
+begin
+  Result := GetTickCount64;
+end;
+
+end.

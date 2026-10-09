@@ -30,12 +30,15 @@ expresses the next requirement, watch it fail, implement the minimum, refactor,
 - [ ] **Test**: an unbalanced leave cannot unwind past an enclosing frame.
 - [ ] **Implement**: `async.context` — immutable snapshots, save stack, depth token.
 
-## Phase 3 — Virtual clock and the async scheduler
+## Phase 3 — Virtual clock and the timer schedulers
 
-- [ ] **Test**: `Advance` fires due timers in order and drains microtasks between
-      them; no wall time passes.
-- [ ] **Test**: a self-rescheduling timer hits the loop guard (typed error).
-- [ ] **Implement**: virtual + async schedulers and timer sources.
+- [x] **Implement**: `async.timers` — `TVirtualScheduler` (`Advance`) and
+      `TRealScheduler`, on a shared ordered timer queue (entry objects, because
+      `TList<T>.Delete` raw-moves a managed element).
+- [x] **Test**: `Advance` fires due timers in due order (FIFO for equal due), runs
+      timers scheduled while it runs, and moves the clock; a future timer does not
+      run on `Drain`; negative delay/advance rejected; unsubscribe cancels.
+- [ ] **Implement**: the self-rescheduling-timer loop guard (typed error).
 
 ## Phase 4 — Future
 
