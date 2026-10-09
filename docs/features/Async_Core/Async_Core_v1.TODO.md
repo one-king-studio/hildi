@@ -55,11 +55,11 @@ expresses the next requirement, watch it fail, implement the minimum, refactor,
 
 ## Phase 5 — Observable and subjects
 
-- [ ] **Test**: lazy subscribe; unsubscribe tears down downstream and upstream;
+- [x] **Test**: lazy subscribe; unsubscribe tears down downstream and upstream;
       terminal is once; late `OnNext` is ignored.
-- [ ] **Implement**: `TObservable<T>`.
-- [ ] **Test**: `Subject`, `BehaviorSubject`, `ReplaySubject`, `AsyncSubject`.
-- [ ] **Implement**: `async.subject`.
+- [x] **Implement**: `TObservable<T>`.
+- [x] **Test**: `Subject`, `BehaviorSubject`, `ReplaySubject`, `AsyncSubject`.
+- [x] **Implement**: `async.subject`.
 
 ## Phase 6 — Operators: creation, transformation, filtering
 

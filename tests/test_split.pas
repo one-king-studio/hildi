@@ -235,7 +235,7 @@ procedure TSplitBoundaryTest.TestAsyncClosureIsStandalone;
 var
   I, J: Integer;
   Closure: TStringList;
-  Roots: array[0..4] of string;
+  Roots: array[0..6] of string;
   IsHarness: Boolean;
 begin
   Roots[0] := 'async.base';
@@ -243,6 +243,8 @@ begin
   Roots[2] := 'async.queue';
   Roots[3] := 'async.future';
   Roots[4] := 'async.timers';
+  Roots[5] := 'async.observable';
+  Roots[6] := 'async.subject';
   AssertTrue('src/async is readable', DirectoryExists(SrcDir));
   for I := Low(Roots) to High(Roots) do
   begin
