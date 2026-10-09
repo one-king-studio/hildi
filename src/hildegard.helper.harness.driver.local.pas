@@ -40,6 +40,7 @@ type
     procedure ReleaseSubagent(const ASessionId: string);
     procedure Checkpoint;
     function PopEvent(out AEvent: TTurnEvent): Boolean;
+    function Dropped: Int64;
     procedure Close;
   end;
 
@@ -161,6 +162,11 @@ begin
       FSession.Queue.Push(E);
     end;
   end;
+end;
+
+function TLocalDriver.Dropped: Int64;
+begin
+  Result := FSession.Queue.Dropped;
 end;
 
 procedure TLocalDriver.Close;

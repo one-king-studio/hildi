@@ -20,6 +20,7 @@ type
     procedure RejectsNonPositiveCapacity;
     procedure WrapsAround;
     procedure ManagedElementsRoundTrip;
+    procedure DropOldestRemovesHead;
   end;
 
 implementation
@@ -172,6 +173,26 @@ begin
     Q.Push('gamma');
     AssertTrue(Q.TryPeek(S));
     AssertEquals('gamma', S);
+  finally
+    Q.Free;
+  end;
+end;
+
+procedure TAsyncQueueTest.DropOldestRemovesHead;
+var
+  Q: TBoundedQueue<Integer>;
+  V: Integer;
+begin
+  Q := TBoundedQueue<Integer>.Create(3);
+  try
+    Q.Push(1);
+    Q.Push(2);
+    AssertTrue('dropped the head', Q.DropOldest);
+    AssertEquals('count fell', 1, Q.Count);
+    AssertEquals('counted', 1, Q.Dropped);
+    AssertTrue(Q.TryPop(V));
+    AssertEquals('2 survives', 2, V);
+    AssertFalse('empty', Q.DropOldest);
   finally
     Q.Free;
   end;

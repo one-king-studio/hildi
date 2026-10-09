@@ -5,6 +5,8 @@ unit async.queue;
   It is BOUNDED on purpose: an unbounded mailbox is how a fast producer starves
   the consumer (the TUI freeze). When full, Push drops the OLDEST item and counts
   it, so the consumer always sees the most recent window and can report the loss.
+  DropOldest lets a caller evict the oldest explicitly, to make room for a
+  priority item.
 
   See docs/features/Async_Core/Async_Core_v1.SPEC.md. }
 
@@ -32,6 +34,9 @@ type
 
     { Adds AItem; on overflow drops the oldest and returns False. Never blocks. }
     function Push(const AItem: T): Boolean;
+    { Removes the oldest item, returning False when empty. Lets a caller make
+      room for a priority item. Counts as a drop. }
+    function DropOldest: Boolean;
     function TryPop(out AItem: T): Boolean;
     function TryPeek(out AItem: T): Boolean;
     procedure Clear;
@@ -99,6 +104,22 @@ begin
     FTail := (FTail + 1) mod FCapacity;
     Inc(FCount);
     Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TBoundedQueue<T>.DropOldest: Boolean;
+begin
+  FLock.Acquire;
+  try
+    Result := FCount > 0;
+    if not Result then
+      Exit;
+    ReleaseAt(FHead);
+    FHead := (FHead + 1) mod FCapacity;
+    Dec(FCount);
+    Inc(FDropped);
   finally
     FLock.Release;
   end;

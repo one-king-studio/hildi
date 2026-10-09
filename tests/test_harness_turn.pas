@@ -48,6 +48,7 @@ type
   published
     procedure TestFifoOrderAndEmpty;
     procedure TestConcurrentPushPop;
+    procedure TestControlEventIsNotDropped;
   end;
 
   TApprovalGateTest = class(TTestCase)
@@ -207,6 +208,38 @@ begin
     while Queue.Pop(Event) do
       Inc(Seen);
     AssertEquals('all events', Threads * PerThread, Seen);
+  finally
+    Queue.Free;
+  end;
+end;
+
+procedure TTurnQueueTest.TestControlEventIsNotDropped;
+var
+  Queue: TTurnQueue;
+  Streamed, Done, E: TTurnEvent;
+  I, Deltas: Integer;
+begin
+  Queue := TTurnQueue.Create;
+  try
+    { Fill well past the capacity with streamed output. }
+    for I := 1 to 5000 do
+    begin
+      Streamed := Default(TTurnEvent);
+      Streamed.Kind := teToolOutput;
+      Streamed.Text := 'x';
+      Queue.Push(Streamed);
+    end;
+    AssertTrue('the bound was hit', Queue.Dropped > 0);
+    { A terminal event arrives into a full queue: it must survive, evicting a
+      streamed event to make room. }
+    Done := Default(TTurnEvent);
+    Done.Kind := teDone;
+    Queue.Push(Done);
+    Deltas := 0;
+    while Queue.Pop(E) do
+      if E.Kind = teDone then
+        Inc(Deltas);
+    AssertEquals('the terminal event survived', 1, Deltas);
   finally
     Queue.Free;
   end;

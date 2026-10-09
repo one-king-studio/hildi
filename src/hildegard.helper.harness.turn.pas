@@ -68,11 +68,18 @@ type
 
   { A thread-safe, BOUNDED FIFO. Push from the worker thread, Pop from the UI
     thread. Bounded so a fast producer cannot starve the consumer: on overflow
-    the oldest event is dropped and counted (async.queue's TBoundedQueue). }
+    the oldest event is dropped and counted (async.queue's TBoundedQueue).
+
+    Control events (teDone, teError, teApprovalAsk, teCheckpointCommitted,
+    teSubagentAsk) are never dropped: if the queue is full when one arrives, the
+    oldest STREAMING event (teToolOutput, else any non-control event) is dropped
+    to make room. A dropped control event would hang the UI (a lost teDone) or
+    wedge a turn (a lost approval ask), so the streamed backlog yields instead. }
   TTurnQueue = class
   private
     FItems: TBoundedQueue<TTurnEvent>;
     function GetDropped: Int64;
+    function IsControl(const AEvent: TTurnEvent): Boolean;
   public
     constructor Create;
     destructor Destroy; override;
@@ -141,7 +148,18 @@ end;
 
 procedure TTurnQueue.Push(const AEvent: TTurnEvent);
 begin
+  { A control event is never dropped: make room for it by evicting the oldest
+    streamed event when the queue is full. A streamed event yields via the
+    queue's own drop-oldest. }
+  if IsControl(AEvent) and (FItems.Count = FItems.Capacity) then
+    FItems.DropOldest;
   FItems.Push(AEvent);
+end;
+
+function TTurnQueue.IsControl(const AEvent: TTurnEvent): Boolean;
+begin
+  Result := AEvent.Kind in [teDone, teError, teApprovalAsk,
+    teCheckpointCommitted, teSubagentAsk];
 end;
 
 function TTurnQueue.Pop(out AEvent: TTurnEvent): Boolean;

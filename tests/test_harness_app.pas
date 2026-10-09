@@ -91,6 +91,9 @@ type
     procedure TestToolLineAppears;
     procedure TestEmptyToolResultShowsPlaceholder;
     procedure TestAppStreamsToolOutput;
+    procedure TestStreamedToolOutputCoalescesOneAppendPerFrame;
+    procedure TestLiveToolBlockIsCapped;
+    procedure TestDrainStopsAtTheBudget;
     procedure TestResumeShowsTheResult;
     procedure TestErrorLineAppears;
     procedure TestApprovalModalResolvesGateAsk;
@@ -500,6 +503,83 @@ begin
   FSession.Queue.Push(E);
   FApp.Step;
   AssertTrue('placeholder shown', FindText(ckTool, '(no output)'));
+end;
+
+procedure THarnessAppTest.TestStreamedToolOutputCoalescesOneAppendPerFrame;
+var
+  Call, Chunk: TTurnEvent;
+begin
+  Build;
+  Call := Default(TTurnEvent);
+  Call.Kind := teToolCall;
+  Call.ToolId := 'c';
+  Call.ToolName := 'run_command';
+  Call.ToolReason := 'build';
+  FSession.Queue.Push(Call);
+  FApp.Step;
+  AssertEquals('the tool block starts empty', '', BlockText(BlockCount - 1));
+  { Three chunks queued before a single Step: buffered, not appended per chunk. }
+  Chunk := Default(TTurnEvent);
+  Chunk.Kind := teToolOutput;
+  Chunk.ToolId := 'c';
+  Chunk.ToolName := 'run_command';
+  Chunk.Text := 'x';
+  FSession.Queue.Push(Chunk);
+  FSession.Queue.Push(Chunk);
+  FSession.Queue.Push(Chunk);
+  AssertEquals('chunks are buffered until the frame', '',
+    BlockText(BlockCount - 1));
+  { One frame appends the coalesced burst once. }
+  FApp.Step;
+  AssertEquals('the coalesced burst landed in one append', 'xxx',
+    BlockText(BlockCount - 1));
+end;
+
+procedure THarnessAppTest.TestLiveToolBlockIsCapped;
+var
+  Call, Chunk: TTurnEvent;
+  I: Integer;
+  Body: string;
+begin
+  Build;
+  Call := Default(TTurnEvent);
+  Call.Kind := teToolCall;
+  Call.ToolId := 'c';
+  Call.ToolName := 'run_command';
+  Call.ToolReason := 'noisy';
+  FSession.Queue.Push(Call);
+  { 200 KB of output in one frame: the live block keeps only its tail. }
+  Chunk := Default(TTurnEvent);
+  Chunk.Kind := teToolOutput;
+  Chunk.ToolId := 'c';
+  Chunk.ToolName := 'run_command';
+  Chunk.Text := StringOfChar('a', 200000);
+  FSession.Queue.Push(Chunk);
+  FApp.Step;
+  Body := BlockText(BlockCount - 1);
+  AssertTrue('the block was capped', Length(Body) <= 66000);
+  AssertTrue('a trim marker names the loss', Pos('trimmed', Body) > 0);
+end;
+
+procedure THarnessAppTest.TestDrainStopsAtTheBudget;
+var
+  Err: TTurnEvent;
+  I: Integer;
+begin
+  Build;
+  { Queue more errors than one frame's drain budget (256). }
+  for I := 1 to 300 do
+  begin
+    Err := Default(TTurnEvent);
+    Err.Kind := teError;
+    Err.ErrorCode := leNetwork;
+    Err.Text := 'boom ' + IntToStr(I);
+    FSession.Queue.Push(Err);
+  end;
+  { One Step drains at most 256, so some remain queued. }
+  FApp.Step;
+  AssertFalse('the drain stopped at the budget, not the queue end',
+    FSession.Queue.IsEmpty);
 end;
 
 procedure THarnessAppTest.TestAppStreamsToolOutput;

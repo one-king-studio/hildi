@@ -17,6 +17,7 @@ type
   published
     procedure TestClientClosureExcludesAgent;
     procedure TestHeadlessClosureExcludesTui;
+    procedure TestAsyncClosureIsStandalone;
   end;
 
 implementation
@@ -145,6 +146,16 @@ begin
   end;
 end;
 
+{ The source path of a project unit: `src/<unit>.pas`, or `src/async/<unit>.pas`
+  for the async library (whose unit names are `async.*`). }
+function UnitPath(const AUnitName: string): string;
+begin
+  Result := IncludeTrailingPathDelimiter(SrcDir) + AUnitName + '.pas';
+  if not FileExists(Result) then
+    Result := IncludeTrailingPathDelimiter(SrcDir) + 'async' + PathDelim +
+      AUnitName + '.pas';
+end;
+
 { Every unit reachable from ARoot through `uses`, following only project units. }
 function CollectClosure(const ARoot: string): TStringList;
 var
@@ -166,7 +177,7 @@ begin
       if Result.IndexOf(U) >= 0 then
         Continue;
       Result.Add(U);
-      Path := IncludeTrailingPathDelimiter(SrcDir) + U + '.pas';
+      Path := UnitPath(U);
       if not FileExists(Path) then
         Continue;
       Deps := ExtractUses(Path);
@@ -217,6 +228,36 @@ begin
         Copy(Closure[I], 1, Length(TuiPrefix)) = TuiPrefix);
   finally
     Closure.Free;
+  end;
+end;
+
+procedure TSplitBoundaryTest.TestAsyncClosureIsStandalone;
+var
+  I, J: Integer;
+  Closure: TStringList;
+  Roots: array[0..4] of string;
+  IsHarness: Boolean;
+begin
+  Roots[0] := 'async.base';
+  Roots[1] := 'async.scheduler';
+  Roots[2] := 'async.queue';
+  Roots[3] := 'async.future';
+  Roots[4] := 'async.timers';
+  AssertTrue('src/async is readable', DirectoryExists(SrcDir));
+  for I := Low(Roots) to High(Roots) do
+  begin
+    Closure := CollectClosure(Roots[I]);
+    try
+      AssertTrue('async unit exists: ' + Roots[I], Closure.Count > 0);
+      for J := 0 to Closure.Count - 1 do
+      begin
+        IsHarness := Copy(Closure[J], 1, Length('hildegard')) = 'hildegard';
+        AssertFalse('the async library reached a harness unit: ' + Closure[J] +
+          ' (from ' + Roots[I] + ')', IsHarness);
+      end;
+    finally
+      Closure.Free;
+    end;
   end;
 end;
 

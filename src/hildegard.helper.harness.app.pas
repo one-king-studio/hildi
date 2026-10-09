@@ -87,6 +87,9 @@ type
     { Queued prompts shown as 'Queued' boxes at the end of the stream, removed
       when they are injected as a real user turn. }
     FQueuedBlocks: array of TChatItem;
+    { The driver's dropped-event count at the last check, so the app warns the
+      operator once when streamed output was dropped (the mailbox bound). }
+    FLastDropped: Int64;
     function BuildTree: TWidget;
     procedure Submit(const AText: string);
     procedure DrainQueue;
@@ -1093,6 +1096,11 @@ begin
       Break;
     HandleTurnEvent(E);
   end;
+  { Surface a dropped-output warning once, the first frame the bound was hit. }
+  if (FLastDropped = 0) and (FDriver.Dropped > 0) then
+    AppendError('streamed output was dropped: the UI could not keep up ' +
+      '(the tool output above is incomplete)');
+  FLastDropped := FDriver.Dropped;
 end;
 
 procedure THarnessApp.FlushToolOutput;

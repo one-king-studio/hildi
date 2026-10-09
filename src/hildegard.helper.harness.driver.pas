@@ -37,6 +37,8 @@ type
     procedure Checkpoint;
     { UI thread: pop the next event, if any. }
     function PopEvent(out AEvent: TTurnEvent): Boolean;
+    { How many streamed events have been dropped to honour the mailbox bound. }
+    function Dropped: Int64;
     { Release the connection and join any thread. Idempotent. }
     procedure Close;
   end;
@@ -100,6 +102,7 @@ type
     procedure ReleaseSubagent(const ASessionId: string);
     procedure Checkpoint;
     function PopEvent(out AEvent: TTurnEvent): Boolean;
+    function Dropped: Int64;
     procedure Close;
   end;
 
@@ -380,6 +383,11 @@ end;
 function TRemoteDriver.PopEvent(out AEvent: TTurnEvent): Boolean;
 begin
   Result := FQueue.Pop(AEvent);
+end;
+
+function TRemoteDriver.Dropped: Int64;
+begin
+  Result := FQueue.Dropped;
 end;
 
 procedure TRemoteDriver.Close;
