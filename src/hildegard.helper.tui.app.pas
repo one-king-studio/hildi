@@ -39,6 +39,10 @@ type
   { Called once per Run iteration, before the frame decision (drain queues,
     update external state). }
   TLoopHook = procedure of object;
+  { A post-dispatch input hook: the host's chance to consume an event the widget
+    tree did not (e.g. a hit-test on chrome the tree does not own). Return True
+    to consume the event. }
+  TInputHook = function(const E: TInputEvent): Boolean of object;
 
   { A plane is a widget tree drawn as one layer. Modal planes trap input. }
   TPlane = class
@@ -69,6 +73,7 @@ type
     FTerminalFocused: Boolean;
     FNeedsRepaint: Boolean;
     FScreenBg: Byte;
+    FInputHook: TInputHook;
     procedure ArrangeBase;
     procedure ArrangePlanes;
     procedure RenderFrame;
@@ -86,6 +91,11 @@ type
     { Mark layout dirty: the next Step re-arranges the base root. Call after a
       widget's content changes (for example appended text). }
     procedure Invalidate;
+
+    { A hook the host sets to post-process each input event after the tree has
+      seen it, for hit-tests on chrome the tree does not own (e.g. the messages
+      panel's left-border scrollbar). Return True to consume the event. }
+    property InputHook: TInputHook read FInputHook write FInputHook;
 
     procedure PushPlane(const APlane: TPlane);
     procedure PopPlane;
@@ -293,6 +303,11 @@ procedure TTuiApp.DispatchEvent(const E: TInputEvent);
 var
   Handled: Boolean;
 begin
+  { The host's hook runs first for a mouse press/drag: it hit-tests chrome the
+    tree does not own (the messages panel's left-border scrollbar) and consumes
+    the event there. }
+  if (E.Kind = ikMouse) and Assigned(FInputHook) and FInputHook(E) then
+    Exit;
   case E.Kind of
     ikResize:
       begin

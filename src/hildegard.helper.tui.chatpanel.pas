@@ -45,6 +45,8 @@ type
     FStatsText: string;
     FHeaderLeft: string;
     FHeaderRight: string;
+    FPageCount: Integer;
+    FPageIndex: Integer;
     FStateKind: TPanelState;
     FStateLabel: string;
     FStateSpans: array[0..1] of TSpan;
@@ -77,6 +79,13 @@ type
     procedure SetHeader(const ALeft, ARight: string);
     property HeaderLeft: string read FHeaderLeft;
     property HeaderRight: string read FHeaderRight;
+    { A multi-page (checkpointed) session: the messages panel's left border is
+      split into one segment per page, the current page drawn heavy. A single
+      page (the default) leaves the border uniform. }
+    procedure SetPage(ACount, AIndex: Integer);
+    { The messages panel's bounds, so the host can map a click on the left-border
+      paginator to a page. }
+    function MessagesBounds: TRect;
     { The left of the toolbar: what the run is doing. }
     procedure SetState(AKind: TPanelState; const ALabel: string);
     { The right of the toolbar: the interaction hints. }
@@ -301,14 +310,60 @@ begin
 end;
 
 procedure TChatPanel.Render(const S: ISurface);
+var
+  B: TRect;
+  Top, Bot, H, I, Y0, Y1: Integer;
+  Heavy: UnicodeString;
 begin
   FMessages.Render(S);
+  { The left border doubles as a page gauge: one segment per page, the current
+    page heavy. Only drawn for a multi-page session. }
+  if (FPageCount > 1) and (FMessages.Bounds.W >= 2) and
+    (FMessages.Bounds.H >= 2) then
+  begin
+    B := FMessages.Bounds;
+    Top := B.Y + 1;
+    Bot := B.Y + B.H - 2;
+    H := Bot - Top + 1;
+    if H >= FPageCount then
+    begin
+      Heavy := UnicodeString(WideChar($2503));   { ┃ }
+      for I := 0 to FPageCount - 1 do
+      begin
+        Y0 := Top + (H * I) div FPageCount;
+        Y1 := Top + (H * (I + 1)) div FPageCount - 1;
+        if I = FPageIndex then
+          while Y0 <= Y1 do
+          begin
+            PutCh(S, B.X, Y0, Heavy, FTheme.Border);
+            Inc(Y0);
+          end;
+      end;
+    end;
+  end;
   FCta.Render(S);
   FCompose.Render(S);
   if FPaletteActive then
     FPalette.Render(S);
   FStatus.Render(S);
   FStats.Render(S);
+end;
+
+procedure TChatPanel.SetPage(ACount, AIndex: Integer);
+begin
+  if ACount < 1 then
+    ACount := 1;
+  FPageCount := ACount;
+  FPageIndex := AIndex;
+  if FPageIndex < 0 then
+    FPageIndex := 0;
+  if FPageIndex > ACount - 1 then
+    FPageIndex := ACount - 1;
+end;
+
+function TChatPanel.MessagesBounds: TRect;
+begin
+  Result := FMessages.Bounds;
 end;
 
 function TChatPanel.HandleEvent(const E: TInputEvent): Boolean;

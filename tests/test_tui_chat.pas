@@ -65,6 +65,7 @@ type
     procedure TestANewBlockDoesNotYankAScrolledUpReader;
     procedure TestAReaderAtTheBottomKeepsFollowing;
     procedure TestPreserveAnchorKeepsTheVisibleContent;
+    procedure TestScrollToStopsFollowingAndMoves;
     procedure TestStackMaterializesOnlyTheWindow;
     procedure TestStackLayoutDoesNotThrashAcrossMeasureAndArrange;
     procedure TestStreamWidthFollowsTheViewport;
@@ -1046,6 +1047,12 @@ begin
         S.CellAt(It.Bounds.X + It.Bounds.W - 3, It.Bounds.H - 1).Ch);
       AssertEquals('bottom-right corner', '╯',
         S.CellAt(It.Bounds.X + It.Bounds.W - 1, It.Bounds.H - 1).Ch);
+      { The caret takes the ambient border's colour (violet, 135), on the box's
+        raised background. }
+      AssertEquals('caret uses the border colour', 135,
+        S.CellAt(It.Bounds.X + It.Bounds.W - 4, It.Bounds.H - 1).Attr.Fg);
+      AssertEquals('caret on the box background', FTheme.RaisedBg,
+        S.CellAt(It.Bounds.X + It.Bounds.W - 4, It.Bounds.H - 1).Attr.Bg);
     finally
       It.Free;
     end;
@@ -1106,6 +1113,11 @@ begin
       It.Render(S);
       AssertEquals('up caret when expanded', '▲',
         S.CellAt(It.Bounds.X + It.Bounds.W - 4, It.Bounds.H - 1).Ch);
+      { The caret takes the tool border colour, on the sunken box background. }
+      AssertEquals('caret uses the tool border colour', 23,
+        S.CellAt(It.Bounds.X + It.Bounds.W - 4, It.Bounds.H - 1).Attr.Fg);
+      AssertEquals('caret on the sunken background', FTheme.SunkenBg,
+        S.CellAt(It.Bounds.X + It.Bounds.W - 4, It.Bounds.H - 1).Attr.Bg);
     finally
       S.Free;
     end;
@@ -1197,6 +1209,30 @@ begin
       content stays put. }
     AssertEquals('anchor held across the prepend', Mid + (After - Before),
       St.ScrollOffset);
+  finally
+    St.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestScrollToStopsFollowingAndMoves;
+var
+  St: TChatStream;
+  I: Integer;
+begin
+  St := TChatStream.Create(FTheme);
+  try
+    for I := 1 to 20 do
+      St.Add(ckAssistant, '', 'line ' + IntToStr(I));
+    St.Arrange(Rc(0, 0, 30, 6));
+    AssertTrue('following at the bottom', St.Following);
+    { An explicit jump is a navigation: stop following. }
+    St.ScrollTo(0);
+    AssertFalse('no longer following', St.Following);
+    AssertEquals('scrolled to the top', 0, St.ScrollOffset);
+    { New content must not yank it back. }
+    St.Add(ckAssistant, '', 'line 21');
+    St.Arrange(Rc(0, 0, 30, 6));
+    AssertEquals('held at the top', 0, St.ScrollOffset);
   finally
     St.Free;
   end;

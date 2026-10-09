@@ -32,6 +32,9 @@ type
     procedure TestCtaRendersAboveTheCompose;
     procedure TestInactiveComposeIgnoresInput;
     procedure TestLastMessageKeepsTwoBlankRowsAboveTheCompose;
+    procedure TestSinglePageLeavesTheLeftBorderUniform;
+    procedure TestTwoPagesSplitTheLeftBorder;
+    procedure TestThreePagesMarkTheCurrentMiddle;
   end;
 
 implementation
@@ -306,6 +309,77 @@ begin
       P.Render(S);
       AssertTrue('the sparkle advanced',
         Ord(S.CellAt(2, 13).Ch[1]) <> First);
+    finally
+      P.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatPanelTest.TestSinglePageLeavesTheLeftBorderUniform;
+var
+  P: TChatPanel;
+  S: TSurfaceMemory;
+begin
+  S := TSurfaceMemory.Create(40, 20);
+  try
+    P := TChatPanel.Create(FTheme, 'info', 'cta');
+    try
+      P.SetPage(1, 0);
+      P.Arrange(Rc(0, 0, 40, 20));
+      P.Render(S);
+      { A single page: the left border stays the thin light vertical. }
+      AssertEquals('thin left border', #$2502, S.CellAt(0, 5).Ch);
+      AssertEquals('thin at the bottom too', #$2502, S.CellAt(0, 17).Ch);
+    finally
+      P.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatPanelTest.TestTwoPagesSplitTheLeftBorder;
+var
+  P: TChatPanel;
+  S: TSurfaceMemory;
+begin
+  S := TSurfaceMemory.Create(40, 20);
+  try
+    P := TChatPanel.Create(FTheme, 'info', 'cta');
+    try
+      { Two pages, the current one (page 2) heavy: thin top half, heavy bottom. }
+      P.SetPage(2, 1);
+      P.Arrange(Rc(0, 0, 40, 20));
+      P.Render(S);
+      AssertEquals('thin in the first half', #$2502, S.CellAt(0, 5).Ch);
+      AssertEquals('heavy in the current half', #$2503, S.CellAt(0, 12).Ch);
+    finally
+      P.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatPanelTest.TestThreePagesMarkTheCurrentMiddle;
+var
+  P: TChatPanel;
+  S: TSurfaceMemory;
+begin
+  S := TSurfaceMemory.Create(40, 20);
+  try
+    P := TChatPanel.Create(FTheme, 'info', 'cta');
+    try
+      { Three pages, the current one (page 2) the middle third: thin, heavy,
+        thin. }
+      P.SetPage(3, 1);
+      P.Arrange(Rc(0, 0, 40, 20));
+      P.Render(S);
+      AssertEquals('thin in the first third', #$2502, S.CellAt(0, 2).Ch);
+      AssertEquals('heavy in the middle third', #$2503, S.CellAt(0, 9).Ch);
+      AssertEquals('thin in the last third', #$2502, S.CellAt(0, 16).Ch);
     finally
       P.Free;
     end;

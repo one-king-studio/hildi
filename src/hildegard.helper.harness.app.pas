@@ -73,6 +73,10 @@ type
       scroll anchor is held by the stream itself (PreserveAnchor), so the visible
       content does not shift when a page is prepended. }
     FOlderPages: Integer;
+    { The left-border paginator (coarse scroll) drag: the last hit row. }
+    FPageDragging: Boolean;
+    FPageDragRow: Integer;
+    FPageCount: Integer;
     { Queued prompts shown as 'Queued' boxes at the end of the stream, removed
       when they are injected as a real user turn. }
     FQueuedBlocks: array of TChatItem;
@@ -143,6 +147,8 @@ type
     procedure Invalidate(Sender: TObject);
     { The transcript reached the top: prepend the next archived page. }
     procedure NeedOlderHistory(Sender: TObject);
+    { The left-border paginator: a press or drag scrolls to that page. }
+    function PageScrub(const E: TInputEvent): Boolean;
     { The continuation page: one more than the session's checkpoint count. }
     function PageNumber: Integer;
     { The compose changed: show/hide and filter the command palette. }
@@ -304,6 +310,7 @@ begin
   FTheme := SelectTheme(AMode, ALightDetected);
   FRoster := TSubagentRoster.Create;
   FApp := TTuiApp.Create(ASurface, AInput, BuildTree);
+  FApp.InputHook := PageScrub;
   FApp.ScreenBg := FTheme.Bg;
   RenderHistory;
   SetState(psReady, 'ready');
@@ -460,19 +467,18 @@ end;
 procedure THarnessApp.UpdateHeader;
 var
   Context: string;
-  Page: Integer;
 begin
   { Read the persisted session, so a live session and a resumed one show the
     same header. The header carries only the context; the consumption is on the
     status bar. }
   Context := FormatContextUsage(FSession.SessionTotals.ContextTokens,
     FSession.MaxContextTokens);
-  { A continuation session runs on pages (one per checkpoint): say so, so the
-    operator knows the context is against the current page, not the whole run. }
-  Page := PageNumber;
-  if Page > 1 then
-    Context := Format('page %d · %s', [Page, Context]);
   FPanel.SetHeader(Copy(FSession.SessionId, 1, 12), Context);
+  { A continuation session runs on pages (one per checkpoint): the messages
+    panel's left border is the gauge, the current page heavy, and a click on it
+    scrolls (the coarse scroll; the right scrollbar is the fine one). }
+  FPageCount := PageNumber;
+  FPanel.SetPage(FPageCount, FPageCount - 1);
 end;
 
 procedure THarnessApp.UpdateStats;
@@ -1076,6 +1082,55 @@ begin
   FPanel.Stream.Clear;
   RenderHistory;
   FApp.Invalidate;
+end;
+
+function THarnessApp.PageScrub(const E: TInputEvent): Boolean;
+var
+  B: TRect;
+  H, I, Seg, Target: Integer;
+begin
+  { The left border of the messages panel is a coarse scrollbar: one segment per
+    page, the current page heavy. A press or drag on it scrolls to that segment's
+    fraction of the content; the last segment reaches the end. }
+  Result := False;
+  if (E.Kind <> ikMouse) or (FPageCount < 2) then
+    Exit;
+  if FPageDragging then
+  begin
+    if E.Mouse.Button = mbNone then
+    begin
+      FPageDragging := False;
+      Exit(True);
+    end;
+    FPageDragRow := E.Mouse.Y;
+  end
+  else
+  begin
+    if E.Mouse.Button <> mbLeft then
+      Exit;
+    B := FPanel.MessagesBounds;
+    if (B.W < 2) or (B.H < 2) or (E.Mouse.X <> B.X) or
+      (E.Mouse.Y <= B.Y) or (E.Mouse.Y >= B.Y + B.H - 1) then
+      Exit;
+    FPageDragging := True;
+    FPageDragRow := E.Mouse.Y;
+  end;
+  B := FPanel.MessagesBounds;
+  H := B.H - 2;
+  if H < 1 then
+    H := 1;
+  I := FPageDragRow - (B.Y + 1);
+  if I < 0 then
+    I := 0;
+  if I >= H then
+    I := H - 1;
+  Seg := (I * FPageCount) div H;
+  if Seg > FPageCount - 1 then
+    Seg := FPageCount - 1;
+  Target := (FPanel.Stream.ContentHeight * Seg) div (FPageCount - 1);
+  FPanel.Stream.ScrollTo(Target);
+  FApp.Invalidate;
+  Result := True;
 end;
 
 procedure THarnessApp.OnLoop;

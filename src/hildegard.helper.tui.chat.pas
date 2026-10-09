@@ -253,7 +253,7 @@ type
     { Hold the current scroll offset across a Clear + re-add (a prepend), so the
       visible content stays put. Applied once, by the next Arrange. }
     procedure PreserveAnchor;
-    { Scroll to an absolute row (0 = top). }
+    { Scroll to an absolute row (0 = top). An explicit position stops following. }
     procedure ScrollTo(ARow: Integer);
     function Measure(const AAvail: TSize): TSize; override;
     procedure Arrange(const ABounds: TRect); override;
@@ -979,11 +979,11 @@ begin
 
   S.FillRect(FBounds, SurfaceAttr);
 
-  { The caret reads on the box's own background, so the blank cells around it
-    match the container rather than the panel behind it. }
-  CaretAttr := FTheme.Text;
-  CaretAttr.Bg := SurfaceAttr.Bg;
-  Exclude(CaretAttr.Style, sfScreenBg);
+  { The caret takes the box border's colour and the box's own background (a
+    raised/sunken surface, or the screen background for a thought), so it reads
+    as part of the frame. }
+  CaretAttr := SurfaceAttr;
+  CaretAttr.Fg := Border.Fg;
 
   if FKind = ckUser then
   begin
@@ -1518,6 +1518,9 @@ end;
 
 procedure TChatStream.ScrollTo(ARow: Integer);
 begin
+  { An explicit position is a navigation, not following: stop auto-following so
+    new content does not yank the view back to the end. }
+  FFollow := False;
   FScroll.ScrollY := ARow;
 end;
 
