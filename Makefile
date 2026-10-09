@@ -84,11 +84,12 @@ TESTARGS += --all
 endif
 
 LIB_SRCS  := $(wildcard $(SRC)/*.pas)
+ASYNC_SRCS := $(wildcard $(SRC)/async/*.pas)
 TEST_SRCS := $(wildcard $(TESTS)/*.pas)
 
 .PHONY: all test test-leak watch check release clean help libsqlite libmbedtls \
         store-demo agent-cli release-agent-cli tui-demo widgets-demo layout-demo \
-        headless-agent tui-agent bench perf agents agent-% mcp-smoke
+        headless-agent tui-agent bench perf agents agent-% mcp-smoke async-standalone
 
 all: $(BIN)/hildegard-helper-demo
 
@@ -225,9 +226,16 @@ $(BIN)/hildegard-helper-tui-bench: $(EXAMPLES)/tui_bench.pas $(LIB_SRCS)
 test: libsqlite libmbedtls $(BIN)/hildegard-helper-tests
 	$(BIN)/hildegard-helper-tests $(TESTARGS)
 
-$(BIN)/hildegard-helper-tests: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
+# The isolation gate: build a program that uses ONLY the async library, with no
+# harness unit on the path. If the library ever depends on the harness, this
+# fails to compile - which is what keeps it extractable.
+async-standalone: $(ASYNC_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) -Fu$(SRC)/async -FU$(DBGUNITS) -FE$(BIN) -o$(BIN)/async-standalone $(EXAMPLES)/async_standalone.pas
+
+$(BIN)/hildegard-helper-tests: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
+	@mkdir -p $(BIN) $(DBGUNITS)
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/async -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 test-leak: libsqlite libmbedtls $(BIN)/hildegard-helper-tests-leak
 	HEAPTRC=$(HEAPTRC) $(BIN)/hildegard-helper-tests-leak $(TESTARGS)
@@ -236,9 +244,9 @@ test-leak: libsqlite libmbedtls $(BIN)/hildegard-helper-tests-leak
 watch:
 	@scripts/watch.sh $(TARGET)
 
-$(BIN)/hildegard-helper-tests-leak: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
+$(BIN)/hildegard-helper-tests-leak: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
 	@mkdir -p $(BIN) $(LEAKUNITS)
-	$(FPC) $(LEAKFLAGS) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(TESTS) -FU$(LEAKUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(LEAKFLAGS) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/async -Fu$(TESTS) -FU$(LEAKUNITS) -FE$(BIN) -o$@ $<
 
 # All quality gates, for CI: functional tests + leak check.
 check: test test-leak
