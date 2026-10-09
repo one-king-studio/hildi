@@ -55,6 +55,9 @@ type
     FAssistant: TChatItem;
     FThought: TChatItem;
     FTool: TChatItem;
+    { Streamed tool output is buffered and appended once per frame, so a chatty
+      command costs one layout, not one per chunk. Flushed by FlushToolOutput. }
+    FPendingToolOutput: string;
     { The reasoning phase's duration for the live thought block, set by
       teReasoningDone and consumed when the block settles. }
     FThoughtMs: Int64;
@@ -87,6 +90,7 @@ type
     function BuildTree: TWidget;
     procedure Submit(const AText: string);
     procedure DrainQueue;
+    procedure FlushToolOutput;
     procedure HandleTurnEvent(const E: TTurnEvent);
     procedure EnqueueAsk(const E: TTurnEvent);
     procedure ShowNextAsk;
@@ -703,6 +707,7 @@ begin
   SetState(psThinking, 'thinking');
   FAssistant := nil;
   FThought := nil;
+  FlushToolOutput;
   FTool := nil;
   if FDriver <> nil then
     FDriver.StartTurn(AText);
@@ -770,6 +775,7 @@ end;
 
 procedure THarnessApp.SettleOpenTool;
 begin
+  FlushToolOutput;
   if FTool <> nil then
   begin
     FTool.Live := False;
@@ -912,6 +918,7 @@ begin
       end;
     teToolResult:
       begin
+        FlushToolOutput;
         if FTool <> nil then
         begin
           AppendToolResult(FTool, E.Text);
@@ -935,9 +942,10 @@ begin
         if FTool = nil then
           FTool := FPanel.Stream.Add(ckTool, E.ToolName, '');
         { Live shows the tail and auto-expands, so the operator can watch a long
-          command; the block settles back to collapsed when the result arrives. }
+          command; the block settles back to collapsed when the result arrives.
+          The text is buffered and appended once per frame (FlushToolOutput). }
         FTool.Live := True;
-        FTool.AppendText(E.Text);
+        FPendingToolOutput := FPendingToolOutput + E.Text;
       end;
     teApprovalAsk:
       begin
@@ -1087,6 +1095,15 @@ begin
   end;
 end;
 
+procedure THarnessApp.FlushToolOutput;
+begin
+  if FPendingToolOutput = '' then
+    Exit;
+  if FTool <> nil then
+    FTool.AppendText(FPendingToolOutput);
+  FPendingToolOutput := '';
+end;
+
 procedure THarnessApp.SyncBusy;
 begin
   FApp.Busy := FBusy;
@@ -1187,6 +1204,7 @@ begin
   CloseModal;
   CheckInterruptWindow;
   DrainQueue;
+  FlushToolOutput;
   SyncBusy;
   { The caret is steady while the terminal is unfocused (DECSET 1004). }
   FPanel.Compose.Edit.Blinking := FApp.TerminalFocused;
@@ -1199,6 +1217,7 @@ begin
   CloseModal;
   CheckInterruptWindow;
   DrainQueue;
+  FlushToolOutput;
   DrainSpy;
   Result := FApp.Step;
 end;
