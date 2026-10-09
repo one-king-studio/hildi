@@ -195,7 +195,6 @@ The methods, and the bash idiom each replaces:
 | `yaml_read(path, path_expr?)` | `yq` | |
 | `yaml_edit(path, path_expr, value)` | `yq -i` | validated |
 | `patch_apply(patch, opts?)` | `patch -p1`, `git apply` | `opts`: `{ strip, dryRun }`; unified diff |
-| `recall(id, opts?)` | — | the existing `recall_tool_result` (read-only) |
 
 Design points to pin:
 
@@ -208,6 +207,17 @@ Design points to pin:
   as a **separate, first-class tool call** (its own reason, its own approval, its
   own audit row) — it just cannot hide one inside a script. The ergonomic cost is
   a separate build/test call after the script, which is the clearer shape anyway.
+- **No `recall` in the sandbox — and `recall` is not a gated tool.** `recall`
+  reads back a tool result the harness itself spilled into its own artifact store
+  (`Context_Budget`). It touches nothing outside the harness, so it is a
+  **built-in, controlled harness feature that bypasses the approval gate** —
+  gating it would be second-guessing our own bookkeeping. It is also not something
+  the agent should be scripting: it is a retrieval primitive the loop exposes, not
+  a tool to compose. So it stays a direct, first-class call (ungated), never a
+  `tools.*` method.
+- **The gate is for world access.** The corollary: a tool that only reads the
+  harness's own state is not gated and is not scriptable; a tool that touches the
+  world is gated, and is the kind the sandbox may expose.
 - **It is a *view* over the registry, not a second registry.** Each method routes
   to the same tool, so the approval ref, the `reason` requirement, the audit row,
   and the snapshot interception are identical to a direct call. If a method
