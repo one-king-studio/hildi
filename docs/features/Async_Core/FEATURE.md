@@ -51,6 +51,11 @@ substrate so ordering, context, and teardown are defined once.
 5. **Standalone.** FPC RTL only (plus `cthreads`/`cwstring` where a program
    needs them); `{$mode delphi}`; no harness or engine units; buildable and
    testable on its own.
+6. **Concurrency is a scheduler choice, not a program mode.** A thread-backed
+   **executor** scheduler runs work off the calling thread; a **queue** scheduler
+   runs it on a chosen thread (the UI's mailbox). `RunOn` plus
+   `SubscribeOn`/`ObserveOn` are the whole concurrency API — no `async` coloring,
+   no runtime to start, and no locks if state stays thread-confined.
 
 ## Goals
 
@@ -60,8 +65,8 @@ substrate so ordering, context, and teardown are defined once.
   `Subscribe`/`Unsubscribe`, and the full operator set.
 - **Subjects** for multicast: `Subject`, `BehaviorSubject`, `ReplaySubject`,
   `AsyncSubject`.
-- **Schedulers**: a microtask/queue scheduler, an `asap` (microtask) scheduler,
-  an `async` (timer) scheduler, and a **virtual/test** scheduler.
+- **Schedulers**: a queue (trampoline), an `asap` (microtask), an `async` (timer),
+  a **virtual/test** scheduler, and an **executor** (bounded thread pool).
 - **Continuation-scoped context** (`AsyncLocalStorage`-like): values that travel
   with the continuation, correct across deferred boundaries.
 - **Cancellation** as a token threaded into sources, so unsubscribing stops work.
@@ -104,7 +109,13 @@ substrate so ordering, context, and teardown are defined once.
 - [ ] Continuation-scoped context: a value set before a deferred boundary is
       visible inside its continuation and not outside it; nested scopes restore.
 - [ ] Cancellation: unsubscribing a subscription backed by a timer or a source
-      stops that work; a cancelled future rejects with a cancellation error.
+      stops that work; a cancelled future rejects with a cancellation error; the
+      token reaches an executor worker so a task can be stopped.
+- [ ] An **executor scheduler** backed by a bounded thread pool, with `RunOn` and
+      `SubscribeOn`/`ObserveOn` moving work between it and a queue scheduler.
+- [ ] A UI (or any) thread never calls `Await`; it subscribes and drains its
+      queue. State is thread-confined: workers post mutations to the owning
+      thread's scheduler, and the library offers no implicit shared state.
 - [ ] Unhandled failures are tracked and reported at the driver's idle point
       (oldest first), with a policy (throw/ignore) and an optional hook.
 - [ ] `Await`/`WaitForCompletion` on a stream that never completes is
@@ -168,8 +179,8 @@ this is the acceptance bar.
   (`Unsubscribe`/`Closed`), `ICancellationToken`.
 - **Scheduler** — `IAsyncScheduler.Schedule(work, delay)`; implementations:
   queue (trampoline), asap (microtask, FIFO with a head index), async (timer),
-  virtual (test clock). The one place the GocciaScript queue shape is reused —
-  scopes and O(1) head index included.
+  virtual (test clock), and **executor** (bounded thread pool). The one place the
+  GocciaScript queue shape is reused — scopes and O(1) head index included.
 - **Context** — immutable snapshots, a save stack, a depth token; installed while
   a job runs and restored after.
 - **Fronts** — `TFuture<T>` (a one-emission contract, eager/shared/uncancellable)
@@ -179,6 +190,53 @@ this is the acceptance bar.
   pumps the registered sources, plus an optional real-time scheduler for I/O.
 - **Sources** — pluggable continuation pumps (timers, host I/O) register with the
   driver, exactly as `fetch`/`Atomics`/timers do in GocciaScript.
+
+## Concurrency model
+
+Concurrency is **which scheduler runs the work**, not a program-wide mode. There
+is no `async` coloring and no runtime to start; a program is synchronous until it
+names a scheduler.
+
+Two schedulers carry it:
+
+- **Executor** (bounded thread pool) — "run this on another thread".
+  Calculations, blocking I/O, anything the UI must not do.
+- **Queue** — "run this on *this* thread's mailbox" (the UI thread's). Everything
+  that touches UI-owned state or renders.
+
+One primitive moves work between them: `RunOn(scheduler, work)`. Fire-and-forget
+is `RunOn(Pool, …)`; a side effect on the UI is `RunOn(Ui, …)`.
+
+`SubscribeOn` and `ObserveOn` are the stream-shaped form — *where the work runs*
+vs *where the notifications land*:
+
+```pascal
+source
+  .SubscribeOn(Pool)     // the work happens off the UI thread
+  .ObserveOn(Ui)         // the effects are delivered on the UI thread
+  .Subscribe(onNext);    // the mutation runs on the UI thread
+```
+
+**The UI never awaits.** `Await` is for headless/CLI/batch code that wants to
+block. A UI thread subscribes and drains its queue per frame; calling `Await` on
+it freezes it — the bug this model exists to prevent.
+
+**State is thread-confined, not shared.** The owning thread owns the state;
+workers post mutations to it. No locks, one writer. The reactive form is a
+`BehaviorSubject<UiState>`: workers push new states on the UI scheduler and the UI
+renders each. Sharing mutable state across threads directly is possible, but the
+library does not default to it.
+
+**Rules:**
+
+- Bound the pool — a thread per task exhausts the process; reuse the harness's
+  bounded pool when in-repo.
+- Cancellation must reach the worker, or teardown hangs; thread the token in.
+- Posting must **wake** the target loop, or the side effect waits for the next
+  input event.
+- Join every thread on teardown (`make test-leak` enforces it).
+- No `TSemaphore` on macOS — `TCriticalSection` + `TSimpleEvent`.
+- Never touch a widget off the UI thread; rendering goes through the UI scheduler.
 
 ## Constraints
 
