@@ -69,13 +69,10 @@ type
     FSpy: TSubagentSpy;
     FSpyId: string;
     FAskRefIsChild: Boolean;
-    { Back-pagination: how many archived pages are shown above the boundary, and
-      the anchor (the scroll offset and content height before a prepend) applied
-      on the next frame, once the layout is current. }
+    { Back-pagination: how many archived pages are shown above the boundary. The
+      scroll anchor is held by the stream itself (PreserveAnchor), so the visible
+      content does not shift when a page is prepended. }
     FOlderPages: Integer;
-    FAnchorBase: Integer;
-    FAnchorHeightBefore: Integer;
-    FAnchorPending: Boolean;
     { Queued prompts shown as 'Queued' boxes at the end of the stream, removed
       when they are injected as a real user turn. }
     FQueuedBlocks: array of TChatItem;
@@ -377,10 +374,15 @@ end;
   keybindings. }
 function THarnessApp.DefaultCommands: TCommandArray;
 begin
+  { Two entries so the command is discoverable however it is typed: the
+    palette's filter is a prefix match, so '/c' shows both and either runs the
+    same checkpoint turn. }
   Result := nil;
-  SetLength(Result, 1);
+  SetLength(Result, 2);
   Result[0].Name := 'checkpoint';
   Result[0].Description := 'create a checkpoint for this session';
+  Result[1].Name := 'cp';
+  Result[1].Description := 'create a checkpoint for this session';
 end;
 
 procedure THarnessApp.ComposeChanged(Sender: TObject);
@@ -582,7 +584,10 @@ begin
         for I := 0 to High(Archived) do
           FPanel.Stream.Add(ckAssistant, '', Archived[I].Content);
     end;
-    FPanel.Stream.Add(ckTurn, '', '— checkpoint —');
+    { The checkpoint document is the segment's opening block: an ambient box
+      whose title carries the label (the ambient render pads it with a leading
+      space). No separate "— checkpoint —" marker is drawn: the box itself is
+      the boundary, and it immediately follows the archived page. }
     FPanel.Stream.Add(ckAmbient, 'checkpoint', Checkpoint.Summary);
   end;
   for I := 0 to High(History) do
@@ -655,6 +660,11 @@ begin
   for I := Head to High(ToolBlocks) do
     if ToolBlocks[I].Text = '' then
       ToolBlocks[I].SetText('(no result)');
+  { A full rebuild (first load, a resume, or a checkpoint reload) shows the
+    newest content; a back-pagination prepend restores its anchor in the
+    stream's Arrange instead. }
+  if not FPanel.Stream.AnchorPending then
+    FPanel.Stream.FollowBottom;
 end;
 
 procedure THarnessApp.Submit(const AText: string);
@@ -1058,19 +1068,13 @@ begin
 end;
 
 procedure THarnessApp.NeedOlderHistory(Sender: TObject);
-var
-  HeightBefore: Integer;
 begin
-  { Prepend one more archived page. The new scroll offset is relative to the
-    taller content, so record where we were and apply the offset on the next
-    frame, once the layout has run and the content height is current. }
-  HeightBefore := FPanel.Stream.ContentHeight;
-  FAnchorBase := FPanel.Stream.ScrollOffset;
-  FAnchorHeightBefore := HeightBefore;
+  { Prepend one more archived page, holding the scroll so the visible content
+    stays put (the stream applies the anchor on its next layout). }
+  FPanel.Stream.PreserveAnchor;
   Inc(FOlderPages);
   FPanel.Stream.Clear;
   RenderHistory;
-  FAnchorPending := True;
   FApp.Invalidate;
 end;
 
@@ -1084,14 +1088,6 @@ begin
   SyncBusy;
   { The caret is steady while the terminal is unfocused (DECSET 1004). }
   FPanel.Compose.Edit.Blinking := FApp.TerminalFocused;
-  { Back-pagination anchor: the layout has run by now, so the content height is
-    current and the offset can be applied without the scroll jumping. }
-  if FAnchorPending then
-  begin
-    FAnchorPending := False;
-    FPanel.Stream.ScrollOffset := FAnchorBase +
-      (FPanel.Stream.ContentHeight - FAnchorHeightBefore);
-  end;
 end;
 
 function THarnessApp.Step: Boolean;

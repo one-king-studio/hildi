@@ -19,7 +19,8 @@ uses
   hildegard.helper.tui.surface, hildegard.helper.tui.widget,
   hildegard.helper.tui.text, hildegard.helper.tui.grapheme,
   hildegard.helper.tui.compact, hildegard.helper.tui.scroll,
-  hildegard.helper.tui.theme, hildegard.helper.tui.markdownview;
+  hildegard.helper.tui.theme, hildegard.helper.markdown,
+  hildegard.helper.tui.markdownview;
 
 type
   TChatKind = (ckUser, ckAssistant, ckError, ckThought, ckTool, ckThinking,
@@ -30,14 +31,18 @@ const
   QueuedBorderFg = 135;
   { The tool box border colour. }
   ToolBorderFg = 23;
-  { A condensed body (a thought/tool/ambient whose full body wraps to more than
-    this many rows) shows the first row, an ellipsis, and the last
-    CondensedTail rows. }
+  { A condensed body (a thought/tool whose full body wraps to more than this
+    many rows) shows the first row, an ellipsis, and the last CondensedTail
+    rows. }
   CondenseThreshold = 7;
   CondensedTail = 3;
-  { A condensed body wrapping to more than this many rows shows the
-    double-headed vertical arrow caret; a shorter one needs no caret. }
+  { A condensed body wrapping to more than this many rows is collapsible; a
+    shorter one has nothing to hide. }
   CaretThreshold = 8;
+  { The disclosure caret at a collapsible box's bottom border: a down caret
+    while the body is condensed, an up caret once it is expanded. }
+  CaretDown = '▼';
+  CaretUp = '▲';
 
 type
   { One block in the stream. Mutable, so a stream can append into it. Its
@@ -53,7 +58,11 @@ type
       (first + ellipsis + last N) or a live tail can be computed from the
       wrapped rows. Nil for other kinds. }
     FSrc: TTextBlock;
-    FMarkdown: TMarkdownView;   { assistant bodies only; nil otherwise }
+    FMarkdown: TMarkdownView;   { assistant and ambient bodies; nil otherwise }
+    { The markdown theme for an ambient box's document: the default markdown
+      palette rebased onto the box's raised background, so the rendered text
+      sits on the container colour rather than the panel's. }
+    FAmbientMdTheme: TMdTheme;
     FExpanded: Boolean;
     FTheme: TTheme;
     FOnToggle: TNotifyEvent;
@@ -74,14 +83,24 @@ type
     FAppliedVer: Integer;
     FAppliedWidth: Integer;
     FAppliedSrc: Integer;
+    { True when the drawn body is the condensed (collapsed) view: the disclosure
+      caret reads this for its direction. }
+    FDisplayCondensed: Boolean;
     function Inset: Integer;
     function BodyAttr: TAttr;
     procedure Rebuild;
     procedure EnsureBody;
+    { The markdown theme for an ambient box: the default palette rebased onto the
+      box's raised background. }
+    function AmbientMdTheme: TMdTheme;
     procedure ArrangeBody(const ABounds: TRect);
     procedure BodyRows(AWidth: Integer; out ATextRows, ALines: Integer);
     function InnerWidth(AWidth: Integer): Integer;
     function Condenseable: Boolean;
+    { True when a disclosure caret should ride the bottom border: the box has
+      content hidden when collapsed (an ambient document, or a thought/tool
+      whose body wraps past CaretThreshold rows). }
+    function CaretShown: Boolean;
     { Refresh the drawn body for AWidth: a live tail, a condensed view, or the
       full body. Rebuilds only when the text version or the width changed. }
     procedure ApplyDisplay(AWidth: Integer);
@@ -199,6 +218,12 @@ type
     FStack: TChatStack;
     FScroll: TScrollContainer;
     FFollow: Boolean;
+    { The anchor: a scroll offset held across a content rebuild (a prepend), so
+      the visible content does not shift. Armed by PreserveAnchor; applied once
+      by the next Arrange, when the new content height is known. }
+    FAnchorPending: Boolean;
+    FAnchorScroll: Integer;
+    FAnchorHeight: Integer;
     FOnToggle: TNotifyEvent;
     FOnChange: TNotifyEvent;
     FOnNeedOlder: TNotifyEvent;
@@ -225,6 +250,11 @@ type
     procedure Remove(AItem: TChatItem);
     { Re-stick the view to the newest block. }
     procedure FollowBottom;
+    { Hold the current scroll offset across a Clear + re-add (a prepend), so the
+      visible content stays put. Applied once, by the next Arrange. }
+    procedure PreserveAnchor;
+    { Scroll to an absolute row (0 = top). }
+    procedure ScrollTo(ARow: Integer);
     function Measure(const AAvail: TSize): TSize; override;
     procedure Arrange(const ABounds: TRect); override;
     procedure Render(const S: ISurface); override;
@@ -241,6 +271,11 @@ type
       history and keep the visible content in place. }
     property ScrollOffset: Integer read GetScrollOffset write SetScrollOffset;
     function ContentHeight: Integer;
+    { True while the view is pinned to the bottom, so new content follows. }
+    property Following: Boolean read FFollow;
+    { True between PreserveAnchor and the next Arrange (a prepend is in flight),
+      so a rebuild can tell a prepend from a fresh load. }
+    property AnchorPending: Boolean read FAnchorPending;
     { Rows at the bottom of the viewport covered by the compose overlay; the
       stream keeps room for them so the last block keeps its pad rows visible. }
     property BottomInset: Integer read FBottomInset write SetBottomInset;
@@ -255,6 +290,9 @@ implementation
 const
   { A collapsed thought or tool block shows this many body rows. }
   CollapsedLines = 3;
+  { A collapsed ambient (a checkpoint document) shows this many body rows: a
+    compact preview of the top of the markdown, expandable to the full body. }
+  AmbientCompactRows = 3;
   { A live (streaming) block shows this many tail lines, plus a '...' when the
     body is longer. }
   LiveTailLines = 6;
@@ -321,7 +359,8 @@ begin
   FBody := AText;
   FTheme := ATheme;
   FExpanded := (AKind = ckUser) or (AKind = ckAssistant) or
-    (AKind = ckError) or (AKind = ckThinking) or (AKind = ckQueued);
+    (AKind = ckError) or (AKind = ckThinking) or (AKind = ckQueued) or
+    (AKind = ckAmbient);
   FLiveStarted := False;
   FHeightValid := False;
   FHeightWidth := 0;
@@ -351,8 +390,12 @@ begin
       Result := OnBg(FTheme.Text, FTheme.SunkenBg);
     ckThought:
       Result := FTheme.Muted;
-    ckAmbient, ckQueued:
+    ckQueued:
       Result := OnBg(FTheme.Text, FTheme.RaisedBg);
+    ckAmbient:
+      { An ambient result (a checkpoint document) reads as markdown, so its
+        body uses the theme's default text on the raised panel. }
+      Result := FTheme.Text;
     ckError:
       Result := FTheme.Error;
   else
@@ -405,10 +448,46 @@ procedure TChatItem.EnsureBody;
 begin
   if (FText <> nil) or (FMarkdown <> nil) then
     Exit;
-  if FKind = ckAssistant then
-    FMarkdown := TMarkdownView.Create
+  if FKind in [ckAssistant, ckAmbient] then
+  begin
+    if FKind = ckAmbient then
+      FMarkdown := TMarkdownView.Create(AmbientMdTheme)
+    else
+      FMarkdown := TMarkdownView.Create;
+  end
   else
     FText := TTextBlock.Create([], wmWord);
+end;
+
+{ The markdown theme for an ambient box: the default palette rebased onto the
+  box's raised background. Every attribute takes the raised background and drops
+  the transparent-background flag, so the rendered document sits on the same
+  colour as the frame. }
+function TChatItem.AmbientMdTheme: TMdTheme;
+
+  procedure Rebase(var AAttr: TAttr);
+  begin
+    AAttr.Bg := FTheme.RaisedBg;
+    Exclude(AAttr.Style, sfScreenBg);
+  end;
+
+var
+  I: Integer;
+begin
+  Result := DefaultMdTheme;
+  Rebase(Result.Paragraph);
+  Rebase(Result.ListBullet);
+  Rebase(Result.Quote);
+  Rebase(Result.Link);
+  Rebase(Result.Rule);
+  Rebase(Result.Bold);
+  Rebase(Result.Italic);
+  Rebase(Result.Strike);
+  Rebase(Result.Muted);
+  for I := 1 to 6 do
+    Rebase(Result.Heading[I]);
+  { Inline code keeps its own chip background (the sunken surface), so the chip
+    still stands out against the raised box. }
 end;
 
 procedure TChatItem.Materialize;
@@ -568,7 +647,32 @@ end;
 
 function TChatItem.Condenseable: Boolean;
 begin
-  Result := (FKind in [ckThought, ckTool, ckAmbient]);
+  { A thought/tool condenses (first + ellipsis + last rows) and is collapsible.
+    An ambient block is a box with a disclosure caret (down/up); it shows its
+    full body, so it never condenses. }
+  Result := FKind in [ckThought, ckTool];
+end;
+
+function TChatItem.CaretShown: Boolean;
+var
+  Rows: TWrappedRows;
+begin
+  { An ambient box always offers the caret: it hides its document when
+    collapsed. A thought/tool shows it only when there is more than the
+    condensed view would show, so a short body has nothing to hide. }
+  if FKind = ckAmbient then
+    Exit(True);
+  if not Condenseable then
+    Exit(False);
+  if (FSrc = nil) or (FAppliedSrc <> FTextVer) then
+  begin
+    if FSrc = nil then
+      FSrc := TTextBlock.Create([], wmWord);
+    FSrc.SetText(FBody, FTheme.Text);
+    FAppliedSrc := FTextVer;
+  end;
+  Rows := FSrc.WrappedRows(InnerWidth(FBounds.W));
+  Result := (not FLive) and (Length(Rows) > CondenseThreshold);
 end;
 
 procedure TChatItem.ApplyDisplay(AWidth: Integer);
@@ -579,7 +683,13 @@ var
   One: TSpan;
 begin
   if FText = nil then
+  begin
+    { An ambient renders markdown, so there is no span body to build; still
+      record whether the drawn view is the compact one, for the caret. }
+    if FKind = ckAmbient then
+      FDisplayCondensed := not FExpanded;
     Exit;
+  end;
   if (FAppliedVer = FTextVer) and (FAppliedWidth = AWidth) then
     Exit;
   if not Condenseable then
@@ -588,6 +698,7 @@ begin
     One.Text := UnicodeString(FBody);
     One.Attr := BodyAttr;
     FText.SetSpans([One]);
+    FDisplayCondensed := False;
   end
   else
   begin
@@ -599,6 +710,8 @@ begin
       FAppliedSrc := FTextVer;
     end;
     Rows := FSrc.WrappedRows(InnerWidth(AWidth));
+    FDisplayCondensed := (not FLive) and (not FExpanded) and
+      (Length(Rows) > CondenseThreshold);
     if Length(Rows) = 0 then
       Res := ''
     else if FLive then
@@ -697,6 +810,10 @@ begin
     ckUser, ckQueued, ckAmbient:
       begin
         BodyRows(AAvail.W, TextRows, Lines);
+        { A compact ambient shows only its first AmbientCompactRows rows. }
+        if (FKind = ckAmbient) and (not FExpanded) and
+          (TextRows > AmbientCompactRows) then
+          TextRows := AmbientCompactRows;
         Result.H := TextRows + 2;   { top border, body, bottom border }
       end;
     ckAssistant, ckError:
@@ -736,6 +853,11 @@ begin
     BodyRows(ABounds.W, TextRows, Lines);
     if TextRows > ABounds.H - 2 then
       TextRows := ABounds.H - 2;
+    { A compact ambient shows only its first AmbientCompactRows rows; the
+      markdown view is arranged short and its Render clips to it. }
+    if (FKind = ckAmbient) and (not FExpanded) and
+      (TextRows > AmbientCompactRows) then
+      TextRows := AmbientCompactRows;
     BodyR := Rc(ABounds.X + 2, ABounds.Y + 1, InnerW, TextRows);
   end
   else
@@ -758,10 +880,10 @@ end;
 procedure TChatItem.Render(const S: ISurface);
 var
   L, R, T, B, X, I, TitleMaxW: Integer;
-  Border, SurfaceAttr, TitleAttr: TAttr;
+  Border, SurfaceAttr, TitleAttr, CaretAttr: TAttr;
   Clip: TRect;
   Title, DispLabel: UnicodeString;
-  MarkCh: UnicodeString;
+  CaretCh: UnicodeString;
   Right: UnicodeString;
 begin
   if (FBounds.W < 1) or (FBounds.H < 1) then
@@ -812,14 +934,19 @@ begin
     TitleMaxW := 1;
   DispLabel := TruncateTitle(UnicodeString(FLabel), TitleMaxW);
 
-  { A condensed thought/tool (> CondenseThreshold wrapped rows, not expanded)
-    shows the double-headed vertical arrow as its caret; a shorter one needs no
-    caret, and a live block never shows one. }
-  if Condenseable and (not FLive) and (not FExpanded) and (FSrc <> nil) and
-    (FSrc.LineCountAt(InnerWidth(FBounds.W)) > CaretThreshold) then
-    MarkCh := '↕'
+  { A disclosure caret rides the bottom border of any bordered message
+    container that has hidden content: a down caret while the body is condensed
+    (collapsed), an up caret once expanded. A short thought/tool has nothing to
+    hide and shows none. }
+  if CaretShown then
+  begin
+    if FDisplayCondensed then
+      CaretCh := CaretDown
+    else
+      CaretCh := CaretUp;
+  end
   else
-    MarkCh := '';
+    CaretCh := '';
 
   { Boxed kinds. }
   if (FKind = ckUser) or (FKind = ckQueued) then
@@ -852,6 +979,12 @@ begin
 
   S.FillRect(FBounds, SurfaceAttr);
 
+  { The caret reads on the box's own background, so the blank cells around it
+    match the container rather than the panel behind it. }
+  CaretAttr := FTheme.Text;
+  CaretAttr.Bg := SurfaceAttr.Bg;
+  Exclude(CaretAttr.Style, sfScreenBg);
+
   if FKind = ckUser then
   begin
     PutCh(S, L, T, '╭', Border);
@@ -862,6 +995,12 @@ begin
       PutCh(S, X, T, '─', Border);
     for X := L + 1 to R - 1 do
       PutCh(S, X, B, '═', Border);
+    if CaretCh <> '' then
+    begin
+      PutCh(S, R - 2, B, ' ', Border);
+      PutText(S, R - 3, B, CaretCh, CaretAttr);
+      PutCh(S, R - 4, B, ' ', Border);
+    end;
     Clip := S.ClipRect;
     for I := T + 1 to B - 1 do
       if (I >= Clip.Y) and (I < Clip.Y + Clip.H) then
@@ -886,6 +1025,12 @@ begin
       PutCh(S, R, B, '╯', Border);
       for X := L + 1 to R - 1 do
         PutCh(S, X, B, '─', Border);
+      if CaretCh <> '' then
+      begin
+        PutCh(S, R - 2, B, ' ', Border);
+        PutText(S, R - 3, B, CaretCh, CaretAttr);
+        PutCh(S, R - 4, B, ' ', Border);
+      end;
     end
     else
     begin
@@ -901,7 +1046,7 @@ begin
         PutCh(S, L, I, '│', Border);
         PutCh(S, R, I, '│', Border);
       end;
-    Title := UnicodeString(FLabel) + ' ─';
+    Title := ' ' + UnicodeString(FLabel) + ' ─';
     if StringWidth(Title) <= FBounds.W - 2 then
     begin
       { The title takes the border's colour: teal for a queued prompt, violet
@@ -912,14 +1057,10 @@ begin
   end
   else
   begin
-    { ╭─ Label ───── ↕ ─╮ (the caret is ↕ only when the condensed view is long,
-      else a blank). The rule fills the width exactly, so the right corner
-      aligns with the right border. }
+    { ╭─ Label ─────╮ (the rule fills the width exactly, so the right corner
+      aligns with the right border). }
     Title := '╭─ ' + DispLabel + ' ';
-    if MarkCh = '' then
-      Right := '╮'
-    else
-      Right := ' ' + MarkCh + ' ─╮';
+    Right := '╮';
     I := FBounds.W - StringWidth(Title) - StringWidth(Right);
     if I < 1 then
       I := 1;
@@ -928,6 +1069,12 @@ begin
     PutCh(S, R, B, '╯', Border);
     for X := L + 1 to R - 1 do
       PutCh(S, X, B, '─', Border);
+    if CaretCh <> '' then
+    begin
+      PutCh(S, R - 2, B, ' ', Border);
+      PutText(S, R - 3, B, CaretCh, CaretAttr);
+      PutCh(S, R - 4, B, ' ', Border);
+    end;
     Clip := S.ClipRect;
     for I := T + 1 to B - 1 do
       if (I >= Clip.Y) and (I < Clip.Y + Clip.H) then
@@ -937,7 +1084,10 @@ begin
       end;
   end;
 
-  FText.Render(S);
+  if FKind = ckAmbient then
+    FMarkdown.Render(S)
+  else
+    FText.Render(S);
 end;
 
 function TChatItem.HandleEvent(const E: TInputEvent): Boolean;
@@ -1317,14 +1467,16 @@ end;
 function TChatStream.Add(AKind: TChatKind; const ALabel, AText: string): TChatItem;
 begin
   Result := FStack.Add(AKind, ALabel, AText);
-  FFollow := True;
+  { Follow only if we were already following: a new block must not yank a reader
+    who scrolled up. The next Arrange scrolls to the bottom when following. }
 end;
 
 procedure TChatStream.Clear;
 begin
+  { Clear the blocks but keep the scroll behaviour: a rebuild that preserves the
+    anchor (a prepend) must not snap to the bottom. Clear follows again only via
+    FollowBottom. }
   FStack.Clear;
-  FFollow := True;
-  FScroll.ScrollY := 0;
 end;
 
 procedure TChatStream.Remove(AItem: TChatItem);
@@ -1353,6 +1505,20 @@ procedure TChatStream.FollowBottom;
 begin
   FFollow := True;
   FScroll.ScrollY := High(Integer);
+end;
+
+procedure TChatStream.PreserveAnchor;
+begin
+  { Record the offset before the content is rebuilt; Arrange applies it once the
+    new (taller) content height is known, so the visible content stays put. }
+  FAnchorScroll := FScroll.ScrollY;
+  FAnchorHeight := ContentHeight;
+  FAnchorPending := True;
+end;
+
+procedure TChatStream.ScrollTo(ARow: Integer);
+begin
+  FScroll.ScrollY := ARow;
 end;
 
 procedure TChatStream.SetOnToggle(AValue: TNotifyEvent);
@@ -1431,7 +1597,15 @@ begin
   B := ABounds;
   Inc(B.W);
   FScroll.Arrange(B);
-  if FFollow then
+  if FAnchorPending then
+  begin
+    { A prepend: keep the visible content in place by adding the height the
+      content grew above the anchor. Applied once, now that the new content
+      height is known. }
+    FAnchorPending := False;
+    FScroll.ScrollY := FAnchorScroll + (ContentHeight - FAnchorHeight);
+  end
+  else if FFollow then
     FScroll.ScrollY := High(Integer);
 end;
 

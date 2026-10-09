@@ -44,6 +44,10 @@ type
     procedure TestTurnDividerDrawsRuleAndRightAlignedStats;
     procedure TestCollapsedToolDrawsAThinFullContrastRule;
     procedure TestAmbientBlockRenders;
+    procedure TestAmbientRendersMarkdownInABox;
+    procedure TestAmbientCaretRidesTheBottomBorder;
+    procedure TestCollapsedAmbientIsShorter;
+    procedure TestCollapsedToolCaretRidesTheBottomBorder;
     procedure TestLongToolTitleIsTruncated;
     procedure TestLiveThoughtShowsTheTail;
     procedure TestExpandedThoughtDrawsABox;
@@ -58,6 +62,9 @@ type
     procedure TestStreamKeepsTheNewestBlockVisible;
     procedure TestStreamReservesTheBottomInset;
     procedure TestStreamFiresNeedOlderAtTheTop;
+    procedure TestANewBlockDoesNotYankAScrolledUpReader;
+    procedure TestAReaderAtTheBottomKeepsFollowing;
+    procedure TestPreserveAnchorKeepsTheVisibleContent;
     procedure TestStackMaterializesOnlyTheWindow;
     procedure TestStackLayoutDoesNotThrashAcrossMeasureAndArrange;
     procedure TestStreamWidthFollowsTheViewport;
@@ -985,6 +992,213 @@ begin
     It.Render(S);
   finally
     It.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestAmbientRendersMarkdownInABox;
+var
+  It: TChatItem;
+  S: TSurfaceMemory;
+begin
+  S := TSurfaceMemory.Create(40, 8);
+  try
+    It := TChatItem.Create(ckAmbient, 'checkpoint', '**bold** text', FTheme);
+    try
+      It.Arrange(Rc(0, 0, 40, 3));
+      It.Render(S);
+      { A bordered box with the label in the top border, and the markdown body
+        inside it (the bold run is styled). }
+      AssertEquals('rounded top-left', '╭', S.CellAt(0, 0).Ch);
+      AssertTrue('label in the top border',
+        Pos('checkpoint', S.RowText(0, 0, 40)) > 0);
+      AssertTrue('bold run styled', sfBold in S.CellAt(2, 1).Attr.Style);
+      { The document text sits on the box's raised background, not the chat
+        panel's default. }
+      AssertEquals('markdown on the box background', FTheme.RaisedBg,
+        S.CellAt(2, 1).Attr.Bg);
+    finally
+      It.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestAmbientCaretRidesTheBottomBorder;
+var
+  It: TChatItem;
+  S: TSurfaceMemory;
+begin
+  S := TSurfaceMemory.Create(40, 8);
+  try
+    It := TChatItem.Create(ckAmbient, 'checkpoint', 'the document body', FTheme);
+    try
+      { Expanded: an up caret sits in the bottom border, one column left of the
+        corner, with a blank cell on either side. }
+      It.Expanded := True;
+      It.Arrange(Rc(0, 0, 40, 3));
+      It.Render(S);
+      AssertEquals('up caret', '▲',
+        S.CellAt(It.Bounds.X + It.Bounds.W - 4, It.Bounds.H - 1).Ch);
+      AssertEquals('gap left of the caret', ' ',
+        S.CellAt(It.Bounds.X + It.Bounds.W - 5, It.Bounds.H - 1).Ch);
+      AssertEquals('gap right of the caret', ' ',
+        S.CellAt(It.Bounds.X + It.Bounds.W - 3, It.Bounds.H - 1).Ch);
+      AssertEquals('bottom-right corner', '╯',
+        S.CellAt(It.Bounds.X + It.Bounds.W - 1, It.Bounds.H - 1).Ch);
+    finally
+      It.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestCollapsedAmbientIsShorter;
+var
+  It: TChatItem;
+  Full, Compact: Integer;
+begin
+  It := TChatItem.Create(ckAmbient, 'checkpoint',
+    '- line one' + #10 + '- line two' + #10 + '- line three' + #10 +
+    '- line four' + #10 + '- line five', FTheme);
+  try
+    It.Expanded := True;
+    Full := It.Measure(Avail(40, 0)).H;
+    It.Expanded := False;
+    Compact := It.Measure(Avail(40, 0)).H;
+    AssertTrue('a compact ambient is shorter', Compact < Full);
+  finally
+    It.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestCollapsedToolCaretRidesTheBottomBorder;
+var
+  It: TChatItem;
+  S: TSurfaceMemory;
+begin
+  { A long tool body collapses, so the caret rides the bottom border: down
+    while collapsed, up when expanded. }
+  It := TChatItem.Create(ckTool, 'search', '', FTheme);
+  try
+    It.SetText('alpha bravo charlie delta echo foxtrot golf hotel india juliet ' +
+      'kilo lima mike november oscar papa quebec romeo sierra tango uniform ' +
+      'victor whiskey xray yankee zulu alpha bravo charlie delta echo foxtrot ' +
+      'golf hotel india juliet kilo lima mike november oscar papa quebec romeo ' +
+      'sierra tango uniform victor whiskey xray yankee zulu');
+    It.Expanded := False;
+    It.Arrange(Rc(0, 0, 30, 8));
+    S := TSurfaceMemory.Create(30, 8);
+    try
+      It.Render(S);
+      AssertEquals('down caret while collapsed', '▼',
+        S.CellAt(It.Bounds.X + It.Bounds.W - 4, It.Bounds.H - 1).Ch);
+      AssertEquals('gap right of the caret', ' ',
+        S.CellAt(It.Bounds.X + It.Bounds.W - 3, It.Bounds.H - 1).Ch);
+    finally
+      S.Free;
+    end;
+    It.Expanded := True;
+    It.Arrange(Rc(0, 0, 30, 20));
+    S := TSurfaceMemory.Create(30, 20);
+    try
+      It.Render(S);
+      AssertEquals('up caret when expanded', '▲',
+        S.CellAt(It.Bounds.X + It.Bounds.W - 4, It.Bounds.H - 1).Ch);
+    finally
+      S.Free;
+    end;
+  finally
+    It.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestANewBlockDoesNotYankAScrolledUpReader;
+var
+  St: TChatStream;
+  E: TInputEvent;
+  I, Up: Integer;
+begin
+  St := TChatStream.Create(FTheme);
+  try
+    for I := 1 to 20 do
+      St.Add(ckAssistant, '', 'line ' + IntToStr(I));
+    St.Arrange(Rc(0, 0, 30, 6));
+    AssertTrue('following at the bottom', St.Following);
+    { Scroll up: no longer following. }
+    E := Default(TInputEvent);
+    E.Kind := ikKey;
+    E.Key.Kind := kkUp;
+    for I := 1 to 5 do
+      St.HandleEvent(E);
+    AssertFalse('no longer following', St.Following);
+    Up := St.ScrollOffset;
+    AssertTrue('scrolled up', Up > 0);
+    { A new block arrives: a reader who scrolled up must not be yanked down. }
+    St.Add(ckAssistant, '', 'line 21');
+    St.Arrange(Rc(0, 0, 30, 6));
+    AssertEquals('scroll position held', Up, St.ScrollOffset);
+  finally
+    St.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestAReaderAtTheBottomKeepsFollowing;
+var
+  St: TChatStream;
+  I: Integer;
+begin
+  St := TChatStream.Create(FTheme);
+  try
+    for I := 1 to 20 do
+      St.Add(ckAssistant, '', 'line ' + IntToStr(I));
+    St.Arrange(Rc(0, 0, 30, 6));
+    { Following: new content stays pinned to the bottom (offset = max scroll). }
+    St.Add(ckAssistant, '', 'line 21');
+    St.Arrange(Rc(0, 0, 30, 6));
+    AssertTrue('still following', St.Following);
+    AssertEquals('pinned to the bottom', St.ContentHeight - 6, St.ScrollOffset);
+  finally
+    St.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestPreserveAnchorKeepsTheVisibleContent;
+var
+  St: TChatStream;
+  E: TInputEvent;
+  I, Before, After, Mid: Integer;
+begin
+  St := TChatStream.Create(FTheme);
+  try
+    for I := 1 to 20 do
+      St.Add(ckAssistant, '', 'line ' + IntToStr(I));
+    St.Arrange(Rc(0, 0, 30, 6));
+    { Scroll up to a middle position. }
+    E := Default(TInputEvent);
+    E.Kind := ikKey;
+    E.Key.Kind := kkUp;
+    for I := 1 to 4 do
+      St.HandleEvent(E);
+    Mid := St.ScrollOffset;
+    Before := St.ContentHeight;
+    { A prepend: hold the anchor, rebuild with older content above, re-arrange. }
+    St.PreserveAnchor;
+    St.Clear;
+    for I := 1 to 5 do
+      St.Add(ckAssistant, '', 'older ' + IntToStr(I));
+    for I := 1 to 20 do
+      St.Add(ckAssistant, '', 'line ' + IntToStr(I));
+    St.Arrange(Rc(0, 0, 30, 6));
+    After := St.ContentHeight;
+    AssertTrue('the content grew', After > Before);
+    { The offset shifted by exactly the growth above the anchor, so the visible
+      content stays put. }
+    AssertEquals('anchor held across the prepend', Mid + (After - Before),
+      St.ScrollOffset);
+  finally
+    St.Free;
   end;
 end;
 
