@@ -238,6 +238,26 @@ library does not default to it.
 - No `TSemaphore` on macOS — `TCriticalSection` + `TSimpleEvent`.
 - Never touch a widget off the UI thread; rendering goes through the UI scheduler.
 
+## Strategy
+
+The library is foundational, so it is built early — but architecture earns its
+keep by being *used*, so each step is proven by a real consumer before the next:
+
+1. **Core, single-threaded** — a scheduler (queue/asap), a bounded subject, a
+   future, a cancellation token, and a virtual clock. Tested standalone.
+2. **First vertical: the TUI drain** ([`TUI_Event_Graph`](../TUI_Event_Graph/FEATURE.md)
+   v1) — the core under real load, fixing the unbounded-drain freeze. **This is
+   the proof.**
+3. **Observables and `Scan`** — the TUI's state-as-a-stream (v2).
+4. **The executor** — when a consumer needs work off the calling thread (the
+   Remote Agent Link, or parallel tools); it then subsumes the hand-rolled
+   `TAgentPool`.
+5. **The operator surface** — the long tail, added as consumers need it. Full
+   parity is the target, not the entry price.
+
+**Extractability is the point.** The library must stay dependency-free (no harness
+or engine units; asserted by a test) so it can be lifted into the other apps.
+
 ## Constraints
 
 ### Technical
@@ -252,8 +272,10 @@ library does not default to it.
 
 ### Business / Time
 
-- No deadline. Sequenced behind the critical path; picked up as a standalone
-  effort.
+- No deadline. **Foundational, started early**: the library is the architecture
+  for concurrency here and the base for other Pascal apps, so it is built
+  up-front rather than after the critical path. Its progress is gated by a real
+  consumer at each step (see *Strategy*).
 
 ## Dependencies
 
