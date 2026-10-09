@@ -1,14 +1,15 @@
 # GocciaScript Embedding (research)
 
-Notes from the GocciaScript source and docs, for the two things we want from it:
+Notes from the GocciaScript source and docs, for what we want from it: a
+**composed-tool sandbox** (`Composed_Tool_Sandbox`). The model writes one script
+that **calls our gated tools** — loops, chaining, conditionals — as **one** tool
+call, so it stops reaching for `bash` to orchestrate and every file modification
+still goes through our gate.
 
-1. **A capability-free compute tier** (`Sandboxed_Script_Compute`): the model
-   writes a small script for deterministic data/text work between "think" and
-   "act".
-2. **A composed-tool sandbox**: the model writes a script that **calls our tools**
-   — loops, chaining, conditionals — as **one** tool call, so it stops reaching
-   for `bash` to orchestrate and every file modification still goes through our
-   gate.
+(The feature began as a capability-free *compute* tier — a script beside the tools.
+That framing is subsumed: a script that calls no tool *is* the compute case, so
+there is one feature, not two. The surface and its rules now live in
+`docs/features/Composed_Tool_Sandbox/FEATURE.md`.)
 
 ## Where the source lives
 
@@ -54,8 +55,9 @@ sandbox:
   `callback` is `function(const AArgs: TGocciaArgumentsCollection; const AThisValue: TGocciaValue): TGocciaValue of object`
 - a namespace with methods: `TGocciaObjectValue.Create` + `RegisterNativeMethod(...)`
 
-So `files.read(path)`, `files.edit(path, old, new)`, `search.replace(glob, …)`
-become ordinary JS calls whose Pascal callbacks are **our gated tools**.
+So `tools.file_read(path)`, `tools.file_edit(path, old, new)`,
+`tools.file_search_replace(glob, …)` become ordinary JS calls whose Pascal
+callbacks are **our gated tools**.
 
 **Limits.** `StartExecutionTimeout(ms)` / `ClearExecutionTimeout`,
 `StartInstructionLimit(steps)`, `SetMaxStackDepth(frames)`, and the GC's
@@ -90,18 +92,16 @@ one-shot use, notable for a long-lived engine.
 **GC.** A mark-and-sweep GC initializes automatically; no manual interaction in
 the normal case.
 
-## How it maps to our two uses
+## How it maps to our use
 
-**Compute tier.** `TGocciaCapabilities.None`, core-only `TGocciaEngine`, a timeout,
-an instruction cap, a memory cap, console capture for the result. No FS, no net,
-no exec — it can only compute. That is exactly `Sandboxed_Script_Compute`'s
-"capability-free compute tier".
-
-**Composed-tool sandbox.** Same capability-free engine, but we **inject the
-harness's tools as native functions/objects**. The script then loops and chains
-tool calls; the only way to touch the world is through those callbacks, so every
-mutation is **gated, logged, and snapshot-intercepted** exactly as a direct call
-would be. One model turn produces one script instead of N tool round-trips.
+`TGocciaCapabilities.None`, core-only `TGocciaEngine`, a timeout, an instruction
+cap, a memory cap, console capture for the result — no FS, no net, no exec. On top
+of that we **inject the harness's tools as native functions/objects**. The script
+then loops and chains tool calls; the only way to touch the world is through those
+callbacks, so every mutation is **gated, logged, and snapshot-intercepted** exactly
+as a direct call would be. One model turn produces one script instead of N tool
+round-trips. The surface and its rules are specified in
+`docs/features/Composed_Tool_Sandbox/FEATURE.md`.
 
 The critical invariant: **the sandbox must not become a bash backdoor.** No
 `exec`, no `ffi`, no `net`, no `read` outside the workspace; the injected tool
@@ -109,33 +109,7 @@ functions go through the same approval gate and the same file-modification
 interception as a direct tool call — otherwise the gate has just moved one level
 up and we have re-created the ungated shell.
 
-## End to end
-
-The full picture, in the order it would land:
-
-1. **Vendor** — `scripts/fetch-goccia.sh` → `deps/goccia/` (pinned, checksummed).
-   *Done.*
-2. **Compute tier** (`Sandboxed_Script_Compute`) — a capability-free engine: no
-   FS, net, or exec; a timeout, an instruction cap, a memory cap; the script's
-   output is the tool result. The model's "think in code" step for deterministic
-   data/text work.
-3. **Composed-tool sandbox** — the same capability-free engine, but with the
-   harness's tools **injected as native functions/objects**. The model writes one
-   script that loops and chains tool calls; every call is the same gated,
-   approval-checked, snapshot-intercepted path as a direct call. One turn, N tool
-   calls.
-4. **First-class edit tools** — the table above: `apply_patch`, a regex
-   `edit_file`, `search_replace`, `edit_json`/`edit_yaml`, file ops. These make the
-   gated path the *easy* path, so the sandbox is an optimization rather than a
-   requirement.
-5. **Snapshots** (`Workspace_Snapshots`) — every tool-driven file change is
-   intercepted and recorded, so the operator can see a turn's diff and undo it.
-   The sandbox's calls go through the same interception, or the feature has a hole.
-
-The ordering matters: (1) unblocks (2) and (3); (4) is independently valuable and
-shrinks the need for (3); (5) is what makes all of it safe to let run.
-
-
+## The bash idioms we replace with first-class tools
 
 Agents reach for `bash` when a tool is missing. The strategies, grouped (the
 *group* is the tool to add):
@@ -157,88 +131,26 @@ The point is not to ban `bash` (you cannot); it is to make the **gated** path th
 over a shell we cannot — and the sandbox then removes the *orchestration* reason
 to use it at all.
 
-## The VM tool surface (`tools.*`)
+## Roadmap
 
-The sandbox exposes the harness's tools as **one global object, `tools`**, with
-snake_case methods. They are **async** (each returns a Promise), so a script
-awaits them and a loop over many files is still one turn:
+The full picture, in the order it lands:
 
-```javascript
-const src = await tools.file_read("some/file.ps");
-const files = await tools.file_glob("src/**/*.pas");
-for (const f of files) {
-  await tools.file_replace_regex(f, "OldName", "NewName", { all: true });
-}
-await tools.patch_apply(patchText, { dryRun: true });
-```
+1. **Vendor** — `scripts/fetch-goccia.sh` → `deps/goccia/` (pinned, checksummed).
+   *Done.*
+2. **Composed-tool sandbox** (`Composed_Tool_Sandbox`) — the capability-free
+   engine with the harness's tools **injected as native functions/objects**. One
+   script, N tool calls; every call the same gated, approval-checked,
+   snapshot-intercepted path as a direct call.
+3. **First-class edit tools** — the table above: `apply_patch`, a regex
+   `edit_file`, `search_replace`, `edit_json`/`edit_yaml`, file ops. These make the
+   gated path the *easy* path, so the sandbox is an optimization rather than a
+   requirement.
+4. **Snapshots** (`Workspace_Snapshots`) — every tool-driven file change is
+   intercepted and recorded, so the operator can see a turn's diff and undo it.
+   The sandbox's calls go through the same interception, or the feature has a hole.
 
-The methods, and the bash idiom each replaces:
-
-| VM method | Replaces | Notes |
-| --- | --- | --- |
-| `file_read(path, opts?)` | `cat`, `head`, `tail`, `sed -n 'a,bp'` | `opts`: `{ offset, limit }` for a line range |
-| `file_write(path, content)` | `cat > f <<EOF`, `printf > f`, `tee` | atomic; the existing `write_file` |
-| `file_append(path, content)` | `>>`, `tee -a` | |
-| `file_edit(path, old, new, opts?)` | `ed`/`ex`, small `sed` | exact-string replace; the existing `edit_file` |
-| `file_replace_regex(path, pattern, repl, opts?)` | `sed -i`, `perl -pi -e`, `python -c` | `opts`: `{ all, flags }` |
-| `file_search_replace(glob, pattern, repl, opts?)` | `grep -rl X \| xargs sed -i`, `find … -exec sed` | `opts`: `{ dryRun, all, flags }`; returns the changed paths + counts |
-| `file_delete(path)` | `rm` | |
-| `file_move(src, dst)` | `mv` | |
-| `file_copy(src, dst)` | `cp` | |
-| `file_mkdir(path)` | `mkdir -p` | |
-| `file_list(path, opts?)` | `ls`, `find` | the existing `list_dir` |
-| `file_glob(pattern)` | `find -name`, shell globs | the existing `glob` |
-| `file_grep(pattern, opts?)` | `grep`, `rg` | the existing `grep`; `opts`: `{ glob, context }` |
-| `file_stat(path)` | `stat`, `ls -l` | size, mtime, mode |
-| `json_read(path, pointer?)` | `jq` | |
-| `json_edit(path, pointer, value)` | `jq '…' > f` | validated; the edit is a JSON patch |
-| `yaml_read(path, path_expr?)` | `yq` | |
-| `yaml_edit(path, path_expr, value)` | `yq -i` | validated |
-| `patch_apply(patch, opts?)` | `patch -p1`, `git apply` | `opts`: `{ strip, dryRun }`; unified diff |
-
-Design points to pin:
-
-- **No `command_run` in the sandbox.** The shell is the one mutation path we
-  cannot observe, snapshot, or scope: we do not know which files it changed, so
-  the snapshot store has a hole — and inside a script its approval collapses into
-  the script's single approval, so one "yes" would cover arbitrary shell. The
-  sandbox's contract is that the only way to touch the world is through the typed,
-  gated, intercepted tools; `command_run` breaks it. The agent keeps `run_command`
-  as a **separate, first-class tool call** (its own reason, its own approval, its
-  own audit row) — it just cannot hide one inside a script. The ergonomic cost is
-  a separate build/test call after the script, which is the clearer shape anyway.
-- **No `recall` in the sandbox — and `recall` is not a gated tool.** `recall`
-  reads back a tool result the harness itself spilled into its own artifact store
-  (`Context_Budget`). It touches nothing outside the harness, so it is a
-  **built-in, controlled harness feature that bypasses the approval gate** —
-  gating it would be second-guessing our own bookkeeping. It is also not something
-  the agent should be scripting: it is a retrieval primitive the loop exposes, not
-  a tool to compose. So it stays a direct, first-class call (ungated), never a
-  `tools.*` method.
-- **The gate is for world access.** The corollary: a tool that only reads the
-  harness's own state is not gated and is not scriptable; a tool that touches the
-  world is gated, and is the kind the sandbox may expose.
-- **It is a *view* over the registry, not a second registry.** Each method routes
-  to the same tool, so the approval ref, the `reason` requirement, the audit row,
-  and the snapshot interception are identical to a direct call. If a method
-  bypassed that, the sandbox would be an ungated shell one level up.
-- **Naming.** The VM surface is snake_case noun-verb (`file_read`); the harness's
-  current names are verb-noun (`read_file`). Either rename the tools to match (and
-  migrate the approval refs) or expose the VM names as aliases in the view — a
-  decision, not an accident.
-- **The `reason`.** The harness requires a non-empty `reason` per tool call. In the
-  sandbox the *script* is the one model tool call and carries one reason; the
-  `tools.*` sub-calls inherit it. Confirm that is acceptable, or have the script
-  pass a reason per call.
-- **Approval.** Whether each `tools.*` call prompts, or the outer script call is
-  approved once and the sub-calls are covered by it, is a policy decision — but
-  the default must not be "a script runs N mutations unapproved".
-- **Async by construction.** Native callbacks that block would stall the engine's
-  thread; returning a Promise (resolved on completion) keeps `await` honest and
-  lets the host run the work off the engine thread.
-- **Return values are structured, not text.** A tool returns a value the script
-  composes (a list of paths, a parsed object) — the point of code over a shell
-  pipe. Text-only tools throw that away.
+The ordering matters: (1) unblocks (2); (3) is independently valuable and shrinks
+the need for (2); (4) is what makes all of it safe to let run.
 
 ## Risks / caveats
 
@@ -255,7 +167,7 @@ Design points to pin:
   injected tool functions being *the same* gated, intercepted calls.
 - **Portability.** GocciaScript is FPC-native and builds with our compiler; verify
   the tree-walk vs bytecode choice and the release-binary delta before committing
-  (`Sandboxed_Script_Compute`'s first task is exactly that spike).
+  (`Composed_Tool_Sandbox`'s first task is exactly that spike).
 
 ## Sources
 
@@ -263,6 +175,6 @@ Design points to pin:
   `docs/embedding.md`, `docs/permissions.md`, `docs/capability-audit.md`,
   `docs/architecture.md`, `docs/bytecode-vm.md`, `docs/host-environment.md`,
   `docs/built-ins-ffi.md`.
-- `docs/features/Sandboxed_Script_Compute/FEATURE.md` (the compute tier).
+- `docs/features/Composed_Tool_Sandbox/FEATURE.md` (the feature).
 - `docs/research/cli-agent-harness-parity.md` (the field's "code execution /
   Codemode" direction: opencode, Pi).

@@ -254,4 +254,5 @@ end to end without network.
 - Streaming-aware tool-call display in the CLI.
 - Context trimming/summarization and token budgets.
 - Tool permissioning/approval and per-tool timeouts.
-- Sandboxed script compute as a tool (parked feature).
+- A scripted tool-composition sandbox as a tool (see
+  `../Composed_Tool_Sandbox/`).

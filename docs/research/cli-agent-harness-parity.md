@@ -76,7 +76,7 @@ of writing, not aspirations.
 | Apply patch | ◐ via `edit_file` | ✅ `apply_patch` | ✅ | ✅ | ✅ | ✅ |
 | Browser automation | ✗ | ✅ (MCP / plugin) | ✅ | ✅ Chrome | ◐ (extension) | ◐ (plugin) |
 | Image / vision input | ✗ | ✅ drag-drop images | ✅ `--image` | ✅ | ✅ | ✅ |
-| Sandboxed script compute | ◐ proposed (GocciaScript) | ◐ | ◐ sandbox | ◐ | ✅ Codemode JS sandbox | ◐ (plugin) |
+| Scripted tool composition | ◐ proposed (Composed Tool Sandbox) | ◐ | ◐ sandbox | ◐ | ✅ Codemode JS sandbox | ◐ (plugin) |
 | Custom tools at runtime | ◐ Pascal units, no runtime plugin | ✅ custom tools | ✅ plugins | ✅ plugins | ✅ TS extensions | ✅ plugins |
 | MCP client | ◐ designed, parked | ✅ | ✅ | ✅ | ✅ | ◐ plugin, off by default |
 | MCP server (expose itself) | ✗ | ◐ (SDK; third-party `opencode-mcp`) | ✅ `codex mcp-server` | ◐ (SDK) | ◐ (RPC/SDK) | ✅ SDK/ACP |

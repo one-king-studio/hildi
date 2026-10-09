@@ -45,7 +45,8 @@ Full pattern: `docs/guidelines/ponytail.md`.
 - `examples/` - runnable example programs
 - `scripts/` - developer tooling (watch loop)
 - `docs/` - source of truth for what was, is, and should be built
-- `deps/` - vendored third-party units (git submodules)
+- `deps/` - vendored third-party sources, fetched by `scripts/fetch-*.sh`
+  (pinned, checksummed, not committed)
 - `build/` - generated output; never committed
 
 ## Commands
