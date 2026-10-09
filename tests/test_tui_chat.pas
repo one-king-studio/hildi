@@ -18,8 +18,10 @@ type
     FTheme: TTheme;
     FToggles: Integer;
     FNeedOlder: Integer;
+    FScrolled: Integer;
     procedure OnToggle(Sender: TObject);
     procedure NoteNeedOlder(Sender: TObject);
+    procedure NoteScrolled(Sender: TObject);
     function Rc(AX, AY, AW, AH: Integer): TRect;
     function Avail(AW, AH: Integer): TSize;
     function MouseEvent(AX, AY: Integer): TInputEvent;
@@ -66,6 +68,7 @@ type
     procedure TestAReaderAtTheBottomKeepsFollowing;
     procedure TestPreserveAnchorKeepsTheVisibleContent;
     procedure TestScrollToStopsFollowingAndMoves;
+    procedure TestScrollNotifiesTheHost;
     procedure TestStackMaterializesOnlyTheWindow;
     procedure TestStackLayoutDoesNotThrashAcrossMeasureAndArrange;
     procedure TestStreamWidthFollowsTheViewport;
@@ -82,6 +85,7 @@ begin
   FTheme := DarkTheme;
   FToggles := 0;
   FNeedOlder := 0;
+  FScrolled := 0;
 end;
 
 procedure TTuiChatTest.OnToggle(Sender: TObject);
@@ -92,6 +96,11 @@ end;
 procedure TTuiChatTest.NoteNeedOlder(Sender: TObject);
 begin
   Inc(FNeedOlder);
+end;
+
+procedure TTuiChatTest.NoteScrolled(Sender: TObject);
+begin
+  Inc(FScrolled);
 end;
 
 function TTuiChatTest.Rc(AX, AY, AW, AH: Integer): TRect;
@@ -1233,6 +1242,29 @@ begin
     St.Add(ckAssistant, '', 'line 21');
     St.Arrange(Rc(0, 0, 30, 6));
     AssertEquals('held at the top', 0, St.ScrollOffset);
+  finally
+    St.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestScrollNotifiesTheHost;
+var
+  St: TChatStream;
+  E: TInputEvent;
+  I: Integer;
+begin
+  St := TChatStream.Create(FTheme);
+  try
+    St.OnScroll := NoteScrolled;
+    for I := 1 to 20 do
+      St.Add(ckAssistant, '', 'line ' + IntToStr(I));
+    St.Arrange(Rc(0, 0, 30, 6));
+    AssertEquals('no scroll yet', 0, FScrolled);
+    E := Default(TInputEvent);
+    E.Kind := ikKey;
+    E.Key.Kind := kkUp;
+    St.HandleEvent(E);
+    AssertEquals('scrolling notified the host', 1, FScrolled);
   finally
     St.Free;
   end;

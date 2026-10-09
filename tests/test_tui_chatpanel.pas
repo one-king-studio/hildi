@@ -35,6 +35,7 @@ type
     procedure TestSinglePageLeavesTheLeftBorderUniform;
     procedure TestTwoPagesSplitTheLeftBorder;
     procedure TestThreePagesMarkTheCurrentMiddle;
+    procedure TestSetPageIndexMovesTheHeavySegment;
   end;
 
 implementation
@@ -380,6 +381,29 @@ begin
       AssertEquals('thin in the first third', #$2502, S.CellAt(0, 2).Ch);
       AssertEquals('heavy in the middle third', #$2503, S.CellAt(0, 9).Ch);
       AssertEquals('thin in the last third', #$2502, S.CellAt(0, 16).Ch);
+    finally
+      P.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatPanelTest.TestSetPageIndexMovesTheHeavySegment;
+var
+  P: TChatPanel;
+  S: TSurfaceMemory;
+begin
+  S := TSurfaceMemory.Create(40, 20);
+  try
+    P := TChatPanel.Create(FTheme, 'info', 'cta');
+    try
+      P.SetPage(2, 1);           { current = page 2 (bottom half heavy) }
+      P.SetPageIndex(0);         { the view scrolled up into page 1 }
+      P.Arrange(Rc(0, 0, 40, 20));
+      P.Render(S);
+      AssertEquals('first half now heavy', #$2503, S.CellAt(0, 5).Ch);
+      AssertEquals('second half thin', #$2502, S.CellAt(0, 12).Ch);
     finally
       P.Free;
     end;

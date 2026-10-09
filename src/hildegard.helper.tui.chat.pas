@@ -227,10 +227,12 @@ type
     FOnToggle: TNotifyEvent;
     FOnChange: TNotifyEvent;
     FOnNeedOlder: TNotifyEvent;
+    FOnScroll: TNotifyEvent;
     FBottomInset: Integer;
     procedure SetOnToggle(AValue: TNotifyEvent);
     procedure SetOnChange(AValue: TNotifyEvent);
     procedure SetOnNeedOlder(AValue: TNotifyEvent);
+    procedure SetOnScroll(AValue: TNotifyEvent);
     function GetScrollOffset: Integer;
     procedure SetScrollOffset(AValue: Integer);
     procedure SetBottomInset(AValue: Integer);
@@ -267,10 +269,15 @@ type
     { Fired when the operator scrolls to the top, so the host can load older
       history and prepend it. }
     property OnNeedOlder: TNotifyEvent read FOnNeedOlder write SetOnNeedOlder;
+    { Fired when the scroll offset changes, so the host can reflect the position
+      (e.g. which page the viewport is on). }
+    property OnScroll: TNotifyEvent read FOnScroll write SetOnScroll;
     { The scroll offset (0 = top) and the content height, so a host can prepend
       history and keep the visible content in place. }
     property ScrollOffset: Integer read GetScrollOffset write SetScrollOffset;
     function ContentHeight: Integer;
+    { The furthest the view can scroll (0 when the content fits). }
+    function MaxScroll: Integer;
     { True while the view is pinned to the bottom, so new content follows. }
     property Following: Boolean read FFollow;
     { True between PreserveAnchor and the next Arrange (a prepend is in flight),
@@ -1549,6 +1556,11 @@ begin
   FOnNeedOlder := AValue;
 end;
 
+procedure TChatStream.SetOnScroll(AValue: TNotifyEvent);
+begin
+  FOnScroll := AValue;
+end;
+
 function TChatStream.GetScrollOffset: Integer;
 begin
   Result := FScroll.ScrollY;
@@ -1562,6 +1574,11 @@ end;
 function TChatStream.ContentHeight: Integer;
 begin
   Result := FScroll.MaxScrollY + FBounds.H;
+end;
+
+function TChatStream.MaxScroll: Integer;
+begin
+  Result := FScroll.MaxScrollY;
 end;
 
 procedure TChatStream.SetBottomInset(AValue: Integer);
@@ -1631,6 +1648,9 @@ begin
     scroll interaction re-evaluates whether we are following the bottom. }
   if Result and (Scrollish or (FScroll.ScrollY <> Before)) then
     FFollow := FScroll.ScrollY >= FScroll.MaxScrollY;
+  { The position changed: let the host reflect it (e.g. which page is active). }
+  if (FScroll.ScrollY <> Before) and Assigned(FOnScroll) then
+    FOnScroll(Self);
   { At the top on a scroll-up: the host may load older history. }
   if Assigned(FOnNeedOlder) and (FScroll.ScrollY <= 0) and
     (((E.Kind = ikKey) and (E.Key.Kind in [kkUp, kkPageUp, kkHome])) or

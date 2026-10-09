@@ -83,6 +83,8 @@ type
       split into one segment per page, the current page drawn heavy. A single
       page (the default) leaves the border uniform. }
     procedure SetPage(ACount, AIndex: Integer);
+    { Update only the active page (the heavy segment) as the view scrolls. }
+    procedure SetPageIndex(AIndex: Integer);
     { The messages panel's bounds, so the host can map a click on the left-border
       paginator to a page. }
     function MessagesBounds: TRect;
@@ -364,6 +366,15 @@ end;
 function TChatPanel.MessagesBounds: TRect;
 begin
   Result := FMessages.Bounds;
+end;
+
+procedure TChatPanel.SetPageIndex(AIndex: Integer);
+begin
+  FPageIndex := AIndex;
+  if FPageIndex < 0 then
+    FPageIndex := 0;
+  if FPageIndex > FPageCount - 1 then
+    FPageIndex := FPageCount - 1;
 end;
 
 function TChatPanel.HandleEvent(const E: TInputEvent): Boolean;

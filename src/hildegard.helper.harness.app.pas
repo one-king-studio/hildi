@@ -149,6 +149,8 @@ type
     procedure NeedOlderHistory(Sender: TObject);
     { The left-border paginator: a press or drag scrolls to that page. }
     function PageScrub(const E: TInputEvent): Boolean;
+    { The view scrolled: recompute which page the viewport is on. }
+    procedure StreamScrolled(Sender: TObject);
     { The continuation page: one more than the session's checkpoint count. }
     function PageNumber: Integer;
     { The compose changed: show/hide and filter the command palette. }
@@ -345,6 +347,7 @@ begin
   FPanel.Stream.OnToggle := Invalidate;
   FPanel.Stream.OnChange := Invalidate;
   FPanel.Stream.OnNeedOlder := NeedOlderHistory;
+  FPanel.Stream.OnScroll := StreamScrolled;
   FPanel.Compose.OnSubmit := Submit;
   FPanel.Compose.OnChange := ComposeChanged;
   { The command palette: registered commands, shown when the compose starts
@@ -1127,10 +1130,31 @@ begin
   Seg := (I * FPageCount) div H;
   if Seg > FPageCount - 1 then
     Seg := FPageCount - 1;
-  Target := (FPanel.Stream.ContentHeight * Seg) div (FPageCount - 1);
+  Target := (FPanel.Stream.MaxScroll * Seg) div (FPageCount - 1);
   FPanel.Stream.ScrollTo(Target);
+  FPanel.SetPageIndex(Seg);
   FApp.Invalidate;
   Result := True;
+end;
+
+procedure THarnessApp.StreamScrolled(Sender: TObject);
+var
+  MaxScroll, Page: Integer;
+begin
+  { The active page follows the scroll position: the viewport's fraction of the
+    scroll range maps onto the pages, so scrolling up into an earlier page moves
+    the heavy segment up. }
+  if FPageCount < 2 then
+    Exit;
+  MaxScroll := FPanel.Stream.MaxScroll;
+  if MaxScroll <= 0 then
+    Exit;
+  Page := (FPanel.Stream.ScrollOffset * (FPageCount - 1)) div MaxScroll;
+  if Page < 0 then
+    Page := 0;
+  if Page > FPageCount - 1 then
+    Page := FPageCount - 1;
+  FPanel.SetPageIndex(Page);
 end;
 
 procedure THarnessApp.OnLoop;
