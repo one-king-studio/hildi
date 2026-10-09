@@ -18,6 +18,13 @@ type
   { A continuation: a bound method to run later. }
   TNotify = procedure of object;
 
+  { Generic delegates. FPC forbids a generic method inside a generic class, so
+    these are declared here and operators are free functions over them. }
+  TAction<T> = reference to procedure(const AValue: T);
+  TMapper<T, U> = reference to function(const AValue: T): U;
+  TProducer<T> = reference to function: T;
+  TFactory<T> = reference to function(const AError: Exception): T;
+
   { A cancellable handle on work. Unsubscribe is idempotent and safe after the
     work has already run. }
   ISubscription = interface

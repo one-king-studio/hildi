@@ -29,7 +29,8 @@ uses
   test_mcp_client, test_subagent, test_subagent_supervisor,
   test_mcp_cli, test_mcp_http, test_mcp_oauth,
   test_mcp_oauth_flow, test_subagent_sidebar, test_tui_sidebar,
-  test_subagent_spy, test_tui_palette, test_async_scheduler;
+  test_subagent_spy, test_tui_palette, test_async_scheduler,
+  test_async_future;
 
 var
   Runner: TTestRunner;

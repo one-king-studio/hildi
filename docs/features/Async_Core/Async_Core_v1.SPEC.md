@@ -263,12 +263,19 @@ thread is joined on teardown.
 
 ## Open questions
 
-- **Delegate types.** Whether to use FPC's `SysUtils` delegates (`TProc`,
-  `TFunc<…>`) or declare our own — decided at first compile; the interfaces above
-  assume our own.
-- **Generic limitations.** FPC's generics may constrain nested generic methods
-  (`All<T>` over `TFuture<T>`); the fallback is per-type helpers or a
-  `TFuture<TArray<T>>` shim.
+- **Delegate types — resolved.** Declare our own generic `reference to` delegates
+  (`TAction<T>`, `TMapper<T, U>`, `TProducer<T>`, `TFactory<T>`) in `async.base`.
+  FPC supports them, including capture, and they keep the library off `SysUtils`.
+- **FPC generic constraints — resolved (measured, FPC 3.3.1):**
+  - A **generic method inside a generic class is forbidden** ("Declaration of
+    generic inside another generic is not allowed"), so operators are **free
+    functions**, not methods — the Rx "pipeable" shape.
+  - Nested generic brackets need a **space**: `TList<TAction<T> >`, or `>>` parses
+    as a shift.
+  - `TList<TAction<T>>` cannot be **specialised** inside a generic class method
+    (it reports `TList` not found), though the field type itself is fine — use a
+    dynamic array (`TArray<TAction<T> >`) for the callback list.
+  - `Then` is a Pascal **reserved word**; the future's method is `AndThen`.
 - **Operator units.** One `async.operators` unit will get large; splitting by
   category is expected once the contract is proven.
 - **Context backing store.** Interface-keyed dictionary vs. a small association

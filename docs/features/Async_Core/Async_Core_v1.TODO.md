@@ -7,21 +7,19 @@ expresses the next requirement, watch it fail, implement the minimum, refactor,
 
 ## Phase 0 — Build and test skeleton
 
-- [ ] **Build**: add the `src/async/` tree and a build target that compiles the
-      library and its tests **standalone** (no harness units in the closure).
-- [ ] **Test**: a runner for the async suites, wired into `make test` / `make check`.
-- [ ] **Test**: isolation — walk the library's transitive `uses` closure and assert
-      it contains no `hildegard.helper.*` unit.
+- [x] **Build**: `src/async/` plus the `make async-standalone` target — it compiles
+      the library with only `-Fu$(SRC)/async`, so a harness dependency breaks the
+      build. That is the isolation gate (compile-time, stronger than a walk).
+- [x] **Test**: the async suites run under `make test` / `make check`.
 
 ## Phase 1 — Core types and the queue/asap scheduler
 
-- [ ] **Test**: the queue trampoline runs work FIFO and is re-entrant-safe (work
-      scheduled during a drain runs in the same drain, after the current item).
-- [ ] **Implement**: `async.base` — `TUnit`, `ISubscription`,
+- [x] **Implement**: `async.base` — `TUnit`, `ISubscription`,
       `ICancellationToken`, `IObserver<T>`, `ISubscribable<T>`, delegates.
-- [ ] **Test**: asap is FIFO with a head index; a nested drain does not re-run the
+- [x] **Test**: the queue trampoline runs work FIFO and is re-entrant-safe.
+- [x] **Test**: asap is FIFO with a head index; a nested drain does not re-run the
       in-flight job.
-- [ ] **Implement**: `async.scheduler` queue + asap.
+- [x] **Implement**: `async.scheduler` queue + asap, with cancellable jobs.
 
 ## Phase 2 — Context
 
@@ -39,13 +37,16 @@ expresses the next requirement, watch it fail, implement the minimum, refactor,
 
 ## Phase 4 — Future
 
-- [ ] **Test**: resolve/reject once; `Then`/`Catch`/`Finally` ordering; an
-      unhandled rejection is tracked.
-- [ ] **Implement**: `TFuture<T>`.
-- [ ] **Test**: `All`, `AllSettled`, `Race`, `Any`.
-- [ ] **Implement**: the combinators.
-- [ ] **Test**: `Await` drives to settlement; `Await(token)` interrupts; an
-      unsettleable future raises the typed "unsettled" error.
+- [x] **Implement**: `TFuture<T>` — resolve/reject once, `AndThen`/`Catch`, and
+      scheduler-ordered delivery. (`Then` is reserved in Pascal, hence `AndThen`.)
+- [x] **Test**: resolve/reject once; callback ordering; settle-once; deferred
+      delivery through a scheduler.
+- [x] **Test**: `Await` returns the value and raises on a rejected future; a
+      pending future with no scheduler raises rather than hanging.
+- [ ] **Implement**: `Finally`.
+- [ ] **Test + Implement**: `All`, `AllSettled`, `Race`, `Any`.
+- [ ] **Test**: `Await(token)` interrupts.
+- [ ] **Implement**: unhandled-rejection tracking.
 
 ## Phase 5 — Observable and subjects
 
