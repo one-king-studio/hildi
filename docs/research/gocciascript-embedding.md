@@ -157,6 +157,71 @@ The point is not to ban `bash` (you cannot); it is to make the **gated** path th
 over a shell we cannot — and the sandbox then removes the *orchestration* reason
 to use it at all.
 
+## The VM tool surface (`tools.*`)
+
+The sandbox exposes the harness's tools as **one global object, `tools`**, with
+snake_case methods. They are **async** (each returns a Promise), so a script
+awaits them and a loop over many files is still one turn:
+
+```javascript
+const src = await tools.file_read("some/file.ps");
+const files = await tools.file_glob("src/**/*.pas");
+for (const f of files) {
+  await tools.file_replace_regex(f, "OldName", "NewName", { all: true });
+}
+await tools.patch_apply(patchText, { dryRun: true });
+```
+
+The methods, and the bash idiom each replaces:
+
+| VM method | Replaces | Notes |
+| --- | --- | --- |
+| `file_read(path, opts?)` | `cat`, `head`, `tail`, `sed -n 'a,bp'` | `opts`: `{ offset, limit }` for a line range |
+| `file_write(path, content)` | `cat > f <<EOF`, `printf > f`, `tee` | atomic; the existing `write_file` |
+| `file_append(path, content)` | `>>`, `tee -a` | |
+| `file_edit(path, old, new, opts?)` | `ed`/`ex`, small `sed` | exact-string replace; the existing `edit_file` |
+| `file_replace_regex(path, pattern, repl, opts?)` | `sed -i`, `perl -pi -e`, `python -c` | `opts`: `{ all, flags }` |
+| `file_search_replace(glob, pattern, repl, opts?)` | `grep -rl X \| xargs sed -i`, `find … -exec sed` | `opts`: `{ dryRun, all, flags }`; returns the changed paths + counts |
+| `file_delete(path)` | `rm` | |
+| `file_move(src, dst)` | `mv` | |
+| `file_copy(src, dst)` | `cp` | |
+| `file_mkdir(path)` | `mkdir -p` | |
+| `file_list(path, opts?)` | `ls`, `find` | the existing `list_dir` |
+| `file_glob(pattern)` | `find -name`, shell globs | the existing `glob` |
+| `file_grep(pattern, opts?)` | `grep`, `rg` | the existing `grep`; `opts`: `{ glob, context }` |
+| `file_stat(path)` | `stat`, `ls -l` | size, mtime, mode |
+| `json_read(path, pointer?)` | `jq` | |
+| `json_edit(path, pointer, value)` | `jq '…' > f` | validated; the edit is a JSON patch |
+| `yaml_read(path, path_expr?)` | `yq` | |
+| `yaml_edit(path, path_expr, value)` | `yq -i` | validated |
+| `patch_apply(patch, opts?)` | `patch -p1`, `git apply` | `opts`: `{ strip, dryRun }`; unified diff |
+| `command_run(command, opts?)` | the shell itself | the existing `run_command` — still gated, still there for what the tools cannot express |
+| `recall(id, opts?)` | — | the existing `recall_tool_result` |
+
+Design points to pin:
+
+- **It is a *view* over the registry, not a second registry.** Each method routes
+  to the same tool, so the approval ref, the `reason` requirement, the audit row,
+  and the snapshot interception are identical to a direct call. If a method
+  bypassed that, the sandbox would be an ungated shell one level up.
+- **Naming.** The VM surface is snake_case noun-verb (`file_read`); the harness's
+  current names are verb-noun (`read_file`). Either rename the tools to match (and
+  migrate the approval refs) or expose the VM names as aliases in the view — a
+  decision, not an accident.
+- **The `reason`.** The harness requires a non-empty `reason` per tool call. In the
+  sandbox the *script* is the one model tool call and carries one reason; the
+  `tools.*` sub-calls inherit it. Confirm that is acceptable, or have the script
+  pass a reason per call.
+- **Approval.** Whether each `tools.*` call prompts, or the outer script call is
+  approved once and the sub-calls are covered by it, is a policy decision — but
+  the default must not be "a script runs N mutations unapproved".
+- **Async by construction.** Native callbacks that block would stall the engine's
+  thread; returning a Promise (resolved on completion) keeps `await` honest and
+  lets the host run the work off the engine thread.
+- **Return values are structured, not text.** A tool returns a value the script
+  composes (a list of paths, a parsed object) — the point of code over a shell
+  pipe. Text-only tools throw that away.
+
 ## Risks / caveats
 
 - **The vendored source is fetched, not committed.** `scripts/fetch-goccia.sh`
