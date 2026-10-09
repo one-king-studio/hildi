@@ -89,7 +89,7 @@ TEST_SRCS := $(wildcard $(TESTS)/*.pas)
 
 .PHONY: all test test-leak watch check release clean help libsqlite libmbedtls \
         store-demo agent-cli release-agent-cli tui-demo widgets-demo layout-demo \
-        headless-agent tui-agent bench perf agents agent-% mcp-smoke async-standalone
+        headless-agent tui-agent bench perf agents agent-% mcp-smoke async-standalone async-bench
 
 all: $(BIN)/hildegard-helper-demo
 
@@ -232,6 +232,12 @@ test: libsqlite libmbedtls $(BIN)/hildegard-helper-tests
 async-standalone: $(ASYNC_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) -Fu$(SRC)/async -FU$(DBGUNITS) -FE$(BIN) -o$(BIN)/async-standalone $(EXAMPLES)/async_standalone.pas
+
+# A release build of the Async Core throughput benchmark.
+async-bench: $(ASYNC_SRCS)
+	@mkdir -p $(BIN) $(RELUNITS)
+	$(FPC) $(RELEASE) -Fu$(SRC)/async -FU$(RELUNITS) -FE$(BIN) -o$(BIN)/async-bench $(EXAMPLES)/async_bench.pas
+	$(BIN)/async-bench
 
 $(BIN)/hildegard-helper-tests: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)

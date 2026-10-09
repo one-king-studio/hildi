@@ -1096,11 +1096,27 @@ begin
 end;
 
 procedure THarnessApp.FlushToolOutput;
+const
+  { The live block keeps only its tail; a huge command must not grow it without
+    limit. Older text is trimmed, with a marker naming how much went. }
+  MaxLiveChars = 65536;
+var
+  Text: string;
+  Excess: Integer;
 begin
   if FPendingToolOutput = '' then
     Exit;
   if FTool <> nil then
+  begin
     FTool.AppendText(FPendingToolOutput);
+    Text := FTool.Text;
+    if Length(Text) > MaxLiveChars then
+    begin
+      Excess := Length(Text) - MaxLiveChars;
+      FTool.SetText('[' + IntToStr(Excess) + ' earlier chars trimmed]' + #10 +
+        Copy(Text, Excess + 1, MaxLiveChars));
+    end;
+  end;
   FPendingToolOutput := '';
 end;
 
