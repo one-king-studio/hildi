@@ -24,9 +24,17 @@ uses
   async.base, async.observable;
 
 type
+  { A subject is both sides of a stream: subscribers attach to it (Subscribe)
+    and it is fed values (the observer methods). It extends IObserver<T>, so a
+    source can subscribe it directly; the connectable observable relies on that. }
+  ISubject<T> = interface(IObserver<T>)
+    function Subscribe(const AObserver: IObserver<T>): ISubscription;
+  end;
+
   { Multicast, no replay. Once terminated, a new subscriber gets a closed
-    subscription and no notification. }
-  TSubject<T> = class(TInterfacedObject, IObserver<T>, ISubscribable<T>)
+    subscription and no notification. Implements ISubscribable<T> as well, so it
+    can be used anywhere a subscribable is expected. }
+  TSubject<T> = class(TInterfacedObject, ISubscribable<T>, ISubject<T>)
   private
     FLock: TCriticalSection;
     FObservers: TArray<IObserver<T>>;

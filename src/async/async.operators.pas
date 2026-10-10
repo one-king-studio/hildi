@@ -35,7 +35,7 @@ interface
 
 uses
   SysUtils, SyncObjs,
-  async.base, async.observable;
+  async.base, async.observable, async.subject;
 
 type
   TPredicate<T> = reference to function(const AValue: T): Boolean;
@@ -902,6 +902,53 @@ type
   function DistinctOp<T>(const AEquals: TEquality<T>): IOperator<T>;
   function IgnoreElementsOp<T>: IOperator<T>;
   function LastOp<T>: IOperator<T>;
+
+  { --- Multicasting (Phase 8) ------------------------------------------- }
+
+type
+  { A connectable observable: a hot subject fed by a source, but only once
+    Connect is called. Subscribers before Connect wait; Connect starts the
+    source and returns the connection. }
+  IConnectableObservable<T> = interface(ISubscribable<T>)
+    function Connect: ISubscription;
+  end;
+
+  TConnectableObservable<T> = class(TInterfacedObject, IConnectableObservable<T>)
+  private
+    FSource: ISubscribable<T>;
+    FSubject: ISubject<T>;
+    FLock: TCriticalSection;
+    FConnection: ISubscription;
+    FConnected: Boolean;
+  public
+    constructor Create(const ASource: ISubscribable<T>; const ASubject: ISubject<T>);
+    destructor Destroy; override;
+    function Subscribe(const AObserver: IObserver<T>): ISubscription;
+    function Connect: ISubscription;
+  end;
+
+  { An auto-connecting shared observable: the first subscriber connects, the
+    source runs once for all subscribers, and the connection drops when the last
+    unsubscribes (ref-count). }
+  TSharedObservable<T> = class(TInterfacedObject, ISubscribable<T>)
+  private
+    FSource: ISubscribable<T>;
+    FConnectable: IConnectableObservable<T>;
+    FLock: TCriticalSection;
+    FCount: Integer;
+    FConnection: ISubscription;
+  public
+    constructor Create(const ASource: ISubscribable<T>;
+      const AConnectable: IConnectableObservable<T>);
+    destructor Destroy; override;
+    function Subscribe(const AObserver: IObserver<T>): ISubscription;
+  end;
+
+  { The observable for the multicasting free functions. }
+  function Multicast<T>(const ASource: ISubscribable<T>;
+    const ASubject: ISubject<T>): IConnectableObservable<T>;
+  function Publish<T>(const ASource: ISubscribable<T>): IConnectableObservable<T>;
+  function Share<T>(const ASource: ISubscribable<T>): ISubscribable<T>;
 
   { --- Observers for the extra operators -------------------------------- }
 
@@ -2892,6 +2939,125 @@ end;
 function LastOp<T>: IOperator<T>;
 begin
   Result := TLastOperator<T>.Create;
+end;
+
+{ TConnectableObservable<T> }
+
+constructor TConnectableObservable<T>.Create(const ASource: ISubscribable<T>;
+  const ASubject: ISubject<T>);
+begin
+  inherited Create;
+  FSource := ASource;
+  FSubject := ASubject;
+  FLock := TCriticalSection.Create;
+  FConnection := nil;
+  FConnected := False;
+end;
+
+destructor TConnectableObservable<T>.Destroy;
+begin
+  FLock.Free;
+  inherited;
+end;
+
+function TConnectableObservable<T>.Subscribe(const AObserver: IObserver<T>): ISubscription;
+begin
+  { Attach to the shared subject; the source is not run until Connect. }
+  Result := FSubject.Subscribe(AObserver);
+end;
+
+function TConnectableObservable<T>.Connect: ISubscription;
+begin
+  FLock.Acquire;
+  try
+    if FConnected then
+      Exit(FConnection);
+    FConnected := True;
+  finally
+    FLock.Release;
+  end;
+  { Subscribe the subject to the source: this runs the source once, feeding the
+    subject, which fans out to every subscriber. }
+  FConnection := FSource.Subscribe(FSubject);
+  Result := FConnection;
+end;
+
+{ TSharedObservable<T> }
+
+constructor TSharedObservable<T>.Create(const ASource: ISubscribable<T>;
+  const AConnectable: IConnectableObservable<T>);
+begin
+  inherited Create;
+  FSource := ASource;
+  FConnectable := AConnectable;
+  FLock := TCriticalSection.Create;
+  FCount := 0;
+  FConnection := nil;
+end;
+
+destructor TSharedObservable<T>.Destroy;
+begin
+  FLock.Free;
+  inherited;
+end;
+
+function TSharedObservable<T>.Subscribe(const AObserver: IObserver<T>): ISubscription;
+var
+  Count: Integer;
+  Connect: Boolean;
+begin
+  FLock.Acquire;
+  try
+    Inc(FCount);
+    Count := FCount;
+    Connect := Count = 1;
+  finally
+    FLock.Release;
+  end;
+  { Attach to the subject FIRST, so a synchronous source's values reach this
+    subscriber; then the first subscriber connects the source. }
+  FConnectable.Subscribe(AObserver);
+  if Connect then
+    FConnection := FConnectable.Connect;
+  { Wrap a teardown so the last unsubscribe drops the connection (ref-count), so
+    a later subscriber re-connects a fresh run. }
+  Result := TClosureSubscription.Create(
+    procedure
+    var
+      Now: Integer;
+    begin
+      FLock.Acquire;
+      try
+        Dec(FCount);
+        Now := FCount;
+      finally
+        FLock.Release;
+      end;
+      if Now = 0 then
+      begin
+        FConnection.Unsubscribe;
+        FConnection := nil;
+      end;
+    end);
+end;
+
+{ Multicasting free functions }
+
+function Multicast<T>(const ASource: ISubscribable<T>;
+  const ASubject: ISubject<T>): IConnectableObservable<T>;
+begin
+  Result := TConnectableObservable<T>.Create(ASource, ASubject);
+end;
+
+function Publish<T>(const ASource: ISubscribable<T>): IConnectableObservable<T>;
+begin
+  Result := TConnectableObservable<T>.Create(ASource, TSubject<T>.Create);
+end;
+
+function Share<T>(const ASource: ISubscribable<T>): ISubscribable<T>;
+begin
+  Result := TSharedObservable<T>.Create(ASource,
+    TConnectableObservable<T>.Create(ASource, TSubject<T>.Create));
 end;
 
 end.

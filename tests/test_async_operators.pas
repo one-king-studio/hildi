@@ -12,7 +12,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  async.base, async.observable, async.operators;
+  async.base, async.observable, async.subject, async.operators;
 
 type
   TAsyncOperatorsTest = class(TTestCase)
@@ -73,6 +73,9 @@ type
     procedure FinalizeRunsOnCompletion;
     procedure CombineLatestEmitsOnEachUpdate;
     procedure ExtraOperatorsComposeInAPipe;
+    { Multicasting. }
+    procedure PublishRunsTheSourceOnceForAllSubscribers;
+    procedure ShareConnectsOnFirstSubscriber;
   end;
 
 implementation
@@ -499,6 +502,46 @@ begin
       begin Result := A = B; end),
     TakeOp<Integer>(3)]);
   AssertInts(S, '1,2,3', True);
+end;
+
+procedure TAsyncOperatorsTest.PublishRunsTheSourceOnceForAllSubscribers;
+var
+  Conn: IConnectableObservable<Integer>;
+  A, B: IObserver<Integer>;
+begin
+  FSourceRuns := 0;
+  Reset;
+  { A cold source that counts its runs, published (no connect yet). }
+  Conn := Publish<Integer>(Defer<Integer>(function: ISubscribable<Integer>
+    begin
+      Inc(FSourceRuns);
+      Result := IntSource([1, 2, 3]);
+    end));
+  A := RecorderInt;
+  B := RecorderInt;
+  Conn.Subscribe(A);
+  Conn.Subscribe(B);
+  AssertEquals('source not run before Connect', 0, FSourceRuns);
+  Conn.Connect;
+  AssertEquals('source ran exactly once', 1, FSourceRuns);
+  { Both subscribers saw every value; the subject fans out value-by-value. }
+  AssertEquals('both subscribers, fanned out', '1,1,2,2,3,3', FSeq);
+end;
+
+procedure TAsyncOperatorsTest.ShareConnectsOnFirstSubscriber;
+var
+  Shared: ISubscribable<Integer>;
+begin
+  FSourceRuns := 0;
+  Reset;
+  Shared := Share<Integer>(Defer<Integer>(function: ISubscribable<Integer>
+    begin
+      Inc(FSourceRuns);
+      Result := IntSource([1, 2, 3]);
+    end));
+  Shared.Subscribe(RecorderInt);
+  AssertEquals('connected on the first subscriber', 1, FSourceRuns);
+  AssertEquals('values', '1,2,3', FSeq);
 end;
 
 initialization

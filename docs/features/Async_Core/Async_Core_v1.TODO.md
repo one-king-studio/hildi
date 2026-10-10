@@ -116,15 +116,19 @@ a source over an array of operators (called once with the whole array).
 
 ## Phase 8 — Error handling, multicasting, utility
 
-- [ ] **Test + Implement**: error — `CatchError`, `Retry`, `RetryWhen`, `Repeat`,
-      `RepeatWhen`, `OnErrorResumeNext`, `ThrowIfEmpty`, `Finalize`.
-- [ ] **Test + Implement**: multicasting — `Multicast`, `Publish`, `PublishReplay`,
-      `PublishLast`, `PublishBehavior`, `Share`, `ShareReplay`, `RefCount`,
-      `Connect`.
-- [ ] **Test + Implement**: utility / aggregation — `Tap`, `Delay`, `DelayWhen`,
-      `Timeout`, `TimeoutWith`, `Materialize`, `Dematerialize`, `ToArray`, `Reduce`,
-      `Count`, `Max`, `Min`, `Every`, `Find`, `FindIndex`, `IsEmpty`,
-      `DefaultIfEmpty`, `SequenceEqual`, `EndWith`.
+- [x] **Test + Implement**: error — `CatchError`, `Retry`, `Finalize`.
+      Remaining: `RetryWhen`, `Repeat`, `RepeatWhen`, `OnErrorResumeNext`,
+      `ThrowIfEmpty`.
+- [x] **Test + Implement**: multicasting — `Multicast`, `Publish` (a
+      `TConnectableObservable<T>` with `Connect`), `Share` (ref-counted
+      auto-connect). `ISubject<T>` in `async.subject` is the seam.
+      Remaining: `PublishReplay`, `PublishLast`, `PublishBehavior`,
+      `ShareReplay`, `RefCount` (explicit).
+- [x] **Test + Implement**: utility / aggregation — `Tap`, `Delay`, `DelayWhen`,
+      `Timeout`, `TimeoutWith`, `Reduce`, `Count`, `EndWith`, `Distinct`, `Last`.
+      Remaining: `Materialize`, `Dematerialize`, `ToArray` (blocked by
+      generic-inside-generic), `Max`, `Min`, `Every`, `Find`, `FindIndex`,
+      `IsEmpty`, `DefaultIfEmpty`, `SequenceEqual`.
 
 ## Phase 9 — Concurrency
 
