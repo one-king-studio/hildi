@@ -35,16 +35,20 @@ type
     function Snapshot: IContextSnapshot;
   end;
 
+  { A job is claimed by exactly one thread (a worker) or cancelled by exactly
+    one other (the UI). Both transitions are a SINGLE InterlockedCompareExchange
+    on a state word, so no lock is needed: whoever CASes 0 -> its own state wins,
+    and the loser sees the state and does nothing. (A spinlock-as-mutex is NOT
+    safe here on ARM64 without acquire/release barriers; a single CAS is.) }
   TAsyncJob = class(TInterfacedObject, IAsyncJob)
   private
-    FLock: TSpinLock;
-    FClosed: Boolean;
-    FCancelled: Boolean;
+    const Pending = 0; Taken = 1; Cancelled = 2;
+  private
+    FState: Integer;
     FWork: TNotify;
     FSnapshot: IContextSnapshot;
   public
     constructor Create(const AWork: TNotify);
-    destructor Destroy; override;
     procedure Unsubscribe;
     function Closed: Boolean;
     function TakeWork: TNotify;
@@ -88,50 +92,33 @@ implementation
 constructor TAsyncJob.Create(const AWork: TNotify);
 begin
   inherited Create;
-  { A spinlock needs no construction and no heap allocation. }
-  FLock.Init;
+  FState := Pending;
   FWork := AWork;
   { Capture the current context at enqueue time; it travels with the job. }
   FSnapshot := ContextCurrent;
 end;
 
-destructor TAsyncJob.Destroy;
-begin
-  inherited;
-end;
-
 procedure TAsyncJob.Unsubscribe;
 begin
-  FLock.Acquire;
-  try
-    if FClosed then
-      Exit;
-    FCancelled := True;
-    FClosed := True;
+  { Claim the job as cancelled: CAS Pending -> Cancelled. If a worker already
+    took it (Taken) or it is already cancelled, do nothing. }
+  if InterlockedCompareExchange(FState, Cancelled, Pending) = Pending then
     FWork := nil;
-  finally
-    FLock.Release;
-  end;
 end;
 
 function TAsyncJob.Closed: Boolean;
 begin
-  Result := FClosed;
+  Result := FState <> Pending;
 end;
 
 function TAsyncJob.TakeWork: TNotify;
 begin
-  FLock.Acquire;
-  try
-    if FCancelled then
-      Result := nil
-    else
-      Result := FWork;
-    FWork := nil;
-    FClosed := True;
-  finally
-    FLock.Release;
-  end;
+  { Claim the job: CAS Pending -> Taken. If a cancel won, there is no work. }
+  if InterlockedCompareExchange(FState, Taken, Pending) = Pending then
+    Result := FWork
+  else
+    Result := nil;
+  FWork := nil;
 end;
 
 function TAsyncJob.Snapshot: IContextSnapshot;

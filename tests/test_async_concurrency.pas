@@ -31,6 +31,7 @@ type
     procedure ExecutorRunsWorkOnAPoolThread;
     procedure ExecutorJoinsThreadsOnShutdown;
     procedure ExecutorRunsManyJobsAcrossWorkers;
+    procedure ExecutorScheduleBatchRunsEveryJob;
     procedure RunOnSchedulesWork;
     procedure SubscribeOnRunsSubscribeOnTheScheduler;
     procedure ObserveOnDeliversNotificationsOnTheScheduler;
@@ -113,6 +114,25 @@ begin
     Exec.Schedule(BumpRan, 0);
   Exec.Drain;
   AssertEquals('every job ran', 5000, FRan);
+end;
+
+procedure TAsyncConcurrencyTest.ExecutorScheduleBatchRunsEveryJob;
+var
+  Exec: IAsyncScheduler;
+  E: TExecutorScheduler;
+  Works: TArray<TNotify>;
+  I: Integer;
+begin
+  FRan := 0;
+  SetLength(Works, 2000);
+  for I := 0 to High(Works) do
+    Works[I] := BumpRan;
+  E := TExecutorScheduler.Create(4);
+  Exec := E;
+  { ScheduleBatch is an executor method, not part of IAsyncScheduler. }
+  E.ScheduleBatch(Works);
+  Exec.Drain;
+  AssertEquals('every batched job ran', 2000, FRan);
 end;
 
 procedure TAsyncConcurrencyTest.RunOnSchedulesWork;

@@ -29,7 +29,7 @@ type
 
   TFuture<T> = class
   private
-    FLock: TSpinLock;
+    FLock: TCriticalSection;
     FState: TFutureState;
     FValue: T;
     FError: Exception;
@@ -72,7 +72,7 @@ constructor TFuture<T>.Create(const AScheduler: IAsyncScheduler);
 begin
   inherited Create;
   { A spinlock needs no construction and no heap allocation. }
-  FLock.Init;
+  FLock := TCriticalSection.Create;
   FState := fsPending;
   SetLength(FOnFulfilled, 0);
   SetLength(FOnRejected, 0);
@@ -82,6 +82,7 @@ end;
 destructor TFuture<T>.Destroy;
 begin
   FError.Free;
+  FLock.Free;
   inherited;
 end;
 

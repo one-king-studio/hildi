@@ -43,6 +43,12 @@ type
   { A bounded thread pool. Schedule runs work on a pool thread. }
   TExecutorScheduler = class(TInterfacedObject, IAsyncScheduler)
   private
+    { A real mutex, NOT a spinlock: the queue lock is held across TQueue
+      operations and (historically) an event call, and a spinlock that is
+      preempted mid-critical-section livelocks the other workers. A correct
+      spinlock needs acquire/release barriers, which a bare InterlockedExchange
+      does not guarantee on ARM64. Correctness first; the win here is the
+      transition wake and ScheduleBatch, not the lock. }
     FLock: TCriticalSection;
     { A MANUAL-reset wake, signaled while the queue is non-empty and reset when a
       worker finds it empty. Manual reset (not auto) so one SetEvent wakes every
@@ -52,12 +58,18 @@ type
     FIdle: TSimpleEvent;
     FQueue: TQueue<IAsyncJob>;
     FWorkers: TObjectList<TExecutorWorker>;
+    { Outstanding jobs, touched only atomically: incremented inside the queue lock
+      on Schedule (so it is never 0 while a job is queued) and decremented after a
+      job runs, so a worker need not take the lock just to record completion. }
     FPending: Integer;
     FStopped: Boolean;
   public
     constructor Create(AConcurrency: Integer);
     destructor Destroy; override;
     function Schedule(const AWork: TNotify; const ADelayMs: Integer): ISubscription;
+    { Enqueue many jobs under ONE lock and ONE wake - for a bulk producer, so it
+      does not pay the per-Schedule lock + wake N times. }
+    function ScheduleBatch(const AWorks: TArray<TNotify>): ISubscription;
     procedure Drain;
     function HasPending: Boolean;
     { Worker loop helpers (called from a pool thread). }
@@ -208,6 +220,8 @@ begin
   try
     WasEmpty := FQueue.Count = 0;
     FQueue.Enqueue(Job);
+    { Count the job INSIDE the lock, before a worker can see and run it: FPending
+      must never be 0 while a job is queued, or Drain returns early. }
     Inc(FPending);
   finally
     FLock.Release;
@@ -217,6 +231,33 @@ begin
   if WasEmpty then
     FWake.SetEvent;
   Result := Job;
+end;
+
+function TExecutorScheduler.ScheduleBatch(const AWorks: TArray<TNotify>): ISubscription;
+var
+  I: Integer;
+  Job: IAsyncJob;
+  WasEmpty: Boolean;
+  Last: IAsyncJob;
+begin
+  Last := nil;
+  FLock.Acquire;
+  try
+    WasEmpty := FQueue.Count = 0;
+    for I := 0 to High(AWorks) do
+    begin
+      Job := TAsyncJob.Create(AWorks[I]);
+      FQueue.Enqueue(Job);
+      Last := Job;
+    end;
+    { Count inside the lock (see Schedule). }
+    Inc(FPending, Length(AWorks));
+  finally
+    FLock.Release;
+  end;
+  if WasEmpty and (Length(AWorks) > 0) then
+    FWake.SetEvent;
+  Result := Last;
 end;
 
 function TExecutorScheduler.WorkerStep: Boolean;
@@ -232,16 +273,24 @@ begin
     begin
       Job := FQueue.Dequeue;
       Result := True;
-    end
-    else
-      { The queue is empty: reset the manual-reset wake so the next Schedule
-        re-signals it. }
-      FWake.ResetEvent;
+    end;
   finally
     FLock.Release;
   end;
   if not Result then
+  begin
+    { The queue looked empty. Re-check under the lock before resetting the
+      manual-reset wake, so a job enqueued in the gap is not missed: reset only
+      if the queue is STILL empty. Never hold the lock across ResetEvent. }
+    FLock.Acquire;
+    try
+      if FQueue.Count = 0 then
+        FWake.ResetEvent;
+    finally
+      FLock.Release;
+    end;
     Exit;
+  end;
   Work := Job.TakeWork;
   if Assigned(Work) then
   begin
@@ -252,6 +301,8 @@ begin
       ContextLeave(Token);
     end;
   end;
+  { Decrement under the lock, so HasPending (also under the lock) is exact and
+    Drain cannot return early. }
   FLock.Acquire;
   try
     Dec(FPending);
