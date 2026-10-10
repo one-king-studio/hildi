@@ -100,10 +100,11 @@ a source over an array of operators (called once with the whole array).
 - [x] **Test + Implement**: combine — `Zip`, `CombineLatest` (combiner form).
 - [x] **Test + Implement**: fan-in — `Merge`, `Concat`, `Race` (Race is a
       synchronous approximation: the first source wins).
-- [ ] **Deferred — needs the virtual clock wired into the operator set**: the
-      time-based operators (`DebounceTime`, `ThrottleTime`, `SampleTime`,
-      `AuditTime`, `Delay`, `Timeout`, `Timer`, `Interval`). This is the natural
-      next increment; there is no language obstacle.
+- [x] **Test + Implement**: time-based (unit `async.time`, virtual clock) —
+      `Delay`, `DebounceTime`, `ThrottleTime`, `SampleTime`, `Timer`, `Interval`.
+      Each takes an explicit `IAsyncScheduler` (a `TVirtualScheduler` in tests).
+- [ ] **Deferred**: `AuditTime`, `Timeout`, `TimeoutWith`, `DelayWhen` — the same
+      pattern, not yet written.
 
 ## Phase 7 — Flattening and combination
 

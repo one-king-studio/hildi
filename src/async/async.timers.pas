@@ -50,15 +50,24 @@ type
   end;
 
   { A virtual clock. Advance moves it and runs whatever became due, in due order
-    (FIFO for equal due), including timers scheduled while it runs. }
-  TVirtualScheduler = class(TBaseTimerScheduler)
+    (FIFO for equal due), including timers scheduled while it runs. Exposed via
+    IVirtualScheduler so a test can hold it as a refcounted interface: an operator
+    keeps an IAsyncScheduler reference to it, so a raw Free would double-free. }
+  IVirtualScheduler = interface(IAsyncScheduler)
+  ['{A1B2C3D4-1111-2222-3333-444455556666}']
+    procedure Advance(const AMs: Int64);
+    function Now: Int64;
+  end;
+
+  TVirtualScheduler = class(TBaseTimerScheduler, IVirtualScheduler)
   private
     FNow: Int64;
   protected
     function Clock: Int64; override;
   public
     procedure Advance(const AMs: Int64);
-    property Now: Int64 read FNow;
+    function Now: Int64;
+    property NowMs: Int64 read FNow;
   end;
 
   { The same queue on the monotonic wall clock. The owner drives it (Drain runs
@@ -200,6 +209,11 @@ begin
     Entry := TakeEarliestDue(Target);
   end;
   FNow := Target;
+end;
+
+function TVirtualScheduler.Now: Int64;
+begin
+  Result := FNow;
 end;
 
 { TRealScheduler }

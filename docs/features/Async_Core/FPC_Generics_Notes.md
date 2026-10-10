@@ -178,10 +178,16 @@ chain from leaking. Any new operator should do the same.
   `ISubscribable<ISubscribable<T>>`. `Race` here is a synchronous approximation
   (the first source wins because synchronous sources complete in order); a true
   race needs overlapping sources.
-- **Not yet implemented** (no language obstacle): the time-based operators
-  (`DebounceTime`, `ThrottleTime`, `Sample`, `Delay`, `Timeout`, `Timer`,
-  `Interval`) — these need the virtual clock (`async.timers`) wired into the
-  operator set, and are the natural next increment.
+- **Implemented (unit `async.time`)**: the time-based operators `Delay`,
+  `DebounceTime`, `ThrottleTime`, `SampleTime`, and the creation operators
+  `Timer` and `Interval`. Each takes an explicit `IAsyncScheduler` — a
+  `TVirtualScheduler` in tests (driven by `Advance`, no sleeps) or a
+  `TRealScheduler` in production — per the spec's rule that a time-based operator
+  uses the scheduler it is given. The scheduled work is a concrete object method
+  (a `TNotify`), never a closure, and a one-shot action frees itself after it
+  runs.
+- **Not yet implemented**: `AuditTime`, `Timeout`, `TimeoutWith`, `DelayWhen`
+  (each a small addition on the same pattern).
 
 ## Reproducing the probes
 

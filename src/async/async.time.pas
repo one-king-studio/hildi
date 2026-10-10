@@ -1,0 +1,665 @@
+unit async.time;
+{ Time-based operators: Delay, DebounceTime, ThrottleTime, SampleTime, and the
+  creation operators Timer and Interval.
+
+  They take an IAsyncScheduler explicitly - a TVirtualScheduler in tests (driven
+  by Advance, so no wall time passes) or a TRealScheduler in production. This is
+  the spec's rule: a time-based operator uses the scheduler it is given, never
+  Sleep.
+
+  FPC 3.3.1 forbids a free generic function whose body builds an anonymous
+  function, and a generic method with a closure ICEs, so every operator is a free
+  function over concrete observer + observable classes, and the scheduled work is
+  a concrete object method (a TNotify), never a closure. See
+  docs/features/Async_Core/FPC_Generics_Notes.md.
+
+  This library has NO dependency on the harness or any engine unit. }
+
+{$mode delphi}{$H+}
+
+interface
+
+uses
+  SysUtils, SyncObjs,
+  async.base, async.observable, async.scheduler;
+
+type
+  { --- Scheduled actions (concrete, no closures) -------------------------- }
+
+{ Forwards one value when it runs. }
+TValueEmit<T> = class
+public
+  FDown: IObserver<T>;
+  FValue: T;
+  constructor Create(const ADown: IObserver<T>; const AValue: T);
+  procedure Run;
+end;
+
+{ Completes the downstream when it runs. }
+TCompleteEmit<T> = class
+public
+  FDown: IObserver<T>;
+  constructor Create(const ADown: IObserver<T>);
+  procedure Run;
+end;
+
+{ --- Delay -------------------------------------------------------------- }
+
+TDelayObserver<T> = class(TInterfacedObject, IObserver<T>)
+private
+  FDown: IObserver<T>;
+  FScheduler: IAsyncScheduler;
+  FDelayMs: Integer;
+public
+  constructor Create(const ADown: IObserver<T>; const AScheduler: IAsyncScheduler;
+    const ADelayMs: Integer);
+  procedure OnNext(const AValue: T);
+  procedure OnError(const AError: Exception);
+  procedure OnComplete;
+end;
+
+TDelayObservable<T> = class(TInterfacedObject, ISubscribable<T>)
+private
+  FSource: ISubscribable<T>;
+  FScheduler: IAsyncScheduler;
+  FDelayMs: Integer;
+public
+  constructor Create(const ASource: ISubscribable<T>;
+    const AScheduler: IAsyncScheduler; const ADelayMs: Integer);
+  function Subscribe(const AObserver: IObserver<T>): ISubscription;
+end;
+
+{ --- DebounceTime ------------------------------------------------------- }
+
+{ Holds the pending value; the scheduler calls Run after the quiet period. }
+TDebounceEmit<T> = class
+public
+  FDown: IObserver<T>;
+  FValue: T;
+  FHas: Boolean;
+  constructor Create(const ADown: IObserver<T>);
+  procedure Run;
+end;
+
+TDebounceObserver<T> = class(TInterfacedObject, IObserver<T>)
+private
+  FDown: IObserver<T>;
+  FScheduler: IAsyncScheduler;
+  FDelayMs: Integer;
+  FEmit: TDebounceEmit<T>;
+  FPending: ISubscription;
+public
+  constructor Create(const ADown: IObserver<T>; const AScheduler: IAsyncScheduler;
+    const ADelayMs: Integer);
+  destructor Destroy; override;
+  procedure OnNext(const AValue: T);
+  procedure OnError(const AError: Exception);
+  procedure OnComplete;
+end;
+
+TDebounceObservable<T> = class(TInterfacedObject, ISubscribable<T>)
+private
+  FSource: ISubscribable<T>;
+  FScheduler: IAsyncScheduler;
+  FDelayMs: Integer;
+public
+  constructor Create(const ASource: ISubscribable<T>;
+    const AScheduler: IAsyncScheduler; const ADelayMs: Integer);
+  function Subscribe(const AObserver: IObserver<T>): ISubscription;
+end;
+
+{ --- ThrottleTime ------------------------------------------------------- }
+
+{ Forwards the leading value, then ignores values for the window. }
+TThrottleObserver<T> = class(TInterfacedObject, IObserver<T>)
+private
+  FDown: IObserver<T>;
+  FScheduler: IAsyncScheduler;
+  FWindowMs: Integer;
+  FOpen: Boolean;
+  FGate: ISubscription;
+  procedure Reopen;
+public
+  constructor Create(const ADown: IObserver<T>; const AScheduler: IAsyncScheduler;
+    const AWindowMs: Integer);
+  procedure OnNext(const AValue: T);
+  procedure OnError(const AError: Exception);
+  procedure OnComplete;
+end;
+
+TThrottleObservable<T> = class(TInterfacedObject, ISubscribable<T>)
+private
+  FSource: ISubscribable<T>;
+  FScheduler: IAsyncScheduler;
+  FWindowMs: Integer;
+public
+  constructor Create(const ASource: ISubscribable<T>;
+    const AScheduler: IAsyncScheduler; const AWindowMs: Integer);
+  function Subscribe(const AObserver: IObserver<T>): ISubscription;
+end;
+
+{ --- SampleTime --------------------------------------------------------- }
+
+{ Emits the most recent value each time the window elapses. }
+TSampleEmit<T> = class
+public
+  FDown: IObserver<T>;
+  FValue: T;
+  FHas: Boolean;
+  constructor Create(const ADown: IObserver<T>);
+  procedure Run;
+end;
+
+TSampleObserver<T> = class(TInterfacedObject, IObserver<T>)
+private
+  FDown: IObserver<T>;
+  FScheduler: IAsyncScheduler;
+  FPeriodMs: Integer;
+  FEmit: TSampleEmit<T>;
+  FTick: ISubscription;
+  procedure ScheduleTick;
+  procedure Tick;
+public
+  constructor Create(const ADown: IObserver<T>; const AScheduler: IAsyncScheduler;
+    const APeriodMs: Integer);
+  destructor Destroy; override;
+  procedure OnNext(const AValue: T);
+  procedure OnError(const AError: Exception);
+  procedure OnComplete;
+end;
+
+TSampleObservable<T> = class(TInterfacedObject, ISubscribable<T>)
+private
+  FSource: ISubscribable<T>;
+  FScheduler: IAsyncScheduler;
+  FPeriodMs: Integer;
+public
+  constructor Create(const ASource: ISubscribable<T>;
+    const AScheduler: IAsyncScheduler; const APeriodMs: Integer);
+  function Subscribe(const AObserver: IObserver<T>): ISubscription;
+end;
+
+{ --- Timer and Interval ------------------------------------------------- }
+
+TTimerObserver = class(TInterfacedObject, ISubscription)
+private
+  FDown: IObserver<Integer>;
+  FScheduler: IAsyncScheduler;
+  FDelayMs: Integer;
+  FClosed: Boolean;
+public
+  constructor Create(const ADown: IObserver<Integer>;
+    const AScheduler: IAsyncScheduler; const ADelayMs: Integer);
+  procedure Fire;
+  procedure Unsubscribe;
+  function Closed: Boolean;
+end;
+
+TTimerObservable = class(TInterfacedObject, ISubscribable<Integer>)
+private
+  FScheduler: IAsyncScheduler;
+  FDelayMs: Integer;
+public
+  constructor Create(const AScheduler: IAsyncScheduler; const ADelayMs: Integer);
+  function Subscribe(const AObserver: IObserver<Integer>): ISubscription;
+end;
+
+TIntervalObserver = class(TInterfacedObject, ISubscription)
+private
+  FDown: IObserver<Integer>;
+  FScheduler: IAsyncScheduler;
+  FPeriodMs: Integer;
+  FIndex: Integer;
+  FClosed: Boolean;
+public
+  constructor Create(const ADown: IObserver<Integer>;
+    const AScheduler: IAsyncScheduler; const APeriodMs: Integer);
+  procedure Start;
+  procedure Tick;
+  procedure Unsubscribe;
+  function Closed: Boolean;
+end;
+
+TIntervalObservable = class(TInterfacedObject, ISubscribable<Integer>)
+private
+  FScheduler: IAsyncScheduler;
+  FPeriodMs: Integer;
+public
+  constructor Create(const AScheduler: IAsyncScheduler; const APeriodMs: Integer);
+  function Subscribe(const AObserver: IObserver<Integer>): ISubscription;
+end;
+
+{ --- The surface -------------------------------------------------------- }
+
+function Delay<T>(const ASource: ISubscribable<T>;
+  const AScheduler: IAsyncScheduler; const ADelayMs: Integer): ISubscribable<T>;
+function DebounceTime<T>(const ASource: ISubscribable<T>;
+  const AScheduler: IAsyncScheduler; const ADelayMs: Integer): ISubscribable<T>;
+function ThrottleTime<T>(const ASource: ISubscribable<T>;
+  const AScheduler: IAsyncScheduler; const AWindowMs: Integer): ISubscribable<T>;
+function SampleTime<T>(const ASource: ISubscribable<T>;
+  const AScheduler: IAsyncScheduler; const APeriodMs: Integer): ISubscribable<T>;
+function Timer(const AScheduler: IAsyncScheduler;
+  const ADelayMs: Integer): ISubscribable<Integer>;
+function Interval(const AScheduler: IAsyncScheduler;
+  const APeriodMs: Integer): ISubscribable<Integer>;
+
+implementation
+
+{ TValueEmit<T> }
+
+constructor TValueEmit<T>.Create(const ADown: IObserver<T>; const AValue: T);
+begin
+  inherited Create;
+  FDown := ADown;
+  FValue := AValue;
+end;
+
+procedure TValueEmit<T>.Run;
+begin
+  FDown.OnNext(FValue);
+  { A one-shot scheduled action: free it after it runs. Nothing touches Self
+    after this. }
+  Free;
+end;
+
+{ TCompleteEmit<T> }
+
+constructor TCompleteEmit<T>.Create(const ADown: IObserver<T>);
+begin
+  inherited Create;
+  FDown := ADown;
+end;
+
+procedure TCompleteEmit<T>.Run;
+begin
+  FDown.OnComplete;
+  Free;
+end;
+
+{ Delay }
+
+constructor TDelayObserver<T>.Create(const ADown: IObserver<T>;
+  const AScheduler: IAsyncScheduler; const ADelayMs: Integer);
+begin
+  inherited Create;
+  FDown := ADown;
+  FScheduler := AScheduler;
+  FDelayMs := ADelayMs;
+end;
+
+procedure TDelayObserver<T>.OnNext(const AValue: T);
+begin
+  FScheduler.Schedule(TValueEmit<T>.Create(FDown, AValue).Run, FDelayMs);
+end;
+
+procedure TDelayObserver<T>.OnError(const AError: Exception);
+begin
+  FDown.OnError(AError);
+end;
+
+procedure TDelayObserver<T>.OnComplete;
+begin
+  FScheduler.Schedule(TCompleteEmit<T>.Create(FDown).Run, FDelayMs);
+end;
+
+constructor TDelayObservable<T>.Create(const ASource: ISubscribable<T>;
+  const AScheduler: IAsyncScheduler; const ADelayMs: Integer);
+begin
+  inherited Create;
+  FSource := ASource;
+  FScheduler := AScheduler;
+  FDelayMs := ADelayMs;
+end;
+
+function TDelayObservable<T>.Subscribe(const AObserver: IObserver<T>): ISubscription;
+begin
+  Result := FSource.Subscribe(TDelayObserver<T>.Create(AObserver, FScheduler, FDelayMs));
+end;
+
+{ DebounceTime }
+
+constructor TDebounceEmit<T>.Create(const ADown: IObserver<T>);
+begin
+  inherited Create;
+  FDown := ADown;
+  FHas := False;
+end;
+
+procedure TDebounceEmit<T>.Run;
+begin
+  if FHas then
+  begin
+    FHas := False;
+    FDown.OnNext(FValue);
+  end;
+end;
+
+constructor TDebounceObserver<T>.Create(const ADown: IObserver<T>;
+  const AScheduler: IAsyncScheduler; const ADelayMs: Integer);
+begin
+  inherited Create;
+  FDown := ADown;
+  FScheduler := AScheduler;
+  FDelayMs := ADelayMs;
+  FEmit := TDebounceEmit<T>.Create(ADown);
+  FPending := nil;
+end;
+
+destructor TDebounceObserver<T>.Destroy;
+begin
+  FEmit.Free;
+  inherited;
+end;
+
+procedure TDebounceObserver<T>.OnNext(const AValue: T);
+begin
+  FEmit.FValue := AValue;
+  FEmit.FHas := True;
+  if FPending <> nil then
+    FPending.Unsubscribe;
+  FPending := FScheduler.Schedule(FEmit.Run, FDelayMs);
+end;
+
+procedure TDebounceObserver<T>.OnError(const AError: Exception);
+begin
+  FDown.OnError(AError);
+end;
+
+procedure TDebounceObserver<T>.OnComplete;
+begin
+  { Flush a pending value, then complete. }
+  if FEmit.FHas then
+  begin
+    FEmit.FHas := False;
+    FDown.OnNext(FEmit.FValue);
+  end;
+  FDown.OnComplete;
+end;
+
+constructor TDebounceObservable<T>.Create(const ASource: ISubscribable<T>;
+  const AScheduler: IAsyncScheduler; const ADelayMs: Integer);
+begin
+  inherited Create;
+  FSource := ASource;
+  FScheduler := AScheduler;
+  FDelayMs := ADelayMs;
+end;
+
+function TDebounceObservable<T>.Subscribe(const AObserver: IObserver<T>): ISubscription;
+begin
+  Result := FSource.Subscribe(TDebounceObserver<T>.Create(AObserver, FScheduler, FDelayMs));
+end;
+
+{ ThrottleTime }
+
+constructor TThrottleObserver<T>.Create(const ADown: IObserver<T>;
+  const AScheduler: IAsyncScheduler; const AWindowMs: Integer);
+begin
+  inherited Create;
+  FDown := ADown;
+  FScheduler := AScheduler;
+  FWindowMs := AWindowMs;
+  FOpen := True;
+  FGate := nil;
+end;
+
+procedure TThrottleObserver<T>.Reopen;
+begin
+  FOpen := True;
+end;
+
+procedure TThrottleObserver<T>.OnNext(const AValue: T);
+begin
+  if not FOpen then
+    Exit;
+  { Emit the leading value, then close the gate for the window. }
+  FOpen := False;
+  FDown.OnNext(AValue);
+  FGate := FScheduler.Schedule(Reopen, FWindowMs);
+end;
+
+procedure TThrottleObserver<T>.OnError(const AError: Exception);
+begin
+  FDown.OnError(AError);
+end;
+
+procedure TThrottleObserver<T>.OnComplete;
+begin
+  FDown.OnComplete;
+end;
+
+constructor TThrottleObservable<T>.Create(const ASource: ISubscribable<T>;
+  const AScheduler: IAsyncScheduler; const AWindowMs: Integer);
+begin
+  inherited Create;
+  FSource := ASource;
+  FScheduler := AScheduler;
+  FWindowMs := AWindowMs;
+end;
+
+function TThrottleObservable<T>.Subscribe(const AObserver: IObserver<T>): ISubscription;
+begin
+  Result := FSource.Subscribe(TThrottleObserver<T>.Create(AObserver, FScheduler, FWindowMs));
+end;
+
+{ SampleTime }
+
+constructor TSampleEmit<T>.Create(const ADown: IObserver<T>);
+begin
+  inherited Create;
+  FDown := ADown;
+  FHas := False;
+end;
+
+procedure TSampleEmit<T>.Run;
+begin
+  if FHas then
+  begin
+    FHas := False;
+    FDown.OnNext(FValue);
+  end;
+end;
+
+constructor TSampleObserver<T>.Create(const ADown: IObserver<T>;
+  const AScheduler: IAsyncScheduler; const APeriodMs: Integer);
+begin
+  inherited Create;
+  FDown := ADown;
+  FScheduler := AScheduler;
+  FPeriodMs := APeriodMs;
+  FEmit := TSampleEmit<T>.Create(ADown);
+  FTick := nil;
+  ScheduleTick;
+end;
+
+destructor TSampleObserver<T>.Destroy;
+begin
+  FEmit.Free;
+  inherited;
+end;
+
+procedure TSampleObserver<T>.ScheduleTick;
+begin
+  FTick := FScheduler.Schedule(Tick, FPeriodMs);
+end;
+
+procedure TSampleObserver<T>.Tick;
+begin
+  { Emit the latest, then re-arm for the next period. }
+  FEmit.Run;
+  ScheduleTick;
+end;
+
+procedure TSampleObserver<T>.OnNext(const AValue: T);
+begin
+  { Remember the latest; the periodic tick emits it. }
+  FEmit.FValue := AValue;
+  FEmit.FHas := True;
+end;
+
+procedure TSampleObserver<T>.OnError(const AError: Exception);
+begin
+  FDown.OnError(AError);
+end;
+
+procedure TSampleObserver<T>.OnComplete;
+begin
+  FDown.OnComplete;
+end;
+
+constructor TSampleObservable<T>.Create(const ASource: ISubscribable<T>;
+  const AScheduler: IAsyncScheduler; const APeriodMs: Integer);
+begin
+  inherited Create;
+  FSource := ASource;
+  FScheduler := AScheduler;
+  FPeriodMs := APeriodMs;
+end;
+
+function TSampleObservable<T>.Subscribe(const AObserver: IObserver<T>): ISubscription;
+begin
+  Result := FSource.Subscribe(TSampleObserver<T>.Create(AObserver, FScheduler, FPeriodMs));
+end;
+
+{ Timer }
+
+constructor TTimerObserver.Create(const ADown: IObserver<Integer>;
+  const AScheduler: IAsyncScheduler; const ADelayMs: Integer);
+begin
+  inherited Create;
+  FDown := ADown;
+  FScheduler := AScheduler;
+  FDelayMs := ADelayMs;
+  FClosed := False;
+end;
+
+procedure TTimerObserver.Fire;
+begin
+  if FClosed then
+    Exit;
+  FClosed := True;
+  FDown.OnNext(0);
+  FDown.OnComplete;
+end;
+
+procedure TTimerObserver.Unsubscribe;
+begin
+  FClosed := True;
+end;
+
+function TTimerObserver.Closed: Boolean;
+begin
+  Result := FClosed;
+end;
+
+constructor TTimerObservable.Create(const AScheduler: IAsyncScheduler;
+  const ADelayMs: Integer);
+begin
+  inherited Create;
+  FScheduler := AScheduler;
+  FDelayMs := ADelayMs;
+end;
+
+function TTimerObservable.Subscribe(const AObserver: IObserver<Integer>): ISubscription;
+var
+  Obs: TTimerObserver;
+begin
+  Obs := TTimerObserver.Create(AObserver, FScheduler, FDelayMs);
+  Result := Obs;
+  FScheduler.Schedule(Obs.Fire, FDelayMs);
+end;
+
+{ Interval }
+
+constructor TIntervalObserver.Create(const ADown: IObserver<Integer>;
+  const AScheduler: IAsyncScheduler; const APeriodMs: Integer);
+begin
+  inherited Create;
+  FDown := ADown;
+  FScheduler := AScheduler;
+  FPeriodMs := APeriodMs;
+  FIndex := 0;
+  FClosed := False;
+end;
+
+procedure TIntervalObserver.Start;
+begin
+  FScheduler.Schedule(Tick, FPeriodMs);
+end;
+
+procedure TIntervalObserver.Tick;
+begin
+  if FClosed then
+    Exit;
+  FDown.OnNext(FIndex);
+  Inc(FIndex);
+  FScheduler.Schedule(Tick, FPeriodMs);
+end;
+
+procedure TIntervalObserver.Unsubscribe;
+begin
+  FClosed := True;
+end;
+
+function TIntervalObserver.Closed: Boolean;
+begin
+  Result := FClosed;
+end;
+
+constructor TIntervalObservable.Create(const AScheduler: IAsyncScheduler;
+  const APeriodMs: Integer);
+begin
+  inherited Create;
+  FScheduler := AScheduler;
+  FPeriodMs := APeriodMs;
+end;
+
+function TIntervalObservable.Subscribe(const AObserver: IObserver<Integer>): ISubscription;
+var
+  Obs: TIntervalObserver;
+begin
+  Obs := TIntervalObserver.Create(AObserver, FScheduler, FPeriodMs);
+  Result := Obs;
+  Obs.Start;
+end;
+
+{ The surface }
+
+function Delay<T>(const ASource: ISubscribable<T>;
+  const AScheduler: IAsyncScheduler; const ADelayMs: Integer): ISubscribable<T>;
+begin
+  Result := TDelayObservable<T>.Create(ASource, AScheduler, ADelayMs);
+end;
+
+function DebounceTime<T>(const ASource: ISubscribable<T>;
+  const AScheduler: IAsyncScheduler; const ADelayMs: Integer): ISubscribable<T>;
+begin
+  Result := TDebounceObservable<T>.Create(ASource, AScheduler, ADelayMs);
+end;
+
+function ThrottleTime<T>(const ASource: ISubscribable<T>;
+  const AScheduler: IAsyncScheduler; const AWindowMs: Integer): ISubscribable<T>;
+begin
+  Result := TThrottleObservable<T>.Create(ASource, AScheduler, AWindowMs);
+end;
+
+function SampleTime<T>(const ASource: ISubscribable<T>;
+  const AScheduler: IAsyncScheduler; const APeriodMs: Integer): ISubscribable<T>;
+begin
+  Result := TSampleObservable<T>.Create(ASource, AScheduler, APeriodMs);
+end;
+
+function Timer(const AScheduler: IAsyncScheduler;
+  const ADelayMs: Integer): ISubscribable<Integer>;
+begin
+  Result := TTimerObservable.Create(AScheduler, ADelayMs);
+end;
+
+function Interval(const AScheduler: IAsyncScheduler;
+  const APeriodMs: Integer): ISubscribable<Integer>;
+begin
+  Result := TIntervalObservable.Create(AScheduler, APeriodMs);
+end;
+
+end.
