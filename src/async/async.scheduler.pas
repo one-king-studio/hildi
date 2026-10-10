@@ -37,7 +37,7 @@ type
 
   TAsyncJob = class(TInterfacedObject, IAsyncJob)
   private
-    FLock: TCriticalSection;
+    FLock: TSpinLock;
     FClosed: Boolean;
     FCancelled: Boolean;
     FWork: TNotify;
@@ -88,7 +88,8 @@ implementation
 constructor TAsyncJob.Create(const AWork: TNotify);
 begin
   inherited Create;
-  FLock := TCriticalSection.Create;
+  { A spinlock needs no construction and no heap allocation. }
+  FLock.Init;
   FWork := AWork;
   { Capture the current context at enqueue time; it travels with the job. }
   FSnapshot := ContextCurrent;
@@ -96,7 +97,6 @@ end;
 
 destructor TAsyncJob.Destroy;
 begin
-  FLock.Free;
   inherited;
 end;
 

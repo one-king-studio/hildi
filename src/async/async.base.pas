@@ -74,7 +74,41 @@ type
     procedure OnCancel(const AAction: TNotify);
   end;
 
+  { A tiny lock-free spinlock. Unlike a TCriticalSection it needs no heap
+    allocation, which matters on a per-job / per-future hot path. Acquire spins
+    on InterlockedExchange until it observes 0, then leaves 1. It is a LOCK
+    (never a barrier on a single thread): hold it only for a few instructions.
+    On a single-threaded program Acquire is uncontended and returns at once. }
+  TSpinLock = record
+  private
+    FLocked: Integer;
+  public
+    { A record has no constructor here; call Init once (a fresh local is already
+      zeroed, but be explicit). }
+    procedure Init;
+    procedure Acquire;
+    procedure Release;
+  end;
+
 implementation
+
+{ TSpinLock }
+
+procedure TSpinLock.Init;
+begin
+  FLocked := 0;
+end;
+
+procedure TSpinLock.Acquire;
+begin
+  while InterlockedExchange(FLocked, 1) <> 0 do
+    ;   { spin: the holder is about to Release }
+end;
+
+procedure TSpinLock.Release;
+begin
+  InterlockedExchange(FLocked, 0);
+end;
 
 { TSubscription }
 

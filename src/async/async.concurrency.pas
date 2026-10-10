@@ -44,7 +44,11 @@ type
   TExecutorScheduler = class(TInterfacedObject, IAsyncScheduler)
   private
     FLock: TCriticalSection;
-    FWake: TSimpleEvent;
+    { A MANUAL-reset wake, signaled while the queue is non-empty and reset when a
+      worker finds it empty. Manual reset (not auto) so one SetEvent wakes every
+      idle worker, not just one; that makes "wake only on the empty -> non-empty
+      transition" correct for a multi-worker pool. }
+    FWake: TEvent;
     FIdle: TSimpleEvent;
     FQueue: TQueue<IAsyncJob>;
     FWorkers: TObjectList<TExecutorWorker>;
@@ -160,7 +164,7 @@ begin
   if AConcurrency < 1 then
     AConcurrency := 1;
   FLock := TCriticalSection.Create;
-  FWake := TSimpleEvent.Create;
+  FWake := TEvent.Create(nil, True, False, '');
   FIdle := TSimpleEvent.Create;
   FQueue := TQueue<IAsyncJob>.Create;
   FWorkers := TObjectList<TExecutorWorker>.Create(True);
@@ -195,18 +199,23 @@ function TExecutorScheduler.Schedule(const AWork: TNotify;
   const ADelayMs: Integer): ISubscription;
 var
   Job: IAsyncJob;
+  WasEmpty: Boolean;
 begin
   if ADelayMs <> 0 then
     raise EArgumentException.Create('the executor has no timer: delay must be 0');
   Job := TAsyncJob.Create(AWork);
   FLock.Acquire;
   try
+    WasEmpty := FQueue.Count = 0;
     FQueue.Enqueue(Job);
     Inc(FPending);
   finally
     FLock.Release;
   end;
-  FWake.SetEvent;
+  { Wake a worker only on the empty -> non-empty transition. Waking on every push
+    is a syscall per job and dominates the cost when jobs are queued in bulk. }
+  if WasEmpty then
+    FWake.SetEvent;
   Result := Job;
 end;
 
@@ -223,7 +232,11 @@ begin
     begin
       Job := FQueue.Dequeue;
       Result := True;
-    end;
+    end
+    else
+      { The queue is empty: reset the manual-reset wake so the next Schedule
+        re-signals it. }
+      FWake.ResetEvent;
   finally
     FLock.Release;
   end;
