@@ -13,6 +13,16 @@ unit async.context;
   before a deferred boundary is visible inside the continuation and not outside
   it.
 
+  THREAD-LOCAL, NOT GLOBAL. The installed snapshot, the save stack, and the depth
+  live in THREADVARS, not module-level globals. A continuation runs on one
+  thread, so its context must not be shared across threads; the executor runs
+  jobs on many worker threads concurrently, and a process-global save stack (a
+  managed dynamic array) raced under that load - concurrent SetLength corrupted
+  the heap and wedged the pool. threadvar makes each thread own its context, and
+  the managed threadvar is released when the thread exits. A worker thread starts
+  with GCurrent = nil (the initialization block runs only on the main thread), so
+  ContextCurrent lazily creates an empty snapshot.
+
   This library has NO dependency on the harness or any engine unit. See
   docs/features/Async_Core/Async_Core_v1.SPEC.md. }
 
@@ -61,8 +71,10 @@ type
     function Count: Integer;
   end;
 
-var
-  { The installed snapshot and the stack of displaced ones (the save stack). }
+threadvar
+  { Per-thread: a continuation runs on one thread, so the installed snapshot and
+    the save stack must not be shared across threads (the executor runs jobs on
+    many). A managed threadvar is freed when the thread exits. }
   GCurrent: IContextSnapshot;
   GStack: TArray<IContextSnapshot>;
   GDepth: Integer;
@@ -121,6 +133,10 @@ end;
 
 function ContextCurrent: IContextSnapshot;
 begin
+  { A worker thread starts with GCurrent = nil (the initialization block runs
+    only on the main thread); lazily give it an empty snapshot. }
+  if GCurrent = nil then
+    GCurrent := TContextSnapshot.Create;
   Result := GCurrent;
 end;
 

@@ -13,7 +13,7 @@ unit test_async_concurrency;
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry,
+  Classes, SysUtils, SyncObjs, fpcunit, testregistry,
   async.base, async.observable, async.operators, async.scheduler,
   async.concurrency;
 
@@ -22,6 +22,7 @@ type
   private
     FSeq: string;
     FRan: Integer;
+    FRanLock: TCriticalSection;
     FThreadId: TThreadID;
     FRanOnWorker: Boolean;
     procedure NoteThread;
@@ -29,12 +30,26 @@ type
   published
     procedure ExecutorRunsWorkOnAPoolThread;
     procedure ExecutorJoinsThreadsOnShutdown;
+    procedure ExecutorRunsManyJobsAcrossWorkers;
     procedure RunOnSchedulesWork;
     procedure SubscribeOnRunsSubscribeOnTheScheduler;
     procedure ObserveOnDeliversNotificationsOnTheScheduler;
+  protected
+    procedure SetUp; override;
+    procedure TearDown; override;
   end;
 
 implementation
+
+procedure TAsyncConcurrencyTest.SetUp;
+begin
+  FRanLock := TCriticalSection.Create;
+end;
+
+procedure TAsyncConcurrencyTest.TearDown;
+begin
+  FRanLock.Free;
+end;
 
 procedure TAsyncConcurrencyTest.NoteThread;
 begin
@@ -44,7 +59,13 @@ end;
 
 procedure TAsyncConcurrencyTest.BumpRan;
 begin
-  Inc(FRan);
+  { A shared counter mutated from several workers; guard it. }
+  FRanLock.Acquire;
+  try
+    Inc(FRan);
+  finally
+    FRanLock.Release;
+  end;
 end;
 
 procedure TAsyncConcurrencyTest.ExecutorRunsWorkOnAPoolThread;
@@ -75,6 +96,23 @@ begin
   Exec.Drain;
   Exec := nil;
   AssertEquals('both jobs ran', 2, FRan);
+end;
+
+procedure TAsyncConcurrencyTest.ExecutorRunsManyJobsAcrossWorkers;
+var
+  Exec: IAsyncScheduler;
+  E: TExecutorScheduler;
+  I: Integer;
+begin
+  { Many jobs across several workers: this exercises the context install/restore
+    on the worker threads. A process-global context here raced and wedged Drain. }
+  FRan := 0;
+  E := TExecutorScheduler.Create(4);
+  Exec := E;
+  for I := 1 to 5000 do
+    Exec.Schedule(BumpRan, 0);
+  Exec.Drain;
+  AssertEquals('every job ran', 5000, FRan);
 end;
 
 procedure TAsyncConcurrencyTest.RunOnSchedulesWork;

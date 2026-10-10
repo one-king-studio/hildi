@@ -163,6 +163,39 @@ while the downstream holds it. The concrete sources wrap the observer in a
 `TSubscriber` (which clears its references on terminal) — that is what keeps the
 chain from leaking. Any new operator should do the same.
 
+## Thread-locals vs process globals (the executor race)
+
+The continuation-scoped context (`async.context`) keeps its state — the installed
+snapshot, the save stack, and the depth — in **`threadvar`s, not module-level
+globals**. This is load-bearing once concurrency enters the picture.
+
+A continuation runs on **one thread**, so its ambient context must not be shared.
+`TExecutorScheduler` (Phase 9) runs jobs on **many worker threads concurrently**,
+and each worker installs/restores the job's captured context around `Work()`.
+With process-global state, several workers concurrently call `SetLength` on the
+**same managed dynamic array** (the save stack) — that corrupts the heap, a worker
+dies mid-job, `FPending` never returns to zero, and `ExecutorScheduler.Drain`
+spins forever. The symptom is a **hang**, not a crash, so it is easy to misread
+as "slow".
+
+Rules that follow:
+
+- **`threadvar` for per-continuation state.** FPC supports a *managed* `threadvar`
+  (an interface or a dynamic array): the runtime frees it when the thread exits.
+  The probe: a worker setting `GCurrent`/`GDepth` sees its own values, and the
+  main thread's are untouched.
+- **A worker starts with `nil`.** The unit's `initialization` block runs only on
+  the main thread, so a fresh worker's `threadvar` is nil — lazy-initialize it
+  (`ContextCurrent` creates an empty snapshot on first use).
+- **The C driver matters.** A program that uses threads must pull in the
+  `cthreads` driver **first** in its `uses`, or it dies with *"no thread support
+  compiled in"* (runtime error 232) the moment a `threadvar` or a thread is
+  touched. The test binary and `async_bench` both do this under `{$ifdef unix}`.
+- **A shared counter in a multi-worker test needs a lock.** `Inc(N)` from four
+  workers is a lost-update race (the stress test saw 4990 of 5000). Guard it with
+  a `TCriticalSection`; `InterlockedIncrement` is not reliably available in this
+  RTL.
+
 ## What the constraints cost us
 
 - **Expressible:** creation (`Just`, `FromArray`, `Range`, `Empty`, `ThrowError`,
