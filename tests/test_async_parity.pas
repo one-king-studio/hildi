@@ -56,7 +56,7 @@ const
     that covers it ("Surface=QualifiedTestName"). This is the acceptance
     checklist from the SPEC's operator list, restricted to what is implemented;
     the table is the thing a reviewer reads to see coverage at a glance. }
-  Parity: array[0..87] of string = (
+  Parity: array[0..88] of string = (
     { Creation. }
     'Just=TAsyncOperatorsTest.OfEmitsOne',
     'FromArray=TAsyncOperatorsTest.FromArrayEmitsEach',
@@ -85,6 +85,7 @@ const
     'Distinct=TAsyncOperatorsTest.DistinctDropsRepeatsGlobally',
     'First=TAsyncOperatorsTest.FirstTakesOne',
     'Last=TAsyncOperatorsTest.LastEmitsTheFinalValue',
+    'Single=TAsyncOperatorsTest.SingleEmitsOneOrErrors',
     'ElementAt=TAsyncOperatorsTest.ElementAtPicksOne',
     'IgnoreElements=TAsyncOperatorsTest.IgnoreElementsDropsAllValues',
     { Combination. }
@@ -165,11 +166,12 @@ const
     'WindowTime', 'GroupBy', 'MergeAll', 'ConcatAll', 'SwitchAll',
     'CombineLatestAll', 'All', 'AllSettled', 'Partition', 'ForkJoin');
 
-  { SPEC operators that are buildable but not yet implemented (the Phase 7
-    remainder beyond the ones just done). Kept explicit so a SPEC operator is
-    always classified: implemented+tested, structurally blocked, or open here. }
+  { SPEC operators that are buildable but not yet implemented. Kept explicit so
+    a SPEC operator is always classified: implemented+tested, structurally
+    blocked, or open here. Empty today (a blank entry) - every buildable
+    operator is done. }
   Unimplemented: array[0..0] of string = (
-    'Single');
+    '');
 
 procedure TAsyncParityTest.SetUp;
 begin
@@ -287,8 +289,9 @@ begin
   Doc := ReadFeatureDoc;
   AssertTrue('the feature doc is readable', Doc <> '');
   for I := Low(Unimplemented) to High(Unimplemented) do
-    AssertTrue('the open operator ' + Unimplemented[I] + ' is documented',
-      Pos(Unimplemented[I], Doc) > 0);
+    if Unimplemented[I] <> '' then
+      AssertTrue('the open operator ' + Unimplemented[I] + ' is documented',
+        Pos(Unimplemented[I], Doc) > 0);
 end;
 
 initialization

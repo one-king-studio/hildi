@@ -732,6 +732,29 @@ type
     function Subscribe(const AObserver: IObserver<T>): ISubscription;
   end;
 
+  { Single: exactly one value, emitted on completion; errors if the source is
+    empty or emits more than one (the second value errors immediately). }
+  TSingleObserver<T> = class(TInterfacedObject, IObserver<T>)
+  private
+    FDown: IObserver<T>;
+    FValue: T;
+    FHas: Boolean;
+    FClosed: Boolean;
+  public
+    constructor Create(const ADown: IObserver<T>);
+    procedure OnNext(const AValue: T);
+    procedure OnError(const AError: Exception);
+    procedure OnComplete;
+  end;
+
+  TSingleObservable<T> = class(TInterfacedObject, ISubscribable<T>)
+  private
+    FSource: ISubscribable<T>;
+  public
+    constructor Create(const ASource: ISubscribable<T>);
+    function Subscribe(const AObserver: IObserver<T>): ISubscription;
+  end;
+
   TCountObserver<T> = class(TInterfacedObject, IObserver<T>)
   private
     FDown: IObserver<Integer>;
@@ -990,6 +1013,7 @@ type
   function Distinct<T>(const ASource: ISubscribable<T>;
     const AEquals: TEquality<T>): ISubscribable<T>;
   function Last<T>(const ASource: ISubscribable<T>): ISubscribable<T>;
+  function Single<T>(const ASource: ISubscribable<T>): ISubscribable<T>;
   function Count<T>(const ASource: ISubscribable<T>): ISubscribable<Integer>;
   function CatchError<T>(const ASource: ISubscribable<T>;
     const AHandler: TErrorMapper<T>): ISubscribable<T>;
@@ -3049,6 +3073,69 @@ begin
   Result := FSource.Subscribe(TLastObserver<T>.Create(AObserver));
 end;
 
+{ TSingleObserver<T> }
+
+constructor TSingleObserver<T>.Create(const ADown: IObserver<T>);
+begin
+  inherited Create;
+  FDown := ADown;
+  FHas := False;
+  FClosed := False;
+end;
+
+procedure TSingleObserver<T>.OnNext(const AValue: T);
+begin
+  if FClosed then
+    Exit;
+  if FHas then
+  begin
+    { A second value means the source is not "single": error at once. }
+    FClosed := True;
+    FDown.OnError(Exception.Create('sequence contains more than one element'));
+    Exit;
+  end;
+  FValue := AValue;
+  FHas := True;
+end;
+
+procedure TSingleObserver<T>.OnError(const AError: Exception);
+begin
+  if FClosed then
+  begin
+    AError.Free;
+    Exit;
+  end;
+  FClosed := True;
+  FDown.OnError(AError);
+end;
+
+procedure TSingleObserver<T>.OnComplete;
+begin
+  if FClosed then
+    Exit;
+  FClosed := True;
+  if FHas then
+  begin
+    FDown.OnNext(FValue);
+    FDown.OnComplete;
+  end
+  else
+    FDown.OnError(Exception.Create('sequence contains no elements'));
+end;
+
+{ TSingleObservable<T> }
+
+constructor TSingleObservable<T>.Create(const ASource: ISubscribable<T>);
+begin
+  inherited Create;
+  FSource := ASource;
+end;
+
+function TSingleObservable<T>.Subscribe(const AObserver: IObserver<T>): ISubscription;
+begin
+  Result := FSource.Subscribe(TSingleObserver<T>.Create(AObserver));
+end;
+
 { TCountObserver<T> }
 
 constructor TCountObserver<T>.Create(const ADown: IObserver<Integer>);
@@ -3488,6 +3575,11 @@ end;
 function Last<T>(const ASource: ISubscribable<T>): ISubscribable<T>;
 begin
   Result := TLastObservable<T>.Create(ASource);
+end;
+
+function Single<T>(const ASource: ISubscribable<T>): ISubscribable<T>;
+begin
+  Result := TSingleObservable<T>.Create(ASource);
 end;
 
 function Count<T>(const ASource: ISubscribable<T>): ISubscribable<Integer>;

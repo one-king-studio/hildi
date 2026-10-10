@@ -131,8 +131,8 @@ is the remainder, split by what is actually buildable under FPC 3.3.1.
       `CombineLatestAll`, `GroupBy`, `Partition`, `Window`, `WindowCount`,
       `WindowTime`, `ForkJoin` — each needs a generic inside a generic as a
       *type*, which FPC 3.3.1 forbids (the `Buffer`/`ToArray` wall).
-- [ ] **Open — buildable**: `Single` (a `First`-like filter that also errors on a
-      second element).
+- [x] **Test + Implement**: `Single` (exactly one value, emitted on completion;
+      errors on empty or on a second element).
 
 ## Phase 8 — Error handling, multicasting, utility
 
@@ -161,9 +161,11 @@ is the remainder, split by what is actually buildable under FPC 3.3.1.
       notifications; `RunOn` fires and forgets.
 - [x] **Implement**: `RunOn`, `SubscribeOn`, `ObserveOn` (unit
       `async.concurrency`).
-- [ ] **Deferred**: `Schedule`/`Unsubscribe` cancelling a *running* job (the
-      subscription cancels a job that has not started; cooperative cancellation
-      of an in-flight worker is a follow-up).
+- [x] **Test + Implement**: `Schedule`/`Unsubscribe` cancelling a job. A
+      not-yet-started job is skipped (the CAS `Pending -> Cancelled` claim); a
+      *running* job is cancelled cooperatively via `ScheduleCancellable` — the
+      job polls the returned `ICancellationToken` (`ExecutorInFlightCancellation
+      TripsTheToken`, `ExecutorUnsubscribeCancelsAQueuedJob`).
 
 ## Phase 10 — Parity sweep and docs
 

@@ -40,6 +40,7 @@ type
     procedure ExecutorScheduleBatchRunsEveryJob;
     procedure ExecutorBoundedMailboxDropsOldest;
     procedure ExecutorInFlightCancellationTripsTheToken;
+    procedure ExecutorUnsubscribeCancelsAQueuedJob;
     procedure RunOnSchedulesWork;
     procedure SubscribeOnRunsSubscribeOnTheScheduler;
     procedure ObserveOnDeliversNotificationsOnTheScheduler;
@@ -199,6 +200,32 @@ begin
   Sub.Unsubscribe;
   Exec.Drain;
   AssertTrue('the running job saw the cancellation', FStopped);
+end;
+
+procedure TAsyncConcurrencyTest.ExecutorUnsubscribeCancelsAQueuedJob;
+var
+  Exec: IAsyncScheduler;
+  E: TExecutorScheduler;
+  Sub: ISubscription;
+begin
+  { One worker blocked on the gate, so the second job stays QUEUED; cancelling
+    it before a worker claims it must skip the work entirely (the CAS Pending ->
+    Cancelled path, the other half of the in-flight story). }
+  FRan := 0;
+  FGate := TSimpleEvent.Create;
+  try
+    E := TExecutorScheduler.Create(1);
+    Exec := E;
+    Exec.Schedule(BlockOnGate, 0);        { occupies the only worker }
+    Sleep(50);                            { let the worker claim the blocker }
+    Sub := Exec.Schedule(BumpRan, 0);     { queued, cannot start yet }
+    Sub.Unsubscribe;                      { cancel before it is taken }
+    FGate.SetEvent;
+    Exec.Drain;
+    AssertEquals('the cancelled job never ran', 0, FRan);
+  finally
+    FGate.Free;
+  end;
 end;
 
 procedure TAsyncConcurrencyTest.RunOnSchedulesWork;

@@ -68,6 +68,7 @@ type
     procedure EndWithAppends;
     procedure DistinctDropsRepeatsGlobally;
     procedure LastEmitsTheFinalValue;
+    procedure SingleEmitsOneOrErrors;
     procedure CountEmitsTheTotal;
     procedure CatchErrorRecovers;
     procedure FinalizeRunsOnCompletion;
@@ -464,6 +465,20 @@ end;
 procedure TAsyncOperatorsTest.LastEmitsTheFinalValue;
 begin
   AssertInts(Last<Integer>(IntSource([1, 2, 3])), '3', True);
+end;
+
+procedure TAsyncOperatorsTest.SingleEmitsOneOrErrors;
+begin
+  { Exactly one value: emitted on completion. }
+  AssertInts(Single<Integer>(IntSource([42])), '42', True);
+  { Empty: an error. }
+  Reset;
+  Single<Integer>(Empty<Integer>).Subscribe(RecorderInt);
+  AssertEquals('empty errors', 'sequence contains no elements', FError);
+  { More than one: an error. }
+  Reset;
+  Single<Integer>(IntSource([1, 2])).Subscribe(RecorderInt);
+  AssertEquals('two values error', 'sequence contains more than one element', FError);
 end;
 
 procedure TAsyncOperatorsTest.CountEmitsTheTotal;
