@@ -76,6 +76,14 @@ type
     { Multicasting. }
     procedure PublishRunsTheSourceOnceForAllSubscribers;
     procedure ShareConnectsOnFirstSubscriber;
+    { Phase 8 remainder. }
+    procedure RepeatCountResubscribes;
+    procedure RetryWhenResubscribesOnDecision;
+    procedure ThrowIfEmptyErrorsOnEmpty;
+    procedure DefaultIfEmptyEmitsTheDefault;
+    procedure EveryEmitsOneBoolean;
+    procedure IsEmptyEmitsOneBoolean;
+    procedure MaterializeThenDematerializeRoundTrips;
   end;
 
 implementation
@@ -542,6 +550,96 @@ begin
   Shared.Subscribe(RecorderInt);
   AssertEquals('connected on the first subscriber', 1, FSourceRuns);
   AssertEquals('values', '1,2,3', FSeq);
+end;
+
+procedure TAsyncOperatorsTest.RepeatCountResubscribes;
+begin
+  { Source completes after two values; RepeatCount(3) runs it three times. }
+  AssertInts(RepeatCount<Integer>(IntSource([1, 2]), 3), '1,2,1,2,1,2', True);
+end;
+
+procedure TAsyncOperatorsTest.RetryWhenResubscribesOnDecision;
+var
+  Attempts: Integer;
+begin
+  Attempts := 0;
+  Reset;
+  RetryWhen<Integer>(ThrowError<Integer>(Exception.Create('boom')),
+    function(const AAttempt: Integer; const AError: Exception): Boolean
+    begin
+      { The operator re-delivers the same error object across attempts; the
+        final OnError owns it, so the decider must not free it. }
+      Inc(Attempts);
+      { Retry twice, then give up. }
+      Result := AAttempt <= 2;
+    end).Subscribe(RecorderInt);
+  AssertEquals('three attempts total', 3, Attempts);
+  AssertEquals('gave up with the error', 'boom', FError);
+end;
+
+procedure TAsyncOperatorsTest.ThrowIfEmptyErrorsOnEmpty;
+begin
+  Reset;
+  ThrowIfEmpty<Integer>(Empty<Integer>).Subscribe(RecorderInt);
+  AssertEquals('errored on empty', 'no elements in sequence', FError);
+end;
+
+procedure TAsyncOperatorsTest.DefaultIfEmptyEmitsTheDefault;
+begin
+  AssertInts(DefaultIfEmpty<Integer>(Empty<Integer>, 42), '42', True);
+  AssertInts(DefaultIfEmpty<Integer>(IntSource([1, 2]), 42), '1,2', True);
+end;
+
+procedure TAsyncOperatorsTest.EveryEmitsOneBoolean;
+var
+  R: string;
+begin
+  R := '';
+  Every<Integer>(IntSource([2, 4, 6]),
+    function(const V: Integer): Boolean begin Result := V mod 2 = 0; end)
+    .Subscribe(TObserver<Boolean>.Create(
+      procedure(const V: Boolean)
+      begin
+        if V then R := R + 'true' else R := R + 'false';
+      end));
+  AssertEquals('all even', 'true', R);
+  R := '';
+  Every<Integer>(IntSource([2, 3, 6]),
+    function(const V: Integer): Boolean begin Result := V mod 2 = 0; end)
+    .Subscribe(TObserver<Boolean>.Create(
+      procedure(const V: Boolean)
+      begin
+        if V then R := R + 'true' else R := R + 'false';
+      end));
+  AssertEquals('not all even', 'false', R);
+end;
+
+procedure TAsyncOperatorsTest.IsEmptyEmitsOneBoolean;
+var
+  R: string;
+begin
+  R := '';
+  IsEmpty<Integer>(Empty<Integer>).Subscribe(TObserver<Boolean>.Create(
+    procedure(const V: Boolean)
+    begin
+      if V then R := 'true' else R := 'false';
+    end));
+  AssertEquals('empty is true', 'true', R);
+  R := '';
+  IsEmpty<Integer>(IntSource([1])).Subscribe(TObserver<Boolean>.Create(
+    procedure(const V: Boolean)
+    begin
+      if V then R := 'true' else R := 'false';
+    end));
+  AssertEquals('non-empty is false', 'false', R);
+end;
+
+procedure TAsyncOperatorsTest.MaterializeThenDematerializeRoundTrips;
+begin
+  { Materialize turns values+completion into notifications; dematerialize
+    turns them back. The round trip yields the original values + completion. }
+  AssertInts(Dematerialize<Integer>(Materialize<Integer>(IntSource([1, 2, 3]))),
+    '1,2,3', True);
 end;
 
 initialization

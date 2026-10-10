@@ -948,9 +948,224 @@ type
   function Multicast<T>(const ASource: ISubscribable<T>;
     const ASubject: ISubject<T>): IConnectableObservable<T>;
   function Publish<T>(const ASource: ISubscribable<T>): IConnectableObservable<T>;
+  function PublishReplay<T>(const ASource: ISubscribable<T>;
+    const ABufferSize: Integer): IConnectableObservable<T>;
+  function PublishLast<T>(const ASource: ISubscribable<T>): IConnectableObservable<T>;
+  function PublishBehavior<T>(const ASource: ISubscribable<T>;
+    const AInitial: T): IConnectableObservable<T>;
   function Share<T>(const ASource: ISubscribable<T>): ISubscribable<T>;
+  function ShareReplay<T>(const ASource: ISubscribable<T>;
+    const ABufferSize: Integer): ISubscribable<T>;
+
+type
+  { --- Remaining error and utility operators ---------------------------- }
+
+  { Repeat: resubscribe on completion, N times (0 = forever). }
+  TRepeatObservable<T> = class(TInterfacedObject, ISubscribable<T>)
+  private
+    FSource: ISubscribable<T>;
+    FCount: Integer;
+  public
+    constructor Create(const ASource: ISubscribable<T>; const ACount: Integer);
+    function Subscribe(const AObserver: IObserver<T>): ISubscription;
+  end;
+
+  { Resubscribes the source on completion until the count is spent (0 = forever).
+    A concrete observer (not a closure) so it does not capture itself. }
+  TRepeatObserver<T> = class(TInterfacedObject, IObserver<T>, ISubscription)
+  private
+    FSource: ISubscribable<T>;
+    FDown: IObserver<T>;
+    FLeft: Integer;
+    FClosed: Boolean;
+  public
+    constructor Create(const ASource: ISubscribable<T>; const ADown: IObserver<T>;
+      const ACount: Integer);
+    procedure Start;
+    procedure OnNext(const AValue: T);
+    procedure OnError(const AError: Exception);
+    procedure OnComplete;
+    procedure Unsubscribe;
+    function Closed: Boolean;
+  end;
+
+  { ThrowIfEmpty: error on completion if no value was seen. }
+  TThrowIfEmptyObserver<T> = class(TInterfacedObject, IObserver<T>)
+  private
+    FDown: IObserver<T>;
+    FHas: Boolean;
+  public
+    constructor Create(const ADown: IObserver<T>);
+    procedure OnNext(const AValue: T);
+    procedure OnError(const AError: Exception);
+    procedure OnComplete;
+  end;
+
+  TThrowIfEmptyObservable<T> = class(TInterfacedObject, ISubscribable<T>)
+  private
+    FSource: ISubscribable<T>;
+  public
+    constructor Create(const ASource: ISubscribable<T>);
+    function Subscribe(const AObserver: IObserver<T>): ISubscription;
+  end;
+
+  { DefaultIfEmpty: emit a default value if the source is empty. }
+  TDefaultIfEmptyObserver<T> = class(TInterfacedObject, IObserver<T>)
+  private
+    FDown: IObserver<T>;
+    FDefault: T;
+    FHas: Boolean;
+  public
+    constructor Create(const ADown: IObserver<T>; const ADefault: T);
+    procedure OnNext(const AValue: T);
+    procedure OnError(const AError: Exception);
+    procedure OnComplete;
+  end;
+
+  TDefaultIfEmptyObservable<T> = class(TInterfacedObject, ISubscribable<T>)
+  private
+    FSource: ISubscribable<T>;
+    FDefault: T;
+  public
+    constructor Create(const ASource: ISubscribable<T>; const ADefault: T);
+    function Subscribe(const AObserver: IObserver<T>): ISubscription;
+  end;
+
+  { Every: emit one Boolean on completion (all values match?). }
+  TEveryObserver<T> = class(TInterfacedObject, IObserver<T>)
+  private
+    FDown: IObserver<Boolean>;
+    FPredicate: TPredicate<T>;
+    FAll: Boolean;
+  public
+    constructor Create(const ADown: IObserver<Boolean>; const APredicate: TPredicate<T>);
+    procedure OnNext(const AValue: T);
+    procedure OnError(const AError: Exception);
+    procedure OnComplete;
+  end;
+
+  TEveryObservable<T> = class(TInterfacedObject, ISubscribable<Boolean>)
+  private
+    FSource: ISubscribable<T>;
+    FPredicate: TPredicate<T>;
+  public
+    constructor Create(const ASource: ISubscribable<T>; const APredicate: TPredicate<T>);
+    function Subscribe(const AObserver: IObserver<Boolean>): ISubscription;
+  end;
+
+  { IsEmpty: emit one Boolean on completion (no values?). }
+  TIsEmptyObserver<T> = class(TInterfacedObject, IObserver<T>)
+  private
+    FDown: IObserver<Boolean>;
+    FSaw: Boolean;
+  public
+    constructor Create(const ADown: IObserver<Boolean>);
+    procedure OnNext(const AValue: T);
+    procedure OnError(const AError: Exception);
+    procedure OnComplete;
+  end;
+
+  TIsEmptyObservable<T> = class(TInterfacedObject, ISubscribable<Boolean>)
+  private
+    FSource: ISubscribable<T>;
+  public
+    constructor Create(const ASource: ISubscribable<T>);
+    function Subscribe(const AObserver: IObserver<Boolean>): ISubscription;
+  end;
+
+  { Materialize / Dematerialize: a stream <-> a stream of notifications. }
+  TNotificationKind = (nkNext, nkError, nkComplete);
+  TNotification<T> = record
+    Kind: TNotificationKind;
+    Value: T;
+    Error: Exception;
+  end;
+
+  TMaterializeObserver<T> = class(TInterfacedObject, IObserver<T>)
+  private
+    FDown: IObserver<TNotification<T>>;
+  public
+    constructor Create(const ADown: IObserver<TNotification<T>>);
+    procedure OnNext(const AValue: T);
+    procedure OnError(const AError: Exception);
+    procedure OnComplete;
+  end;
+
+  TMaterializeObservable<T> = class(TInterfacedObject, ISubscribable<TNotification<T>>)
+  private
+    FSource: ISubscribable<T>;
+  public
+    constructor Create(const ASource: ISubscribable<T>);
+    function Subscribe(const AObserver: IObserver<TNotification<T>>): ISubscription;
+  end;
+
+  TDematerializeObserver<T> = class(TInterfacedObject, IObserver<TNotification<T>>)
+  private
+    FDown: IObserver<T>;
+    FClosed: Boolean;
+  public
+    constructor Create(const ADown: IObserver<T>);
+    procedure OnNext(const AValue: TNotification<T>);
+    procedure OnError(const AError: Exception);
+    procedure OnComplete;
+  end;
+
+  TDematerializeObservable<T> = class(TInterfacedObject, ISubscribable<T>)
+  private
+    FSource: ISubscribable<TNotification<T>>;
+  public
+    constructor Create(const ASource: ISubscribable<TNotification<T>>);
+    function Subscribe(const AObserver: IObserver<T>): ISubscription;
+  end;
+
+  { RetryWhen: on error, call the handler to decide whether to resubscribe. }
+  TRetryDecider = reference to function(const AAttempt: Integer;
+    const AError: Exception): Boolean;
+
+  TRetryWhenObservable<T> = class(TInterfacedObject, ISubscribable<T>)
+  private
+    FSource: ISubscribable<T>;
+    FDecider: TRetryDecider;
+  public
+    constructor Create(const ASource: ISubscribable<T>; const ADecider: TRetryDecider);
+    function Subscribe(const AObserver: IObserver<T>): ISubscription;
+  end;
+
+  { Resubscribes the source on error while the decider says yes. A concrete
+    observer so it does not capture itself. }
+  TRetryWhenObserver<T> = class(TInterfacedObject, IObserver<T>, ISubscription)
+  private
+    FSource: ISubscribable<T>;
+    FDown: IObserver<T>;
+    FDecider: TRetryDecider;
+    FAttempt: Integer;
+    FClosed: Boolean;
+  public
+    constructor Create(const ASource: ISubscribable<T>; const ADown: IObserver<T>;
+      const ADecider: TRetryDecider);
+    procedure Start;
+    procedure OnNext(const AValue: T);
+    procedure OnError(const AError: Exception);
+    procedure OnComplete;
+    procedure Unsubscribe;
+    function Closed: Boolean;
+  end;
 
   { --- Observers for the extra operators -------------------------------- }
+
+{ --- The Phase 8 surface (free functions) ------------------------------ }
+function RepeatCount<T>(const ASource: ISubscribable<T>;
+  const ACount: Integer): ISubscribable<T>;
+function RetryWhen<T>(const ASource: ISubscribable<T>;
+  const ADecider: TRetryDecider): ISubscribable<T>;
+function ThrowIfEmpty<T>(const ASource: ISubscribable<T>): ISubscribable<T>;
+function DefaultIfEmpty<T>(const ASource: ISubscribable<T>;
+  const ADefault: T): ISubscribable<T>;
+function Every<T>(const ASource: ISubscribable<T>;
+  const APredicate: TPredicate<T>): ISubscribable<Boolean>;
+function IsEmpty<T>(const ASource: ISubscribable<T>): ISubscribable<Boolean>;
+function Materialize<T>(const ASource: ISubscribable<T>): ISubscribable<TNotification<T>>;
+function Dematerialize<T>(const ASource: ISubscribable<TNotification<T>>): ISubscribable<T>;
 
 implementation
 
@@ -3058,6 +3273,477 @@ function Share<T>(const ASource: ISubscribable<T>): ISubscribable<T>;
 begin
   Result := TSharedObservable<T>.Create(ASource,
     TConnectableObservable<T>.Create(ASource, TSubject<T>.Create));
+end;
+
+function PublishReplay<T>(const ASource: ISubscribable<T>;
+  const ABufferSize: Integer): IConnectableObservable<T>;
+begin
+  Result := TConnectableObservable<T>.Create(ASource,
+    TReplaySubject<T>.Create(ABufferSize));
+end;
+
+function PublishLast<T>(const ASource: ISubscribable<T>): IConnectableObservable<T>;
+begin
+  Result := TConnectableObservable<T>.Create(ASource, TAsyncSubject<T>.Create);
+end;
+
+function PublishBehavior<T>(const ASource: ISubscribable<T>;
+  const AInitial: T): IConnectableObservable<T>;
+begin
+  Result := TConnectableObservable<T>.Create(ASource,
+    TBehaviorSubject<T>.Create(AInitial));
+end;
+
+function ShareReplay<T>(const ASource: ISubscribable<T>;
+  const ABufferSize: Integer): ISubscribable<T>;
+begin
+  Result := TSharedObservable<T>.Create(ASource,
+    TConnectableObservable<T>.Create(ASource, TReplaySubject<T>.Create(ABufferSize)));
+end;
+
+{ TRepeatObservable<T> }
+
+constructor TRepeatObservable<T>.Create(const ASource: ISubscribable<T>;
+  const ACount: Integer);
+begin
+  inherited Create;
+  FSource := ASource;
+  FCount := ACount;
+end;
+
+function TRepeatObservable<T>.Subscribe(const AObserver: IObserver<T>): ISubscription;
+var
+  Obs: TRepeatObserver<T>;
+begin
+  Obs := TRepeatObserver<T>.Create(FSource, AObserver, FCount);
+  Result := Obs;
+  Obs.Start;
+end;
+
+{ TRepeatObserver<T> }
+
+constructor TRepeatObserver<T>.Create(const ASource: ISubscribable<T>;
+  const ADown: IObserver<T>; const ACount: Integer);
+begin
+  inherited Create;
+  FSource := ASource;
+  FDown := ADown;
+  FLeft := ACount;
+end;
+
+procedure TRepeatObserver<T>.Start;
+begin
+  FSource.Subscribe(Self);
+end;
+
+procedure TRepeatObserver<T>.OnNext(const AValue: T);
+begin
+  FDown.OnNext(AValue);
+end;
+
+procedure TRepeatObserver<T>.OnError(const AError: Exception);
+begin
+  FDown.OnError(AError);
+end;
+
+procedure TRepeatObserver<T>.OnComplete;
+begin
+  { Resubscribe on completion, until the count is spent (0 = forever). }
+  if (FLeft = 0) or (FLeft > 1) then
+  begin
+    if FLeft > 1 then
+      Dec(FLeft);
+    FSource.Subscribe(Self);
+  end
+  else
+    FDown.OnComplete;
+end;
+
+procedure TRepeatObserver<T>.Unsubscribe;
+begin
+  FClosed := True;
+end;
+
+function TRepeatObserver<T>.Closed: Boolean;
+begin
+  Result := FClosed;
+end;
+
+{ TRetryWhenObservable<T> }
+
+constructor TRetryWhenObservable<T>.Create(const ASource: ISubscribable<T>;
+  const ADecider: TRetryDecider);
+begin
+  inherited Create;
+  FSource := ASource;
+  FDecider := ADecider;
+end;
+
+function TRetryWhenObservable<T>.Subscribe(const AObserver: IObserver<T>): ISubscription;
+var
+  Obs: TRetryWhenObserver<T>;
+begin
+  Obs := TRetryWhenObserver<T>.Create(FSource, AObserver, FDecider);
+  Result := Obs;
+  Obs.Start;
+end;
+
+{ TRetryWhenObserver<T> }
+
+constructor TRetryWhenObserver<T>.Create(const ASource: ISubscribable<T>;
+  const ADown: IObserver<T>; const ADecider: TRetryDecider);
+begin
+  inherited Create;
+  FSource := ASource;
+  FDown := ADown;
+  FDecider := ADecider;
+  FAttempt := 0;
+end;
+
+procedure TRetryWhenObserver<T>.Start;
+begin
+  FSource.Subscribe(Self);
+end;
+
+procedure TRetryWhenObserver<T>.OnNext(const AValue: T);
+begin
+  FDown.OnNext(AValue);
+end;
+
+procedure TRetryWhenObserver<T>.OnError(const AError: Exception);
+begin
+  Inc(FAttempt);
+  if FDecider(FAttempt, AError) then
+    FSource.Subscribe(Self)
+  else
+    FDown.OnError(AError);
+end;
+
+procedure TRetryWhenObserver<T>.OnComplete;
+begin
+  FDown.OnComplete;
+end;
+
+procedure TRetryWhenObserver<T>.Unsubscribe;
+begin
+  FClosed := True;
+end;
+
+function TRetryWhenObserver<T>.Closed: Boolean;
+begin
+  Result := FClosed;
+end;
+
+{ TThrowIfEmptyObserver<T> }
+
+constructor TThrowIfEmptyObserver<T>.Create(const ADown: IObserver<T>);
+begin
+  inherited Create;
+  FDown := ADown;
+  FHas := False;
+end;
+
+procedure TThrowIfEmptyObserver<T>.OnNext(const AValue: T);
+begin
+  FHas := True;
+  FDown.OnNext(AValue);
+end;
+
+procedure TThrowIfEmptyObserver<T>.OnError(const AError: Exception);
+begin
+  FDown.OnError(AError);
+end;
+
+procedure TThrowIfEmptyObserver<T>.OnComplete;
+begin
+  if not FHas then
+    FDown.OnError(Exception.Create('no elements in sequence'))
+  else
+    FDown.OnComplete;
+end;
+
+constructor TThrowIfEmptyObservable<T>.Create(const ASource: ISubscribable<T>);
+begin
+  inherited Create;
+  FSource := ASource;
+end;
+
+function TThrowIfEmptyObservable<T>.Subscribe(const AObserver: IObserver<T>): ISubscription;
+begin
+  Result := FSource.Subscribe(TThrowIfEmptyObserver<T>.Create(AObserver));
+end;
+
+{ TDefaultIfEmptyObserver<T> }
+
+constructor TDefaultIfEmptyObserver<T>.Create(const ADown: IObserver<T>;
+  const ADefault: T);
+begin
+  inherited Create;
+  FDown := ADown;
+  FDefault := ADefault;
+  FHas := False;
+end;
+
+procedure TDefaultIfEmptyObserver<T>.OnNext(const AValue: T);
+begin
+  FHas := True;
+  FDown.OnNext(AValue);
+end;
+
+procedure TDefaultIfEmptyObserver<T>.OnError(const AError: Exception);
+begin
+  FDown.OnError(AError);
+end;
+
+procedure TDefaultIfEmptyObserver<T>.OnComplete;
+begin
+  if not FHas then
+    FDown.OnNext(FDefault);
+  FDown.OnComplete;
+end;
+
+constructor TDefaultIfEmptyObservable<T>.Create(const ASource: ISubscribable<T>;
+  const ADefault: T);
+begin
+  inherited Create;
+  FSource := ASource;
+  FDefault := ADefault;
+end;
+
+function TDefaultIfEmptyObservable<T>.Subscribe(const AObserver: IObserver<T>): ISubscription;
+begin
+  Result := FSource.Subscribe(TDefaultIfEmptyObserver<T>.Create(AObserver, FDefault));
+end;
+
+{ TEveryObserver<T> }
+
+constructor TEveryObserver<T>.Create(const ADown: IObserver<Boolean>;
+  const APredicate: TPredicate<T>);
+begin
+  inherited Create;
+  FDown := ADown;
+  FPredicate := APredicate;
+  FAll := True;
+end;
+
+procedure TEveryObserver<T>.OnNext(const AValue: T);
+begin
+  if not FPredicate(AValue) then
+    FAll := False;
+end;
+
+procedure TEveryObserver<T>.OnError(const AError: Exception);
+begin
+  FDown.OnError(AError);
+end;
+
+procedure TEveryObserver<T>.OnComplete;
+begin
+  FDown.OnNext(FAll);
+  FDown.OnComplete;
+end;
+
+constructor TEveryObservable<T>.Create(const ASource: ISubscribable<T>;
+  const APredicate: TPredicate<T>);
+begin
+  inherited Create;
+  FSource := ASource;
+  FPredicate := APredicate;
+end;
+
+function TEveryObservable<T>.Subscribe(const AObserver: IObserver<Boolean>): ISubscription;
+begin
+  Result := FSource.Subscribe(TEveryObserver<T>.Create(AObserver, FPredicate));
+end;
+
+{ TIsEmptyObserver<T> }
+
+constructor TIsEmptyObserver<T>.Create(const ADown: IObserver<Boolean>);
+begin
+  inherited Create;
+  FDown := ADown;
+  FSaw := False;
+end;
+
+procedure TIsEmptyObserver<T>.OnNext(const AValue: T);
+begin
+  FSaw := True;
+end;
+
+procedure TIsEmptyObserver<T>.OnError(const AError: Exception);
+begin
+  FDown.OnError(AError);
+end;
+
+procedure TIsEmptyObserver<T>.OnComplete;
+begin
+  FDown.OnNext(not FSaw);
+  FDown.OnComplete;
+end;
+
+constructor TIsEmptyObservable<T>.Create(const ASource: ISubscribable<T>);
+begin
+  inherited Create;
+  FSource := ASource;
+end;
+
+function TIsEmptyObservable<T>.Subscribe(const AObserver: IObserver<Boolean>): ISubscription;
+begin
+  Result := FSource.Subscribe(TIsEmptyObserver<T>.Create(AObserver));
+end;
+
+{ Materialize / Dematerialize }
+
+constructor TMaterializeObserver<T>.Create(const ADown: IObserver<TNotification<T>>);
+begin
+  inherited Create;
+  FDown := ADown;
+end;
+
+procedure TMaterializeObserver<T>.OnNext(const AValue: T);
+var
+  N: TNotification<T>;
+begin
+  N.Kind := nkNext;
+  N.Value := AValue;
+  N.Error := nil;
+  FDown.OnNext(N);
+end;
+
+procedure TMaterializeObserver<T>.OnError(const AError: Exception);
+var
+  N: TNotification<T>;
+begin
+  N.Kind := nkError;
+  N.Error := AError;
+  FDown.OnNext(N);
+  FDown.OnComplete;
+end;
+
+procedure TMaterializeObserver<T>.OnComplete;
+var
+  N: TNotification<T>;
+begin
+  N.Kind := nkComplete;
+  N.Error := nil;
+  FDown.OnNext(N);
+  FDown.OnComplete;
+end;
+
+constructor TMaterializeObservable<T>.Create(const ASource: ISubscribable<T>);
+begin
+  inherited Create;
+  FSource := ASource;
+end;
+
+function TMaterializeObservable<T>.Subscribe(const AObserver: IObserver<TNotification<T>>): ISubscription;
+begin
+  Result := FSource.Subscribe(TMaterializeObserver<T>.Create(AObserver));
+end;
+
+constructor TDematerializeObserver<T>.Create(const ADown: IObserver<T>);
+begin
+  inherited Create;
+  FDown := ADown;
+  FClosed := False;
+end;
+
+procedure TDematerializeObserver<T>.OnNext(const AValue: TNotification<T>);
+begin
+  { A materialized stream carries its terminal as a notification; once it is
+    delivered, the trailing OnComplete must not deliver a second terminal. }
+  if FClosed then
+    Exit;
+  case AValue.Kind of
+    nkNext:
+      FDown.OnNext(AValue.Value);
+    nkError:
+      begin
+        FClosed := True;
+        FDown.OnError(AValue.Error);
+      end;
+    nkComplete:
+      begin
+        FClosed := True;
+        FDown.OnComplete;
+      end;
+  end;
+end;
+
+procedure TDematerializeObserver<T>.OnError(const AError: Exception);
+begin
+  if FClosed then
+  begin
+    AError.Free;
+    Exit;
+  end;
+  FClosed := True;
+  FDown.OnError(AError);
+end;
+
+procedure TDematerializeObserver<T>.OnComplete;
+begin
+  if FClosed then
+    Exit;
+  FClosed := True;
+  FDown.OnComplete;
+end;
+
+constructor TDematerializeObservable<T>.Create(const ASource: ISubscribable<TNotification<T>>);
+begin
+  inherited Create;
+  FSource := ASource;
+end;
+
+function TDematerializeObservable<T>.Subscribe(const AObserver: IObserver<T>): ISubscription;
+begin
+  Result := FSource.Subscribe(TDematerializeObserver<T>.Create(AObserver));
+end;
+
+{ The Phase 8 surface }
+
+function RepeatCount<T>(const ASource: ISubscribable<T>;
+  const ACount: Integer): ISubscribable<T>;
+begin
+  Result := TRepeatObservable<T>.Create(ASource, ACount);
+end;
+
+function RetryWhen<T>(const ASource: ISubscribable<T>;
+  const ADecider: TRetryDecider): ISubscribable<T>;
+begin
+  Result := TRetryWhenObservable<T>.Create(ASource, ADecider);
+end;
+
+function ThrowIfEmpty<T>(const ASource: ISubscribable<T>): ISubscribable<T>;
+begin
+  Result := TThrowIfEmptyObservable<T>.Create(ASource);
+end;
+
+function DefaultIfEmpty<T>(const ASource: ISubscribable<T>;
+  const ADefault: T): ISubscribable<T>;
+begin
+  Result := TDefaultIfEmptyObservable<T>.Create(ASource, ADefault);
+end;
+
+function Every<T>(const ASource: ISubscribable<T>;
+  const APredicate: TPredicate<T>): ISubscribable<Boolean>;
+begin
+  Result := TEveryObservable<T>.Create(ASource, APredicate);
+end;
+
+function IsEmpty<T>(const ASource: ISubscribable<T>): ISubscribable<Boolean>;
+begin
+  Result := TIsEmptyObservable<T>.Create(ASource);
+end;
+
+function Materialize<T>(const ASource: ISubscribable<T>): ISubscribable<TNotification<T>>;
+begin
+  Result := TMaterializeObservable<T>.Create(ASource);
+end;
+
+function Dematerialize<T>(const ASource: ISubscribable<TNotification<T>>): ISubscribable<T>;
+begin
+  Result := TDematerializeObservable<T>.Create(ASource);
 end;
 
 end.

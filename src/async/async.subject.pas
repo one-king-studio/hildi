@@ -50,7 +50,7 @@ type
   end;
 
   { Holds a current value; a new subscriber receives it before new values. }
-  TBehaviorSubject<T> = class(TInterfacedObject, IObserver<T>, ISubscribable<T>)
+  TBehaviorSubject<T> = class(TInterfacedObject, ISubscribable<T>, ISubject<T>)
   private
     FLock: TCriticalSection;
     FObservers: TArray<IObserver<T>>;
@@ -68,7 +68,7 @@ type
 
   { Replays a bounded buffer of recent values to each new subscriber. ACapacity
     of 0 replays every value (unbounded). }
-  TReplaySubject<T> = class(TInterfacedObject, IObserver<T>, ISubscribable<T>)
+  TReplaySubject<T> = class(TInterfacedObject, ISubscribable<T>, ISubject<T>)
   private
     FLock: TCriticalSection;
     FObservers: TArray<IObserver<T>>;
@@ -86,7 +86,7 @@ type
   end;
 
   { Emits only the last value, when it completes. An error is forwarded at once. }
-  TAsyncSubject<T> = class(TInterfacedObject, IObserver<T>, ISubscribable<T>)
+  TAsyncSubject<T> = class(TInterfacedObject, ISubscribable<T>, ISubject<T>)
   private
     FLock: TCriticalSection;
     FObservers: TArray<IObserver<T>>;
