@@ -25,10 +25,13 @@ expresses the next requirement, watch it fail, implement the minimum, refactor,
 
 ## Phase 2 — Context
 
-- [ ] **Test**: a value set before a deferred boundary is visible inside its
+- [x] **Test**: a value set before a deferred boundary is visible inside its
       continuation and not outside it; nested scopes restore.
-- [ ] **Test**: an unbalanced leave cannot unwind past an enclosing frame.
-- [ ] **Implement**: `async.context` — immutable snapshots, save stack, depth token.
+- [x] **Test**: an unbalanced leave cannot unwind past an enclosing frame.
+- [x] **Implement**: `async.context` — immutable snapshots, save stack, depth token.
+      The scheduler seam: a job captures `ContextCurrent` at enqueue and the
+      scheduler installs it while the job runs, then restores (both
+      `async.scheduler` and `async.timers`).
 
 ## Phase 3 — Virtual clock and the timer schedulers
 

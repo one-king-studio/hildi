@@ -14,7 +14,7 @@ interface
 
 uses
   SysUtils, SyncObjs, Generics.Collections,
-  async.base;
+  async.base, async.context;
 
 type
   { Ordered delivery of continuations. A delay of 0 is "as soon as possible on
@@ -31,6 +31,8 @@ type
   IAsyncJob = interface(ISubscription)
     { The work to run, or nil when it was cancelled or already taken. }
     function TakeWork: TNotify;
+    { The continuation-scoped context captured when the job was enqueued. }
+    function Snapshot: IContextSnapshot;
   end;
 
   TAsyncJob = class(TInterfacedObject, IAsyncJob)
@@ -39,12 +41,14 @@ type
     FClosed: Boolean;
     FCancelled: Boolean;
     FWork: TNotify;
+    FSnapshot: IContextSnapshot;
   public
     constructor Create(const AWork: TNotify);
     destructor Destroy; override;
     procedure Unsubscribe;
     function Closed: Boolean;
     function TakeWork: TNotify;
+    function Snapshot: IContextSnapshot;
   end;
 
   { Shared machinery: a FIFO of jobs with a head index advanced before each job
@@ -86,6 +90,8 @@ begin
   inherited Create;
   FLock := TCriticalSection.Create;
   FWork := AWork;
+  { Capture the current context at enqueue time; it travels with the job. }
+  FSnapshot := ContextCurrent;
 end;
 
 destructor TAsyncJob.Destroy;
@@ -128,6 +134,11 @@ begin
   end;
 end;
 
+function TAsyncJob.Snapshot: IContextSnapshot;
+begin
+  Result := FSnapshot;
+end;
+
 { TBaseScheduler }
 
 constructor TBaseScheduler.Create;
@@ -157,6 +168,8 @@ procedure TBaseScheduler.RunPending;
 var
   Job: IAsyncJob;
   Work: TNotify;
+  Snap: IContextSnapshot;
+  Token: TContextToken;
 begin
   while FHead < FJobs.Count do
   begin
@@ -164,7 +177,16 @@ begin
     Inc(FHead);
     Work := Job.TakeWork;
     if Assigned(Work) then
-      Work();
+    begin
+      { Install the job's captured context, run, then restore. }
+      Snap := Job.Snapshot;
+      Token := ContextEnter(Snap);
+      try
+        Work();
+      finally
+        ContextLeave(Token);
+      end;
+    end;
   end;
 end;
 

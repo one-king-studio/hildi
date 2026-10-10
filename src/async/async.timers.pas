@@ -18,7 +18,7 @@ interface
 
 uses
   SysUtils, SyncObjs, Generics.Collections,
-  async.base, async.scheduler;
+  async.base, async.context, async.scheduler;
 
 type
   TTimerEntry = class
@@ -153,14 +153,22 @@ procedure TBaseTimerScheduler.RunDue(const AUntil: Int64);
 var
   Entry: TTimerEntry;
   Work: TNotify;
+  Token: TContextToken;
 begin
   Entry := TakeEarliestDue(AUntil);
   while Entry <> nil do
   begin
     Work := Entry.Job.TakeWork;
-    Entry.Free;
     if Assigned(Work) then
-      Work();
+    begin
+      Token := ContextEnter(Entry.Job.Snapshot);
+      try
+        Work();
+      finally
+        ContextLeave(Token);
+      end;
+    end;
+    Entry.Free;
     Entry := TakeEarliestDue(AUntil);
   end;
 end;
