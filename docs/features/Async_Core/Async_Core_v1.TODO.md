@@ -135,12 +135,18 @@ a source over an array of operators (called once with the whole array).
 
 ## Phase 9 — Concurrency
 
-- [ ] **Test**: the executor runs work on a pool thread; `Schedule`/`Unsubscribe`
-      cancels; every thread is joined on shutdown.
-- [ ] **Implement**: `TExecutorScheduler` (bounded pool, token into the worker).
-- [ ] **Test**: `SubscribeOn` moves the work; `ObserveOn` moves the notifications;
-      `RunOn` fires and forgets.
-- [ ] **Implement**: `RunOn`, `SubscribeOn`, `ObserveOn`.
+- [x] **Test**: the executor runs work on a pool thread; every thread is joined
+      on shutdown.
+- [x] **Implement**: `TExecutorScheduler` (a bounded thread pool; a
+      lock-guarded queue + `TSimpleEvent` wake, workers also poll; the job
+      captures the context and the token reaches the worker).
+- [x] **Test**: `SubscribeOn` moves the work; `ObserveOn` moves the
+      notifications; `RunOn` fires and forgets.
+- [x] **Implement**: `RunOn`, `SubscribeOn`, `ObserveOn` (unit
+      `async.concurrency`).
+- [ ] **Deferred**: `Schedule`/`Unsubscribe` cancelling a *running* job (the
+      subscription cancels a job that has not started; cooperative cancellation
+      of an in-flight worker is a follow-up).
 
 ## Phase 10 — Parity sweep and docs
 

@@ -32,7 +32,7 @@ uses
   test_subagent_spy, test_tui_palette, test_async_scheduler,
   test_async_future, test_async_queue, test_async_timers,
   test_async_observable, test_async_subject, test_async_operators,
-  test_async_time, test_async_context;
+  test_async_time, test_async_context, test_async_concurrency;
 
 var
   Runner: TTestRunner;
