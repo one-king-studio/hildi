@@ -75,11 +75,11 @@ type
   private
     FOnNext: TAction<T>;
     FOnError: TAction<Exception>;
-    FOnComplete: TNotify;
+    FOnComplete: TAction0;
   public
     constructor Create(const AOnNext: TAction<T>;
       const AOnError: TAction<Exception> = nil;
-      const AOnComplete: TNotify = nil);
+      const AOnComplete: TAction0 = nil);
     procedure OnNext(const AValue: T);
     procedure OnError(const AError: Exception);
     procedure OnComplete;
@@ -169,6 +169,10 @@ begin
       FClosed := True;
       Down := FDownstream;
       Up := FUpstream;
+      { Break the subscriber<->operator-observer cycle, or the chain never
+        reaches a zero refcount. }
+      FDownstream := nil;
+      FUpstream := nil;
     end;
   finally
     FLock.Release;
@@ -199,6 +203,8 @@ begin
       FClosed := True;
       Down := FDownstream;
       Up := FUpstream;
+      FDownstream := nil;
+      FUpstream := nil;
     end;
   finally
     FLock.Release;
@@ -221,6 +227,8 @@ begin
     Go := not FClosed;
     FClosed := True;
     Up := FUpstream;
+    FDownstream := nil;
+    FUpstream := nil;
   finally
     FLock.Release;
   end;
@@ -255,7 +263,7 @@ end;
 { TObserver<T> }
 
 constructor TObserver<T>.Create(const AOnNext: TAction<T>;
-  const AOnError: TAction<Exception>; const AOnComplete: TNotify);
+  const AOnError: TAction<Exception>; const AOnComplete: TAction0);
 begin
   inherited Create;
   FOnNext := AOnNext;

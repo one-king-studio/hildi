@@ -18,6 +18,11 @@ type
   { A continuation: a bound method to run later. }
   TNotify = procedure of object;
 
+  { A parameterless anonymous callback (a `reference to`), so an inline closure
+    matches it even inside a class method (where an anonymous procedure is a
+    "class anonymous procedure", not a `procedure of object`). }
+  TAction0 = reference to procedure;
+
   { Generic delegates. FPC forbids a generic method inside a generic class, so
     these are declared here and operators are free functions over them. }
   TAction<T> = reference to procedure(const AValue: T);

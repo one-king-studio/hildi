@@ -63,17 +63,39 @@ expresses the next requirement, watch it fail, implement the minimum, refactor,
 
 ## Phase 6 — Operators: creation, transformation, filtering
 
-- [ ] **Test**: the operator test-contract helper (source of known values on the
-      virtual clock → expected notification sequence + teardown expectation).
-- [ ] **Test + Implement**: creation — `Of`, `From`, `Range`, `Defer`, `Empty`,
-      `ThrowError`, `Iif`, `Timer`, `Interval`, `Generate`, `Using`, `FromEvent`.
-- [ ] **Test + Implement**: transformation — `Map`, `Scan`, `Pairwise`, `Buffer`,
-      `BufferCount`, `BufferTime`.
-- [ ] **Test + Implement**: filtering — `Filter`, `Distinct`, `DistinctUntilChanged`,
-      `DistinctUntilKeyChanged`, `First`, `Last`, `Single`, `ElementAt`, `Skip`,
-      `SkipLast`, `SkipUntil`, `SkipWhile`, `Take`, `TakeLast`, `TakeUntil`,
-      `TakeWhile`, `IgnoreElements`, `Debounce`, `DebounceTime`, `Throttle`,
-      `ThrottleTime`, `Audit`, `AuditTime`, `Sample`, `SampleTime`.
+**FPC 3.3.1 generics constrain the surface** (all verified by compile probe). The
+compiler cannot build the idiomatic implementation:
+- A free generic function is an internal compiler error.
+- A generic method inside a generic class is rejected ("generic inside another
+  generic"), and a method on a two-parameter generic class is also an ICE.
+- A generic method whose body builds an anonymous function capturing its type
+  parameter is an ICE, and so is one returning a concrete type (e.g.
+  `ISubscribable<Integer>`).
+
+The one shape that compiles is: **concrete observer and concrete observable
+CLASSES, and a generic METHOD on a single non-generic class (`TStreamOps`) that
+only constructs them (no closure)**. Call sites compose 1:1 with the pipeline
+(`TStreamOps.Map<A,B>(src, f)`, `TStreamOps.Filter<A>(src, p)`).
+
+Still blocked (generic-inside-generic is forbidden): operators returning
+`ISubscribable<TArray<T>>` / `ISubscribable<ISubscribable<...>>` — `Buffer`,
+`Window`, `GroupBy`, `Partition`, `Pairwise`, and the flattening family.
+
+- [x] **Implement**: the operator pattern (concrete observer + observable per
+      operator; `TStreamOps` generic methods).
+- [x] **Test**: creation — `Just`, `FromArray`, `Range`, `Empty`, `ThrowError`,
+      `Defer`.
+- [x] **Test + Implement**: transformation — `Map`, `Scan`.
+- [x] **Test + Implement**: filtering — `Filter`, `Take`, `Skip`, `TakeWhile`,
+      `SkipWhile`, `DistinctUntilChanged`, `First`, `ElementAt`.
+- [x] **Test**: composability (`Map` → `Filter`), laziness.
+- [ ] **Deferred** (see the constraint above): `Buffer`, `Window`, `GroupBy`,
+      `Partition`, `Pairwise`, the flattening family, `Count`, and the
+      cross-type combinators. Record them for a future non-nesting
+      representation.
+- [ ] **Deferred**: the time-based operators (`DebounceTime`, `ThrottleTime`,
+      `SampleTime`, `AuditTime`, `Delay`, `Timeout`, `Timer`, `Interval`) — they
+      need the virtual clock wired into the operator set.
 
 ## Phase 7 — Flattening and combination
 
