@@ -15,6 +15,9 @@ type
     FInt: Integer;
     FMsg: string;
     FRuns: Integer;
+    FFinallyRan: Integer;
+    procedure BumpFinally;
+    function RaiseProducer: Integer;
   published
     procedure ResolveIsFulfilled;
     procedure RejectIsRejected;
@@ -27,9 +30,26 @@ type
     procedure AwaitOnPendingWithoutSchedulerRaises;
     procedure SchedulerDefersDeliveryUntilDrain;
     procedure ThenOnPendingRunsOnFulfill;
+    procedure OnFinallyRunsOnFulfillAndReject;
+    procedure RunProducesEagerly;
+    procedure RunRejectionOnRaise;
+    procedure AwaitTokenStopsOnCancel;
+    procedure RaceTakesTheFirstSettled;
+    procedure AnyTakesTheFirstFulfilled;
   end;
 
 implementation
+
+procedure TAsyncFutureTest.BumpFinally;
+begin
+  Inc(FFinallyRan);
+end;
+
+function TAsyncFutureTest.RaiseProducer: Integer;
+begin
+  Result := 0;
+  raise Exception.Create('boom');
+end;
 
 procedure TAsyncFutureTest.ResolveIsFulfilled;
 var
@@ -202,6 +222,126 @@ begin
     AssertEquals('ran on fulfill', 5, FInt);
   finally
     F.Free;
+  end;
+end;
+
+procedure TAsyncFutureTest.OnFinallyRunsOnFulfillAndReject;
+var
+  F: TFuture<Integer>;
+begin
+  FFinallyRan := 0;
+  F := TFuture<Integer>.Resolve(1);
+  try
+    F.OnFinally(BumpFinally);
+    AssertEquals('ran on fulfill', 1, FFinallyRan);
+  finally
+    F.Free;
+  end;
+  F := TFuture<Integer>.Reject(Exception.Create('x'));
+  try
+    F.OnFinally(BumpFinally);
+    AssertEquals('ran on reject too', 2, FFinallyRan);
+  finally
+    F.Free;
+  end;
+end;
+
+procedure TAsyncFutureTest.RunProducesEagerly;
+var
+  F: TFuture<Integer>;
+begin
+  F := TFuture<Integer>.Run(function: Integer begin Result := 42; end);
+  try
+    AssertEquals('fulfilled', Ord(fsFulfilled), Ord(F.State));
+    AssertEquals('value', 42, F.Value);
+  finally
+    F.Free;
+  end;
+end;
+
+procedure TAsyncFutureTest.RunRejectionOnRaise;
+var
+  F: TFuture<Integer>;
+begin
+  F := TFuture<Integer>.Run(RaiseProducer);
+  try
+    AssertEquals('rejected', Ord(fsRejected), Ord(F.State));
+    AssertEquals('message', 'boom', F.Error.Message);
+  finally
+    F.Free;
+  end;
+end;
+
+procedure TAsyncFutureTest.AwaitTokenStopsOnCancel;
+var
+  F: TFuture<Integer>;
+  Tok: TSpinFreeCancellation;
+  Caught: Boolean;
+begin
+  { A pending future with a scheduler but no work to settle it; a tripped token
+    stops the wait. }
+  F := TFuture<Integer>.Create(TAsapScheduler.Create);
+  try
+    Tok := TSpinFreeCancellation.Create;
+    Tok.Cancel;
+    Caught := False;
+    try
+      F.AwaitToken(Tok);
+    except
+      on E: EFutureCancelled do
+        Caught := True;
+    end;
+    AssertTrue('await stopped on cancel', Caught);
+    Tok.Free;
+  finally
+    F.Free;
+  end;
+end;
+
+procedure TAsyncFutureTest.RaceTakesTheFirstSettled;
+var
+  A, B, R: TFuture<Integer>;
+  Arr: TArray<TFuture<Integer>>;
+begin
+  A := TFuture<Integer>.Resolve(1);
+  B := TFuture<Integer>.Resolve(2);
+  try
+    SetLength(Arr, 2);
+    Arr[0] := A;
+    Arr[1] := B;
+    R := Race<Integer>(Arr);
+    try
+      AssertEquals('first settled wins', 1, R.Value);
+    finally
+      R.Free;
+    end;
+  finally
+    A.Free;
+    B.Free;
+  end;
+end;
+
+procedure TAsyncFutureTest.AnyTakesTheFirstFulfilled;
+var
+  A, B, R: TFuture<Integer>;
+  Arr: TArray<TFuture<Integer>>;
+begin
+  { A rejected then a fulfilled: Any still fulfills with the good one. }
+  A := TFuture<Integer>.Reject(Exception.Create('x'));
+  B := TFuture<Integer>.Resolve(7);
+  try
+    SetLength(Arr, 2);
+    Arr[0] := A;
+    Arr[1] := B;
+    R := Any<Integer>(Arr);
+    try
+      AssertEquals('the fulfilled one wins', 7, R.Value);
+    finally
+      R.Free;
+    end;
+  finally
+    A.Free;
+    B.Free;
   end;
 end;
 

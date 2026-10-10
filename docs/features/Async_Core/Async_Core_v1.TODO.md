@@ -51,10 +51,14 @@ expresses the next requirement, watch it fail, implement the minimum, refactor,
       delivery through a scheduler.
 - [x] **Test**: `Await` returns the value and raises on a rejected future; a
       pending future with no scheduler raises rather than hanging.
-- [ ] **Implement**: `Finally`.
-- [ ] **Test + Implement**: `All`, `AllSettled`, `Race`, `Any`.
-- [ ] **Test**: `Await(token)` interrupts.
-- [ ] **Implement**: unhandled-rejection tracking.
+- [x] **Implement**: `OnFinally` (named so because `Finally` is reserved).
+- [x] **Implement**: `Run` (eager producer; a raise becomes a rejection).
+- [x] **Test + Implement**: `Race`, `Any` (same-type; a `TFutureRacer<T>`
+      coordinator). `All`/`AllSettled` are **deferred**: they would return
+      `TFuture<TArray<T>>`, the generic-inside-generic wall (the same one that
+      blocks `Buffer`/`GroupBy`).
+- [x] **Test**: `AwaitToken(token)` interrupts (`EFutureCancelled`).
+- [ ] **Deferred**: unhandled-rejection tracking.
 
 ## Phase 5 — Observable and subjects
 
