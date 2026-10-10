@@ -89,7 +89,7 @@ TEST_SRCS := $(wildcard $(TESTS)/*.pas)
 
 .PHONY: all test test-leak watch check release clean help libsqlite libmbedtls \
         store-demo agent-cli release-agent-cli tui-demo widgets-demo layout-demo \
-        headless-agent tui-agent bench perf agents agent-% mcp-smoke async-standalone async-bench async-freeze
+        headless-agent tui-agent bench perf agents agent-% mcp-smoke async-standalone async-bench async-freeze async-examples
 
 all: $(BIN)/hildegard-helper-demo
 
@@ -245,6 +245,13 @@ async-freeze: $(ASYNC_SRCS)
 	$(FPC) $(RELEASE) -Fu$(SRC)/async -FU$(RELUNITS) -FE$(BIN) -o$(BIN)/async-freeze $(EXAMPLES)/async_freeze_bench.pas
 	$(BIN)/async-freeze
 
+# The three worked examples (CLI Await, UI ObserveOn, virtual clock), run so the
+# output is visible. Uses only the async library.
+async-examples: $(ASYNC_SRCS)
+	@mkdir -p $(BIN) $(DBGUNITS)
+	$(FPC) $(DEBUG) -Fu$(SRC)/async -FU$(DBGUNITS) -FE$(BIN) -o$(BIN)/async-examples $(EXAMPLES)/async_examples.pas
+	$(BIN)/async-examples
+
 $(BIN)/hildegard-helper-tests: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/async -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
@@ -321,6 +328,8 @@ help:
 	@echo "  make mcp-smoke                live MCP smoke against a real server (needs Docker)"
 	@echo "  make agents                   list agent playgrounds (ahead/behind, stale flags)"
 	@echo "  make agent-<target>           run <target> in the ACTIVE playground"
+	@echo "  make async-standalone         build & run the Async Core isolation check"
+	@echo "  make async-examples           build & run the three Async Core worked examples"
 	@echo "  make tui-agent [ARGS=...]     build & run the agent harness (needs an API key)"
 	@echo "  make bench [ARGS=--real]      build & run the TUI wall-clock benchmark"
 	@echo "  make perf                     run the benchmark with budget assertions"

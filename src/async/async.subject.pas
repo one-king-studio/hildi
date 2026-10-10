@@ -389,10 +389,17 @@ begin
   finally
     FLock.Release;
   end;
-  if Stopped then
-    Exit(TClosureSubscription.Create(nil));
+  { Replay the buffer to the new subscriber, then - if the subject has already
+    stopped - terminate it. A completed replay subject therefore replays its
+    buffer AND completes a late subscriber (the AsyncSubject pattern); without
+    the replay a late subscriber would silently see nothing. }
   for I := 0 to High(Replay) do
     AObserver.OnNext(Replay[I]);
+  if Stopped then
+  begin
+    AObserver.OnComplete;
+    Exit(TClosureSubscription.Create(nil));
+  end;
   Result := TClosureSubscription.Create(
     procedure
     var

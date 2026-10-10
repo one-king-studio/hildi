@@ -84,6 +84,18 @@ type
     procedure EveryEmitsOneBoolean;
     procedure IsEmptyEmitsOneBoolean;
     procedure MaterializeThenDematerializeRoundTrips;
+    { Phase 10 parity sweep: operators implemented but previously untested. }
+    procedure ConcatMapIsSequential;
+    procedure RetryResubscribesThenRaises;
+    procedure RaceTakesTheFirstSource;
+    procedure PublishReplayReplaysToLateSubscribers;
+    procedure PublishLastEmitsOnlyTheFinalValue;
+    procedure PublishBehaviorReplaysTheInitialValue;
+    procedure ShareReplayReplaysToLateSubscribers;
+    { Phase 7 remainder: the buildable flatten/combine operators. }
+    procedure ExhaustMapDropsValuesWhileBusy;
+    procedure WithLatestFromCombinesWithTheLatestRight;
+    procedure ExpandUnfoldsBreadthFirst;
   end;
 
 implementation
@@ -640,6 +652,188 @@ begin
     turns them back. The round trip yields the original values + completion. }
   AssertInts(Dematerialize<Integer>(Materialize<Integer>(IntSource([1, 2, 3]))),
     '1,2,3', True);
+end;
+
+procedure TAsyncOperatorsTest.ConcatMapIsSequential;
+begin
+  { ConcatMap projects each outer value to an inner stream and concatenates them
+    in order. With a synchronous source every inner completes before the next
+    outer value arrives, so the order is deterministic. }
+  AssertInts(ConcatMap<Integer, Integer>(IntSource([1, 2]),
+    function(const V: Integer): ISubscribable<Integer>
+    begin
+      Result := IntSource([V * 10, V * 10 + 1]);
+    end), '10,11,20,21', True);
+end;
+
+procedure TAsyncOperatorsTest.RetryResubscribesThenRaises;
+var
+  Err: Exception;
+begin
+  { A source that fails once, then succeeds: Retry(1) resubscribes and recovers.
+    The discarded intermediate error is never delivered to OnError (Retry
+    swallows it), so this test owns it and frees it after the run. }
+  FSourceRuns := 0;
+  Reset;
+  Err := Exception.Create('boom');
+  Retry<Integer>(Defer<Integer>(function: ISubscribable<Integer>
+    begin
+      Inc(FSourceRuns);
+      if FSourceRuns = 1 then
+        Result := ThrowError<Integer>(Err)
+      else
+        Result := IntSource([1, 2]);
+    end), 1).Subscribe(RecorderInt);
+  Err.Free;
+  AssertEquals('resubscribed once', 2, FSourceRuns);
+  AssertEquals('recovered on the retry', '1,2', FSeq);
+  AssertEquals('completed', 1, FCompletes);
+  { An always-failing source exhausts the retries and surfaces the error; the
+    same object is delivered across attempts, so the final OnError owns it. }
+  Reset;
+  Retry<Integer>(ThrowError<Integer>(Exception.Create('boom')), 2).Subscribe(RecorderInt);
+  AssertEquals('gave up with the error', 'boom', FError);
+end;
+
+procedure TAsyncOperatorsTest.RaceTakesTheFirstSource;
+var
+  None: TArray<ISubscribable<Integer>>;
+begin
+  { The synchronous approximation: the first source wins. }
+  AssertInts(Race<Integer>([IntSource([1, 2]), IntSource([9, 9])]), '1,2', True);
+  { No sources is the empty stream. }
+  None := nil;
+  AssertInts(Race<Integer>(None), '', True);
+end;
+
+procedure TAsyncOperatorsTest.PublishReplayReplaysToLateSubscribers;
+var
+  Conn: IConnectableObservable<Integer>;
+begin
+  FSourceRuns := 0;
+  Reset;
+  Conn := PublishReplay<Integer>(Defer<Integer>(function: ISubscribable<Integer>
+    begin
+      Inc(FSourceRuns);
+      Result := IntSource([1, 2, 3]);
+    end), 2);
+  Conn.Subscribe(RecorderInt);
+  Conn.Connect;
+  AssertEquals('source ran once', 1, FSourceRuns);
+  AssertEquals('first subscriber saw every value', '1,2,3', FSeq);
+  { A subscriber after the run replays the bounded buffer (the last 2). }
+  Reset;
+  Conn.Subscribe(RecorderInt);
+  AssertEquals('late subscriber replays the buffer', '2,3', FSeq);
+end;
+
+procedure TAsyncOperatorsTest.PublishLastEmitsOnlyTheFinalValue;
+var
+  Conn: IConnectableObservable<Integer>;
+begin
+  FSourceRuns := 0;
+  Reset;
+  Conn := PublishLast<Integer>(Defer<Integer>(function: ISubscribable<Integer>
+    begin
+      Inc(FSourceRuns);
+      Result := IntSource([1, 2, 3]);
+    end));
+  Conn.Subscribe(RecorderInt);
+  Conn.Connect;
+  AssertEquals('only the last value', '3', FSeq);
+  AssertEquals('completed', 1, FCompletes);
+end;
+
+procedure TAsyncOperatorsTest.PublishBehaviorReplaysTheInitialValue;
+var
+  Conn: IConnectableObservable<Integer>;
+begin
+  FSourceRuns := 0;
+  Reset;
+  Conn := PublishBehavior<Integer>(Defer<Integer>(function: ISubscribable<Integer>
+    begin
+      Inc(FSourceRuns);
+      Result := IntSource([1, 2]);
+    end), 0);
+  { The subscriber gets the current (initial) value before Connect. }
+  Conn.Subscribe(RecorderInt);
+  AssertEquals('initial value first', '0', FSeq);
+  Conn.Connect;
+  AssertEquals('then the source values', '0,1,2', FSeq);
+end;
+
+procedure TAsyncOperatorsTest.ShareReplayReplaysToLateSubscribers;
+var
+  Shared: ISubscribable<Integer>;
+begin
+  FSourceRuns := 0;
+  Reset;
+  Shared := ShareReplay<Integer>(Defer<Integer>(function: ISubscribable<Integer>
+    begin
+      Inc(FSourceRuns);
+      Result := IntSource([1, 2, 3]);
+    end), 2);
+  Shared.Subscribe(RecorderInt);
+  AssertEquals('source ran once for the first subscriber', 1, FSourceRuns);
+  AssertEquals('first subscriber saw every value', '1,2,3', FSeq);
+  Reset;
+  Shared.Subscribe(RecorderInt);
+  AssertEquals('late subscriber replays the buffer', '2,3', FSeq);
+  AssertEquals('source still ran only once', 1, FSourceRuns);
+end;
+
+procedure TAsyncOperatorsTest.ExhaustMapDropsValuesWhileBusy;
+var
+  Projected: Integer;
+begin
+  { A synchronous source with synchronous inners: each inner completes during
+    Subscribe, so the observer is never busy when the next value arrives and
+    every value is projected - the same determinism as MergeMap here. }
+  Projected := 0;
+  Reset;
+  ExhaustMap<Integer, Integer>(IntSource([1, 2]),
+    function(const V: Integer): ISubscribable<Integer>
+    begin
+      Inc(Projected);
+      Result := IntSource([V * 10, V * 10 + 1]);
+    end).Subscribe(RecorderInt);
+  AssertEquals('every value projected', 2, Projected);
+  AssertEquals('values', '10,11,20,21', FSeq);
+  AssertEquals('completed', 1, FCompletes);
+end;
+
+procedure TAsyncOperatorsTest.WithLatestFromCombinesWithTheLatestRight;
+begin
+  { Left emits 1,2,3; right supplies 10 then 20. Each left value pairs with the
+    latest right value seen so far. The right is subscribed first, so a
+    synchronous right's values are all available before the left runs. }
+  Reset;
+  WithLatestFrom<Integer, Integer, string>(IntSource([1, 2, 3]),
+    IntSource([10, 20]),
+    function(const A, B: Integer): string
+    begin
+      Result := IntToStr(A) + '/' + IntToStr(B);
+    end).Subscribe(RecorderStr);
+  AssertEquals('each left paired with the latest right', '1/20,2/20,3/20', FSeq);
+  AssertEquals('completes with the left', 1, FCompletes);
+end;
+
+procedure TAsyncOperatorsTest.ExpandUnfoldsBreadthFirst;
+begin
+  { From 1, expand by doubling while the value is below 8: 1 -> 2 -> 4 -> 8,
+    where 8 is emitted but its expansion (16) is out of range so it stops.
+    Breadth-first emission order. }
+  Reset;
+  Expand<Integer>(IntSource([1]),
+    function(const V: Integer): ISubscribable<Integer>
+    begin
+      if V < 8 then
+        Result := IntSource([V * 2])
+      else
+        Result := Empty<Integer>;
+    end).Subscribe(RecorderInt);
+  AssertEquals('unfolded', '1,2,4,8', FSeq);
+  AssertEquals('completed', 1, FCompletes);
 end;
 
 initialization

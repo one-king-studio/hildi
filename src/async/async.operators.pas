@@ -334,7 +334,7 @@ type
     function Subscribe(const AObserver: IObserver<T>): ISubscription;
   end;
 
-  TFlattenMode = (fmMerge, fmSwitch, fmConcat);
+  TFlattenMode = (fmMerge, fmSwitch, fmConcat, fmExhaust);
 
   { Projects each source value to an inner stream and flattens: MergeMap keeps
     all inners live, SwitchMap keeps only the newest, ConcatMap runs them in
@@ -372,6 +372,38 @@ type
     constructor Create(const ASource: ISubscribable<T>;
       const AProject: TStreamMapper<T, U>; const AMode: TFlattenMode);
     function Subscribe(const AObserver: IObserver<U>): ISubscription;
+  end;
+
+  { Expand: emit each source value, then feed every emitted value back through
+    the projection and merge the results (a bounded breadth-first unfold). The
+    projection must be finite - an unbounded one never terminates, exactly as in
+    RxJS. The element type stays T, so this is one level: not blocked. }
+  TExpandObserver<T> = class(TInterfacedObject, IObserver<T>)
+  private
+    FDown: IObserver<T>;
+    FProject: TStreamMapper<T, T>;
+    FLock: TCriticalSection;
+    FSourceDone: Boolean;
+    FActive: Integer;
+    procedure InnerNext(const AValue: T);
+    procedure InnerDone;
+    procedure SubscribeInner(const AInner: ISubscribable<T>);
+  public
+    constructor Create(const ADown: IObserver<T>; const AProject: TStreamMapper<T, T>);
+    destructor Destroy; override;
+    procedure OnNext(const AValue: T);
+    procedure OnError(const AError: Exception);
+    procedure OnComplete;
+  end;
+
+  TExpandObservable<T> = class(TInterfacedObject, ISubscribable<T>)
+  private
+    FSource: ISubscribable<T>;
+    FProject: TStreamMapper<T, T>;
+  public
+    constructor Create(const ASource: ISubscribable<T>;
+      const AProject: TStreamMapper<T, T>);
+    function Subscribe(const AObserver: IObserver<T>): ISubscription;
   end;
 
   { Two-stream combine by a combiner function (no tuple type). A coordinator
@@ -419,6 +451,57 @@ type
   end;
 
   TZipObservable<T, U, V> = class(TInterfacedObject, ISubscribable<V>)
+  private
+    FLeft: ISubscribable<T>;
+    FRight: ISubscribable<U>;
+    FCombine: TCombiner<T, U, V>;
+  public
+    constructor Create(const ALeft: ISubscribable<T>;
+      const ARight: ISubscribable<U>; const ACombine: TCombiner<T, U, V>);
+    function Subscribe(const AObserver: IObserver<V>): ISubscription;
+  end;
+
+  { WithLatestFrom: emit a combined value on each LEFT value, paired with the
+    latest RIGHT value; right values seen before the first left value are
+    ignored, and the result completes with the left. Same coordinator shape as
+    Zip (two single-type observers push each side in). }
+  TWithLatestCoordinator<T, U, V> = class(TInterfacedObject, ISubscription)
+  private
+    FDown: IObserver<V>;
+    FCombine: TCombiner<T, U, V>;
+    FLatest: U;
+    FHasLatest: Boolean;
+    FClosed: Boolean;
+  public
+    constructor Create(const ADown: IObserver<V>; const ACombine: TCombiner<T, U, V>);
+    procedure PushLeft(const AValue: T);
+    procedure PushRight(const AValue: U);
+    procedure RightDone;
+    procedure Unsubscribe;
+    function Closed: Boolean;
+  end;
+
+  TWithLatestLeftObserver<T, U, V> = class(TInterfacedObject, IObserver<T>)
+  private
+    FCoord: TWithLatestCoordinator<T, U, V>;
+  public
+    constructor Create(const ACoord: TWithLatestCoordinator<T, U, V>);
+    procedure OnNext(const AValue: T);
+    procedure OnError(const AError: Exception);
+    procedure OnComplete;
+  end;
+
+  TWithLatestRightObserver<T, U, V> = class(TInterfacedObject, IObserver<U>)
+  private
+    FCoord: TWithLatestCoordinator<T, U, V>;
+  public
+    constructor Create(const ACoord: TWithLatestCoordinator<T, U, V>);
+    procedure OnNext(const AValue: U);
+    procedure OnError(const AError: Exception);
+    procedure OnComplete;
+  end;
+
+  TWithLatestObservable<T, U, V> = class(TInterfacedObject, ISubscribable<V>)
   private
     FLeft: ISubscribable<T>;
     FRight: ISubscribable<U>;
@@ -720,6 +803,27 @@ type
     function Subscribe(const AObserver: IObserver<T>): ISubscription;
   end;
 
+  { Resubscribes the source on error until the count is spent. A concrete
+    observer (not a closure): the closure form captured the observer itself,
+    an observer -> closure -> observer reference cycle that leaked. Mirrors
+    TRepeatObserver. }
+  TRetryObserver<T> = class(TInterfacedObject, IObserver<T>, ISubscription)
+  private
+    FSource: ISubscribable<T>;
+    FDown: IObserver<T>;
+    FLeft: Integer;
+    FClosed: Boolean;
+  public
+    constructor Create(const ASource: ISubscribable<T>; const ADown: IObserver<T>;
+      const ACount: Integer);
+    procedure Start;
+    procedure OnNext(const AValue: T);
+    procedure OnError(const AError: Exception);
+    procedure OnComplete;
+    procedure Unsubscribe;
+    function Closed: Boolean;
+  end;
+
   TCombineLatestCoordinator<T, U, V> = class(TInterfacedObject, ISubscription)
   private
     FDown: IObserver<V>;
@@ -849,6 +953,10 @@ type
     const AProject: TStreamMapper<T, U>): ISubscribable<U>;
   function ConcatMap<T, U>(const ASource: ISubscribable<T>;
     const AProject: TStreamMapper<T, U>): ISubscribable<U>;
+  function ExhaustMap<T, U>(const ASource: ISubscribable<T>;
+    const AProject: TStreamMapper<T, U>): ISubscribable<U>;
+  function Expand<T>(const ASource: ISubscribable<T>;
+    const AProject: TStreamMapper<T, T>): ISubscribable<T>;
   function Zip<T, U, V>(const ALeft: ISubscribable<T>;
     const ARight: ISubscribable<U>;
     const ACombine: TCombiner<T, U, V>): ISubscribable<V>;
@@ -890,6 +998,9 @@ type
   function Retry<T>(const ASource: ISubscribable<T>;
     const ACount: Integer): ISubscribable<T>;
   function CombineLatest<T, U, V>(const ALeft: ISubscribable<T>;
+    const ARight: ISubscribable<U>;
+    const ACombine: TCombiner<T, U, V>): ISubscribable<V>;
+  function WithLatestFrom<T, U, V>(const ALeft: ISubscribable<T>;
     const ARight: ISubscribable<U>;
     const ACombine: TCombiner<T, U, V>): ISubscribable<V>;
   function Race<T>(const ASources: TArray<ISubscribable<T>>): ISubscribable<T>;
@@ -1734,6 +1845,18 @@ begin
   Result := TFlattenObservable<T, U>.Create(ASource, AProject, fmConcat);
 end;
 
+function ExhaustMap<T, U>(const ASource: ISubscribable<T>;
+  const AProject: TStreamMapper<T, U>): ISubscribable<U>;
+begin
+  Result := TFlattenObservable<T, U>.Create(ASource, AProject, fmExhaust);
+end;
+
+function Expand<T>(const ASource: ISubscribable<T>;
+  const AProject: TStreamMapper<T, T>): ISubscribable<T>;
+begin
+  Result := TExpandObservable<T>.Create(ASource, AProject);
+end;
+
 function Zip<T, U, V>(const ALeft: ISubscribable<T>;
   const ARight: ISubscribable<U>;
   const ACombine: TCombiner<T, U, V>): ISubscribable<V>;
@@ -2110,6 +2233,11 @@ begin
   FLock.Acquire;
   try
     Dec(FActive);
+    { Clear the concat guard here, not only in DrainConcat: an inner that
+      completes synchronously (the common case for this library) returns before
+      the queue is drained, so without this the next queued inner never starts
+      and the stream stalls after the first one. }
+    FRunning := False;
     Done := FSourceDone and (FActive = 0) and (Length(FQueue) = 0);
   finally
     FLock.Release;
@@ -2164,7 +2292,22 @@ end;
 procedure TFlattenObserver<T, U>.OnNext(const AValue: T);
 var
   Inner: ISubscribable<U>;
+  Busy: Boolean;
 begin
+  { The exhaust rule: while an inner is in flight, a new source value is
+    ignored outright - the projection is not even called (matching RxJS, so a
+    projection with a side effect does not run for a dropped value). }
+  if FMode = fmExhaust then
+  begin
+    FLock.Acquire;
+    try
+      Busy := FActive > 0;
+    finally
+      FLock.Release;
+    end;
+    if Busy then
+      Exit;
+  end;
   Inner := FProject(AValue);
   case FMode of
     fmSwitch:
@@ -2236,6 +2379,113 @@ end;
 function TFlattenObservable<T, U>.Subscribe(const AObserver: IObserver<U>): ISubscription;
 begin
   Result := FSource.Subscribe(TFlattenObserver<T, U>.Create(AObserver, FProject, FMode));
+end;
+
+{ TExpandObserver<T> }
+
+constructor TExpandObserver<T>.Create(const ADown: IObserver<T>;
+  const AProject: TStreamMapper<T, T>);
+begin
+  inherited Create;
+  FDown := ADown;
+  FProject := AProject;
+  FLock := TCriticalSection.Create;
+  FSourceDone := False;
+  FActive := 0;
+end;
+
+destructor TExpandObserver<T>.Destroy;
+begin
+  FLock.Free;
+  inherited;
+end;
+
+procedure TExpandObserver<T>.InnerNext(const AValue: T);
+var
+  Inner: ISubscribable<T>;
+begin
+  { Emit the value, then feed it back through the projection. Count the inner
+    before subscribing: a synchronous inner completes during Subscribe. }
+  FDown.OnNext(AValue);
+  Inner := FProject(AValue);
+  SubscribeInner(Inner);
+end;
+
+procedure TExpandObserver<T>.InnerDone;
+var
+  Done: Boolean;
+begin
+  FLock.Acquire;
+  try
+    Dec(FActive);
+    Done := FSourceDone and (FActive = 0);
+  finally
+    FLock.Release;
+  end;
+  if Done then
+    FDown.OnComplete;
+end;
+
+procedure TExpandObserver<T>.SubscribeInner(const AInner: ISubscribable<T>);
+var
+  Obs: IObserver<T>;
+begin
+  FLock.Acquire;
+  try
+    Inc(FActive);
+  finally
+    FLock.Release;
+  end;
+  Obs := TObserver<T>.Create(
+    procedure(const V: T) begin InnerNext(V); end,
+    procedure(const E: Exception) begin FDown.OnError(E); end,
+    procedure begin InnerDone; end);
+  AInner.Subscribe(Obs);
+end;
+
+procedure TExpandObserver<T>.OnNext(const AValue: T);
+var
+  Inner: ISubscribable<T>;
+begin
+  { Emit the source value, then expand it. }
+  FDown.OnNext(AValue);
+  Inner := FProject(AValue);
+  SubscribeInner(Inner);
+end;
+
+procedure TExpandObserver<T>.OnError(const AError: Exception);
+begin
+  FDown.OnError(AError);
+end;
+
+procedure TExpandObserver<T>.OnComplete;
+var
+  Done: Boolean;
+begin
+  FLock.Acquire;
+  try
+    FSourceDone := True;
+    Done := FActive = 0;
+  finally
+    FLock.Release;
+  end;
+  if Done then
+    FDown.OnComplete;
+end;
+
+{ TExpandObservable<T> }
+
+constructor TExpandObservable<T>.Create(const ASource: ISubscribable<T>;
+  const AProject: TStreamMapper<T, T>);
+begin
+  inherited Create;
+  FSource := ASource;
+  FProject := AProject;
+end;
+
+function TExpandObservable<T>.Subscribe(const AObserver: IObserver<T>): ISubscription;
+begin
+  Result := FSource.Subscribe(TExpandObserver<T>.Create(AObserver, FProject));
 end;
 
 { TZipCoordinator<T,U,V> }
@@ -2377,6 +2627,123 @@ begin
   FLeft.Subscribe(TZipLeftObserver<T, U, V>.Create(Zip));
   FRight.Subscribe(TZipRightObserver<T, U, V>.Create(Zip));
   Result := Zip;
+end;
+
+{ TWithLatestCoordinator<T,U,V> }
+
+constructor TWithLatestCoordinator<T, U, V>.Create(const ADown: IObserver<V>;
+  const ACombine: TCombiner<T, U, V>);
+begin
+  inherited Create;
+  FDown := ADown;
+  FCombine := ACombine;
+  FHasLatest := False;
+  FClosed := False;
+end;
+
+procedure TWithLatestCoordinator<T, U, V>.PushLeft(const AValue: T);
+begin
+  { Emit only once a right value has been seen; otherwise the left value has no
+    partner and is dropped. }
+  if FClosed or (not FHasLatest) then
+    Exit;
+  FDown.OnNext(FCombine(AValue, FLatest));
+end;
+
+procedure TWithLatestCoordinator<T, U, V>.PushRight(const AValue: U);
+begin
+  if FClosed then
+    Exit;
+  FLatest := AValue;
+  FHasLatest := True;
+end;
+
+procedure TWithLatestCoordinator<T, U, V>.RightDone;
+begin
+  { The right side is only a supplier; its completion does not complete the
+    result (the left drives it). }
+end;
+
+procedure TWithLatestCoordinator<T, U, V>.Unsubscribe;
+begin
+  FClosed := True;
+end;
+
+function TWithLatestCoordinator<T, U, V>.Closed: Boolean;
+begin
+  Result := FClosed;
+end;
+
+{ TWithLatestLeftObserver<T,U,V> }
+
+constructor TWithLatestLeftObserver<T, U, V>.Create(
+  const ACoord: TWithLatestCoordinator<T, U, V>);
+begin
+  inherited Create;
+  FCoord := ACoord;
+end;
+
+procedure TWithLatestLeftObserver<T, U, V>.OnNext(const AValue: T);
+begin
+  FCoord.PushLeft(AValue);
+end;
+
+procedure TWithLatestLeftObserver<T, U, V>.OnError(const AError: Exception);
+begin
+  FCoord.FDown.OnError(AError);
+end;
+
+procedure TWithLatestLeftObserver<T, U, V>.OnComplete;
+begin
+  FCoord.FDown.OnComplete;
+end;
+
+{ TWithLatestRightObserver<T,U,V> }
+
+constructor TWithLatestRightObserver<T, U, V>.Create(
+  const ACoord: TWithLatestCoordinator<T, U, V>);
+begin
+  inherited Create;
+  FCoord := ACoord;
+end;
+
+procedure TWithLatestRightObserver<T, U, V>.OnNext(const AValue: U);
+begin
+  FCoord.PushRight(AValue);
+end;
+
+procedure TWithLatestRightObserver<T, U, V>.OnError(const AError: Exception);
+begin
+  FCoord.FDown.OnError(AError);
+end;
+
+procedure TWithLatestRightObserver<T, U, V>.OnComplete;
+begin
+  FCoord.RightDone;
+end;
+
+{ TWithLatestObservable<T,U,V> }
+
+constructor TWithLatestObservable<T, U, V>.Create(const ALeft: ISubscribable<T>;
+  const ARight: ISubscribable<U>; const ACombine: TCombiner<T, U, V>);
+begin
+  inherited Create;
+  FLeft := ALeft;
+  FRight := ARight;
+  FCombine := ACombine;
+end;
+
+function TWithLatestObservable<T, U, V>.Subscribe(
+  const AObserver: IObserver<V>): ISubscription;
+var
+  C: TWithLatestCoordinator<T, U, V>;
+begin
+  C := TWithLatestCoordinator<T, U, V>.Create(AObserver, FCombine);
+  Result := C;
+  { Subscribe the right side FIRST so its latest value is available before the
+    (possibly synchronous) left side emits. }
+  FRight.Subscribe(TWithLatestRightObserver<T, U, V>.Create(C));
+  FLeft.Subscribe(TWithLatestLeftObserver<T, U, V>.Create(C));
 end;
 
 { TReduceObserver<T,A> }
@@ -2834,25 +3201,62 @@ end;
 
 function TRetryObservable<T>.Subscribe(const AObserver: IObserver<T>): ISubscription;
 var
-  Attempts: Integer;
-  Fwd: IObserver<T>;
+  Obs: TRetryObserver<T>;
 begin
-  Attempts := 0;
-  Fwd := TObserver<T>.Create(
-    procedure(const V: T) begin AObserver.OnNext(V); end,
-    procedure(const E: Exception)
-    begin
-      if Attempts < FCount then
-      begin
-        Inc(Attempts);
-        FSource.Subscribe(Fwd);
-      end
-      else
-        AObserver.OnError(E);
-    end,
-    procedure begin AObserver.OnComplete; end);
-  FSource.Subscribe(Fwd);
-  Result := TClosureSubscription.Create(nil);
+  Obs := TRetryObserver<T>.Create(FSource, AObserver, FCount);
+  Result := Obs;
+  Obs.Start;
+end;
+
+{ TRetryObserver<T> }
+
+constructor TRetryObserver<T>.Create(const ASource: ISubscribable<T>;
+  const ADown: IObserver<T>; const ACount: Integer);
+begin
+  inherited Create;
+  FSource := ASource;
+  FDown := ADown;
+  FLeft := ACount;
+  FClosed := False;
+end;
+
+procedure TRetryObserver<T>.Start;
+begin
+  FSource.Subscribe(Self);
+end;
+
+procedure TRetryObserver<T>.OnNext(const AValue: T);
+begin
+  FDown.OnNext(AValue);
+end;
+
+procedure TRetryObserver<T>.OnError(const AError: Exception);
+begin
+  { Resubscribe on error until the count is spent. The intermediate error is
+    dropped (the source owns it - ThrowError frees its error, and a well-behaved
+    source must), so it is deliberately not freed here. }
+  if FLeft > 0 then
+  begin
+    Dec(FLeft);
+    FSource.Subscribe(Self);
+  end
+  else
+    FDown.OnError(AError);
+end;
+
+procedure TRetryObserver<T>.OnComplete;
+begin
+  FDown.OnComplete;
+end;
+
+procedure TRetryObserver<T>.Unsubscribe;
+begin
+  FClosed := True;
+end;
+
+function TRetryObserver<T>.Closed: Boolean;
+begin
+  Result := FClosed;
 end;
 
 { TCombineLatestCoordinator<T,U,V> }
@@ -3111,6 +3515,12 @@ function CombineLatest<T, U, V>(const ALeft: ISubscribable<T>;
   const ARight: ISubscribable<U>; const ACombine: TCombiner<T, U, V>): ISubscribable<V>;
 begin
   Result := TCombineLatestObservable<T, U, V>.Create(ALeft, ARight, ACombine);
+end;
+
+function WithLatestFrom<T, U, V>(const ALeft: ISubscribable<T>;
+  const ARight: ISubscribable<U>; const ACombine: TCombiner<T, U, V>): ISubscribable<V>;
+begin
+  Result := TWithLatestObservable<T, U, V>.Create(ALeft, ARight, ACombine);
 end;
 
 function Race<T>(const ASources: TArray<ISubscribable<T>>): ISubscribable<T>;

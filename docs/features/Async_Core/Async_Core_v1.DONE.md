@@ -96,9 +96,10 @@ a source over an array of operators (called once with the whole array).
       (projection form; the result is one level, so no nesting).
 - [x] **Test + Implement**: combine — `Zip` (combiner form).
 - [x] **Test**: composability (`Map` → `Filter`), laziness, `Pipe`.
-- [ ] **Deferred — needs a non-nesting container**: `Buffer`, `ToArray`,
-      `Window`, `GroupBy`, and a true `MergeAll` over
-      `ISubscribable<ISubscribable<T>>`.
+- [ ] **Deferred — needs a non-nesting container**: `Buffer`, `BufferCount`,
+      `BufferTime`, `ToArray`, `Window`, `WindowCount`, `WindowTime`, `GroupBy`,
+      `Partition`, `ForkJoin`, and a true `MergeAll`/`ConcatAll`/`SwitchAll`/
+      `CombineLatestAll` over `ISubscribable<ISubscribable<T>>`.
 - [x] **Test + Implement**: utility — `Tap`, `IgnoreElements`, `StartWith`,
       `EndWith`, `Distinct`, `Last`.
 - [x] **Test + Implement**: aggregation — `Count` (and `Reduce<T,A>` with a
@@ -115,11 +116,23 @@ a source over an array of operators (called once with the whole array).
 
 ## Phase 7 — Flattening and combination
 
-- [ ] **Test + Implement**: flattening — `MergeMap`, `ConcatMap`, `SwitchMap`,
-      `ExhaustMap`, `MergeAll`, `ConcatAll`, `SwitchAll`, `Expand`, `GroupBy`,
-      `Partition`, `Window`, `WindowCount`, `WindowTime`, `CombineLatestAll`.
-- [ ] **Test + Implement**: combination — `Merge`, `Concat`, `CombineLatest`,
-      `Zip`, `ForkJoin`, `Race`, `StartWith`, `WithLatestFrom`.
+The phase overlaps Phase 6 (the flattening and combine cores landed there); this
+is the remainder, split by what is actually buildable under FPC 3.3.1.
+
+- [x] **Test + Implement**: flattening — `MergeMap`, `ConcatMap`, `SwitchMap`
+      (done under Phase 6), `ExhaustMap` (new: ignores source values while an
+      inner is in flight).
+- [x] **Test + Implement**: combination — `Merge`, `Concat`, `CombineLatest`,
+      `Zip`, `Race`, `StartWith` (done under Phase 6), `WithLatestFrom` (new:
+      each left value paired with the latest right).
+- [x] **Test + Implement**: `Expand` (new: a bounded breadth-first unfold; the
+      element type stays `T`, so it is one level and not blocked).
+- [ ] **Blocked — nested generic type**: `MergeAll`, `ConcatAll`, `SwitchAll`,
+      `CombineLatestAll`, `GroupBy`, `Partition`, `Window`, `WindowCount`,
+      `WindowTime`, `ForkJoin` — each needs a generic inside a generic as a
+      *type*, which FPC 3.3.1 forbids (the `Buffer`/`ToArray` wall).
+- [ ] **Open — buildable**: `Single` (a `First`-like filter that also errors on a
+      second element).
 
 ## Phase 8 — Error handling, multicasting, utility
 
@@ -154,8 +167,16 @@ a source over an array of operators (called once with the whole array).
 
 ## Phase 10 — Parity sweep and docs
 
-- [ ] **Test**: walk the SPEC's operator list and assert every operator has a test.
-- [ ] **Check**: `make check` green (functional suite + leak gate).
-- [ ] **Docs**: an example each of a CLI `Await`, a UI `ObserveOn` side effect, and
-      a virtual-clock operator test.
-- [ ] Rename this file to `Async_Core_v1.DONE.md`.
+- [x] **Test**: walk the SPEC's operator list and assert every operator has a test.
+      `test_async_parity` enumerates the live registry: every async suite is
+      registered, every implemented operator has a named test that exists, and the
+      structurally-blocked set is documented. It found `ConcatMap`/`Retry`/`Race`
+      and the `PublishReplay`/`PublishLast`/`PublishBehavior`/`ShareReplay` family
+      implemented but untested — and, once tested, two real bugs (a `ConcatMap`
+      stall and a `ReplaySubject` late-subscriber no-op) plus a `Retry` observer
+      reference-cycle leak.
+- [x] **Check**: `make check` green — 1182 tests, 0 errors, 0 failures, leak-clean
+      (functional suite + `heaptrc` gate); `make async-standalone` still builds.
+- [x] **Docs**: `examples/async_examples.pas` (`make async-examples`) — a CLI
+      `Await`, a UI `ObserveOn` side effect, and a virtual-clock operator, each run.
+- [x] Rename this file to `Async_Core_v1.DONE.md`.
