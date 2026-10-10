@@ -3,8 +3,8 @@ unit test_async_operators;
   against a source of known values: the expected notification sequence and
   whether it completed.
 
-  Same-type operators and sources are class methods on TOp<T>; the cross-type
-  ones (Map, Count) and Range are on TStreamOps. }
+  Operators are free functions; the curried Op factories and Pipe compose them
+  RxJS-style. }
 
 {$mode delphi}{$H+}
 
@@ -52,6 +52,15 @@ type
     { Laziness and composability. }
     procedure OperatorsAreLazyUntilSubscribed;
     procedure MapComposesWithFilter;
+    procedure PipeReducesOverOperators;
+    { Fan-in and flattening. }
+    procedure MergeInterleaves;
+    procedure ConcatIsSequential;
+    procedure MergeMapFlattens;
+    procedure SwitchMapUsesTheNewest;
+    procedure ZipPairsByIndex;
+    procedure ReduceFoldsWithASeparateAccumulator;
+    procedure PairwiseCombinesAdjacent;
   end;
 
 implementation
@@ -83,7 +92,7 @@ end;
 function TAsyncOperatorsTest.IntSource(
   const AValues: array of Integer): ISubscribable<Integer>;
 begin
-  Result := TStreamOps.FromArray<Integer>(Arr(AValues));
+  Result := FromArray<Integer>(Arr(AValues));
 end;
 
 function TAsyncOperatorsTest.RecorderInt: IObserver<Integer>;
@@ -116,7 +125,7 @@ end;
 
 procedure TAsyncOperatorsTest.OfEmitsOne;
 begin
-  AssertInts(TStreamOps.Just<Integer>(5), '5', True);
+  AssertInts(Just<Integer>(5), '5', True);
 end;
 
 procedure TAsyncOperatorsTest.FromArrayEmitsEach;
@@ -126,18 +135,18 @@ end;
 
 procedure TAsyncOperatorsTest.RangeEmits;
 begin
-  AssertInts(TStreamOps.Range(3, 4), '3,4,5,6', True);
+  AssertInts(Range(3, 4), '3,4,5,6', True);
 end;
 
 procedure TAsyncOperatorsTest.EmptyCompletesWithoutValues;
 begin
-  AssertInts(TStreamOps.Empty<Integer>, '', True);
+  AssertInts(Empty<Integer>, '', True);
 end;
 
 procedure TAsyncOperatorsTest.ThrowErrorDeliversError;
 begin
   Reset;
-  TStreamOps.ThrowError<Integer>(Exception.Create('boom')).Subscribe(RecorderInt);
+  ThrowError<Integer>(Exception.Create('boom')).Subscribe(RecorderInt);
   AssertEquals('no values', '', FSeq);
   AssertEquals('error', 'boom', FError);
   AssertEquals('not completed', 0, FCompletes);
@@ -147,10 +156,10 @@ procedure TAsyncOperatorsTest.DeferRunsTheFactoryPerSubscribe;
 begin
   FSourceRuns := 0;
   Reset;
-  TStreamOps.Defer<Integer>(function: ISubscribable<Integer>
+  Defer<Integer>(function: ISubscribable<Integer>
     begin
       Inc(FSourceRuns);
-      Result := TStreamOps.Just<Integer>(1);
+      Result := Just<Integer>(1);
     end).Subscribe(RecorderInt);
   AssertEquals('ran once', 1, FSourceRuns);
   AssertEquals('value', '1', FSeq);
@@ -161,7 +170,7 @@ end;
 procedure TAsyncOperatorsTest.MapTransforms;
 begin
   Reset;
-  TStreamOps.Map<Integer, string>(IntSource([1, 2, 3]),
+  Map<Integer, string>(IntSource([1, 2, 3]),
     function(const V: Integer): string
     begin
       Result := 'v' + IntToStr(V);
@@ -173,7 +182,7 @@ end;
 procedure TAsyncOperatorsTest.ScanAccumulates;
 begin
   Reset;
-  TStreamOps.Scan<Integer>(IntSource([1, 2, 3]), 0,
+  Scan<Integer>(IntSource([1, 2, 3]), 0,
     function(const AAcc, AValue: Integer): Integer
     begin
       Result := AAcc + AValue;
@@ -187,7 +196,7 @@ end;
 procedure TAsyncOperatorsTest.FilterKeepsMatches;
 begin
   Reset;
-  TStreamOps.Filter<Integer>(IntSource([1, 2, 3, 4]),
+  Filter<Integer>(IntSource([1, 2, 3, 4]),
     function(const V: Integer): Boolean
     begin
       Result := V mod 2 = 0;
@@ -198,17 +207,17 @@ end;
 
 procedure TAsyncOperatorsTest.TakeTakesThenCompletes;
 begin
-  AssertInts(TStreamOps.Take<Integer>(IntSource([1, 2, 3, 4, 5]), 2), '1,2', True);
+  AssertInts(Take<Integer>(IntSource([1, 2, 3, 4, 5]), 2), '1,2', True);
 end;
 
 procedure TAsyncOperatorsTest.SkipSkipsTheHead;
 begin
-  AssertInts(TStreamOps.Skip<Integer>(IntSource([1, 2, 3, 4, 5]), 2), '3,4,5', True);
+  AssertInts(Skip<Integer>(IntSource([1, 2, 3, 4, 5]), 2), '3,4,5', True);
 end;
 
 procedure TAsyncOperatorsTest.TakeWhileStopsAtTheFirstMiss;
 begin
-  AssertInts(TStreamOps.TakeWhile<Integer>(IntSource([1, 2, 3, 1]),
+  AssertInts(TakeWhile<Integer>(IntSource([1, 2, 3, 1]),
     function(const V: Integer): Boolean
     begin
       Result := V < 3;
@@ -217,7 +226,7 @@ end;
 
 procedure TAsyncOperatorsTest.SkipWhileSkipsUntilTheFirstMiss;
 begin
-  AssertInts(TStreamOps.SkipWhile<Integer>(IntSource([1, 2, 3, 1]),
+  AssertInts(SkipWhile<Integer>(IntSource([1, 2, 3, 1]),
     function(const V: Integer): Boolean
     begin
       Result := V < 3;
@@ -226,7 +235,7 @@ end;
 
 procedure TAsyncOperatorsTest.DistinctUntilChangedDropsRepeats;
 begin
-  AssertInts(TStreamOps.DistinctUntilChanged<Integer>(IntSource([1, 1, 2, 2, 3, 1]),
+  AssertInts(DistinctUntilChanged<Integer>(IntSource([1, 1, 2, 2, 3, 1]),
     function(const A, B: Integer): Boolean
     begin
       Result := A = B;
@@ -235,12 +244,12 @@ end;
 
 procedure TAsyncOperatorsTest.FirstTakesOne;
 begin
-  AssertInts(TStreamOps.First<Integer>(IntSource([5, 6, 7])), '5', True);
+  AssertInts(First<Integer>(IntSource([5, 6, 7])), '5', True);
 end;
 
 procedure TAsyncOperatorsTest.ElementAtPicksOne;
 begin
-  AssertInts(TStreamOps.ElementAt<Integer>(IntSource([5, 6, 7]), 1), '6', True);
+  AssertInts(ElementAt<Integer>(IntSource([5, 6, 7]), 1), '6', True);
 end;
 
 { Laziness and composability }
@@ -251,11 +260,11 @@ var
 begin
   FSourceRuns := 0;
   Reset;
-  Filtered := TStreamOps.Filter<Integer>(
-    TStreamOps.Defer<Integer>(function: ISubscribable<Integer>
+  Filtered := Filter<Integer>(
+    Defer<Integer>(function: ISubscribable<Integer>
       begin
         Inc(FSourceRuns);
-        Result := TStreamOps.Just<Integer>(1);
+        Result := Just<Integer>(1);
       end),
     function(const V: Integer): Boolean
     begin
@@ -273,8 +282,8 @@ var
 begin
   { Map to strings, then filter — the composability the surface exists for. }
   Reset;
-  Composed := TStreamOps.Filter<string>(
-    TStreamOps.Map<Integer, string>(IntSource([1, 2, 3, 4, 5]),
+  Composed := Filter<string>(
+    Map<Integer, string>(IntSource([1, 2, 3, 4, 5]),
       function(const V: Integer): string
       begin
         Result := IntToStr(V * 10);
@@ -285,6 +294,101 @@ begin
     end);
   Composed.Subscribe(RecorderStr);
   AssertEquals('mapped then filtered', '10,20,40,50', FSeq);
+  AssertEquals('completed', 1, FCompletes);
+end;
+
+{ Fan-in and flattening }
+
+procedure TAsyncOperatorsTest.PipeReducesOverOperators;
+var
+  S: ISubscribable<Integer>;
+begin
+  { The RxJS-style pipeline: an array of curried operators reduced over a source. }
+  S := Pipe<Integer>(Range(1, 10), [
+    FilterOp<Integer>(function(const V: Integer): Boolean
+      begin Result := V mod 2 = 0; end),
+    TakeOp<Integer>(3)]);
+  AssertInts(S, '2,4,6', True);
+end;
+
+procedure TAsyncOperatorsTest.MergeInterleaves;
+var
+  Srcs: TArray<ISubscribable<Integer>>;
+begin
+  SetLength(Srcs, 2);
+  Srcs[0] := IntSource([1, 2, 3]);
+  Srcs[1] := IntSource([10, 11]);
+  AssertInts(Merge<Integer>(Srcs), '1,2,3,10,11', True);
+end;
+
+procedure TAsyncOperatorsTest.ConcatIsSequential;
+var
+  Srcs: TArray<ISubscribable<Integer>>;
+begin
+  SetLength(Srcs, 2);
+  Srcs[0] := IntSource([1, 2]);
+  Srcs[1] := IntSource([3, 4]);
+  AssertInts(Concat<Integer>(Srcs), '1,2,3,4', True);
+end;
+
+procedure TAsyncOperatorsTest.MergeMapFlattens;
+begin
+  { Each value projects to a two-element stream; all inner values are forwarded. }
+  AssertInts(MergeMap<Integer, Integer>(IntSource([1, 2]),
+    function(const V: Integer): ISubscribable<Integer>
+    begin
+      Result := IntSource([V * 10, V * 10 + 1]);
+    end), '10,11,20,21', True);
+end;
+
+procedure TAsyncOperatorsTest.SwitchMapUsesTheNewest;
+begin
+  { Synchronous sources settle before the next value arrives, so switch and merge
+    agree here; the switch semantics (cancel the prior inner) matter only when
+    inners overlap in time. }
+  AssertInts(SwitchMap<Integer, Integer>(IntSource([1, 2]),
+    function(const V: Integer): ISubscribable<Integer>
+    begin
+      Result := IntSource([V * 10, V * 10 + 1]);
+    end), '10,11,20,21', True);
+end;
+
+procedure TAsyncOperatorsTest.ZipPairsByIndex;
+begin
+  Reset;
+  Zip<Integer, Integer, string>(IntSource([1, 2, 3]),
+    IntSource([10, 20]),
+    function(const A, B: Integer): string
+    begin
+      Result := IntToStr(A) + '/' + IntToStr(B);
+    end).Subscribe(RecorderStr);
+  AssertEquals('paired by index, shortest wins', '1/10,2/20', FSeq);
+  AssertEquals('completed', 1, FCompletes);
+end;
+
+procedure TAsyncOperatorsTest.ReduceFoldsWithASeparateAccumulator;
+begin
+  { Reduce<T, A>: fold T into an A, emitting the final A. }
+  Reset;
+  Reduce<Integer, string>(IntSource([1, 2, 3]), '',
+    function(const Acc: string; const V: Integer): string
+    begin
+      Result := Acc + IntToStr(V);
+    end).Subscribe(RecorderStr);
+  AssertEquals('one folded value', '123', FSeq);
+  AssertEquals('completed', 1, FCompletes);
+end;
+
+procedure TAsyncOperatorsTest.PairwiseCombinesAdjacent;
+begin
+  { Pairwise<T, U>: combine each adjacent pair into a U (no tuple type needed). }
+  Reset;
+  Pairwise<Integer, Integer>(IntSource([1, 2, 3, 4]),
+    function(const A, B: Integer): Integer
+    begin
+      Result := B - A;
+    end).Subscribe(RecorderInt);
+  AssertEquals('adjacent differences', '1,1,1', FSeq);
   AssertEquals('completed', 1, FCompletes);
 end;
 
