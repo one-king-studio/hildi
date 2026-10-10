@@ -21,7 +21,9 @@ type
   private
     FSeq: string;
     FCompletes: Integer;
+    FErr: string;
     function Recorder: IObserver<Integer>;
+    function ErrRecorder: IObserver<Integer>;
     procedure Add(const S: string);
   published
     procedure TimerFiresAfterTheDelay;
@@ -30,6 +32,9 @@ type
     procedure DebounceTimeEmitsOnlyAfterQuiet;
     procedure ThrottleTimeEmitsTheLeadingValue;
     procedure SampleTimeEmitsTheLatestPerPeriod;
+    procedure AuditTimeEmitsTheTrailingValuePerWindow;
+    procedure TimeoutErrorsWhenIdle;
+    procedure TimeoutPassesValuesWhenTimely;
   end;
 
 implementation
@@ -46,6 +51,14 @@ begin
   Result := TObserver<Integer>.Create(
     procedure(const V: Integer) begin Add(IntToStr(V)); end,
     procedure(const E: Exception) begin end,
+    procedure begin Inc(FCompletes); end);
+end;
+
+function TAsyncTimeTest.ErrRecorder: IObserver<Integer>;
+begin
+  Result := TObserver<Integer>.Create(
+    procedure(const V: Integer) begin Add(IntToStr(V)); end,
+    procedure(const E: Exception) begin FErr := E.Message; E.Free; end,
     procedure begin Inc(FCompletes); end);
 end;
 
@@ -112,7 +125,6 @@ begin
   AssertEquals('nothing emitted while active', '', FSeq);
   S.Advance(30);      { quiet for 30ms }
   AssertEquals('only the latest survived', '2', FSeq);
-  Obs.Free;
 end;
 
 procedure TAsyncTimeTest.ThrottleTimeEmitsTheLeadingValue;
@@ -132,7 +144,6 @@ begin
   S.Advance(30);      { window reopens }
   Obs.OnNext(4);      { emitted }
   AssertEquals('emitted after the window', '1,4', FSeq);
-  Obs.Free;
 end;
 
 procedure TAsyncTimeTest.SampleTimeEmitsTheLatestPerPeriod;
@@ -154,7 +165,61 @@ begin
   AssertEquals('latest again', '2,3', FSeq);
   S.Advance(20);      { tick with nothing new: no emission }
   AssertEquals('no emission without a new value', '2,3', FSeq);
-  Obs.Free;
+end;
+
+procedure TAsyncTimeTest.AuditTimeEmitsTheTrailingValuePerWindow;
+var
+  S: IVirtualScheduler;
+  Obs: TSubject<Integer>;
+begin
+  FSeq := '';
+  FCompletes := 0;
+  S := TVirtualScheduler.Create as IVirtualScheduler;
+  Obs := TSubject<Integer>.Create;
+  AuditTime<Integer>(Obs, S, 30).Subscribe(Recorder);
+  Obs.OnNext(1);      { arms the window; holds 1 }
+  Obs.OnNext(2);      { still within the window; holds 2 }
+  Obs.OnNext(3);      { holds 3 }
+  AssertEquals('nothing until the window closes', '', FSeq);
+  S.Advance(30);      { window closes: emits the latest, 3 }
+  AssertEquals('trailing value', '3', FSeq);
+  Obs.OnNext(4);      { arms a new window }
+  S.Advance(30);
+  AssertEquals('next window trailing value', '3,4', FSeq);
+end;
+
+procedure TAsyncTimeTest.TimeoutErrorsWhenIdle;
+var
+  S: IVirtualScheduler;
+  Obs: TSubject<Integer>;
+begin
+  FSeq := '';
+  FCompletes := 0;
+  FErr := '';
+  S := TVirtualScheduler.Create as IVirtualScheduler;
+  Obs := TSubject<Integer>.Create;
+  Timeout<Integer>(Obs, S, 30).Subscribe(ErrRecorder);
+  S.Advance(30);      { no value arrived in time }
+  AssertEquals('timed out', 'timeout', FErr);
+  AssertEquals('no values', '', FSeq);
+end;
+
+procedure TAsyncTimeTest.TimeoutPassesValuesWhenTimely;
+var
+  S: IVirtualScheduler;
+  Obs: TSubject<Integer>;
+begin
+  FSeq := '';
+  FCompletes := 0;
+  FErr := '';
+  S := TVirtualScheduler.Create as IVirtualScheduler;
+  Obs := TSubject<Integer>.Create;
+  Timeout<Integer>(Obs, S, 30).Subscribe(ErrRecorder);
+  Obs.OnNext(1);      { in time: resets the timer, forwards }
+  S.Advance(20);      { still within the window }
+  Obs.OnNext(2);      { in time again }
+  AssertEquals('values forwarded', '1,2', FSeq);
+  AssertEquals('no timeout', '', FErr);
 end;
 
 initialization

@@ -239,10 +239,88 @@ function ThrottleTime<T>(const ASource: ISubscribable<T>;
   const AScheduler: IAsyncScheduler; const AWindowMs: Integer): ISubscribable<T>;
 function SampleTime<T>(const ASource: ISubscribable<T>;
   const AScheduler: IAsyncScheduler; const APeriodMs: Integer): ISubscribable<T>;
+function AuditTime<T>(const ASource: ISubscribable<T>;
+  const AScheduler: IAsyncScheduler; const ADurationMs: Integer): ISubscribable<T>;
+function Timeout<T>(const ASource: ISubscribable<T>;
+  const AScheduler: IAsyncScheduler; const ATimeoutMs: Integer): ISubscribable<T>;
 function Timer(const AScheduler: IAsyncScheduler;
   const ADelayMs: Integer): ISubscribable<Integer>;
 function Interval(const AScheduler: IAsyncScheduler;
   const APeriodMs: Integer): ISubscribable<Integer>;
+
+type
+  { --- AuditTime ---------------------------------------------------------- }
+
+{ Holds the latest value; a timer emits it at the end of each window. }
+TAuditEmit<T> = class
+public
+  FDown: IObserver<T>;
+  FValue: T;
+  FHas: Boolean;
+  FArmed: Boolean;
+  constructor Create(const ADown: IObserver<T>);
+  procedure Run;
+end;
+
+TAuditObserver<T> = class(TInterfacedObject, IObserver<T>)
+private
+  FDown: IObserver<T>;
+  FScheduler: IAsyncScheduler;
+  FDurationMs: Integer;
+  FEmit: TAuditEmit<T>;
+  FHandle: ISubscription;
+public
+  constructor Create(const ADown: IObserver<T>; const AScheduler: IAsyncScheduler;
+    const ADurationMs: Integer);
+  destructor Destroy; override;
+  procedure OnNext(const AValue: T);
+  procedure OnError(const AError: Exception);
+  procedure OnComplete;
+end;
+
+TAuditObservable<T> = class(TInterfacedObject, ISubscribable<T>)
+private
+  FSource: ISubscribable<T>;
+  FScheduler: IAsyncScheduler;
+  FDurationMs: Integer;
+public
+  constructor Create(const ASource: ISubscribable<T>;
+    const AScheduler: IAsyncScheduler; const ADurationMs: Integer);
+  function Subscribe(const AObserver: IObserver<T>): ISubscription;
+end;
+
+{ --- Timeout ------------------------------------------------------------ }
+
+{ Resets a timer on each value; if it fires first, the stream errors. }
+TTimeoutObserver<T> = class(TInterfacedObject, IObserver<T>, ISubscription)
+private
+  FDown: IObserver<T>;
+  FScheduler: IAsyncScheduler;
+  FTimeoutMs: Integer;
+  FHandle: ISubscription;
+  FClosed: Boolean;
+public
+  constructor Create(const ADown: IObserver<T>; const AScheduler: IAsyncScheduler;
+    const ATimeoutMs: Integer);
+  procedure Arm;
+  procedure Fire;
+  procedure OnNext(const AValue: T);
+  procedure OnError(const AError: Exception);
+  procedure OnComplete;
+  procedure Unsubscribe;
+  function Closed: Boolean;
+end;
+
+TTimeoutObservable<T> = class(TInterfacedObject, ISubscribable<T>)
+private
+  FSource: ISubscribable<T>;
+  FScheduler: IAsyncScheduler;
+  FTimeoutMs: Integer;
+public
+  constructor Create(const ASource: ISubscribable<T>;
+    const AScheduler: IAsyncScheduler; const ATimeoutMs: Integer);
+  function Subscribe(const AObserver: IObserver<T>): ISubscription;
+end;
 
 implementation
 
@@ -660,6 +738,179 @@ function Interval(const AScheduler: IAsyncScheduler;
   const APeriodMs: Integer): ISubscribable<Integer>;
 begin
   Result := TIntervalObservable.Create(AScheduler, APeriodMs);
+end;
+
+function AuditTime<T>(const ASource: ISubscribable<T>;
+  const AScheduler: IAsyncScheduler; const ADurationMs: Integer): ISubscribable<T>;
+begin
+  Result := TAuditObservable<T>.Create(ASource, AScheduler, ADurationMs);
+end;
+
+function Timeout<T>(const ASource: ISubscribable<T>;
+  const AScheduler: IAsyncScheduler; const ATimeoutMs: Integer): ISubscribable<T>;
+begin
+  Result := TTimeoutObservable<T>.Create(ASource, AScheduler, ATimeoutMs);
+end;
+
+{ TAuditEmit<T> }
+
+constructor TAuditEmit<T>.Create(const ADown: IObserver<T>);
+begin
+  inherited Create;
+  FDown := ADown;
+  FHas := False;
+  FArmed := False;
+end;
+
+procedure TAuditEmit<T>.Run;
+begin
+  FArmed := False;
+  if FHas then
+  begin
+    FHas := False;
+    FDown.OnNext(FValue);
+  end;
+end;
+
+{ TAuditObserver<T> }
+
+constructor TAuditObserver<T>.Create(const ADown: IObserver<T>;
+  const AScheduler: IAsyncScheduler; const ADurationMs: Integer);
+begin
+  inherited Create;
+  FDown := ADown;
+  FScheduler := AScheduler;
+  FDurationMs := ADurationMs;
+  FEmit := TAuditEmit<T>.Create(ADown);
+  FHandle := nil;
+end;
+
+destructor TAuditObserver<T>.Destroy;
+begin
+  FEmit.Free;
+  inherited;
+end;
+
+procedure TAuditObserver<T>.OnNext(const AValue: T);
+begin
+  { Remember the latest; arm a timer only if none is pending (rate-limit). }
+  FEmit.FValue := AValue;
+  FEmit.FHas := True;
+  if not FEmit.FArmed then
+  begin
+    FEmit.FArmed := True;
+    FHandle := FScheduler.Schedule(FEmit.Run, FDurationMs);
+  end;
+end;
+
+procedure TAuditObserver<T>.OnError(const AError: Exception);
+begin
+  FDown.OnError(AError);
+end;
+
+procedure TAuditObserver<T>.OnComplete;
+begin
+  { Flush a pending value, then complete. }
+  if FEmit.FHas then
+  begin
+    FEmit.FHas := False;
+    FDown.OnNext(FEmit.FValue);
+  end;
+  FDown.OnComplete;
+end;
+
+constructor TAuditObservable<T>.Create(const ASource: ISubscribable<T>;
+  const AScheduler: IAsyncScheduler; const ADurationMs: Integer);
+begin
+  inherited Create;
+  FSource := ASource;
+  FScheduler := AScheduler;
+  FDurationMs := ADurationMs;
+end;
+
+function TAuditObservable<T>.Subscribe(const AObserver: IObserver<T>): ISubscription;
+begin
+  Result := FSource.Subscribe(TAuditObserver<T>.Create(AObserver, FScheduler, FDurationMs));
+end;
+
+{ TTimeoutObserver<T> }
+
+constructor TTimeoutObserver<T>.Create(const ADown: IObserver<T>;
+  const AScheduler: IAsyncScheduler; const ATimeoutMs: Integer);
+begin
+  inherited Create;
+  FDown := ADown;
+  FScheduler := AScheduler;
+  FTimeoutMs := ATimeoutMs;
+  FHandle := nil;
+  FClosed := False;
+end;
+
+procedure TTimeoutObserver<T>.Arm;
+begin
+  FHandle := FScheduler.Schedule(Fire, FTimeoutMs);
+end;
+
+procedure TTimeoutObserver<T>.Fire;
+begin
+  if FClosed then
+    Exit;
+  FClosed := True;
+  FDown.OnError(Exception.Create('timeout'));
+end;
+
+procedure TTimeoutObserver<T>.OnNext(const AValue: T);
+begin
+  { A value arrived in time: reset the timer, then forward. }
+  if FClosed then
+    Exit;
+  if FHandle <> nil then
+    FHandle.Unsubscribe;
+  Arm;
+  FDown.OnNext(AValue);
+end;
+
+procedure TTimeoutObserver<T>.OnError(const AError: Exception);
+begin
+  FClosed := True;
+  FDown.OnError(AError);
+end;
+
+procedure TTimeoutObserver<T>.OnComplete;
+begin
+  FClosed := True;
+  FDown.OnComplete;
+end;
+
+procedure TTimeoutObserver<T>.Unsubscribe;
+begin
+  FClosed := True;
+  if FHandle <> nil then
+    FHandle.Unsubscribe;
+end;
+
+function TTimeoutObserver<T>.Closed: Boolean;
+begin
+  Result := FClosed;
+end;
+
+constructor TTimeoutObservable<T>.Create(const ASource: ISubscribable<T>;
+  const AScheduler: IAsyncScheduler; const ATimeoutMs: Integer);
+begin
+  inherited Create;
+  FSource := ASource;
+  FScheduler := AScheduler;
+  FTimeoutMs := ATimeoutMs;
+end;
+
+function TTimeoutObservable<T>.Subscribe(const AObserver: IObserver<T>): ISubscription;
+var
+  Obs: TTimeoutObserver<T>;
+begin
+  Obs := TTimeoutObserver<T>.Create(AObserver, FScheduler, FTimeoutMs);
+  Result := Obs;
+  Obs.Arm;
+  FSource.Subscribe(Obs);
 end;
 
 end.

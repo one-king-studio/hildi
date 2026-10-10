@@ -101,10 +101,11 @@ a source over an array of operators (called once with the whole array).
 - [x] **Test + Implement**: fan-in — `Merge`, `Concat`, `Race` (Race is a
       synchronous approximation: the first source wins).
 - [x] **Test + Implement**: time-based (unit `async.time`, virtual clock) —
-      `Delay`, `DebounceTime`, `ThrottleTime`, `SampleTime`, `Timer`, `Interval`.
-      Each takes an explicit `IAsyncScheduler` (a `TVirtualScheduler` in tests).
-- [ ] **Deferred**: `AuditTime`, `Timeout`, `TimeoutWith`, `DelayWhen` — the same
-      pattern, not yet written.
+      `Delay`, `DebounceTime`, `ThrottleTime`, `SampleTime`, `AuditTime`,
+      `Timeout`, `Timer`, `Interval`. Each takes an explicit `IAsyncScheduler`
+      (a `TVirtualScheduler` in tests).
+- [ ] **Deferred**: `TimeoutWith`, `DelayWhen` — the same pattern, not yet
+      written.
 
 ## Phase 7 — Flattening and combination
 
