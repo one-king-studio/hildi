@@ -33,6 +33,9 @@ type
     function TakeWork: TNotify;
     { The continuation-scoped context captured when the job was enqueued. }
     function Snapshot: IContextSnapshot;
+    { A cancellation token for IN-FLIGHT cancellation: a running job polls it.
+      Unsubscribe trips it, so a long job can stop cooperatively. }
+    function Token: ICancellationToken;
   end;
 
   { A job is claimed by exactly one thread (a worker) or cancelled by exactly
@@ -47,12 +50,16 @@ type
     FState: Integer;
     FWork: TNotify;
     FSnapshot: IContextSnapshot;
+    FToken: ICancellationToken;
   public
-    constructor Create(const AWork: TNotify);
+    { AToken may be nil (the job makes its own). A caller that wants to poll the
+      token inside the work supplies one. }
+    constructor Create(const AWork: TNotify; const AToken: ICancellationToken = nil);
     procedure Unsubscribe;
     function Closed: Boolean;
     function TakeWork: TNotify;
     function Snapshot: IContextSnapshot;
+    function Token: ICancellationToken;
   end;
 
   { Shared machinery: a FIFO of jobs with a head index advanced before each job
@@ -89,19 +96,25 @@ implementation
 
 { TAsyncJob }
 
-constructor TAsyncJob.Create(const AWork: TNotify);
+constructor TAsyncJob.Create(const AWork: TNotify; const AToken: ICancellationToken);
 begin
   inherited Create;
   FState := Pending;
   FWork := AWork;
+  if AToken <> nil then
+    FToken := AToken
+  else
+    FToken := TSpinFreeCancellation.Create;
   { Capture the current context at enqueue time; it travels with the job. }
   FSnapshot := ContextCurrent;
 end;
 
 procedure TAsyncJob.Unsubscribe;
 begin
-  { Claim the job as cancelled: CAS Pending -> Cancelled. If a worker already
-    took it (Taken) or it is already cancelled, do nothing. }
+  { Trip the token first: this stops a RUNNING job that polls it. Then claim the
+    job as cancelled (CAS Pending -> Cancelled) so a not-yet-started job is
+    skipped. }
+  FToken.Cancel;
   if InterlockedCompareExchange(FState, Cancelled, Pending) = Pending then
     FWork := nil;
 end;
@@ -119,6 +132,11 @@ begin
   else
     Result := nil;
   FWork := nil;
+end;
+
+function TAsyncJob.Token: ICancellationToken;
+begin
+  Result := FToken;
 end;
 
 function TAsyncJob.Snapshot: IContextSnapshot;

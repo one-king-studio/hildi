@@ -25,13 +25,21 @@ type
     FRanLock: TCriticalSection;
     FThreadId: TThreadID;
     FRanOnWorker: Boolean;
+    FGate: TSimpleEvent;
+    FStarted: Integer;
+    FStopped: Boolean;
+    FTok: ICancellationToken;
     procedure NoteThread;
     procedure BumpRan;
+    procedure BlockOnGate;
+    procedure PollUntilCancelled;
   published
     procedure ExecutorRunsWorkOnAPoolThread;
     procedure ExecutorJoinsThreadsOnShutdown;
     procedure ExecutorRunsManyJobsAcrossWorkers;
     procedure ExecutorScheduleBatchRunsEveryJob;
+    procedure ExecutorBoundedMailboxDropsOldest;
+    procedure ExecutorInFlightCancellationTripsTheToken;
     procedure RunOnSchedulesWork;
     procedure SubscribeOnRunsSubscribeOnTheScheduler;
     procedure ObserveOnDeliversNotificationsOnTheScheduler;
@@ -67,6 +75,19 @@ begin
   finally
     FRanLock.Release;
   end;
+end;
+
+procedure TAsyncConcurrencyTest.BlockOnGate;
+begin
+  FGate.WaitFor(5000);
+end;
+
+procedure TAsyncConcurrencyTest.PollUntilCancelled;
+begin
+  InterlockedIncrement(FStarted);
+  while not FTok.IsCancelled do
+    Sleep(1);
+  FStopped := True;
 end;
 
 procedure TAsyncConcurrencyTest.ExecutorRunsWorkOnAPoolThread;
@@ -133,6 +154,51 @@ begin
   E.ScheduleBatch(Works);
   Exec.Drain;
   AssertEquals('every batched job ran', 2000, FRan);
+end;
+
+procedure TAsyncConcurrencyTest.ExecutorBoundedMailboxDropsOldest;
+var
+  Exec: IAsyncScheduler;
+  E: TExecutorScheduler;
+  I: Integer;
+begin
+  { One worker, blocked on a gate, so the queue fills while nothing drains. }
+  FGate := TSimpleEvent.Create;
+  try
+    E := TExecutorScheduler.Create(1, 2);   { capacity 2 }
+    Exec := E;
+    { The first job occupies the only worker until the gate is set. }
+    Exec.Schedule(BlockOnGate, 0);
+    { Give the worker a moment to claim the blocking job, then overflow. }
+    Sleep(50);
+    for I := 1 to 10 do
+      Exec.Schedule(BumpRan, 0);
+    AssertTrue('the mailbox dropped the oldest jobs', E.Dropped > 0);
+    FGate.SetEvent;
+    Exec.Drain;
+  finally
+    FGate.Free;
+  end;
+end;
+
+procedure TAsyncConcurrencyTest.ExecutorInFlightCancellationTripsTheToken;
+var
+  Exec: IAsyncScheduler;
+  E: TExecutorScheduler;
+  Sub: ISubscription;
+begin
+  FStarted := 0;
+  FStopped := False;
+  E := TExecutorScheduler.Create(1);
+  Exec := E;
+  { A long job that polls its token; Unsubscribe trips it and the job stops. }
+  Sub := E.ScheduleCancellable(PollUntilCancelled, FTok);
+  { Wait for the worker to start the job, then cancel in flight. }
+  while FStarted = 0 do
+    Sleep(1);
+  Sub.Unsubscribe;
+  Exec.Drain;
+  AssertTrue('the running job saw the cancellation', FStopped);
 end;
 
 procedure TAsyncConcurrencyTest.RunOnSchedulesWork;

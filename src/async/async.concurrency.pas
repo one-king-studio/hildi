@@ -58,24 +58,41 @@ type
     FIdle: TSimpleEvent;
     FQueue: TQueue<IAsyncJob>;
     FWorkers: TObjectList<TExecutorWorker>;
-    { Outstanding jobs, touched only atomically: incremented inside the queue lock
-      on Schedule (so it is never 0 while a job is queued) and decremented after a
-      job runs, so a worker need not take the lock just to record completion. }
+    { The mailbox bound: a fast producer must not grow the queue without limit.
+      On overflow the OLDEST queued job is dropped and counted (the same policy
+      as the harness's TTurnQueue), so the consumer always sees the most recent
+      window. Capacity 0 means unbounded. }
+    FCapacity: Integer;
+    FDropped: Int64;
+    { Outstanding jobs, touched only under FLock: incremented with the enqueue on
+      Schedule (so it is never 0 while a job is queued) and decremented after a
+      job runs, so Drain cannot return early. }
     FPending: Integer;
     FStopped: Boolean;
   public
-    constructor Create(AConcurrency: Integer);
+    constructor Create(AConcurrency: Integer; ACapacity: Integer = 0);
     destructor Destroy; override;
     function Schedule(const AWork: TNotify; const ADelayMs: Integer): ISubscription;
     { Enqueue many jobs under ONE lock and ONE wake - for a bulk producer, so it
       does not pay the per-Schedule lock + wake N times. }
     function ScheduleBatch(const AWorks: TArray<TNotify>): ISubscription;
+    { Schedule AWork and hand back the job's cancellation token, so a caller can
+      poll it inside the work (in-flight cancellation) and Unsubscribe the result
+      to trip it. }
+    function ScheduleCancellable(const AWork: TNotify;
+      out AToken: ICancellationToken): ISubscription;
     procedure Drain;
     function HasPending: Boolean;
+    { How many queued jobs were dropped to honour the capacity. }
+    property Dropped: Int64 read FDropped;
     { Worker loop helpers (called from a pool thread). }
     function WorkerStep: Boolean;
     procedure WaitForWork;
     function Stopped: Boolean;
+  private
+    { Enqueue one job, dropping the oldest queued job if the mailbox is full.
+      Caller holds FLock. }
+    procedure EnqueueLocked(const AJob: IAsyncJob);
   end;
 
   { SubscribeOn: run the source's Subscribe on a scheduler. }
@@ -168,18 +185,22 @@ end;
 
 { TExecutorScheduler }
 
-constructor TExecutorScheduler.Create(AConcurrency: Integer);
+constructor TExecutorScheduler.Create(AConcurrency: Integer; ACapacity: Integer);
 var
   I: Integer;
 begin
   inherited Create;
   if AConcurrency < 1 then
     AConcurrency := 1;
+  if ACapacity < 0 then
+    ACapacity := 0;
   FLock := TCriticalSection.Create;
   FWake := TEvent.Create(nil, True, False, '');
   FIdle := TSimpleEvent.Create;
   FQueue := TQueue<IAsyncJob>.Create;
   FWorkers := TObjectList<TExecutorWorker>.Create(True);
+  FCapacity := ACapacity;
+  FDropped := 0;
   FPending := 0;
   FStopped := False;
   for I := 1 to AConcurrency do
@@ -207,6 +228,24 @@ begin
   inherited;
 end;
 
+procedure TExecutorScheduler.EnqueueLocked(const AJob: IAsyncJob);
+var
+  Oldest: IAsyncJob;
+begin
+  { Bound the mailbox: when full, drop the OLDEST queued job (cancel it, so a
+    worker never runs it) and count it. FPending is decremented for the drop, so
+    Drain still terminates. }
+  if (FCapacity > 0) and (FQueue.Count >= FCapacity) then
+  begin
+    Oldest := FQueue.Dequeue;
+    Oldest.Unsubscribe;
+    Inc(FDropped);
+    Dec(FPending);
+  end;
+  FQueue.Enqueue(AJob);
+  Inc(FPending);
+end;
+
 function TExecutorScheduler.Schedule(const AWork: TNotify;
   const ADelayMs: Integer): ISubscription;
 var
@@ -219,10 +258,7 @@ begin
   FLock.Acquire;
   try
     WasEmpty := FQueue.Count = 0;
-    FQueue.Enqueue(Job);
-    { Count the job INSIDE the lock, before a worker can see and run it: FPending
-      must never be 0 while a job is queued, or Drain returns early. }
-    Inc(FPending);
+    EnqueueLocked(Job);
   finally
     FLock.Release;
   end;
@@ -247,17 +283,35 @@ begin
     for I := 0 to High(AWorks) do
     begin
       Job := TAsyncJob.Create(AWorks[I]);
-      FQueue.Enqueue(Job);
+      EnqueueLocked(Job);
       Last := Job;
     end;
-    { Count inside the lock (see Schedule). }
-    Inc(FPending, Length(AWorks));
   finally
     FLock.Release;
   end;
   if WasEmpty and (Length(AWorks) > 0) then
     FWake.SetEvent;
   Result := Last;
+end;
+
+function TExecutorScheduler.ScheduleCancellable(const AWork: TNotify;
+  out AToken: ICancellationToken): ISubscription;
+var
+  Job: IAsyncJob;
+  WasEmpty: Boolean;
+begin
+  Job := TAsyncJob.Create(AWork);
+  AToken := Job.Token;
+  FLock.Acquire;
+  try
+    WasEmpty := FQueue.Count = 0;
+    EnqueueLocked(Job);
+  finally
+    FLock.Release;
+  end;
+  if WasEmpty then
+    FWake.SetEvent;
+  Result := Job;
 end;
 
 function TExecutorScheduler.WorkerStep: Boolean;

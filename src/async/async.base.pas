@@ -40,6 +40,8 @@ type
   { A one-shot cancellation signal. }
   ICancellationToken = interface
     function IsCancelled: Boolean;
+    { Trip the token. Idempotent. }
+    procedure Cancel;
     procedure OnCancel(const AAction: TNotify);
   end;
 
@@ -74,7 +76,38 @@ type
     procedure OnCancel(const AAction: TNotify);
   end;
 
+  { A lock-free cancellation token. Cancel and IsCancelled are a single
+    InterlockedExchange/read, so a worker polling IsCancelled pays no lock. }
+  TSpinFreeCancellation = class(TInterfacedObject, ICancellationToken)
+  private
+    FCancelled: Integer;
+  public
+    procedure Cancel;
+    function IsCancelled: Boolean;
+    procedure OnCancel(const AAction: TNotify);
+  end;
+
 implementation
+
+{ TSpinFreeCancellation }
+
+procedure TSpinFreeCancellation.Cancel;
+begin
+  InterlockedExchange(FCancelled, 1);
+end;
+
+function TSpinFreeCancellation.IsCancelled: Boolean;
+begin
+  Result := FCancelled <> 0;
+end;
+
+procedure TSpinFreeCancellation.OnCancel(const AAction: TNotify);
+begin
+  { Best-effort: run now if already cancelled; otherwise the token has no
+    callback list (a poller checks IsCancelled). }
+  if IsCancelled then
+    AAction();
+end;
 
 { TSubscription }
 
