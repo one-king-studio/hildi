@@ -24,6 +24,10 @@ uses
   async.base, async.observable, async.scheduler;
 
 type
+  { A duration selector: picks a per-value duration (the *When operators). }
+  TDurationSelector<T> = reference to function(const AValue: T): Integer;
+  { A fallback factory: a stream to switch to on timeout (TimeoutWith). }
+  TStreamFactory<T> = reference to function: ISubscribable<T>;
   { --- Scheduled actions (concrete, no closures) -------------------------- }
 
 { Forwards one value when it runs. }
@@ -247,6 +251,12 @@ function Timer(const AScheduler: IAsyncScheduler;
   const ADelayMs: Integer): ISubscribable<Integer>;
 function Interval(const AScheduler: IAsyncScheduler;
   const APeriodMs: Integer): ISubscribable<Integer>;
+function DelayWhen<T>(const ASource: ISubscribable<T>;
+  const AScheduler: IAsyncScheduler;
+  const ASelector: TDurationSelector<T>): ISubscribable<T>;
+function TimeoutWith<T>(const ASource: ISubscribable<T>;
+  const AScheduler: IAsyncScheduler; const ATimeoutMs: Integer;
+  const AFallback: TStreamFactory<T>): ISubscribable<T>;
 
 type
   { --- AuditTime ---------------------------------------------------------- }
@@ -322,8 +332,68 @@ public
   function Subscribe(const AObserver: IObserver<T>): ISubscription;
 end;
 
-implementation
+{ --- DelayWhen ---------------------------------------------------------- }
 
+{ Forwards a value after a per-value delay from the selector. }
+TDelayWhenObserver<T> = class(TInterfacedObject, IObserver<T>)
+private
+  FDown: IObserver<T>;
+  FScheduler: IAsyncScheduler;
+  FSelector: TDurationSelector<T>;
+public
+  constructor Create(const ADown: IObserver<T>; const AScheduler: IAsyncScheduler;
+    const ASelector: TDurationSelector<T>);
+  procedure OnNext(const AValue: T);
+  procedure OnError(const AError: Exception);
+  procedure OnComplete;
+end;
+
+TDelayWhenObservable<T> = class(TInterfacedObject, ISubscribable<T>)
+private
+  FSource: ISubscribable<T>;
+  FScheduler: IAsyncScheduler;
+  FSelector: TDurationSelector<T>;
+public
+  constructor Create(const ASource: ISubscribable<T>;
+    const AScheduler: IAsyncScheduler; const ASelector: TDurationSelector<T>);
+  function Subscribe(const AObserver: IObserver<T>): ISubscription;
+end;
+
+{ --- TimeoutWith -------------------------------------------------------- }
+
+{ Like Timeout, but switches to a fallback stream instead of erroring. }
+TTimeoutWithObserver<T> = class(TInterfacedObject, IObserver<T>)
+private
+  FDown: IObserver<T>;
+  FScheduler: IAsyncScheduler;
+  FTimeoutMs: Integer;
+  FFallback: TStreamFactory<T>;
+  FHandle: ISubscription;
+  FClosed: Boolean;
+public
+  constructor Create(const ADown: IObserver<T>; const AScheduler: IAsyncScheduler;
+    const ATimeoutMs: Integer; const AFallback: TStreamFactory<T>);
+  procedure Arm;
+  procedure Fire;
+  procedure OnNext(const AValue: T);
+  procedure OnError(const AError: Exception);
+  procedure OnComplete;
+end;
+
+TTimeoutWithObservable<T> = class(TInterfacedObject, ISubscribable<T>)
+private
+  FSource: ISubscribable<T>;
+  FScheduler: IAsyncScheduler;
+  FTimeoutMs: Integer;
+  FFallback: TStreamFactory<T>;
+public
+  constructor Create(const ASource: ISubscribable<T>;
+    const AScheduler: IAsyncScheduler; const ATimeoutMs: Integer;
+    const AFallback: TStreamFactory<T>);
+  function Subscribe(const AObserver: IObserver<T>): ISubscription;
+end;
+
+implementation
 { TValueEmit<T> }
 
 constructor TValueEmit<T>.Create(const ADown: IObserver<T>; const AValue: T);
@@ -909,6 +979,134 @@ var
 begin
   Obs := TTimeoutObserver<T>.Create(AObserver, FScheduler, FTimeoutMs);
   Result := Obs;
+  Obs.Arm;
+  FSource.Subscribe(Obs);
+end;
+
+function DelayWhen<T>(const ASource: ISubscribable<T>;
+  const AScheduler: IAsyncScheduler;
+  const ASelector: TDurationSelector<T>): ISubscribable<T>;
+begin
+  Result := TDelayWhenObservable<T>.Create(ASource, AScheduler, ASelector);
+end;
+
+function TimeoutWith<T>(const ASource: ISubscribable<T>;
+  const AScheduler: IAsyncScheduler; const ATimeoutMs: Integer;
+  const AFallback: TStreamFactory<T>): ISubscribable<T>;
+begin
+  Result := TTimeoutWithObservable<T>.Create(ASource, AScheduler, ATimeoutMs,
+    AFallback);
+end;
+
+{ TDelayWhenObserver<T> }
+
+constructor TDelayWhenObserver<T>.Create(const ADown: IObserver<T>;
+  const AScheduler: IAsyncScheduler; const ASelector: TDurationSelector<T>);
+begin
+  inherited Create;
+  FDown := ADown;
+  FScheduler := AScheduler;
+  FSelector := ASelector;
+end;
+
+procedure TDelayWhenObserver<T>.OnNext(const AValue: T);
+begin
+  FScheduler.Schedule(TValueEmit<T>.Create(FDown, AValue).Run, FSelector(AValue));
+end;
+
+procedure TDelayWhenObserver<T>.OnError(const AError: Exception);
+begin
+  FDown.OnError(AError);
+end;
+
+procedure TDelayWhenObserver<T>.OnComplete;
+begin
+  FDown.OnComplete;
+end;
+
+constructor TDelayWhenObservable<T>.Create(const ASource: ISubscribable<T>;
+  const AScheduler: IAsyncScheduler; const ASelector: TDurationSelector<T>);
+begin
+  inherited Create;
+  FSource := ASource;
+  FScheduler := AScheduler;
+  FSelector := ASelector;
+end;
+
+function TDelayWhenObservable<T>.Subscribe(const AObserver: IObserver<T>): ISubscription;
+begin
+  Result := FSource.Subscribe(TDelayWhenObserver<T>.Create(AObserver, FScheduler,
+    FSelector));
+end;
+
+{ TTimeoutWithObserver<T> }
+
+constructor TTimeoutWithObserver<T>.Create(const ADown: IObserver<T>;
+  const AScheduler: IAsyncScheduler; const ATimeoutMs: Integer;
+  const AFallback: TStreamFactory<T>);
+begin
+  inherited Create;
+  FDown := ADown;
+  FScheduler := AScheduler;
+  FTimeoutMs := ATimeoutMs;
+  FFallback := AFallback;
+  FHandle := nil;
+  FClosed := False;
+end;
+
+procedure TTimeoutWithObserver<T>.Arm;
+begin
+  FHandle := FScheduler.Schedule(Fire, FTimeoutMs);
+end;
+
+procedure TTimeoutWithObserver<T>.Fire;
+begin
+  if FClosed then
+    Exit;
+  FClosed := True;
+  { Switch to the fallback stream. }
+  FFallback().Subscribe(FDown);
+end;
+
+procedure TTimeoutWithObserver<T>.OnNext(const AValue: T);
+begin
+  if FClosed then
+    Exit;
+  if FHandle <> nil then
+    FHandle.Unsubscribe;
+  Arm;
+  FDown.OnNext(AValue);
+end;
+
+procedure TTimeoutWithObserver<T>.OnError(const AError: Exception);
+begin
+  FClosed := True;
+  FDown.OnError(AError);
+end;
+
+procedure TTimeoutWithObserver<T>.OnComplete;
+begin
+  FClosed := True;
+  FDown.OnComplete;
+end;
+
+constructor TTimeoutWithObservable<T>.Create(const ASource: ISubscribable<T>;
+  const AScheduler: IAsyncScheduler; const ATimeoutMs: Integer;
+  const AFallback: TStreamFactory<T>);
+begin
+  inherited Create;
+  FSource := ASource;
+  FScheduler := AScheduler;
+  FTimeoutMs := ATimeoutMs;
+  FFallback := AFallback;
+end;
+
+function TTimeoutWithObservable<T>.Subscribe(const AObserver: IObserver<T>): ISubscription;
+var
+  Obs: TTimeoutWithObserver<T>;
+begin
+  Obs := TTimeoutWithObserver<T>.Create(AObserver, FScheduler, FTimeoutMs, FFallback);
+  Result := TClosureSubscription.Create(nil);
   Obs.Arm;
   FSource.Subscribe(Obs);
 end;

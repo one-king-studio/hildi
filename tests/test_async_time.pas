@@ -35,6 +35,8 @@ type
     procedure AuditTimeEmitsTheTrailingValuePerWindow;
     procedure TimeoutErrorsWhenIdle;
     procedure TimeoutPassesValuesWhenTimely;
+    procedure DelayWhenUsesThePerValueDuration;
+    procedure TimeoutWithSwitchesToTheFallback;
   end;
 
 implementation
@@ -220,6 +222,43 @@ begin
   Obs.OnNext(2);      { in time again }
   AssertEquals('values forwarded', '1,2', FSeq);
   AssertEquals('no timeout', '', FErr);
+end;
+
+procedure TAsyncTimeTest.DelayWhenUsesThePerValueDuration;
+var
+  S: IVirtualScheduler;
+begin
+  FSeq := '';
+  FCompletes := 0;
+  S := TVirtualScheduler.Create as IVirtualScheduler;
+  { Each value is delayed by its own duration: 10ms for 1, 20ms for 2. }
+  DelayWhen<Integer>(Range(1, 2), S,
+    function(const V: Integer): Integer begin Result := V * 10; end).Subscribe(Recorder);
+  S.Advance(10);
+  AssertEquals('the short-delay value first', '1', FSeq);
+  S.Advance(10);
+  AssertEquals('then the longer-delay value', '1,2', FSeq);
+  AssertEquals('completed', 1, FCompletes);
+end;
+
+procedure TAsyncTimeTest.TimeoutWithSwitchesToTheFallback;
+var
+  S: IVirtualScheduler;
+  Obs: TSubject<Integer>;
+begin
+  FSeq := '';
+  FCompletes := 0;
+  FErr := '';
+  S := TVirtualScheduler.Create as IVirtualScheduler;
+  Obs := TSubject<Integer>.Create;
+  TimeoutWith<Integer>(Obs, S, 30,
+    function: ISubscribable<Integer>
+    begin
+      Result := Range(100, 2);
+    end).Subscribe(Recorder);
+  S.Advance(30);      { no value in time: switch to the fallback }
+  AssertEquals('fallback values', '100,101', FSeq);
+  AssertEquals('completed by the fallback', 1, FCompletes);
 end;
 
 initialization

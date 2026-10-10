@@ -185,9 +185,9 @@ chain from leaking. Any new operator should do the same.
   sleeps) or a `TRealScheduler` in production — per the spec's rule that a
   time-based operator uses the scheduler it is given. The scheduled work is a
   concrete object method (a `TNotify`), never a closure, and a one-shot action
-  frees itself after it runs.
-- **Not yet implemented**: `TimeoutWith`, `DelayWhen` (small additions on the
-  same pattern).
+  frees itself after it runs. The full time set is implemented: `Delay`,
+  `DelayWhen`, `DebounceTime`, `ThrottleTime`, `SampleTime`, `AuditTime`,
+  `Timeout`, `TimeoutWith`, `Timer`, `Interval`.
 
 ## Reproducing the probes
 
