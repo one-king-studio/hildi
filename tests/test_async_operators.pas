@@ -61,6 +61,18 @@ type
     procedure ZipPairsByIndex;
     procedure ReduceFoldsWithASeparateAccumulator;
     procedure PairwiseCombinesAdjacent;
+    { Utility, aggregation, error. }
+    procedure TapSeesValuesAndPassesThemOn;
+    procedure IgnoreElementsDropsAllValues;
+    procedure StartWithPrepends;
+    procedure EndWithAppends;
+    procedure DistinctDropsRepeatsGlobally;
+    procedure LastEmitsTheFinalValue;
+    procedure CountEmitsTheTotal;
+    procedure CatchErrorRecovers;
+    procedure FinalizeRunsOnCompletion;
+    procedure CombineLatestEmitsOnEachUpdate;
+    procedure ExtraOperatorsComposeInAPipe;
   end;
 
 implementation
@@ -390,6 +402,103 @@ begin
     end).Subscribe(RecorderInt);
   AssertEquals('adjacent differences', '1,1,1', FSeq);
   AssertEquals('completed', 1, FCompletes);
+end;
+
+procedure TAsyncOperatorsTest.TapSeesValuesAndPassesThemOn;
+var
+  Seen: Integer;
+begin
+  Seen := 0;
+  Reset;
+  Tap<Integer>(IntSource([1, 2, 3]),
+    procedure(const V: Integer) begin Seen := Seen + V; end).Subscribe(RecorderInt);
+  AssertEquals('values forwarded', '1,2,3', FSeq);
+  AssertEquals('tap saw them', 6, Seen);
+end;
+
+procedure TAsyncOperatorsTest.IgnoreElementsDropsAllValues;
+begin
+  AssertInts(IgnoreElements<Integer>(IntSource([1, 2, 3])), '', True);
+end;
+
+procedure TAsyncOperatorsTest.StartWithPrepends;
+begin
+  AssertInts(StartWith<Integer>(IntSource([1, 2]), 0), '0,1,2', True);
+end;
+
+procedure TAsyncOperatorsTest.EndWithAppends;
+begin
+  AssertInts(EndWith<Integer>(IntSource([1, 2]), 9), '1,2,9', True);
+end;
+
+procedure TAsyncOperatorsTest.DistinctDropsRepeatsGlobally;
+begin
+  AssertInts(Distinct<Integer>(IntSource([1, 2, 1, 3, 2, 4]),
+    function(const A, B: Integer): Boolean begin Result := A = B; end),
+    '1,2,3,4', True);
+end;
+
+procedure TAsyncOperatorsTest.LastEmitsTheFinalValue;
+begin
+  AssertInts(Last<Integer>(IntSource([1, 2, 3])), '3', True);
+end;
+
+procedure TAsyncOperatorsTest.CountEmitsTheTotal;
+begin
+  AssertInts(Count<Integer>(IntSource([1, 2, 3, 4])), '4', True);
+end;
+
+procedure TAsyncOperatorsTest.CatchErrorRecovers;
+begin
+  Reset;
+  CatchError<Integer>(ThrowError<Integer>(Exception.Create('boom')),
+    function(const E: Exception): ISubscribable<Integer>
+    begin
+      E.Free;
+      Result := IntSource([7, 8]);
+    end).Subscribe(RecorderInt);
+  AssertEquals('recovered with the fallback', '7,8', FSeq);
+  AssertEquals('completed', 1, FCompletes);
+end;
+
+procedure TAsyncOperatorsTest.FinalizeRunsOnCompletion;
+var
+  Ran: Boolean;
+begin
+  Ran := False;
+  Reset;
+  Finalize<Integer>(IntSource([1, 2]),
+    procedure begin Ran := True; end).Subscribe(RecorderInt);
+  AssertEquals('values', '1,2', FSeq);
+  AssertTrue('finalize ran', Ran);
+end;
+
+procedure TAsyncOperatorsTest.CombineLatestEmitsOnEachUpdate;
+begin
+  Reset;
+  CombineLatest<Integer, Integer, string>(IntSource([1, 2]),
+    IntSource([10, 20]),
+    function(const A, B: Integer): string
+    begin
+      Result := IntToStr(A) + '/' + IntToStr(B);
+    end).Subscribe(RecorderStr);
+  { left emits 1 (no B yet), left emits 2 (no B yet), right emits 10 -> 2/10,
+    right emits 20 -> 2/20 }
+  AssertEquals('latest combination', '2/10,2/20', FSeq);
+  AssertEquals('completed', 1, FCompletes);
+end;
+
+procedure TAsyncOperatorsTest.ExtraOperatorsComposeInAPipe;
+var
+  S: ISubscribable<Integer>;
+begin
+  { Tap (side effect) then Distinct then Take, composed in a Pipe. }
+  S := Pipe<Integer>(IntSource([1, 1, 2, 3, 3, 4]), [
+    TapOp<Integer>(procedure(const V: Integer) begin end),
+    DistinctOp<Integer>(function(const A, B: Integer): Boolean
+      begin Result := A = B; end),
+    TakeOp<Integer>(3)]);
+  AssertInts(S, '1,2,3', True);
 end;
 
 initialization

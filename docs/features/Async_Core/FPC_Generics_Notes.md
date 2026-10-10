@@ -168,15 +168,20 @@ chain from leaking. Any new operator should do the same.
 - **Expressible:** creation (`Just`, `FromArray`, `Range`, `Empty`, `ThrowError`,
   `Defer`); transformation (`Map`, `Scan`, `Pairwise`, `Reduce`); filtering
   (`Filter`, `Take`, `Skip`, `TakeWhile`, `SkipWhile`, `DistinctUntilChanged`,
-  `First`, `ElementAt`); fan-in (`Merge`, `Concat`); flattening (`MergeMap`,
-  `SwitchMap`, `ConcatMap`); combine (`Zip`); composition (`IOperator<T>`
-  factories + `Pipe`).
+  `Distinct`, `First`, `Last`, `ElementAt`, `IgnoreElements`); fan-in (`Merge`,
+  `Concat`, `Race`); flattening (`MergeMap`, `SwitchMap`, `ConcatMap`); combine
+  (`Zip`, `CombineLatest`); utility (`Tap`, `StartWith`, `EndWith`); aggregation
+  (`Count`); error (`CatchError`, `Finalize`, `Retry`); composition
+  (`IOperator<T>` factories + `Pipe`).
 - **Not yet expressible** (need a non-nesting container type): `Buffer`,
   `ToArray`, `Window`, `GroupBy`, and a true `MergeAll` over
-  `ISubscribable<ISubscribable<T>>`.
+  `ISubscribable<ISubscribable<T>>`. `Race` here is a synchronous approximation
+  (the first source wins because synchronous sources complete in order); a true
+  race needs overlapping sources.
 - **Not yet implemented** (no language obstacle): the time-based operators
   (`DebounceTime`, `ThrottleTime`, `Sample`, `Delay`, `Timeout`, `Timer`,
-  `Interval`) and error operators (`CatchError`, `Retry`, `Finalize`).
+  `Interval`) — these need the virtual clock (`async.timers`) wired into the
+  operator set, and are the natural next increment.
 
 ## Reproducing the probes
 

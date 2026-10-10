@@ -50,6 +50,10 @@ type
   TCombiner<T, U, V> = reference to function(const A: T; const B: U): V;
   { A fold with a SEPARATE accumulator type: Reduce. }
   TReducer<T, A> = reference to function(const AAcc: A; const AValue: T): A;
+  { An error projection: CatchError maps an error to a fallback stream. }
+  TErrorMapper<T> = reference to function(const AError: Exception): ISubscribable<T>;
+  { A predicate over the whole stream: Every, ThrowIfEmpty. }
+  TVoidPredicate = reference to function: Boolean;
 
   { --- Observers (one per rule) ------------------------------------------ }
 
@@ -477,6 +481,11 @@ type
     function Apply(const A: ISubscribable<T>): ISubscribable<T>;
   end;
 
+  { A type-changing operator as a value (for Map): T in, U out. }
+  IMapOperator<T, U> = interface
+    function Apply(const A: ISubscribable<T>): ISubscribable<U>;
+  end;
+
   { The concrete operator classes behind the curried factories. }
   TFilterOperator<T> = class(TInterfacedObject, IOperator<T>)
   private
@@ -531,6 +540,278 @@ type
     constructor Create(const AIndex: Integer);
     function Apply(const A: ISubscribable<T>): ISubscribable<T>;
   end;
+
+  TTapObserver<T> = class(TInterfacedObject, IObserver<T>)
+  private
+    FDown: IObserver<T>;
+    FAction: TAction<T>;
+  public
+    constructor Create(const ADown: IObserver<T>; const AAction: TAction<T>);
+    procedure OnNext(const AValue: T);
+    procedure OnError(const AError: Exception);
+    procedure OnComplete;
+  end;
+
+  TTapObservable<T> = class(TInterfacedObject, ISubscribable<T>)
+  private
+    FSource: ISubscribable<T>;
+    FAction: TAction<T>;
+  public
+    constructor Create(const ASource: ISubscribable<T>; const AAction: TAction<T>);
+    function Subscribe(const AObserver: IObserver<T>): ISubscription;
+  end;
+
+  TIgnoreObservable<T> = class(TInterfacedObject, ISubscribable<T>)
+  private
+    FSource: ISubscribable<T>;
+  public
+    constructor Create(const ASource: ISubscribable<T>);
+    function Subscribe(const AObserver: IObserver<T>): ISubscription;
+  end;
+
+  TIgnoreObserver<T> = class(TInterfacedObject, IObserver<T>)
+  private
+    FDown: IObserver<T>;
+  public
+    constructor Create(const ADown: IObserver<T>);
+    procedure OnNext(const AValue: T);
+    procedure OnError(const AError: Exception);
+    procedure OnComplete;
+  end;
+
+  TStartWithObservable<T> = class(TInterfacedObject, ISubscribable<T>)
+  private
+    FSource: ISubscribable<T>;
+    FValue: T;
+  public
+    constructor Create(const ASource: ISubscribable<T>; const AValue: T);
+    function Subscribe(const AObserver: IObserver<T>): ISubscription;
+  end;
+
+  TEndWithObserver<T> = class(TInterfacedObject, IObserver<T>)
+  private
+    FDown: IObserver<T>;
+    FValue: T;
+  public
+    constructor Create(const ADown: IObserver<T>; const AValue: T);
+    procedure OnNext(const AValue: T);
+    procedure OnError(const AError: Exception);
+    procedure OnComplete;
+  end;
+
+  TEndWithObservable<T> = class(TInterfacedObject, ISubscribable<T>)
+  private
+    FSource: ISubscribable<T>;
+    FValue: T;
+  public
+    constructor Create(const ASource: ISubscribable<T>; const AValue: T);
+    function Subscribe(const AObserver: IObserver<T>): ISubscription;
+  end;
+
+  TDistinctAllObserver<T> = class(TInterfacedObject, IObserver<T>)
+  private
+    FDown: IObserver<T>;
+    FEquals: TEquality<T>;
+    FSeen: TArray<T>;
+  public
+    constructor Create(const ADown: IObserver<T>; const AEquals: TEquality<T>);
+    procedure OnNext(const AValue: T);
+    procedure OnError(const AError: Exception);
+    procedure OnComplete;
+  end;
+
+  TDistinctAllObservable<T> = class(TInterfacedObject, ISubscribable<T>)
+  private
+    FSource: ISubscribable<T>;
+    FEquals: TEquality<T>;
+  public
+    constructor Create(const ASource: ISubscribable<T>; const AEquals: TEquality<T>);
+    function Subscribe(const AObserver: IObserver<T>): ISubscription;
+  end;
+
+  TLastObserver<T> = class(TInterfacedObject, IObserver<T>)
+  private
+    FDown: IObserver<T>;
+    FLast: T;
+    FHas: Boolean;
+  public
+    constructor Create(const ADown: IObserver<T>);
+    procedure OnNext(const AValue: T);
+    procedure OnError(const AError: Exception);
+    procedure OnComplete;
+  end;
+
+  TLastObservable<T> = class(TInterfacedObject, ISubscribable<T>)
+  private
+    FSource: ISubscribable<T>;
+  public
+    constructor Create(const ASource: ISubscribable<T>);
+    function Subscribe(const AObserver: IObserver<T>): ISubscription;
+  end;
+
+  TCountObserver<T> = class(TInterfacedObject, IObserver<T>)
+  private
+    FDown: IObserver<Integer>;
+    FN: Integer;
+  public
+    constructor Create(const ADown: IObserver<Integer>);
+    procedure OnNext(const AValue: T);
+    procedure OnError(const AError: Exception);
+    procedure OnComplete;
+  end;
+
+  TCountObservable<T> = class(TInterfacedObject, ISubscribable<Integer>)
+  private
+    FSource: ISubscribable<T>;
+  public
+    constructor Create(const ASource: ISubscribable<T>);
+    function Subscribe(const AObserver: IObserver<Integer>): ISubscription;
+  end;
+
+  TCatchObserver<T> = class(TInterfacedObject, IObserver<T>)
+  private
+    FDown: IObserver<T>;
+    FHandler: TErrorMapper<T>;
+    FHandled: Boolean;
+  public
+    constructor Create(const ADown: IObserver<T>; const AHandler: TErrorMapper<T>);
+    procedure OnNext(const AValue: T);
+    procedure OnError(const AError: Exception);
+    procedure OnComplete;
+  end;
+
+  TCatchObservable<T> = class(TInterfacedObject, ISubscribable<T>)
+  private
+    FSource: ISubscribable<T>;
+    FHandler: TErrorMapper<T>;
+  public
+    constructor Create(const ASource: ISubscribable<T>; const AHandler: TErrorMapper<T>);
+    function Subscribe(const AObserver: IObserver<T>): ISubscription;
+  end;
+
+  TFinalizeObserver<T> = class(TInterfacedObject, IObserver<T>)
+  private
+    FDown: IObserver<T>;
+    FAction: TAction0;
+    FRan: Boolean;
+    procedure RunOnce;
+  public
+    constructor Create(const ADown: IObserver<T>; const AAction: TAction0);
+    procedure OnNext(const AValue: T);
+    procedure OnError(const AError: Exception);
+    procedure OnComplete;
+  end;
+
+  TFinalizeObservable<T> = class(TInterfacedObject, ISubscribable<T>)
+  private
+    FSource: ISubscribable<T>;
+    FAction: TAction0;
+  public
+    constructor Create(const ASource: ISubscribable<T>; const AAction: TAction0);
+    function Subscribe(const AObserver: IObserver<T>): ISubscription;
+  end;
+
+  TRetryObservable<T> = class(TInterfacedObject, ISubscribable<T>)
+  private
+    FSource: ISubscribable<T>;
+    FCount: Integer;
+  public
+    constructor Create(const ASource: ISubscribable<T>; const ACount: Integer);
+    function Subscribe(const AObserver: IObserver<T>): ISubscription;
+  end;
+
+  TCombineLatestCoordinator<T, U, V> = class(TInterfacedObject, ISubscription)
+  private
+    FDown: IObserver<V>;
+    FCombine: TCombiner<T, U, V>;
+    FLastT: T;
+    FLastU: U;
+    FHasT: Boolean;
+    FHasU: Boolean;
+    FClosed: Boolean;
+    FTDone: Boolean;
+    FUDone: Boolean;
+    procedure TryEmit;
+  public
+    constructor Create(const ADown: IObserver<V>; const ACombine: TCombiner<T, U, V>);
+    procedure PushT(const AValue: T);
+    procedure PushU(const AValue: U);
+    procedure TDone;
+    procedure UDone;
+    procedure Unsubscribe;
+    function Closed: Boolean;
+  end;
+
+  TCLTObserverT<T, U, V> = class(TInterfacedObject, IObserver<T>)
+  private
+    FC: TCombineLatestCoordinator<T, U, V>;
+  public
+    constructor Create(const AC: TCombineLatestCoordinator<T, U, V>);
+    procedure OnNext(const AValue: T);
+    procedure OnError(const AError: Exception);
+    procedure OnComplete;
+  end;
+
+  TCLTObserverU<T, U, V> = class(TInterfacedObject, IObserver<U>)
+  private
+    FC: TCombineLatestCoordinator<T, U, V>;
+  public
+    constructor Create(const AC: TCombineLatestCoordinator<T, U, V>);
+    procedure OnNext(const AValue: U);
+    procedure OnError(const AError: Exception);
+    procedure OnComplete;
+  end;
+
+  TCombineLatestObservable<T, U, V> = class(TInterfacedObject, ISubscribable<V>)
+  private
+    FLeft: ISubscribable<T>;
+    FRight: ISubscribable<U>;
+    FCombine: TCombiner<T, U, V>;
+  public
+    constructor Create(const ALeft: ISubscribable<T>;
+      const ARight: ISubscribable<U>; const ACombine: TCombiner<T, U, V>);
+    function Subscribe(const AObserver: IObserver<V>): ISubscription;
+  end;
+
+  { Curried factories' concrete classes. }
+  TMapOperator<T, U> = class(TInterfacedObject, IMapOperator<T, U>)
+  private
+    FMapper: TMapper<T, U>;
+  public
+    constructor Create(const AMapper: TMapper<T, U>);
+    function Apply(const A: ISubscribable<T>): ISubscribable<U>;
+  end;
+  TScanOperator<T> = class(TInterfacedObject, IOperator<T>)
+  private
+    FSeed: T;
+    FAccumulator: TAccumulator<T>;
+  public
+    constructor Create(const ASeed: T; const AAccumulator: TAccumulator<T>);
+    function Apply(const A: ISubscribable<T>): ISubscribable<T>;
+  end;
+  TTapOperator<T> = class(TInterfacedObject, IOperator<T>)
+  private
+    FAction: TAction<T>;
+  public
+    constructor Create(const AAction: TAction<T>);
+    function Apply(const A: ISubscribable<T>): ISubscribable<T>;
+  end;
+  TDistinctAllOperator<T> = class(TInterfacedObject, IOperator<T>)
+  private
+    FEquals: TEquality<T>;
+  public
+    constructor Create(const AEquals: TEquality<T>);
+    function Apply(const A: ISubscribable<T>): ISubscribable<T>;
+  end;
+  TIgnoreOperator<T> = class(TInterfacedObject, IOperator<T>)
+  public
+    function Apply(const A: ISubscribable<T>): ISubscribable<T>;
+  end;
+  TLastOperator<T> = class(TInterfacedObject, IOperator<T>)
+  public
+    function Apply(const A: ISubscribable<T>): ISubscribable<T>;
+  end;
+
 
   { --- Sources (free functions) ----------------------------------------- }
   function Just<T>(const AValue: T): ISubscribable<T>;
@@ -590,6 +871,39 @@ type
   function Pipe<T>(const A: ISubscribable<T>;
     const AOps: TArray<IOperator<T> >): ISubscribable<T>;
 
+  { --- More operators (free functions) ---------------------------------- }
+  function Tap<T>(const ASource: ISubscribable<T>;
+    const AAction: TAction<T>): ISubscribable<T>;
+  function IgnoreElements<T>(const ASource: ISubscribable<T>): ISubscribable<T>;
+  function StartWith<T>(const ASource: ISubscribable<T>;
+    const AValue: T): ISubscribable<T>;
+  function EndWith<T>(const ASource: ISubscribable<T>;
+    const AValue: T): ISubscribable<T>;
+  function Distinct<T>(const ASource: ISubscribable<T>;
+    const AEquals: TEquality<T>): ISubscribable<T>;
+  function Last<T>(const ASource: ISubscribable<T>): ISubscribable<T>;
+  function Count<T>(const ASource: ISubscribable<T>): ISubscribable<Integer>;
+  function CatchError<T>(const ASource: ISubscribable<T>;
+    const AHandler: TErrorMapper<T>): ISubscribable<T>;
+  function Finalize<T>(const ASource: ISubscribable<T>;
+    const AAction: TAction0): ISubscribable<T>;
+  function Retry<T>(const ASource: ISubscribable<T>;
+    const ACount: Integer): ISubscribable<T>;
+  function CombineLatest<T, U, V>(const ALeft: ISubscribable<T>;
+    const ARight: ISubscribable<U>;
+    const ACombine: TCombiner<T, U, V>): ISubscribable<V>;
+  function Race<T>(const ASources: TArray<ISubscribable<T>>): ISubscribable<T>;
+
+  { --- More curried operator factories ---------------------------------- }
+  function MapOp<T, U>(const AMapper: TMapper<T, U>): IMapOperator<T, U>;
+  function ScanOp<T>(const ASeed: T;
+    const AAccumulator: TAccumulator<T>): IOperator<T>;
+  function TapOp<T>(const AAction: TAction<T>): IOperator<T>;
+  function DistinctOp<T>(const AEquals: TEquality<T>): IOperator<T>;
+  function IgnoreElementsOp<T>: IOperator<T>;
+  function LastOp<T>: IOperator<T>;
+
+  { --- Observers for the extra operators -------------------------------- }
 
 implementation
 
@@ -1888,6 +2202,696 @@ end;
 function TPairwiseObservable<T, U>.Subscribe(const AObserver: IObserver<U>): ISubscription;
 begin
   Result := FSource.Subscribe(TPairwiseObserver<T, U>.Create(AObserver, FPair));
+end;
+
+{ TTapObserver<T> }
+
+constructor TTapObserver<T>.Create(const ADown: IObserver<T>; const AAction: TAction<T>);
+begin
+  inherited Create;
+  FDown := ADown;
+  FAction := AAction;
+end;
+
+procedure TTapObserver<T>.OnNext(const AValue: T);
+begin
+  FAction(AValue);
+  FDown.OnNext(AValue);
+end;
+
+procedure TTapObserver<T>.OnError(const AError: Exception);
+begin
+  FDown.OnError(AError);
+end;
+
+procedure TTapObserver<T>.OnComplete;
+begin
+  FDown.OnComplete;
+end;
+
+{ TIgnoreObserver<T> }
+
+constructor TIgnoreObserver<T>.Create(const ADown: IObserver<T>);
+begin
+  inherited Create;
+  FDown := ADown;
+end;
+procedure TIgnoreObserver<T>.OnNext(const AValue: T);
+begin
+  { dropped }
+end;
+
+procedure TIgnoreObserver<T>.OnError(const AError: Exception);
+begin
+  FDown.OnError(AError);
+end;
+
+procedure TIgnoreObserver<T>.OnComplete;
+begin
+  FDown.OnComplete;
+end;
+
+{ TTapObservable<T> }
+
+constructor TTapObservable<T>.Create(const ASource: ISubscribable<T>; const AAction: TAction<T>);
+begin
+  inherited Create;
+  FSource := ASource;
+  FAction := AAction;
+end;
+
+function TTapObservable<T>.Subscribe(const AObserver: IObserver<T>): ISubscription;
+begin
+  Result := FSource.Subscribe(TTapObserver<T>.Create(AObserver, FAction));
+end;
+
+{ TIgnoreObservable<T> }
+
+constructor TIgnoreObservable<T>.Create(const ASource: ISubscribable<T>);
+begin
+  inherited Create;
+  FSource := ASource;
+end;
+
+function TIgnoreObservable<T>.Subscribe(const AObserver: IObserver<T>): ISubscription;
+begin
+  Result := FSource.Subscribe(TIgnoreObserver<T>.Create(AObserver));
+end;
+
+{ TStartWithObservable<T> }
+
+constructor TStartWithObservable<T>.Create(const ASource: ISubscribable<T>; const AValue: T);
+begin
+  inherited Create;
+  FSource := ASource;
+  FValue := AValue;
+end;
+
+function TStartWithObservable<T>.Subscribe(const AObserver: IObserver<T>): ISubscription;
+begin
+  AObserver.OnNext(FValue);
+  Result := FSource.Subscribe(AObserver);
+end;
+
+{ TEndWithObserver<T> }
+
+constructor TEndWithObserver<T>.Create(const ADown: IObserver<T>; const AValue: T);
+begin
+  inherited Create;
+  FDown := ADown;
+  FValue := AValue;
+end;
+
+procedure TEndWithObserver<T>.OnNext(const AValue: T);
+begin
+  FDown.OnNext(AValue);
+end;
+
+procedure TEndWithObserver<T>.OnError(const AError: Exception);
+begin
+  FDown.OnError(AError);
+end;
+
+procedure TEndWithObserver<T>.OnComplete;
+begin
+  FDown.OnNext(FValue);
+  FDown.OnComplete;
+end;
+
+{ TEndWithObservable<T> }
+
+constructor TEndWithObservable<T>.Create(const ASource: ISubscribable<T>; const AValue: T);
+begin
+  inherited Create;
+  FSource := ASource;
+  FValue := AValue;
+end;
+
+function TEndWithObservable<T>.Subscribe(const AObserver: IObserver<T>): ISubscription;
+begin
+  Result := FSource.Subscribe(TEndWithObserver<T>.Create(AObserver, FValue));
+end;
+
+{ TDistinctAllObserver<T> }
+
+constructor TDistinctAllObserver<T>.Create(const ADown: IObserver<T>;
+  const AEquals: TEquality<T>);
+begin
+  inherited Create;
+  FDown := ADown;
+  FEquals := AEquals;
+  FSeen := nil;
+end;
+
+procedure TDistinctAllObserver<T>.OnNext(const AValue: T);
+var
+  I: Integer;
+begin
+  for I := 0 to High(FSeen) do
+    if FEquals(FSeen[I], AValue) then
+      Exit;
+  SetLength(FSeen, Length(FSeen) + 1);
+  FSeen[High(FSeen)] := AValue;
+  FDown.OnNext(AValue);
+end;
+
+procedure TDistinctAllObserver<T>.OnError(const AError: Exception);
+begin
+  FDown.OnError(AError);
+end;
+
+procedure TDistinctAllObserver<T>.OnComplete;
+begin
+  FDown.OnComplete;
+end;
+
+{ TDistinctAllObservable<T> }
+
+constructor TDistinctAllObservable<T>.Create(const ASource: ISubscribable<T>;
+  const AEquals: TEquality<T>);
+begin
+  inherited Create;
+  FSource := ASource;
+  FEquals := AEquals;
+end;
+
+function TDistinctAllObservable<T>.Subscribe(const AObserver: IObserver<T>): ISubscription;
+begin
+  Result := FSource.Subscribe(TDistinctAllObserver<T>.Create(AObserver, FEquals));
+end;
+
+{ TLastObserver<T> }
+
+constructor TLastObserver<T>.Create(const ADown: IObserver<T>);
+begin
+  inherited Create;
+  FDown := ADown;
+  FHas := False;
+end;
+
+procedure TLastObserver<T>.OnNext(const AValue: T);
+begin
+  FLast := AValue;
+  FHas := True;
+end;
+
+procedure TLastObserver<T>.OnError(const AError: Exception);
+begin
+  FDown.OnError(AError);
+end;
+
+procedure TLastObserver<T>.OnComplete;
+begin
+  if FHas then
+    FDown.OnNext(FLast);
+  FDown.OnComplete;
+end;
+
+{ TLastObservable<T> }
+
+constructor TLastObservable<T>.Create(const ASource: ISubscribable<T>);
+begin
+  inherited Create;
+  FSource := ASource;
+end;
+
+function TLastObservable<T>.Subscribe(const AObserver: IObserver<T>): ISubscription;
+begin
+  Result := FSource.Subscribe(TLastObserver<T>.Create(AObserver));
+end;
+
+{ TCountObserver<T> }
+
+constructor TCountObserver<T>.Create(const ADown: IObserver<Integer>);
+begin
+  inherited Create;
+  FDown := ADown;
+  FN := 0;
+end;
+
+procedure TCountObserver<T>.OnNext(const AValue: T);
+begin
+  Inc(FN);
+end;
+
+procedure TCountObserver<T>.OnError(const AError: Exception);
+begin
+  FDown.OnError(AError);
+end;
+
+procedure TCountObserver<T>.OnComplete;
+begin
+  FDown.OnNext(FN);
+  FDown.OnComplete;
+end;
+
+{ TCountObservable<T> }
+
+constructor TCountObservable<T>.Create(const ASource: ISubscribable<T>);
+begin
+  inherited Create;
+  FSource := ASource;
+end;
+
+function TCountObservable<T>.Subscribe(const AObserver: IObserver<Integer>): ISubscription;
+begin
+  Result := FSource.Subscribe(TCountObserver<T>.Create(AObserver));
+end;
+
+{ TCatchObserver<T> }
+
+constructor TCatchObserver<T>.Create(const ADown: IObserver<T>;
+  const AHandler: TErrorMapper<T>);
+begin
+  inherited Create;
+  FDown := ADown;
+  FHandler := AHandler;
+  FHandled := False;
+end;
+
+procedure TCatchObserver<T>.OnNext(const AValue: T);
+begin
+  FDown.OnNext(AValue);
+end;
+
+procedure TCatchObserver<T>.OnError(const AError: Exception);
+var
+  Fallback: ISubscribable<T>;
+begin
+  if FHandled then
+  begin
+    FDown.OnError(AError);
+    Exit;
+  end;
+  FHandled := True;
+  Fallback := FHandler(AError);
+  Fallback.Subscribe(FDown);
+end;
+
+procedure TCatchObserver<T>.OnComplete;
+begin
+  FDown.OnComplete;
+end;
+
+{ TCatchObservable<T> }
+
+constructor TCatchObservable<T>.Create(const ASource: ISubscribable<T>;
+  const AHandler: TErrorMapper<T>);
+begin
+  inherited Create;
+  FSource := ASource;
+  FHandler := AHandler;
+end;
+
+function TCatchObservable<T>.Subscribe(const AObserver: IObserver<T>): ISubscription;
+begin
+  Result := FSource.Subscribe(TCatchObserver<T>.Create(AObserver, FHandler));
+end;
+
+{ TFinalizeObserver<T> }
+
+constructor TFinalizeObserver<T>.Create(const ADown: IObserver<T>; const AAction: TAction0);
+begin
+  inherited Create;
+  FDown := ADown;
+  FAction := AAction;
+  FRan := False;
+end;
+
+procedure TFinalizeObserver<T>.RunOnce;
+begin
+  if not FRan then
+  begin
+    FRan := True;
+    if Assigned(FAction) then
+      FAction();
+  end;
+end;
+
+procedure TFinalizeObserver<T>.OnNext(const AValue: T);
+begin
+  FDown.OnNext(AValue);
+end;
+
+procedure TFinalizeObserver<T>.OnError(const AError: Exception);
+begin
+  FDown.OnError(AError);
+  RunOnce;
+end;
+
+procedure TFinalizeObserver<T>.OnComplete;
+begin
+  FDown.OnComplete;
+  RunOnce;
+end;
+
+{ TFinalizeObservable<T> }
+
+constructor TFinalizeObservable<T>.Create(const ASource: ISubscribable<T>;
+  const AAction: TAction0);
+begin
+  inherited Create;
+  FSource := ASource;
+  FAction := AAction;
+end;
+
+function TFinalizeObservable<T>.Subscribe(const AObserver: IObserver<T>): ISubscription;
+begin
+  Result := FSource.Subscribe(TFinalizeObserver<T>.Create(AObserver, FAction));
+end;
+
+{ TRetryObservable<T> }
+
+constructor TRetryObservable<T>.Create(const ASource: ISubscribable<T>;
+  const ACount: Integer);
+begin
+  inherited Create;
+  FSource := ASource;
+  FCount := ACount;
+end;
+
+function TRetryObservable<T>.Subscribe(const AObserver: IObserver<T>): ISubscription;
+var
+  Attempts: Integer;
+  Fwd: IObserver<T>;
+begin
+  Attempts := 0;
+  Fwd := TObserver<T>.Create(
+    procedure(const V: T) begin AObserver.OnNext(V); end,
+    procedure(const E: Exception)
+    begin
+      if Attempts < FCount then
+      begin
+        Inc(Attempts);
+        FSource.Subscribe(Fwd);
+      end
+      else
+        AObserver.OnError(E);
+    end,
+    procedure begin AObserver.OnComplete; end);
+  FSource.Subscribe(Fwd);
+  Result := TClosureSubscription.Create(nil);
+end;
+
+{ TCombineLatestCoordinator<T,U,V> }
+
+constructor TCombineLatestCoordinator<T, U, V>.Create(const ADown: IObserver<V>;
+  const ACombine: TCombiner<T, U, V>);
+begin
+  inherited Create;
+  FDown := ADown;
+  FCombine := ACombine;
+  FHasT := False;
+  FHasU := False;
+  FClosed := False;
+  FTDone := False;
+  FUDone := False;
+end;
+
+procedure TCombineLatestCoordinator<T, U, V>.TryEmit;
+begin
+  if FHasT and FHasU and (not FClosed) then
+    FDown.OnNext(FCombine(FLastT, FLastU));
+end;
+
+procedure TCombineLatestCoordinator<T, U, V>.PushT(const AValue: T);
+begin
+  FLastT := AValue;
+  FHasT := True;
+  TryEmit;
+end;
+
+procedure TCombineLatestCoordinator<T, U, V>.PushU(const AValue: U);
+begin
+  FLastU := AValue;
+  FHasU := True;
+  TryEmit;
+end;
+
+procedure TCombineLatestCoordinator<T, U, V>.TDone;
+begin
+  FTDone := True;
+  if FUDone and (not FClosed) then
+  begin
+    FClosed := True;
+    FDown.OnComplete;
+  end;
+end;
+
+procedure TCombineLatestCoordinator<T, U, V>.UDone;
+begin
+  FUDone := True;
+  if FTDone and (not FClosed) then
+  begin
+    FClosed := True;
+    FDown.OnComplete;
+  end;
+end;
+
+procedure TCombineLatestCoordinator<T, U, V>.Unsubscribe;
+begin
+  FClosed := True;
+end;
+
+function TCombineLatestCoordinator<T, U, V>.Closed: Boolean;
+begin
+  Result := FClosed;
+end;
+
+{ TCLTObserverT<T,U,V> }
+
+constructor TCLTObserverT<T, U, V>.Create(const AC: TCombineLatestCoordinator<T, U, V>);
+begin
+  inherited Create;
+  FC := AC;
+end;
+
+procedure TCLTObserverT<T, U, V>.OnNext(const AValue: T);
+begin
+  FC.PushT(AValue);
+end;
+
+procedure TCLTObserverT<T, U, V>.OnError(const AError: Exception);
+begin
+  AError.Free;
+end;
+
+procedure TCLTObserverT<T, U, V>.OnComplete;
+begin
+  FC.TDone;
+end;
+
+{ TCLTObserverU<T,U,V> }
+
+constructor TCLTObserverU<T, U, V>.Create(const AC: TCombineLatestCoordinator<T, U, V>);
+begin
+  inherited Create;
+  FC := AC;
+end;
+
+procedure TCLTObserverU<T, U, V>.OnNext(const AValue: U);
+begin
+  FC.PushU(AValue);
+end;
+
+procedure TCLTObserverU<T, U, V>.OnError(const AError: Exception);
+begin
+  AError.Free;
+end;
+
+procedure TCLTObserverU<T, U, V>.OnComplete;
+begin
+  FC.UDone;
+end;
+
+{ TCombineLatestObservable<T,U,V> }
+
+constructor TCombineLatestObservable<T, U, V>.Create(const ALeft: ISubscribable<T>;
+  const ARight: ISubscribable<U>; const ACombine: TCombiner<T, U, V>);
+begin
+  inherited Create;
+  FLeft := ALeft;
+  FRight := ARight;
+  FCombine := ACombine;
+end;
+
+function TCombineLatestObservable<T, U, V>.Subscribe(const AObserver: IObserver<V>): ISubscription;
+var
+  C: TCombineLatestCoordinator<T, U, V>;
+begin
+  C := TCombineLatestCoordinator<T, U, V>.Create(AObserver, FCombine);
+  Result := C;
+  FLeft.Subscribe(TCLTObserverT<T, U, V>.Create(C));
+  FRight.Subscribe(TCLTObserverU<T, U, V>.Create(C));
+end;
+
+{ TMapOperator<T,U> }
+
+constructor TMapOperator<T, U>.Create(const AMapper: TMapper<T, U>);
+begin
+  inherited Create;
+  FMapper := AMapper;
+end;
+
+function TMapOperator<T, U>.Apply(const A: ISubscribable<T>): ISubscribable<U>;
+begin
+  Result := Map<T, U>(A, FMapper);
+end;
+
+{ TScanOperator<T> }
+
+constructor TScanOperator<T>.Create(const ASeed: T; const AAccumulator: TAccumulator<T>);
+begin
+  inherited Create;
+  FSeed := ASeed;
+  FAccumulator := AAccumulator;
+end;
+
+function TScanOperator<T>.Apply(const A: ISubscribable<T>): ISubscribable<T>;
+begin
+  Result := Scan<T>(A, FSeed, FAccumulator);
+end;
+
+{ TTapOperator<T> }
+
+constructor TTapOperator<T>.Create(const AAction: TAction<T>);
+begin
+  inherited Create;
+  FAction := AAction;
+end;
+
+function TTapOperator<T>.Apply(const A: ISubscribable<T>): ISubscribable<T>;
+begin
+  Result := Tap<T>(A, FAction);
+end;
+
+{ TDistinctAllOperator<T> }
+
+constructor TDistinctAllOperator<T>.Create(const AEquals: TEquality<T>);
+begin
+  inherited Create;
+  FEquals := AEquals;
+end;
+
+function TDistinctAllOperator<T>.Apply(const A: ISubscribable<T>): ISubscribable<T>;
+begin
+  Result := Distinct<T>(A, FEquals);
+end;
+
+{ TIgnoreOperator<T> }
+
+function TIgnoreOperator<T>.Apply(const A: ISubscribable<T>): ISubscribable<T>;
+begin
+  Result := IgnoreElements<T>(A);
+end;
+
+{ TLastOperator<T> }
+
+function TLastOperator<T>.Apply(const A: ISubscribable<T>): ISubscribable<T>;
+begin
+  Result := Last<T>(A);
+end;
+
+{ The extra free-function operators }
+
+function Tap<T>(const ASource: ISubscribable<T>; const AAction: TAction<T>): ISubscribable<T>;
+begin
+  Result := TTapObservable<T>.Create(ASource, AAction);
+end;
+
+function IgnoreElements<T>(const ASource: ISubscribable<T>): ISubscribable<T>;
+begin
+  Result := TIgnoreObservable<T>.Create(ASource);
+end;
+
+function StartWith<T>(const ASource: ISubscribable<T>; const AValue: T): ISubscribable<T>;
+begin
+  Result := TStartWithObservable<T>.Create(ASource, AValue);
+end;
+
+function EndWith<T>(const ASource: ISubscribable<T>; const AValue: T): ISubscribable<T>;
+begin
+  Result := TEndWithObservable<T>.Create(ASource, AValue);
+end;
+
+function Distinct<T>(const ASource: ISubscribable<T>; const AEquals: TEquality<T>): ISubscribable<T>;
+begin
+  Result := TDistinctAllObservable<T>.Create(ASource, AEquals);
+end;
+
+function Last<T>(const ASource: ISubscribable<T>): ISubscribable<T>;
+begin
+  Result := TLastObservable<T>.Create(ASource);
+end;
+
+function Count<T>(const ASource: ISubscribable<T>): ISubscribable<Integer>;
+begin
+  Result := TCountObservable<T>.Create(ASource);
+end;
+
+function CatchError<T>(const ASource: ISubscribable<T>;
+  const AHandler: TErrorMapper<T>): ISubscribable<T>;
+begin
+  Result := TCatchObservable<T>.Create(ASource, AHandler);
+end;
+
+function Finalize<T>(const ASource: ISubscribable<T>; const AAction: TAction0): ISubscribable<T>;
+begin
+  Result := TFinalizeObservable<T>.Create(ASource, AAction);
+end;
+
+function Retry<T>(const ASource: ISubscribable<T>; const ACount: Integer): ISubscribable<T>;
+begin
+  Result := TRetryObservable<T>.Create(ASource, ACount);
+end;
+
+function CombineLatest<T, U, V>(const ALeft: ISubscribable<T>;
+  const ARight: ISubscribable<U>; const ACombine: TCombiner<T, U, V>): ISubscribable<V>;
+begin
+  Result := TCombineLatestObservable<T, U, V>.Create(ALeft, ARight, ACombine);
+end;
+
+function Race<T>(const ASources: TArray<ISubscribable<T>>): ISubscribable<T>;
+var
+  First: ISubscribable<T>;
+begin
+  { A synchronous approximation: the first source's values win, since a
+    synchronous source completes before the next is subscribed. A true race
+    needs the sources to overlap in time. }
+  if Length(ASources) = 0 then
+    Exit(Empty<T>);
+  First := ASources[0];
+  Result := First;
+end;
+
+function MapOp<T, U>(const AMapper: TMapper<T, U>): IMapOperator<T, U>;
+begin
+  Result := TMapOperator<T, U>.Create(AMapper);
+end;
+
+function ScanOp<T>(const ASeed: T; const AAccumulator: TAccumulator<T>): IOperator<T>;
+begin
+  Result := TScanOperator<T>.Create(ASeed, AAccumulator);
+end;
+
+function TapOp<T>(const AAction: TAction<T>): IOperator<T>;
+begin
+  Result := TTapOperator<T>.Create(AAction);
+end;
+
+function DistinctOp<T>(const AEquals: TEquality<T>): IOperator<T>;
+begin
+  Result := TDistinctAllOperator<T>.Create(AEquals);
+end;
+
+function IgnoreElementsOp<T>: IOperator<T>;
+begin
+  Result := TIgnoreOperator<T>.Create;
+end;
+
+function LastOp<T>: IOperator<T>;
+begin
+  Result := TLastOperator<T>.Create;
 end;
 
 end.

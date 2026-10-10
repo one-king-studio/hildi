@@ -92,10 +92,18 @@ a source over an array of operators (called once with the whole array).
 - [ ] **Deferred — needs a non-nesting container**: `Buffer`, `ToArray`,
       `Window`, `GroupBy`, and a true `MergeAll` over
       `ISubscribable<ISubscribable<T>>`.
-- [ ] **Deferred — no language obstacle**: the time-based operators
-      (`DebounceTime`, `ThrottleTime`, `SampleTime`, `AuditTime`, `Delay`,
-      `Timeout`, `Timer`, `Interval`) need the virtual clock wired in; the error
-      operators (`CatchError`, `Retry`, `Repeat`, `Finalize`).
+- [x] **Test + Implement**: utility — `Tap`, `IgnoreElements`, `StartWith`,
+      `EndWith`, `Distinct`, `Last`.
+- [x] **Test + Implement**: aggregation — `Count` (and `Reduce<T,A>` with a
+      separate accumulator).
+- [x] **Test + Implement**: error — `CatchError`, `Finalize`, `Retry`.
+- [x] **Test + Implement**: combine — `Zip`, `CombineLatest` (combiner form).
+- [x] **Test + Implement**: fan-in — `Merge`, `Concat`, `Race` (Race is a
+      synchronous approximation: the first source wins).
+- [ ] **Deferred — needs the virtual clock wired into the operator set**: the
+      time-based operators (`DebounceTime`, `ThrottleTime`, `SampleTime`,
+      `AuditTime`, `Delay`, `Timeout`, `Timer`, `Interval`). This is the natural
+      next increment; there is no language obstacle.
 
 ## Phase 7 — Flattening and combination
 
