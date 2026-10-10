@@ -7,7 +7,7 @@ program async_bench;
 
 uses
   {$ifdef unix}cthreads,{$endif}
-  SysUtils,
+  SysUtils, SyncObjs,
   async.base, async.scheduler, async.queue, async.future,
   async.observable, async.operators, async.timers, async.time,
   async.concurrency;
@@ -16,6 +16,9 @@ type
   TCounter = class
   public
     N: Int64;
+    Lock: TCriticalSection;
+    constructor Create;
+    destructor Destroy; override;
     procedure Bump;
   end;
 
@@ -25,9 +28,28 @@ type
     procedure Note(const AValue: Integer);
   end;
 
+constructor TCounter.Create;
+begin
+  inherited Create;
+  Lock := TCriticalSection.Create;
+end;
+
+destructor TCounter.Destroy;
+begin
+  Lock.Free;
+  inherited;
+end;
+
 procedure TCounter.Bump;
 begin
-  Inc(N);
+  { The executor runs Bump from several workers; guard the shared counter or it
+    loses increments (the "ran N" line would read low). }
+  Lock.Acquire;
+  try
+    Inc(N);
+  finally
+    Lock.Release;
+  end;
 end;
 
 procedure TSink.Note(const AValue: Integer);
@@ -171,19 +193,17 @@ var
   C: TCounter;
   I: Integer;
 begin
-  { NOTE: the timer queue takes the earliest due entry by a LINEAR SCAN on each
-    firing, so scheduling T timers is O(T^2). Keep T modest here; a heap would
-    make this O(T log T). }
+  { The timer queue is a binary min-heap, so scheduling T timers is O(T log T). }
   Sched := TVirtualScheduler.Create;
   C := TCounter.Create;
   try
     Start := MsNow;
-    for I := 1 to 10000 do
+    for I := 1 to 200000 do
       Sched.Schedule(C.Bump, 1);
     Sched.Advance(1);
     Elapsed := MsNow - Start;
-    WriteLn(Format('virtual clock schedule   : %8.1f ns/op (ran %d, O(T^2))',
-      [PerOp(10000), C.N]));
+    WriteLn(Format('virtual clock schedule   : %8.1f ns/op (ran %d, O(T log T))',
+      [PerOp(200000), C.N]));
   finally
     C.Free;
     Sched.Free;

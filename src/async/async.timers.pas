@@ -28,12 +28,24 @@ type
     Job: IAsyncJob;
   end;
 
-  { The shared ordered timer queue. Subclasses supply the clock. }
+  { The shared ordered timer queue. Subclasses supply the clock.
+
+    FTimers is a binary MIN-HEAP keyed on (Due, Seq): the earliest due entry is
+    at index 0. Push and pop are O(log T), so scheduling T timers is O(T log T),
+    not the O(T^2) a linear "find the earliest" scan would cost. }
   TBaseTimerScheduler = class(TInterfacedObject, IAsyncScheduler)
   private
     FLock: TCriticalSection;
     FTimers: TList<TTimerEntry>;
     FSeq: Int64;
+    { True when A is due earlier than B (ties broken by lower Seq, FIFO). }
+    function Earlier(const A, B: TTimerEntry): Boolean;
+    procedure SiftUp(AIndex: Integer);
+    procedure SiftDown(AIndex: Integer);
+    procedure HeapPush(const AEntry: TTimerEntry);
+    { Remove and hand back the root (the earliest due), or nil. Ownership
+      transfers to the caller. }
+    function HeapPop: TTimerEntry;
   protected
     { The current time in milliseconds. }
     function Clock: Int64; virtual; abstract;
@@ -100,6 +112,72 @@ begin
   inherited;
 end;
 
+function TBaseTimerScheduler.Earlier(const A, B: TTimerEntry): Boolean;
+begin
+  Result := (A.Due < B.Due) or ((A.Due = B.Due) and (A.Seq < B.Seq));
+end;
+
+procedure TBaseTimerScheduler.SiftUp(AIndex: Integer);
+var
+  Parent: Integer;
+  Tmp: TTimerEntry;
+begin
+  while AIndex > 0 do
+  begin
+    Parent := (AIndex - 1) div 2;
+    if not Earlier(FTimers[AIndex], FTimers[Parent]) then
+      Break;
+    Tmp := FTimers[AIndex];
+    FTimers[AIndex] := FTimers[Parent];
+    FTimers[Parent] := Tmp;
+    AIndex := Parent;
+  end;
+end;
+
+procedure TBaseTimerScheduler.SiftDown(AIndex: Integer);
+var
+  N, Left, Right, Smallest: Integer;
+  Tmp: TTimerEntry;
+begin
+  N := FTimers.Count;
+  while True do
+  begin
+    Left := 2 * AIndex + 1;
+    Right := 2 * AIndex + 2;
+    Smallest := AIndex;
+    if (Left < N) and Earlier(FTimers[Left], FTimers[Smallest]) then
+      Smallest := Left;
+    if (Right < N) and Earlier(FTimers[Right], FTimers[Smallest]) then
+      Smallest := Right;
+    if Smallest = AIndex then
+      Break;
+    Tmp := FTimers[AIndex];
+    FTimers[AIndex] := FTimers[Smallest];
+    FTimers[Smallest] := Tmp;
+    AIndex := Smallest;
+  end;
+end;
+
+procedure TBaseTimerScheduler.HeapPush(const AEntry: TTimerEntry);
+begin
+  FTimers.Add(AEntry);
+  SiftUp(FTimers.Count - 1);
+end;
+
+function TBaseTimerScheduler.HeapPop: TTimerEntry;
+var
+  Last: Integer;
+begin
+  if FTimers.Count = 0 then
+    Exit(nil);
+  Result := FTimers[0];
+  Last := FTimers.Count - 1;
+  FTimers[0] := FTimers[Last];
+  FTimers.Delete(Last);
+  if FTimers.Count > 0 then
+    SiftDown(0);
+end;
+
 function TBaseTimerScheduler.Schedule(const AWork: TNotify;
   const ADelayMs: Integer): ISubscription;
 var
@@ -114,7 +192,7 @@ begin
   Inc(FSeq);
   FLock.Acquire;
   try
-    FTimers.Add(Entry);
+    HeapPush(Entry);
   finally
     FLock.Release;
   end;
@@ -123,27 +201,13 @@ end;
 
 function TBaseTimerScheduler.TakeEarliestDue(
   const AUntil: Int64): TTimerEntry;
-var
-  I, Best: Integer;
 begin
   Result := nil;
-  Best := -1;
   FLock.Acquire;
   try
-    for I := 0 to FTimers.Count - 1 do
-    begin
-      if FTimers[I].Due > AUntil then
-        Continue;
-      if (Best < 0) or (FTimers[I].Due < FTimers[Best].Due) or
-         ((FTimers[I].Due = FTimers[Best].Due) and
-          (FTimers[I].Seq < FTimers[Best].Seq)) then
-        Best := I;
-    end;
-    if Best >= 0 then
-    begin
-      Result := FTimers[Best];
-      FTimers.Delete(Best);
-    end;
+    { The heap root is the earliest due; pop it only if it is due by AUntil. }
+    if (FTimers.Count > 0) and (FTimers[0].Due <= AUntil) then
+      Result := HeapPop;
   finally
     FLock.Release;
   end;
