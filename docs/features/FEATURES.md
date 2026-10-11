@@ -48,6 +48,9 @@ in `../guidelines/spec-driven-development.md`:
 | [Workspace Snapshots](Workspace_Snapshots/FEATURE.md) | Proposed | - | Per-turn workspace snapshots with a changed-files view and a diff view, plus undo/redo that walks the history and brings the files along with it. Self-contained on the vendored SQLite; no git dependency. Prior art: SynProject's `TVersions` (GPL-3, Windows-only — shape only). |
 | [Async Core](Async_Core/FEATURE.md) | Implemented | Async Core v1 | A standalone, dependency-free Object Pascal library for async and reactive programming: **futures** (one async value) and **observables** (a stream) over **one spine** — scheduler, continuation-scoped context, cancellation. No event loop; a synchronous driver, the GocciaScript model. Concurrency is a scheduler choice (`RunOn`, `SubscribeOn`/`ObserveOn` over a bounded executor); the UI never awaits. The surface is free functions composed RxJS-style (`Pipe(src, [FilterOp(p), TakeOp(3)])`): creation, transform, filter, fan-in, flatten (`MergeMap`/`ConcatMap`/`SwitchMap`/`ExhaustMap`/`Expand`), combine (`Zip`/`CombineLatest`/`WithLatestFrom`), utility, aggregate, error, multicasting, and the full time set on the virtual clock. `TBoundedQueue` backs the real TUI's turn queue. FPC 3.3.1's incomplete generics cap the surface (see `FPC_Generics_Notes.md`); the container-returning family (`Buffer`/`Window`/`GroupBy`/`MergeAll`/`ForkJoin`) is the genuinely blocked set, tracked by `test_async_parity`. All ten phases done (`Async_Core_v1.DONE.md`); 1186 tests, leak-clean. No harness or engine dependency, so it is extractable. |
 | [TUI Event Graph (RxPascal)](TUI_Event_Graph/FEATURE.md) | In Progress | TUI Event Graph v1 | The TUI is one drain on one thread — correct — but it drained **unbounded**, so a streaming `run_command` kept the UI inside `DrainQueue` and froze it. **v1 is implemented**: the drain is bounded per frame (256 events), the turn queue is a bounded `TBoundedQueue<TTurnEvent>` with O(1) push (control events are never dropped — a streamed event yields instead), the streamed tool output is coalesced per frame, and the live tool block is capped at 64 KiB. The direction is the whole TUI as an event graph on Async Core ("RxPascal"): sources are streams, state is a `Scan`, rendering is a frame-paced subscription — with a two-lane split (commands lossless, signals coalescible). |
+| [Dynamic Tools](Dynamic_Tools/FEATURE.md) | Implemented | Tool Boundary v1, MCP Lifecycle v1 | A running session's MCP tool surface is dynamic: reconcile from the store at each turn boundary, with enable/disable/remove and reconnect (bounded backoff) for dropped servers. Adds `TAgentLoop.OnTurnStart`, `TToolRegistry.Remove`, and a per-server MCP lifecycle manager. Trust unchanged (every call stays approval-gated). |
+| [Turn Injection](Turn_Injection/FEATURE.md) | Implemented | Turn Assembly v1, MCP Provider v1 | Assemble the loop's tools **and prompt** fresh each turn from registered contributors, so tools can load dynamically and skills can inject prompt + tools. Adds the `IToolProvider` seam (`Prepare`/`Specs`/`PromptFragment`/`Find`); MCP is one contributor. Prompt fragments are request-only (never persisted). |
+| [Runtime Lifecycle](Runtime_Lifecycle/FEATURE.md) | Implemented | Runtime Shutdown v1 | The session runtime stops promptly and gracefully: an in-band `scShutdown` command, SIGTERM/SIGINT handling, and an exit-when-no-clients policy with a short grace. |
 
 ## Parked (ideated, awaiting a need)
 
@@ -70,27 +73,6 @@ in `../guidelines/spec-driven-development.md`:
   the shared OAuth pipeline (Remote Agent Link specifies device pairing +
   bearer token, not OAuth). v1 is independent of that and of TLS. Full FEATURE
   doc and v1 SPECs in the directory.
-
-- **Dynamic Tools** (`Dynamic_Tools/FEATURE.md`) — make a *running* session's MCP
-  tool surface dynamic: reconcile from the store at each turn boundary, with
-  enable/disable/remove and **reconnect** (bounded backoff) for dropped servers
-  — the remote-MCP requirement. Adds a generic `TAgentLoop.OnTurnStart` boundary
-  hook, `TToolRegistry.Remove`, and turns `TMcpManager` into a per-server
-  lifecycle manager. Trust is unchanged (every call stays approval-gated).
-  Spec'd (v1); not yet implemented.
-
-- **Turn Injection** (`Turn_Injection/FEATURE.md`) — assemble the loop's tools
-  **and prompt** fresh each turn from registered *contributors*, so tools can be
-  loaded dynamically and **skills** can inject prompt + tools. Adds an
-  `IToolProvider` seam; MCP becomes one contributor (retiring the MCP-specific
-  session wiring). Prompt fragments are request-only (never persisted); trust is
-  unchanged. Spec'd (v1); not yet implemented.
-
-- **Runtime Lifecycle** (`Runtime_Lifecycle/FEATURE.md`) — let the session  runtime (which owns the agent loop and its tools) stop **promptly and
-  gracefully**: an in-band `scShutdown` command, SIGTERM/SIGINT handling, and an
-  exit-when-no-clients policy with a short grace (down from the 5-minute idle
-  timeout). Makes upgrading/restarting a long-lived agent painless. Spec'd (v1);
-  not yet implemented.
 
 - **Turn Lifecycle** (`Turn_Lifecycle/FEATURE.md`) — guarantee a turn always
   reaches a terminal state: reconcile orphaned `tsRunning` turns on runtime

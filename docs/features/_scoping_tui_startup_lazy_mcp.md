@@ -129,12 +129,11 @@ primitive; then take the chain. It also means a slow MCP start is already
   to DONE and FEATURES still says "not yet implemented" — same stale-doc pattern
   I fixed for TUI Widgets/Harness UI).
 
-## Footnote: stale docs found during this pass
+## Footnote: stale docs found during this pass (resolved)
 
-`Dynamic_Tools` and `Turn_Injection` have **all tasks ticked** and their code is
-present, yet:
-- their `TODO.md` files are **not** renamed to `DONE.md`, and
-- `FEATURES.md` still says **"not yet implemented"** for both.
-
-That contradicts the source. Worth a doc-reconciliation commit (like `a773332`)
-before their dependents (Skills, Lazy MCP) cite them as done.
+`Dynamic_Tools`, `Turn_Injection`, and `Runtime_Lifecycle` had **all tasks
+ticked** and their code present, yet their `TODO.md` files were not renamed to
+`DONE.md` and `FEATURES.md` still said **"not yet implemented"** (or listed them
+as Parked). Reconciled: all three now appear in the main table as
+**Implemented**, and the two remaining `TODO.md` files were renamed to `DONE.md`.
+Their dependents (Skills, Lazy MCP) may now cite them as done.
