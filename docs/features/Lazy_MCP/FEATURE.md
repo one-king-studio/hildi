@@ -63,7 +63,7 @@ runtime is still alive, slow (or failing) after it idle-exits.
 ```text
 startup   TSessionRuntime.Open does not connect MCP; Serve binds and greets first
 manifest  one skill entry per configured connection: name + description + whenToUse
-load      load_skill("mcp/<name>") -> connect -> tools/list -> register (namespaced)
+load      load_skill("mcp_<name>") -> connect -> tools/list -> register (namespaced)
 lifetime  kept alive by use; unloaded after an idle TTL; the state is in the manifest
 errors    connection_failed / not_connected / ... returned to the model, not thrown
 ```
@@ -151,7 +151,8 @@ errors    connection_failed / not_connected / ... returned to the model, not thr
   readiness means "the protocol is up", not "optional subsystems finished".
 - The MCP manager's reconcile/backoff behaviour is retained; only *when* a
   connection is opened changes.
-- Tool names are namespaced (`mcp/<server>/<tool>`); the namespace is part of the
+- Tool names are namespaced (`mcp_<server>_<tool>`); the approval ref is
+  `mcp:<server>:<tool>` (colon-separated like every other family). The namespace is part of the
   approval `ref`, so it must stay stable.
 - The manifest is a stable system fragment (`PromptFragment`), never persisted.
 
@@ -217,8 +218,11 @@ errors    connection_failed / not_connected / ... returned to the model, not thr
 2. **Where does `whenToUse` come from** — a curated template by known service
    name, the operator, or both? (The main project curates by name and lets the
    user override.)
-3. **Namespace vs `Dynamic_Tools`.** That feature uses `mcp/<server>/<tool>`; we
-   chose `mcp_<id>_<tool>`. Reconcile the two before either is specced.
+3. **Namespace vs `Dynamic_Tools` — resolved.** Both now agree: the tool name is
+   `mcp_<server>_<tool>`, and the approval ref is `mcp:<server>:<tool>`
+   (colon-separated, matching `run_command:<bin>` / `file:read` / `subagent:<verb>`).
+   `McpRef` was aligned from the older `mcp/<server>/<tool>` to the colon form;
+   nothing parses refs and MCP grants never persist, so there is no migration.
 4. **Does the operator get an explicit load** (a CLI flag / TUI command) in v1, or
    is model-initiated load enough?
 

@@ -23,7 +23,7 @@ type
   TMcpTool = record
     ServerName: string;
     ToolName: string;          // the server's original tool name
-    Ref: string;               // 'mcp/<server>/<tool>'
+    Ref: string;               // 'mcp:<server>:<tool>'
     Name: string;              // provider-safe name (see McpToolName)
     Description: string;
     ParametersJson: string;    // mapped inputSchema (server 'reason' stripped)
@@ -253,7 +253,10 @@ end;
 
 function McpRef(const AServer, ATool: string): string;
 begin
-  Result := 'mcp/' + McpSanitize(AServer) + '/' + McpSanitize(ATool);
+  { Colon-separated, like every other approval family (run_command:<bin>,
+    file:read, subagent:<verb>). Components are sanitized, so neither can
+    contain a colon and the ref is unambiguous. }
+  Result := 'mcp:' + McpSanitize(AServer) + ':' + McpSanitize(ATool);
 end;
 
 function McpToolName(const AServer, ATool: string): string;

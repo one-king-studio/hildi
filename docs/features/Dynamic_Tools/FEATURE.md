@@ -41,7 +41,7 @@ remove / reconnect with backoff).
 - Support **reconnect** of a dropped server with bounded exponential backoff,
   re-listing its tools (a recovered server may advertise a different set).
 - Keep the trust model unchanged: config is operator-only; every call is
-  approval-gated by `mcp/<server>/<tool>` ref.
+  approval-gated by `mcp:<server>:<tool>` ref.
 - Be leak-clean and race-free against the loop's per-request tool snapshot.
 
 ## User Stories

@@ -138,9 +138,9 @@ end;
 
 procedure TMcpClientTest.TestMcpRefIsStable;
 begin
-  AssertEquals('ref', 'mcp/github/create_issue',
+  AssertEquals('ref', 'mcp:github:create_issue',
     McpRef('GitHub', 'Create_Issue'));
-  AssertEquals('slash sanitized', 'mcp/a_b/c_d', McpRef('a/b', 'c/d'));
+  AssertEquals('separators sanitized', 'mcp:a_b:c_d', McpRef('a/b', 'c/d'));
 end;
 
 procedure TMcpClientTest.TestMcpToolNameIsProviderSafe;
