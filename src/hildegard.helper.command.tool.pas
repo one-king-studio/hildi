@@ -495,6 +495,11 @@ begin
         the live block without end. }
       Stream := TCappedObserver.Create(AObserver, FConfig.MaxOutputBytes);
       try
+        { Print the command first, before its output, so the operator sees what
+          is about to run - especially for a long-running command. Emitted to the
+          observer directly so it is never dropped by the output cap. }
+        if AObserver <> nil then
+          AObserver.Next('$ ' + Command + LineEnding + LineEnding);
         if not FExecutor.Execute(FConfig.Shell, Command, EffectiveCwd,
           TimeoutMs, Stream, Execution) then
         begin

@@ -602,7 +602,10 @@ begin
     finally
       Observer.Free;
     end;
-    AssertEquals('streamed chunks', 'one two ', Log.Text);
+    { The command is streamed first, so the operator sees what is about to run
+      (especially for a long-running command), then its output. }
+    AssertEquals('streamed chunks',
+      '$ echo hi' + LineEnding + LineEnding + 'one two ', Log.Text);
   finally
     Log.Free;
   end;
