@@ -85,7 +85,13 @@ function DefaultShellProfile: TShellProfile;
 
 const
   CommandToolName = 'run_command';
-  ProfileDefaultTimeoutMs = 30000;
+  { The default command timeout when the model does not ask for one: 5 minutes,
+    long enough for real builds and installs. The model may raise it via
+    timeout_ms, up to the absolute ceiling. }
+  ProfileDefaultTimeoutMs = 300000;
+  { The absolute ceiling. A timeout_ms above it is clamped; the attempted bypass
+    is a nudge for the loop (docs/features/Tool_Limits), never a failure. }
+  AbsoluteTimeoutMs = 3600000;
   DefaultMaxOutputBytes = 32768;
 
 implementation
@@ -460,6 +466,11 @@ begin
         MaxTimeoutMs (0 = none). }
       if (FConfig.MaxTimeoutMs > 0) and (TimeoutMs > FConfig.MaxTimeoutMs) then
         TimeoutMs := FConfig.MaxTimeoutMs;
+      { The absolute ceiling: clamp, never fail. The advisory for an attempted
+        bypass belongs to the loop (docs/features/Tool_Limits) and is not
+        persisted here. }
+      if TimeoutMs > AbsoluteTimeoutMs then
+        TimeoutMs := AbsoluteTimeoutMs;
 
       Plan := ParseCommand(Command, FConfig.Shell.Syntax);
       if (Plan.ParseError <> '') or (Length(Plan.Segments) = 0) then
