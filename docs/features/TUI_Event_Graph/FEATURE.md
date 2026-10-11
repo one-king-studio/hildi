@@ -63,13 +63,26 @@ pops with.
 
 ## v1 — the fix
 
-- [ ] **Bound the drain**: `DrainQueue` processes at most `N` events or `M` ms,
-      then returns so the loop can render and poll input.
-- [ ] **Coalesce signals** in the runtime: batch `teToolOutput` (and deltas) into
-      one event per interval/frame.
-- [ ] **Bound retention**: cap the live tool block and the queue (truncate, keep
-      the tail).
-- [ ] **Fix `TTurnQueue.Push`** growth (amortized or a ring buffer).
+**Implemented.** All four landed in the harness (commits `da1f42b`, `4993577`,
+`32ee607`, `d4381cc`); the checklist is kept for the record.
+
+- [x] **Bound the drain**: `THarnessApp.DrainQueue` processes at most
+      `DrainBudget` (256) events per frame, then returns so the loop can render
+      and poll input (`harness.app.pas`). A dropped-output warning is surfaced
+      once when the bound is first hit. (Count-bounded; a wall-clock bound was
+      not needed — 256 events is well under a frame.)
+- [x] **Coalesce signals**: streamed `teToolOutput` is buffered in the app and
+      appended to the live block once per frame (`THarnessApp.FlushToolOutput`),
+      so a chatty command costs one layout, not one per chunk.
+- [x] **Bound retention**: the live tool block keeps only its tail
+      (`MaxLiveChars` = 65536, older text trimmed with a marker), and the queue is
+      bounded (`TTurnQueue` over `TBoundedQueue`, capacity 4096).
+- [x] **Fix `TTurnQueue.Push` growth**: the queue is a fixed-capacity ring
+      (`TBoundedQueue`, O(1) push, no grow-by-one), and a control event is never
+      dropped — it evicts the oldest streamed event to make room.
+
+**Still ahead (v2/v3, see *Phasing*):** state as a stream (`Scan` + frame-paced
+render), then the graph itself on Async Core.
 
 ## The conversion table
 
