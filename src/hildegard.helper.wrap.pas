@@ -54,6 +54,11 @@ function FormatUserMessage(const AContent: string; ATimestampMs: Int64;
   const AContext: string = ''; AUsageTokens: Integer = 0;
   ALimitTokens: Integer = 0): string;
 
+{ A loop-only advisory that rides a tool response: a soft-limit nudge, not a
+  failure. The stored tool record stays plain - this is prepended on the way out
+  and never persisted. }
+function FormatAdvisory(const AText: string): string;
+
 implementation
 
 uses
@@ -96,6 +101,13 @@ begin
     '<instructions>' + UserInstructions + '</instructions>' + LineEnding +
     '<message>' + EscapeXmlContent(AContent) + '</message>' + LineEnding +
     '<guard>' + UserGuard + '</guard>';
+end;
+
+function FormatAdvisory(const AText: string): string;
+begin
+  Result := '<context>' + LineEnding +
+    '  <advisory>' + EscapeXmlContent(AText) + '</advisory>' + LineEnding +
+    '</context>' + LineEnding;
 end;
 
 end.

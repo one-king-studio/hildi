@@ -251,6 +251,9 @@ type
     { The last request's prompt tokens, so the user-message wrapper can show the
       model its context headroom. Zero until the first request returns. }
     FLastPromptTokens: Integer;
+    { A loop-only advisory to ride the next tool response (a soft-limit nudge).
+      Never persisted. }
+    FPendingAdvisory: string;
     FCancel: TAgentCancelCheck;
     FOnTurnStart: TAgentBoundaryEvent;
     FProviders: array of IToolProvider;
@@ -924,6 +927,19 @@ begin
           FLastPromptTokens, FConfig.MaxContextTokens);
       Break;
     end;
+  { A soft-limit nudge rides the last tool response's <context> - loop-only, not
+    persisted - so the model sees it with the result, not instead of it. }
+  if FPendingAdvisory <> '' then
+  begin
+    for I := High(Result.Messages) downto 0 do
+      if Result.Messages[I].Role = crTool then
+      begin
+        Result.Messages[I].Content :=
+          FormatAdvisory(FPendingAdvisory) + Result.Messages[I].Content;
+        Break;
+      end;
+    FPendingAdvisory := '';
+  end;
   if AContinuing then
   begin
     { The pending fragment and the instruction are request-only: neither is
@@ -1081,9 +1097,8 @@ end;
 function ToolSoftNotice(ARound, AHard: Integer): string;
 begin
   Result := Format('tool call limit notice: %d tool calls have been made this ' +
-    'turn (hard limit %d). You may continue, but reconsider whether the call ' +
-    'is still needed; if it is, resubmit the tool request now.',
-    [ARound, AHard]);
+    'turn (hard limit %d). You may continue; keep going only if the calls are ' +
+    'still needed.', [ARound, AHard]);
 end;
 
 function ToolHardNotice(ARound: Integer): string;
@@ -1461,15 +1476,19 @@ begin
     if Rounds = FConfig.HardToolLimit then
       InterceptToolCalls(ChatResult.Message.ToolCalls,
         ToolHardNotice(Rounds), AEvents)
-    else if (Rounds >= FConfig.SoftToolLimit) and
-      ((Rounds - FConfig.SoftToolLimit) mod FConfig.ToolNoticeStep = 0) then
-      InterceptToolCalls(ChatResult.Message.ToolCalls,
-        ToolSoftNotice(Rounds, FConfig.HardToolLimit), AEvents)
     else if TruncatedRound then
       InterceptToolCalls(ChatResult.Message.ToolCalls,
         TruncatedToolNotice, AEvents)
     else
+    begin
+      { A soft-limit nudge is an advisory, not a failure: run the calls and let
+        the nudge ride the response's <context>. Only the hard limit intercepts
+        (and it is the absolute ceiling - the one limit that blocks). }
+      if (Rounds >= FConfig.SoftToolLimit) and
+        ((Rounds - FConfig.SoftToolLimit) mod FConfig.ToolNoticeStep = 0) then
+        FPendingAdvisory := ToolSoftNotice(Rounds, FConfig.HardToolLimit);
       ExecuteToolCalls(ChatResult.Message.ToolCalls, AEvents, AllOk);
+    end;
     Continue;
   end;
 end;

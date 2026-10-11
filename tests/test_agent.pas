@@ -182,7 +182,7 @@ type
     procedure TestFailingHandlerReturnsErrorResultAndContinues;
     procedure TestRaisingHandlerIsCaughtAndReported;
     procedure TestToolCallLoopAbortsAtTheHardLimit;
-    procedure TestSoftLimitInterceptsTheCall;
+    procedure TestSoftLimitRunsAndNudges;
     procedure TestHardLimitLocksDownTheCall;
     procedure TestContextLimitAborts;
     procedure TestLengthFinishReasonReported;
@@ -878,21 +878,24 @@ begin
   AssertTrue('mentions the loop', Pos('tool call loop', Err.Message) > 0);
 end;
 
-procedure TAgentLoopTest.TestSoftLimitInterceptsTheCall;
+procedure TAgentLoopTest.TestSoftLimitRunsAndNudges;
 var
   Rec: TRecordingStore;
   Answer: string;
   Err: TLLMError;
 begin
-  { Soft 1, step 1: the very first call is intercepted and must be resubmitted. }
+  { Soft 1, step 1: the call RUNS - a soft limit is an advisory, not a failure. }
   Rec := BuildLoopBudget(1, 100, 1, 0);
   FFake.AddResponse([ToolNameFrame(0, 'call_1', 'get_system_time'),
     ToolArgsFrame(0, '{"reason":"test"}'), FinishFrame('tool_calls'), DoneFrame]);
   FFake.AddResponse([TextDelta('ok'), FinishFrame('stop'), DoneFrame]);
   AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
-  AssertFalse('the call was not run', Rec.LastTool.ToolOk);
-  AssertTrue('a soft notice was returned',
-    Pos('tool call limit notice', Rec.LastTool.Content) > 0);
+  AssertTrue('the call was run', Rec.LastTool.ToolOk);
+  { The nudge rode the next request's tool response, loop-only (never stored). }
+  AssertTrue('a soft notice was delivered as an advisory',
+    Pos('<advisory>', FFake.LastBody) > 0);
+  AssertTrue('the advisory names the limit',
+    Pos('tool call limit notice', FFake.LastBody) > 0);
 end;
 
 procedure TAgentLoopTest.TestHardLimitLocksDownTheCall;

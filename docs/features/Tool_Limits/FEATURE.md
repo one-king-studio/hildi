@@ -65,10 +65,11 @@ Three tiers, by what happens to the call and what is persisted:
 
 ## Open Questions
 
-- **The nudge channel.** Advisories must reach the model without a persisted
-  message. Candidates: a loop-only notice prepended to the *request* (never the
-  store), or the `<context>` block of the tool response (see the parked
-  `Tool_Response_Wrapping`). Decide in the SPEC — this is the one real unknown.
+- **The nudge channel — decided: the tool response's `<context>`.** Advisories
+  reach the model as a loop-only `<context>` block prepended to the tool response
+  on the way out (never persisted) — the same invariant as the user wrapper. The
+  soft tool-call limit now **runs** its calls and nudges, instead of intercepting
+  them; only the hard limit (the absolute ceiling) intercepts.
 - **The absolute ceiling value.** Not yet chosen; a named constant so it is one
   edit.
 - **Which limits are advisory.** Enumerate them (output cap, result count,
