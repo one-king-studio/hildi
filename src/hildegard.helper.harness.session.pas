@@ -14,7 +14,8 @@ interface
 uses
   Classes, Contnrs, SysUtils,
   async.base, async.scheduler, async.concurrency,
-  hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.approval,
+  hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.skills,
+  hildegard.helper.approval,
   hildegard.helper.approval.store, hildegard.helper.command.tool,
   hildegard.helper.files,
   hildegard.helper.session, hildegard.helper.session.store,
@@ -40,6 +41,12 @@ type
     FMcp: TMcpManager;
     FMcpProvider: IToolProvider;
     FMcpTokenProviders: TObjectList;
+    { The skill registry: the capability layer (manifest + load_skill + decay).
+      Empty by default; Lazy_MCP fills it with one skill per MCP server. Held as
+      the interface it is handed to the loop as (the owning ref), so it is freed
+      by refcount, never by a raw Free. }
+    FSkills: TSkillRegistry;
+    FSkillsKeep: IToolProvider;
     FLoop: TAgentLoop;
     FQueue: TTurnQueue;
     FGate: TApprovalGate;
@@ -70,6 +77,8 @@ type
     property Gate: TApprovalGate read FGate;
     { The shared executor the turn worker runs on. }
     property TurnPool: IAsyncScheduler read FTurnPool;
+    { The capability layer: skills load on demand; empty unless Lazy_MCP fills it. }
+    property Skills: TSkillRegistry read FSkills;
     { The session's approval service, so the runtime can hand it to the
       delegation tools. }
     property ApprovalService: IApprovalService read FApprovalService;
@@ -109,6 +118,10 @@ begin
   FMcp := nil;
   FMcpTokenProviders.Free;
   FMcpTokenProviders := nil;
+  { The registry is freed by refcount: the loop's ref is gone (FLoop.Free above);
+    drop our owning ref last. Never Free it directly (double-free). }
+  FSkills := nil;
+  FSkillsKeep := nil;
   FCommandTool.Free;
   FCommandTool := nil;
   FFileTool.Free;
@@ -314,6 +327,11 @@ begin
   AgentConfig.MaxContextTokens := FView.MaxContextTokens;
 
   FLoop := TAgentLoop.Create(FClient, FConversation, FTools, AgentConfig);
+  { The skill registry is the capability layer; register it before any provider
+    so its load_skill is always offered. Empty by default (Lazy_MCP fills it). }
+  FSkills := TSkillRegistry.Create;
+  FSkillsKeep := FSkills;   // owning interface ref
+  FLoop.AddProvider(FSkillsKeep);
   { Register the MCP provider: at each turn boundary it reconciles from the
     store and contributes its live tools, so a server added/changed/removed
     between turns is picked up without a restart. }
