@@ -21,7 +21,6 @@ type
     function UserMsg(const AText: string): TChatMessage;
     function AssistantMsg(const AText: string): TChatMessage;
     function ToolMsg(const AId, AText: string): TChatMessage;
-    procedure AssertUserWraps(const AExpected, AContent: string);
   protected
     procedure SetUp; override;
     procedure TearDown; override;
@@ -232,14 +231,6 @@ begin
   end;
 end;
 
-procedure TSessionTest.AssertUserWraps(const AExpected, AContent: string);
-begin
-  { User messages are delivered wrapped (docs/features/User_Message_Wrapping):
-    the text lives inside <message>...</message>. }
-  AssertTrue('user message wraps ' + AExpected,
-    Pos('<message>' + AExpected + '</message>', AContent) > 0);
-end;
-
 procedure TSessionTest.TestRestoreSkipsReasoningAndErrors;
 var
   S: TSqliteStore;
@@ -260,8 +251,8 @@ begin
     Conv.Append(UserMsg('again'));
     Msgs := Conv.Messages;
     AssertEquals('two messages', 2, Length(Msgs));
-    AssertUserWraps('hello', Msgs[0].Content);
-    AssertUserWraps('again', Msgs[1].Content);
+    AssertEquals('first', 'hello', Msgs[0].Content);
+    AssertEquals('second', 'again', Msgs[1].Content);
   finally
     S.Free;
   end;
@@ -291,7 +282,7 @@ begin
     Conv := TSqliteConversationStore.Create(S, SessionId);
     Msgs := Conv.Messages;
     AssertEquals('restored', 3, Length(Msgs));
-    AssertUserWraps('hello', Msgs[0].Content);
+    AssertEquals('content', 'hello', Msgs[0].Content);
     AssertEquals('tool calls restored', 2, Length(Msgs[1].ToolCalls));
     AssertEquals('tool', 'time', Msgs[2].Content);
   finally
@@ -325,8 +316,8 @@ begin
     Msgs := Conv.Messages;
     AssertEquals('system + last five', 6, Length(Msgs));
     AssertEquals('system kept', Ord(crSystem), Ord(Msgs[0].Role));
-    AssertUserWraps('m2', Msgs[1].Content);
-    AssertUserWraps('m6', Msgs[5].Content);
+    AssertEquals('first kept is m2', 'm2', Msgs[1].Content);
+    AssertEquals('last is m6', 'm6', Msgs[5].Content);
   finally
     S.Free;
   end;
@@ -356,7 +347,7 @@ begin
       the orphan tool is dropped. }
     Msgs := Conv.Messages;
     AssertEquals('one message', 1, Length(Msgs));
-    AssertUserWraps('x', Msgs[0].Content);
+    AssertEquals('user x', 'x', Msgs[0].Content);
   finally
     S.Free;
   end;

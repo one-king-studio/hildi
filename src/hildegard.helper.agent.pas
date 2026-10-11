@@ -10,7 +10,7 @@ interface
 
 uses
   Classes, SysUtils, SyncObjs, hildegard.helper.llm, hildegard.helper.session,
-  hildegard.helper.ambient;
+  hildegard.helper.ambient, hildegard.helper.wrap;
 
 type
   { The outcome of one LLM request, for the audit/metrics seam. }
@@ -248,6 +248,9 @@ type
     FStore: IConversationStore;
     FTools: TToolRegistry;
     FConfig: TAgentConfig;
+    { The last request's prompt tokens, so the user-message wrapper can show the
+      model its context headroom. Zero until the first request returns. }
+    FLastPromptTokens: Integer;
     FCancel: TAgentCancelCheck;
     FOnTurnStart: TAgentBoundaryEvent;
     FProviders: array of IToolProvider;
@@ -885,12 +888,16 @@ var
   I, K: Integer;
   Specs: TToolSpecArray;
   Fragment: string;
+  Context: string;
 begin
   Result := Default(TChatRequest);
   Result.Messages := FStore.Messages;
-  { Request-only system fragments from providers, injected after any leading
-    system message(s) and before the first non-system message. Never persisted. }
-  K := 0;
+  { Dynamic context from the providers (the skills manifest, ...) and the
+    prompt-injection guard ride the current user turn. Built here, on the way
+    out, and never persisted - nothing but the loop knows the wrapper exists.
+    Injecting the manifest as a standalone system message made it read as a
+    message with no user message mid-turn. }
+  Context := '';
   for I := 0 to High(FProviders) do
   begin
     try
@@ -901,20 +908,22 @@ begin
     end;
     if Fragment = '' then
       Continue;
-    Msg := Default(TChatMessage);
-    Msg.Role := crSystem;
-    Msg.Content := Fragment;
-    N := Length(Result.Messages);
-    SetLength(Result.Messages, N + 1);
-    { Shift from K to make room, keeping system messages first. }
-    for K := N downto 1 do
-      if Result.Messages[K - 1].Role = crSystem then
-        Result.Messages[K] := Result.Messages[K - 1]
-      else
-        Break;
-    Result.Messages[K] := Msg;
-    K := K + 1;
+    if Context <> '' then
+      Context := Context + LineEnding;
+    Context := Context + Fragment;
   end;
+  { Wrap the current user turn: the last user message. Ambient notifications are
+    delivered as user messages but are already wrapped by FormatAmbient - wrapping
+    them again would escape their tags - so only the user's own turn is wrapped. }
+  for I := High(Result.Messages) downto 0 do
+    if Result.Messages[I].Role = crUser then
+    begin
+      if Pos('<ambient', Result.Messages[I].Content) <> 1 then
+        Result.Messages[I].Content := FormatUserMessage(
+          Result.Messages[I].Content, NowUtcMs, Context,
+          FLastPromptTokens, FConfig.MaxContextTokens);
+      Break;
+    end;
   if AContinuing then
   begin
     { The pending fragment and the instruction are request-only: neither is
@@ -1344,6 +1353,7 @@ begin
       Outcome.FinishReason := ChatResult.FinishReason;
       Outcome.RawFinishReason := ChatResult.RawFinishReason;
       Outcome.Usage := ChatResult.Usage;
+      FLastPromptTokens := ChatResult.Usage.PromptTokens;
       Outcome.FirstTokenMs := ChatResult.FirstTokenMs;
       Outcome.DurationMs := Int64(GetTickCount64 - StartMs);
       FStore.FinishRequest(RequestId, Outcome);

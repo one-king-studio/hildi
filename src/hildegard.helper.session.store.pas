@@ -310,12 +310,9 @@ begin
         end;
       mrUser:
         begin
-          { The user's text is wrapped so dynamic context (skills, time) cannot
-            be mistaken for it; the persisted record stays plain. }
           Msg := Default(TChatMessage);
           Msg.Role := crUser;
-          Msg.Content := FormatUserMessage(Tail[I].Content,
-            Tail[I].CreatedAtMs);
+          Msg.Content := Tail[I].Content;
           AddMessage(Result, Msg);
         end;
       mrAmbient:

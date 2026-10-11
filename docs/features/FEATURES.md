@@ -54,6 +54,16 @@ in `../guidelines/spec-driven-development.md`:
 
 ## Parked (ideated, awaiting a need)
 
+- **Tool Response Wrapping** (`Tool_Response_Wrapping/FEATURE.md`) — wrap every
+  in-turn tool response (`<result>` + `<context>` + `<ambient>` advisories).
+  Parked: tool results are already typed by the role, and the manifest belongs in
+  the system prompt plus the `load_skill` result, not a per-request fragment. The
+  invariant (payload in its own element, context as a sibling) is kept in
+  `User_Message_Wrapping`; revisit the tool side only if dynamic context
+  proliferates. The two behaviours it was meant to enable — the manifest no
+  longer re-injected per request, and tool limits non-blocking — are implemented
+  directly.
+
 - **Reasoning Doom Loop Detection** (`Doom_Loop_Detection/FEATURE.md`) — a
   signal-only detector over the reasoning stream: deflate-style backwards
   match pass of the tail against recent history, keeping the *parse*
