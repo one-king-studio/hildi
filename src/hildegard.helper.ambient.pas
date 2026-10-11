@@ -92,7 +92,8 @@ function IsoUtc(AMs: Int64): string;
 var
   D: TDateTime;
 begin
-  D := UnixToDateTime(AMs div 1000, False);
+  { True = UTC: the timestamp claims a 'Z' suffix, so it must be UTC. }
+  D := UnixToDateTime(AMs div 1000, True);
   Result := FormatDateTime('yyyy-mm-dd"T"hh:nn:ss"Z"', D);
 end;
 

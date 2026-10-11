@@ -11,7 +11,8 @@ interface
 uses
   SysUtils, hildegard.helper.agent, hildegard.helper.llm,
   hildegard.helper.store, hildegard.helper.session,
-  hildegard.helper.recall.tool, hildegard.helper.ambient;
+  hildegard.helper.recall.tool, hildegard.helper.ambient,
+  hildegard.helper.wrap;
 
 type
   TSqliteConversationStore = class(TInterfacedObject, IConversationStore)
@@ -309,9 +310,12 @@ begin
         end;
       mrUser:
         begin
+          { The user's text is wrapped so dynamic context (skills, time) cannot
+            be mistaken for it; the persisted record stays plain. }
           Msg := Default(TChatMessage);
           Msg.Role := crUser;
-          Msg.Content := Tail[I].Content;
+          Msg.Content := FormatUserMessage(Tail[I].Content,
+            Tail[I].CreatedAtMs);
           AddMessage(Result, Msg);
         end;
       mrAmbient:
