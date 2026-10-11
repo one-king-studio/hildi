@@ -9,9 +9,11 @@ even though the prompt sent to the model is small.
 ## Summary
 
 A checkpoint trims the **context window** (what goes to the model), but it does
-**not** trim the process's **retained memory**. Three places still hold the whole
-session history, so a long session resumed from a checkpoint still pays for
-everything before it.
+**not** trim the process's **retained memory**. Two places still walk the whole
+session history on the hot path — `Compose` re-reads all rows per request, and
+the in-memory store never filters — so a long session resumed from a checkpoint
+still pays for everything before it. (A third, the runtime replay log, turns out
+to be per-turn bounded; only its append shape is worth fixing.)
 
 ## What the checkpoint does trim (correct)
 
@@ -24,25 +26,7 @@ holds no history of its own — `BuildRequest` reads `FStore.Messages`
 
 ## What is *not* trimmed
 
-### 1. The runtime replay log — the likely culprit
-
-```pascal
-FReplay: array of TSessionEvent;          // session.runtime.pas:91
-...
-SetLength(FReplay, Length(FReplay) + 1);  // :438
-FReplay[High(FReplay)] := AEvent;
-```
-
-Every event of the session is retained for the life of the session, for
-back-pagination (`ReplayTo`, `:554`). It is **never pruned**, not even at a
-checkpoint. Two costs:
-
-- **Unbounded retention** — every assistant/reasoning delta, tool chunk and
-  status event stays in RAM.
-- **O(n²) growth** — `SetLength(n+1)` reallocates per event (the same
-  grow-by-one shape fixed in `TTurnQueue`).
-
-### 2. `Compose` loads the entire history before filtering
+### 1. `Compose` loads the entire history before filtering — the likely culprit
 
 ```pascal
 if not FStore.QueryMessages(FSessionId, Msgs, Err) then   // :250 — ALL rows
@@ -52,7 +36,30 @@ if (Boundary > 0) and (Msgs[I].Seq <= Boundary) then ...  // :280 — then filte
 
 Each `Messages` call (i.e. each request) materialises the **full** session
 history into a temporary `TChatMessageArray` before discarding the archived
-part. Transient, but O(history) per request.
+part. Transient, but O(history) per request — and `Messages` is called on
+*every* request (`BuildRequest` → `FStore.Messages`), so a long resumed session
+re-reads and re-allocates everything it no longer needs, on every turn.
+
+### 2. The runtime replay log — per-turn bounded, but grows by one
+
+```pascal
+FReplay: array of TSessionEvent;          // session.runtime.pas:91
+...
+SetLength(FReplay, Length(FReplay) + 1);  // :438
+FReplay[High(FReplay)] := AEvent;
+```
+
+**Correction:** `FReplay` is *not* session-lifetime. It is reset twice per turn —
+`EmitLoopStarted` (`:416`) and `FinishTurn` (`:1200`, called from `teDone` and
+`teError`) both do `SetLength(FReplay, 1)`. So it is bounded by **one turn's**
+events, not the whole session; resuming from a checkpoint does not touch it.
+
+The one real cost that remains is the append shape:
+
+- **O(n²) growth** — `SetLength(n+1)` reallocates (and copies) per event; a
+  chatty turn's streaming deltas (`ekAssistantDelta`/`ekReasoningDelta`) can run
+  to thousands of events. Same grow-by-one shape fixed in `TTurnQueue`; `:438`
+  should grow by capacity (or use a ring).
 
 ### 3. The in-memory store does not filter at all
 
@@ -67,11 +74,17 @@ No checkpoint filtering (tests/CLI, so not the TUI case, but noted).
 
 ## Proposed fix (when picked up)
 
-1. **Bound `FReplay`** — a ring buffer, or prune it at the checkpoint horizon
-   (the same treatment `TTurnQueue` got). This is the main win.
-2. **Query after the boundary** — `QueryMessagesAfter` already exists
-   (`store.pas:239`); `Compose` should use it instead of loading everything and
-   filtering.
+1. **Query after the boundary** — `QueryMessagesAfter` already exists
+   (`store.pas:239`). `Compose` should use it instead of loading everything and
+   filtering. This is the main win (it removes the per-request O(history)
+   allocation). **Caveat:** the leading system message(s) are written at session
+   start (lowest `seq`, before any checkpoint), so `Compose` must *also* fetch
+   them — a bare `QueryMessagesAfter(boundary)` would drop the system prompt.
+   `QueryActiveMessages` (`store.pas:2801`) already does the boundary query, but
+   it drops the system messages too, so it is not a drop-in for `Compose`.
+2. **Grow `FReplay` by capacity** — the O(n²) append (`:438`), the same
+   treatment `TTurnQueue` got. Not the memory culprit (it is per-turn bounded),
+   but a real per-turn cost.
 3. **Checkpoint-filter the in-memory store** for parity.
 
 ## Why this is filed separately
