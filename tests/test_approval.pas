@@ -15,6 +15,7 @@ type
   TFakePrompt = class
   public
     Allowed: Boolean;
+    TimedOut: Boolean;
     OptionKey: string;
     Scope: TApprovalScope;
     Calls: Integer;
@@ -55,6 +56,7 @@ type
     procedure TestPromptPersistsChosenRuleAtChosenScope;
     procedure TestOnceChoiceDoesNotPersist;
     procedure TestMissingPromptDenies;
+    procedure TestTimedOutPromptReportsTimeout;
     procedure TestInvalidOptionDenies;
     procedure TestStoreSaveLoadRemoveRoundTrip;
     procedure TestStoreSuppressesDuplicates;
@@ -167,6 +169,7 @@ begin
   LastSummary := AAsk.Summary;
   Result := Default(TApprovalChoice);
   Result.Allowed := Allowed;
+  Result.TimedOut := TimedOut;
   Result.OptionKey := OptionKey;
   Result.Scope := Scope;
 end;
@@ -294,6 +297,35 @@ begin
   Ctx.SessionId := '';
   Store.Load(Ctx, Rules, Err);
   AssertEquals('global + ws8', 2, Length(Rules));
+end;
+
+procedure TApprovalTest.TestTimedOutPromptReportsTimeout;
+var
+  Store: IApprovalStore;
+  Prompt: TFakePrompt;
+  Svc: IApprovalService;
+  Asks: TApprovalAskArray;
+  Result_: TApprovalBatchResult;
+begin
+  { A prompt that timed out is not an operator decision: the denial must say so. }
+  Store := TMemoryApprovalStore.Create;
+  Prompt := TFakePrompt.Create;
+  try
+    Prompt.Allowed := False;
+    Prompt.TimedOut := True;
+    Svc := TApprovalService.Create(Store, Prompt.Prompt,
+      Default(TApprovalContext));
+    SetLength(Asks, 1);
+    Asks[0] := Ask('run_command:ls', 'ls', [],
+      [Option('once', 'once', False, 'run_command:ls', [], False)]);
+    AssertTrue('resolved', Svc.Resolve(Asks, Result_));
+    AssertTrue('denied', Result_.Denied);
+    AssertTrue('reported as a timeout', Pos('timed out', Result_.Reason) > 0);
+    AssertTrue('not blamed on the operator',
+      Pos('denied by operator', Result_.Reason) = 0);
+  finally
+    Prompt.Free;
+  end;
 end;
 
 procedure TApprovalTest.TestBatchDenyPreScanDoesNotPrompt;

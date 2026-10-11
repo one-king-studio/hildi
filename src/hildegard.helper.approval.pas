@@ -82,6 +82,9 @@ type
 
   TApprovalChoice = record
     Allowed: Boolean;
+    { True when the choice is a timeout, not an operator decision, so the
+      denial can be reported as a timeout rather than a denial. }
+    TimedOut: Boolean;
     OptionKey: string;      // '' when denied
     Scope: TApprovalScope;
   end;
@@ -373,7 +376,13 @@ begin
     if not Choice.Allowed then
     begin
       AResult.Denied := True;
-      AResult.Reason := 'denied by operator: ' + AAsks[I].Summary;
+      { A timeout is not an operator decision: say so, so the operator is not
+        blamed for a call no one answered. }
+      if Choice.TimedOut then
+        AResult.Reason := 'approval timed out (no operator response): ' +
+          AAsks[I].Summary
+      else
+        AResult.Reason := 'denied by operator: ' + AAsks[I].Summary;
       Exit(True);
     end;
 

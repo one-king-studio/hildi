@@ -34,6 +34,10 @@ type
       a grant made for one child is in force for the parent and every sibling.
       '' => the session's own id. }
     ApprovalRootSessionId: string;
+    { How long a client has to answer an approval ask before it is auto-denied;
+      0 => wait indefinitely (a connected client owns the timeout, not the
+      session). Loop-only. }
+    ApprovalTimeoutMs: Integer;
     { Loop-only test seam: when set, the loop's client uses this transport. }
     Transport: TLLMTransport;
   end;

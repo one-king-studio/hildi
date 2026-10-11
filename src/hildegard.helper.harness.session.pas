@@ -302,9 +302,10 @@ begin
     the provider) never starves the next turn, and so a cancel of one turn can
     be processed while another runs. }
   FTurnPool := TExecutorScheduler.Create(2);
-  { Bound the approval wait: an approval no client answers within the timeout is
-    denied, so a disconnected driver never blocks the turn forever. }
-  FGate := TApprovalGate.Create(FQueue, DefaultApprovalTimeoutMs);
+  { Bound the approval wait only when the config asks for it (0 = wait
+    indefinitely). A connected client owns the timeout; the auto-deny is for a
+    headless run with no one to answer. }
+  FGate := TApprovalGate.Create(FQueue, AConfig.ApprovalTimeoutMs);
 
   ApprovalCtx.WorkspaceId := FView.WorkspaceId;
   { A subagent resolves approvals against its lineage root, so the whole

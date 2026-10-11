@@ -269,6 +269,10 @@ begin
     Runtime.FNextClientId := 0;
 
     HConfig := Default(THarnessSessionConfig);
+    { The runtime serves connected clients (the TUI), which own the approval
+      timeout: wait indefinitely. The auto-deny is for a headless run, wired
+      when such a run sets a timeout. }
+    HConfig.ApprovalTimeoutMs := 0;
     HConfig.WorkspacePath := AConfig.WorkspacePath;
     HConfig.StorePath := AConfig.StorePath;
     HConfig.SessionId := AConfig.SessionId;

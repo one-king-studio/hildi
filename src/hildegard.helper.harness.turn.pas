@@ -228,7 +228,10 @@ begin
   FLock.Acquire;
   try
     if WaitRes = wrTimeout then
-      FChoice := Default(TApprovalChoice);   // deny
+    begin
+      FChoice := Default(TApprovalChoice);
+      FChoice.TimedOut := True;
+    end;
     FPending := False;
     Result := FChoice;
   finally
