@@ -141,8 +141,9 @@ type
     TMcpTokenSource of object;
 
   { Spawns every configured server, and reconciles the live set from config at a
-    boundary. Tear-down closes them all. The manager owns the tool specs; it is
-    exposed to the loop through TMcpProvider. }
+    boundary. Tear-down closes them all. The manager owns the tool specs; with
+    Lazy MCP it is reached through a per-server TMcpSkillSource (see below), not
+    a turn provider - Reconcile declares runtimes without connecting. }
   TMcpManager = class
   private
     FApproval: IApprovalService;
@@ -194,20 +195,6 @@ type
     { When set, each HTTP server's client gets a token source from here. }
     property TokenSourceFor: TMcpTokenSourceFactory read FTokenSourceFor
       write FTokenSourceFor;
-  end;
-
-  { The MCP manager as a turn provider. Prepare reconciles from the config
-    source; Specs/Find expose the live tools; PromptFragment is ''. }
-  TMcpProvider = class(TInterfacedObject, IToolProvider)
-  private
-    FManager: TMcpManager;
-    FConfigSource: TMcpConfigSource;
-  public
-    constructor Create(AManager: TMcpManager; AConfigSource: TMcpConfigSource);
-    procedure Prepare;
-    function Specs: TToolSpecArray;
-    function PromptFragment: string;
-    function Find(const AName: string; out ATool: TRegisteredTool): Boolean;
   end;
 
   { One configured MCP server as a skill tool source (Lazy_MCP). Activate
@@ -1242,46 +1229,6 @@ end;
 function TMcpManager.Runtimes: TMcpServerRuntimeArray;
 begin
   Result := FRuntimes;
-end;
-
-{ --- TMcpProvider ------------------------------------------------------- }
-
-constructor TMcpProvider.Create(AManager: TMcpManager;
-  AConfigSource: TMcpConfigSource);
-begin
-  inherited Create;
-  FManager := AManager;
-  FConfigSource := AConfigSource;
-end;
-
-procedure TMcpProvider.Prepare;
-begin
-  if (FManager <> nil) and Assigned(FConfigSource) then
-    FManager.Reconcile(FConfigSource());
-end;
-
-function TMcpProvider.Specs: TToolSpecArray;
-begin
-  if FManager = nil then
-    Result := nil
-  else
-    Result := FManager.Specs;
-end;
-
-function TMcpProvider.PromptFragment: string;
-begin
-  Result := '';   { MCP contributes no prompt }
-end;
-
-function TMcpProvider.Find(const AName: string;
-  out ATool: TRegisteredTool): Boolean;
-begin
-  if FManager = nil then
-  begin
-    ATool := Default(TRegisteredTool);
-    Exit(False);
-  end;
-  Result := FManager.Find(AName, ATool);
 end;
 
 { --- TMcpSkillSource (Lazy_MCP) ----------------------------------------- }
