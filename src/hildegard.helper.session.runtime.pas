@@ -1066,7 +1066,8 @@ begin
   E.Text := AText;
   Broadcast(E);
   FTurnActive := True;
-  FWorker := TTurnWorker.Create(FSession.Loop, FSession.Queue, AText);
+  FWorker := TTurnWorker.Create(FSession.Loop, FSession.Queue, AText,
+    FSession.TurnPool);
   FWorker.Start;
 end;
 
@@ -1075,7 +1076,8 @@ begin
   { The ambient notification is already queued; the turn drains it at its first
     boundary. No user message is emitted (there is no operator prompt). }
   FTurnActive := True;
-  FWorker := TTurnWorker.CreateAmbient(FSession.Loop, FSession.Queue);
+  FWorker := TTurnWorker.CreateAmbient(FSession.Loop, FSession.Queue,
+    FSession.TurnPool);
   FWorker.Start;
 end;
 

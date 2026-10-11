@@ -74,10 +74,19 @@ type
 threadvar
   { Per-thread: a continuation runs on one thread, so the installed snapshot and
     the save stack must not be shared across threads (the executor runs jobs on
-    many). A managed threadvar is freed when the thread exits. }
+    many). NOTE: FPC does NOT finalise a managed threadvar of INTERFACE type when
+    a thread exits (verified), so we must never lazily create one per thread -
+    that leaks a snapshot per thread. A thread with nothing installed returns the
+    shared GEmpty below instead. }
   GCurrent: IContextSnapshot;
   GStack: TArray<IContextSnapshot>;
   GDepth: Integer;
+
+var
+  { The shared, immutable empty snapshot, returned when no snapshot is installed
+    on this thread. Process-global (not a threadvar) so it is created once and
+    freed once, never per thread. }
+  GEmpty: IContextSnapshot;
 
 function TContextSnapshot.IndexOfKey(const AKey: string): Integer;
 var
@@ -134,10 +143,13 @@ end;
 function ContextCurrent: IContextSnapshot;
 begin
   { A worker thread starts with GCurrent = nil (the initialization block runs
-    only on the main thread); lazily give it an empty snapshot. }
+    only on the main thread). Return the SHARED empty snapshot - do NOT lazily
+    create a per-thread one: FPC does not finalise a managed interface threadvar
+    on thread exit, so a per-thread snapshot would leak one per worker. }
   if GCurrent = nil then
-    GCurrent := TContextSnapshot.Create;
-  Result := GCurrent;
+    Result := GEmpty
+  else
+    Result := GCurrent;
 end;
 
 function ContextEnter(const ASnapshot: IContextSnapshot): TContextToken;
@@ -175,7 +187,8 @@ begin
 end;
 
 initialization
-  GCurrent := TContextSnapshot.Create;
+  GEmpty := TContextSnapshot.Create;
+  GCurrent := GEmpty;
   GDepth := 0;
 
 end.

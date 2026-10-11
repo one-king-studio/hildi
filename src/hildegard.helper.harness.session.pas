@@ -13,6 +13,7 @@ interface
 
 uses
   Classes, Contnrs, SysUtils,
+  async.base, async.scheduler, async.concurrency,
   hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.approval,
   hildegard.helper.approval.store, hildegard.helper.command.tool,
   hildegard.helper.files,
@@ -42,6 +43,9 @@ type
     FLoop: TAgentLoop;
     FQueue: TTurnQueue;
     FGate: TApprovalGate;
+    { The shared turn pool: one bounded executor for the session, so turns reuse
+      threads instead of spawning and joining a TThread per turn. }
+    FTurnPool: IAsyncScheduler;
     FApprovalService: IApprovalService;
     { MCP events (server failure etc.) are recorded as session errors. }
     procedure McpEvent(const AMessage, ADetail: string);
@@ -64,6 +68,8 @@ type
     property Tools: TToolRegistry read FTools;
     property Queue: TTurnQueue read FQueue;
     property Gate: TApprovalGate read FGate;
+    { The shared executor the turn worker runs on. }
+    property TurnPool: IAsyncScheduler read FTurnPool;
     { The session's approval service, so the runtime can hand it to the
       delegation tools. }
     property ApprovalService: IApprovalService read FApprovalService;
@@ -120,6 +126,7 @@ begin
   FGate := nil;
   FQueue.Free;
   FQueue := nil;
+  FTurnPool := nil;
 end;
 
 class function THarnessSession.Open(const AConfig: THarnessSessionConfig;
@@ -240,6 +247,10 @@ begin
   end;
 
   FQueue := TTurnQueue.Create;
+  { The shared turn pool. Two workers so a turn blocked on an approval (or on
+    the provider) never starves the next turn, and so a cancel of one turn can
+    be processed while another runs. }
+  FTurnPool := TExecutorScheduler.Create(2);
   { Bound the approval wait: an approval no client answers within the timeout is
     denied, so a disconnected driver never blocks the turn forever. }
   FGate := TApprovalGate.Create(FQueue, DefaultApprovalTimeoutMs);

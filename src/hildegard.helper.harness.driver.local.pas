@@ -70,7 +70,8 @@ begin
   E.Kind := teUserMessage;
   E.Text := AText;
   FSession.Queue.Push(E);
-  FWorker := TTurnWorker.Create(FSession.Loop, FSession.Queue, AText);
+  FWorker := TTurnWorker.Create(FSession.Loop, FSession.Queue, AText,
+    FSession.TurnPool);
   FWorker.Start;
 end;
 
@@ -128,7 +129,8 @@ begin
   FSession.Loop.PromptQueue.PushAmbient(CheckpointInstruction, '',
     'checkpoint', 'checkpoint', 'running', 0);
   FCheckpointTurn := True;
-  FWorker := TTurnWorker.CreateAmbient(FSession.Loop, FSession.Queue);
+  FWorker := TTurnWorker.CreateAmbient(FSession.Loop, FSession.Queue,
+    FSession.TurnPool);
   FWorker.Start;
 end;
 
