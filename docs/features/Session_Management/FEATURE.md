@@ -312,8 +312,8 @@ Resolved before the SPEC (Stage 2):
 
 ### Storage shape (from the decisions)
 
-- `sessions`: add `title`, `title_override`, `pinned`, `archived` (migration v7,
-  additive).
+- `sessions`: add `title`, `title_override`, `pinned`, `archived` (migration v10,
+  additive; the newest migration today is v9).
 - `messages`: the assistant row already holds the **raw** reply text (decision 9);
   no change needed to store it.
 - `reply_keywords(message_id, keyword)`: one row per keyword per reply, normalized
