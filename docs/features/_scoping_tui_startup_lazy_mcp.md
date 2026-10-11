@@ -54,7 +54,8 @@ Dynamic_Tools  ──►  Turn_Injection  ──►  Skills  ──►  Lazy_MCP
   `PromptFragment`/`Find`); MCP moves behind it. **Implemented** (specs + all
   tasks ticked; the seam is live in `agent.pas:216`).
 - **Skills** — the manifest with loaded/unloaded state, `load_skill`, decay by
-  idle TTL. **Proposed only; no SPEC, no code.** This is the missing piece.
+  idle TTL. **Now Specified (`Skills_v1.SPEC.md` + `TODO.md`); no code yet.**
+  This is the missing piece.
 - **Lazy MCP** — "MCP servers are skills": a `load_skill("mcp_<id>")` connects +
   discovers + registers. Depends on Skills.
 
