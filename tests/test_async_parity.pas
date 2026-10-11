@@ -56,7 +56,7 @@ const
     that covers it ("Surface=QualifiedTestName"). This is the acceptance
     checklist from the SPEC's operator list, restricted to what is implemented;
     the table is the thing a reviewer reads to see coverage at a glance. }
-  Parity: array[0..88] of string = (
+  Parity: array[0..96] of string = (
     { Creation. }
     'Just=TAsyncOperatorsTest.OfEmitsOne',
     'FromArray=TAsyncOperatorsTest.FromArrayEmitsEach',
@@ -101,6 +101,8 @@ const
     'Retry=TAsyncOperatorsTest.RetryResubscribesThenRaises',
     'RetryWhen=TAsyncOperatorsTest.RetryWhenResubscribesOnDecision',
     'RepeatCount=TAsyncOperatorsTest.RepeatCountResubscribes',
+    'RepeatWhen=TAsyncOperatorsTest.RepeatWhenResubscribesOnDecision',
+    'OnErrorResumeNext=TAsyncOperatorsTest.OnErrorResumeNextSkipsErrors',
     'Finalize=TAsyncOperatorsTest.FinalizeRunsOnCompletion',
     'ThrowIfEmpty=TAsyncOperatorsTest.ThrowIfEmptyErrorsOnEmpty',
     { Multicasting (Publish is Multicast with a default subject). }
@@ -111,6 +113,7 @@ const
     'PublishBehavior=TAsyncOperatorsTest.PublishBehaviorReplaysTheInitialValue',
     'Share=TAsyncOperatorsTest.ShareConnectsOnFirstSubscriber',
     'ShareReplay=TAsyncOperatorsTest.ShareReplayReplaysToLateSubscribers',
+    'RefCount=TAsyncOperatorsTest.RefCountSharesAConnectable',
     { Utility / aggregation. }
     'Tap=TAsyncOperatorsTest.TapSeesValuesAndPassesThemOn',
     'Count=TAsyncOperatorsTest.CountEmitsTheTotal',
@@ -119,6 +122,11 @@ const
     'DefaultIfEmpty=TAsyncOperatorsTest.DefaultIfEmptyEmitsTheDefault',
     'Materialize=TAsyncOperatorsTest.MaterializeThenDematerializeRoundTrips',
     'Dematerialize=TAsyncOperatorsTest.MaterializeThenDematerializeRoundTrips',
+    'Max=TAsyncOperatorsTest.MaxEmitsTheLargest',
+    'Min=TAsyncOperatorsTest.MinEmitsTheSmallest',
+    'Find=TAsyncOperatorsTest.FindEmitsTheFirstMatch',
+    'FindIndex=TAsyncOperatorsTest.FindIndexEmitsTheIndexOfTheMatch',
+    'SequenceEqual=TAsyncOperatorsTest.SequenceEqualComparesElementWise',
     { Time-based (unit test_async_time, virtual clock). }
     'Delay=TAsyncTimeTest.DelayShiftsValuesAndCompletion',
     'DelayWhen=TAsyncTimeTest.DelayWhenUsesThePerValueDuration',

@@ -97,6 +97,15 @@ type
     procedure ExhaustMapDropsValuesWhileBusy;
     procedure WithLatestFromCombinesWithTheLatestRight;
     procedure ExpandUnfoldsBreadthFirst;
+    { Phase 8 remainder: the remaining error, aggregate and utility operators. }
+    procedure RepeatWhenResubscribesOnDecision;
+    procedure OnErrorResumeNextSkipsErrors;
+    procedure MaxEmitsTheLargest;
+    procedure MinEmitsTheSmallest;
+    procedure FindEmitsTheFirstMatch;
+    procedure FindIndexEmitsTheIndexOfTheMatch;
+    procedure SequenceEqualComparesElementWise;
+    procedure RefCountSharesAConnectable;
   end;
 
 implementation
@@ -849,6 +858,126 @@ begin
     end).Subscribe(RecorderInt);
   AssertEquals('unfolded', '1,2,4,8', FSeq);
   AssertEquals('completed', 1, FCompletes);
+end;
+
+procedure TAsyncOperatorsTest.RepeatWhenResubscribesOnDecision;
+var
+  Attempts: Integer;
+begin
+  { A source that completes after two values; the decider repeats it twice more
+    (three runs total), then stops. }
+  Attempts := 0;
+  Reset;
+  RepeatWhen<Integer>(IntSource([1, 2]),
+    function(const AAttempt: Integer): Boolean
+    begin
+      Inc(Attempts);
+      Result := AAttempt <= 2;
+    end).Subscribe(RecorderInt);
+  AssertEquals('values across the repeats', '1,2,1,2,1,2', FSeq);
+  AssertEquals('completed after the decider said no', 1, FCompletes);
+end;
+
+procedure TAsyncOperatorsTest.OnErrorResumeNextSkipsErrors;
+begin
+  { The first source errors mid-stream; OnErrorResumeNext continues with the
+    second, dropping the error, and completes when the list is exhausted. }
+  Reset;
+  OnErrorResumeNext<Integer>([ThrowError<Integer>(Exception.Create('boom')),
+    IntSource([3, 4])]).Subscribe(RecorderInt);
+  AssertEquals('resumed past the error', '3,4', FSeq);
+  AssertEquals('completed', 1, FCompletes);
+  AssertEquals('no error surfaced', '', FError);
+end;
+
+procedure TAsyncOperatorsTest.MaxEmitsTheLargest;
+begin
+  AssertInts(Max<Integer>(IntSource([3, 1, 4, 1, 5]),
+    function(const A, B: Integer): Integer begin Result := A - B; end), '5', True);
+  { Empty emits nothing, but still completes. }
+  AssertInts(Max<Integer>(Empty<Integer>,
+    function(const A, B: Integer): Integer begin Result := A - B; end), '', True);
+end;
+
+procedure TAsyncOperatorsTest.MinEmitsTheSmallest;
+begin
+  AssertInts(Min<Integer>(IntSource([3, 1, 4, 1, 5]),
+    function(const A, B: Integer): Integer begin Result := A - B; end), '1', True);
+end;
+
+procedure TAsyncOperatorsTest.FindEmitsTheFirstMatch;
+begin
+  { Find projects the matching value: here the value itself. }
+  Reset;
+  Find<Integer, Integer>(IntSource([1, 2, 3, 4]),
+    function(const V: Integer): Integer begin Result := V; end,
+    function(const V: Integer): Boolean begin Result := V > 2; end)
+    .Subscribe(RecorderInt);
+  AssertEquals('first match', '3', FSeq);
+  AssertEquals('completed', 1, FCompletes);
+  { No match: emits nothing, completes. }
+  AssertInts(Find<Integer, Integer>(IntSource([1, 2]),
+    function(const V: Integer): Integer begin Result := V; end,
+    function(const V: Integer): Boolean begin Result := V > 9; end), '', True);
+end;
+
+procedure TAsyncOperatorsTest.FindIndexEmitsTheIndexOfTheMatch;
+begin
+  Reset;
+  FindIndex<Integer>(IntSource([10, 20, 30]),
+    function(const V: Integer): Boolean begin Result := V = 20; end)
+    .Subscribe(RecorderInt);
+  AssertEquals('index of the match', '1', FSeq);
+  AssertEquals('completed', 1, FCompletes);
+end;
+
+procedure TAsyncOperatorsTest.SequenceEqualComparesElementWise;
+var
+  R: string;
+  Eq: TEquality<Integer>;
+begin
+  Eq := function(const A, B: Integer): Boolean begin Result := A = B; end;
+  R := '';
+  SequenceEqual<Integer>(IntSource([1, 2, 3]), IntSource([1, 2, 3]), Eq)
+    .Subscribe(TObserver<Boolean>.Create(
+      procedure(const V: Boolean)
+      begin
+        if V then R := R + 'true' else R := R + 'false';
+      end));
+  AssertEquals('equal sequences', 'true', R);
+  R := '';
+  SequenceEqual<Integer>(IntSource([1, 2, 3]), IntSource([1, 2, 4]), Eq)
+    .Subscribe(TObserver<Boolean>.Create(
+      procedure(const V: Boolean)
+      begin
+        if V then R := R + 'true' else R := R + 'false';
+      end));
+  AssertEquals('differing element', 'false', R);
+  R := '';
+  SequenceEqual<Integer>(IntSource([1, 2]), IntSource([1, 2, 3]), Eq)
+    .Subscribe(TObserver<Boolean>.Create(
+      procedure(const V: Boolean)
+      begin
+        if V then R := R + 'true' else R := R + 'false';
+      end));
+  AssertEquals('different lengths', 'false', R);
+end;
+
+procedure TAsyncOperatorsTest.RefCountSharesAConnectable;
+var
+  Conn: IConnectableObservable<Integer>;
+begin
+  FSourceRuns := 0;
+  Reset;
+  Conn := Publish<Integer>(Defer<Integer>(function: ISubscribable<Integer>
+    begin
+      Inc(FSourceRuns);
+      Result := IntSource([1, 2, 3]);
+    end));
+  { RefCount over the connectable: the first subscriber connects. }
+  RefCount<Integer>(Conn).Subscribe(RecorderInt);
+  AssertEquals('connected on the first subscriber', 1, FSourceRuns);
+  AssertEquals('values', '1,2,3', FSeq);
 end;
 
 initialization

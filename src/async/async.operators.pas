@@ -1091,6 +1091,9 @@ type
   function Share<T>(const ASource: ISubscribable<T>): ISubscribable<T>;
   function ShareReplay<T>(const ASource: ISubscribable<T>;
     const ABufferSize: Integer): ISubscribable<T>;
+  { RefCount: turn a connectable into a shared observable that connects on the
+    first subscriber and disconnects on the last (the Share semantics, explicit). }
+  function RefCount<T>(const AConnectable: IConnectableObservable<T>): ISubscribable<T>;
 
 type
   { --- Remaining error and utility operators ---------------------------- }
@@ -1257,6 +1260,13 @@ type
   TRetryDecider = reference to function(const AAttempt: Integer;
     const AError: Exception): Boolean;
 
+  { RepeatWhen: on completion, call the handler to decide whether to resubscribe
+    (the completion-side mirror of TRetryDecider). }
+  TRepeatDecider = reference to function(const AAttempt: Integer): Boolean;
+
+  { A three-way comparison for Max/Min: <0, 0, >0. }
+  TComparer<T> = reference to function(const A, B: T): Integer;
+
   TRetryWhenObservable<T> = class(TInterfacedObject, ISubscribable<T>)
   private
     FSource: ISubscribable<T>;
@@ -1288,6 +1298,195 @@ type
 
   { --- Observers for the extra operators -------------------------------- }
 
+  { RepeatWhen: resubscribes the source on completion while the decider says yes. }
+  TRepeatWhenObservable<T> = class(TInterfacedObject, ISubscribable<T>)
+  private
+    FSource: ISubscribable<T>;
+    FDecider: TRepeatDecider;
+  public
+    constructor Create(const ASource: ISubscribable<T>; const ADecider: TRepeatDecider);
+    function Subscribe(const AObserver: IObserver<T>): ISubscription;
+  end;
+
+  TRepeatWhenObserver<T> = class(TInterfacedObject, IObserver<T>, ISubscription)
+  private
+    FSource: ISubscribable<T>;
+    FDown: IObserver<T>;
+    FDecider: TRepeatDecider;
+    FAttempt: Integer;
+    FClosed: Boolean;
+  public
+    constructor Create(const ASource: ISubscribable<T>; const ADown: IObserver<T>;
+      const ADecider: TRepeatDecider);
+    procedure Start;
+    procedure OnNext(const AValue: T);
+    procedure OnError(const AError: Exception);
+    procedure OnComplete;
+    procedure Unsubscribe;
+    function Closed: Boolean;
+  end;
+
+  { OnErrorResumeNext: concatenate the sources, continuing on the next one after
+    an error (the error is dropped). Mirrors TConcatObserver, but an OnError
+    advances to the next source instead of terminating. }
+  TResumeObserver<T> = class(TInterfacedObject, IObserver<T>, ISubscription)
+  private
+    FDown: IObserver<T>;
+    FSources: TArray<ISubscribable<T>>;
+    FIndex: Integer;
+    FDone: Boolean;
+    procedure SubscribeNext;
+  public
+    constructor Create(const ADown: IObserver<T>; const ASources: TArray<ISubscribable<T>>);
+    procedure OnNext(const AValue: T);
+    procedure OnError(const AError: Exception);
+    procedure OnComplete;
+    procedure Unsubscribe;
+    function Closed: Boolean;
+  end;
+
+  TResumeObservable<T> = class(TInterfacedObject, ISubscribable<T>)
+  private
+    FSources: TArray<ISubscribable<T>>;
+  public
+    constructor Create(const ASources: TArray<ISubscribable<T>>);
+    function Subscribe(const AObserver: IObserver<T>): ISubscription;
+  end;
+
+  { Max / Min: the extremum, emitted on completion; empty emits nothing (RxJS). }
+  TExtremeMode = (emMax, emMin);
+  TExtremeObserver<T> = class(TInterfacedObject, IObserver<T>)
+  private
+    FDown: IObserver<T>;
+    FComparer: TComparer<T>;
+    FMode: TExtremeMode;
+    FBest: T;
+    FHas: Boolean;
+  public
+    constructor Create(const ADown: IObserver<T>; const AComparer: TComparer<T>;
+      const AMode: TExtremeMode);
+    procedure OnNext(const AValue: T);
+    procedure OnError(const AError: Exception);
+    procedure OnComplete;
+  end;
+
+  TExtremeObservable<T> = class(TInterfacedObject, ISubscribable<T>)
+  private
+    FSource: ISubscribable<T>;
+    FComparer: TComparer<T>;
+    FMode: TExtremeMode;
+  public
+    constructor Create(const ASource: ISubscribable<T>; const AComparer: TComparer<T>;
+      const AMode: TExtremeMode);
+    function Subscribe(const AObserver: IObserver<T>): ISubscription;
+  end;
+
+  { Find / FindIndex: the first match (a projection that yields a Boolean, so a
+    match can carry a computed value), emitted on match; empty if none. }
+  TFindObserver<T, R> = class(TInterfacedObject, IObserver<T>)
+  private
+    FDown: IObserver<R>;
+    FMapper: TMapper<T, R>;
+    FMatch: TPredicate<T>;
+    FFound: Boolean;
+  public
+    constructor Create(const ADown: IObserver<R>; const AMapper: TMapper<T, R>;
+      const AMatch: TPredicate<T>);
+    procedure OnNext(const AValue: T);
+    procedure OnError(const AError: Exception);
+    procedure OnComplete;
+  end;
+
+  TFindObservable<T, R> = class(TInterfacedObject, ISubscribable<R>)
+  private
+    FSource: ISubscribable<T>;
+    FMapper: TMapper<T, R>;
+    FMatch: TPredicate<T>;
+  public
+    constructor Create(const ASource: ISubscribable<T>; const AMapper: TMapper<T, R>;
+      const AMatch: TPredicate<T>);
+    function Subscribe(const AObserver: IObserver<R>): ISubscription;
+  end;
+
+  { FindIndex: the index of the first match (needs a running counter, which the
+    value-only Find mapper cannot express). }
+  TFindIndexObserver<T> = class(TInterfacedObject, IObserver<T>)
+  private
+    FDown: IObserver<Integer>;
+    FMatch: TPredicate<T>;
+    FIndex: Integer;
+    FFound: Boolean;
+  public
+    constructor Create(const ADown: IObserver<Integer>; const AMatch: TPredicate<T>);
+    procedure OnNext(const AValue: T);
+    procedure OnError(const AError: Exception);
+    procedure OnComplete;
+  end;
+
+  TFindIndexObservable<T> = class(TInterfacedObject, ISubscribable<Integer>)
+  private
+    FSource: ISubscribable<T>;
+    FMatch: TPredicate<T>;
+  public
+    constructor Create(const ASource: ISubscribable<T>; const AMatch: TPredicate<T>);
+    function Subscribe(const AObserver: IObserver<Integer>): ISubscription;
+  end;
+
+  { SequenceEqual: emit one Boolean - whether two sources emit equal values
+    element-wise and complete together (using the equality relation). Buffers
+    both sides and compares on completion (synchronous sources complete one
+    side before the other subscribes, so a pairwise compare cannot work). }
+  TSequenceEqualCoordinator<T> = class(TInterfacedObject, ISubscription)
+  private
+    FDown: IObserver<Boolean>;
+    FEquals: TEquality<T>;
+    FLeft: TArray<T>;
+    FRight: TArray<T>;
+    FLeftDone: Boolean;
+    FRightDone: Boolean;
+    FClosed: Boolean;
+    procedure TryEmit;
+  public
+    constructor Create(const ADown: IObserver<Boolean>; const AEquals: TEquality<T>);
+    procedure PushLeft(const AValue: T);
+    procedure PushRight(const AValue: T);
+    procedure LeftDone;
+    procedure RightDone;
+    procedure Unsubscribe;
+    function Closed: Boolean;
+  end;
+
+  TSeqEqualLeftObserver<T> = class(TInterfacedObject, IObserver<T>)
+  private
+    FCoord: TSequenceEqualCoordinator<T>;
+  public
+    constructor Create(const ACoord: TSequenceEqualCoordinator<T>);
+    procedure OnNext(const AValue: T);
+    procedure OnError(const AError: Exception);
+    procedure OnComplete;
+  end;
+
+  TSeqEqualRightObserver<T> = class(TInterfacedObject, IObserver<T>)
+  private
+    FCoord: TSequenceEqualCoordinator<T>;
+  public
+    constructor Create(const ACoord: TSequenceEqualCoordinator<T>);
+    procedure OnNext(const AValue: T);
+    procedure OnError(const AError: Exception);
+    procedure OnComplete;
+  end;
+
+  TSequenceEqualObservable<T> = class(TInterfacedObject, ISubscribable<Boolean>)
+  private
+    FLeft: ISubscribable<T>;
+    FRight: ISubscribable<T>;
+    FEquals: TEquality<T>;
+  public
+    constructor Create(const ALeft: ISubscribable<T>; const ARight: ISubscribable<T>;
+      const AEquals: TEquality<T>);
+    function Subscribe(const AObserver: IObserver<Boolean>): ISubscription;
+  end;
+
 { --- The Phase 8 surface (free functions) ------------------------------ }
 function RepeatCount<T>(const ASource: ISubscribable<T>;
   const ACount: Integer): ISubscribable<T>;
@@ -1301,6 +1500,17 @@ function Every<T>(const ASource: ISubscribable<T>;
 function IsEmpty<T>(const ASource: ISubscribable<T>): ISubscribable<Boolean>;
 function Materialize<T>(const ASource: ISubscribable<T>): ISubscribable<TNotification<T>>;
 function Dematerialize<T>(const ASource: ISubscribable<TNotification<T>>): ISubscribable<T>;
+function RepeatWhen<T>(const ASource: ISubscribable<T>;
+  const ADecider: TRepeatDecider): ISubscribable<T>;
+function OnErrorResumeNext<T>(const ASources: TArray<ISubscribable<T>>): ISubscribable<T>;
+function Max<T>(const ASource: ISubscribable<T>; const AComparer: TComparer<T>): ISubscribable<T>;
+function Min<T>(const ASource: ISubscribable<T>; const AComparer: TComparer<T>): ISubscribable<T>;
+function Find<T, R>(const ASource: ISubscribable<T>; const AMapper: TMapper<T, R>;
+  const AMatch: TPredicate<T>): ISubscribable<R>;
+function FindIndex<T>(const ASource: ISubscribable<T>;
+  const AMatch: TPredicate<T>): ISubscribable<Integer>;
+function SequenceEqual<T>(const ALeft: ISubscribable<T>; const ARight: ISubscribable<T>;
+  const AEquals: TEquality<T>): ISubscribable<Boolean>;
 
 implementation
 
@@ -4246,6 +4456,505 @@ end;
 function Dematerialize<T>(const ASource: ISubscribable<TNotification<T>>): ISubscribable<T>;
 begin
   Result := TDematerializeObservable<T>.Create(ASource);
+end;
+
+{ --- Phase 8 remainder: RepeatWhen, OnErrorResumeNext, Max/Min, Find/FindIndex,
+    SequenceEqual, RefCount ------------------------------------------------ }
+
+function RepeatWhen<T>(const ASource: ISubscribable<T>;
+  const ADecider: TRepeatDecider): ISubscribable<T>;
+begin
+  Result := TRepeatWhenObservable<T>.Create(ASource, ADecider);
+end;
+
+{ TRepeatWhenObservable<T> }
+
+constructor TRepeatWhenObservable<T>.Create(const ASource: ISubscribable<T>;
+  const ADecider: TRepeatDecider);
+begin
+  inherited Create;
+  FSource := ASource;
+  FDecider := ADecider;
+end;
+
+function TRepeatWhenObservable<T>.Subscribe(const AObserver: IObserver<T>): ISubscription;
+var
+  Obs: TRepeatWhenObserver<T>;
+begin
+  Obs := TRepeatWhenObserver<T>.Create(FSource, AObserver, FDecider);
+  Result := Obs;
+  Obs.Start;
+end;
+
+{ TRepeatWhenObserver<T> }
+
+constructor TRepeatWhenObserver<T>.Create(const ASource: ISubscribable<T>;
+  const ADown: IObserver<T>; const ADecider: TRepeatDecider);
+begin
+  inherited Create;
+  FSource := ASource;
+  FDown := ADown;
+  FDecider := ADecider;
+  FAttempt := 0;
+  FClosed := False;
+end;
+
+procedure TRepeatWhenObserver<T>.Start;
+begin
+  FSource.Subscribe(Self);
+end;
+
+procedure TRepeatWhenObserver<T>.OnNext(const AValue: T);
+begin
+  FDown.OnNext(AValue);
+end;
+
+procedure TRepeatWhenObserver<T>.OnError(const AError: Exception);
+begin
+  FDown.OnError(AError);
+end;
+
+procedure TRepeatWhenObserver<T>.OnComplete;
+begin
+  Inc(FAttempt);
+  if FDecider(FAttempt) then
+    FSource.Subscribe(Self)
+  else
+    FDown.OnComplete;
+end;
+
+procedure TRepeatWhenObserver<T>.Unsubscribe;
+begin
+  FClosed := True;
+end;
+
+function TRepeatWhenObserver<T>.Closed: Boolean;
+begin
+  Result := FClosed;
+end;
+
+function OnErrorResumeNext<T>(const ASources: TArray<ISubscribable<T>>): ISubscribable<T>;
+begin
+  Result := TResumeObservable<T>.Create(ASources);
+end;
+
+{ TResumeObservable<T> }
+
+constructor TResumeObservable<T>.Create(const ASources: TArray<ISubscribable<T>>);
+begin
+  inherited Create;
+  FSources := ASources;
+end;
+
+function TResumeObservable<T>.Subscribe(const AObserver: IObserver<T>): ISubscription;
+var
+  Coord: TResumeObserver<T>;
+begin
+  Coord := TResumeObserver<T>.Create(AObserver, FSources);
+  Result := Coord;
+  Coord.SubscribeNext;
+end;
+
+{ TResumeObserver<T> }
+
+constructor TResumeObserver<T>.Create(const ADown: IObserver<T>;
+  const ASources: TArray<ISubscribable<T>>);
+begin
+  inherited Create;
+  FDown := ADown;
+  FSources := ASources;
+  FIndex := 0;
+  FDone := False;
+end;
+
+procedure TResumeObserver<T>.SubscribeNext;
+var
+  Obs: IObserver<T>;
+begin
+  if FDone then
+    Exit;
+  if FIndex > High(FSources) then
+  begin
+    FDone := True;
+    FDown.OnComplete;
+    Exit;
+  end;
+  Obs := TObserver<T>.Create(
+    procedure(const V: T) begin FDown.OnNext(V); end,
+    procedure(const E: Exception)
+    begin
+      { Resume on the next source; the error is dropped (the source owns it). }
+      E.Free;
+      Inc(FIndex);
+      SubscribeNext;
+    end,
+    procedure
+    begin
+      Inc(FIndex);
+      SubscribeNext;
+    end);
+  FSources[FIndex].Subscribe(Obs);
+end;
+
+procedure TResumeObserver<T>.OnNext(const AValue: T);
+begin
+  FDown.OnNext(AValue);
+end;
+
+procedure TResumeObserver<T>.OnError(const AError: Exception);
+begin
+  FDown.OnError(AError);
+end;
+
+procedure TResumeObserver<T>.OnComplete;
+begin
+  if not FDone then
+  begin
+    FDone := True;
+    FDown.OnComplete;
+  end;
+end;
+
+procedure TResumeObserver<T>.Unsubscribe;
+begin
+  FDone := True;
+end;
+
+function TResumeObserver<T>.Closed: Boolean;
+begin
+  Result := FDone;
+end;
+
+function Max<T>(const ASource: ISubscribable<T>; const AComparer: TComparer<T>): ISubscribable<T>;
+begin
+  Result := TExtremeObservable<T>.Create(ASource, AComparer, emMax);
+end;
+
+function Min<T>(const ASource: ISubscribable<T>; const AComparer: TComparer<T>): ISubscribable<T>;
+begin
+  Result := TExtremeObservable<T>.Create(ASource, AComparer, emMin);
+end;
+
+{ TExtremeObserver<T> }
+
+constructor TExtremeObserver<T>.Create(const ADown: IObserver<T>;
+  const AComparer: TComparer<T>; const AMode: TExtremeMode);
+begin
+  inherited Create;
+  FDown := ADown;
+  FComparer := AComparer;
+  FMode := AMode;
+  FHas := False;
+end;
+
+procedure TExtremeObserver<T>.OnNext(const AValue: T);
+begin
+  if not FHas then
+  begin
+    FBest := AValue;
+    FHas := True;
+    Exit;
+  end;
+  if FMode = emMax then
+  begin
+    if FComparer(AValue, FBest) > 0 then
+      FBest := AValue;
+  end
+  else if FComparer(AValue, FBest) < 0 then
+    FBest := AValue;
+end;
+
+procedure TExtremeObserver<T>.OnError(const AError: Exception);
+begin
+  FDown.OnError(AError);
+end;
+
+procedure TExtremeObserver<T>.OnComplete;
+begin
+  { Empty emits nothing (RxJS Max/Min). }
+  if FHas then
+    FDown.OnNext(FBest);
+  FDown.OnComplete;
+end;
+
+{ TExtremeObservable<T> }
+
+constructor TExtremeObservable<T>.Create(const ASource: ISubscribable<T>;
+  const AComparer: TComparer<T>; const AMode: TExtremeMode);
+begin
+  inherited Create;
+  FSource := ASource;
+  FComparer := AComparer;
+  FMode := AMode;
+end;
+
+function TExtremeObservable<T>.Subscribe(const AObserver: IObserver<T>): ISubscription;
+begin
+  Result := FSource.Subscribe(TExtremeObserver<T>.Create(AObserver, FComparer, FMode));
+end;
+
+function Find<T, R>(const ASource: ISubscribable<T>; const AMapper: TMapper<T, R>;
+  const AMatch: TPredicate<T>): ISubscribable<R>;
+begin
+  Result := TFindObservable<T, R>.Create(ASource, AMapper, AMatch);
+end;
+
+function FindIndex<T>(const ASource: ISubscribable<T>;
+  const AMatch: TPredicate<T>): ISubscribable<Integer>;
+begin
+  Result := TFindIndexObservable<T>.Create(ASource, AMatch);
+end;
+
+{ TFindObserver<T,R> }
+
+constructor TFindObserver<T, R>.Create(const ADown: IObserver<R>;
+  const AMapper: TMapper<T, R>; const AMatch: TPredicate<T>);
+begin
+  inherited Create;
+  FDown := ADown;
+  FMapper := AMapper;
+  FMatch := AMatch;
+  FFound := False;
+end;
+
+procedure TFindObserver<T, R>.OnNext(const AValue: T);
+begin
+  if FFound then
+    Exit;
+  if FMatch(AValue) then
+  begin
+    FFound := True;
+    FDown.OnNext(FMapper(AValue));
+  end;
+end;
+
+procedure TFindObserver<T, R>.OnError(const AError: Exception);
+begin
+  FDown.OnError(AError);
+end;
+
+procedure TFindObserver<T, R>.OnComplete;
+begin
+  FDown.OnComplete;
+end;
+
+{ TFindObservable<T,R> }
+
+constructor TFindObservable<T, R>.Create(const ASource: ISubscribable<T>;
+  const AMapper: TMapper<T, R>; const AMatch: TPredicate<T>);
+begin
+  inherited Create;
+  FSource := ASource;
+  FMapper := AMapper;
+  FMatch := AMatch;
+end;
+
+function TFindObservable<T, R>.Subscribe(const AObserver: IObserver<R>): ISubscription;
+begin
+  Result := FSource.Subscribe(TFindObserver<T, R>.Create(AObserver, FMapper, FMatch));
+end;
+
+{ TFindIndexObserver<T> }
+
+constructor TFindIndexObserver<T>.Create(const ADown: IObserver<Integer>;
+  const AMatch: TPredicate<T>);
+begin
+  inherited Create;
+  FDown := ADown;
+  FMatch := AMatch;
+  FIndex := 0;
+  FFound := False;
+end;
+
+procedure TFindIndexObserver<T>.OnNext(const AValue: T);
+begin
+  if FFound then
+    Exit;
+  if FMatch(AValue) then
+  begin
+    FFound := True;
+    FDown.OnNext(FIndex);
+  end;
+  Inc(FIndex);
+end;
+
+procedure TFindIndexObserver<T>.OnError(const AError: Exception);
+begin
+  FDown.OnError(AError);
+end;
+
+procedure TFindIndexObserver<T>.OnComplete;
+begin
+  FDown.OnComplete;
+end;
+
+{ TFindIndexObservable<T> }
+
+constructor TFindIndexObservable<T>.Create(const ASource: ISubscribable<T>;
+  const AMatch: TPredicate<T>);
+begin
+  inherited Create;
+  FSource := ASource;
+  FMatch := AMatch;
+end;
+
+function TFindIndexObservable<T>.Subscribe(const AObserver: IObserver<Integer>): ISubscription;
+begin
+  Result := FSource.Subscribe(TFindIndexObserver<T>.Create(AObserver, FMatch));
+end;
+
+function SequenceEqual<T>(const ALeft: ISubscribable<T>; const ARight: ISubscribable<T>;
+  const AEquals: TEquality<T>): ISubscribable<Boolean>;
+begin
+  Result := TSequenceEqualObservable<T>.Create(ALeft, ARight, AEquals);
+end;
+
+{ TSequenceEqualCoordinator<T> }
+
+constructor TSequenceEqualCoordinator<T>.Create(const ADown: IObserver<Boolean>;
+  const AEquals: TEquality<T>);
+begin
+  inherited Create;
+  FDown := ADown;
+  FEquals := AEquals;
+  FLeft := nil;
+  FRight := nil;
+  FLeftDone := False;
+  FRightDone := False;
+  FClosed := False;
+end;
+
+procedure TSequenceEqualCoordinator<T>.TryEmit;
+var
+  I: Integer;
+  Equal: Boolean;
+begin
+  { Compare only once both sides are done, so the whole arrays are present. }
+  if (not FLeftDone) or (not FRightDone) or FClosed then
+    Exit;
+  FClosed := True;
+  Equal := Length(FLeft) = Length(FRight);
+  if Equal then
+    for I := 0 to High(FLeft) do
+      if not FEquals(FLeft[I], FRight[I]) then
+      begin
+        Equal := False;
+        Break;
+      end;
+  FDown.OnNext(Equal);
+  FDown.OnComplete;
+end;
+
+procedure TSequenceEqualCoordinator<T>.PushLeft(const AValue: T);
+begin
+  if FClosed then
+    Exit;
+  SetLength(FLeft, Length(FLeft) + 1);
+  FLeft[High(FLeft)] := AValue;
+end;
+
+procedure TSequenceEqualCoordinator<T>.PushRight(const AValue: T);
+begin
+  if FClosed then
+    Exit;
+  SetLength(FRight, Length(FRight) + 1);
+  FRight[High(FRight)] := AValue;
+end;
+
+procedure TSequenceEqualCoordinator<T>.LeftDone;
+begin
+  FLeftDone := True;
+  TryEmit;
+end;
+
+procedure TSequenceEqualCoordinator<T>.RightDone;
+begin
+  FRightDone := True;
+  TryEmit;
+end;
+
+procedure TSequenceEqualCoordinator<T>.Unsubscribe;
+begin
+  FClosed := True;
+end;
+
+function TSequenceEqualCoordinator<T>.Closed: Boolean;
+begin
+  Result := FClosed;
+end;
+
+{ TSeqEqualLeftObserver<T> }
+
+constructor TSeqEqualLeftObserver<T>.Create(const ACoord: TSequenceEqualCoordinator<T>);
+begin
+  inherited Create;
+  FCoord := ACoord;
+end;
+
+procedure TSeqEqualLeftObserver<T>.OnNext(const AValue: T);
+begin
+  FCoord.PushLeft(AValue);
+end;
+
+procedure TSeqEqualLeftObserver<T>.OnError(const AError: Exception);
+begin
+  FCoord.FDown.OnError(AError);
+end;
+
+procedure TSeqEqualLeftObserver<T>.OnComplete;
+begin
+  FCoord.LeftDone;
+end;
+
+{ TSeqEqualRightObserver<T> }
+
+constructor TSeqEqualRightObserver<T>.Create(const ACoord: TSequenceEqualCoordinator<T>);
+begin
+  inherited Create;
+  FCoord := ACoord;
+end;
+
+procedure TSeqEqualRightObserver<T>.OnNext(const AValue: T);
+begin
+  FCoord.PushRight(AValue);
+end;
+
+procedure TSeqEqualRightObserver<T>.OnError(const AError: Exception);
+begin
+  FCoord.FDown.OnError(AError);
+end;
+
+procedure TSeqEqualRightObserver<T>.OnComplete;
+begin
+  FCoord.RightDone;
+end;
+
+{ TSequenceEqualObservable<T> }
+
+constructor TSequenceEqualObservable<T>.Create(const ALeft: ISubscribable<T>;
+  const ARight: ISubscribable<T>; const AEquals: TEquality<T>);
+begin
+  inherited Create;
+  FLeft := ALeft;
+  FRight := ARight;
+  FEquals := AEquals;
+end;
+
+function TSequenceEqualObservable<T>.Subscribe(
+  const AObserver: IObserver<Boolean>): ISubscription;
+var
+  C: TSequenceEqualCoordinator<T>;
+begin
+  C := TSequenceEqualCoordinator<T>.Create(AObserver, FEquals);
+  Result := C;
+  FLeft.Subscribe(TSeqEqualLeftObserver<T>.Create(C));
+  FRight.Subscribe(TSeqEqualRightObserver<T>.Create(C));
+end;
+
+function RefCount<T>(const AConnectable: IConnectableObservable<T>): ISubscribable<T>;
+begin
+  { RefCount is Share's body over an existing connectable: no source needed. }
+  Result := TSharedObservable<T>.Create(nil, AConnectable);
 end;
 
 end.

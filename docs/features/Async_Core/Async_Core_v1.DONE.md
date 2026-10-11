@@ -137,18 +137,19 @@ is the remainder, split by what is actually buildable under FPC 3.3.1.
 ## Phase 8 — Error handling, multicasting, utility
 
 - [x] **Test + Implement**: error — `CatchError`, `Retry`, `RetryWhen`,
-      `RepeatCount`, `Finalize`, `ThrowIfEmpty`.
-      Remaining: `RepeatWhen`, `OnErrorResumeNext`.
+      `RepeatCount`, `Finalize`, `ThrowIfEmpty`, `RepeatWhen` (the completion-side
+      mirror of `RetryWhen`), `OnErrorResumeNext` (concatenate, resuming past an
+      error).
 - [x] **Test + Implement**: multicasting — `Multicast`, `Publish`,
       `PublishReplay`, `PublishLast`, `PublishBehavior`, `Share`, `ShareReplay`
       (a `TConnectableObservable<T>` with `Connect`; `Share`/`ShareReplay` are
-      ref-counted auto-connect). `ISubject<T>` in `async.subject` is the seam.
-      Remaining: an explicit `RefCount`.
+      ref-counted auto-connect), and an explicit `RefCount` over a connectable.
+      `ISubject<T>` in `async.subject` is the seam.
 - [x] **Test + Implement**: utility / aggregation — `Tap`, `Delay`, `DelayWhen`,
       `Timeout`, `TimeoutWith`, `Reduce`, `Count`, `EndWith`, `Distinct`, `Last`,
-      `Every`, `IsEmpty`, `DefaultIfEmpty`, `Materialize`, `Dematerialize`.
-      Remaining: `ToArray` (blocked by generic-inside-generic), `Max`, `Min`,
-      `Find`, `FindIndex`, `SequenceEqual`.
+      `Single`, `Every`, `IsEmpty`, `DefaultIfEmpty`, `Materialize`,
+      `Dematerialize`, `Max`, `Min`, `Find`, `FindIndex`, `SequenceEqual`.
+      Remaining: `ToArray` (blocked by generic-inside-generic).
 
 ## Phase 9 — Concurrency
 
