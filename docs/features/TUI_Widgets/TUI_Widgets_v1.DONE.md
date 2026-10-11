@@ -70,10 +70,16 @@ HANDOFF.md
 
 ## Success Criteria
 
-- [ ] All tasks checked
-- [ ] Every FEATURE acceptance criterion maps to a passing test
-- [ ] `make check` passes (tests + leak gate)
-- [ ] The demo uses the kit instead of a local panel
+- [x] All tasks checked
+- [x] Every FEATURE acceptance criterion maps to a passing test
+- [x] `make check` passes (tests + leak gate)
+- [x] The demo uses the kit instead of a local panel
+
+> **Complete.** All implementation tasks and success criteria are met; the code,
+> tests (`TThemeTest`/`TPanelTest`/`TButtonTest`/`TListTest`/`TFocusGroupTest`/
+> `TSingleChildTest`, all green) and the `tui_widgets_demo` (built by
+> `make widgets-demo`) are in place. Tick-boxes above were completed
+> retroactively.
 
 ## Notes & Considerations
 

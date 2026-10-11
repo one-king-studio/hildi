@@ -314,50 +314,50 @@ interface stays interactive while a turn streams.
 
 Prompt and turn lifecycle
 
-- [ ] A single-line prompt editor accepts typed characters, Backspace/Delete,
+- [x] A single-line prompt editor accepts typed characters, Backspace/Delete,
       Home/End, and left/right cursor movement; Enter submits the line.
-- [ ] Up/Down recalls previously submitted prompts (history).
-- [ ] Submitting echoes the prompt into the conversation and starts a turn; the
+- [x] Up/Down recalls previously submitted prompts (history).
+- [x] Submitting echoes the prompt into the conversation and starts a turn; the
       prompt editor is disabled until the turn ends.
-- [ ] While a turn runs the UI keeps processing input (scroll, resize, quit).
-- [ ] Assistant text (and, when present, reasoning) appears incrementally as it
+- [x] While a turn runs the UI keeps processing input (scroll, resize, quit).
+- [x] Assistant text (and, when present, reasoning) appears incrementally as it
       streams, appended to the conversation, which auto-scrolls to the newest
       line unless the user has scrolled away.
-- [ ] Each tool call renders a labelled line with the tool name, the model's
+- [x] Each tool call renders a labelled line with the tool name, the model's
       reason, and its arguments; each result renders a labelled outcome line.
-- [ ] When an approval ask arrives, a modal shows the summary and its options;
+- [x] When an approval ask arrives, a modal shows the summary and its options;
       choosing an option resolves the ask (persisting the rule per its scope when
       the option persists) and the turn resumes; deny refuses the call.
-- [ ] LLM and tool errors render as error lines; the prompt editor re-enables.
-- [ ] On completion the final assistant text is in the conversation and the
+- [x] LLM and tool errors render as error lines; the prompt editor re-enables.
+- [x] On completion the final assistant text is in the conversation and the
       prompt editor re-enables.
-- [ ] Quitting mid-turn denies any pending ask, stops the worker, joins it, and
+- [x] Quitting mid-turn denies any pending ask, stops the worker, joins it, and
       restores the terminal.
 
 Persistence and configuration
 
-- [ ] With a store configured, the workspace is ensured, a session is created (or
+- [x] With a store configured, the workspace is ensured, a session is created (or
       resumed), and every user/assistant/reasoning/tool message is appended to the
       ledger as it occurs.
-- [ ] On resume, prior messages are rendered into the conversation before the
+- [x] On resume, prior messages are rendered into the conversation before the
       first new turn.
-- [ ] With no store, the app runs against an in-memory conversation and
+- [x] With no store, the app runs against an in-memory conversation and
       session-only approvals (never silently disabled).
-- [ ] Model, endpoint, workspace, session, and system prompt come from the same
+- [x] Model, endpoint, workspace, session, and system prompt come from the same
       environment/`.env`/flags resolution the CLI uses.
 
 #### Non-Functional Requirements
 
-- [ ] The UI thread never performs network or blocking I/O; a turn runs on a
+- [x] The UI thread never performs network or blocking I/O; a turn runs on a
       worker thread and communicates only through a thread-safe queue.
-- [ ] Input-to-visible latency stays under 50 ms while a turn streams;
+- [x] Input-to-visible latency stays under 50 ms while a turn streams;
       interactive frame rate stays >= 60 fps (measured work, not wall-clock, in
       `make check`; wall-clock via `make bench`).
-- [ ] The worker thread is always joined and its objects freed on every exit
+- [x] The worker thread is always joined and its objects freed on every exit
       path; leak-clean under `make test-leak`.
-- [ ] `cthreads` is listed first in the example program on Unix.
-- [ ] Builds on macOS and Linux with FPC 3.3.1; no new dependency.
-- [ ] `make check` is green.
+- [x] `cthreads` is listed first in the example program on Unix.
+- [x] Builds on macOS and Linux with FPC 3.3.1; no new dependency.
+- [x] `make check` is green.
 
 ### Out of Scope (Harness UI v1)
 

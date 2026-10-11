@@ -47,25 +47,25 @@ them, not a framework.
 
 ### Functional Requirements
 
-- [ ] `TSingleChild` owns one child and forwards `Measure`/`Arrange`/`Render`/
+- [x] `TSingleChild` owns one child and forwards `Measure`/`Arrange`/`Render`/
       `HandleEvent` to it; subclasses override only what differs.
-- [ ] `TPanel` draws a background, an optional border (box-drawing) and title,
+- [x] `TPanel` draws a background, an optional border (box-drawing) and title,
       and insets its child by a padding; `Measure` accounts for border/padding.
-- [ ] `TTheme` maps named roles (base, panel, border, title, text, muted, accent,
+- [x] `TTheme` maps named roles (base, panel, border, title, text, muted, accent,
       error, success) to `TAttr`; `DarkTheme`/`LightTheme` are provided.
-- [ ] `TFocusable` exposes `Focused`; `TFocusGroup` cycles focus with `Tab` and
+- [x] `TFocusable` exposes `Focused`; `TFocusGroup` cycles focus with `Tab` and
       `Shift-Tab`, focuses on left-click, and routes keys to the focused child.
-- [ ] `TButton` has a caption and an `OnClick`; `Enter`/`Space` (when focused)
+- [x] `TButton` has a caption and an `OnClick`; `Enter`/`Space` (when focused)
       and a click invoke it.
-- [ ] `TList` has items and a selected index; `Up`/`Down` move the selection and
+- [x] `TList` has items and a selected index; `Up`/`Down` move the selection and
       `Enter` activates; it scrolls when placed in a `TScrollContainer`.
-- [ ] The focused control is visually distinct.
+- [x] The focused control is visually distinct.
 
 ### Non-Functional Requirements
 
-- [ ] No new dependency; reuses TUI Core and the encoder.
-- [ ] Testable headlessly; leak-clean under `make test-leak`; `make check` green.
-- [ ] Style: `{$mode delphi}{$H+}`, units named `hildegard.helper.tui.*`.
+- [x] No new dependency; reuses TUI Core and the encoder.
+- [x] Testable headlessly; leak-clean under `make test-leak`; `make check` green.
+- [x] Style: `{$mode delphi}{$H+}`, units named `hildegard.helper.tui.*`.
 
 ## Success Metrics
 

@@ -127,12 +127,17 @@ HANDOFF.md
 
 ## Success Criteria
 
-- [ ] All tasks above checked
-- [ ] Every FEATURE acceptance criterion maps to a passing test
-- [ ] `make check` passes (tests + leak gate)
-- [ ] `examples/tui_agent.pas` demonstrates streaming, tool lines, an approval
+- [x] All tasks above checked
+- [x] Every FEATURE acceptance criterion maps to a passing test
+- [x] `make check` passes (tests + leak gate)
+- [x] `examples/tui_agent.pas` demonstrates streaming, tool lines, an approval
       modal, quit-mid-turn, and resume
-- [ ] Implementation matches the specification
+- [x] Implementation matches the specification
+
+> **Complete.** All tasks and success criteria are met; the harness suites
+> (`TTurnQueueTest`/`TTurnWorkerTest`/`THarnessAppTest`/`THarnessSessionTest`/
+> `THarnessViewTest`) are green and `examples/tui_agent.pas` builds
+> (`make tui-agent`). Tick-boxes completed retroactively.
 
 ## Notes & Considerations
 
