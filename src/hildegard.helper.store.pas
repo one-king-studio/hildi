@@ -238,6 +238,12 @@ type
     { Messages with seq > AAfterSeq, oldest first. }
     function QueryMessagesAfter(const ASessionId: string; AAfterSeq: Int64;
       out AMessages: TMessageRecordArray; out AError: TStoreError): Boolean;
+    { The leading run of system messages (the session setup prompt): every
+      system message before the first non-system one, oldest first. This is the
+      part of the prompt that a checkpoint must never archive away, so Compose
+      fetches it separately instead of loading the whole history. }
+    function QueryLeadingSystemMessages(const ASessionId: string;
+      out AMessages: TMessageRecordArray; out AError: TStoreError): Boolean;
     { An archived page for back-pagination: the last ALimit messages with
       seq <= ABeforeSeq, oldest first. }
     function QueryMessagesBefore(const ASessionId: string; ABeforeSeq: Int64;
@@ -2837,6 +2843,68 @@ begin
         Exit(Fail(AError, seError, 'could not read messages', DbErrorText));
       Stmt.BindText(1, ASessionId);
       Stmt.BindInt64(2, AAfterSeq);
+      N := 0;
+      while Stmt.Step = SQLITE_ROW do
+      begin
+        Rec := Default(TMessageRecord);
+        Rec.Id := Stmt.ColInt64(0);
+        Rec.SessionId := Stmt.ColText(1);
+        Rec.TurnId := Stmt.ColInt64(2);
+        Rec.RequestId := Stmt.ColInt64(3);
+        Rec.Seq := Stmt.ColInt64(4);
+        Rec.Role := TMessageRole(Stmt.ColInt(5));
+        Rec.Content := Stmt.ColText(6);
+        Rec.ToolCallId := Stmt.ColText(7);
+        Rec.ToolName := Stmt.ColText(8);
+        Rec.ToolArguments := Stmt.ColText(9);
+        Rec.ToolReason := Stmt.ColText(10);
+        Rec.ToolOk := Stmt.ColInt(11) <> 0;
+        Rec.CreatedAtMs := Stmt.ColInt64(12);
+        Rec.DurationMs := Stmt.ColInt64(13);
+        Rec.RefSessionId := Stmt.ColText(14);
+        Rec.LabelText := Stmt.ColText(15);
+        Rec.Source := Stmt.ColText(16);
+        Rec.Status := Stmt.ColText(17);
+        SetLength(AMessages, N + 1);
+        AMessages[N] := Rec;
+        Inc(N);
+      end;
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.QueryLeadingSystemMessages(const ASessionId: string;
+  out AMessages: TMessageRecordArray; out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+  N: Integer;
+  Rec: TMessageRecord;
+begin
+  AError := OkError;
+  AMessages := nil;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    { The leading run: system messages (role 0) with seq below the first
+      non-system message. This is the session setup prompt. }
+    Stmt := TStmt.Create(FDb,
+      'SELECT id, session_id, turn_id, request_id, seq, role, content, ' +
+      'tool_call_id, tool_name, tool_arguments, tool_reason, tool_ok, ' +
+      'created_at, duration_ms, ref_session_id, label, source, status ' +
+      'FROM messages WHERE session_id = ? AND role = 0 AND seq < ' +
+      '(SELECT COALESCE(MIN(seq), 9223372036854775807) FROM messages ' +
+      ' WHERE session_id = ? AND role <> 0) ORDER BY seq ASC');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not read system messages', DbErrorText));
+      Stmt.BindText(1, ASessionId);
+      Stmt.BindText(2, ASessionId);
       N := 0;
       while Stmt.Step = SQLITE_ROW do
       begin

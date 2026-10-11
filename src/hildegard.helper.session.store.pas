@@ -237,36 +237,44 @@ end;
 
 function TSqliteConversationStore.Compose: TChatMessageArray;
 var
-  Msgs: TMessageRecordArray;
+  Lead, Tail: TMessageRecordArray;
   Snap: TCheckpointRecord;
   Err: TStoreError;
-  Boundary: Int64;
+  Boundary, LastLeadSeq: Int64;
   HasCp: Boolean;
   I, J: Integer;
   Msg: TChatMessage;
   Call: TChatToolCall;
 begin
   Result := nil;
-  if not FStore.QueryMessages(FSessionId, Msgs, Err) then
-    Exit;
   { Resume from the latest checkpoint. The prompt is: the leading system
     message(s) (setup, always kept), then the checkpoint's summary as a context
     block, then every message after the boundary. Messages at or before the
-    boundary are archived (not replayed). }
+    boundary are archived (not replayed).
+
+    Two windowed queries replace the old "load the whole session, then filter",
+    so a resumed long session no longer re-reads (and re-allocates) its archived
+    history on every request: the leading system run (never archived) and the
+    post-boundary tail. }
+  if not FStore.QueryLeadingSystemMessages(FSessionId, Lead, Err) then
+    Exit;
   Boundary := 0;
   HasCp := FStore.LatestCheckpoint(FSessionId, Snap, Err);
   if HasCp then
     Boundary := Snap.Seq;
-  { Leading system messages, always. }
-  I := 0;
-  while (I <= High(Msgs)) and (Msgs[I].Role = mrSystem) do
+
+  { Leading system messages, always. Remember where the run ends so the tail
+    query below never re-emits them. }
+  LastLeadSeq := 0;
+  for I := 0 to High(Lead) do
   begin
     Msg := Default(TChatMessage);
     Msg.Role := crSystem;
-    Msg.Content := Msgs[I].Content;
+    Msg.Content := Lead[I].Content;
     AddMessage(Result, Msg);
-    Inc(I);
+    LastLeadSeq := Lead[I].Seq;
   end;
+
   { The checkpoint context block, after the system prompt. }
   if HasCp then
   begin
@@ -275,27 +283,35 @@ begin
     Msg.Content := CheckpointContextHeader + Snap.Summary;
     AddMessage(Result, Msg);
   end;
-  while I <= High(Msgs) do
+
+  { The tail: every message after BOTH the checkpoint boundary and the leading
+    system run (i.e. seq > max(Boundary, LastLeadSeq)). Skipping the leading run
+    unconditionally avoids re-emitting the system prompt when there is no
+    checkpoint; when there is one, the leading run is already below it. }
+  if LastLeadSeq > Boundary then
+    Boundary := LastLeadSeq;
+  if not FStore.QueryMessagesAfter(FSessionId, Boundary, Tail, Err) then
   begin
-    { Archived (before the checkpoint): not replayed. }
-    if (Boundary > 0) and (Msgs[I].Seq <= Boundary) then
-    begin
-      Inc(I);
-      Continue;
-    end;
-    case Msgs[I].Role of
+    Result := nil;
+    Exit;
+  end;
+
+  I := 0;
+  while I <= High(Tail) do
+  begin
+    case Tail[I].Role of
       mrSystem:
         begin
           Msg := Default(TChatMessage);
           Msg.Role := crSystem;
-          Msg.Content := Msgs[I].Content;
+          Msg.Content := Tail[I].Content;
           AddMessage(Result, Msg);
         end;
       mrUser:
         begin
           Msg := Default(TChatMessage);
           Msg.Role := crUser;
-          Msg.Content := Msgs[I].Content;
+          Msg.Content := Tail[I].Content;
           AddMessage(Result, Msg);
         end;
       mrAmbient:
@@ -304,23 +320,23 @@ begin
             format; the persisted record stays plain. }
           Msg := Default(TChatMessage);
           Msg.Role := crUser;
-          Msg.Content := FormatAmbient(Msgs[I].Content,
-            Msgs[I].RefSessionId, Msgs[I].LabelText, Msgs[I].Source,
-            Msgs[I].Status, Msgs[I].CreatedAtMs);
+          Msg.Content := FormatAmbient(Tail[I].Content,
+            Tail[I].RefSessionId, Tail[I].LabelText, Tail[I].Source,
+            Tail[I].Status, Tail[I].CreatedAtMs);
           AddMessage(Result, Msg);
         end;
       mrAssistant:
         begin
           Msg := Default(TChatMessage);
           Msg.Role := crAssistant;
-          Msg.Content := Msgs[I].Content;
+          Msg.Content := Tail[I].Content;
           J := I + 1;
-          while (J <= High(Msgs)) and (Msgs[J].Role = mrToolCall) do
+          while (J <= High(Tail)) and (Tail[J].Role = mrToolCall) do
           begin
             Call := Default(TChatToolCall);
-            Call.Id := Msgs[J].ToolCallId;
-            Call.Name := Msgs[J].ToolName;
-            Call.Arguments := Msgs[J].ToolArguments;
+            Call.Id := Tail[J].ToolCallId;
+            Call.Name := Tail[J].ToolName;
+            Call.Arguments := Tail[J].ToolArguments;
             SetLength(Msg.ToolCalls, Length(Msg.ToolCalls) + 1);
             Msg.ToolCalls[High(Msg.ToolCalls)] := Call;
             Inc(J);
@@ -335,12 +351,12 @@ begin
           Msg := Default(TChatMessage);
           Msg.Role := crAssistant;
           J := I;
-          while (J <= High(Msgs)) and (Msgs[J].Role = mrToolCall) do
+          while (J <= High(Tail)) and (Tail[J].Role = mrToolCall) do
           begin
             Call := Default(TChatToolCall);
-            Call.Id := Msgs[J].ToolCallId;
-            Call.Name := Msgs[J].ToolName;
-            Call.Arguments := Msgs[J].ToolArguments;
+            Call.Id := Tail[J].ToolCallId;
+            Call.Name := Tail[J].ToolName;
+            Call.Arguments := Tail[J].ToolArguments;
             SetLength(Msg.ToolCalls, Length(Msg.ToolCalls) + 1);
             Msg.ToolCalls[High(Msg.ToolCalls)] := Call;
             Inc(J);
@@ -352,11 +368,11 @@ begin
         begin
           Msg := Default(TChatMessage);
           Msg.Role := crTool;
-          Msg.Content := CapToolResult(Msgs[I]);
-          Msg.ToolCallId := Msgs[I].ToolCallId;
-          Msg.ToolName := Msgs[I].ToolName;
-          Msg.ToolOk := Msgs[I].ToolOk;
-          Msg.DurationMs := Msgs[I].DurationMs;
+          Msg.Content := CapToolResult(Tail[I]);
+          Msg.ToolCallId := Tail[I].ToolCallId;
+          Msg.ToolName := Tail[I].ToolName;
+          Msg.ToolOk := Tail[I].ToolOk;
+          Msg.DurationMs := Tail[I].DurationMs;
           AddMessage(Result, Msg);
         end;
       { Tool calls are consumed with their assistant message above, or

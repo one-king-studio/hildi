@@ -34,6 +34,7 @@ type
     procedure TestTailKeepsSystemAndRecent;
     procedure TestTailDropsOrphanTools;
     procedure TestResumeFromCheckpointShrinksContext;
+    procedure TestComposeDoesNotDuplicateLeadingSystem;
     procedure TestAppendMapsRolesAndToolFields;
     procedure TestQueryMessagesReturnsAllBlocks;
     procedure TestBeginFinishTurnAndRequestRecorded;
@@ -749,6 +750,51 @@ begin
       Pos('carried forward', Msgs[1].Content) > 0);
     AssertTrue('marked as carried-forward',
       Pos('carried forward', Msgs[1].Content) > 0);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TSessionTest.TestComposeDoesNotDuplicateLeadingSystem;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  SessionId: string;
+  WorkspaceId: Integer;
+  Conv: IConversationStore;
+  Msgs: TChatMessageArray;
+  Sys: TChatMessage;
+  I, SysCount: Integer;
+begin
+  { The windowed Compose reads the leading system run separately from the
+    post-boundary tail. With no checkpoint the tail starts after the run, so the
+    system prompt must appear exactly once (not duplicated), and the ordinary
+    history must all be present. }
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', WorkspaceId, Err);
+    S.CreateSession(WorkspaceId, SessionId, Err);
+    Conv := TSqliteConversationStore.Create(S, SessionId);
+    Sys := Default(TChatMessage);
+    Sys.Role := crSystem;
+    Sys.Content := 'setup prompt';
+    Conv.Append(Sys);
+    for I := 1 to 3 do
+    begin
+      Conv.Append(UserMsg('turn ' + IntToStr(I)));
+      Conv.Append(AssistantMsg('reply ' + IntToStr(I)));
+    end;
+    Msgs := Conv.Messages;
+    { Exactly one system message at the front. }
+    SysCount := 0;
+    for I := 0 to High(Msgs) do
+      if Msgs[I].Role = crSystem then
+        Inc(SysCount);
+    AssertEquals('system prompt appears once', 1, SysCount);
+    AssertEquals('system first', Ord(crSystem), Ord(Msgs[0].Role));
+    AssertEquals('system content', 'setup prompt', Msgs[0].Content);
+    { Full history present: 1 system + 3 user + 3 assistant. }
+    AssertEquals('full history', 7, Length(Msgs));
   finally
     S.Free;
   end;

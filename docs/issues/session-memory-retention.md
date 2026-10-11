@@ -1,6 +1,6 @@
 # Issue: session memory is not trimmed by a checkpoint
 
-**Status:** open, deferred (documented while other work is in flight)
+**Status:** fixed (both proposed code changes landed; see "Proposed fix" below)
 **Area:** session runtime + store (`hildegard.helper.session.runtime`,
 `hildegard.helper.session.store`), not `Context_Checkpoint` itself
 **Symptom:** memory stays high when a session is resumed from a new checkpoint,
@@ -74,17 +74,19 @@ No checkpoint filtering (tests/CLI, so not the TUI case, but noted).
 
 ## Proposed fix (when picked up)
 
-1. **Query after the boundary** — `QueryMessagesAfter` already exists
-   (`store.pas:239`). `Compose` should use it instead of loading everything and
-   filtering. This is the main win (it removes the per-request O(history)
-   allocation). **Caveat:** the leading system message(s) are written at session
-   start (lowest `seq`, before any checkpoint), so `Compose` must *also* fetch
-   them — a bare `QueryMessagesAfter(boundary)` would drop the system prompt.
-   `QueryActiveMessages` (`store.pas:2801`) already does the boundary query, but
-   it drops the system messages too, so it is not a drop-in for `Compose`.
-2. **Grow `FReplay` by capacity** — the O(n²) append (`:438`), the same
-   treatment `TTurnQueue` got. Not the memory culprit (it is per-turn bounded),
-   but a real per-turn cost.
+**Done:**
+
+1. **Query after the boundary** — `Compose` now uses two windowed queries:
+   `QueryLeadingSystemMessages` (new; the session setup prompt, never archived)
+   plus `QueryMessagesAfter(max(boundary, lastLeadSeq))` for the tail, instead of
+   loading the whole history and filtering. The system prompt is fetched
+   separately, so it is not lost to the boundary and not double-emitted.
+2. **Grow `FReplay` by capacity** — `ReplayPush` doubles the buffer (start 16)
+   instead of `SetLength(n+1)`, so the per-turn append is amortised rather than
+   O(n²); `ReplayReset` keeps the allocation across turns.
+
+**Remaining:**
+
 3. **Checkpoint-filter the in-memory store** for parity.
 
 ## Why this is filed separately

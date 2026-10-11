@@ -89,6 +89,8 @@ type
     FIdleDeadline: Int64;
     FLoopStarted: TSessionEvent;
     FReplay: array of TSessionEvent;
+    FReplayLen: Integer;      { logical length; FReplay may hold spare capacity }
+    FReplayCap: Integer;      { allocated slots in FReplay }
     FReadSet, FWriteSet: TFDSet;
     FMaxFd: Integer;
     { Subagents: the supervisor (nil when this session may not delegate), its
@@ -109,6 +111,8 @@ type
     procedure EmitLoopStarted;
     function EmitEvent(AKind: TSessionEventKind): TSessionEvent;
     procedure Broadcast(const AEvent: TSessionEvent);
+    procedure ReplayReset;
+    procedure ReplayPush(const AEvent: TSessionEvent);
     procedure ReplyTo(AClient: TClientConn; const AId: string; AOk: Boolean;
       const AErrorCode: string);
     procedure QueueLine(AClient: TClientConn; const ALine: string);
@@ -413,8 +417,8 @@ begin
   FLoopStarted.Kind := ekLoopStarted;
   FLoopStarted.LoopId := FLoopId;
   FLoopStarted.SessionId := FSessionId;
-  SetLength(FReplay, 1);
-  FReplay[0] := FLoopStarted;
+  ReplayReset;
+  ReplayPush(FLoopStarted);
 end;
 
 function TSessionRuntime.EmitEvent(AKind: TSessionEventKind): TSessionEvent;
@@ -426,6 +430,30 @@ begin
   Result.Kind := AKind;
 end;
 
+procedure TSessionRuntime.ReplayReset;
+begin
+  { Keep the allocated capacity; just drop the logical length. The next push
+    reuses the buffer, so a per-turn reset no longer frees and reallocates. }
+  FReplayLen := 0;
+end;
+
+procedure TSessionRuntime.ReplayPush(const AEvent: TSessionEvent);
+begin
+  { Amortised growth: double the capacity instead of SetLength(n+1), which
+    reallocates and copies on every event (O(n^2) within a chatty turn - the
+    streaming deltas alone can be thousands of events). }
+  if FReplayLen = FReplayCap then
+  begin
+    if FReplayCap = 0 then
+      FReplayCap := 16
+    else
+      FReplayCap := FReplayCap * 2;
+    SetLength(FReplay, FReplayCap);
+  end;
+  FReplay[FReplayLen] := AEvent;
+  Inc(FReplayLen);
+end;
+
 procedure TSessionRuntime.Broadcast(const AEvent: TSessionEvent);
 var
   I: Integer;
@@ -434,10 +462,7 @@ var
   C: TClientConn;
 begin
   if AEvent.Kind <> ekGap then
-  begin
-    SetLength(FReplay, Length(FReplay) + 1);
-    FReplay[High(FReplay)] := AEvent;
-  end;
+    ReplayPush(AEvent);
   M := Default(TSessionMessage);
   M.Kind := mkEvent;
   M.Event := AEvent;
@@ -556,7 +581,7 @@ var
   I: Integer;
   M: TSessionMessage;
 begin
-  for I := 0 to High(FReplay) do
+  for I := 0 to FReplayLen - 1 do
   begin
     if FReplay[I].Seq < AFromSeq then
       Continue;
@@ -1197,8 +1222,8 @@ begin
     FWorker := nil;
   end;
   FTurnActive := False;
-  SetLength(FReplay, 1);
-  FReplay[0] := FLoopStarted;
+  ReplayReset;
+  ReplayPush(FLoopStarted);
   FIdleDeadline := NowMs + FIdleExitMs;
 end;
 
