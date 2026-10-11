@@ -13,6 +13,7 @@ interface
 uses
   Classes, SysUtils,
   hildegard.helper.agent, hildegard.helper.llm, hildegard.helper.approval,
+  hildegard.helper.skills,
   hildegard.helper.stdio.child, hildegard.helper.jsonrpc,
   hildegard.helper.mcp.transport, hildegard.helper.mcp.http,
   hildegard.helper.mcp.config;
@@ -150,10 +151,12 @@ type
     FBackoffInitialMs: Integer;
     FBackoffMaxMs: Integer;
     FTokenSourceFor: TMcpTokenSourceFactory;
+    FLazy: Boolean;
     function FindRuntime(const AName: string): Integer;
     function ClientConfigFor(const AServer: TMcpServerConfig): TMcpClientConfig;
     procedure CloseRuntime(AIndex: Integer);
-    function OpenRuntime(AIndex: Integer): Boolean;
+    function OpenRuntime(AIndex: Integer): Boolean; overload;
+    function OpenRuntime(AIndex: Integer; out AError: string): Boolean; overload;
   public
     constructor Create(const AConfig: TMcpConfig;
       AApproval: IApprovalService; AOnEvent: TMcpEvent;
@@ -161,6 +164,18 @@ type
     destructor Destroy; override;
     { Open every configured server (a thin wrapper over Reconcile). }
     function Open: Boolean;
+    { Open one configured server by name (connect + discover), for a lazy load.
+      False + AError when the name is unknown or the connect fails. }
+    function OpenServer(const AName: string; out AError: string): Boolean;
+    { Close one configured server by name (its client + tools). Idempotent;
+      False when the name is unknown. }
+    function CloseServer(const AName: string): Boolean;
+    { The names of the servers the manager currently holds (configured). }
+    function ServerNames: TStringArray;
+    { When True, Reconcile declares servers without opening them (lazy MCP): a
+      new or stopped server is left mssStopped until OpenServer is called. Set
+      before the first Reconcile. }
+    property Lazy: Boolean read FLazy write FLazy;
     { Diff AConfig against the live set: open new, reconnect dead (after
       backoff), close disabled/removed. Returns True when consistent. }
     function Reconcile(const AConfig: TMcpConfig): Boolean;
@@ -168,6 +183,8 @@ type
     function Runtimes: TMcpServerRuntimeArray;
     { The union of connected servers' tool specs. }
     function Specs: TToolSpecArray;
+    { One server's tool specs (empty when unknown or not connected). }
+    function ServerSpecs(const AName: string): TToolSpecArray;
     { Resolve a tool name to its owning server's handler. }
     function Find(const AName: string; out ATool: TRegisteredTool): Boolean;
     { Backoff knobs; default 1000 -> 60000 ms. Exposed for tests. }
@@ -192,6 +209,33 @@ type
     function PromptFragment: string;
     function Find(const AName: string; out ATool: TRegisteredTool): Boolean;
   end;
+
+  { One configured MCP server as a skill tool source (Lazy_MCP). Activate
+    connects + discovers via the manager; Deactivate closes. Curated metadata
+    only - the Declaration never uses a server's initialize.instructions. }
+  TMcpSkillSource = class(TInterfacedObject, ISkillToolSource)
+  private
+    FManager: TMcpManager;
+    FName: string;
+    FDescription: string;
+    FWhenToUse: string;
+  public
+    constructor Create(AManager: TMcpManager; const AName, ADescription,
+      AWhenToUse: string);
+    function Activate(out AError: string): Boolean;
+    procedure Deactivate;
+    function Specs: TToolSpecArray;
+    function Find(const AName: string; out ATool: TRegisteredTool): Boolean;
+    { The skill declaration for this server (key mcp_<name>, curated metadata). }
+    function Declaration: TSkill;
+  end;
+
+  { Declare one skill per enabled server into the registry. Re-callable at a turn
+    boundary: it replaces the MCP skills' declarations without connecting. }
+  procedure RegisterMcpSkills(const ARegistry: TSkillRegistry;
+    const AConfig: TMcpConfig; AManager: TMcpManager);
+  { The skill key for a server name: mcp_<sanitized name>. }
+  function McpSkillKey(const AServer: string): string;
 
 { --- pure mapping (public for direct testing) --------------------------- }
 
@@ -941,6 +985,7 @@ begin
   FTokenSourceFor := ATokenSourceFor;
   FBackoffInitialMs := McpBackoffInitialMs;
   FBackoffMaxMs := McpBackoffMaxMs;
+  FLazy := False;
   SetLength(FRuntimes, Length(AConfig.Servers));
   for I := 0 to High(AConfig.Servers) do
   begin
@@ -981,11 +1026,17 @@ begin
   Result := -1;
 end;
 
-function TMcpManager.OpenRuntime(AIndex: Integer): Boolean;
+function TMcpManager.OpenRuntime(AIndex: Integer): Boolean; overload;
 var
   Err: string;
 begin
-  Result := FRuntimes[AIndex].Client.Open(Err);
+  Result := OpenRuntime(AIndex, Err);
+end;
+
+function TMcpManager.OpenRuntime(AIndex: Integer; out AError: string): Boolean; overload;
+begin
+  AError := '';
+  Result := FRuntimes[AIndex].Client.Open(AError);
   if Result then
   begin
     FRuntimes[AIndex].State := mssConnected;
@@ -1020,6 +1071,47 @@ begin
   for I := 0 to High(FRuntimes) do
     Cfg.Servers[I] := FRuntimes[I].Config;
   Result := Reconcile(Cfg);
+end;
+
+function TMcpManager.OpenServer(const AName: string; out AError: string): Boolean;
+var
+  I: Integer;
+begin
+  AError := '';
+  I := FindRuntime(AName);
+  if I < 0 then
+  begin
+    AError := 'unknown server: ' + AName;
+    Exit(False);
+  end;
+  { Already connected: nothing to do. }
+  if (FRuntimes[I].State = mssConnected) and not FRuntimes[I].Client.Dead then
+    Exit(True);
+  { A stale or dead client must be closed before a fresh Open. }
+  if FRuntimes[I].State <> mssStopped then
+    FRuntimes[I].Client.Close;
+  Result := OpenRuntime(I, AError);
+end;
+
+function TMcpManager.CloseServer(const AName: string): Boolean;
+var
+  I: Integer;
+begin
+  I := FindRuntime(AName);
+  if I < 0 then
+    Exit(False);
+  CloseRuntime(I);
+  Result := True;
+end;
+
+function TMcpManager.ServerNames: TStringArray;
+var
+  I: Integer;
+begin
+  Result := nil;
+  SetLength(Result, Length(FRuntimes));
+  for I := 0 to High(FRuntimes) do
+    Result[I] := FRuntimes[I].Name;
 end;
 
 function TMcpManager.Reconcile(const AConfig: TMcpConfig): Boolean;
@@ -1081,9 +1173,11 @@ begin
           FRuntimes[I].NextAttemptAt := Now + FRuntimes[I].BackoffMs;
         end;
       mssStopped:
-        OpenRuntime(I);
+        { Lazy: a stopped server stays stopped until an explicit OpenServer. }
+        if not FLazy then
+          OpenRuntime(I);
       mssDead:
-        if Now >= FRuntimes[I].NextAttemptAt then
+        if (not FLazy) and (Now >= FRuntimes[I].NextAttemptAt) then
         begin
           FRuntimes[I].Client.Close;
           OpenRuntime(I);
@@ -1108,6 +1202,17 @@ begin
       Result[N] := S[K];
     end;
   end;
+end;
+
+function TMcpManager.ServerSpecs(const AName: string): TToolSpecArray;
+var
+  I: Integer;
+begin
+  Result := nil;
+  I := FindRuntime(AName);
+  if I < 0 then
+    Exit;
+  Result := FRuntimes[I].Client.Specs;
 end;
 
 function TMcpManager.Find(const AName: string;
@@ -1177,6 +1282,156 @@ begin
     Exit(False);
   end;
   Result := FManager.Find(AName, ATool);
+end;
+
+{ --- TMcpSkillSource (Lazy_MCP) ----------------------------------------- }
+
+function McpSkillKey(const AServer: string): string;
+begin
+  Result := 'mcp_' + McpSanitize(AServer);
+end;
+
+{ Curated manifest metadata for a server, keyed by its (sanitized) name. A known
+  service gets a real description and when-to-use; an unknown one gets an honest
+  generic line. This is the SPEC's "curated template by known service name" - the
+  text is OURS, never the server's own initialize.instructions (a prompt-
+  injection surface). }
+procedure McpCuratedMeta(const AName: string; out ADescription,
+  AWhenToUse: string);
+var
+  Key: string;
+begin
+  Key := McpSanitize(AName);
+  if Key = 'playwright' then
+  begin
+    ADescription := 'Browser automation (navigate, click, type, snapshot).';
+    AWhenToUse := 'Use when a task needs a real browser: driving a web UI, ' +
+      'scraping a rendered page, or checking how a site behaves.';
+  end
+  else if Key = 'puppeteer' then
+  begin
+    ADescription := 'Browser automation (Chromium) via Puppeteer.';
+    AWhenToUse := 'Use when a task needs to drive a headless Chromium.';
+  end
+  else if Key = 'github' then
+  begin
+    ADescription := 'GitHub: repos, issues, pull requests, and code search.';
+    AWhenToUse := 'Use when a task concerns a GitHub repository, its issues, ' +
+      'or its pull requests.';
+  end
+  else if Key = 'notion' then
+  begin
+    ADescription := 'Notion: read and write pages and databases.';
+    AWhenToUse := 'Use when a task concerns the user''s Notion workspace.';
+  end
+  else if Key = 'filesystem' then
+  begin
+    ADescription := 'Filesystem access (read, write, move, search files).';
+    AWhenToUse := 'Use when a task needs file access outside the workspace.';
+  end
+  else if Key = 'fetch' then
+  begin
+    ADescription := 'HTTP fetch: retrieve a URL and return its content.';
+    AWhenToUse := 'Use when a task needs to retrieve a web page or API.';
+  end
+  else if Key = 'memory' then
+  begin
+    ADescription := 'A persistent knowledge graph of entities and relations.';
+    AWhenToUse := 'Use when a task needs long-term memory across sessions.';
+  end
+  else if Key = 'postgres' then
+  begin
+    ADescription := 'PostgreSQL: run read-only SQL queries.';
+    AWhenToUse := 'Use when a task needs to query a Postgres database.';
+  end
+  else if Key = 'sqlite' then
+  begin
+    ADescription := 'SQLite: query and inspect a database file.';
+    AWhenToUse := 'Use when a task concerns a SQLite database.';
+  end
+  else if Key = 'slack' then
+  begin
+    ADescription := 'Slack: read and post channel messages.';
+    AWhenToUse := 'Use when a task concerns Slack channels or messages.';
+  end
+  else
+  begin
+    ADescription := 'An MCP server (' + AName + ').';
+    AWhenToUse := 'Use when the task needs the ' + AName + ' MCP tools.';
+  end;
+end;
+
+constructor TMcpSkillSource.Create(AManager: TMcpManager;
+  const AName, ADescription, AWhenToUse: string);
+begin
+  inherited Create;
+  FManager := AManager;
+  FName := AName;
+  FDescription := ADescription;
+  FWhenToUse := AWhenToUse;
+end;
+
+function TMcpSkillSource.Activate(out AError: string): Boolean;
+begin
+  AError := '';
+  if FManager = nil then
+  begin
+    AError := 'no MCP manager';
+    Exit(False);
+  end;
+  Result := FManager.OpenServer(FName, AError);
+end;
+
+procedure TMcpSkillSource.Deactivate;
+begin
+  if FManager <> nil then
+    FManager.CloseServer(FName);
+end;
+
+function TMcpSkillSource.Specs: TToolSpecArray;
+begin
+  { The manager exposes the union of connected servers; filter to this server. }
+  Result := nil;
+  if FManager = nil then
+    Exit;
+  Result := FManager.ServerSpecs(FName);
+end;
+
+function TMcpSkillSource.Find(const AName: string;
+  out ATool: TRegisteredTool): Boolean;
+begin
+  ATool := Default(TRegisteredTool);
+  if FManager = nil then
+    Exit(False);
+  Result := FManager.Find(AName, ATool);
+end;
+
+function TMcpSkillSource.Declaration: TSkill;
+begin
+  Result := Default(TSkill);
+  Result.Key := McpSkillKey(FName);
+  Result.Name := FName;
+  Result.Description := FDescription;
+  Result.WhenToUse := FWhenToUse;
+  { No Instructions: an MCP server's text is server-authored and must never
+    reach the manifest. }
+end;
+
+procedure RegisterMcpSkills(const ARegistry: TSkillRegistry;
+  const AConfig: TMcpConfig; AManager: TMcpManager);
+var
+  I: Integer;
+  Src: TMcpSkillSource;
+  D: TSkill;
+  Desc, When: string;
+begin
+  for I := 0 to High(AConfig.Servers) do
+  begin
+    McpCuratedMeta(AConfig.Servers[I].Name, Desc, When);
+    Src := TMcpSkillSource.Create(AManager, AConfig.Servers[I].Name, Desc, When);
+    D := Src.Declaration;
+    ARegistry.Add(D, Src);
+  end;
 end;
 
 end.

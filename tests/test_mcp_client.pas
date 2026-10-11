@@ -10,6 +10,7 @@ interface
 uses
   SysUtils, Classes, fpcunit, testregistry,
   hildegard.helper.mcp.client, hildegard.helper.mcp.config,
+  hildegard.helper.skills,
   hildegard.helper.agent, hildegard.helper.llm, hildegard.helper.approval;
 
 type
@@ -43,6 +44,11 @@ type
     procedure TestReconcileDisableUnregisters;
     procedure TestReconcileReconnectsDeadServer;
     procedure TestReconcileIsolatesFailures;
+    procedure TestLazyReconcileDeclaresWithoutConnecting;
+    procedure TestLazyOpenServerConnects;
+    procedure TestLazyCloseServerDisconnects;
+    procedure TestRegisterMcpSkillsDeclaresUnloaded;
+    procedure TestCuratedManifestMetadata;
   end;
 
 implementation
@@ -413,6 +419,125 @@ begin
     Rt := Mgr.Runtimes;
     AssertEquals('two runtimes', 2, Length(Rt));
   finally
+    Mgr.Free;
+  end;
+end;
+
+procedure TMcpClientTest.TestLazyReconcileDeclaresWithoutConnecting;
+var
+  Mgr: TMcpManager;
+  Approval: IApprovalService;
+  Tool: TRegisteredTool;
+  Rt: TMcpServerRuntimeArray;
+begin
+  Approval := TFakeApproval.Create(True);
+  Mgr := TMcpManager.Create(Default(TMcpConfig), Approval, nil);
+  try
+    Mgr.Lazy := True;
+    AssertTrue('reconcile', Mgr.Reconcile(McpCfg('fake', StandardScript)));
+    { Declared (one runtime) but NOT connected: no tools yet. }
+    Rt := Mgr.Runtimes;
+    AssertEquals('one runtime', 1, Length(Rt));
+    AssertEquals('stopped', Ord(mssStopped), Ord(Rt[0].State));
+    AssertFalse('no tools before load', Mgr.Find('mcp_fake_echo', Tool));
+    AssertEquals('no specs', 0, Length(Mgr.Specs));
+  finally
+    Mgr.Free;
+  end;
+end;
+
+procedure TMcpClientTest.TestLazyOpenServerConnects;
+var
+  Mgr: TMcpManager;
+  Approval: IApprovalService;
+  Tool: TRegisteredTool;
+  Err: string;
+begin
+  Approval := TFakeApproval.Create(True);
+  Mgr := TMcpManager.Create(Default(TMcpConfig), Approval, nil);
+  try
+    Mgr.Lazy := True;
+    Mgr.Reconcile(McpCfg('fake', StandardScript));
+    AssertFalse('not connected yet', Mgr.Find('mcp_fake_echo', Tool));
+    AssertTrue('open by name', Mgr.OpenServer('fake', Err));
+    AssertTrue('tool present after open', Mgr.Find('mcp_fake_echo', Tool));
+    AssertTrue('server specs', Length(Mgr.ServerSpecs('fake')) > 0);
+  finally
+    Mgr.Free;
+  end;
+end;
+
+procedure TMcpClientTest.TestLazyCloseServerDisconnects;
+var
+  Mgr: TMcpManager;
+  Approval: IApprovalService;
+  Tool: TRegisteredTool;
+  Err: string;
+begin
+  Approval := TFakeApproval.Create(True);
+  Mgr := TMcpManager.Create(Default(TMcpConfig), Approval, nil);
+  try
+    Mgr.Lazy := True;
+    Mgr.Reconcile(McpCfg('fake', StandardScript));
+    Mgr.OpenServer('fake', Err);
+    AssertTrue('connected', Mgr.Find('mcp_fake_echo', Tool));
+    AssertTrue('close by name', Mgr.CloseServer('fake'));
+    AssertFalse('tools gone after close', Mgr.Find('mcp_fake_echo', Tool));
+    AssertEquals('no specs', 0, Length(Mgr.Specs));
+  finally
+    Mgr.Free;
+  end;
+end;
+
+procedure TMcpClientTest.TestRegisterMcpSkillsDeclaresUnloaded;
+var
+  Mgr: TMcpManager;
+  Approval: IApprovalService;
+  Reg: TSkillRegistry;
+  Err: string;
+begin
+  Approval := TFakeApproval.Create(True);
+  Mgr := TMcpManager.Create(Default(TMcpConfig), Approval, nil);
+  Reg := TSkillRegistry.Create;
+  try
+    Mgr.Lazy := True;
+    Mgr.Reconcile(McpCfg('fake', StandardScript));
+    RegisterMcpSkills(Reg, McpCfg('fake', StandardScript), Mgr);
+    AssertEquals('declared unloaded', Ord(ssUnloaded), Ord(Reg.StateOf('mcp_fake')));
+    AssertTrue('in the manifest', Pos('mcp_fake', Reg.Manifest) > 0);
+    { Loading connects and the tools appear. }
+    AssertTrue('load', Reg.LoadSkill('mcp_fake', Err));
+    AssertTrue('tools after load', Pos('mcp_fake_echo',
+      Reg.Specs[1].Name) >= 0);
+  finally
+    Reg.Free;
+    Mgr.Free;
+  end;
+end;
+
+procedure TMcpClientTest.TestCuratedManifestMetadata;
+var
+  Mgr: TMcpManager;
+  Approval: IApprovalService;
+  Reg: TSkillRegistry;
+  Manifest: string;
+begin
+  { A known service gets curated metadata; an unknown one gets an honest generic
+    line. Server-authored text is never used (there is none to use here). }
+  Approval := TFakeApproval.Create(True);
+  Mgr := TMcpManager.Create(Default(TMcpConfig), Approval, nil);
+  Reg := TSkillRegistry.Create;
+  try
+    Mgr.Lazy := True;
+    Mgr.Reconcile(McpCfg('playwright', StandardScript));
+    RegisterMcpSkills(Reg, McpCfg('playwright', StandardScript), Mgr);
+    Manifest := Reg.Manifest;
+    AssertTrue('curated description for a known service',
+      Pos('Browser automation', Manifest) > 0);
+    AssertFalse('not the generic placeholder',
+      Pos('MCP server playwright.', Manifest) > 0);
+  finally
+    Reg.Free;
     Mgr.Free;
   end;
 end;

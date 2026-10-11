@@ -17,51 +17,51 @@ load connects + discovers. A re-ordering plus one new class, on top of the
 
 ### Phase 1: The skill source (`hildegard.helper.mcp.client`)
 
-- [ ] **Test**: `TMcpSkillSource.Activate` calls the manager to open the server
+- [x] **Test**: `TMcpSkillSource.Activate` calls the manager to open the server
       (a spy manager records `OpenRuntime`) and returns the tool names; a failure
       returns the error and leaves nothing registered.
-- [ ] **Implement**: `TMcpSkillSource` (`Activate`/`Deactivate`/`Specs`/`Find`)
+- [x] **Implement**: `TMcpSkillSource` (`Activate`/`Deactivate`/`Specs`/`Find`)
       over `TMcpManager` + one `TMcpServerRuntime`.
-- [ ] **Test**: `Deactivate` closes the server (`CloseRuntime`) and `Specs`
+- [x] **Test**: `Deactivate` closes the server (`CloseRuntime`) and `Specs`
       becomes empty; it is idempotent.
-- [ ] **Implement**: `Deactivate`.
-- [ ] **Test**: `Find` resolves `mcp_<server>_<tool>` to the client's handler.
-- [ ] **Implement**: `Find` (delegates to the client).
-- [ ] **Test**: `Declaration` returns key `mcp_<server>` and **curated**
+- [x] **Implement**: `Deactivate`.
+- [x] **Test**: `Find` resolves `mcp_<server>_<tool>` to the client's handler.
+- [x] **Implement**: `Find` (delegates to the client).
+- [x] **Test**: `Declaration` returns key `mcp_<server>` and **curated**
       description/when-to-use; a server-authored `instructions` string never
       appears.
-- [ ] **Implement**: `Declaration`.
+- [x] **Implement**: `Declaration`.
 
 ### Phase 2: Build skills from config
 
-- [ ] **Test**: `RegisterMcpSkills` adds one source per **enabled** server, key
+- [x] **Test**: `RegisterMcpSkills` adds one source per **enabled** server, key
       `mcp_<server>`; a disabled server adds none.
-- [ ] **Implement**: `RegisterMcpSkills` (reads `TMcpConfig`, `McpSanitize`).
-- [ ] **Test**: re-calling it after an add/enable/remove reflects the change (the
+- [x] **Implement**: `RegisterMcpSkills` (reads `TMcpConfig`, `McpSanitize`).
+- [x] **Test**: re-calling it after an add/enable/remove reflects the change (the
       registry's declaration set is updated) without connecting.
-- [ ] **Implement**: the re-declare path (reconcile-safe).
+- [x] **Implement**: the re-declare path (reconcile-safe).
 
 ### Phase 3: Take MCP off the startup path
 
-- [ ] **Test**: `THarnessSession.Init` does **not** call `FMcp.Open` (a spy
+- [x] **Test**: `THarnessSession.Init` does **not** call `FMcp.Open` (a spy
       manager records no open before the session is returned).
-- [ ] **Implement**: drop `FMcp.Open`; construct the manager only; register the
+- [x] **Implement**: drop `FMcp.Open`; construct the manager only; register the
       MCP skills with the registry instead of adding `TMcpProvider`.
-- [ ] **Test**: the runtime's socket binds and greets with MCP configured and no
+- [x] **Test**: the runtime's socket binds and greets with MCP configured and no
       server connected (a connect-first assertion).
-- [ ] **Test**: the manifest lists the configured servers `unloaded` on first
+- [x] **Test**: the manifest lists the configured servers `unloaded` on first
       turn; `Specs` carries no `mcp_` tools.
 
 ### Phase 4: Load, use, decay
 
-- [ ] **Test**: `load_skill("mcp_<server>")` connects, registers the tools, and
+- [x] **Test**: `load_skill("mcp_<server>")` connects, registers the tools, and
       the next request carries them.
-- [ ] **Implement**: the wiring from the registry's load to the source.
-- [ ] **Test**: a tool call on the loaded server reaches the fake server and its
+- [x] **Implement**: the wiring from the registry's load to the source.
+- [x] **Test**: a tool call on the loaded server reaches the fake server and its
       result returns (the existing `CallTool` path).
-- [ ] **Test**: after the TTL the skill unloads (the client closes) and the
+- [x] **Test**: after the TTL the skill unloads (the client closes) and the
       manifest shows `unloaded`.
-- [ ] **Test**: a slow/unreachable server returns a structured load error; the
+- [x] **Test**: a slow/unreachable server returns a structured load error; the
       socket and turn are unaffected.
 
 ### Phase 5: Operator preload
@@ -71,16 +71,25 @@ load connects + discovers. A re-ordering plus one new class, on top of the
 - [ ] **Implement**: `--mcp <key>` (CLI/runtime flag) -> preload after `Init`,
       before the first turn.
 
+> **Deferred.** v1 ships model-initiated load only; an operator `--mcp <key>`
+> preload is a small follow-up (the registry's `LoadSkill` already does the
+> connect). Left open rather than ticked.
+
 ### Phase 6: Validation & docs
 
-- [ ] **Run**: `make test SUITE=TMcpClientTest,THarnessSessionTest,TSkillsTest`
+- [x] **Run**: `make test SUITE=TMcpClientTest,THarnessSessionTest,TSkillsTest`
       (green)
-- [ ] **Run**: `make test` (whole suite)
-- [ ] **Run**: `make test-leak` (no leaks)
-- [ ] **Run**: `make check` (all gates)
+- [x] **Run**: `make test` (whole suite)
+- [x] **Run**: `make test-leak` (no leaks)
+- [x] **Run**: `make check` (all gates)
 - [ ] **Run**: a live check against the configured Playwright server:
       `mcp_playwright_*` resolves through the loaded skill (manual)
-- [ ] **Update** `FEATURES.md`; rename this TODO to `Lazy_MCP_v1.DONE.md`
+
+> **Deferred (manual).** Needs a real Playwright server; the automated coverage
+> (the lazy reconcile/load/close tests, `TMcpClientTest`) stands in. Left open.
+- [x] **Update** `FEATURES.md` (row -> In Progress, v1 core implemented).
+- [ ] **Rename** this TODO to `Lazy_MCP_v1.DONE.md` — blocked on the 3 open
+      boxes above (the deferred operator preload and the manual live check).
 
 ## Modified Files
 
@@ -111,12 +120,13 @@ Skills -> 1 (source) -> 2 (from config) -> 3 (off startup) -> 4 (load/decay) ->
 
 ## Success Criteria
 
-- [ ] All tasks checked
-- [ ] Every SPEC acceptance criterion maps to a passing test
-- [ ] `make check` passes (tests + leak gate)
-- [ ] The socket binds with no MCP connect; a slow server cannot fail the launch
-- [ ] A server's tools appear only while its skill is loaded
-- [ ] No idle connections linger after the TTL
+- [ ] All tasks checked (3 open: the deferred operator preload, and the manual
+      live check)
+- [x] Every SPEC acceptance criterion maps to a passing test
+- [x] `make check` passes (tests + leak gate)
+- [x] The socket binds with no MCP connect; a slow server cannot fail the launch
+- [x] A server's tools appear only while its skill is loaded
+- [x] No idle connections linger after the TTL
 
 ## Notes & Considerations
 

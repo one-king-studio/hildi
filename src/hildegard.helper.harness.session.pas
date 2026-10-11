@@ -39,7 +39,6 @@ type
     FFileTool: TFileTool;
     FRecallTool: TRecallTool;
     FMcp: TMcpManager;
-    FMcpProvider: IToolProvider;
     FMcpTokenProviders: TObjectList;
     { The skill registry: the capability layer (manifest + load_skill + decay).
       Empty by default; Lazy_MCP fills it with one skill per MCP server. Held as
@@ -56,6 +55,10 @@ type
     FApprovalService: IApprovalService;
     { MCP events (server failure etc.) are recorded as session errors. }
     procedure McpEvent(const AMessage, ADetail: string);
+    { At each turn boundary, re-declare the MCP skills from the current config so
+      a server added/enabled/removed is picked up without a restart. Lazy: it
+      declares, it does not connect. }
+    procedure ReconcileMcpSkills;
     { The current effective MCP config from the store, for the provider. }
     function McpConfigSource: TMcpConfig;
     { A token source for a server with a stored OAuth token (or nil). }
@@ -113,7 +116,6 @@ procedure THarnessSession.Close;
 begin
   FLoop.Free;
   FLoop := nil;
-  FMcpProvider := nil;
   FMcp.Free;
   FMcp := nil;
   FMcpTokenProviders.Free;
@@ -209,6 +211,42 @@ begin
     Result.Servers := ResolveMcpConfig(Rows, Ctx);
 end;
 
+procedure THarnessSession.ReconcileMcpSkills;
+var
+  Cfg: TMcpConfig;
+  I, J: Integer;
+  Key: string;
+  Present: Boolean;
+  Keys: TStringArray;
+begin
+  if (FSkills = nil) or (FMcp = nil) then
+    Exit;
+  Cfg := McpConfigSource;
+  { Reconcile the manager's runtime set from the config first (lazy: it adds or
+    drops runtimes but does not connect). This is what lets a server added after
+    open be loadable. }
+  FMcp.Reconcile(Cfg);
+  { Remove MCP skills whose server is gone or disabled. }
+  Keys := FSkills.Keys;
+  for I := 0 to High(Keys) do
+  begin
+    Key := Keys[I];
+    if Copy(Key, 1, 4) <> 'mcp_' then
+      Continue;
+    Present := False;
+    for J := 0 to High(Cfg.Servers) do
+      if McpSkillKey(Cfg.Servers[J].Name) = Key then
+      begin
+        Present := True;
+        Break;
+      end;
+    if not Present then
+      FSkills.Remove(Key);
+  end;
+  { Declare/replace a skill per configured server (no connect). }
+  RegisterMcpSkills(FSkills, Cfg, FMcp);
+end;
+
 function THarnessSession.Init(const AConfig: THarnessSessionConfig;
   out AError: string): Boolean;
 var
@@ -302,18 +340,17 @@ begin
   end;
 
   { MCP servers: effective config comes from the store (scoped), resolved for
-    this workspace. The manager is created even with no servers, so a server
-    added to the store later is picked up at the next turn boundary
-    (FLoop.OnTurnStart -> McpReconcile). Only with a store; without one there is
-    nowhere to read config from. }
+    this workspace. The manager is created LAZY (no connect on startup), so the
+    runtime's socket binds without touching a server; each enabled server becomes
+    a skill, and a load_skill connects it. Only with a store; without one there
+    is nowhere to read config from. }
   if FView.Store <> nil then
   begin
     McpCfg := McpConfigSource;
     FMcpTokenProviders := TObjectList.Create(True);
     FMcp := TMcpManager.Create(McpCfg, ApprovalService, McpEvent,
       McpTokenSourceFor);
-    FMcp.Open;
-    FMcpProvider := TMcpProvider.Create(FMcp, McpConfigSource);
+    FMcp.Lazy := True;
   end;
 
   AgentConfig := Default(TAgentConfig);
@@ -327,16 +364,19 @@ begin
   AgentConfig.MaxContextTokens := FView.MaxContextTokens;
 
   FLoop := TAgentLoop.Create(FClient, FConversation, FTools, AgentConfig);
-  { The skill registry is the capability layer; register it before any provider
-    so its load_skill is always offered. Empty by default (Lazy_MCP fills it). }
+  { The skill registry is the capability layer; register it as the provider. Its
+    load_skill is offered once any skill is declared. Empty by default. }
   FSkills := TSkillRegistry.Create;
   FSkillsKeep := FSkills;   // owning interface ref
   FLoop.AddProvider(FSkillsKeep);
-  { Register the MCP provider: at each turn boundary it reconciles from the
-    store and contributes its live tools, so a server added/changed/removed
-    between turns is picked up without a restart. }
-  if FMcpProvider <> nil then
-    FLoop.AddProvider(FMcpProvider);
+  { Lazy MCP: each configured server is a skill (declared, not connected). A
+    load_skill connects it. Re-declared at each turn boundary so an add/enable/
+    remove is picked up without a restart. }
+  if FMcp <> nil then
+  begin
+    ReconcileMcpSkills;
+    FLoop.OnTurnStart := ReconcileMcpSkills;
+  end;
   Result := True;
 end;
 

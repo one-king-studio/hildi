@@ -85,6 +85,10 @@ type
     { Declare a skill. ASource is nil for an instruction-only skill. The same
       key twice replaces the declaration. }
     procedure Add(const ASkill: TSkill; const ASource: ISkillToolSource = nil);
+    { Remove a skill by key (deactivates it first). True when it was present. }
+    function Remove(const AKey: string): Boolean;
+    { The declared keys, in declaration order. }
+    function Keys: TStringArray;
 
     { Activate by key. False + AError (structured) on unknown key or a source
       failure; nothing changes on failure. Resets the idle timer. }
@@ -183,6 +187,31 @@ begin
     Result := ssUnloaded
   else
     Result := TSkillEntry(FEntries[I]).State;
+end;
+
+function TSkillRegistry.Remove(const AKey: string): Boolean;
+var
+  I: Integer;
+  E: TSkillEntry;
+begin
+  I := IndexOfKey(AKey);
+  if I < 0 then
+    Exit(False);
+  E := TSkillEntry(FEntries[I]);
+  if (E.State = ssLoaded) and (E.Source <> nil) then
+    E.Source.Deactivate;
+  FEntries.Delete(I);
+  Result := True;
+end;
+
+function TSkillRegistry.Keys: TStringArray;
+var
+  I: Integer;
+begin
+  Result := nil;
+  SetLength(Result, FEntries.Count);
+  for I := 0 to FEntries.Count - 1 do
+    Result[I] := TSkillEntry(FEntries[I]).Skill.Key;
 end;
 
 function TSkillRegistry.Manifest: string;

@@ -333,7 +333,15 @@ begin
   Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
   AssertTrue('opened: ' + Err, Session <> nil);
   try
-    AssertTrue('mcp tool resolvable',
+    { Lazy: the server is declared as a skill but NOT connected, so its tools
+      are absent until a load. }
+    AssertFalse('mcp tool absent before load',
+      Session.Loop.ResolveTool('mcp_fake_echo', Tool));
+    AssertTrue('declared as a skill',
+      Pos('mcp_fake', Session.Skills.Manifest) > 0);
+    { Loading the skill connects it and registers its tools. }
+    AssertTrue('load ok', Session.Skills.LoadSkill('mcp_fake', Err));
+    AssertTrue('mcp tool resolvable after load',
       Session.Loop.ResolveTool('mcp_fake_echo', Tool));
   finally
     Session.Free;
@@ -389,9 +397,13 @@ begin
       Store.Free;
     end;
 
-    { The next turn's boundary reconcile picks it up. }
+    { The next turn's boundary reconcile picks it up as a skill (declared, not
+      connected); loading it registers the tools. }
     Session.Loop.PrepareProviders;
-    AssertTrue('picked up at boundary',
+    AssertTrue('picked up as a skill at the boundary',
+      Pos('mcp_late', Session.Skills.Manifest) > 0);
+    AssertTrue('load ok', Session.Skills.LoadSkill('mcp_late', Err));
+    AssertTrue('resolvable after load',
       Session.Loop.ResolveTool('mcp_late_echo', Tool));
   finally
     Session.Free;
