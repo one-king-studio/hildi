@@ -62,19 +62,21 @@ TDD-first; `make check` before moving on. `main` only.
 
 ### Phase 2: Tail-first history (`hildegard.helper.harness.view` + store)
 
-- [ ] **Add** `TSessionView.HistoryTail(AMax): TMessageRecordArray` (the last
+> **Done** (`a006fbe`, `5c190d8`): the queries and the bounded `RenderHistory`.
+
+- [x] **Add** `TSessionView.HistoryTail(AMax): TMessageRecordArray` (the last
       `AMax` messages, oldest first).
-- [ ] **Test**: `HistoryTail(N)` returns at most `N` messages, oldest first, from
+- [x] **Test**: `HistoryTail(N)` returns at most `N` messages, oldest first, from
       a seeded store (and all of them when the session is smaller than `N`).
-- [ ] **Implement**: `HistoryTail` (a tail-limited active query; reuse the store's
-      boundary logic).
-- [ ] **Add** `TSessionView.HistoryPage(ABeforeSeq, AMax)` (the strictly-earlier
+- [x] **Implement**: `HistoryTail` (`QueryActiveMessagesTail`).
+- [x] **Add** `TSessionView.HistoryPage(ABeforeSeq, AMax)` (the strictly-earlier
       page, oldest first).
-- [ ] **Test**: `HistoryPage` returns the page before a boundary and an empty
+- [x] **Test**: `HistoryPage` returns the page before a boundary and an empty
       array at the head.
-- [ ] **Implement**: `HistoryPage` over `QueryMessagesBefore`.
-- [ ] **Test**: `RenderHistory` builds from `HistoryTail(StartupTailCount)`, not
+- [x] **Implement**: `HistoryPage` over `QueryMessagesBefore`.
+- [x] **Test**: `RenderHistory` builds from `HistoryTail(StartupTailCount)`, not
       the whole history.
+- [x] **Add** `MessageCount` (store + view), the virtual-extent input.
 
 ### Phase 3: Back-pagination in the app (`hildegard.helper.harness.app`)
 
