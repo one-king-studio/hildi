@@ -129,6 +129,7 @@ type
     procedure TestApprovalDimsTheBackground;
     { TUI Startup: the connect lifecycle. }
     procedure TestNoSessionStartsIdle;
+    procedure TestPaintBeforeConnectOrder;
     procedure TestSubmitWhileIdleWithoutHookIsRefused;
     procedure TestIdleSubmitTriggersConnect;
     procedure TestAttachMovesToConnectedAndRendersHistory;
@@ -1491,6 +1492,34 @@ begin
   AssertTrue('an idle frame is drawn', BlockCount >= 1);
   AssertTrue('it invites a prompt',
     FindText(ckThinking, 'type a prompt to start'));
+end;
+
+procedure THarnessAppTest.TestPaintBeforeConnectOrder;
+var
+  Err: string;
+  FramesBefore: Integer;
+begin
+  { The composition root's order: surface + input + app (nil driver) paints a
+    frame BEFORE any connect. The app is constructed and renders a frame while
+    still idle; only Attach (the connect) moves it to connected. }
+  FDir := IncludeTrailingPathDelimiter(GetTempDir) + 'hh-app-' +
+    IntToStr(Random(1000000));
+  ForceDirectories(FDir);
+  FStorePath := '';
+  FFake := TFakeTransport.Create;
+  FSurface := TSurfaceMemory.Create(40, 20);
+  FInput := TInputSourceScripted.Create;
+  FSession := THarnessSession.Open(Config, Err);
+  AssertTrue('session opened: ' + Err, FSession <> nil);
+  { Construct with no driver: a frame exists, and no connect has happened. }
+  FApp := THarnessApp.Create(FSurface, FInput, FSession.View, nil);
+  FApp.Step;   // the first frame
+  FramesBefore := BlockCount;
+  AssertTrue('a frame is on screen before any connect', FramesBefore >= 1);
+  AssertEquals('still not connected', Ord(csIdle), Ord(FApp.ConnState));
+  { Only now connect. }
+  FApp.Attach(FSession.View, LocalDriver(FSession));
+  AssertEquals('connected after Attach', Ord(csConnected), Ord(FApp.ConnState));
 end;
 
 procedure THarnessAppTest.TestSubmitWhileIdleWithoutHookIsRefused;
