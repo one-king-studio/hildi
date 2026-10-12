@@ -23,7 +23,7 @@ interface
 uses
   Classes, SysUtils, hildegard.helper.tui.base, hildegard.helper.tui.input,
   hildegard.helper.tui.surface, hildegard.helper.tui.widget,
-  hildegard.helper.tui.theme;
+  hildegard.helper.tui.theme, hildegard.helper.fuzzy;
 
 type
   TCommand = record
@@ -98,17 +98,16 @@ function FilterCommands(const ACommands: TCommandArray;
 var
   P: string;
   I: Integer;
-  Lower: string;
 begin
   Result := nil;
   P := APrefix;
   if (P <> '') and (P[1] = '/') then
     P := Copy(P, 2, MaxInt);
-  P := LowerCase(P);
   for I := 0 to High(ACommands) do
   begin
-    Lower := LowerCase(ACommands[I].Name);
-    if (P = '') or (Copy(Lower, 1, Length(P)) = P) then
+    { Fuzzy (subsequence) match on the command name, so "/cp" finds "checkpoint"
+      and a mistyped middle still narrows. An empty prefix shows all. }
+    if FuzzyMatches(P, ACommands[I].Name) then
     begin
       SetLength(Result, Length(Result) + 1);
       Result[High(Result)] := ACommands[I];

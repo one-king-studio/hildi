@@ -14,6 +14,7 @@ uses
   hildegard.helper.tui.base, hildegard.helper.tui.input,
   hildegard.helper.tui.surface, hildegard.helper.tui.widget,
   hildegard.helper.tui.theme, hildegard.helper.tui.grapheme,
+  hildegard.helper.fuzzy,
   hildegard.helper.session;
 
 type
@@ -137,19 +138,17 @@ end;
 
 function TSessionsModal.Match(AIndex: Integer): Boolean;
 var
-  Needle: string;
   I: Integer;
 begin
   if FRows[AIndex].Archived and (not FShowArchived) then
     Exit(False);
   if FFilter = '' then
     Exit(True);
-  Needle := LowerCase(FFilter);
-  Result := (Pos(Needle, LowerCase(FRows[AIndex].Title)) > 0) or
-    (Pos(Needle, LowerCase(FRows[AIndex].Id)) > 0);
+  Result := FuzzyMatches(FFilter, FRows[AIndex].Title) or
+    FuzzyMatches(FFilter, FRows[AIndex].Id);
   if not Result then
     for I := 0 to High(FRows[AIndex].Keywords) do
-      if Pos(Needle, LowerCase(FRows[AIndex].Keywords[I])) > 0 then
+      if FuzzyMatches(FFilter, FRows[AIndex].Keywords[I]) then
         Exit(True);
 end;
 
