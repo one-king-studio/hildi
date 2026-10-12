@@ -46,13 +46,16 @@ decision.
 ## Acceptance Criteria
 
 - [x] A timed-out ask is reported as a timeout, not a denial.
-- [x] A connected session waits indefinitely (`ApprovalTimeoutMs = 0`).
-- [ ] A **headless** run (no client) sets `DefaultApprovalTimeoutMs` so it
-      auto-denies rather than blocking forever.
-- [ ] A client that crashes or disconnects resolves the pending ask (session
-      cleanup), so the turn is not left waiting on a dead client.
+- [x] A connected session waits indefinitely (the runtime sets the gate timeout
+      to 0 on attach).
+- [x] A **headless** run (no client) auto-denies: the runtime starts at
+      `DefaultApprovalTimeoutMs` and reverts to it when the last client leaves.
+- [x] A client that crashes or disconnects resolves the pending ask (the
+      session's cleanup presides, `CancelAsTimeout`), and the runtime reverts to
+      the headless auto-deny.
 
 ## Notes
 
-- The mechanism (`TApprovalGate`, `TApprovalChoice.TimedOut`) is in place; the
-  remaining work is wiring the headless default and the disconnect cleanup.
+- Complete: the mechanism (`TApprovalChoice.TimedOut`, `TApprovalGate.SetTimeoutMs`
+  / `CancelAsTimeout`) plus the runtime wiring (headless default at start, 0 on
+  attach, `CancelAsTimeout` + revert on the last disconnect).

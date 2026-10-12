@@ -269,10 +269,9 @@ begin
     Runtime.FNextClientId := 0;
 
     HConfig := Default(THarnessSessionConfig);
-    { The runtime serves connected clients (the TUI), which own the approval
-      timeout: wait indefinitely. The auto-deny is for a headless run, wired
-      when such a run sets a timeout. }
-    HConfig.ApprovalTimeoutMs := 0;
+    { Headless until a client attaches: auto-deny so an unattended run does not
+      block forever. A connected client owns the timeout (see AcceptClient). }
+    HConfig.ApprovalTimeoutMs := DefaultApprovalTimeoutMs;
     HConfig.WorkspacePath := AConfig.WorkspacePath;
     HConfig.StorePath := AConfig.StorePath;
     HConfig.SessionId := AConfig.SessionId;
@@ -729,6 +728,8 @@ begin
   Inc(FNextClientId);
   C.Id := 'c' + IntToStr(FNextClientId);
   FClients.Add(C);
+  { A connected client owns the approval timeout: wait indefinitely. }
+  FSession.Gate.SetTimeoutMs(0);
   SendHello(C);
   {$endif}
 end;
@@ -1371,7 +1372,14 @@ begin
     the last turn: start it when the last client leaves, so a reconnect within
     the timeout reuses this runtime. }
   if Reaped and (FClients.Count = 0) then
+  begin
+    { The last client left: resolve any ask it was going to answer as a timeout
+      (the session's cleanup presides, not a dead client), and revert to the
+      headless auto-deny. }
+    FSession.Gate.CancelAsTimeout;
+    FSession.Gate.SetTimeoutMs(DefaultApprovalTimeoutMs);
     FIdleDeadline := NowMs + FIdleExitMs;
+  end;
 end;
 
 procedure TSessionRuntime.Shutdown;

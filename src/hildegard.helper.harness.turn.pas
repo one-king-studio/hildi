@@ -117,7 +117,15 @@ type
       ARequestId is not the pending ask. }
     procedure Answer(ARequestId: Integer; const AChoice: TApprovalChoice);
 
-    { UI thread. Deny any pending ask and unblock the worker (used on quit). }
+    { The wait used by the NEXT ask. 0 = wait indefinitely. A connected client
+      owns the timeout; with no client the session auto-denies. }
+    procedure SetTimeoutMs(const AMs: Integer);
+
+    { Resolve a pending ask as a timeout (not a denial) - used when the client
+      that would have answered it is gone. }
+    procedure CancelAsTimeout;
+
+    { Deny any pending ask and unblock the worker (used on quit). }
     procedure Cancel;
   end;
 
@@ -252,6 +260,31 @@ begin
     if FPending and (ARequestId = FRequestId) then
     begin
       FChoice := AChoice;
+      FEvent.SetEvent;
+    end;
+  finally
+    FLock.Release;
+  end;
+end;
+
+procedure TApprovalGate.SetTimeoutMs(const AMs: Integer);
+begin
+  FLock.Acquire;
+  try
+    FTimeoutMs := AMs;
+  finally
+    FLock.Release;
+  end;
+end;
+
+procedure TApprovalGate.CancelAsTimeout;
+begin
+  FLock.Acquire;
+  try
+    if FPending then
+    begin
+      FChoice := Default(TApprovalChoice);
+      FChoice.TimedOut := True;
       FEvent.SetEvent;
     end;
   finally
