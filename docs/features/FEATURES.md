@@ -98,10 +98,14 @@ in `../guidelines/spec-driven-development.md`:
   checkpoint forward, and the archived messages stay intact (back-pagination) and
   are recallable via whole-session SQLite FTS5 weighted toward tool
   reasons/names. One session id. Implemented: the checkpoint is an ordinary
-  ambient turn whose reply is the document, recorded at the boundary; resume and
-  the TUI use the active window; back-pagination, the left-border page gauge
-  (which doubles as the coarse scroll), the per-page context metric, and the
-  nudge are in. The live manual sign-off is pending.
+  ambient turn whose reply is the document, recorded at the boundary; on resume
+  the document is carried forward as a **handoff** — the new page's first user
+  message, wrapped `<handoff>` and framed as orientation, not authority, pointing
+  at the sources to ground on (`hildegard.helper.handoff`) — and the TUI draws it
+  as its own `ckHandoff` block; resume and the TUI use the active window;
+  back-pagination, the left-border page gauge (which doubles as the coarse
+  scroll), the per-page context metric, and the nudge are in. The live manual
+  sign-off is pending.
 
 ## Backlog (low priority)
 

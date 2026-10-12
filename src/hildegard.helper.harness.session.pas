@@ -93,16 +93,23 @@ type
 const
   { The instruction that turns the current conversation into a checkpoint. The
     checkpoint is an ordinary turn: the runtime queues this as an ambient message
-    and runs an ambient turn; the assistant's reply is the document. }
+    and runs an ambient turn; the assistant's reply is the handoff document
+    (delivered to the next page by Compose, see hildegard.helper.handoff). }
   CheckpointInstruction =
-    'Write a checkpoint document so another agent can continue this work with no ' +
-    'other context. Be concise but complete. Cover, as headed sections: ' +
+    'Write a handoff document so another agent can pick this work up in a fresh ' +
+    'context, with no memory of this session. Write it as the document itself, ' +
+    'not as commentary about it. Be concise but complete. It is a handoff, not ' +
+    'a specification: it orients the next agent and points at the sources of ' +
+    'truth - it does not restate them. Cover, as headed sections: ' +
     '(1) Objective - what we are doing and why; ' +
     '(2) Decisions - each decision and its rationale; ' +
     '(3) State - what is done, in progress, and uncommitted; ' +
-    '(4) Gotchas - pitfalls, constraints, and things that bit us; ' +
-    '(5) Open threads - what to do next. Write it as the document itself, ' +
-    'not as commentary about it.';
+    '(4) Grounding - the documents, files, or resources the next agent should ' +
+    'read first to understand this work: exact paths, links, or identifiers, ' +
+    'and one line on why each matters. Prefer the few highest-value sources ' +
+    'over a full inventory; point at the workspace, do not reproduce it; ' +
+    '(5) Gotchas - pitfalls, constraints, and things that bit us; ' +
+    '(6) Open threads - what to do next.';
 
 implementation
 

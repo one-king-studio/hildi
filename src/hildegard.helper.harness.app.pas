@@ -842,11 +842,12 @@ begin
         for I := 0 to High(Archived) do
           FPanel.Stream.Add(ckAssistant, '', Archived[I].Content);
     end;
-    { The checkpoint document is the segment's opening block: an ambient box
-      whose title carries the label (the ambient render pads it with a leading
+    { The checkpoint document is the segment's opening block: a handoff box
+      whose title carries the label (the box render pads it with a leading
       space). No separate "— checkpoint —" marker is drawn: the box itself is
-      the boundary, and it immediately follows the archived page. }
-    FPanel.Stream.Add(ckAmbient, 'checkpoint', Checkpoint.Summary);
+      the boundary, and it immediately follows the archived page. The kind is
+      its own so a distinct handoff presentation can fork from the ambient one. }
+    FPanel.Stream.Add(ckHandoff, 'checkpoint', Checkpoint.Summary);
     FCheckpointBlock := FPanel.Stream.Last;
   end;
   for I := 0 to High(History) do

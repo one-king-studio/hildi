@@ -24,7 +24,7 @@ uses
 
 type
   TChatKind = (ckUser, ckAssistant, ckError, ckThought, ckTool, ckThinking,
-    ckTurn, ckAmbient, ckQueued);
+    ckTurn, ckAmbient, ckQueued, ckHandoff);
 
 const
   { The violet used for the ambient border. }
@@ -384,7 +384,7 @@ begin
   FTheme := ATheme;
   FExpanded := (AKind = ckUser) or (AKind = ckAssistant) or
     (AKind = ckError) or (AKind = ckThinking) or (AKind = ckQueued) or
-    (AKind = ckAmbient);
+    (AKind in [ckAmbient, ckHandoff]);
   FLiveStarted := False;
   FHeightValid := False;
   FHeightWidth := 0;
@@ -416,9 +416,10 @@ begin
       Result := FTheme.Muted;
     ckQueued:
       Result := OnBg(FTheme.Text, FTheme.RaisedBg);
-    ckAmbient:
-      { An ambient result (a checkpoint document) reads as markdown, so its
-        body uses the theme's default text on the raised panel. }
+    ckAmbient, ckHandoff:
+      { A carried-context box (an ambient result, a checkpoint handoff) reads as
+        markdown, so its body uses the theme's default text on the raised
+        panel. }
       Result := FTheme.Text;
     ckError:
       Result := FTheme.Error;
@@ -472,9 +473,9 @@ procedure TChatItem.EnsureBody;
 begin
   if (FText <> nil) or (FMarkdown <> nil) then
     Exit;
-  if FKind in [ckAssistant, ckAmbient] then
+  if FKind in [ckAssistant, ckAmbient, ckHandoff] then
   begin
-    if FKind = ckAmbient then
+    if FKind in [ckAmbient, ckHandoff] then
       FMarkdown := TMarkdownView.Create(AmbientMdTheme)
     else
       FMarkdown := TMarkdownView.Create;
@@ -708,8 +709,8 @@ end;
 
 function TChatItem.Inset: Integer;
 begin
-  if (FKind = ckUser) or (FKind = ckQueued) or (FKind = ckAmbient) or
-    (FKind in [ckThought, ckTool]) then
+  if (FKind = ckUser) or (FKind = ckQueued) or
+    (FKind in [ckAmbient, ckHandoff]) or (FKind in [ckThought, ckTool]) then
     Result := 4
   else if (FKind = ckAssistant) or (FKind = ckError) then
     Result := 1
@@ -739,7 +740,7 @@ begin
   { An ambient box always offers the caret: it hides its document when
     collapsed. A thought/tool shows it only when there is more than the
     condensed view would show, so a short body has nothing to hide. }
-  if FKind = ckAmbient then
+  if FKind in [ckAmbient, ckHandoff] then
     Exit(True);
   if not Condenseable then
     Exit(False);
@@ -765,7 +766,7 @@ begin
   begin
     { An ambient renders markdown, so there is no span body to build; still
       record whether the drawn view is the compact one, for the caret. }
-    if FKind = ckAmbient then
+    if FKind in [ckAmbient, ckHandoff] then
       FDisplayCondensed := not FExpanded;
     Exit;
   end;
@@ -837,8 +838,8 @@ end;
 
 function TChatItem.Boxed: Boolean;
 begin
-  Result := (FKind = ckUser) or (FKind = ckQueued) or (FKind = ckAmbient) or
-    (FKind in [ckThought, ckTool]);
+  Result := (FKind = ckUser) or (FKind = ckQueued) or
+    (FKind in [ckAmbient, ckHandoff]) or (FKind in [ckThought, ckTool]);
 end;
 
 procedure TChatItem.BodyRows(AWidth: Integer; out ATextRows, ALines: Integer);
@@ -886,11 +887,12 @@ begin
   WasMaterialized := Materialized;
   Materialize;
   case FKind of
-    ckUser, ckQueued, ckAmbient:
+    ckUser, ckQueued, ckAmbient, ckHandoff:
       begin
         BodyRows(AAvail.W, TextRows, Lines);
-        { A compact ambient shows only its first AmbientCompactRows rows. }
-        if (FKind = ckAmbient) and (not FExpanded) and
+        { A compact carried-context box (an ambient result, a handoff) shows
+          only its first AmbientCompactRows rows. }
+        if (FKind in [ckAmbient, ckHandoff]) and (not FExpanded) and
           (TextRows > AmbientCompactRows) then
           TextRows := AmbientCompactRows;
         Result.H := TextRows + 2;   { top border, body, bottom border }
@@ -932,9 +934,9 @@ begin
     BodyRows(ABounds.W, TextRows, Lines);
     if TextRows > ABounds.H - 2 then
       TextRows := ABounds.H - 2;
-    { A compact ambient shows only its first AmbientCompactRows rows; the
-      markdown view is arranged short and its Render clips to it. }
-    if (FKind = ckAmbient) and (not FExpanded) and
+    { A compact carried-context box shows only its first AmbientCompactRows
+      rows; the markdown view is arranged short and its Render clips to it. }
+    if (FKind in [ckAmbient, ckHandoff]) and (not FExpanded) and
       (TextRows > AmbientCompactRows) then
       TextRows := AmbientCompactRows;
     BodyR := Rc(ABounds.X + 2, ABounds.Y + 1, InnerW, TextRows);
@@ -1038,10 +1040,11 @@ begin
     SurfaceAttr := OnBg(FTheme.Text, FTheme.RaisedBg);
     Border := OnBg(WithStyle(FTheme.Accent, [sfDim]), FTheme.RaisedBg);
   end
-  else if FKind = ckAmbient then
+  else if FKind in [ckAmbient, ckHandoff] then
   begin
-    { An ambient result: the user-box frame with a violet border (matching
-      inline code), to mark it as an async task's output. }
+    { A carried-context box - an ambient task result, or a checkpoint handoff -
+      drawn as the user-box frame with a violet border (matching inline code).
+      The handoff shares this presentation for now; a distinct one forks here. }
     SurfaceAttr := OnBg(FTheme.Text, FTheme.RaisedBg);
     Border := OnBg(FTheme.Text, FTheme.RaisedBg);
     Border.Fg := QueuedBorderFg;
@@ -1091,7 +1094,7 @@ begin
         PutCh(S, R, I, '│', Border);
       end;
   end
-  else if (FKind = ckQueued) or (FKind = ckAmbient) then
+  else if (FKind = ckQueued) or (FKind in [ckAmbient, ckHandoff]) then
   begin
     { The user-box frame with a right-aligned title (Queued / the ambient
       label); the border is teal for a queued prompt, violet for an ambient.
@@ -1101,7 +1104,7 @@ begin
     PutCh(S, R, T, '╮', Border);
     for X := L + 1 to R - 1 do
       PutCh(S, X, T, '─', Border);
-    if FKind = ckAmbient then
+    if FKind in [ckAmbient, ckHandoff] then
     begin
       PutCh(S, L, B, '╰', Border);
       PutCh(S, R, B, '╯', Border);
@@ -1166,7 +1169,7 @@ begin
       end;
   end;
 
-  if FKind = ckAmbient then
+  if FKind in [ckAmbient, ckHandoff] then
     FMarkdown.Render(S)
   else
     FText.Render(S);
@@ -1175,7 +1178,7 @@ end;
 function TChatItem.HandleEvent(const E: TInputEvent): Boolean;
 begin
   Result := False;
-  if not (FKind in [ckThought, ckTool, ckAmbient]) then
+  if not (FKind in [ckThought, ckTool, ckAmbient, ckHandoff]) then
     Exit;
   if FLive then
     Exit;   { a live block is not toggleable; it settles when the stream ends }

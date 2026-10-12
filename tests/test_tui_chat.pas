@@ -49,6 +49,7 @@ type
     procedure TestAmbientRendersMarkdownInABox;
     procedure TestAmbientCaretRidesTheBottomBorder;
     procedure TestCollapsedAmbientIsShorter;
+    procedure TestHandoffRendersAsACarriedContextBox;
     procedure TestCollapsedToolCaretRidesTheBottomBorder;
     procedure TestLongToolTitleIsTruncated;
     procedure TestLiveThoughtShowsTheTail;
@@ -1087,6 +1088,39 @@ begin
     AssertTrue('a compact ambient is shorter', Compact < Full);
   finally
     It.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestHandoffRendersAsACarriedContextBox;
+var
+  It: TChatItem;
+  S: TSurfaceMemory;
+begin
+  { A checkpoint handoff is its own kind, wired like the ambient box: a bordered
+    markdown box with the label in the top border and a disclosure caret. A
+    distinct handoff presentation forks from the ambient one in the chat item. }
+  S := TSurfaceMemory.Create(40, 8);
+  try
+    It := TChatItem.Create(ckHandoff, 'checkpoint', '**bold** handoff', FTheme);
+    try
+      AssertTrue('kind', It.Kind = ckHandoff);
+      It.Expanded := True;
+      It.Arrange(Rc(0, 0, 40, 3));
+      It.Render(S);
+      AssertEquals('rounded top-left', '╭', S.CellAt(0, 0).Ch);
+      AssertTrue('label in the top border',
+        Pos('checkpoint', S.RowText(0, 0, 40)) > 0);
+      AssertTrue('bold run styled', sfBold in S.CellAt(2, 1).Attr.Style);
+      AssertEquals('markdown on the box background', FTheme.RaisedBg,
+        S.CellAt(2, 1).Attr.Bg);
+      { The caret rides the bottom border, as for an ambient box. }
+      AssertEquals('up caret', '▲',
+        S.CellAt(It.Bounds.X + It.Bounds.W - 4, It.Bounds.H - 1).Ch);
+    finally
+      It.Free;
+    end;
+  finally
+    S.Free;
   end;
 end;
 

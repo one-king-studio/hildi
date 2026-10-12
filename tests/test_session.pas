@@ -739,17 +739,17 @@ begin
     Checked := Default(TCheckpointRecord);
     AssertTrue('latest finds it', S.LatestCheckpoint(SessionId, Checked, Err));
 
-    { Resume: the system prompt + the checkpoint context, and the archived
-      turns are gone from the prompt. }
+    { Resume: the system prompt + the checkpoint handoff, and the archived turns
+      are gone from the prompt. The handoff is the new page's first user message,
+      wrapped - no longer a system block. }
     Msgs := Conv.Messages;
-    AssertEquals('system + checkpoint context', 2, Length(Msgs));
+    AssertEquals('system + handoff', 2, Length(Msgs));
     AssertEquals('system first', Ord(crSystem), Ord(Msgs[0].Role));
-    AssertEquals('context is system', Ord(crSystem), Ord(Msgs[1].Role));
+    AssertEquals('handoff is a user message', Ord(crUser), Ord(Msgs[1].Role));
     AssertTrue('carries the summary', Pos('we did turns 1-5', Msgs[1].Content) > 0);
-    AssertTrue('marked as carried-forward',
-      Pos('carried forward', Msgs[1].Content) > 0);
-    AssertTrue('marked as carried-forward',
-      Pos('carried forward', Msgs[1].Content) > 0);
+    AssertTrue('wrapped as a handoff', Pos('<handoff', Msgs[1].Content) > 0);
+    AssertTrue('instructions frame it as orientation',
+      Pos('<instructions>', Msgs[1].Content) > 0);
   finally
     S.Free;
   end;

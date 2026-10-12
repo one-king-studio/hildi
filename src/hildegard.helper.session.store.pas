@@ -12,7 +12,7 @@ uses
   SysUtils, hildegard.helper.agent, hildegard.helper.llm,
   hildegard.helper.store, hildegard.helper.session,
   hildegard.helper.recall.tool, hildegard.helper.ambient,
-  hildegard.helper.wrap;
+  hildegard.helper.wrap, hildegard.helper.handoff;
 
 type
   TSqliteConversationStore = class(TInterfacedObject, IConversationStore)
@@ -55,13 +55,6 @@ type
   end;
 
 implementation
-
-const
-  { Prefixes the checkpoint summary injected on resume, so the model knows this
-    is carried-forward context, not a user turn. }
-  CheckpointContextHeader =
-    '[Context carried forward from an earlier checkpoint of this session]' +
-    LineEnding + LineEnding;
 
 procedure AddMessage(var AList: TChatMessageArray;
   const AMessage: TChatMessage);
@@ -276,12 +269,14 @@ begin
     LastLeadSeq := Lead[I].Seq;
   end;
 
-  { The checkpoint context block, after the system prompt. }
+  { The checkpoint handoff, after the system prompt and before the tail: the new
+    page's first user message. Orientation, not authority - it points the next
+    agent at the sources to ground on, and the operator's own turn follows it. }
   if HasCp then
   begin
     Msg := Default(TChatMessage);
-    Msg.Role := crSystem;
-    Msg.Content := CheckpointContextHeader + Snap.Summary;
+    Msg.Role := crUser;
+    Msg.Content := FormatHandoff(Snap.Summary, Snap.Seq);
     AddMessage(Result, Msg);
   end;
 

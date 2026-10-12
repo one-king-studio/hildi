@@ -205,3 +205,30 @@ footage before it still on disk.
 - **One session, one chain.** The checkpoint does not create a session or a
   child; it archives the messages behind a boundary and re-seeds the chain from
   the document. Recall and back-pagination are queries within the same session.
+- **2026-10-12 — The summary is carried forward as a handoff, not a system
+  block.** Observed live: after a checkpoint the resumed agent spent its whole
+  first turn re-deriving what the document already said (re-reading docs,
+  re-running `git log`, re-checking state) and never started the work. Two
+  causes: the summary was injected as a bare system message with no framing, and
+  the document was written as a narrative that named no sources.
+
+  **Decision:** the summary is delivered as the **first user message of the new
+  page**, wrapped as a `<handoff>` (`hildegard.helper.handoff`), with a generic
+  instruction block that frames it as **orientation, not authority** — read the
+  sources it names to ground yourself, then continue; do not re-explore. The
+  operator's own turn follows as a second user message, so the handoff can never
+  be mistaken for their words. It is **not** the system prompt (the system slot
+  is for standing instructions, not volatile carried context) and **not** an
+  ambient task result (that framing says "act on it, delegate, or tell the
+  user", which is wrong for a handoff).
+
+  **Generator:** `CheckpointInstruction` asks for a handoff document with a
+  **Grounding** section naming the documents/files/resources to read first, so
+  the next agent grounds in a few sources instead of exploring. Domain-neutral
+  (a repo, a ticket queue, or a research task alike) — the handoff is the
+  session-scoped sibling of the hand-maintained `HANDOFF.md`.
+
+  **Why not a new message role:** the summary is not a stored message; it lives
+  in `session_checkpoints` and is synthesized on compose (the TUI already does
+  the same). A new `mrHandoff` role would duplicate that source of truth. The
+  distinct *wrapper* is where the "type" belongs.

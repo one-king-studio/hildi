@@ -49,8 +49,9 @@ the turn boundary when the turn completes.
       session's **active window** becomes "summary + messages after the boundary".
       Nothing is deleted. A failed or empty turn records nothing.
 - [ ] **Resume**: opening/attaching a session loads the active window — the
-      latest checkpoint's summary prepended, then messages after its `seq`. The
-      TUI renders the summary as the segment's opening block.
+      latest checkpoint's summary carried forward as a **handoff** (the new
+      page's first user message; see "The handoff"), then messages after its
+      `seq`. The TUI renders the summary as the segment's opening block.
 - [ ] **Back-pagination**: the TUI can load the previous segment
       (`QueryMessagesBefore`) with the checkpoint's ambient box as the visible
       boundary (no separate marker).
@@ -124,9 +125,9 @@ type
 
 - **Checkpoint boundary.** `Seq` = the message HWM at checkpoint time. The active
   window is strictly `seq > Seq`; the archived set is `seq <= Seq`.
-- **Summary block.** On resume, the summary is presented as the opening context
-  of the segment (a system/ambient block). It is **not** a stored message row
-  (keeps role counts honest); it comes from the checkpoint.
+- **Summary block.** On resume, the summary is carried forward as a **handoff**
+  user message (see below) — the first message of the new page. It is **not** a
+  stored message row (keeps role counts honest); it comes from the checkpoint.
 - **FTS schema** (v1):
   ```sql
   CREATE VIRTUAL TABLE messages_fts USING fts5(
@@ -140,6 +141,51 @@ type
 - **Column-scoped search.** A query with `AColumns = ['tool_reason']` issues
   `SELECT ... FROM messages_fts WHERE messages_fts MATCH 'tool_reason:…' AND
   session_id = ?` — the FTS column filter, so `content` is never scanned.
+
+### The handoff (the carried-forward summary)
+
+A checkpoint bridges two pages of one session. On resume the document is the
+**first user message of the new page**, wrapped as a handoff:
+
+```xml
+<handoff seq="15924">
+  <summary>
+...the document...
+  </summary>
+
+  <instructions>
+...
+  </instructions>
+</handoff>
+```
+
+It is deliberately **not** the system prompt and **not** an ambient task result:
+it is a peer's handoff, and the operator's own turn follows it. The instruction
+block is generic and domain-neutral, and states that the document is
+**orientation, not authority** — read the sources it names to ground yourself,
+then continue; do not re-explore from scratch.
+
+- `FormatHandoff(ASummary, ASeq)` lives in its own unit
+  (`hildegard.helper.handoff`), beside `hildegard.helper.ambient`: both do the
+  "carried context" job, and both keep the wrapper volatile (the document stays
+  plain in `session_checkpoints`).
+- `Compose` emits it once, at the head of the tail (after the leading system
+  run), so it is the page's first message on every request — never re-inserted
+  before each user message.
+- The operator's own turn follows it as a **second** user message. The
+  prompt-injection guard stays on the operator's turn (it closes that turn), so
+  the handoff can never be read as the operator's words.
+- The TUI renders the document as its own block kind, `ckHandoff` (in
+  `hildegard.helper.tui.chat`), so a distinct handoff presentation can fork from
+  the ambient one without touching it. Today it draws identically to an ambient
+  box (violet border, disclosure caret, markdown body); the title stays
+  `checkpoint`, the boundary.
+
+**Generator.** `CheckpointInstruction` (in `hildegard.helper.harness.session`)
+asks for a handoff document, not a specification, with a **Grounding** section:
+the documents, files, or resources the next agent should read first (exact
+paths, links, or identifiers, and why each matters). It is domain-neutral — a
+code repo, a ticket queue, or a research task alike.
 
 ### Event Contracts
 
@@ -191,6 +237,18 @@ type
       `content`-scoped search does not match a `tool_reason`-only hit (proving
       column scoping).
 - [ ] FTS backfill indexes pre-existing messages.
+
+### Unit Tests (`tests/test_handoff.pas`)
+
+- [ ] `FormatHandoff` wraps the summary in `<handoff seq>` / `<summary>` and
+      includes the `<instructions>` block.
+- [ ] The summary is XML-escaped: a `<summary>`/`</handoff>` inside the document
+      cannot close the wrapper.
+- [ ] The instruction block names the document as orientation, not authority,
+      and points at the sources to ground on.
+- [ ] `TestResumeFromCheckpointShrinksContext` (in `tests/test_session.pas`):
+      after a checkpoint, the composed window is `[system] + [handoff (crUser)]`
+      and the handoff carries the summary — no longer a `crSystem` block.
 
 ### Integration Tests (`tests/test_session_runtime.pas`)
 
