@@ -96,11 +96,13 @@ const
     and runs an ambient turn; the assistant's reply is the handoff document
     (delivered to the next page by Compose, see hildegard.helper.handoff). }
   CheckpointInstruction =
-    'Write a handoff document so another agent can pick this work up in a fresh ' +
-    'context, with no memory of this session. Write it as the document itself, ' +
-    'not as commentary about it. Be concise but complete. It is a handoff, not ' +
-    'a specification: it orients the next agent and points at the sources of ' +
-    'truth - it does not restate them. Cover, as headed sections: ' +
+    'Write a handoff so another agent can pick this work up in a fresh context, ' +
+    'with no memory of this session. Reply with the handoff document itself, as ' +
+    'your message - do not write it to a file, and do not use a tool to record ' +
+    'it. Be concise but complete; write the document itself, not commentary ' +
+    'about it. It is a handoff, not a specification: it orients the next agent ' +
+    'and points at the sources of truth - it does not restate them. Cover, as ' +
+    'headed sections: ' +
     '(1) Objective - what we are doing and why; ' +
     '(2) Decisions - each decision and its rationale; ' +
     '(3) State - what is done, in progress, and uncommitted; ' +

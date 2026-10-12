@@ -40,6 +40,7 @@ type
     procedure TestMaxContextTokensFromConfig;
     procedure TestMcpServerToolsRegistered;
     procedure TestSessionPicksUpServerAddedBetweenTurns;
+    procedure TestCheckpointInstructionIsReplyOnly;
   end;
 
 implementation
@@ -350,6 +351,17 @@ end;
 
 { A server added to the store *after* the session opens is picked up at the
   next turn boundary (the OnTurnStart reconcile). }
+procedure THarnessSessionTest.TestCheckpointInstructionIsReplyOnly;
+begin
+  { The checkpoint document is the turn's reply, not a workspace file. Without
+    this clause the agent mirrors the repo's HANDOFF.md convention and writes one
+    (observed live: the first run wrote HANDOFF_session.md). }
+  AssertTrue('reply with the document',
+    Pos('Reply with the handoff document itself', CheckpointInstruction) > 0);
+  AssertTrue('explicitly no file write',
+    Pos('do not write it to a file', CheckpointInstruction) > 0);
+end;
+
 procedure THarnessSessionTest.TestSessionPicksUpServerAddedBetweenTurns;
 var
   Session: THarnessSession;

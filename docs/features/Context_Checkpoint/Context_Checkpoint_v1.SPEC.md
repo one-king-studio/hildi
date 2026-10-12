@@ -185,7 +185,10 @@ then continue; do not re-explore from scratch.
 asks for a handoff document, not a specification, with a **Grounding** section:
 the documents, files, or resources the next agent should read first (exact
 paths, links, or identifiers, and why each matters). It is domain-neutral — a
-code repo, a ticket queue, or a research task alike.
+code repo, a ticket queue, or a research task alike. The instruction states that
+the **reply is the document** and forbids writing it to a file: a workspace with
+its own handoff convention (e.g. a `HANDOFF.md`) otherwise tempts the model to
+create one — observed live as a stray `HANDOFF_session.md`.
 
 ### Reverting a checkpoint
 
