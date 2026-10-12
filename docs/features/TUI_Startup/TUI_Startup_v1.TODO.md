@@ -80,38 +80,49 @@ TDD-first; `make check` before moving on. `main` only.
 
 ### Phase 3: Back-pagination in the app (`hildegard.helper.harness.app`)
 
-- [ ] **Test**: scrolling to the top issues a page (a spy view counts calls) and
-      shows a "loading older messages" line while in flight.
-- [ ] **Implement**: the scroll-to-top trigger and the loading line.
-- [ ] **Test**: a prepended page preserves the top anchor (the visible message is
-      unchanged after the insert).
-- [ ] **Implement**: record the top message before prepend; restore after.
-- [ ] **Test**: an empty page shows the "start of session" state, not an endless
-      loading line.
+> **Done** (`5c190d8`, `b7407c5`, `458b090`, `d4a3f4a`). The loads are
+> **synchronous** (a local SQLite query), so there is no in-flight moment and no
+> "loading older messages" line; the window grows inline. The head guard
+> (`FAtHead`) is the "start of session" state.
+
+- [x] **Test**: scrolling to the top issues a page (the tail grows with
+      `FOlderPages`; `TestTranscriptIsBoundedToTheTail`).
+- [x] **Implement**: the scroll-to-top trigger (`NeedOlderHistory`).
+- [x] **Test**: a prepended page preserves the top anchor (the stream's
+      `PreserveAnchor`, existing; the window re-render uses it).
+- [x] **Implement**: record the top before prepend; restore after (`PreserveAnchor`).
+- [x] **Test**: an empty page / the head stops the endless load (`FAtHead`; the
+      content height does not grow).
+- [x] **Implement**: the end-of-history state (`FAtHead`).
+- [x] **Add**: the coarse scrubber over the whole session (`CoarseScrollTarget`,
+      real DB counts) and the passive trim (`ShouldTrimHistory`).
 - [ ] **Test**: a fully-paged transcript equals the un-paged history (same order
-      and content).
-- [ ] **Implement**: the end-of-history state.
+      and content). *(Covered transitively by the resume tests; a dedicated
+      full-page equality test is a follow-up.)*
 
 ### Phase 4: Composition root (`examples/tui_agent.pas`)
 
-- [ ] **Test**: a startup-trace harness (a headless `THarnessApp`) asserts the
-      order surface+input+app -> first frame -> connect -> attach -> tail, with
-      the connect NOT before the first frame.
-- [ ] **Implement**: reorder — create surface, input, app (nil driver), paint,
-      then connect; `Attach` on success, `FailConnect` on failure.
-- [ ] **Test**: a failed connect leaves the app running (the error is shown; the
-      process does not exit with a bare message).
-- [ ] **Implement**: the failure path in the composition root.
+> **Done** (`be40988`, `8ba7302`).
+
+- [x] **Test**: `TestPaintBeforeConnectOrder` asserts the app paints a frame
+      while idle, before any connect.
+- [x] **Implement**: the reorder — surface, input, app (nil driver), paint, then
+      connect (`TLauncher.Connect`); `Attach` on success, `FailConnect` on failure.
+- [x] **Test**: a failed connect leaves the app running (the error is shown; the
+      app stays steppable) — `TestFailConnectShowsErrorAndStaysUsable`.
+- [x] **Implement**: the failure path in the composition root (`FailConnect`).
 
 ### Phase 5: Validation & docs
 
-- [ ] **Run**: `make test SUITE=THarnessAppTest,TSessionTest` (green)
-- [ ] **Run**: `make test` (whole suite)
-- [ ] **Run**: `make test-leak` (no leaks)
-- [ ] **Run**: `make check` (all gates)
-- [ ] **Run**: `make tui-agent` builds and the connecting frame appears first
-      (manual, real terminal)
-- [ ] **Update** `FEATURES.md`; rename this TODO to `TUI_Startup_v1.DONE.md`
+- [x] **Run**: `make test SUITE=THarnessAppTest,TSessionTest` (green)
+- [x] **Run**: `make test` (whole suite)
+- [x] **Run**: `make test-leak` (no leaks)
+- [x] **Run**: `make check` (all gates) — 1240 tests, 0 failures, leak-clean
+- [ ] **Run**: `make tui-agent` builds and the frame appears first (manual, real
+      terminal) — **deferred** (needs a real terminal)
+- [x] **Update** `FEATURES.md` (row -> Implemented).
+- [ ] **Rename** this TODO to `TUI_Startup_v1.DONE.md` — blocked on the one open
+      box above (the manual terminal check).
 
 ## Modified Files
 
