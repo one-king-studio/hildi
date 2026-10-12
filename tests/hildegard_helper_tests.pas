@@ -33,7 +33,7 @@ uses
   test_async_future, test_async_queue, test_async_timers,
   test_async_observable, test_async_subject, test_async_operators,
   test_async_time, test_async_context, test_async_concurrency,
-  test_async_parity, test_skills, test_wrap;
+  test_async_parity, test_skills, test_wrap, test_replymeta;
 
 var
   Runner: TTestRunner;
