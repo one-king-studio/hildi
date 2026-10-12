@@ -53,6 +53,10 @@ type
     FKind: TChatKind;
     FLabel: string;
     FBody: string;
+    { Reply metadata (an assistant reply's frontmatter, extracted): a title line
+      and keyword chips drawn above the body. Empty for a reply with no block. }
+    FTitle: string;
+    FKeywords: TStringArray;
     FText: TTextBlock;
     { The full-body wrap source for a thought/tool block, so a condensed view
       (first + ellipsis + last N) or a live tail can be computed from the
@@ -88,6 +92,11 @@ type
     FDisplayCondensed: Boolean;
     function Inset: Integer;
     function BodyAttr: TAttr;
+    function HasMeta: Boolean;
+    { The header's height in rows for a width: a title line, and a chips line
+      when there are keywords. 0 when there is no metadata. }
+    function MetaRows(AWidth: Integer): Integer;
+    procedure RenderMeta(const S: ISurface; const ARect: TRect);
     procedure Rebuild;
     procedure EnsureBody;
     { The markdown theme for an ambient box: the default palette rebased onto the
@@ -114,6 +123,9 @@ type
     destructor Destroy; override;
     { Replace or append the body text (streaming); both fire OnChange. }
     procedure SetText(const AText: string);
+    { Set the reply metadata (title + keywords) drawn above the body. The body
+      is the stripped text; the frontmatter never reaches the renderer. }
+    procedure SetMeta(const ATitle: string; const AKeywords: TStringArray);
     procedure AppendText(const AText: string);
     { End a streamed body: the open markdown tail becomes its final block, so
       the last (still-open) block is parsed and styled. Idempotent; a no-op
@@ -557,11 +569,66 @@ begin
     FOnChange(Self);
 end;
 
+procedure TChatItem.SetMeta(const ATitle: string;
+  const AKeywords: TStringArray);
+begin
+  FTitle := ATitle;
+  FKeywords := AKeywords;
+  Inc(FTextVer);
+  InvalidateHeight;
+  if Assigned(FOnChange) then
+    FOnChange(Self);
+end;
+
+function TChatItem.HasMeta: Boolean;
+begin
+  Result := (FTitle <> '') or (Length(FKeywords) > 0);
+end;
+
+function TChatItem.MetaRows(AWidth: Integer): Integer;
+begin
+  { A title line, and a chips line when there are keywords. }
+  if not HasMeta then
+    Exit(0);
+  Result := 0;
+  if FTitle <> '' then
+    Inc(Result);
+  if Length(FKeywords) > 0 then
+    Inc(Result);
+end;
+
+procedure TChatItem.RenderMeta(const S: ISurface; const ARect: TRect);
+var
+  Row, X: Integer;
+  Chips: UnicodeString;
+  I: Integer;
+begin
+  { A title line in the accent role, then the keywords as muted chips. Drawn
+    above the body; the body never contains the frontmatter block. }
+  Row := ARect.Y;
+  X := ARect.X;
+  if FTitle <> '' then
+  begin
+    PutText(S, X, Row, UnicodeString(FTitle), FTheme.Accent);
+    Inc(Row);
+  end;
+  if Length(FKeywords) > 0 then
+  begin
+    Chips := '';
+    for I := 0 to High(FKeywords) do
+    begin
+      if I > 0 then
+        Chips := Chips + ' · ';
+      Chips := Chips + UnicodeString(FKeywords[I]);
+    end;
+    PutText(S, X, Row, Chips, FTheme.Muted);
+  end;
+end;
+
 procedure TChatItem.SetText(const AText: string);
 begin
   if AText = FBody then
-    Exit;
-  FBody := AText;
+    Exit;  FBody := AText;
   FLiveStarted := False;
   Inc(FTextVer);
   InvalidateHeight;
@@ -831,7 +898,7 @@ begin
     ckAssistant, ckError:
       begin
         BodyRows(AAvail.W, TextRows, Lines);
-        Result.H := TextRows;
+        Result.H := TextRows + MetaRows(AAvail.W);
       end;
     ckThinking, ckTurn:
       Result.H := 1;
@@ -873,8 +940,8 @@ begin
     BodyR := Rc(ABounds.X + 2, ABounds.Y + 1, InnerW, TextRows);
   end
   else
-    BodyR := Rc(ABounds.X + Inset, ABounds.Y, ABounds.W - Inset,
-      ABounds.H);
+    BodyR := Rc(ABounds.X + Inset, ABounds.Y + MetaRows(ABounds.W),
+      ABounds.W - Inset, ABounds.H - MetaRows(ABounds.W));
   if FMarkdown <> nil then
     FMarkdown.Arrange(BodyR)
   else
@@ -910,6 +977,9 @@ begin
   case FKind of
     ckAssistant:
       begin
+        if HasMeta then
+          RenderMeta(S, Rc(FBounds.X + Inset, FBounds.Y, FBounds.W - Inset,
+            MetaRows(FBounds.W)));
         FMarkdown.Render(S);
         Exit;
       end;

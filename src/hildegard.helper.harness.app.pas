@@ -24,6 +24,7 @@ uses
   hildegard.helper.harness.driver, hildegard.helper.harness.view,
   hildegard.helper.store,
   hildegard.helper.harness.stats, hildegard.helper.session,
+  hildegard.helper.replymeta,
   hildegard.helper.harness.subagent, hildegard.helper.harness.subagent.spy,
   hildegard.helper.tui.sidebar, hildegard.helper.tui.list,
   hildegard.helper.session.protocol, hildegard.helper.session.client;
@@ -74,6 +75,11 @@ type
     FInterruptAt: Int64;
     { The blocks of the turn in flight, so deltas land in the right one. }
     FAssistant: TChatItem;
+    { The assistant reply's raw text and the streaming frontmatter suppressor,
+      so a leading block is withheld from the display until it closes (the body
+      then renders normally). }
+    FAssistantRaw: string;
+    FAssistantSupp: TFrontMatterSuppressor;
     FThought: TChatItem;
     FTool: TChatItem;
     { Streamed tool output is buffered and appended once per frame, so a chatty
@@ -981,12 +987,24 @@ begin
 end;
 
 procedure THarnessApp.FinalizeAssistant;
+var
+  Meta: TReplyMeta;
 begin
   if FAssistant <> nil then
   begin
     FAssistant.Finalize;
+    { The reply's frontmatter is metadata: strip it from the displayed body and
+      draw the title/keyword header instead. The block was already withheld
+      while streaming; this also covers a reply that streamed without one. }
+    Meta := ExtractReplyMeta(FAssistantRaw);
+    if Meta.HasMeta then
+    begin
+      FAssistant.SetText(Meta.Body);
+      FAssistant.SetMeta(Meta.Title, Meta.Keywords);
+    end;
     FAssistant := nil;
   end;
+  FAssistantRaw := '';
 end;
 
 procedure THarnessApp.AddTurnDivider;
@@ -1128,6 +1146,8 @@ begin
 end;
 
 procedure THarnessApp.HandleTurnEvent(const E: TTurnEvent);
+var
+  Suppressed: string;
 begin
   { Anything that is not more reasoning (or the reasoning-end marker, which
     carries its duration) means the reasoning stream has ended. }
@@ -1139,8 +1159,17 @@ begin
     teAssistantDelta:
       begin
         if FAssistant = nil then
+        begin
           FAssistant := FPanel.Stream.Add(ckAssistant, '', '');
-        FAssistant.AppendText(E.Text);
+          FAssistantRaw := '';
+          FAssistantSupp := Default(TFrontMatterSuppressor);
+        end;
+        { Accumulate the raw reply; suppress a leading frontmatter block so its
+          bytes are not shown as they stream. }
+        FAssistantRaw := FAssistantRaw + E.Text;
+        SuppressFrontMatter(FAssistantSupp, E.Text, Suppressed);
+        if Suppressed <> '' then
+          FAssistant.AppendText(Suppressed);
       end;
     teReasoningDelta:
       begin

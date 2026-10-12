@@ -89,6 +89,7 @@ type
     procedure TearDown; override;
   published
     procedure TestStreamedTurnRendersAndReenables;
+    procedure TestAssistantMetadataIsStrippedAndShown;
     procedure TestAssistantFinalizedAfterTurn;
     procedure TestToolLineAppears;
     procedure TestEmptyToolResultShowsPlaceholder;
@@ -416,6 +417,38 @@ begin
     not FindText(ckThinking, 'Thinking'));
   AssertTrue('prompt re-enabled', FApp.PromptActive);
   AssertFalse('not busy', FApp.Busy);
+end;
+
+procedure THarnessAppTest.TestAssistantMetadataIsStrippedAndShown;
+var
+  Y: Integer;
+  SawTitle: Boolean;
+begin
+  { A substantive reply opens with a frontmatter block: the block is metadata -
+    stripped from the rendered body and drawn as a title + keyword header. }
+  Build;
+  FFake.AddChunk(TextDelta('---' + #10));
+  FFake.AddChunk(TextDelta('title: Fix the drain' + #10));
+  FFake.AddChunk(TextDelta('keywords: [drain, tui]' + #10));
+  FFake.AddChunk(TextDelta('---' + #10));
+  FFake.AddChunk(TextDelta('The body.'));
+  FFake.AddChunk(FinishFrame('stop'));
+  FFake.AddChunk(DoneFrame);
+  SubmitPrompt('hi');
+  AssertTrue('turn finished', Pump(300));
+
+  { The rendered body excludes the block entirely. }
+  AssertFalse('no frontmatter fence', FindText(ckAssistant, '---'));
+  AssertFalse('no title line in the body', FindText(ckAssistant, 'title:'));
+  AssertTrue('the body is present', FindText(ckAssistant, 'The body.'));
+  { The metadata header is drawn on the surface: the title (accent) appears, so
+    the block was extracted rather than lost. }
+  FApp.Step;   // render
+  SawTitle := False;
+  for Y := 0 to FSurface.Height - 1 do
+    if Pos('Fix the drain', FSurface.RowText(Y, 0, FSurface.Width)) > 0 then
+      SawTitle := True;
+  AssertTrue('the title is drawn', SawTitle);
 end;
 
 procedure THarnessAppTest.TestAssistantFinalizedAfterTurn;
