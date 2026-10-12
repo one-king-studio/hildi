@@ -29,6 +29,11 @@ uses
   hildegard.helper.session.protocol, hildegard.helper.session.client;
 
 type
+  { Where the app is in the startup sequence. csConnecting draws a frame before
+    the driver is attached; csConnected is the normal live state; csFailed shows
+    an in-app error and stays usable. }
+  TConnState = (csConnecting, csConnected, csFailed);
+
   { Builds the tree and owns the TTuiApp and the current worker. The session is
     owned by the caller and must outlive the app. }
   THarnessApp = class
@@ -37,6 +42,12 @@ type
     FInput: IInputSource;
     FSession: TSessionView;
     FDriver: ISessionDriver;
+    { The startup lifecycle. While csConnecting there is no driver; the app draws
+      a connecting frame and refuses commands. Attach moves to csConnected;
+      FailConnect to csFailed (an in-app error, still quittable). }
+    FConnState: TConnState;
+    FConnectPhase: string;
+    FConnectError: string;
     FApp: TTuiApp;
     FTheme: TTheme;
     FPanel: TChatPanel;
@@ -172,6 +183,9 @@ type
     function GetModalActive: Boolean;
     function GetPromptActive: Boolean;
     procedure Quit(Sender: TObject);
+    { Draw the frame for the current connect state (connecting / failed). }
+    procedure RenderConnState;
+    function GetConnState: TConnState;
   public
     constructor Create(const ASurface: ISurface; const AInput: IInputSource;
       ASession: TSessionView; ADriver: ISessionDriver;
@@ -188,6 +202,17 @@ type
 
     { Quit mid-turn: deny pending approvals, join the worker, restore state. }
     procedure CancelTurn;
+
+    { Hand the app its session and driver after the connect succeeded; moves
+      csConnecting -> csConnected and renders the transcript tail. }
+    procedure Attach(const ASession: TSessionView; const ADriver: ISessionDriver);
+    { Report a failed connect; moves to csFailed and shows AError. }
+    procedure FailConnect(const AError: string);
+    { A phase label for the connecting frame (e.g. 'connecting', 'loading
+      history'), so the wait is honest. }
+    procedure SetConnectPhase(const APhase: string);
+
+    property ConnState: TConnState read GetConnState;
 
     property Busy: Boolean read FBusy;
     property PromptActive: Boolean read GetPromptActive;
@@ -325,9 +350,77 @@ begin
   FApp := TTuiApp.Create(ASurface, AInput, BuildTree);
   FApp.InputHook := PageScrub;
   FApp.ScreenBg := FTheme.Bg;
+  { With no driver yet, the app is connecting: draw a connecting frame and wait
+    for Attach. With one, it is live from the first frame (the old behaviour). }
+  if FDriver = nil then
+  begin
+    FConnState := csConnecting;
+    FConnectPhase := 'connecting';
+    RenderConnState;
+  end
+  else
+  begin
+    FConnState := csConnected;
+    RenderHistory;
+    SetState(psReady, 'ready');
+    UpdateStats;
+  end;
+end;
+
+function THarnessApp.GetConnState: TConnState;
+begin
+  Result := FConnState;
+end;
+
+procedure THarnessApp.SetConnectPhase(const APhase: string);
+begin
+  if FConnState <> csConnecting then
+    Exit;
+  FConnectPhase := APhase;
+  RenderConnState;
+end;
+
+procedure THarnessApp.RenderConnState;
+begin
+  { Replace the stream with the state's frame. While connecting the panel is
+    otherwise empty, so this is the first frame the operator sees. }
+  FPanel.Stream.Clear;
+  case FConnState of
+    csConnecting:
+      begin
+        FPanel.Stream.Add(ckThinking, '', FConnectPhase + '…');
+        SetState(psThinking, FConnectPhase);
+      end;
+    csFailed:
+      begin
+        FPanel.Stream.Add(ckError, '',
+          'connection failed: ' + FConnectError);
+        SetState(psError, 'failed');
+      end;
+  else
+    ;
+  end;
+  FApp.Invalidate;
+end;
+
+procedure THarnessApp.Attach(const ASession: TSessionView;
+  const ADriver: ISessionDriver);
+begin
+  FSession := ASession;
+  FDriver := ADriver;
+  FConnState := csConnected;
+  { Replace the connecting frame with the transcript. }
+  FPanel.Stream.Clear;
   RenderHistory;
   SetState(psReady, 'ready');
   UpdateStats;
+end;
+
+procedure THarnessApp.FailConnect(const AError: string);
+begin
+  FConnState := csFailed;
+  FConnectError := AError;
+  RenderConnState;
 end;
 
 destructor THarnessApp.Destroy;
@@ -352,9 +445,15 @@ end;
 function THarnessApp.BuildTree: TWidget;
 var
   Shell: TAppShell;
+  Title: string;
 begin
-  FPanel := TChatPanel.Create(FTheme, 'Hildegard · ' + FSession.Model,
-    CtaHints);
+  { While connecting there may be no session yet; use a placeholder title and an
+    empty status until Attach supplies them. }
+  if FSession <> nil then
+    Title := 'Hildegard · ' + FSession.Model
+  else
+    Title := 'Hildegard';
+  FPanel := TChatPanel.Create(FTheme, Title, CtaHints);
   FPanel.Stream.OnToggle := Invalidate;
   FPanel.Stream.OnChange := Invalidate;
   FPanel.Stream.OnNeedOlder := NeedOlderHistory;
@@ -428,6 +527,12 @@ procedure THarnessApp.RunCommand(const AName: string);
 begin
   FPanel.SetPaletteActive(False);
   FPanel.Compose.Clear;
+  { While connecting or failed, commands have no driver; refuse cleanly. }
+  if FConnState <> csConnected then
+  begin
+    AppendError('not connected yet');
+    Exit;
+  end;
   if (AName = 'checkpoint') and (FDriver <> nil) then
   begin
     { The runtime drafts synchronously; show the state now so the operator sees
@@ -691,6 +796,12 @@ end;
 
 procedure THarnessApp.Submit(const AText: string);
 begin
+  { While connecting or failed there is no driver to submit to; refuse cleanly. }
+  if FConnState <> csConnected then
+  begin
+    AppendError('not connected yet');
+    Exit;
+  end;
   if FBusy then
   begin
     { A turn is in flight: hand the prompt to the driver, which injects it at

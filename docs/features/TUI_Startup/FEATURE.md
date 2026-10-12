@@ -55,6 +55,13 @@ It is the general safety net for startup latency. `Lazy_MCP` removes the current
   primitive `Context_Handoff` needs for archived messages, so build it once.
 - **The async driver is deferred.** A background connect (a driver state, drained
   like `TTurnQueue`) is the eventual shape; v1 does paint-then-block.
+- **No session, no runtime, until the first prompt.** A TUI launched without a
+  session id must not *create* a session row or *spawn* a runtime at startup.
+  Opening the view opens the workspace and the store (cheap, local), but the
+  session is created and the runtime spawned **lazily, on the first submit**. So
+  the connecting frame becomes an **idle/ready-to-start** state: the operator can
+  quit without ever touching the store or spawning a process. A resumed or named
+  session still connects eagerly (its id already exists).
 
 ### Shape (the SPEC formalizes it)
 
@@ -62,6 +69,7 @@ It is the general safety net for startup latency. `Lazy_MCP` removes the current
 order      surface + input + app(connecting) -> paint -> connect -> attach -> history
 state      THarnessApp: connecting | connected | failed
 history    tail window first; page older on demand; scroll stays put
+lazy       no session id => idle; the first submit creates the session + spawns
 future     an async driver that never blocks the UI thread
 ```
 
