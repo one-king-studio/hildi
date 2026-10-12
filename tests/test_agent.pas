@@ -224,6 +224,7 @@ type
     procedure TestV1SendOverloadStillWorks;
     procedure TestQueuedAmbientDrainsAsAmbient;
     procedure TestSendAmbientStartsWithoutUserMessage;
+    procedure TestPrewrappedUserMessagesAreNotWrappedAgain;
     procedure TestSendAmbientDrainsQueuedAmbient;
     procedure TestRegistrationAddsRequiredReasonParam;
     procedure TestRegistrationPreservesExistingParams;
@@ -982,6 +983,20 @@ begin
     if Pos('subagent result', Msgs[I].Content) > 0 then
       Found := True;
   AssertTrue('ambient content present in history', Found);
+end;
+
+procedure TAgentLoopTest.TestPrewrappedUserMessagesAreNotWrappedAgain;
+begin
+  { The loop wraps the last user turn unless it is already wrapped; a second pass
+    would escape the markup and the model would read it as text. An ambient
+    notification and a checkpoint handoff are both delivered pre-wrapped. }
+  AssertTrue('an ambient notification',
+    IsPrewrappedUserMessage('<ambient timestamp="x">'));
+  AssertTrue('a checkpoint handoff',
+    IsPrewrappedUserMessage('<handoff seq="15924">'));
+  AssertFalse('a plain turn', IsPrewrappedUserMessage('fix the modal'));
+  AssertFalse('a mid-text mention',
+    IsPrewrappedUserMessage('see the <handoff> docs'));
 end;
 
 procedure TAgentLoopTest.TestSendAmbientStartsWithoutUserMessage;

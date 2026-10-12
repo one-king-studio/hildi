@@ -45,6 +45,7 @@ function NowUtcMs: Int64;
 
     <context>
       <now>ISO</now>
+      <workspace>/abs/path</workspace>
       ...dynamic context...
       <usage used="N" limit="M">P%</usage>
     </context>
@@ -54,10 +55,13 @@ function NowUtcMs: Int64;
 
   AContext is the dynamic context - the providers' fragments, e.g. the skills
   manifest. It is omitted when empty. The usage element appears only when a limit
-  is known. The guard is always present, at the tail. }
+  is known. The guard is always present, at the tail. AWorkspace is the workspace
+  root (the shell's starting directory and the base the file tools resolve
+  against); it is omitted when unknown, so a caller without a workspace is
+  unchanged. }
 function FormatUserMessage(const AContent: string; ATimestampMs: Int64;
   const AContext: string = ''; AUsageTokens: Integer = 0;
-  ALimitTokens: Integer = 0): string;
+  ALimitTokens: Integer = 0; const AWorkspace: string = ''): string;
 
 { A loop-only advisory that rides a tool response: a soft-limit nudge, not a
   failure. The stored tool record stays plain - this is prepended on the way out
@@ -85,11 +89,17 @@ begin
 end;
 
 function FormatUserMessage(const AContent: string; ATimestampMs: Int64;
-  const AContext: string; AUsageTokens: Integer; ALimitTokens: Integer): string;
+  const AContext: string; AUsageTokens: Integer; ALimitTokens: Integer;
+  const AWorkspace: string): string;
 var
   Context: string;
 begin
   Context := '  <now>' + IsoUtc(ATimestampMs) + '</now>' + LineEnding;
+  { The workspace root, so the model grounds relative paths (shell commands, in
+    particular) instead of guessing one - it has guessed /workspace. }
+  if AWorkspace <> '' then
+    Context := Context + '  <workspace>' + EscapeXmlContent(AWorkspace) +
+      '</workspace>' + LineEnding;
   if AContext <> '' then
     Context := Context + AContext + LineEnding;
   { The model's headroom, so it can manage the thread instead of discovering the

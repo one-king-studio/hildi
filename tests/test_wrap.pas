@@ -15,6 +15,8 @@ type
     procedure WrapsContentInMessage;
     procedure EscapesContent;
     procedure HasContextAndNow;
+    procedure HasWorkspaceWhenGiven;
+    procedure NoWorkspaceWhenEmpty;
     procedure ContentCannotCloseTheWrapper;
   end;
 
@@ -52,6 +54,23 @@ var
 begin
   S := FormatUserMessage('x', 0);
   AssertTrue('now element', Pos('<now>', S) > 0);
+end;
+
+procedure TWrapTest.HasWorkspaceWhenGiven;
+var
+  S: string;
+begin
+  S := FormatUserMessage('x', 0, '', 0, 0, '/home/agent/project');
+  AssertTrue('workspace element',
+    Pos('<workspace>/home/agent/project</workspace>', S) > 0);
+end;
+
+procedure TWrapTest.NoWorkspaceWhenEmpty;
+var
+  S: string;
+begin
+  S := FormatUserMessage('x', 0);
+  AssertTrue('no workspace element when unknown', Pos('<workspace>', S) = 0);
 end;
 
 procedure TWrapTest.ContentCannotCloseTheWrapper;

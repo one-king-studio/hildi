@@ -62,6 +62,7 @@ type
     procedure TearDown; override;
   published
     procedure TestRegisterAddsRunCommandSpec;
+    procedure TestDescriptionNamesTheShellStartDirectory;
     procedure TestDefaultShellProfileIsPosixBash;
     procedure TestMissingCommandArgumentFails;
     procedure TestInvalidJsonFails;
@@ -198,6 +199,33 @@ begin
     Tool.Register(Tools);
     AssertEquals('one tool', 1, Tools.Count);
     AssertTrue('registered', Tools.Find(CommandToolName, Registered));
+  finally
+    Tool.Free;
+    Tools.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestDescriptionNamesTheShellStartDirectory;
+var
+  Tools: TToolRegistry;
+  Tool: TCommandTool;
+  Registered: TRegisteredTool;
+  Cfg: TCommandToolConfig;
+begin
+  { The model has guessed /workspace; the description must state where the shell
+    starts, and the cwd parameter must name its default. }
+  Tools := TToolRegistry.Create;
+  Cfg := MakeConfig(0);
+  Cfg.DefaultCwd := '/home/agent/project';
+  Tool := TCommandTool.Create(Cfg, ServiceWith(nil), FExecutor);
+  try
+    Tool.Register(Tools);
+    AssertTrue('registered', Tools.Find(CommandToolName, Registered));
+    AssertTrue('names the default cwd',
+      Pos('/home/agent/project', Registered.Spec.Description) > 0);
+    AssertTrue('cwd param names the default',
+      Pos('defaults to the workspace root',
+        Registered.Spec.ParametersJson) > 0);
   finally
     Tool.Free;
     Tools.Free;

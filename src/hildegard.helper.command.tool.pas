@@ -367,11 +367,17 @@ begin
     'Run a shell command on the host and return its output. Requires a short ' +
     'reason. Commands are checked against the approval whitelist and may need ' +
     'approval.';
+  { State where the shell starts, so the model grounds relative paths instead of
+    guessing a directory (it has guessed /workspace). }
+  if FConfig.DefaultCwd <> '' then
+    Spec.Description := Spec.Description +
+      ' The shell starts in the workspace root (' + FConfig.DefaultCwd + ').';
   Spec.ParametersJson :=
     '{"type":"object","properties":{' +
     '"command":{"type":"string","description":"Shell command to run."},' +
     '"reason":{"type":"string","description":"Short reason this command is needed."},' +
-    '"cwd":{"type":"string","description":"Working directory."},' +
+    '"cwd":{"type":"string","description":"Working directory; defaults to the ' +
+    'workspace root."},' +
     '"timeout_ms":{"type":"integer","description":"Timeout in ms; omit or 0 ' +
     'for the default. Set higher for slow commands."}' +
     '},"required":["command","reason"]}';

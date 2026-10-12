@@ -47,6 +47,7 @@ have one (`<ambient>…<message>…</message>`); ordinary user turns do not.
 ```
 <context>
   <now>2026-10-11T14:03:00.000Z</now>
+  <workspace>/abs/workspace/root</workspace>
   <preferences>
     <item key="KEY">VALUE</item>
   </preferences>
@@ -56,7 +57,10 @@ have one (`<ambient>…<message>…</message>`); ordinary user turns do not.
 ```
 
 `<preferences>` is omitted when empty; `<now>` always appears. The skills manifest
-becomes another child of `<context>` (e.g. `<skills>…</skills>`).
+becomes another child of `<context>` (e.g. `<skills>…</skills>`). `<workspace>`
+carries the workspace root — the shell's starting directory and the base the file
+tools resolve against — so the model grounds relative paths instead of guessing
+one (it has guessed `/workspace`); it is omitted when unknown.
 
 **Past user message** (`formatPastMessage`):
 

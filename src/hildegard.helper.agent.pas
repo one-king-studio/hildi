@@ -227,6 +227,10 @@ type
 
   TAgentConfig = record
     SystemPrompt: string;
+    { The workspace root, so the user turn's <context> can state it and the model
+      grounds shell paths instead of guessing one (it has guessed /workspace).
+      Empty when unknown. }
+    WorkspaceRoot: string;
     { Tool-call budget for one turn. From SoftToolLimit the model is nudged
       every ToolNoticeStep calls (the call is intercepted and it must resubmit);
       at HardToolLimit it is locked down; one call past that ends the turn as a
@@ -335,6 +339,12 @@ function MakeToolSpec(const AName, ADescription,
 { Required, non-empty, human-readable reason every tool call must carry. }
 function ExtractToolReason(const AArgumentsJson: string;
   out AReason: string; out AError: string): Boolean;
+
+{ Whether a user-role message is already wrapped by the loop - an ambient
+  notification, or a checkpoint handoff - and so must not be wrapped again: a
+  second pass would escape its tags and the model would read the markup instead
+  of the context. }
+function IsPrewrappedUserMessage(const AContent: string): Boolean;
 
 const
   { Tool-call budget: nudge from 30, lock down at 50, and end the turn on the
@@ -883,6 +893,11 @@ begin
     FTimedEvents.OnText(AText);
 end;
 
+function IsPrewrappedUserMessage(const AContent: string): Boolean;
+begin
+  Result := (Pos('<ambient', AContent) = 1) or (Pos('<handoff', AContent) = 1);
+end;
+
 function TAgentLoop.BuildRequest(const APendingContent: string;
   AContinuing: Boolean): TChatRequest;
 var
@@ -915,16 +930,17 @@ begin
       Context := Context + LineEnding;
     Context := Context + Fragment;
   end;
-  { Wrap the current user turn: the last user message. Ambient notifications are
-    delivered as user messages but are already wrapped by FormatAmbient - wrapping
-    them again would escape their tags - so only the user's own turn is wrapped. }
+  { Wrap the current user turn: the last user message. An ambient notification
+    and a checkpoint handoff are delivered as user messages but are already
+    wrapped - wrapping them again would escape their tags - so only the user's
+    own turn is wrapped. }
   for I := High(Result.Messages) downto 0 do
     if Result.Messages[I].Role = crUser then
     begin
-      if Pos('<ambient', Result.Messages[I].Content) <> 1 then
+      if not IsPrewrappedUserMessage(Result.Messages[I].Content) then
         Result.Messages[I].Content := FormatUserMessage(
           Result.Messages[I].Content, NowUtcMs, Context,
-          FLastPromptTokens, FConfig.MaxContextTokens);
+          FLastPromptTokens, FConfig.MaxContextTokens, FConfig.WorkspaceRoot);
       Break;
     end;
   { A soft-limit nudge rides the last tool response's <context> - loop-only, not

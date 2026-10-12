@@ -372,6 +372,9 @@ begin
   { The tool-call budget keeps its agent default; the context cap comes from the
     view (which resolved the config, env, or the default). }
   AgentConfig.MaxContextTokens := FView.MaxContextTokens;
+  { State the workspace root in the user turn's <context>, so the model grounds
+    shell paths instead of guessing one. }
+  AgentConfig.WorkspaceRoot := FView.WorkspaceRoot;
 
   FLoop := TAgentLoop.Create(FClient, FConversation, FTools, AgentConfig);
   { The skill registry is the capability layer; register it as the provider. Its

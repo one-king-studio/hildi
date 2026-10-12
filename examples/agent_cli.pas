@@ -1090,6 +1090,7 @@ begin
     AgentConfig.SystemPrompt := Opts.SystemPrompt;
   if AgentConfig.SystemPrompt = '' then
     AgentConfig.SystemPrompt := DefaultSystemPrompt;
+  AgentConfig.WorkspaceRoot := Workspace.Root;
 
   Client := TLLMClient.Create(Config, nil);
   Store := TMemoryConversationStore.Create;
