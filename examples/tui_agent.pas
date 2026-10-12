@@ -24,6 +24,21 @@ uses
   hildegard.helper.harness.app, hildegard.helper.session.protocol,
   hildegard.helper.session.client;
 
+type
+  { The lazy-connect hook: on the first prompt, create the session and spawn its
+    runtime, then Attach (or FailConnect). Holds the view and app so the connect
+    is one method of object. }
+  TLauncher = class
+  private
+    FSession: TSessionView;
+    FApp: THarnessApp;
+    FStorePath: string;
+  public
+    constructor Create(ASession: TSessionView; AApp: THarnessApp;
+      const AStorePath: string);
+    procedure Connect;
+  end;
+
 var
   RawArgs: TStringList;
   Args: array of string;
@@ -36,12 +51,51 @@ var
   Cfg: THarnessSessionConfig;
   Session: TSessionView;
   Err: string;
-  ClientCfg: TSessionClientConfig;
-  Driver: ISessionDriver;
   Surface: ISurface;
   InputTerm: TInputSourceTerminal;
   Input: IInputSource;
   App: THarnessApp;
+  Launcher: TLauncher;
+
+constructor TLauncher.Create(ASession: TSessionView; AApp: THarnessApp;
+  const AStorePath: string);
+begin
+  inherited Create;
+  FSession := ASession;
+  FApp := AApp;
+  FStorePath := AStorePath;
+end;
+
+procedure TLauncher.Connect;
+var
+  Err: string;
+  ClientCfg: TSessionClientConfig;
+  Driver: ISessionDriver;
+begin
+  { Create the session now (the lazy path defers it), then spawn the runtime. }
+  if not FSession.EnsureSession(Err) then
+  begin
+    FApp.FailConnect('could not create session: ' + Err);
+    Exit;
+  end;
+  ClientCfg := Default(TSessionClientConfig);
+  ClientCfg.SessionId := FSession.SessionId;
+  ClientCfg.WorkspacePath := FSession.WorkspaceRoot;
+  ClientCfg.StorePath := FStorePath;
+  ClientCfg.Role := srDrive;
+  ClientCfg.FromSeq := 0;
+  ClientCfg.Spawn := True;
+  ClientCfg.SpawnTimeoutMs := 5000;
+  ClientCfg.RuntimeCommand := ResolveRuntimeBinary(
+    GetEnvironmentVariable('HILDEGARD_RUNTIME_BIN'), ParamStr(0));
+  Driver := RemoteDriver(ClientCfg, Err);
+  if Driver = nil then
+  begin
+    FApp.FailConnect(Err);
+    Exit;
+  end;
+  FApp.Attach(FSession, Driver);
+end;
 
 { End the run loop on SIGTERM/SIGINT/SIGHUP so the terminal is restored. }
 function ShouldStop: Boolean;
@@ -93,7 +147,8 @@ begin
       '.hildegard-helper' + PathDelim + 'store.db';
 
   { The TUI process only needs the store/workspace/session handle; the runtime
-    owns the loop. }
+    owns the loop. With no explicit session or --continue, defer creating one
+    until the operator sends the first prompt (so a launch has no side effect). }
   Cfg := Default(THarnessSessionConfig);
   Cfg.WorkspacePath := Opts.Workspace;
   Cfg.StorePath := StorePath;
@@ -101,33 +156,12 @@ begin
   Cfg.Resume := Opts.ContinueSession;
   Cfg.Model := Opts.Model;
   Cfg.Endpoint := Opts.Endpoint;
+  Cfg.LazySession := (Opts.Session = '') and (not Opts.ContinueSession);
 
   Session := TSessionView.Open(Cfg, Err);
   if Session = nil then
   begin
     WriteLn('error: ', Err);
-    Halt(1);
-  end;
-
-  { Connect to (or spawn) the session's runtime as the driver. }
-  ClientCfg := Default(TSessionClientConfig);
-  ClientCfg.SessionId := Session.SessionId;
-  ClientCfg.WorkspacePath := Session.WorkspaceRoot;
-  ClientCfg.StorePath := StorePath;
-  ClientCfg.Role := srDrive;
-  ClientCfg.FromSeq := 0;
-  ClientCfg.Spawn := True;
-  ClientCfg.SpawnTimeoutMs := 5000;
-  { The headless agent to spawn: HILDEGARD_RUNTIME_BIN, else a sibling of this
-    executable. '' when neither exists; the client then reports a clear error if
-    it must spawn (an already-live runtime still attaches). }
-  ClientCfg.RuntimeCommand := ResolveRuntimeBinary(
-    GetEnvironmentVariable('HILDEGARD_RUNTIME_BIN'), ParamStr(0));
-  Driver := RemoteDriver(ClientCfg, Err);
-  if Driver = nil then
-  begin
-    WriteLn('error: ', Err);
-    Session.Free;
     Halt(1);
   end;
 
@@ -140,14 +174,24 @@ begin
   { Theme: forced by --theme, else detected from the terminal (OSC 11). }
   ThemeMode := ThemeModeFromString(ThemeArg);
   Light := (ThemeMode = tmAuto) and InputTerm.DetectLightBackground;
-  App := THarnessApp.Create(Surface, Input, Session, Driver, ThemeMode, Light);
+
+  { Paint first: build the app with no driver. It is idle (no session) or
+    connecting (a named/resumed session); the driver attaches after. }
+  App := THarnessApp.Create(Surface, Input, Session, nil, ThemeMode, Light);
+  Launcher := TLauncher.Create(Session, App, StorePath);
   try
+    if Session.HasSession then
+      { A named or resumed session: connect now (the first frame is already up). }
+      Launcher.Connect
+    else
+      { No session yet: connect lazily on the first prompt. }
+      App.OnNeedConnect := Launcher.Connect;
     { Clock-driven: waits on input, drains the driver's queue each iteration,
       and renders on the frame cadence only while a turn is in flight. }
     App.Run(@ShouldStop);
   finally
+    Launcher.Free;
     App.Free;
-    Driver := nil;
     Input := nil;
     Surface := nil;
     Session.Free;
