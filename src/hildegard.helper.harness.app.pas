@@ -106,6 +106,10 @@ type
       the whole session is loaded), so the coarse scrubber can map a session
       fraction to a row within the loaded window. }
     FWindowStart: Integer;
+    { Passive trim: the monotonic ms of the last scroll. When the operator has
+      not scrolled for TrimIdleMs and the viewport is at the bottom, older loaded
+      pages are unloaded so a long session's memory stays bounded. }
+    FLastScrollMs: Int64;
     { The left-border paginator (coarse scroll) drag: the last hit row. }
     FPageDragging: Boolean;
     FPageDragRow: Integer;
@@ -188,6 +192,9 @@ type
     procedure Invalidate(Sender: TObject);
     { The transcript reached the top: prepend the next archived page. }
     procedure NeedOlderHistory(Sender: TObject);
+    { Passive trim: unload the older loaded pages once the operator has been away
+      from them (see TrimIdleMs), so a long session stays bounded. }
+    procedure TrimHistory;
     { The left-border paginator: a press or drag scrolls to that page. }
     function PageScrub(const E: TInputEvent): Boolean;
     { The view scrolled: recompute which page the viewport is on. }
@@ -267,6 +274,12 @@ type
   widgets. }
 function CoarseScrollTarget(ASeg, ASegCount, AMessageCount: Integer): Integer;
 
+{ Whether the passive trim should run: older pages are loaded, the operator has
+  not scrolled for ATickMs since ALastScrollMs, and the viewport is at the
+  bottom (AScrollY >= AMaxScroll - 2). Pure, so the policy is testable. }
+function ShouldTrimHistory(AOlderPages: Integer; ANowMs, ALastScrollMs: Int64;
+  AScrollY, AMaxScroll: Integer): Boolean;
+
 implementation
 
 const
@@ -282,6 +295,11 @@ const
   StartupTailCount = 200;
   { A back-pagination page size, in messages. }
   HistoryPageSize = 200;
+  { Passive trim: after this long without a scroll, unload the older pages that
+    the operator has left behind, so a long session's TUI memory stays bounded.
+    Only trims when the viewport is at the bottom (the operator is not reading
+    the older region). }
+  TrimIdleMs = 30000;
 
 type
   { A yes/no query, e.g. "may I quit?". }
@@ -334,6 +352,14 @@ begin
   if (ASegCount <= 1) or (ASeg >= ASegCount - 1) then
     Exit(AMessageCount - 1);
   Result := (ASeg * (AMessageCount - 1)) div (ASegCount - 1);
+end;
+
+function ShouldTrimHistory(AOlderPages: Integer; ANowMs, ALastScrollMs: Int64;
+  AScrollY, AMaxScroll: Integer): Boolean;
+begin
+  Result := (AOlderPages > 0) and
+    (ANowMs - ALastScrollMs >= TrimIdleMs) and
+    (AScrollY >= AMaxScroll - 2);
 end;
 
 { TAppShell }
@@ -1379,6 +1405,28 @@ begin
   FApp.Invalidate;
 end;
 
+procedure THarnessApp.TrimHistory;
+begin
+  { Unload older loaded pages once the operator has not scrolled for TrimIdleMs
+    and is at the bottom (not reading the older region). This keeps a long
+    session's TUI memory bounded: the pages scrolled past are released. The
+    viewport is not moved (it is at the bottom; dropping content above it leaves
+    the visible rows unchanged). }
+  if FOlderPages <= 0 then
+    Exit;
+  if FBusy then
+    Exit;                       { a turn is streaming; do not churn the stream }
+  if not ShouldTrimHistory(FOlderPages, GetTickCount64, FLastScrollMs,
+    FPanel.Stream.ScrollOffset, FPanel.Stream.MaxScroll) then
+    Exit;
+  { Drop every older page: back to the tail window. }
+  FOlderPages := 0;
+  FAtHead := False;
+  FPanel.Stream.Clear;
+  RenderHistory;
+  FApp.Invalidate;
+end;
+
 function THarnessApp.PageScrub(const E: TInputEvent): Boolean;
 var
   B: TRect;
@@ -1460,6 +1508,7 @@ begin
   { The active page is discrete: it changes only when the viewport crosses the
     checkpoint boundary. Above the boundary is the archived (earlier) page; at or
     below it is the current page. }
+  FLastScrollMs := GetTickCount64;
   if FPageCount < 2 then
     Exit;
   if FCheckpointBlock = nil then
@@ -1487,6 +1536,7 @@ begin
   CheckInterruptWindow;
   DrainQueue;
   FlushToolOutput;
+  TrimHistory;
   SyncBusy;
   { The caret is steady while the terminal is unfocused (DECSET 1004). }
   FPanel.Compose.Edit.Blinking := FApp.TerminalFocused;

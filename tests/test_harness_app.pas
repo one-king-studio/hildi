@@ -113,6 +113,7 @@ type
     procedure TestThoughtShowsDuration;
     procedure TestCtaHintsAreBlank;
     procedure TestCoarseScrollTargetMapsSegments;
+    procedure TestShouldTrimHistory;
     procedure TestSidebarTogglesWithCtrlB;
     procedure TestThinkingStateDuringATurn;
     procedure TestReasoningSettlesIntoAThoughtBlock;
@@ -1157,6 +1158,20 @@ begin
     page, so its target is the top). }
   AssertEquals('one message', 0, CoarseScrollTarget(0, 3, 1));
   AssertEquals('one page -> top', 0, CoarseScrollTarget(0, 1, 43));
+end;
+
+procedure THarnessAppTest.TestShouldTrimHistory;
+begin
+  { Trim only when older pages are loaded, the operator has been idle past the
+    window, AND the viewport is at the bottom. }
+  AssertFalse('no older pages: no trim', ShouldTrimHistory(0, 100000, 0, 500, 500));
+  AssertFalse('recent scroll: no trim', ShouldTrimHistory(2, 5000, 0, 500, 500));
+  AssertFalse('scrolled up (not at the bottom): no trim',
+    ShouldTrimHistory(2, 100000, 0, 100, 500));
+  AssertTrue('idle + at the bottom: trim',
+    ShouldTrimHistory(2, 100000, 0, 500, 500));
+  AssertTrue('within 2 rows of the bottom still trims',
+    ShouldTrimHistory(2, 100000, 0, 498, 500));
 end;
 
 procedure THarnessAppTest.TestThinkingStateDuringATurn;
