@@ -29,6 +29,7 @@ type
     procedure Render;
     function Key(AKind: TKeyKind): TInputEvent;
     function Ch(const AText: string): TInputEvent;
+    function Ctrl(const AText: string): TInputEvent;
     function Row(const AId, ATitle: string; APinned, AArchived: Boolean): TSessionRow;
   protected
     procedure SetUp; override;
@@ -39,6 +40,7 @@ type
     procedure TestArchivedHiddenByDefaultAndToggled;
     procedure TestNavigationMovesSelection;
     procedure TestPinKeyRaisesTheAction;
+    procedure TestPlainLetterFiltersInsteadOfActing;
     procedure TestRenameCapturesText;
     procedure TestEmptyIsDrawnNotCrashed;
   end;
@@ -87,6 +89,12 @@ begin
   Result.Kind := ikKey;
   Result.Key.Kind := kkChar;
   Result.Key.Ch := UnicodeString(AText);
+end;
+
+function TSessionsModalTest.Ctrl(const AText: string): TInputEvent;
+begin
+  Result := Ch(AText);
+  Result.Key.Mods := [moCtrl];
 end;
 
 function TSessionsModalTest.Row(const AId, ATitle: string; APinned,
@@ -166,19 +174,31 @@ procedure TSessionsModalTest.TestPinKeyRaisesTheAction;
 begin
   FModal.SetRows([Row('a', 'A', False, False), Row('b', 'B', False, False)]);
   FModal.OnAction := NoteAction;
-  FModal.HandleEvent(Ch('p'));
+  FModal.HandleEvent(Ctrl('p'));
   AssertEquals('pinned a', 'a', FActionId);
   AssertEquals('pin action', Ord(saTogglePin), Ord(FActionKind));
-  FModal.HandleEvent(Ch('a'));
+  FModal.HandleEvent(Ctrl('a'));
   AssertEquals('archived a', 'a', FActionId);
   AssertEquals('archive action', Ord(saToggleArchive), Ord(FActionKind));
+end;
+
+procedure TSessionsModalTest.TestPlainLetterFiltersInsteadOfActing;
+begin
+  { A stray letter while typing a filter must NOT trigger an action. }
+  FModal.SetRows([Row('a', 'Alpha', False, False)]);
+  FModal.OnAction := NoteAction;
+  FActionId := '';
+  FModal.HandleEvent(Ch('a'));
+  AssertEquals('no action fired', '', FActionId);
+  AssertEquals('the letter filtered instead', 'a', FModal.Filter);
+  AssertFalse('not archived', FModal.ShowArchived);
 end;
 
 procedure TSessionsModalTest.TestRenameCapturesText;
 begin
   FModal.SetRows([Row('a', 'A', False, False)]);
   FModal.OnRename := NoteRename;
-  FModal.HandleEvent(Ch('r'));
+  FModal.HandleEvent(Ctrl('r'));
   AssertTrue('renaming', FModal.Renaming);
   FModal.HandleEvent(Ch('h'));
   FModal.HandleEvent(Ch('i'));

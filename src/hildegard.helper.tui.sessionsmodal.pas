@@ -5,7 +5,7 @@ unit hildegard.helper.tui.sessionsmodal;
   v1 (the driver seam). Modelled on TApprovalModal: dim, trap input, theme roles.
   See docs/features/Session_Management/Session_Modal_v1.SPEC.md. }
 
-{$mode delphi}{$H+}
+{$mode delphi}{$H+}{$codepage utf8}
 
 interface
 
@@ -63,10 +63,43 @@ type
 const
   { The dialog's minimum width and the chrome rows (borders + title + filter +
     footer). }
-  SessionsMinWidth = 50;
+  SessionsMinWidth = 56;
   SessionsChromeRows = 5;
 
+type
+  { A footer hint: the keybinding (dimmed) and its action (normal), matching the
+    approval modal's `enter accept   esc deny` convention. }
+  TSessionsFooterHint = record
+    Key: string;
+    Action: string;
+  end;
+
+const
+  SessionsFooter: array[0..4] of TSessionsFooterHint = (
+    (Key: 'ctrl+p'; Action: ' pin'),
+    (Key: 'ctrl+a'; Action: ' archive'),
+    (Key: 'ctrl+r'; Action: ' rename'),
+    (Key: 'ctrl+x'; Action: ' archived'),
+    (Key: 'esc'; Action: ' close'));
+  FooterGap = '   ';
+
+function SessionsFooterWidth: Integer;
+
 implementation
+
+function SessionsFooterWidth: Integer;
+var
+  I: Integer;
+begin
+  Result := 0;
+  for I := Low(SessionsFooter) to High(SessionsFooter) do
+  begin
+    if I > Low(SessionsFooter) then
+      Inc(Result, StringWidth(UnicodeString(FooterGap)));
+    Inc(Result, StringWidth(UnicodeString(SessionsFooter[I].Key)));
+    Inc(Result, StringWidth(UnicodeString(SessionsFooter[I].Action)));
+  end;
+end;
 
 constructor TSessionsModal.Create(const ATheme: TTheme);
 begin
@@ -184,6 +217,10 @@ function TSessionsModal.Measure(const AAvail: TSize): TSize;
 begin
   Result := Default(TSize);
   Result.W := SessionsMinWidth;
+  { At least wide enough for the footer hints, plus the two border columns and
+    the two inner pads. }
+  if SessionsFooterWidth + 4 > Result.W then
+    Result.W := SessionsFooterWidth + 4;
   if Result.W > AAvail.W then
     Result.W := AAvail.W;
   Result.H := VisibleCount * RowHeight + SessionsChromeRows;
@@ -289,8 +326,21 @@ begin
       PutText(S, L + 2 + StringWidth(Line) + 2, Row, Chips, MutedAttr);
   end;
 
-  PutText(S, L + 2, B - 1,
-    'p pin  a archive  r rename  x archived  esc close', MutedAttr);
+  { Footer, right-aligned: keys dimmed, actions normal (the approval modal's
+    convention). }
+  Row := B - 1;
+  X := R - 1 - StringWidth(UnicodeString(FooterGap)) - SessionsFooterWidth;
+  if X < L + 2 then
+    X := L + 2;
+  for I := Low(SessionsFooter) to High(SessionsFooter) do
+  begin
+    if I > Low(SessionsFooter) then
+      Inc(X, StringWidth(UnicodeString(FooterGap)));
+    PutText(S, X, Row, UnicodeString(SessionsFooter[I].Key), DimAttr);
+    Inc(X, StringWidth(UnicodeString(SessionsFooter[I].Key)));
+    PutText(S, X, Row, UnicodeString(SessionsFooter[I].Action), NormalAttr);
+    Inc(X, StringWidth(UnicodeString(SessionsFooter[I].Action)));
+  end;
 end;
 
 function TSessionsModal.HandleEvent(const E: TInputEvent): Boolean;
@@ -339,16 +389,23 @@ begin
       begin
         if E.Key.Ch = '' then
           Exit;
-        if (E.Key.Ch = 'p') or (E.Key.Ch = 'P') then
-          FireAction(saTogglePin)
-        else if (E.Key.Ch = 'a') or (E.Key.Ch = 'A') then
-          FireAction(saToggleArchive)
-        else if (E.Key.Ch = 'x') or (E.Key.Ch = 'X') then
-          FShowArchived := not FShowArchived
-        else if (E.Key.Ch = 'r') or (E.Key.Ch = 'R') then
+        { Actions are Ctrl-modified, so plain typing only filters (a stray 'a'
+          while typing must not archive a session). }
+        if moCtrl in E.Key.Mods then
         begin
-          FRenaming := True;
-          FRenameText := '';
+          if (E.Key.Ch = 'p') or (E.Key.Ch = 'P') then
+            FireAction(saTogglePin)
+          else if (E.Key.Ch = 'a') or (E.Key.Ch = 'A') then
+            FireAction(saToggleArchive)
+          else if (E.Key.Ch = 'x') or (E.Key.Ch = 'X') then
+            FShowArchived := not FShowArchived
+          else if (E.Key.Ch = 'r') or (E.Key.Ch = 'R') then
+          begin
+            FRenaming := True;
+            FRenameText := '';
+          end
+          else
+            Result := False;
         end
         else
           FFilter := FFilter + string(E.Key.Ch);
