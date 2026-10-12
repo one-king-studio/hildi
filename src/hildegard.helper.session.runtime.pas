@@ -29,6 +29,7 @@ uses
   hildegard.helper.harness.session, hildegard.helper.harness.view,
   hildegard.helper.harness.turn,
   hildegard.helper.harness.turn.worker,
+  hildegard.helper.replymeta,
   hildegard.helper.subagent, hildegard.helper.subagent.supervisor;
 
 type
@@ -156,6 +157,10 @@ type
     { Record a checkpoint for a completed checkpoint turn (the assistant's reply)
       at the current message boundary. }
     procedure CommitCheckpoint(const ADocument: string);
+    { Extract a reply's frontmatter (title + keywords) at the completed-turn
+      boundary: set the session title (honouring an override) and the reply's
+      keyword set. The raw reply is already stored verbatim. }
+    procedure CommitReplyMetadata(const AReply: string);
     procedure StartTurn(const AText: string);
     procedure FinishTurn;
     procedure DrainTurn;
@@ -930,6 +935,29 @@ begin
   Broadcast(E);
 end;
 
+procedure TSessionRuntime.CommitReplyMetadata(const AReply: string);
+var
+  Meta: TReplyMeta;
+  MsgId: Int64;
+  StoreErr: TStoreError;
+  Store: TSqliteStore;
+begin
+  if (FSession.View.Store = nil) or (AReply = '') then
+    Exit;
+  Meta := ExtractReplyMeta(AReply);
+  if not Meta.HasMeta then
+    Exit;   { a non-substantive reply: leave the title and keywords unchanged }
+  Store := FSession.View.Store;
+  { The session title (the store ignores it when an override is set). }
+  if Meta.Title <> '' then
+    Store.SetSessionTitle(FSessionId, Meta.Title, StoreErr);
+  { The reply's keywords, attached to its assistant message. }
+  if Length(Meta.Keywords) > 0 then
+    if Store.LastAssistantMessageId(FSessionId, MsgId, StoreErr) and (MsgId > 0)
+    then
+      Store.SetReplyKeywords(MsgId, Meta.Keywords, StoreErr);
+end;
+
 procedure TSessionRuntime.HandlePrompt(AClient: TClientConn;
   const ACommand: TSessionCommand);
 begin
@@ -1319,7 +1347,12 @@ begin
         begin
           FCheckpointTurn := False;
           CommitCheckpoint(AEvent.Answer);
-        end;
+        end
+        else
+          { Extract the reply's frontmatter (title + keywords); the raw reply is
+            already in the ledger. Skipped on a checkpoint turn (the document is
+            not a normal reply). }
+          CommitReplyMetadata(AEvent.Answer);
         FinishTurn;
       end;
     teError:

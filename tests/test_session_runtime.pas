@@ -101,6 +101,7 @@ type
     procedure TestIdleExit;
     procedure TestRecoversInterruptedTurn;
     procedure TestCheckpointTurnRecords;
+    procedure TestReplyMetadataCommitsAtTheBoundary;
     procedure TestShutdownCommandStopsRuntime;
     procedure TestShutdownFromNonDriverRefused;
     procedure TestNoClientsExitAfterGrace;
@@ -1005,6 +1006,82 @@ begin
     AssertTrue('history preserved', Length(Before) > 0);
   finally
     Store.Free;
+  end;
+end;
+
+procedure TSessionRuntimeTest.TestReplyMetadataCommitsAtTheBoundary;
+var
+  Id: string;
+  Fake: TFakeTransport;
+  Rt: TSessionRuntime;
+  Th: TRuntimeThread;
+  Driver: TSessionClient;
+  DriverSink: TRecordingSink;
+  Cmd: TSessionCommand;
+  Reply: TSessionMessage;
+  Err: string;
+  Store: TSqliteStore;
+  StoreErr: TStoreError;
+  Cfg: TStoreConfig;
+  Title: string;
+  Kw: TStringArray;
+  MsgId: Int64;
+begin
+  { A substantive reply opens with a frontmatter block: at the completed-turn
+    boundary the runtime sets the session title and the reply's keywords. }
+  Id := NewSession;
+  Fake := TFakeTransport.Create;
+  try
+    Fake.AddResponse([TextDelta('---' + #10 + 'title: Fix the drain' + #10 +
+      'keywords: [drain, tui]' + #10 + '---' + #10 + 'The body.'),
+      FinishFrame('stop'), DoneFrame]);
+    Rt := MakeRuntime(Id, Fake);
+    Th := TRuntimeThread.Create(Rt);
+    try
+      Th.Start;
+      AssertTrue('bound', WaitForSocket(Id, 5000));
+      DriverSink := TRecordingSink.Create;
+      Driver := TSessionClient.Open(MakeClientConfig(Id, srDrive), DriverSink,
+        Err);
+      AssertNotNull('driver attaches: ' + Err, Driver);
+      try
+        Cmd := Default(TSessionCommand);
+        Cmd.Kind := scPrompt;
+        Cmd.Id := 'p1';
+        Cmd.Text := 'go';
+        AssertTrue('prompt replied', Driver.SendAndWait(Cmd, 3000, Reply));
+        AssertTrue('reply ok', Reply.Ok);
+        AssertTrue('turn finished',
+          WaitCount(DriverSink, ekTurnFinished, 1, 5000));
+      finally
+        Driver.Free;
+        DriverSink := nil;
+      end;
+    finally
+      Rt.Stop;
+      WaitFinished(Th, 3000);
+      Th.Free;
+      DeleteSocket(Id);
+    end;
+
+    { The title and keywords were persisted at the boundary. }
+    Cfg := Default(TStoreConfig);
+    Cfg.DatabasePath := FDbPath;
+    Cfg.BusyTimeoutMs := 5000;
+    Store := TSqliteStore.Create(Cfg);
+    try
+      AssertTrue('open', Store.Open(StoreErr));
+      AssertTrue('title', Store.SessionTitle(Id, Title, StoreErr));
+      AssertEquals('extracted title', 'Fix the drain', Title);
+      AssertTrue('last message', Store.LastAssistantMessageId(Id, MsgId, StoreErr));
+      AssertTrue('has an assistant message', MsgId > 0);
+      AssertTrue('keywords', Store.ReplyKeywords(MsgId, Kw, StoreErr));
+      AssertEquals('two keywords', 2, Length(Kw));
+    finally
+      Store.Free;
+    end;
+  finally
+    Fake.Free;
   end;
 end;
 

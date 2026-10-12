@@ -181,6 +181,10 @@ type
     { A reply's keyword set, oldest-first order not guaranteed. }
     function ReplyKeywords(const AMessageId: Int64; out AKeywords: TStringArray;
       out AError: TStoreError): Boolean;
+    { The id of the most recent assistant message in a session (0 when none):
+      where a reply's keywords attach. }
+    function LastAssistantMessageId(const ASessionId: string; out AId: Int64;
+      out AError: TStoreError): Boolean;
 
     { Opens a turn (loop) for a session, assigning its per-session sequence.
       Any prior tsRunning turn for the session is finalized (tsCancelled,
@@ -2913,6 +2917,36 @@ begin
         AKeywords[N] := Stmt.ColText(0);
         Inc(N);
       end;
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.LastAssistantMessageId(const ASessionId: string;
+  out AId: Int64; out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  AId := 0;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb,
+      'SELECT id FROM messages WHERE session_id = ? AND role = ? ' +
+      'ORDER BY seq DESC LIMIT 1');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not read last message', DbErrorText));
+      Stmt.BindText(1, ASessionId);
+      Stmt.BindInt(2, Ord(mrAssistant));
+      if Stmt.Step = SQLITE_ROW then
+        AId := Stmt.ColInt64(0);
     finally
       Stmt.Free;
     end;
