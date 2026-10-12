@@ -86,6 +86,11 @@ type
     procedure TestCheckpointAndActiveWindow;
     procedure TestQueryMessagesBefore;
     procedure TestFtsSearchScoped;
+
+    procedure TestReplyMetadataMigrationV10IsAdditive;
+    procedure TestSessionTitleOverrideWins;
+    procedure TestReplyKeywordsReplace;
+    procedure TestReplyKeywordsCascade;
   end;
 
 implementation
@@ -1772,6 +1777,141 @@ begin
       10, Msgs, Err));
     AssertEquals('one reason hit', 1, Length(Msgs));
     AssertEquals('the tool call', 'run_command', Msgs[0].ToolName);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestReplyMetadataMigrationV10IsAdditive;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Cfg: TStoreConfig;
+  Migs: TMigrationArray;
+  Ws: Integer;
+  Sid, Title: string;
+begin
+  Cfg.DatabasePath := FDbPath;
+  Cfg.BusyTimeoutMs := 5000;
+  { A v9-only database (as an install predating reply metadata would have). }
+  Migs := DefaultMigrations;
+  SetLength(Migs, 9);
+  S := TSqliteStore.Create(Cfg, Migs);
+  try
+    AssertTrue('open v9', S.Open(Err));
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, Sid, Err);
+  finally
+    S.Free;
+  end;
+  { Reopen with the full migrations: v10 applies and the session survives. }
+  S := TSqliteStore.Create(Cfg);
+  try
+    AssertTrue('reopen', S.Open(Err));
+    AssertEquals('schema at the latest version', StoreSchemaVersion,
+      RawReadUserVersion(FDbPath));
+    AssertTrue('title readable after migration', S.SessionTitle(Sid, Title, Err));
+    AssertEquals('empty title initially', '', Title);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestSessionTitleOverrideWins;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws: Integer;
+  Sid, Title: string;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, Sid, Err);
+    { The extracted title. }
+    AssertTrue('set title', S.SetSessionTitle(Sid, 'Extracted title', Err));
+    AssertTrue('read', S.SessionTitle(Sid, Title, Err));
+    AssertEquals('extracted wins while no override', 'Extracted title', Title);
+    { An override beats the extracted title. }
+    AssertTrue('set override', S.SetSessionTitleOverride(Sid, 'My name', Err));
+    AssertTrue('read', S.SessionTitle(Sid, Title, Err));
+    AssertEquals('override wins', 'My name', Title);
+    { A later extracted title must NOT overwrite the override. }
+    AssertTrue('set title again', S.SetSessionTitle(Sid, 'Newer extracted', Err));
+    AssertTrue('read', S.SessionTitle(Sid, Title, Err));
+    AssertEquals('override still wins', 'My name', Title);
+    { Clearing the override reveals the last ACCEPTED extracted title (the one
+      attempted while overridden was dropped). }
+    AssertTrue('clear override', S.SetSessionTitleOverride(Sid, '', Err));
+    AssertTrue('read', S.SessionTitle(Sid, Title, Err));
+    AssertEquals('extracted after clear', 'Extracted title', Title);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestReplyKeywordsReplace;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws: Integer;
+  Sid: string;
+  Msgs: TMessageRecordArray;
+  M: TMessageRecord;
+  Kw: TStringArray;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, Sid, Err);
+    M := Default(TMessageRecord);
+    M.SessionId := Sid;
+    M.Role := mrAssistant;
+    M.Content := 'a reply';
+    S.AppendMessage(M, Err);
+    AssertTrue('query', S.QueryMessages(Sid, Msgs, Err));
+    AssertEquals('one message', 1, Length(Msgs));
+    { Set two keywords, then replace with one. }
+    AssertTrue('set', S.SetReplyKeywords(Msgs[0].Id, ['alpha', 'beta'], Err));
+    AssertTrue('read', S.ReplyKeywords(Msgs[0].Id, Kw, Err));
+    AssertEquals('two', 2, Length(Kw));
+    AssertTrue('replace', S.SetReplyKeywords(Msgs[0].Id, ['gamma'], Err));
+    AssertTrue('read', S.ReplyKeywords(Msgs[0].Id, Kw, Err));
+    AssertEquals('replaced, not appended', 1, Length(Kw));
+    AssertEquals('gamma', 'gamma', Kw[0]);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestReplyKeywordsCascade;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws: Integer;
+  Sid: string;
+  Msgs: TMessageRecordArray;
+  M: TMessageRecord;
+  Kw: TStringArray;
+  TurnId: Int64;
+begin
+  { Deleting the message removes its keywords (ON DELETE CASCADE). }
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, Sid, Err);
+    AssertTrue('begin turn', S.BeginTurn(Sid, TurnId, Err));
+    M := Default(TMessageRecord);
+    M.SessionId := Sid;
+    M.TurnId := TurnId;
+    M.Role := mrAssistant;
+    M.Content := 'a reply';
+    S.AppendMessage(M, Err);
+    S.QueryMessages(Sid, Msgs, Err);
+    AssertTrue('set', S.SetReplyKeywords(Msgs[0].Id, ['alpha'], Err));
+    AssertTrue('delete the turn''s messages', S.DeleteTurnMessages(TurnId, Err));
+    AssertTrue('read after delete', S.ReplyKeywords(Msgs[0].Id, Kw, Err));
+    AssertEquals('cascaded away', 0, Length(Kw));
   finally
     S.Free;
   end;

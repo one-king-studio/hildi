@@ -165,6 +165,23 @@ type
     function MostRecentSessionId(AWorkspaceId: Integer; out AId: string;
       out AError: TStoreError): Boolean;
 
+    { --- reply metadata (v10) -------------------------------------------- }
+    { Set the extracted (generated) title; a no-op when an override is set. }
+    function SetSessionTitle(const ASessionId, ATitle: string;
+      out AError: TStoreError): Boolean;
+    { Set ('' clears) the operator's title override. }
+    function SetSessionTitleOverride(const ASessionId, AOverride: string;
+      out AError: TStoreError): Boolean;
+    { The resolved title (override else extracted; '' when neither). }
+    function SessionTitle(const ASessionId: string; out ATitle: string;
+      out AError: TStoreError): Boolean;
+    { Replace a reply's keyword set (by the assistant message id). }
+    function SetReplyKeywords(const AMessageId: Int64;
+      const AKeywords: TStringArray; out AError: TStoreError): Boolean;
+    { A reply's keyword set, oldest-first order not guaranteed. }
+    function ReplyKeywords(const AMessageId: Int64; out AKeywords: TStringArray;
+      out AError: TStoreError): Boolean;
+
     { Opens a turn (loop) for a session, assigning its per-session sequence.
       Any prior tsRunning turn for the session is finalized (tsCancelled,
       'superseded') first, so a turn can never be orphaned. }
@@ -312,7 +329,7 @@ end;
 function DefaultMigrations: TMigrationArray;
 begin
   Result := nil;
-  SetLength(Result, 9);
+  SetLength(Result, 10);
   Result[0].Version := 1;
   Result[0].Name := 'session history';
   Result[0].Statements := [
@@ -517,6 +534,19 @@ begin
       'message_id) ' +
       'SELECT content, tool_reason, tool_name, tool_arguments, label, ' +
       'session_id, id FROM messages'
+  ];
+  { v10: reply metadata - a session title (extracted + an operator override) and
+    the per-reply keyword set. Additive. }
+  Result[9].Version := 10;
+  Result[9].Name := 'reply metadata';
+  Result[9].Statements := [
+    'ALTER TABLE sessions ADD COLUMN title TEXT NOT NULL DEFAULT ''''',
+    'ALTER TABLE sessions ADD COLUMN title_override TEXT NOT NULL DEFAULT ''''',
+    'CREATE TABLE reply_keywords (' +
+      'message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE, ' +
+      'keyword TEXT NOT NULL, ' +
+      'PRIMARY KEY (message_id, keyword))',
+    'CREATE INDEX idx_reply_keywords_keyword ON reply_keywords (keyword)'
   ];
 end;
 
@@ -2716,6 +2746,173 @@ begin
       Stmt.BindText(1, ASessionId);
       if Stmt.Step = SQLITE_ROW then
         ACount := Stmt.ColInt(0);
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.SetSessionTitle(const ASessionId, ATitle: string;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    { The extracted title never overwrites an operator override. }
+    Stmt := TStmt.Create(FDb,
+      'UPDATE sessions SET title = ? WHERE id = ? AND title_override = ''''');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not set title', DbErrorText));
+      Stmt.BindText(1, ATitle);
+      Stmt.BindText(2, ASessionId);
+      Stmt.Step;
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.SetSessionTitleOverride(const ASessionId,
+  AOverride: string; out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb,
+      'UPDATE sessions SET title_override = ? WHERE id = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not set title override', DbErrorText));
+      Stmt.BindText(1, AOverride);
+      Stmt.BindText(2, ASessionId);
+      Stmt.Step;
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.SessionTitle(const ASessionId: string;
+  out ATitle: string; out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+  Override: string;
+begin
+  AError := OkError;
+  ATitle := '';
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb,
+      'SELECT title, title_override FROM sessions WHERE id = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not read title', DbErrorText));
+      Stmt.BindText(1, ASessionId);
+      if Stmt.Step = SQLITE_ROW then
+      begin
+        ATitle := Stmt.ColText(0);
+        Override := Stmt.ColText(1);
+        if Override <> '' then
+          ATitle := Override;
+      end;
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.SetReplyKeywords(const AMessageId: Int64;
+  const AKeywords: TStringArray; out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+  I: Integer;
+begin
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    { Replace: clear the reply's set, then insert the new one. A fresh statement
+      per keyword keeps it simple (the set is small). }
+    Stmt := TStmt.Create(FDb, 'DELETE FROM reply_keywords WHERE message_id = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not clear keywords', DbErrorText));
+      Stmt.BindInt64(1, AMessageId);
+      Stmt.Step;
+    finally
+      Stmt.Free;
+    end;
+    for I := 0 to High(AKeywords) do
+      if AKeywords[I] <> '' then
+      begin
+        Stmt := TStmt.Create(FDb,
+          'INSERT OR IGNORE INTO reply_keywords (message_id, keyword) ' +
+          'VALUES (?, ?)');
+        try
+          if not Stmt.Valid then
+            Exit(Fail(AError, seError, 'could not insert keywords', DbErrorText));
+          Stmt.BindInt64(1, AMessageId);
+          Stmt.BindText(2, AKeywords[I]);
+          Stmt.Step;
+        finally
+          Stmt.Free;
+        end;
+      end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.ReplyKeywords(const AMessageId: Int64;
+  out AKeywords: TStringArray; out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+  N: Integer;
+begin
+  AError := OkError;
+  AKeywords := nil;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb,
+      'SELECT keyword FROM reply_keywords WHERE message_id = ? ORDER BY keyword');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not read keywords', DbErrorText));
+      Stmt.BindInt64(1, AMessageId);
+      N := 0;
+      while Stmt.Step = SQLITE_ROW do
+      begin
+        SetLength(AKeywords, N + 1);
+        AKeywords[N] := Stmt.ColText(0);
+        Inc(N);
+      end;
     finally
       Stmt.Free;
     end;
