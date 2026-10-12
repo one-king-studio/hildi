@@ -220,6 +220,10 @@ type
       the runtime's `store_hwm`, so it must not read every row. }
     function MessageHighWaterMark(const ASessionId: string; out ASeq: Int64;
       out AError: TStoreError): Boolean;
+    { The session's message count (0 when it has none). Cheap: a COUNT, for the
+      transcript's virtual scroll extent. }
+    function MessageCount(const ASessionId: string; out ACount: Integer;
+      out AError: TStoreError): Boolean;
 
     { Record a context-checkpoint checkpoint at the session's current message HWM.
       The summary stands in for every message with seq <= ASeq. }
@@ -2684,6 +2688,34 @@ begin
       Stmt.BindText(1, ASessionId);
       if Stmt.Step = SQLITE_ROW then
         ASeq := Stmt.ColInt64(0);
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.MessageCount(const ASessionId: string;
+  out ACount: Integer; out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  ACount := 0;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb,
+      'SELECT COUNT(*) FROM messages WHERE session_id = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not count messages', DbErrorText));
+      Stmt.BindText(1, ASessionId);
+      if Stmt.Step = SQLITE_ROW then
+        ACount := Stmt.ColInt(0);
     finally
       Stmt.Free;
     end;

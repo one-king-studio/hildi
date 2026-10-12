@@ -261,6 +261,12 @@ const
   CtaHints = 'shift+enter newline · ctrl+b subagents';
   { How long the first Escape stays armed before the interrupt prompt expires. }
   InterruptWindowMs = 2000;
+  { The first frame loads at most this many messages of the active window (the
+    tail). Older messages load on scroll-up (the window), so the first paint is
+    bounded by the window, not the session. }
+  StartupTailCount = 200;
+  { A back-pagination page size, in messages. }
+  HistoryPageSize = 200;
 
 type
   { A yes/no query, e.g. "may I quit?". }
@@ -733,7 +739,14 @@ var
   end;
 
 begin
-  History := FSession.History;
+  { A bounded tail, not the whole session: the first frame is O(window), and the
+    window grows as the operator scrolls up (FOlderPages). Ephemeral/no-store
+    sessions have no history. }
+  if FSession <> nil then
+    History := FSession.HistoryTail(StartupTailCount +
+      FOlderPages * HistoryPageSize)
+  else
+    History := nil;
   Turns := FSession.Turns;
   Head := 0;
   CurrentTurn := 0;

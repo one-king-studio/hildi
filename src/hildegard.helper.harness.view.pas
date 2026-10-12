@@ -94,6 +94,9 @@ type
     { The page strictly before ABeforeSeq: the last AMax messages with
       seq < ABeforeSeq (oldest first). Empty when nothing precedes it. }
     function HistoryPage(ABeforeSeq: Int64; AMax: Integer): TMessageRecordArray;
+    { The session's total message count, for the virtual scroll extent. 0 for an
+      ephemeral or empty session. }
+    function MessageCount: Integer;
 
     { The latest turn's metrics for the status bar; a zero record when the
       session has no store or no turns. }
@@ -306,6 +309,15 @@ begin
   Result := nil;
   if (FStore <> nil) and (FSessionId <> '') then
     FStore.QueryMessagesBefore(FSessionId, ABeforeSeq - 1, AMax, Result, Err);
+end;
+
+function TSessionView.MessageCount: Integer;
+var
+  Err: TStoreError;
+begin
+  Result := 0;
+  if (FStore <> nil) and (FSessionId <> '') then
+    FStore.MessageCount(FSessionId, Result, Err);
 end;
 
 function TSessionView.LastTurn: TTurnRecord;
