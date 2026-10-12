@@ -102,6 +102,7 @@ type
     procedure TestAsksDoNotStack;
     procedure TestOneFramePerStep;
     procedure TestRenderHistoryRestoresToolBlocks;
+    procedure TestTranscriptIsBoundedToTheTail;
     procedure TestHeaderShowsSessionIdAndContext;
     procedure TestStatusShowsWorkspaceAndConsumption;
     procedure TestStatusSumsTurns;
@@ -851,6 +852,64 @@ begin
   AssertFalse('the raw call is not restored', FindText(ckTool, 'run_command'));
   AssertTrue('assistant block restored', SawAssistant);
   AssertTrue('error block restored', SawError);
+end;
+
+procedure THarnessAppTest.TestTranscriptIsBoundedToTheTail;
+var
+  Store: TSqliteStore;
+  StoreCfg: TStoreConfig;
+  Err, Sid: string;
+  StoreErr: TStoreError;
+  WorkspaceId: Integer;
+  TurnId: Int64;
+  Rec: TMessageRecord;
+  Cfg: THarnessSessionConfig;
+  I: Integer;
+begin
+  { Seed more messages than the startup tail, then resume: the transcript is the
+    bounded tail, not the whole session. }
+  FDir := IncludeTrailingPathDelimiter(GetTempDir) + 'hh-app-' +
+    IntToStr(Random(1000000));
+  ForceDirectories(FDir);
+  FStorePath := IncludeTrailingPathDelimiter(FDir) + 'store.db';
+  StoreCfg := Default(TStoreConfig);
+  StoreCfg.DatabasePath := FStorePath;
+  StoreCfg.BusyTimeoutMs := 5000;
+  Store := TSqliteStore.Create(StoreCfg);
+  try
+    AssertTrue('open store', Store.Open(StoreErr));
+    Store.EnsureWorkspace(FDir, WorkspaceId, StoreErr);
+    Store.CreateSession(WorkspaceId, Sid, StoreErr);
+    Store.BeginTurn(Sid, TurnId, StoreErr);
+    { 500 user messages, far more than StartupTailCount (200). }
+    for I := 1 to 500 do
+    begin
+      Rec := Default(TMessageRecord);
+      Rec.SessionId := Sid;
+      Rec.TurnId := TurnId;
+      Rec.Role := mrUser;
+      Rec.Content := 'm' + IntToStr(I);
+      Store.AppendMessage(Rec, StoreErr);
+    end;
+  finally
+    Store.Free;
+  end;
+
+  FFake := TFakeTransport.Create;
+  FSurface := TSurfaceMemory.Create(60, 20);
+  FInput := TInputSourceScripted.Create;
+  Cfg := Config;
+  Cfg.StorePath := FStorePath;
+  Cfg.SessionId := Sid;
+  Cfg.Resume := True;
+  FSession := THarnessSession.Open(Cfg, Err);
+  AssertTrue('resumed: ' + Err, FSession <> nil);
+  FApp := THarnessApp.Create(FSurface, FInput, FSession.View, LocalDriver(FSession));
+  FApp.Step;
+  { The whole session is 500 messages; the first frame renders the tail only. }
+  AssertTrue('bounded to the tail', BlockCount <= 200);
+  AssertTrue('the newest is present', FindText(ckUser, 'm500'));
+  AssertFalse('an early message is not loaded', FindText(ckUser, 'm1'));
 end;
 
 procedure THarnessAppTest.TestHeaderShowsSessionIdAndContext;

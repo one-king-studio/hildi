@@ -97,6 +97,11 @@ type
       scroll anchor is held by the stream itself (PreserveAnchor), so the visible
       content does not shift when a page is prepended. }
     FOlderPages: Integer;
+    { True once the window has reached the head of the session: no older page
+      exists, so the scroll-to-top trigger must not fire again (no endless
+      "loading older messages"). Reset when the window is rebuilt from a fresh
+      tail. }
+    FAtHead: Boolean;
     { The left-border paginator (coarse scroll) drag: the last hit row. }
     FPageDragging: Boolean;
     FPageDragRow: Integer;
@@ -446,6 +451,9 @@ begin
   FSession := ASession;
   FDriver := ADriver;
   FConnState := csConnected;
+  { A fresh tail: the window has not reached the head yet. }
+  FAtHead := False;
+  FOlderPages := 0;
   { Replace the connecting/idle frame with the transcript. }
   FPanel.Stream.Clear;
   RenderHistory;
@@ -1315,13 +1323,24 @@ begin
 end;
 
 procedure THarnessApp.NeedOlderHistory(Sender: TObject);
+var
+  Before, After: Integer;
 begin
-  { Prepend one more archived page, holding the scroll so the visible content
-    stays put (the stream applies the anchor on its next layout). }
+  { At the head already: nothing older exists; do not re-fire (no endless
+    "loading older messages"). }
+  if FAtHead then
+    Exit;
+  Before := FPanel.Stream.ContentHeight;
+  { Prepend one more page, holding the scroll so the visible content stays put
+    (the stream applies the anchor on its next layout). }
   FPanel.Stream.PreserveAnchor;
   Inc(FOlderPages);
   FPanel.Stream.Clear;
   RenderHistory;
+  After := FPanel.Stream.ContentHeight;
+  { The window did not grow: the previous page reached the head. }
+  if After <= Before then
+    FAtHead := True;
   FApp.Invalidate;
 end;
 
