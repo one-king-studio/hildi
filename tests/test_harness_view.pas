@@ -26,6 +26,8 @@ type
     procedure TestInMemoryViewHasNoStore;
     procedure TestStoreViewCreatesSession;
     procedure TestHistoryReadsOnDemand;
+    procedure TestHistoryTailIsBounded;
+    procedure TestHistoryPageReturnsEarlierRows;
     procedure TestMaxContextTokensOverride;
     procedure TestLazySessionDefersCreation;
     procedure TestEnsureSessionCreatesOnDemand;
@@ -109,6 +111,74 @@ begin
     History := View.History;
     AssertEquals('one message', 1, Length(History));
     AssertEquals('content', 'hello', History[0].Content);
+  finally
+    View.Free;
+  end;
+end;
+
+procedure THarnessViewTest.TestHistoryTailIsBounded;
+var
+  View: TSessionView;
+  Err: string;
+  StoreErr: TStoreError;
+  Rec: TMessageRecord;
+  Sid: string;
+  I: Integer;
+  Tail: TMessageRecordArray;
+begin
+  View := TSessionView.Open(Config(FStorePath), Err);
+  try
+    AssertNotNull('view opens: ' + Err, View);
+    Sid := View.SessionId;
+    for I := 1 to 10 do
+    begin
+      Rec := Default(TMessageRecord);
+      Rec.SessionId := Sid;
+      Rec.Role := mrUser;
+      Rec.Content := 'm' + IntToStr(I);
+      AssertTrue('append', View.Store.AppendMessage(Rec, StoreErr));
+    end;
+    { The tail returns the LAST 3, oldest first. }
+    Tail := View.HistoryTail(3);
+    AssertEquals('bounded to 3', 3, Length(Tail));
+    AssertEquals('oldest of the tail', 'm8', Tail[0].Content);
+    AssertEquals('newest of the tail', 'm10', Tail[2].Content);
+    { A limit larger than the session returns all of them. }
+    AssertEquals('all when smaller', 10, Length(View.HistoryTail(50)));
+  finally
+    View.Free;
+  end;
+end;
+
+procedure THarnessViewTest.TestHistoryPageReturnsEarlierRows;
+var
+  View: TSessionView;
+  Err: string;
+  StoreErr: TStoreError;
+  Rec: TMessageRecord;
+  Sid: string;
+  I: Integer;
+  Page: TMessageRecordArray;
+begin
+  View := TSessionView.Open(Config(FStorePath), Err);
+  try
+    AssertNotNull('view opens: ' + Err, View);
+    Sid := View.SessionId;
+    for I := 1 to 10 do
+    begin
+      Rec := Default(TMessageRecord);
+      Rec.SessionId := Sid;
+      Rec.Role := mrUser;
+      Rec.Content := 'm' + IntToStr(I);
+      AssertTrue('append', View.Store.AppendMessage(Rec, StoreErr));
+    end;
+    { The page strictly before seq 5: m1..m4 (oldest first). }
+    Page := View.HistoryPage(5, 20);
+    AssertEquals('four rows before', 4, Length(Page));
+    AssertEquals('oldest', 'm1', Page[0].Content);
+    AssertEquals('newest', 'm4', Page[3].Content);
+    { At the head: an empty page, not an error. }
+    AssertEquals('empty at the head', 0, Length(View.HistoryPage(1, 20)));
   finally
     View.Free;
   end;

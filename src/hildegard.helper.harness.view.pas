@@ -88,6 +88,13 @@ type
       session or an unconfigured store). }
     function History: TMessageRecordArray;
 
+    { The last AMax messages of the active window (oldest first), for the first
+      frame. Bounded, so the first paint does not read the whole session. }
+    function HistoryTail(AMax: Integer): TMessageRecordArray;
+    { The page strictly before ABeforeSeq: the last AMax messages with
+      seq < ABeforeSeq (oldest first). Empty when nothing precedes it. }
+    function HistoryPage(ABeforeSeq: Int64; AMax: Integer): TMessageRecordArray;
+
     { The latest turn's metrics for the status bar; a zero record when the
       session has no store or no turns. }
     function LastTurn: TTurnRecord;
@@ -280,6 +287,25 @@ begin
   Result := nil;
   if (FStore <> nil) and (FSessionId <> '') then
     FStore.QueryActiveMessages(FSessionId, Result, Err);
+end;
+
+function TSessionView.HistoryTail(AMax: Integer): TMessageRecordArray;
+var
+  Err: TStoreError;
+begin
+  Result := nil;
+  if (FStore <> nil) and (FSessionId <> '') then
+    FStore.QueryActiveMessagesTail(FSessionId, AMax, Result, Err);
+end;
+
+function TSessionView.HistoryPage(ABeforeSeq: Int64;
+  AMax: Integer): TMessageRecordArray;
+var
+  Err: TStoreError;
+begin
+  Result := nil;
+  if (FStore <> nil) and (FSessionId <> '') then
+    FStore.QueryMessagesBefore(FSessionId, ABeforeSeq - 1, AMax, Result, Err);
 end;
 
 function TSessionView.LastTurn: TTurnRecord;

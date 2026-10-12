@@ -235,6 +235,11 @@ type
       messages when there is no checkpoint). }
     function QueryActiveMessages(const ASessionId: string;
       out AMessages: TMessageRecordArray; out AError: TStoreError): Boolean;
+    { The tail of the active window: the last ALimit messages with seq > the
+      latest checkpoint's seq (all messages when there is no checkpoint), oldest
+      first. For the first frame, so it does not read the whole session. }
+    function QueryActiveMessagesTail(const ASessionId: string; ALimit: Integer;
+      out AMessages: TMessageRecordArray; out AError: TStoreError): Boolean;
     { Messages with seq > AAfterSeq, oldest first. }
     function QueryMessagesAfter(const ASessionId: string; AAfterSeq: Int64;
       out AMessages: TMessageRecordArray; out AError: TStoreError): Boolean;
@@ -2817,6 +2822,85 @@ begin
     Exit(False);
   { Messages with seq > boundary (all when no checkpoint). }
   Result := QueryMessagesAfter(ASessionId, Boundary, AMessages, AError);
+end;
+
+function TSqliteStore.QueryActiveMessagesTail(const ASessionId: string;
+  ALimit: Integer; out AMessages: TMessageRecordArray;
+  out AError: TStoreError): Boolean;
+var
+  Snap: TCheckpointRecord;
+  Boundary: Int64;
+  Stmt: TStmt;
+  N, I, J: Integer;
+  Rec: TMessageRecord;
+  Tmp: TMessageRecord;
+begin
+  AError := OkError;
+  AMessages := nil;
+  Boundary := 0;
+  if LatestCheckpoint(ASessionId, Snap, AError) then
+    Boundary := Snap.Seq
+  else if AError.Code <> seNotFound then
+    Exit(False);
+  if ALimit <= 0 then
+    Exit(True);
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    { The last ALimit messages after the boundary, newest first, then reversed. }
+    Stmt := TStmt.Create(FDb,
+      'SELECT id, session_id, turn_id, request_id, seq, role, content, ' +
+      'tool_call_id, tool_name, tool_arguments, tool_reason, tool_ok, ' +
+      'created_at, duration_ms, ref_session_id, label, source, status ' +
+      'FROM messages WHERE session_id = ? AND seq > ? ' +
+      'ORDER BY seq DESC LIMIT ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not read messages', DbErrorText));
+      Stmt.BindText(1, ASessionId);
+      Stmt.BindInt64(2, Boundary);
+      Stmt.BindInt(3, ALimit);
+      N := 0;
+      while Stmt.Step = SQLITE_ROW do
+      begin
+        Rec := Default(TMessageRecord);
+        Rec.Id := Stmt.ColInt64(0);
+        Rec.SessionId := Stmt.ColText(1);
+        Rec.TurnId := Stmt.ColInt64(2);
+        Rec.RequestId := Stmt.ColInt64(3);
+        Rec.Seq := Stmt.ColInt64(4);
+        Rec.Role := TMessageRole(Stmt.ColInt(5));
+        Rec.Content := Stmt.ColText(6);
+        Rec.ToolCallId := Stmt.ColText(7);
+        Rec.ToolName := Stmt.ColText(8);
+        Rec.ToolArguments := Stmt.ColText(9);
+        Rec.ToolReason := Stmt.ColText(10);
+        Rec.ToolOk := Stmt.ColInt(11) <> 0;
+        Rec.CreatedAtMs := Stmt.ColInt64(12);
+        Rec.DurationMs := Stmt.ColInt64(13);
+        Rec.RefSessionId := Stmt.ColText(14);
+        Rec.LabelText := Stmt.ColText(15);
+        Rec.Source := Stmt.ColText(16);
+        Rec.Status := Stmt.ColText(17);
+        SetLength(AMessages, N + 1);
+        AMessages[N] := Rec;
+        Inc(N);
+      end;
+    finally
+      Stmt.Free;
+    end;
+    for I := 0 to (N div 2) - 1 do
+    begin
+      J := N - 1 - I;
+      Tmp := AMessages[I];
+      AMessages[I] := AMessages[J];
+      AMessages[J] := Tmp;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
 end;
 
 function TSqliteStore.QueryMessagesAfter(const ASessionId: string;

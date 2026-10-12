@@ -19,24 +19,46 @@ TDD-first; `make check` before moving on. `main` only.
 
 ### Phase 1: The connect lifecycle (`hildegard.helper.harness.app`)
 
-- [ ] **Define** `TConnState` (`csConnecting`/`csConnected`/`csFailed`) and the
-      `FConnState` field; `Create` accepts a nil driver.
-- [ ] **Test**: the app constructs with a nil driver and `ConnState =
-      csConnecting`.
-- [ ] **Implement**: the nil-driver path — `RenderHistory` is skipped while
-      connecting; a connecting frame is drawn.
-- [ ] **Test**: `Attach(session, driver)` moves `csConnecting -> csConnected` and
-      renders the tail.
-- [ ] **Implement**: `Attach`.
-- [ ] **Test**: `FailConnect(msg)` moves to `csFailed`, shows `msg`, and the app
+> **Done** (commit `a18eca2`), extended with the lazy-session half (`a5521c7`,
+> `be40988`): `TConnState` is `csIdle`/`csConnecting`/`csConnected`/`csFailed`;
+> the app enters `csIdle` when there is no session and no driver, and
+> `OnNeedConnect` lets the first submit trigger the connect.
+
+- [x] **Define** `TConnState` (`csIdle`/`csConnecting`/`csConnected`/`csFailed`)
+      and the `FConnState` field; `Create` accepts a nil driver.
+- [x] **Test**: the app constructs with a nil driver and no session, and
+      `ConnState = csIdle`.
+- [x] **Implement**: the nil-driver path — `RenderHistory` is skipped; an idle or
+      connecting frame is drawn.
+- [x] **Test**: `Attach(session, driver)` moves to `csConnected` and renders the
+      tail (flushing a prompt held from idle).
+- [x] **Implement**: `Attach`.
+- [x] **Test**: `FailConnect(msg)` moves to `csFailed`, shows `msg`, and the app
       remains usable (a quit path exists; no exception escapes).
-- [ ] **Implement**: `FailConnect`, and the failed-state frame.
-- [ ] **Test**: `SetConnectPhase('loading history')` changes the connecting
+- [x] **Implement**: `FailConnect`, and the failed-state frame.
+- [x] **Test**: `SetConnectPhase('loading history')` changes the connecting
       frame's label.
-- [ ] **Implement**: `SetConnectPhase` and the phase label.
-- [ ] **Test**: a command (submit / checkpoint / interrupt) while `csConnecting`
+- [x] **Implement**: `SetConnectPhase` and the phase label.
+- [x] **Test**: a command (submit / checkpoint / interrupt) while not connected
       is refused with a status line and does not raise.
-- [ ] **Implement**: guard the command entry points on `ConnState`.
+- [x] **Implement**: guard the command entry points on `ConnState`.
+- [x] **Test**: a submit while idle fires `OnNeedConnect`; the held prompt runs
+      after `Attach`.
+- [x] **Implement**: `OnNeedConnect` + the held-prompt flush.
+
+### Phase 1b: The lazy session (`hildegard.helper.harness.view`)
+
+> **Done** (`a5521c7`): a view opened with no session id and `LazySession` set
+> creates no session row until `EnsureSession`; the composition root wires the
+> connect on the first prompt.
+
+- [x] **Add** `THarnessSessionConfig.LazySession`; `Init` skips `CreateSession`
+      when set (and no id and not resuming).
+- [x] **Test**: a lazy view opens with a store but `HasSession = False`.
+- [x] **Implement**: `HasSession` / `EnsureSession` (idempotent; no-op for a
+      named/resumed/ephemeral view).
+- [x] **Test**: `EnsureSession` creates the session on demand and is idempotent.
+- [x] **Implement**: the composition root (`examples/tui_agent.pas`).
 
 ### Phase 2: Tail-first history (`hildegard.helper.harness.view` + store)
 
