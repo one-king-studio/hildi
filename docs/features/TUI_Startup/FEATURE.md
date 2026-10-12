@@ -53,6 +53,20 @@ It is the general safety net for startup latency. `Lazy_MCP` removes the current
   further up. The headless agent's context is unaffected — the *loop* reads the
   ledger, and the TUI's history is display-only. This is the same back-pagination
   primitive `Context_Handoff` needs for archived messages, so build it once.
+- **The transcript is a bounded window, not the whole history.** The TUI is a
+  view; it does not maintain context, so it holds only a slice of the most recent
+  messages and extends it upward as the operator scrolls. This is the same
+  mechanism as pre-checkpoint back-pagination, one continuous window: tail →
+  older active messages → archived pages, seamlessly. Older *loaded* messages are
+  **passively trimmed** once the operator has stayed away from them (past X
+  messages for Y time), so a long session does not grow the TUI's memory without
+  bound.
+- **The coarse (page) scrollbar stays correct over the window.** The scrollbar
+  must reflect the whole session's extent, not just the loaded slice: scrolling
+  the bar jumps into the window (loading that region), and the page index still
+  tracks the checkpoint boundary. A **virtual extent** (an estimated total row
+  height from the message count) drives the bar; the loaded window is a real
+  sub-range of it.
 - **The async driver is deferred.** A background connect (a driver state, drained
   like `TTurnQueue`) is the eventual shape; v1 does paint-then-block.
 - **No session, no runtime, until the first prompt.** A TUI launched without a
@@ -87,7 +101,8 @@ future     an async driver that never blocks the UI thread
 - Removing MCP from the runtime's startup path (`Lazy_MCP` does that).
 - An async/background driver (deferred; see Future Considerations).
 - A splash screen, branding, or animation.
-- A windowed store query as the *only* history path (tail-first is enough for v1).
+- Loading the **whole** session into memory at any point (the transcript is a
+  window; see the Decision).
 - Windows.
 
 ## User Stories
@@ -118,6 +133,14 @@ future     an async driver that never blocks the UI thread
 - [ ] Scrolling to the top backfills the previous page with a visible "loading
       older messages" line, reflows, and lets the operator keep scrolling up; the
       visible scroll anchor does not jump.
+- [ ] The window is **continuous**: tail → older active messages → archived
+      (pre-checkpoint) pages, with no gap and no duplication at the seams.
+- [ ] Older **loaded** messages are **passively trimmed** once the operator has
+      not scrolled near them for a time (past X messages for Y time), so a long
+      session's TUI memory stays bounded; trimming never moves the viewport.
+- [ ] The coarse (page) scrollbar reflects the **whole** session's extent, not
+      just the loaded window; dragging it jumps into the window and loads that
+      region; the page index still tracks the checkpoint boundary.
 - [ ] The transcript, once fully loaded, is identical to today's (and to a resumed
       session).
 - [ ] The headless agent's context is unaffected: the loop still reads the full

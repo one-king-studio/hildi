@@ -110,26 +110,77 @@ type
   end;
 ```
 
-### Tail-first history and paging
+### Tail-first history and paging — the window
+
+The transcript is a **bounded window** over the session, not the whole history.
+The window is continuous: tail (newest) → older active messages → archived
+(pre-checkpoint) pages.
 
 ```pascal
 type
-  { The TUI's history query, bounded for the first frame. }
+  { The TUI's history query, bounded for the first frame and for each extension. }
   TSessionView = class
-    { The last AMax messages (oldest first), for the first frame. }
+    { The last AMax messages of the active window (oldest first), for the first
+      frame. Bounded: the first paint does not read the whole session. }
     function HistoryTail(AMax: Integer): TMessageRecordArray;
     { The page strictly before ABeforeSeq: the last AMax messages with
-      seq < ABeforeSeq (oldest first). Empty when nothing precedes it. }
+      seq < ABeforeSeq (oldest first). Empty at the head. Used for both the
+      older-active window and the archived pages. }
     function HistoryPage(ABeforeSeq: Int64; AMax: Integer): TMessageRecordArray;
+    { The whole session's message count, for the virtual scroll extent. }
+    function MessageCount: Integer;
   end;
 ```
 
 - `HistoryTail` is the first-frame window; `HistoryPage` is the scroll-up
-  backfill. Both map onto the store (`QueryMessagesBefore` for the page; a
-  tail-limited active query for the tail).
+  backfill (one primitive for both the active window and the archived pages —
+  the checkpoint boundary is just a `seq`). Both map onto the store
+  (`QueryActiveMessagesTail` for the tail; `QueryMessagesBefore` for the page).
+- **The window state (app).** `FWindowFirstSeq` / `FWindowLastSeq` bound the
+  loaded range; scrolling near the top loads the previous page
+  (`HistoryPage(FWindowFirstSeq, PageSize)`), scrolling near the bottom (when a
+  newer range exists) loads the next. New live messages extend the bottom.
 - **The anchor rule.** When a page prepends, the app records the top visible
   message's identity before the insert and restores it after, so the viewport
   does not jump. The scroll container's existing anchor support is the seam.
+
+### The virtual extent (the coarse scrollbar)
+
+The scrubber must reflect the **whole session**, not the loaded window.
+
+```pascal
+type
+  { A cheap total-row estimate from the message count, so the page bar spans the
+    session while only a window is loaded. Refined as real pages load. }
+  TWindowExtent = record
+    MessageCount: Integer;    // the session's total
+    LoadedCount: Integer;     // the window's real count
+    EstimatedRowHeight: Integer;
+    function VirtualMaxScroll(const AViewportH: Integer): Integer;
+    function WindowRowRange(...): TRowRange;   // the loaded window's sub-range
+  end;
+```
+
+- The page scrubber maps a segment to a **fraction of the virtual extent**; a
+  jump into an unloaded region triggers the loads that cover it.
+- `StreamScrolled`'s page index still keys on the checkpoint boundary
+  (`FCheckpointBlock`), which remains correct because the boundary block stays in
+  the window whenever the window overlaps it.
+
+### Passive trim
+
+```text
+rule    once the operator has not scrolled within X messages of an older
+        loaded region for Y time, unload it (drop the blocks + the window range)
+guards  never trim the region the viewport is in or near; never move the
+        viewport; never trim below the tail window
+clock   checked on the frame tick (the one-clock rule), not a new timer
+```
+
+- Trimming keeps the loaded set bounded: a session scrolled through then left
+  idle releases the old blocks. The window shrinks from the top (and, when far
+  below, the middle), and the virtual extent is unchanged (only `LoadedCount`
+  drops).
 
 ### Composition root ordering (`examples/tui_agent.pas`)
 
