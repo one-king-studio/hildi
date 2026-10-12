@@ -129,6 +129,7 @@ type
     procedure TestPasteInsertsIntoTheCompose;
     procedure TestCtrlCQuitsOnlyWhenComposeIsEmpty;
     procedure TestApprovalDimsTheBackground;
+    procedure TestSessionsCommandOpensAndClosesTheModal;
     { TUI Startup: the connect lifecycle. }
     procedure TestNoSessionStartsIdle;
     procedure TestPaintBeforeConnectOrder;
@@ -1579,6 +1580,21 @@ begin
   { A cell above the modal (the panel's top border) is dimmed. }
   AssertTrue('the background is dimmed',
     sfDim in FSurface.CellAt(20, 0).Attr.Style);
+end;
+
+procedure THarnessAppTest.TestSessionsCommandOpensAndClosesTheModal;
+begin
+  BuildWithStore;
+  AssertFalse('no modal initially', FApp.ModalActive);
+  { Run /sessions via the palette's command hook. }
+  FApp.Panel.Palette.OnRun('sessions');
+  FApp.Step;   // render the plane
+  AssertTrue('the sessions modal opened', FApp.ModalActive);
+  { Escape closes it. }
+  FInput.Push(Key(kkEscape));
+  FApp.Step;
+  FApp.Step;
+  AssertFalse('the modal closed', FApp.ModalActive);
 end;
 
 procedure THarnessAppTest.TestSidebarTogglesWithCtrlB;

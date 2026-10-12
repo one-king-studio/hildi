@@ -25,6 +25,7 @@ uses
   hildegard.helper.store,
   hildegard.helper.harness.stats, hildegard.helper.session,
   hildegard.helper.replymeta,
+  hildegard.helper.tui.sessionsmodal,
   hildegard.helper.harness.subagent, hildegard.helper.harness.subagent.spy,
   hildegard.helper.tui.sidebar, hildegard.helper.tui.list,
   hildegard.helper.session.protocol, hildegard.helper.session.client;
@@ -64,6 +65,9 @@ type
     FPanel: TChatPanel;
     FBusy: Boolean;
     FModal: TApprovalModal;
+    { The /sessions modal (nil when closed) and its wrap. }
+    FSessionsModal: TSessionsModal;
+    FSessionsShown: Boolean;
     FPendingAskRef: string;
     FCloseModal: Boolean;
     FAskQueue: array of TTurnEvent;
@@ -140,6 +144,13 @@ type
     procedure ShowApproval(const E: TTurnEvent);
     procedure OnApprovalChosen(const AChoice: TApprovalChoice);
     procedure CloseModal;
+    { The /sessions modal: open it (load the rows), refresh after an action, and
+      close it. }
+    procedure ShowSessions;
+    procedure RefreshSessions;
+    procedure CloseSessions;
+    procedure OnSessionAction(const ASessionId: string; AAction: TSessionAction);
+    procedure OnSessionRename(const ASessionId, ANewTitle: string);
     { Subagents: feed the roster, toggle/show the sidebar, spy on a child. }
     procedure HandleSubagentEvent(const E: TTurnEvent);
     { Show a queued prompt (a violet 'Queued' box) at the end of the stream. }
@@ -615,11 +626,13 @@ begin
     palette's filter is a prefix match, so '/c' shows both and either runs the
     same checkpoint turn. }
   Result := nil;
-  SetLength(Result, 2);
+  SetLength(Result, 3);
   Result[0].Name := 'checkpoint';
   Result[0].Description := 'create a checkpoint for this session';
   Result[1].Name := 'cp';
   Result[1].Description := 'create a checkpoint for this session';
+  Result[2].Name := 'sessions';
+  Result[2].Description := 'list and manage this workspace''s sessions';
 end;
 
 procedure THarnessApp.ComposeChanged(Sender: TObject);
@@ -644,7 +657,13 @@ procedure THarnessApp.RunCommand(const AName: string);
 begin
   FPanel.SetPaletteActive(False);
   FPanel.Compose.Clear;
-  { While connecting or failed, commands have no driver; refuse cleanly. }
+  { /sessions reads the store, not the runtime, so it works while connecting. }
+  if (AName = 'sessions') or (AName = 'ss') then
+  begin
+    ShowSessions;
+    Exit;
+  end;
+  { While connecting or failed, other commands have no driver; refuse cleanly. }
   if FConnState <> csConnected then
   begin
     AppendError('not connected yet');
@@ -743,6 +762,12 @@ end;
 
 procedure THarnessApp.HandleEscape(Sender: TObject);
 begin
+  { Escape closes the /sessions modal first. }
+  if FSessionsShown then
+  begin
+    CloseSessions;
+    Exit;
+  end;
   if not FBusy then
     Exit;
   if FInterruptPending then
@@ -1342,6 +1367,101 @@ begin
   if FBusy then
     SetState(psThinking, 'thinking');
   ShowNextAsk;
+end;
+
+procedure THarnessApp.RefreshSessions;
+var
+  Rows: TSessionRowArray;
+  StoreErr: TStoreError;
+begin
+  if (FSessionsModal = nil) or (FSession = nil) or (FSession.Store = nil) then
+    Exit;
+  if FSession.Store.ListSessionRows(FSession.WorkspaceId,
+    FSessionsModal.ShowArchived, Rows, StoreErr) then
+    FSessionsModal.SetRows(Rows);
+end;
+
+procedure THarnessApp.ShowSessions;
+var
+  Wrap: TContainer;
+  R: TRect;
+begin
+  if (FSession = nil) or (FSession.Store = nil) then
+  begin
+    AppendError('no store; /sessions needs a session store');
+    Exit;
+  end;
+  FSessionsModal := TSessionsModal.Create(FTheme);
+  FSessionsModal.SetCurrent(FSession.SessionId);
+  FSessionsModal.OnAction := OnSessionAction;
+  FSessionsModal.OnRename := OnSessionRename;
+  RefreshSessions;
+  Wrap := TContainer.Create([Fill(1), Auto, Fill(1)], [Fill(1), Auto, Fill(1)]);
+  Wrap.Add(FSessionsModal, 1, 1);
+  R := Default(TRect);
+  R.W := FSurface.Width;
+  R.H := FSurface.Height;
+  Wrap.Arrange(R);
+  FApp.PushPlane(TPlane.Create(Wrap, True, True));
+  FSessionsShown := True;
+  SetState(psReady, 'sessions');
+end;
+
+procedure THarnessApp.CloseSessions;
+begin
+  if not FSessionsShown then
+    Exit;
+  if FApp.ModalActive then
+    FApp.PopPlane;
+  FSessionsModal := nil;
+  FSessionsShown := False;
+  SetState(psReady, 'ready');
+end;
+
+procedure THarnessApp.OnSessionAction(const ASessionId: string;
+  AAction: TSessionAction);
+var
+  Err: TStoreError;
+  Row: TSessionRow;
+  I: Integer;
+  Rows: TSessionRowArray;
+  Pinned, Archived: Boolean;
+begin
+  if (FSession = nil) or (FSession.Store = nil) or (ASessionId = '') then
+    Exit;
+  { Find the row's current flags, then toggle. }
+  Pinned := False;
+  Archived := False;
+  if FSession.Store.ListSessionRows(FSession.WorkspaceId, True, Rows, Err) then
+    for I := 0 to High(Rows) do
+      if Rows[I].Id = ASessionId then
+      begin
+        Pinned := Rows[I].Pinned;
+        Archived := Rows[I].Archived;
+        Break;
+      end;
+  case AAction of
+    saTogglePin:
+      FSession.Store.SetSessionPinned(ASessionId, not Pinned, Err);
+    saToggleArchive:
+      FSession.Store.SetSessionArchived(ASessionId, not Archived, Err);
+  else
+    ;
+  end;
+  RefreshSessions;
+  FApp.Invalidate;
+end;
+
+procedure THarnessApp.OnSessionRename(const ASessionId, ANewTitle: string);
+var
+  Err: TStoreError;
+begin
+  if (FSession = nil) or (FSession.Store = nil) or (ASessionId = '') then
+    Exit;
+  { An empty title clears the override (back to the extracted title). }
+  FSession.Store.SetSessionTitleOverride(ASessionId, ANewTitle, Err);
+  RefreshSessions;
+  FApp.Invalidate;
 end;
 
 procedure THarnessApp.FinishTurn(AState: TPanelState; const ALabel: string);
