@@ -646,7 +646,7 @@ end;
 
 procedure THarnessApp.UpdateStats;
 var
-  Context: Integer;
+  Context: Int64;
 begin
   { The session's consumption sits on the status bar's right; the header carries
     the context. Read the persisted session, so live and resumed match. }

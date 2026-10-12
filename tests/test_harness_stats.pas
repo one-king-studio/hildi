@@ -27,6 +27,7 @@ type
     procedure TestFormatSessionStats;
     procedure TestFormatSessionStatsEmpty;
     procedure TestCheckpointNudgeNeeded;
+    procedure TestFormatTokensScalesPastMillions;
   end;
 
 implementation
@@ -137,6 +138,18 @@ begin
   AssertTrue('at the threshold', CheckpointNudgeNeeded(80, 100));
   AssertTrue('above the threshold', CheckpointNudgeNeeded(95, 100));
   AssertFalse('no limit disables it', CheckpointNudgeNeeded(100, 0));
+end;
+
+procedure THarnessStatsTest.TestFormatTokensScalesPastMillions;
+begin
+  { A long session's aggregates cross 1e9 (observed at 2.15B total tokens):
+    the display must keep scaling instead of showing 2145.6M. }
+  AssertEquals('millions', '980.0M', FormatTokens(980000000));
+  AssertEquals('one billion', '1.0B', FormatTokens(1000000000));
+  AssertEquals('the crashing session', '2.1B', FormatTokens(2149321552));
+  AssertEquals('hundreds of billions', '420.0B', FormatTokens(420000000000));
+  AssertEquals('one trillion', '1.0T', FormatTokens(1000000000000));
+  AssertEquals('past a trillion', '7.5T', FormatTokens(7500000000000));
 end;
 
 initialization

@@ -2191,11 +2191,14 @@ begin
       if Stmt.Step <> SQLITE_ROW then
         Exit(True);   // no row (impossible for an aggregate); the zero record
       ATurn.RequestCount := Stmt.ColInt(0);
-      ATurn.Usage.PromptTokens := Stmt.ColInt(1);
-      ATurn.Usage.CompletionTokens := Stmt.ColInt(2);
-      ATurn.Usage.CachedTokens := Stmt.ColInt(3);
-      ATurn.Usage.ReasoningTokens := Stmt.ColInt(4);
-      ATurn.ContextTokens := Stmt.ColInt(5);
+      { Int64: the sums cross MaxInt on a long session (every request re-bills
+        the whole context), and ColInt would truncate them before the addition
+        ever ran. }
+      ATurn.Usage.PromptTokens := Stmt.ColInt64(1);
+      ATurn.Usage.CompletionTokens := Stmt.ColInt64(2);
+      ATurn.Usage.CachedTokens := Stmt.ColInt64(3);
+      ATurn.Usage.ReasoningTokens := Stmt.ColInt64(4);
+      ATurn.ContextTokens := Stmt.ColInt64(5);
       ATurn.Usage.TotalTokens := ATurn.Usage.PromptTokens +
         ATurn.Usage.CompletionTokens;
       ATurn.DurationMs := Stmt.ColInt64(6);

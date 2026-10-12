@@ -27,7 +27,12 @@ function FormatThoughtLabel(ADurationMs: Int64): string;
 
 { The final context, a ten-cell shades bar, and its percentage of the limit:
   `121k [▓░░░░░░░░░] 12%`. With no limit (<= 0), just `121k`. }
-function FormatContextUsage(ATokens, ALimit: Integer): string;
+function FormatContextUsage(ATokens, ALimit: Int64): string;
+
+{ A token count scaled for display: raw under a thousand, then one decimal and
+  a k/M/B/T suffix. A long session's aggregates cross a billion (every request
+  re-bills the whole context), so the scale does not stop at millions. }
+function FormatTokens(AN: Int64): string;
 
 { The session's consumption for the status bar: `<in> in · <out> out ·
   <cached>% cached · <time> · <req> req`; the empty string for a session with no
@@ -37,7 +42,7 @@ function FormatSessionStats(const ATurn: TTurnRecord): string;
 { True when the context in play has crossed the checkpoint-nudge threshold (80%
   of the limit). Advisory only: the operator triggers the checkpoint. A
   non-positive limit disables the nudge. }
-function CheckpointNudgeNeeded(ATokens, ALimit: Integer): Boolean;
+function CheckpointNudgeNeeded(ATokens, ALimit: Int64): Boolean;
 
 implementation
 
@@ -91,14 +96,18 @@ begin
     IntToStr((AValue mod ADiv) * 10 div ADiv);
 end;
 
-function FormatTokens(AN: Integer): string;
+function FormatTokens(AN: Int64): string;
 begin
   if AN < 1000 then
     Result := IntToStr(AN)
   else if AN < 1000000 then
     Result := OneDecimal(AN, 1000) + 'k'
+  else if AN < 1000000000 then
+    Result := OneDecimal(AN, 1000000) + 'M'
+  else if AN < 1000000000000 then
+    Result := OneDecimal(AN, 1000000000) + 'B'
   else
-    Result := OneDecimal(AN, 1000000) + 'M';
+    Result := OneDecimal(AN, 1000000000000) + 'T';
 end;
 
 function FormatDurationMs(AMs: Int64): string;
@@ -123,7 +132,7 @@ begin
     Result := 'Thought for ' + FormatDurationMs(ADurationMs);
 end;
 
-function FormatContextUsage(ATokens, ALimit: Integer): string;
+function FormatContextUsage(ATokens, ALimit: Int64): string;
 var
   Pct: Integer;
 begin
@@ -168,7 +177,7 @@ begin
     IntToStr(ATurn.RequestCount) + ' req';
 end;
 
-function CheckpointNudgeNeeded(ATokens, ALimit: Integer): Boolean;
+function CheckpointNudgeNeeded(ATokens, ALimit: Int64): Boolean;
 begin
   Result := (ALimit > 0) and (ATokens * 100 >= ALimit * 80);
 end;

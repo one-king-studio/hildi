@@ -47,15 +47,18 @@ type
 
   { Normalised token accounting: one shape across the provider spellings
     (OpenAI/Fireworks, DeepSeek, Anthropic-style gateways). Absent usage is all
-    zeros. }
+    zeros. The counters are Int64 because the SAME record carries session
+    aggregates: SessionTotals sums every request, and every request re-bills the
+    whole context, A long session crossed MaxInt and raised ERangeError
+    (observed at 2,149,321,552 total tokens). }
   TTokenUsage = record
-    PromptTokens: Integer;       // prompt_tokens | input_tokens
-    CompletionTokens: Integer;   // completion_tokens | output_tokens
-    TotalTokens: Integer;        // total_tokens, else prompt + completion
-    CachedTokens: Integer;       // prompt_tokens_details.cached_tokens
+    PromptTokens: Int64;        // prompt_tokens | input_tokens
+    CompletionTokens: Int64;    // completion_tokens | output_tokens
+    TotalTokens: Int64;         // total_tokens, else prompt + completion
+    CachedTokens: Int64;        // prompt_tokens_details.cached_tokens
                                  //   | prompt_cache_hit_tokens
                                  //   | cache_read_input_tokens
-    ReasoningTokens: Integer;    // completion_tokens_details.reasoning_tokens
+    ReasoningTokens: Int64;     // completion_tokens_details.reasoning_tokens
                                  //   | reasoning_tokens
   end;
 

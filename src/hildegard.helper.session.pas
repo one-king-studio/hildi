@@ -90,7 +90,7 @@ type
     Usage: TTokenUsage;     // rolled up from the turn's requests
     { The context window in play: a turn's own is 0 (unused); a session
       aggregate sets it to the largest prompt it ever sent. }
-    ContextTokens: Integer;
+    ContextTokens: Int64;
     CreatedAtMs: Int64;
     FinishedAtMs: Int64;
     DurationMs: Int64;
