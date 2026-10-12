@@ -187,11 +187,68 @@ the documents, files, or resources the next agent should read first (exact
 paths, links, or identifiers, and why each matters). It is domain-neutral — a
 code repo, a ticket queue, or a research task alike.
 
+### Reverting a checkpoint
+
+A checkpoint is the operator's archive boundary; a **revert** is the deliberate
+undo of the latest one (see the 2026-10-12 FEATURE decision). Two store
+primitives, one operator action:
+
+```pascal
+unit hildegard.helper.store;   // additions
+
+  { Delete one checkpoint by its boundary seq. Messages are never touched; the
+    active window expands to the previous checkpoint. }
+  function DeleteCheckpoint(const ASessionId: string; ASeq: Int64;
+    out AError: TStoreError): Boolean;
+
+  { Drop every turn at or after AFromSeq: its messages, its requests, the turn
+    rows, and the FTS rows for those messages. Messages before AFromSeq stay.
+    Explicitly destructive - the rewind primitive. }
+  function DropTurnsFrom(const ASessionId: string; AFromSeq: Int64;
+    out ADroppedTurns, ADroppedMessages: Integer;
+    out AError: TStoreError): Boolean;
+```
+
+```pascal
+unit hildegard.helper.session.protocol;   // additions
+
+type
+  TSessionCommandKind = (
+    // ... scCheckpoint ...
+    scCheckpointRevert);          // revert the latest checkpoint
+  TSessionEventKind = (
+    // ... ekCheckpointCommitted ...
+    ekCheckpointReverted);        // the boundary is gone; clients reload
+```
+
+**Revert = drop the checkpoint + drop its turn.** The operator action
+(`/checkpoint revert`) deletes the latest `session_checkpoints` row and the
+checkpoint turn's messages (the ambient request, its reasoning, and the
+document), in one transaction. The archived messages are **untouched** — they
+un-archive, and the window expands to the previous boundary. Dropping the turn
+is what keeps the handoff from replaying as an ordinary assistant message.
+
+**Rewind is separate, and destructive.** `DropTurnsFrom` discards the turns at
+or after a `seq` — the work done *after* a checkpoint, which a revert alone does
+not touch. It is refused while a turn is in flight (one writer) and the operator
+confirms it; the app backs up the store first. Reverting a checkpoint is the
+composition *rewind to the checkpoint request* + *drop the checkpoint*.
+
+**Safety.** Both run in one transaction under the store lock. A revert with no
+previous checkpoint is allowed: the session resumes from the beginning, all
+messages active. A revert of a checkpoint that has messages after its boundary
+still succeeds (the boundary is what matters, not the tail). `reply_keywords`
+and `messages_fts` rows for dropped messages are removed with them; recall joins
+back to `messages`, so a stale FTS row is dropped by the join, but the drop
+keeps the index honest.
+
 ### Event Contracts
 
 - `ekCheckpointCommitted` carries the recorded boundary `seq` (reuse `TurnSeq`).
   There is no draft event: the document streams as the checkpoint turn's
   assistant reply.
+- `ekCheckpointReverted` carries the now-latest boundary `seq` (or 0 when there
+  is none), so clients reload the transcript from the previous checkpoint.
 
 ## Architecture
 
@@ -237,6 +294,10 @@ code repo, a ticket queue, or a research task alike.
       `content`-scoped search does not match a `tool_reason`-only hit (proving
       column scoping).
 - [ ] FTS backfill indexes pre-existing messages.
+- [ ] `DeleteCheckpoint` removes the row; the latest checkpoint becomes the
+      previous one (or none); the messages are unchanged.
+- [ ] `DropTurnsFrom` drops the turns at/after a `seq` — their messages,
+      requests, turn rows, and FTS rows — and leaves messages before it intact.
 
 ### Unit Tests (`tests/test_handoff.pas`)
 

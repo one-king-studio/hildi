@@ -105,7 +105,9 @@ in `../guidelines/spec-driven-development.md`:
   as its own `ckHandoff` block; resume and the TUI use the active window;
   back-pagination, the left-border page gauge (which doubles as the coarse
   scroll), the per-page context metric, and the nudge are in. The live manual
-  sign-off is pending.
+  sign-off is pending. A documented **revert** of the latest checkpoint (drop the
+  checkpoint and its turn; the conversation sibling of Workspace Snapshots'
+  undo/redo) is specified, not yet built.
 
 ## Backlog (low priority)
 

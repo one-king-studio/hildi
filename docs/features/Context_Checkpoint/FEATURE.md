@@ -59,6 +59,9 @@ footage before it still on disk.
   the structured context we already store (tool reasons, names, arguments,
   labels) so searches can skip `content` when they do not need it.
 - **One session id** throughout; the full chain stays one group.
+- A deliberate, operator-owned **revert** of the latest checkpoint, so a bad
+  handoff or a bad post-checkpoint turn can be undone without hand-editing the
+  store (see the 2026-10-12 revert decision).
 
 ## User Stories
 
@@ -232,3 +235,35 @@ footage before it still on disk.
   in `session_checkpoints` and is synthesized on compose (the TUI already does
   the same). A new `mrHandoff` role would duplicate that source of truth. The
   distinct *wrapper* is where the "type" belongs.
+- **2026-10-12 — Reverting a checkpoint is a first-class operator action.** We
+  had to revert the latest checkpoint **by hand** (a `sqlite3` delete of the
+  checkpoint row, the checkpoint turn, and the turns after it) when a stale
+  handoff and the turn that followed it had to be undone. A capability the
+  operator reaches for under stress should not be a manual store edit, so it
+  becomes a documented mechanism.
+
+  **It is the conversation sibling of Workspace Snapshots.** That feature
+  versions the *workspace files* across turns (undo/redo walks file state);
+  this reverts the *conversation's* checkpoint. They are independent axes — the
+  Workspace Snapshots Notes already say so — and neither substitutes for the
+  other.
+
+  **Semantics — reverting the latest checkpoint at boundary `B`:**
+  - drops the `session_checkpoints` row at `B`, so the session resumes from the
+    **previous** checkpoint (or from the beginning);
+  - drops the checkpoint **turn** (its ambient request, its reasoning, and the
+    document) — the turn exists only to produce the checkpoint, so the handoff
+    cannot replay as an ordinary assistant message;
+  - **never deletes the archived messages** — they un-archive and the active
+    window expands;
+  - runs in **one transaction**, and is **refused while a turn is in flight**
+    (one writer).
+
+  **Rewind is the companion, not the same action.** Reverting a checkpoint does
+  *not* discard the work done after it. Discarding that work is a **rewind** to a
+  message `seq` — a separate, explicitly destructive operation that drops the
+  turns at or after it (their messages, requests, and FTS rows). The two compose:
+  reverting a checkpoint is *rewind to the checkpoint request* + *drop the
+  checkpoint*. Because a rewind destroys history, it is operator-confirmed and
+  the store is backed up first (the same rule the non-destructive checkpoint
+  invariant implies: a checkpoint never deletes, so a delete must be explicit).

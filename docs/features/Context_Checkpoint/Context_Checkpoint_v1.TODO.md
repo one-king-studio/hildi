@@ -171,6 +171,28 @@ SPEC's "The handoff" and the FEATURE decision (2026-10-12).
 **Note:** the runtime is a long-lived process — the change takes effect on the
 next runtime restart, not on a TUI relaunch (the socket-is-the-lease model).
 
+## Redesign: reverting a checkpoint (v1.2)
+
+**Status: TODO.** A documented, operator-owned revert, so a stale handoff or a
+bad post-checkpoint turn is undone with a command, not a hand-editing of the
+store (see the FEATURE decision, 2026-10-12, and the SPEC's "Reverting a
+checkpoint"). The conversation sibling of Workspace Snapshots' undo/redo.
+
+- [ ] **Test**: `DeleteCheckpoint` — removes the row, the latest becomes the
+      previous (or none), messages unchanged.
+- [ ] **Implement**: `TSqliteStore.DeleteCheckpoint`.
+- [ ] **Test**: `DropTurnsFrom` — drops turns at/after a seq (messages, requests,
+      turns, FTS), leaves earlier messages.
+- [ ] **Implement**: `TSqliteStore.DropTurnsFrom` (one transaction).
+- [ ] **Test**: `scCheckpointRevert` reverts the latest checkpoint + its turn and
+      emits `ekCheckpointReverted`; a revert mid-turn is refused.
+- [ ] **Implement**: the protocol verb/event and the runtime handler; the app
+      command (`/checkpoint revert`) reloads the transcript.
+- [ ] **Document** the manual fallback (the `sqlite3` procedure this decision
+      came from) beside the command, since a store edit remains the last resort
+      when no runtime is available.
+- [ ] `make check` green; record the outcome here.
+
 ## Files to Create/Modify
 
 ```
