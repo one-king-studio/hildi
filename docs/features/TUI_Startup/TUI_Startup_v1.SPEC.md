@@ -146,23 +146,25 @@ type
 
 ### The virtual extent (the coarse scrollbar)
 
-The scrubber must reflect the **whole session**, not the loaded window.
+The scrubber must reflect the **whole session**, not the loaded window — and the
+counts come from the **store**, not an estimate:
+
+- `PageNumber` = `ListCheckpoints(...)` count + 1 — one segment per checkpoint
+  page (session-global, exact).
+- `MessageCount` = `COUNT(*)` — the session's total messages (exact).
+- A segment maps to a **0-based message index** in the session via the pure
+  `CoarseScrollTarget(seg, segCount, messageCount)` (segment 0 = oldest, last =
+  newest).
+- A jump into a region older than the loaded window **grows the window to cover
+  it** (the same page load as scroll-up), then scrolls within the window. The
+  window's start index (`FWindowStart` = `MessageCount - loadedCount`) places the
+  target inside it.
 
 ```pascal
-type
-  { A cheap total-row estimate from the message count, so the page bar spans the
-    session while only a window is loaded. Refined as real pages load. }
-  TWindowExtent = record
-    MessageCount: Integer;    // the session's total
-    LoadedCount: Integer;     // the window's real count
-    EstimatedRowHeight: Integer;
-    function VirtualMaxScroll(const AViewportH: Integer): Integer;
-    function WindowRowRange(...): TRowRange;   // the loaded window's sub-range
-  end;
+{ The pure mapping (unit-testable). }
+function CoarseScrollTarget(ASeg, ASegCount, AMessageCount: Integer): Integer;
 ```
 
-- The page scrubber maps a segment to a **fraction of the virtual extent**; a
-  jump into an unloaded region triggers the loads that cover it.
 - `StreamScrolled`'s page index still keys on the checkpoint boundary
   (`FCheckpointBlock`), which remains correct because the boundary block stays in
   the window whenever the window overlaps it.

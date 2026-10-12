@@ -112,6 +112,7 @@ type
     procedure TestResumeRendersTurnDividers;
     procedure TestThoughtShowsDuration;
     procedure TestCtaHintsAreBlank;
+    procedure TestCoarseScrollTargetMapsSegments;
     procedure TestSidebarTogglesWithCtrlB;
     procedure TestThinkingStateDuringATurn;
     procedure TestReasoningSettlesIntoAThoughtBlock;
@@ -1140,6 +1141,22 @@ begin
     FApp.HintsText);
   AssertFalse('hints are not in the status bar',
     Pos('newline', FApp.StatusText) > 0);
+end;
+
+procedure THarnessAppTest.TestCoarseScrollTargetMapsSegments;
+begin
+  { The scrubber has one segment per page (the checkpoint count from the store);
+    a segment maps to a 0-based message index. Segment 0 is the oldest, the last
+    segment the newest. }
+  AssertEquals('first segment is the oldest', 0,
+    CoarseScrollTarget(0, 3, 100));
+  AssertEquals('last segment is the newest', 99,
+    CoarseScrollTarget(2, 3, 100));
+  AssertEquals('middle segment', 49, CoarseScrollTarget(1, 3, 100));
+  { Edge cases: a single message, a single page (the bar is not drawn for one
+    page, so its target is the top). }
+  AssertEquals('one message', 0, CoarseScrollTarget(0, 3, 1));
+  AssertEquals('one page -> top', 0, CoarseScrollTarget(0, 1, 43));
 end;
 
 procedure THarnessAppTest.TestThinkingStateDuringATurn;

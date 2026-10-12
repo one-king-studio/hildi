@@ -102,6 +102,10 @@ type
       "loading older messages"). Reset when the window is rebuilt from a fresh
       tail. }
     FAtHead: Boolean;
+    { The 0-based index of the first message the window currently holds (0 when
+      the whole session is loaded), so the coarse scrubber can map a session
+      fraction to a row within the loaded window. }
+    FWindowStart: Integer;
     { The left-border paginator (coarse scroll) drag: the last hit row. }
     FPageDragging: Boolean;
     FPageDragRow: Integer;
@@ -257,6 +261,12 @@ type
     function ConversationText: string;
   end;
 
+{ The coarse-scroll target: the message index (0-based, oldest = 0) a scrubber
+  segment points to in a session of AMessageCount messages. Segment 0 is the
+  oldest, ASegCount-1 the newest. Pure, so the mapping is testable without the
+  widgets. }
+function CoarseScrollTarget(ASeg, ASegCount, AMessageCount: Integer): Integer;
+
 implementation
 
 const
@@ -307,6 +317,23 @@ begin
   else
     Result := '';
   end;
+end;
+
+function CoarseScrollTarget(ASeg, ASegCount, AMessageCount: Integer): Integer;
+begin
+  { The coarse scrubber has one segment per page (the checkpoint count, read
+    from the store). This maps a segment to a 0-based message index in a session
+    of AMessageCount messages: segment 0 is the oldest message, ASegCount-1 the
+    newest. The counts are exact (the store), so no row-height estimate is
+    needed. Pure, so the mapping is unit-testable. }
+  Result := 0;
+  if AMessageCount <= 1 then
+    Exit;
+  if ASeg <= 0 then
+    Exit(0);
+  if (ASegCount <= 1) or (ASeg >= ASegCount - 1) then
+    Exit(AMessageCount - 1);
+  Result := (ASeg * (AMessageCount - 1)) div (ASegCount - 1);
 end;
 
 { TAppShell }
@@ -755,6 +782,14 @@ begin
       FOlderPages * HistoryPageSize)
   else
     History := nil;
+  { The window's start index in the whole session, for the coarse scrubber: the
+    session's message count minus what is loaded (0 when all is loaded). }
+  if FSession <> nil then
+    FWindowStart := FSession.MessageCount - Length(History)
+  else
+    FWindowStart := 0;
+  if FWindowStart < 0 then
+    FWindowStart := 0;
   Turns := FSession.Turns;
   Head := 0;
   CurrentTurn := 0;
@@ -1347,7 +1382,7 @@ end;
 function THarnessApp.PageScrub(const E: TInputEvent): Boolean;
 var
   B: TRect;
-  H, I, Seg, Target: Integer;
+  H, I, Seg, Target, SessionIndex: Integer;
 begin
   { The left border of the messages panel is a coarse scrollbar: one segment per
     page, the current page heavy. A press or drag on it scrolls to that segment's
@@ -1387,7 +1422,30 @@ begin
   Seg := (I * FPageCount) div H;
   if Seg > FPageCount - 1 then
     Seg := FPageCount - 1;
-  Target := (FPanel.Stream.MaxScroll * Seg) div (FPageCount - 1);
+  { The segment points to a message index in the whole session (real counts from
+    the store, not an estimate). If that is older than the loaded window, grow
+    the window to cover it first (a coarse jump loads); then scroll within. }
+  SessionIndex := CoarseScrollTarget(Seg, FPageCount, FSession.MessageCount);
+  while (not FAtHead) and (FWindowStart > SessionIndex) and
+    (FOlderPages * HistoryPageSize < FSession.MessageCount) do
+  begin
+    FPanel.Stream.PreserveAnchor;
+    Inc(FOlderPages);
+    FPanel.Stream.Clear;
+    RenderHistory;
+    if FWindowStart = 0 then
+      FAtHead := True;
+  end;
+  { Within the loaded window: the fraction of the way from its start to the
+    session's end. ScrollY = 0 is the window top, MaxScroll the bottom. }
+  Target := 0;
+  if FSession.MessageCount > 1 then
+    Target := (FPanel.Stream.MaxScroll * (SessionIndex - FWindowStart)) div
+      (FSession.MessageCount - 1 - FWindowStart);
+  if Target < 0 then
+    Target := 0;
+  if Target > FPanel.Stream.MaxScroll then
+    Target := FPanel.Stream.MaxScroll;
   FPanel.Stream.ScrollTo(Target);
   FPanel.SetPageIndex(Seg);
   FApp.Invalidate;
