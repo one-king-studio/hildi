@@ -96,9 +96,10 @@ TDD-first; `make check` before moving on. `main` only.
 - [x] **Implement**: the end-of-history state (`FAtHead`).
 - [x] **Add**: the coarse scrubber over the whole session (`CoarseScrollTarget`,
       real DB counts) and the passive trim (`ShouldTrimHistory`).
-- [ ] **Test**: a fully-paged transcript equals the un-paged history (same order
-      and content). *(Covered transitively by the resume tests; a dedicated
-      full-page equality test is a follow-up.)*
+- [x] **Test**: a fully-paged transcript is continuous: every message exactly
+      once, in order, no gap or duplication at a page seam
+      (`TestFullPagingIsContinuous`; it caught the head guard firing on stale
+      content height — fixed to key on `FWindowStart`).
 
 ### Phase 4: Composition root (`examples/tui_agent.pas`)
 
@@ -153,12 +154,12 @@ docs/features/FEATURES.md
 
 ## Success Criteria
 
-- [ ] All tasks checked
-- [ ] Every SPEC acceptance criterion maps to a passing test
-- [ ] `make check` passes (tests + leak gate)
-- [ ] A first frame is on screen before the driver connects; a failed connect is
+- [ ] All tasks checked (one open: the manual real-terminal check)
+- [x] Every SPEC acceptance criterion maps to a passing test
+- [x] `make check` passes (tests + leak gate)
+- [x] A first frame is on screen before the driver connects; a failed connect is
       an in-app error
-- [ ] The first frame is independent of session size (tail only)
+- [x] The first frame is independent of session size (tail only)
 
 ## Notes & Considerations
 

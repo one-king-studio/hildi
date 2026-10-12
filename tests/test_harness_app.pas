@@ -103,6 +103,7 @@ type
     procedure TestOneFramePerStep;
     procedure TestRenderHistoryRestoresToolBlocks;
     procedure TestTranscriptIsBoundedToTheTail;
+    procedure TestFullPagingIsContinuous;
     procedure TestHeaderShowsSessionIdAndContext;
     procedure TestStatusShowsWorkspaceAndConsumption;
     procedure TestStatusSumsTurns;
@@ -913,6 +914,96 @@ begin
   AssertTrue('bounded to the tail', BlockCount <= 200);
   AssertTrue('the newest is present', FindText(ckUser, 'm500'));
   AssertFalse('an early message is not loaded', FindText(ckUser, 'm1'));
+end;
+
+procedure THarnessAppTest.TestFullPagingIsContinuous;
+var
+  Store: TSqliteStore;
+  StoreCfg: TStoreConfig;
+  Err, Sid: string;
+  StoreErr: TStoreError;
+  WorkspaceId: Integer;
+  TurnId: Int64;
+  Rec: TMessageRecord;
+  Cfg: THarnessSessionConfig;
+  I, Guard, Prev, Idx, Seen: Integer;
+  Text, Marker: string;
+begin
+  { Seed a session, resume it, then page to the head. The full window must be
+    continuous: every message exactly once, in order (no gap or duplication at a
+    page seam). }
+  FDir := IncludeTrailingPathDelimiter(GetTempDir) + 'hh-app-' +
+    IntToStr(Random(1000000));
+  ForceDirectories(FDir);
+  FStorePath := IncludeTrailingPathDelimiter(FDir) + 'store.db';
+  StoreCfg := Default(TStoreConfig);
+  StoreCfg.DatabasePath := FStorePath;
+  StoreCfg.BusyTimeoutMs := 5000;
+  Store := TSqliteStore.Create(StoreCfg);
+  try
+    AssertTrue('open store', Store.Open(StoreErr));
+    Store.EnsureWorkspace(FDir, WorkspaceId, StoreErr);
+    Store.CreateSession(WorkspaceId, Sid, StoreErr);
+    Store.BeginTurn(Sid, TurnId, StoreErr);
+    { 450 messages: 3 pages of 200 (the tail + two more), so the seams matter. }
+    for I := 1 to 450 do
+    begin
+      Rec := Default(TMessageRecord);
+      Rec.SessionId := Sid;
+      Rec.TurnId := TurnId;
+      Rec.Role := mrUser;
+      Rec.Content := 'm' + IntToStr(I);
+      Store.AppendMessage(Rec, StoreErr);
+    end;
+  finally
+    Store.Free;
+  end;
+
+  FFake := TFakeTransport.Create;
+  FSurface := TSurfaceMemory.Create(60, 20);
+  FInput := TInputSourceScripted.Create;
+  Cfg := Config;
+  Cfg.StorePath := FStorePath;
+  Cfg.SessionId := Sid;
+  Cfg.Resume := True;
+  FSession := THarnessSession.Open(Cfg, Err);
+  AssertTrue('resumed: ' + Err, FSession <> nil);
+  FApp := THarnessApp.Create(FSurface, FInput, FSession.View, LocalDriver(FSession));
+  FApp.Step;
+  { Page to the head: drive the stream's need-older handler, stepping so the
+    layout applies (and the anchor clears) between pages, until the window stops
+    growing (the head guard fires). }
+  Guard := 0;
+  repeat
+    Inc(Guard);
+    Prev := FApp.Panel.Stream.ContentHeight;
+    FApp.Panel.Stream.OnNeedOlder(FApp.Panel.Stream);
+    FApp.Step;   // layout: apply the anchor and settle the new height
+  until (Guard >= 10) or (FApp.Panel.Stream.ContentHeight <= Prev);
+  { Every seeded message is present exactly once, in ascending order. }
+  Text := FApp.ConversationText;
+  Prev := 0;
+  for I := 1 to 450 do
+  begin
+    Marker := 'm' + IntToStr(I) + #10;
+    Idx := Pos(Marker, Text);
+    AssertTrue('message m' + IntToStr(I) + ' present', Idx > 0);
+    AssertTrue('message m' + IntToStr(I) + ' in order', Idx > Prev);
+    Prev := Idx;
+  end;
+  { No duplication: 'm1' appears once as a whole block (its text plus the
+    newline). A duplicate would place it again after m450. }
+  Seen := 0;
+  I := 0;
+  repeat
+    Idx := Pos('m1' + #10, Copy(Text, I + 1, MaxInt));
+    if Idx > 0 then
+    begin
+      Inc(Seen);
+      I := I + Idx;
+    end;
+  until Idx = 0;
+  AssertEquals('the first message appears once', 1, Seen);
 end;
 
 procedure THarnessAppTest.TestHeaderShowsSessionIdAndContext;

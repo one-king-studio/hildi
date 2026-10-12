@@ -1384,23 +1384,21 @@ begin
 end;
 
 procedure THarnessApp.NeedOlderHistory(Sender: TObject);
-var
-  Before, After: Integer;
 begin
   { At the head already: nothing older exists; do not re-fire (no endless
     "loading older messages"). }
   if FAtHead then
     Exit;
-  Before := FPanel.Stream.ContentHeight;
   { Prepend one more page, holding the scroll so the visible content stays put
     (the stream applies the anchor on its next layout). }
   FPanel.Stream.PreserveAnchor;
   Inc(FOlderPages);
   FPanel.Stream.Clear;
   RenderHistory;
-  After := FPanel.Stream.ContentHeight;
-  { The window did not grow: the previous page reached the head. }
-  if After <= Before then
+  { RenderHistory sets FWindowStart to the window's start index in the session;
+    0 means the window now holds everything, so the head is reached. (Content
+    height is stale until the next layout, so it is not the signal.) }
+  if FWindowStart <= 0 then
     FAtHead := True;
   FApp.Invalidate;
 end;
