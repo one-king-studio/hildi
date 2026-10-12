@@ -161,6 +161,16 @@ type
     { Sessions for a workspace, newest updated first. }
     function ListSessions(AWorkspaceId: Integer;
       out AList: TSessionSummaryArray; out AError: TStoreError): Boolean;
+    { Sessions resolved for the /sessions modal: pinned first, then newest; the
+      resolved title and the latest reply's keywords per row. Archived rows are
+      excluded unless AIncludeArchived. }
+    function ListSessionRows(AWorkspaceId: Integer; AIncludeArchived: Boolean;
+      out ARows: TSessionRowArray; out AError: TStoreError): Boolean;
+    { Pin/unpin and archive/unarchive a session. }
+    function SetSessionPinned(const ASessionId: string; APinned: Boolean;
+      out AError: TStoreError): Boolean;
+    function SetSessionArchived(const ASessionId: string; AArchived: Boolean;
+      out AError: TStoreError): Boolean;
     { The most recently updated session for a workspace; seNotFound if none. }
     function MostRecentSessionId(AWorkspaceId: Integer; out AId: string;
       out AError: TStoreError): Boolean;
@@ -333,7 +343,7 @@ end;
 function DefaultMigrations: TMigrationArray;
 begin
   Result := nil;
-  SetLength(Result, 10);
+  SetLength(Result, 11);
   Result[0].Version := 1;
   Result[0].Name := 'session history';
   Result[0].Statements := [
@@ -551,6 +561,13 @@ begin
       'keyword TEXT NOT NULL, ' +
       'PRIMARY KEY (message_id, keyword))',
     'CREATE INDEX idx_reply_keywords_keyword ON reply_keywords (keyword)'
+  ];
+  { v11: session lifecycle flags for the /sessions modal. Additive. }
+  Result[10].Version := 11;
+  Result[10].Name := 'session lifecycle flags';
+  Result[10].Statements := [
+    'ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0'
   ];
 end;
 
@@ -2663,6 +2680,111 @@ begin
         AList[N] := Item;
         Inc(N);
       end;
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.ListSessionRows(AWorkspaceId: Integer;
+  AIncludeArchived: Boolean; out ARows: TSessionRowArray;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+  N: Integer;
+  Row: TSessionRow;
+  Title, Override: string;
+begin
+  AError := OkError;
+  ARows := nil;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb,
+      'SELECT id, updated_at, pinned, archived, title, title_override ' +
+      'FROM sessions WHERE workspace_id = ? ' +
+      'ORDER BY pinned DESC, updated_at DESC, rowid DESC');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not list sessions', DbErrorText));
+      Stmt.BindInt(1, AWorkspaceId);
+      N := 0;
+      while Stmt.Step = SQLITE_ROW do
+      begin
+        Row := Default(TSessionRow);
+        Row.Id := Stmt.ColText(0);
+        Row.UpdatedAtMs := Stmt.ColInt64(1);
+        Row.Pinned := Stmt.ColInt(2) <> 0;
+        Row.Archived := Stmt.ColInt(3) <> 0;
+        if Row.Archived and (not AIncludeArchived) then
+          Continue;
+        { The resolved title: the override wins over the extracted title. }
+        Title := Stmt.ColText(4);
+        Override := Stmt.ColText(5);
+        if Override <> '' then
+          Row.Title := Override
+        else
+          Row.Title := Title;
+        SetLength(ARows, N + 1);
+        ARows[N] := Row;
+        Inc(N);
+      end;
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.SetSessionPinned(const ASessionId: string;
+  APinned: Boolean; out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb, 'UPDATE sessions SET pinned = ? WHERE id = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not pin session', DbErrorText));
+      Stmt.BindInt(1, Ord(APinned));
+      Stmt.BindText(2, ASessionId);
+      Stmt.Step;
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.SetSessionArchived(const ASessionId: string;
+  AArchived: Boolean; out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb, 'UPDATE sessions SET archived = ? WHERE id = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not archive session', DbErrorText));
+      Stmt.BindInt(1, Ord(AArchived));
+      Stmt.BindText(2, ASessionId);
+      Stmt.Step;
     finally
       Stmt.Free;
     end;

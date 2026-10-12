@@ -124,6 +124,19 @@ type
 
   TSessionSummaryArray = array of TSessionSummary;
 
+  { A session row resolved for the /sessions modal: its title (override else
+    extracted), its latest reply's keywords, and its lifecycle flags. }
+  TSessionRow = record
+    Id: string;
+    Title: string;
+    Keywords: TStringArray;
+    Pinned: Boolean;
+    Archived: Boolean;
+    UpdatedAtMs: Int64;
+  end;
+
+  TSessionRowArray = array of TSessionRow;
+
   { A session's live runtime row (migration v2). Advisory: discovery and
     display only - the socket, not this row, is the authority on liveness. }
   TSessionRuntimeStatus = (rsRunning, rsExited);

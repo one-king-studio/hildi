@@ -91,6 +91,9 @@ type
     procedure TestSessionTitleOverrideWins;
     procedure TestReplyKeywordsReplace;
     procedure TestReplyKeywordsCascade;
+    procedure TestListSessionRowsOrderAndArchived;
+    procedure TestSessionPinAndArchiveRoundTrip;
+    procedure TestRenameReusesTitleOverride;
   end;
 
 implementation
@@ -1912,6 +1915,96 @@ begin
     AssertTrue('delete the turn''s messages', S.DeleteTurnMessages(TurnId, Err));
     AssertTrue('read after delete', S.ReplyKeywords(Msgs[0].Id, Kw, Err));
     AssertEquals('cascaded away', 0, Length(Kw));
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestListSessionRowsOrderAndArchived;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws: Integer;
+  A, B, C: string;
+  Rows: TSessionRowArray;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, A, Err);
+    S.CreateSession(Ws, B, Err);
+    S.CreateSession(Ws, C, Err);
+    { Default: newest first (C, B, A), no archived. }
+    AssertTrue('list', S.ListSessionRows(Ws, False, Rows, Err));
+    AssertEquals('three rows', 3, Length(Rows));
+    AssertEquals('newest first', C, Rows[0].Id);
+    { Pin A: it sorts ahead of everything. }
+    AssertTrue('pin A', S.SetSessionPinned(A, True, Err));
+    AssertTrue('list', S.ListSessionRows(Ws, False, Rows, Err));
+    AssertEquals('pinned first', A, Rows[0].Id);
+    AssertTrue('A pinned', Rows[0].Pinned);
+    { Archive B: excluded by default, present when asked. }
+    AssertTrue('archive B', S.SetSessionArchived(B, True, Err));
+    AssertTrue('list default', S.ListSessionRows(Ws, False, Rows, Err));
+    AssertEquals('archived excluded', 2, Length(Rows));
+    AssertTrue('list all', S.ListSessionRows(Ws, True, Rows, Err));
+    AssertEquals('archived included', 3, Length(Rows));
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestSessionPinAndArchiveRoundTrip;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws: Integer;
+  A: string;
+  Rows: TSessionRowArray;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, A, Err);
+    AssertTrue('pin', S.SetSessionPinned(A, True, Err));
+    AssertTrue('list', S.ListSessionRows(Ws, True, Rows, Err));
+    AssertTrue('pinned', Rows[0].Pinned);
+    AssertFalse('not archived', Rows[0].Archived);
+    AssertTrue('archive', S.SetSessionArchived(A, True, Err));
+    AssertTrue('list', S.ListSessionRows(Ws, True, Rows, Err));
+    AssertTrue('archived', Rows[0].Archived);
+    { Unpin + restore round-trip. }
+    AssertTrue('unpin', S.SetSessionPinned(A, False, Err));
+    AssertTrue('restore', S.SetSessionArchived(A, False, Err));
+    AssertTrue('list', S.ListSessionRows(Ws, False, Rows, Err));
+    AssertEquals('visible again', 1, Length(Rows));
+    AssertFalse('unpinned', Rows[0].Pinned);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestRenameReusesTitleOverride;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws: Integer;
+  A: string;
+  Rows: TSessionRowArray;
+begin
+  { The modal's rename is SetSessionTitleOverride; the row shows the override. }
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, A, Err);
+    S.SetSessionTitle(A, 'Extracted', Err);
+    AssertTrue('rename', S.SetSessionTitleOverride(A, 'My name', Err));
+    AssertTrue('list', S.ListSessionRows(Ws, False, Rows, Err));
+    AssertEquals('override shown', 'My name', Rows[0].Title);
+    { Clearing the override falls back to the extracted title. }
+    AssertTrue('clear', S.SetSessionTitleOverride(A, '', Err));
+    AssertTrue('list', S.ListSessionRows(Ws, False, Rows, Err));
+    AssertEquals('extracted shown', 'Extracted', Rows[0].Title);
   finally
     S.Free;
   end;
