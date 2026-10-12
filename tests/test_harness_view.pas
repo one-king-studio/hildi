@@ -27,6 +27,8 @@ type
     procedure TestStoreViewCreatesSession;
     procedure TestHistoryReadsOnDemand;
     procedure TestMaxContextTokensOverride;
+    procedure TestLazySessionDefersCreation;
+    procedure TestEnsureSessionCreatesOnDemand;
   end;
 
 implementation
@@ -124,6 +126,47 @@ begin
   try
     AssertNotNull('view opens: ' + Err, View);
     AssertEquals('override applied', 1000000, View.MaxContextTokens);
+  finally
+    View.Free;
+  end;
+end;
+
+procedure THarnessViewTest.TestLazySessionDefersCreation;
+var
+  View: TSessionView;
+  Err: string;
+  Cfg: THarnessSessionConfig;
+begin
+  { Lazy: opening the view must NOT create a session row. }
+  Cfg := Config(FStorePath);
+  Cfg.LazySession := True;
+  View := TSessionView.Open(Cfg, Err);
+  try
+    AssertNotNull('view opens: ' + Err, View);
+    AssertFalse('no session yet', View.HasSession);
+    AssertEquals('empty id', '', View.SessionId);
+    AssertTrue('the store is open', View.Store <> nil);
+  finally
+    View.Free;
+  end;
+end;
+
+procedure THarnessViewTest.TestEnsureSessionCreatesOnDemand;
+var
+  View: TSessionView;
+  Err: string;
+  Cfg: THarnessSessionConfig;
+begin
+  Cfg := Config(FStorePath);
+  Cfg.LazySession := True;
+  View := TSessionView.Open(Cfg, Err);
+  try
+    AssertNotNull('view opens: ' + Err, View);
+    AssertTrue('create on demand', View.EnsureSession(Err));
+    AssertTrue('now has a session', View.HasSession);
+    AssertTrue('a real id', View.SessionId <> '');
+    { Idempotent: a second call keeps the same id. }
+    AssertTrue('idempotent', View.EnsureSession(Err));
   finally
     View.Free;
   end;

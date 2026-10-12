@@ -29,10 +29,17 @@ uses
   hildegard.helper.session.protocol, hildegard.helper.session.client;
 
 type
-  { Where the app is in the startup sequence. csConnecting draws a frame before
-    the driver is attached; csConnected is the normal live state; csFailed shows
-    an in-app error and stays usable. }
-  TConnState = (csConnecting, csConnected, csFailed);
+  { Where the app is in the startup sequence. csIdle waits for the first prompt
+    (no session/runtime yet); csConnecting draws a frame while a connect is in
+    progress; csConnected is the normal live state; csFailed shows an in-app
+    error and stays usable. }
+  TConnState = (csIdle, csConnecting, csConnected, csFailed);
+
+  { Fired when the app is idle (no session/runtime) and the operator submits the
+    first prompt: the composition root creates the session, spawns the runtime,
+    and calls Attach (or FailConnect). Set by the launcher that wants a lazy
+    start; when unset, an idle app cannot send. }
+  TConnectEvent = procedure of object;
 
   { Builds the tree and owns the TTuiApp and the current worker. The session is
     owned by the caller and must outlive the app. }
@@ -48,6 +55,9 @@ type
     FConnState: TConnState;
     FConnectPhase: string;
     FConnectError: string;
+    FOnNeedConnect: TConnectEvent;
+    { A prompt submitted while idle, held until Attach delivers the driver. }
+    FPendingSubmit: string;
     FApp: TTuiApp;
     FTheme: TTheme;
     FPanel: TChatPanel;
@@ -208,11 +218,17 @@ type
     procedure Attach(const ASession: TSessionView; const ADriver: ISessionDriver);
     { Report a failed connect; moves to csFailed and shows AError. }
     procedure FailConnect(const AError: string);
+    { Enter the idle state: no session/runtime yet, waiting for the first prompt.
+      The launcher sets OnNeedConnect so a submit can trigger the connect. }
+    procedure BeginIdle;
     { A phase label for the connecting frame (e.g. 'connecting', 'loading
       history'), so the wait is honest. }
     procedure SetConnectPhase(const APhase: string);
 
     property ConnState: TConnState read GetConnState;
+    { The lazy-start hook: called on the first submit when idle. }
+    property OnNeedConnect: TConnectEvent read FOnNeedConnect
+      write FOnNeedConnect;
 
     property Busy: Boolean read FBusy;
     property PromptActive: Boolean read GetPromptActive;
@@ -350,9 +366,18 @@ begin
   FApp := TTuiApp.Create(ASurface, AInput, BuildTree);
   FApp.InputHook := PageScrub;
   FApp.ScreenBg := FTheme.Bg;
-  { With no driver yet, the app is connecting: draw a connecting frame and wait
-    for Attach. With one, it is live from the first frame (the old behaviour). }
-  if FDriver = nil then
+  { With no driver: if there is a session (named/resumed) we are connecting and
+    wait for Attach; if there is no session, the app is idle and waits for the
+    first prompt (the launcher wires OnNeedConnect). With a driver it is live
+    from the first frame (the old behaviour). }
+  if FDriver <> nil then
+  begin
+    FConnState := csConnected;
+    RenderHistory;
+    SetState(psReady, 'ready');
+    UpdateStats;
+  end
+  else if (FSession <> nil) and FSession.HasSession then
   begin
     FConnState := csConnecting;
     FConnectPhase := 'connecting';
@@ -360,10 +385,8 @@ begin
   end
   else
   begin
-    FConnState := csConnected;
-    RenderHistory;
-    SetState(psReady, 'ready');
-    UpdateStats;
+    FConnState := csIdle;
+    RenderConnState;
   end;
 end;
 
@@ -386,6 +409,12 @@ begin
     otherwise empty, so this is the first frame the operator sees. }
   FPanel.Stream.Clear;
   case FConnState of
+    csIdle:
+      begin
+        FPanel.Stream.Add(ckThinking, '',
+          'type a prompt to start a session');
+        SetState(psReady, 'idle');
+      end;
     csConnecting:
       begin
         FPanel.Stream.Add(ckThinking, '', FConnectPhase + '…');
@@ -405,15 +434,30 @@ end;
 
 procedure THarnessApp.Attach(const ASession: TSessionView;
   const ADriver: ISessionDriver);
+var
+  Pending: string;
 begin
   FSession := ASession;
   FDriver := ADriver;
   FConnState := csConnected;
-  { Replace the connecting frame with the transcript. }
+  { Replace the connecting/idle frame with the transcript. }
   FPanel.Stream.Clear;
   RenderHistory;
   SetState(psReady, 'ready');
   UpdateStats;
+  { Flush a prompt submitted while idle: it is the prompt the operator typed to
+    trigger this connect. }
+  Pending := FPendingSubmit;
+  FPendingSubmit := '';
+  if Pending <> '' then
+    Submit(Pending);
+end;
+
+procedure THarnessApp.BeginIdle;
+begin
+  { No session/runtime yet: the operator can quit without any side effect. }
+  FConnState := csIdle;
+  RenderConnState;
 end;
 
 procedure THarnessApp.FailConnect(const AError: string);
@@ -796,6 +840,19 @@ end;
 
 procedure THarnessApp.Submit(const AText: string);
 begin
+  { Idle: no session/runtime yet. The first prompt triggers the connect via the
+    launcher's hook; the prompt is remembered and submitted once connected. }
+  if FConnState = csIdle then
+  begin
+    if Assigned(FOnNeedConnect) then
+    begin
+      FPendingSubmit := AText;
+      FOnNeedConnect();
+    end
+    else
+      AppendError('no session; cannot send');
+    Exit;
+  end;
   { While connecting or failed there is no driver to submit to; refuse cleanly. }
   if FConnState <> csConnected then
   begin

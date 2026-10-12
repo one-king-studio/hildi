@@ -83,6 +83,8 @@ type
     function ApprovalEvent(ARequestId: Integer;
       const AAsk: TApprovalAsk): TTurnEvent;
     function Config: THarnessSessionConfig;
+    { The lazy-connect hook: attach a local driver to the current app. }
+    procedure AttachLocal;
   protected
     procedure TearDown; override;
   published
@@ -123,11 +125,12 @@ type
     procedure TestCtrlCQuitsOnlyWhenComposeIsEmpty;
     procedure TestApprovalDimsTheBackground;
     { TUI Startup: the connect lifecycle. }
-    procedure TestNilDriverStartsConnecting;
+    procedure TestNoSessionStartsIdle;
+    procedure TestSubmitWhileIdleWithoutHookIsRefused;
+    procedure TestIdleSubmitTriggersConnect;
     procedure TestAttachMovesToConnectedAndRendersHistory;
     procedure TestFailConnectShowsErrorAndStaysUsable;
     procedure TestSetConnectPhaseUpdatesTheFrame;
-    procedure TestSubmitWhileConnectingIsRefused;
   end;
 
 implementation
@@ -198,6 +201,11 @@ begin
   { Pin the context limit so the header is deterministic (the environment may
     set HILDEGARD_MAX_CONTEXT_TOKENS). }
   Result.MaxContextTokens := 120000;
+end;
+
+procedure THarnessAppTest.AttachLocal;
+begin
+  FApp.Attach(FSession.View, LocalDriver(FSession));
 end;
 
 procedure THarnessAppTest.Build;
@@ -1371,11 +1379,33 @@ end;
 
 { TUI Startup: the connect lifecycle. }
 
-procedure THarnessAppTest.TestNilDriverStartsConnecting;
+procedure THarnessAppTest.TestNoSessionStartsIdle;
 var
   Err: string;
 begin
-  { No driver: the app draws a connecting frame instead of the transcript. }
+  { No session (an in-memory view has no id) and no driver: the app is idle, not
+    connecting - it waits for the first prompt and creates nothing. }
+  FDir := IncludeTrailingPathDelimiter(GetTempDir) + 'hh-app-' +
+    IntToStr(Random(1000000));
+  ForceDirectories(FDir);
+  FStorePath := '';
+  FFake := TFakeTransport.Create;
+  FSurface := TSurfaceMemory.Create(40, 20);
+  FInput := TInputSourceScripted.Create;
+  FSession := THarnessSession.Open(Config, Err);
+  AssertTrue('session opened: ' + Err, FSession <> nil);
+  AssertFalse('no session id', FSession.View.HasSession);
+  FApp := THarnessApp.Create(FSurface, FInput, FSession.View, nil);
+  AssertEquals('idle', Ord(csIdle), Ord(FApp.ConnState));
+  AssertTrue('an idle frame is drawn', BlockCount >= 1);
+  AssertTrue('it invites a prompt',
+    FindText(ckThinking, 'type a prompt to start'));
+end;
+
+procedure THarnessAppTest.TestSubmitWhileIdleWithoutHookIsRefused;
+var
+  Err: string;
+begin
   FDir := IncludeTrailingPathDelimiter(GetTempDir) + 'hh-app-' +
     IntToStr(Random(1000000));
   ForceDirectories(FDir);
@@ -1386,9 +1416,40 @@ begin
   FSession := THarnessSession.Open(Config, Err);
   AssertTrue('session opened: ' + Err, FSession <> nil);
   FApp := THarnessApp.Create(FSurface, FInput, FSession.View, nil);
-  AssertEquals('connecting', Ord(csConnecting), Ord(FApp.ConnState));
-  AssertTrue('a connecting frame is drawn', BlockCount >= 1);
-  AssertTrue('it says connecting', FindText(ckThinking, 'connecting'));
+  FApp.Step;
+  { Idle with no connect hook: submitting must not raise; it is refused. }
+  SubmitPrompt('hello');
+  Pump(20);
+  AssertTrue('refused', FindText(ckError, 'no session; cannot send'));
+  AssertEquals('still idle', Ord(csIdle), Ord(FApp.ConnState));
+end;
+
+procedure THarnessAppTest.TestIdleSubmitTriggersConnect;
+var
+  Err: string;
+begin
+  FDir := IncludeTrailingPathDelimiter(GetTempDir) + 'hh-app-' +
+    IntToStr(Random(1000000));
+  ForceDirectories(FDir);
+  FStorePath := '';
+  FFake := TFakeTransport.Create;
+  FSurface := TSurfaceMemory.Create(40, 20);
+  FInput := TInputSourceScripted.Create;
+  FSession := THarnessSession.Open(Config, Err);
+  AssertTrue('session opened: ' + Err, FSession <> nil);
+  FApp := THarnessApp.Create(FSurface, FInput, FSession.View, nil);
+  FApp.Step;
+  { Wire the lazy hook to attach a driver, as the composition root does. The
+    hook fires on the first submit and Attach flushes the held prompt. }
+  FApp.OnNeedConnect := AttachLocal;
+  FFake.AddChunk(TextDelta('ok'));
+  FFake.AddChunk(FinishFrame('stop'));
+  FFake.AddChunk(DoneFrame);
+  SubmitPrompt('hi');
+  Pump(300);
+  AssertEquals('connected after the submit',
+    Ord(csConnected), Ord(FApp.ConnState));
+  AssertTrue('the prompt ran', FindText(ckAssistant, 'ok'));
 end;
 
 procedure THarnessAppTest.TestAttachMovesToConnectedAndRendersHistory;
@@ -1405,12 +1466,12 @@ begin
   FSession := THarnessSession.Open(Config, Err);
   AssertTrue('session opened: ' + Err, FSession <> nil);
   FApp := THarnessApp.Create(FSurface, FInput, FSession.View, nil);
-  AssertEquals('connecting first', Ord(csConnecting), Ord(FApp.ConnState));
-  { Attach the driver: the app moves to connected and the connecting frame is
-    replaced by the (empty) transcript. }
+  AssertEquals('idle first', Ord(csIdle), Ord(FApp.ConnState));
+  { Attach the driver: the app moves to connected and the idle frame is replaced
+    by the (empty) transcript. }
   FApp.Attach(FSession.View, LocalDriver(FSession));
   AssertEquals('connected', Ord(csConnected), Ord(FApp.ConnState));
-  AssertFalse('no connecting frame', FindText(ckThinking, 'connecting'));
+  AssertFalse('no idle frame', FindText(ckThinking, 'type a prompt'));
 end;
 
 procedure THarnessAppTest.TestFailConnectShowsErrorAndStaysUsable;
@@ -1439,43 +1500,27 @@ end;
 procedure THarnessAppTest.TestSetConnectPhaseUpdatesTheFrame;
 var
   Err: string;
+  Cfg: THarnessSessionConfig;
 begin
+  { A connecting state needs a session that already has an id: open a store so
+    the view creates one, then pass a nil driver. }
   FDir := IncludeTrailingPathDelimiter(GetTempDir) + 'hh-app-' +
     IntToStr(Random(1000000));
   ForceDirectories(FDir);
-  FStorePath := '';
+  FStorePath := IncludeTrailingPathDelimiter(FDir) + 'store.db';
   FFake := TFakeTransport.Create;
   FSurface := TSurfaceMemory.Create(40, 20);
   FInput := TInputSourceScripted.Create;
-  FSession := THarnessSession.Open(Config, Err);
+  Cfg := Config;
+  Cfg.StorePath := FStorePath;
+  FSession := THarnessSession.Open(Cfg, Err);
   AssertTrue('session opened: ' + Err, FSession <> nil);
+  AssertTrue('has a session id', FSession.View.HasSession);
   FApp := THarnessApp.Create(FSurface, FInput, FSession.View, nil);
+  AssertEquals('connecting', Ord(csConnecting), Ord(FApp.ConnState));
   FApp.SetConnectPhase('loading history');
   AssertTrue('the phase is shown', FindText(ckThinking, 'loading history'));
   AssertFalse('the old label is gone', FindText(ckThinking, 'connecting'));
-end;
-
-procedure THarnessAppTest.TestSubmitWhileConnectingIsRefused;
-var
-  Err: string;
-begin
-  FDir := IncludeTrailingPathDelimiter(GetTempDir) + 'hh-app-' +
-    IntToStr(Random(1000000));
-  ForceDirectories(FDir);
-  FStorePath := '';
-  FFake := TFakeTransport.Create;
-  FSurface := TSurfaceMemory.Create(40, 20);
-  FInput := TInputSourceScripted.Create;
-  FSession := THarnessSession.Open(Config, Err);
-  AssertTrue('session opened: ' + Err, FSession <> nil);
-  FApp := THarnessApp.Create(FSurface, FInput, FSession.View, nil);
-  FApp.Step;   // initial layout, so the compose is live
-  { Typing a prompt and pressing Enter while connecting must not raise; it is
-    refused with a status and the app stays connecting. }
-  SubmitPrompt('hello');
-  Pump(20);
-  AssertTrue('refused with a status', FindText(ckError, 'not connected'));
-  AssertEquals('still connecting', Ord(csConnecting), Ord(FApp.ConnState));
 end;
 
 initialization

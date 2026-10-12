@@ -18,6 +18,11 @@ type
     StorePath: string;            // '' => in-memory, no persistence
     SessionId: string;            // '' => create new (store) or ephemeral
     Resume: Boolean;              // SessionId = '' => most recent; else exists
+    { Defer creating the session until EnsureSession is called. When set and
+      SessionId = '' and not Resume, Init opens the workspace and store but
+      creates no session row, so a launcher can paint before committing to a
+      session. EnsureSession then creates it on demand. }
+    LazySession: Boolean;
     Model: string;                // '' => resolved from env/.env
     Endpoint: string;             // '' => resolved from env/.env
     { Bytes a tool result may contribute to the prompt; 0 => default, negative
@@ -63,6 +68,12 @@ type
     destructor Destroy; override;
 
     property SessionId: string read FSessionId;
+    { True once a session id exists (eager, resumed, or created lazily). }
+    function HasSession: Boolean;
+    { Create the session if one is not yet set (the lazy path); a no-op when a
+      session already exists, when there is no store, or when the id was named.
+      False + AError on a store failure. }
+    function EnsureSession(out AError: string): Boolean;
     { The store's workspace row id; 0 when there is no store. }
     property WorkspaceId: Integer read FWorkspaceId;
     property WorkspaceRoot: string read FWorkspaceRoot;
@@ -138,6 +149,30 @@ begin
     end;
   end;
   Result := View;
+end;
+
+function TSessionView.HasSession: Boolean;
+begin
+  Result := FSessionId <> '';
+end;
+
+function TSessionView.EnsureSession(out AError: string): Boolean;
+var
+  StoreErr: TStoreError;
+begin
+  AError := '';
+  { Nothing to do when a session already exists, or there is no store to create
+    one in (an ephemeral, in-memory session needs no id). }
+  if FSessionId <> '' then
+    Exit(True);
+  if FStore = nil then
+    Exit(True);
+  if not FStore.CreateSession(FWorkspaceId, FSessionId, StoreErr) then
+  begin
+    AError := 'could not create session: ' + StoreErr.Message;
+    Exit(False);
+  end;
+  Result := True;
 end;
 
 function TSessionView.Init(const AConfig: THarnessSessionConfig;
@@ -218,10 +253,15 @@ begin
           Exit;
         end;
       end
-      else if not FStore.CreateSession(WorkspaceId, FSessionId, StoreErr) then
+      else if not AConfig.LazySession then
       begin
-        AError := 'could not create session: ' + StoreErr.Message;
-        Exit;
+        { Eager (the default): create the session now. Lazy: defer to
+          EnsureSession, so a launcher paints before committing. }
+        if not FStore.CreateSession(WorkspaceId, FSessionId, StoreErr) then
+        begin
+          AError := 'could not create session: ' + StoreErr.Message;
+          Exit;
+        end;
       end;
     end
     else if not FStore.SessionExists(FSessionId, StoreErr) then
