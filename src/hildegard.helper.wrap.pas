@@ -24,7 +24,12 @@ const
   UserInstructions =
     'Respond with plain Markdown only. Do not wrap your response in XML tags ' +
     'such as <message>, <context>, or <summary> - those are system-provided ' +
-    'metadata, not part of your output format.';
+    'metadata, not part of your output format. ' +
+    'For a substantive reply, open with a YAML frontmatter block - the first ' +
+    'line is `---`, then `title:` (a short subject) and `keywords:` (3-8 ' +
+    'lowercase topical terms, e.g. [drain, tui, freeze]), then a closing `---`. ' +
+    'A terse acknowledgement needs no block. Use CommonMark with GFM pipe ' +
+    'tables for the body.';
 
   { The prompt-injection guard, delivered at the TAIL of the turn (after the
     user's message) so it is the most recent instruction the model reads. }

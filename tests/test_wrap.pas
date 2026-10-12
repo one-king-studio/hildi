@@ -28,6 +28,12 @@ begin
   AssertTrue('message wrapper', Pos('<message>hello</message>', S) > 0);
   AssertTrue('context block', Pos('<context>', S) > 0);
   AssertTrue('instructions', Pos('<instructions>', S) > 0);
+  { The instruction asks for a frontmatter header on substantive replies and
+    names the markdown flavor. }
+  AssertTrue('frontmatter asked', Pos('frontmatter', S) > 0);
+  AssertTrue('title key', Pos('title:', S) > 0);
+  AssertTrue('keywords key', Pos('keywords:', S) > 0);
+  AssertTrue('flavor named', Pos('CommonMark', S) > 0);
 end;
 
 procedure TWrapTest.EscapesContent;
