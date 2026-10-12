@@ -867,7 +867,7 @@ begin
   AssertEquals('session id on the left', Copy(FSession.View.SessionId, 1, 12),
     FApp.Panel.HeaderLeft);
   AssertTrue('context tokens in the header',
-    Pos('1.2k', FApp.Panel.HeaderRight) > 0);
+    Pos('1k', FApp.Panel.HeaderRight) > 0);
   { The pinned limit is 120k, so the context bar and percentage are shown. }
   AssertTrue('context percentage in the header',
     Pos('1%', FApp.Panel.HeaderRight) > 0);
@@ -932,8 +932,8 @@ begin
   SubmitPrompt('b');
   AssertTrue('second turn finished', Pump(300));
 
-  { The status bar's consumption sums both turns: 3.0k in, 300 out, 2 req. }
-  AssertTrue('input summed', Pos('3.0k in', FApp.StatsText) > 0);
+  { The status bar's consumption sums both turns: 3k in, 300 out, 2 req. }
+  AssertTrue('input summed', Pos('3k in', FApp.StatsText) > 0);
   AssertTrue('output summed', Pos('300 out', FApp.StatsText) > 0);
   AssertTrue('two requests', Pos('2 req', FApp.StatsText) > 0);
 end;
@@ -950,7 +950,7 @@ begin
 
   { The workspace stays on the left; the consumption is on the right. }
   AssertEquals('workspace on the left', FDir, FApp.StatusText);
-  AssertTrue('input in the consumption', Pos('1.2k in', FApp.StatsText) > 0);
+  AssertTrue('input in the consumption', Pos('1k in', FApp.StatsText) > 0);
   AssertTrue('output in the consumption', Pos('310 out', FApp.StatsText) > 0);
   AssertTrue('cache in the consumption',
     Pos('92% cached', FApp.StatsText) > 0);
@@ -971,7 +971,7 @@ begin
 
   Saw := False;
   for I := 0 to BlockCount - 1 do
-    if (BlockKind(I) = ckTurn) and (Pos('1.2k in', BlockText(I)) > 0) then
+    if (BlockKind(I) = ckTurn) and (Pos('1k in', BlockText(I)) > 0) then
       Saw := True;
   AssertTrue('a divider carries the loop stats', Saw);
 end;

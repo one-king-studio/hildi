@@ -50,7 +50,7 @@ end;
 procedure THarnessStatsTest.TestFormatTurnStatsFull;
 begin
   AssertEquals('full summary',
-    '1.2k in · 310 out · 120 think · 92% cached · 3.4s · 2 req',
+    '1k in · 310 out · 120 think · 92% cached · 3.4s · 2 req',
     FormatTurnStats(Turn(1200, 310, 120, 1100, 3400, 2)));
 end;
 
@@ -66,7 +66,7 @@ var
 begin
   S := FormatTurnStats(Turn(999, 1000, 0, 0, 1000, 1));
   AssertTrue('999 plain', Pos('999 in', S) > 0);
-  AssertTrue('1.0k', Pos('1.0k out', S) > 0);
+  AssertTrue('1k (round-numbered)', Pos('1k out', S) > 0);
   S := FormatTurnStats(Turn(3400000, 0, 0, 0, 1000, 1));
   AssertTrue('3.4M', Pos('3.4M in', S) > 0);
 end;
@@ -95,26 +95,26 @@ end;
 
 procedure THarnessStatsTest.TestFormatContextUsage;
 begin
-  AssertEquals('half', '500.0k [▓▓▓▓▓░░░░░] 50%',
+  AssertEquals('half', '500k [▓▓▓▓▓░░░░░] 50%',
     FormatContextUsage(500000, 1000000));
   { 12%: one full tenth, the 2% remainder stays background. }
-  AssertEquals('small', '121.0k [▓░░░░░░░░░] 12%',
+  AssertEquals('small', '121k [▓░░░░░░░░░] 12%',
     FormatContextUsage(121000, 1000000));
   { 15%: one full tenth plus a half-cell remainder. }
-  AssertEquals('remainder', '150.0k [▓▒░░░░░░░░] 15%',
+  AssertEquals('remainder', '150k [▓▒░░░░░░░░] 15%',
     FormatContextUsage(150000, 1000000));
 end;
 
 procedure THarnessStatsTest.TestFormatContextUsageNoLimit;
 begin
-  AssertEquals('no limit, no bar', '121.0k',
+  AssertEquals('no limit, no bar', '121k',
     FormatContextUsage(121000, 0));
 end;
 
 procedure THarnessStatsTest.TestFormatSessionStats;
 begin
   AssertEquals('consumption line',
-    '1.2k in · 310 out · 92% cached · 3.4s · 2 req',
+    '1k in · 310 out · 92% cached · 3.4s · 2 req',
     FormatSessionStats(Turn(1200, 310, 120, 1100, 3400, 2)));
 end;
 
@@ -142,10 +142,16 @@ end;
 
 procedure THarnessStatsTest.TestFormatTokensScalesPastMillions;
 begin
-  { A long session's aggregates cross 1e9 (observed at 2.15B total tokens):
-    the display must keep scaling instead of showing 2145.6M. }
-  AssertEquals('millions', '980.0M', FormatTokens(980000000));
-  AssertEquals('one billion', '1.0B', FormatTokens(1000000000));
+  { Round-numbered: raw under a thousand, an integer k count, then one decimal
+    from M up. A long session's aggregates cross 1e9 (observed at 2.15B total
+    tokens), so the scale must not stop at millions. }
+  AssertEquals('under a thousand is raw', '999', FormatTokens(999));
+  AssertEquals('integer k', '1k', FormatTokens(1000));
+  AssertEquals('integer k rounds', '138k', FormatTokens(137800));
+  AssertEquals('999,999 rolls up to a million', '1.0M',
+    FormatTokens(999999));
+  AssertEquals('one decimal from M', '2.7M', FormatTokens(2713000));
+  AssertEquals('three-digit M', '980.0M', FormatTokens(980000000));
   AssertEquals('the crashing session', '2.1B', FormatTokens(2149321552));
   AssertEquals('hundreds of billions', '420.0B', FormatTokens(420000000000));
   AssertEquals('one trillion', '1.0T', FormatTokens(1000000000000));

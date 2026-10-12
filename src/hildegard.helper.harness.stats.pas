@@ -29,9 +29,10 @@ function FormatThoughtLabel(ADurationMs: Int64): string;
   `121k [▓░░░░░░░░░] 12%`. With no limit (<= 0), just `121k`. }
 function FormatContextUsage(ATokens, ALimit: Int64): string;
 
-{ A token count scaled for display: raw under a thousand, then one decimal and
-  a k/M/B/T suffix. A long session's aggregates cross a billion (every request
-  re-bills the whole context), so the scale does not stop at millions. }
+{ A token count scaled for display, round-numbered: raw under a thousand, an
+  integer k count (1k, 138k), then one decimal from M up (2.7M, 2.1B, 7.5T). A
+  long session's aggregates cross a billion (every request re-bills the whole
+  context), so the scale does not stop at millions. }
 function FormatTokens(AN: Int64): string;
 
 { The session's consumption for the status bar: `<in> in · <out> out ·
@@ -97,17 +98,26 @@ begin
 end;
 
 function FormatTokens(AN: Int64): string;
+var
+  K: Int64;
 begin
   if AN < 1000 then
-    Result := IntToStr(AN)
-  else if AN < 1000000 then
-    Result := OneDecimal(AN, 1000) + 'k'
-  else if AN < 1000000000 then
-    Result := OneDecimal(AN, 1000000) + 'M'
+    Exit(IntToStr(AN));
+  { k is round-numbered - an integer count (1k, 138k) - because at that scale
+    the fraction is noise. From M up the magnitude earns one decimal. }
+  if AN < 1000000 then
+  begin
+    K := (AN + 500) div 1000;
+    if K < 1000 then
+      Exit(IntToStr(K) + 'k');
+    Exit('1.0M');   { 999,999 rounds up to a million }
+  end;
+  if AN < 1000000000 then
+    Exit(OneDecimal(AN, 1000000) + 'M')
   else if AN < 1000000000000 then
-    Result := OneDecimal(AN, 1000000000) + 'B'
+    Exit(OneDecimal(AN, 1000000000) + 'B')
   else
-    Result := OneDecimal(AN, 1000000000000) + 'T';
+    Exit(OneDecimal(AN, 1000000000000) + 'T');
 end;
 
 function FormatDurationMs(AMs: Int64): string;
