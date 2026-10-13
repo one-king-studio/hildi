@@ -24,8 +24,11 @@ type
     FActionKind: TSessionAction;
     FRenameId: string;
     FRenameText: string;
+    FActivateId: string;
+    FActivateCount: Integer;
     procedure NoteAction(const ASessionId: string; AAction: TSessionAction);
     procedure NoteRename(const ASessionId, ANewTitle: string);
+    procedure NoteActivate(const ASessionId: string);
     procedure Render;
     function Key(AKind: TKeyKind): TInputEvent;
     function Ch(const AText: string): TInputEvent;
@@ -42,6 +45,7 @@ type
     procedure TestPinKeyRaisesTheAction;
     procedure TestPlainLetterFiltersInsteadOfActing;
     procedure TestRenameCapturesText;
+    procedure TestEnterActivatesTheSelectedRow;
     procedure TestEmptyIsDrawnNotCrashed;
   end;
 
@@ -58,6 +62,12 @@ procedure TSessionsModalTest.NoteRename(const ASessionId, ANewTitle: string);
 begin
   FRenameId := ASessionId;
   FRenameText := ANewTitle;
+end;
+
+procedure TSessionsModalTest.NoteActivate(const ASessionId: string);
+begin
+  FActivateId := ASessionId;
+  Inc(FActivateCount);
 end;
 
 procedure TSessionsModalTest.Render;
@@ -206,6 +216,20 @@ begin
   AssertFalse('rename ended', FModal.Renaming);
   AssertEquals('renamed a', 'a', FRenameId);
   AssertEquals('to hi', 'hi', FRenameText);
+end;
+
+procedure TSessionsModalTest.TestEnterActivatesTheSelectedRow;
+begin
+  FModal.SetRows([Row('a', 'A', False, False), Row('b', 'B', False, False)]);
+  FModal.OnActivate := NoteActivate;
+  FModal.HandleEvent(Key(kkDown));   { select b }
+  FModal.HandleEvent(Key(kkEnter));
+  AssertEquals('activated b', 'b', FActivateId);
+  AssertEquals('fired once', 1, FActivateCount);
+  { An empty list fires nothing. }
+  FModal.SetRows(nil);
+  FModal.HandleEvent(Key(kkEnter));
+  AssertEquals('still once', 1, FActivateCount);
 end;
 
 procedure TSessionsModalTest.TestEmptyIsDrawnNotCrashed;

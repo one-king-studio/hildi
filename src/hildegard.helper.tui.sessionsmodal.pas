@@ -23,6 +23,9 @@ type
   TSessionActionEvent = procedure(const ASessionId: string;
     AAction: TSessionAction) of object;
   TSessionRenameEvent = procedure(const ASessionId, ANewTitle: string) of object;
+  { Fired when the operator activates a row (Enter): open that session. Separate
+    from the management actions, which write a store row. }
+  TSessionActivateEvent = procedure(const ASessionId: string) of object;
 
   TSessionsModal = class(TWidget)
   private
@@ -36,6 +39,7 @@ type
     FRenameText: string;
     FOnAction: TSessionActionEvent;
     FOnRename: TSessionRenameEvent;
+    FOnActivate: TSessionActivateEvent;
     function Match(AIndex: Integer): Boolean;
     function VisibleRows: TArray<Integer>;
     function RowHeight: Integer;
@@ -56,6 +60,8 @@ type
     property Renaming: Boolean read FRenaming;
     property OnAction: TSessionActionEvent read FOnAction write FOnAction;
     property OnRename: TSessionRenameEvent read FOnRename write FOnRename;
+    { Enter on the selected row: open that session. Not fired for an empty list. }
+    property OnActivate: TSessionActivateEvent read FOnActivate write FOnActivate;
     function Measure(const AAvail: TSize): TSize; override;
     procedure Render(const S: ISurface); override;
     function HandleEvent(const E: TInputEvent): Boolean; override;
@@ -76,7 +82,8 @@ type
   end;
 
 const
-  SessionsFooter: array[0..4] of TSessionsFooterHint = (
+  SessionsFooter: array[0..5] of TSessionsFooterHint = (
+    (Key: 'enter'; Action: ' open'),
     (Key: 'ctrl+p'; Action: ' pin'),
     (Key: 'ctrl+a'; Action: ' archive'),
     (Key: 'ctrl+r'; Action: ' rename'),
@@ -381,6 +388,13 @@ begin
     kkPageDown: MoveSelection(5);
     kkHome: FSelected := 0;
     kkEnd: FSelected := VisibleCount - 1;
+    kkEnter:
+      begin
+        { Enter opens the selected row (management is the Ctrl-modified keys). }
+        Id := SelectedVisibleId;
+        if (Id <> '') and Assigned(FOnActivate) then
+          FOnActivate(Id);
+      end;
     kkBackspace:
       if FFilter <> '' then
         SetLength(FFilter, Length(FFilter) - 1);
