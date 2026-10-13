@@ -152,8 +152,9 @@ The modal
 - [ ] The modal has a search input; typing filters the list live by **title and
       keyword** (a reply's keywords are searched), and by the id, so a pasted id
       finds its row.
-- [ ] Up/Down/Home/End move the selection; Escape closes the modal. **Activating
-      a row (opening another session) is deferred** — see Decisions.
+- [x] Up/Down/Home/End move the selection; Escape closes the modal. **Activating
+      a row (opening another session)** is delivered by `Session_Switching_v1`
+      (Enter opens the selected session) — see Decisions.
 - [ ] Per-row actions are reachable by keys (pin/unpin, rename, archive/restore);
       the exact bindings are fixed in the SPEC and shown, dimmed, in the modal.
 - [ ] Rename opens an inline text input seeded with the current title; empty
@@ -249,8 +250,8 @@ The modal
 
 - Cross-workspace session browsing (the modal is scoped to the current
   workspace).
-- Opening/activating another session from the modal (deferred — the driver seam;
-  Decision 5).
+- Opening/activating another session from the modal — **delivered in
+  `Session_Switching_v1`** (Decision 5).
 - Deleting a session's **history** (rows in the ledger). v1 archives, it does not
   destroy.
 - A separate summarizer model or a new tool call for naming.
@@ -288,10 +289,10 @@ Resolved before the SPEC (Stage 2):
    additive migration — not a separate table, not the store's soft-delete.
 4. **Archived visibility.** Hidden by default; an explicit toggle shows archived
    rows dimmed with an archive glyph.
-5. **Open behaviour — deferred.** Activating a row (opening a different session)
-   is **out of v1**. It needs the driver seam (the TUI binds one session at
-   startup and there is no runtime re-attach), so it is its own increment. v1 is
-   management only.
+5. **Open behaviour — delivered in `Session_Switching_v1`.** Activating a row
+   (opening a different session) was deferred from v1 because it needs the driver
+   seam; TUI Startup supplied that seam (`Attach`/`EnsureSession`, the bounded
+   window), so it is now its own increment: Enter opens the selected session.
 6. **Current session.** Always the first row, marked as current, so `/sessions`
    can rename the session you are in.
 7. **Keywords are per reply, not per session.** A substantive reply's frontmatter
