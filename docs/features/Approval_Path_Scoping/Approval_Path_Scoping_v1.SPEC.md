@@ -14,6 +14,17 @@ persistable **`never`** (deny) — alongside the existing once/exact/any options
 The engine stays generic: it matches the new dimensions against a path the
 **tool declares on the subject**, never parsing the params array.
 
+Two consumers declare that path, in two coordinate spaces. The **file tools**
+declare a *workspace-relative* path, scoping a grant **within** the workspace.
+The **command tool** declares an *absolute* path for anything its command names
+**outside** the workspace root, so a shell command cannot leave the workspace
+without its own ask. The spaces never cross-match — a relative path and an
+absolute one share no prefix — which keeps the file tools' confinement and the
+shell's boundary independent. The path is resolved **physically** (symlinks and
+`..` included), walking up to the nearest existing ancestor so a non-existent
+target still compares; the same primitive closes a symlink hole in the file
+tools.
+
 ## Requirements
 
 ### Functional
@@ -48,7 +59,42 @@ The engine stays generic: it matches the new dimensions against a path the
       `AnyParams`, no directory/extension). Scoped deny rules are supported by
       the engine and authored outside the ask in v1.
 - [ ] Each tool owns its own option builder: the file tool gains the path
-      options; the command tool's options are unchanged.
+      options; the command tool gains the boundary options below.
+
+**Workspace** (`hildegard.helper.workspace`)
+
+- [ ] `PhysicalResolve`/`PhysicalContains`: resolve a path physically —
+      `realpath(3)` the nearest **existing** ancestor and re-append the
+      non-existent tail — and treat a path as inside only when **both** the
+      lexical and the physical readings are in-bounds (`..` after a symlink is
+      mode-dependent — bash's `cd` is logical by default, physical with `-P` —
+      so neither reading alone is trusted).
+- [ ] The file tools' `ResolveChecked` uses `PhysicalContains`, closing the
+      symlink escape: a link inside the workspace pointing out is refused.
+
+**Command tool** (`hildegard.helper.command.tool`,
+`hildegard.helper.command.paths`)
+
+- [ ] A new extractor derives the paths a command **names** from its plan: each
+      segment's path-like arguments and redirection targets, the `cwd`
+      argument, and each `cd`/`pushd` target — resolved against the effective
+      base (the tool's `cwd`, else the workspace root), with a top-level `cd`
+      moving the base for later segments (a subshell resets it). An unresolved
+      token (`$VAR`, a glob) is an access to check, never assumed in-bounds.
+- [ ] An access that resolves **outside** the workspace root raises its own ask,
+      whose subject is the segment's command (`run_command:<bin>`) with
+      `Subject.Path` set to the **absolute** path.
+- [ ] Precedence — **specificity wins**: an ask whose command subject is matched
+      by an allow rule with `AnyParams = false` (an **exact** command grant) is
+      **suppressed**; a **wildcard** command grant (`AnyParams = true`) covers
+      the command but **not** the path — "any arguments" is not "any location";
+      a path rule covers the path for any command; deny-first still applies at
+      whichever level matched.
+- [ ] The command path ask offers `once`, `dir` (the absolute directory), `any`
+      (any outside path), `never` — no `ext`, as with the read-shaped file asks.
+- [ ] When a path ask fires for a command that is already allowed, the dialog
+      says so ("`cat` is allowed; `/etc/hosts` is not"), so a wildcard grant is
+      not misleading.
 
 **Store** (`hildegard.helper.store`, `hildegard.helper.approval.store`)
 
@@ -113,8 +159,47 @@ function PathInDirectory(const APath, ADirectory: string): Boolean;
 function PathHasExtension(const APath, AExtension: string): Boolean;
 ```
 
-The ask model is unchanged (`TApprovalOption` carries a `TApprovalRule`); the
-new options simply fill the new fields. Option keys:
+The ask model is unchanged in shape (`TApprovalOption` carries a
+`TApprovalRule`); the new options fill the new fields. One field is added, for
+the command boundary: `TApprovalAsk` gains `Covers: TApprovalSubject` +
+`HasCovers: Boolean`, and an ask with `HasCovers` is **skipped** when `Covers`
+is matched by an allow rule with `AnyParams = false` (an exact command grant
+trumps the path gate). Two units carry the boundary:
+
+```pascal
+unit hildegard.helper.workspace;   // extended
+
+  { Resolve APath (relative allowed) against ABase ('' => the root), physically:
+    the nearest existing ancestor is realpath(3)-resolved and the non-existent
+    tail re-appended. Never raises; a resolution failure yields the lexical path. }
+  function PhysicalResolve(const APath: string; const ABase: string = ''): string;
+  { True only when BOTH the lexical and the physical readings are in-bounds. }
+  function PhysicalContains(const APath: string; const ABase: string = ''): Boolean;
+```
+
+```pascal
+unit hildegard.helper.command.paths;   // NEW
+
+type
+  TPathAccess = record
+    Token: string;       // as written
+    Resolved: string;    // physical absolute
+    Exists: Boolean;     // the full path exists
+    Inside: Boolean;     // physically under the workspace root
+    Segment: Integer;    // index into the plan's segments
+  end;
+  TPathAccessArray = array of TPathAccess;
+
+{ Every path-like token in the plan, resolved against ACwd with a top-level `cd`
+  tracked; `OutsideAccesses` filters to the ones outside the root. Both are
+  ordered: segment order, then token order. }
+function PathAccesses(const APlan: TCommandPlan; const AWorkspace: TWorkspace;
+  const ACwd: string): TPathAccessArray;
+function OutsideAccesses(const APlan: TCommandPlan; const AWorkspace: TWorkspace;
+  const ACwd: string): TPathAccessArray;
+```
+
+Option keys:
 
 | Key | Effect | Params | Directory / Extension |
 | --- | --- | --- | --- |
@@ -150,6 +235,19 @@ new options simply fill the new fields. Option keys:
   ALTER TABLE approvals_new RENAME TO approvals;
   CREATE INDEX idx_approvals_scope ON approvals (scope, workspace_id, session_id);
   ```
+
+- **Coordinate spaces.** A file-tool subject's `Path` is workspace-relative; a
+  command subject's is absolute (outside the root). A rule stores whichever
+  space the operator granted; a rule in one space never matches a subject in the
+  other, because a relative path and an absolute one share no prefix.
+- **Boundary suppression.** In `Resolve`, after the deny-first scan and before
+  prompting: for each ask with `HasCovers`, if `Decide(Rules, Covers)` is an
+  allow with `AnyParams = false`, skip the ask. A deny on `Covers` still denies.
+- **Effective base.** The tool's `cwd` argument, else the workspace root. A
+  top-level `cd X` moves the base for later segments; a `( … )` subshell's `cd`
+  does not leak out. `~` expands to the home directory (outside, so it asks).
+- **Unresolved tokens.** A path-like token the parser marks unresolved (`$VAR`,
+  a glob) is an access to check, never assumed in-bounds.
 
 ### Event Contracts
 
@@ -248,16 +346,60 @@ table rebuild.
 
 - [ ] `TestModalRendersManyOptions` (the seven-option ask fits and selects)
 
+### Unit Tests (`tests/test_workspace.pas`)
+
+- [ ] `TestPhysicalContainsRefusesOutside`, `TestPhysicalContainsAcceptsInside`
+- [ ] `TestSymlinkOutOfTheWorkspaceIsRefused` (the lexical check says inside —
+      the fix)
+- [ ] `TestNonExistentTailUsesTheNearestExistingAncestor`
+- [ ] `TestDotDotThroughASymlinkIsConservative`
+- [ ] `TestBoundarySiblingIsNotUnder` (`<root>-evil`)
+
+### Unit Tests (`tests/test_command_paths.pas`)
+
+- [ ] `TestCdParentIsAnOutsideAccess`, `TestAbsoluteArgumentIsAnOutsideAccess`
+- [ ] `TestInBoundsArgumentIsSilent`
+- [ ] `TestUnresolvedTokenIsChecked`
+- [ ] `TestCdMovesTheBaseForLaterSegments`; `TestSubshellCdDoesNotLeak`
+- [ ] `TestCwdArgumentIsAnAccess`
+- [ ] `TestOrderAndDedupAreDeterministic`
+
+### Unit Tests (`tests/test_approval.pas`, extended)
+
+- [ ] `TestExactCommandGrantSuppressesThePathAsk`
+- [ ] `TestWildcardCommandGrantDoesNotSuppressIt`
+- [ ] `TestPathDenyBeatsWildcardCommandAllow`
+- [ ] `TestAbsolutePathRuleMatchesByDirectory`
+
+### Unit Tests (`tests/test_command_tool.pas`, extended)
+
+- [ ] `TestWildcardAllowedCatStillAsksAboutThePath`
+- [ ] `TestExactlyApprovedCatDoesNotAskAboutThePath`
+- [ ] `TestUnknownCommandAsksForBoth`
+
 ## Performance Targets
 
 - Linear over rules; 200 rules match in microseconds. No index.
 
 ## Security Considerations
 
-- The new dimensions only **narrow** a grant; deny still wins. The path is the
-  canonical workspace-relative path the file tools already confine to the
+- The new dimensions only **narrow** a grant; deny still wins. The file tools'
+  path is the canonical workspace-relative path they already confine to the
   workspace, so a directory/extension rule cannot escape it. No glob or regex is
   introduced.
+- **The command boundary is a guardrail, not a sandbox.** It sees literal
+  path-like tokens, `cwd`, `cd` targets, and non-existent paths (via their
+  nearest existing ancestor), with symlinks resolved. It cannot see a path a
+  program derives at runtime (`python -c 'open("/etc/passwd")'`, `x=/etc; cat
+  $x`), a path built from a non-path argument (`git -C`, `tar -C`), or implicit
+  reads (config, libraries, `/tmp` — deliberately **not** flagged, which is what
+  keeps the dialog quiet). It raises the cost of an accident and makes an escape
+  visible; it does not confine a determined command.
+- **No path ask does not mean "safe".** It means nothing outside was *named*;
+  the command gate still applies.
+- **Fail-safe.** An imperfect parse unions the tree's asks with the conservative
+  splitter's, and an unparseable non-empty command asks for the raw command — a
+  degraded parse is noisier, never blinder.
 
 ## Success Criteria
 
@@ -265,6 +407,10 @@ table rebuild.
 
 - [ ] One approval click grants "`.md` under `docs/`" and produces no further
       asks for matching writes, and denies everything else.
+- [ ] `cat /etc/hosts` asks about `/etc/hosts`, not only `cat`.
+- [ ] A symlink inside the workspace pointing out is refused by the file tools.
+- [ ] An **exact** `cat /etc/hosts` grant means the operator is never asked
+      twice; a **wildcard** `cat` grant still asks about `/etc/shadow`.
 - [ ] Existing approval behaviour is bit-compatible.
 - [ ] `make check` passes.
 
@@ -279,3 +425,6 @@ table rebuild.
   author scoped denies directly.
 - A glob rule dimension, if a real need appears.
 - Other tools adopting path scoping by setting `Subject.Path`.
+- Tracking `cd` inside subshells and functions; `pushd`/`popd`.
+- Argument-aware gating for known programs (`git -C`, `tar -C`, `find`).
+- Fold into the tree-sitter plan when it lands (a better path extraction).

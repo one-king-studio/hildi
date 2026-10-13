@@ -74,6 +74,10 @@ new scope axis, no policy language, no glob engine.
 - Per-agent gating works through the **existing scope axis**: a session-
   scoped rule binds the grant to one agent's session; a workspace-scoped
   rule grants to every holder in the workspace. No new identity machinery.
+- The **command tool** adopts the dimensions across the workspace boundary: a
+  command that names a path **outside** the workspace root raises its own ask
+  (the subject's path is the absolute path), resolved **physically**, and an
+  **exact** command grant trumps that ask while a **wildcard** grant does not.
 
 ## User Stories
 
@@ -89,6 +93,9 @@ new scope axis, no policy language, no glob engine.
 - As an **operator** running multiple agents, I want grants scoped to the
   asking session, so different agents get different capabilities against the
   same workspace.
+- As an **operator**, I want a shell command that leaves the workspace to ask
+  about *where* it goes — `cat /etc/hosts`, `cd ..` — without re-asking for a
+  command I have already approved exactly.
 - As an **operator** reviewing rules, I want each stored rule to read
   unambiguously ("allow file:write in docs/** for .md"), so an audit of the
   `approvals` table tells me exactly who can do what.
@@ -168,6 +175,23 @@ Engine
 - [ ] A deny rule can carry a directory/extension too (deny `.env` writes
       anywhere) and composes per deny-wins; the ask UI's **`never`** option
       writes exactly such a deny rule.
+
+Command boundary (the command tool)
+
+- [ ] A path a command **names** that resolves **outside** the workspace root
+      raises its own ask, with `Subject.Path` = the **absolute** path: a
+      path-like argument, a redirection target, the `cwd` argument, or a
+      `cd`/`pushd` target.
+- [ ] Resolution is **physical** (symlinks and `..`, via the nearest existing
+      ancestor so a non-existent target still compares) and the boundary is the
+      workspace **root**, not the cwd.
+- [ ] An **exact** command grant (`AnyParams = false`) suppresses the path ask; a
+      **wildcard** grant does not. A path rule covers the path for any command;
+      deny still wins.
+- [ ] A path-like token the parser cannot resolve (`$VAR`, a glob) is an access
+      to check, never assumed in-bounds.
+- [ ] The file tools refuse a symlink that escapes the workspace (the same
+      physical primitive).
 
 ### Non-Functional Requirements
 
@@ -249,3 +273,10 @@ Engine
   documented breadth rather than a rule-shape change.
 - Related: `Tool_Approvals` (the engine this extends), `Session_Handoff`
   (the consumer), `File_Tools` (the asks this changes).
+- **`run_command` is now in scope** (2026-10-13). The original decision left it
+  out — "its params are not paths" — which was true of the *params array* but
+  missed the paths a command **names** in its text. The command tool now
+  declares an **absolute** `Subject.Path` for anything outside the workspace
+  root, and the physical primitive (nearest-existing-ancestor + `realpath`) also
+  closes the file tools' symlink hole. The command's options are no longer
+  "unchanged".

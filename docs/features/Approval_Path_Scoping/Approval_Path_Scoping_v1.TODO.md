@@ -7,8 +7,11 @@
 
 Add directory/extension matching dimensions and a persistable `never` to the
 approval engine, declare the operation's path on the subject, offer the new
-options from the file tool, and migrate the `approvals` table. TDD-first; update
-tasks in real time.
+options from the file tool, and migrate the `approvals` table. Two consumers
+share the engine: the **file tools** (workspace-relative paths, scoping a grant
+within the workspace) and the **command tool** (absolute paths, gating a command
+that names something outside the workspace root). TDD-first; update tasks in
+real time.
 
 ## Implementation Tasks
 
@@ -53,10 +56,62 @@ tasks in real time.
 - [ ] **Verify**: the CLI prompt renders the extra options through the existing
       ask/option mechanism (no code change expected)
 
-### Phase 5: Docs & validation
+### Phase 5: The physical primitive (`hildegard.helper.workspace`)
+
+- [ ] **Test**: `TestPhysicalContainsRefusesOutside`,
+      `TestPhysicalContainsAcceptsInside`
+- [ ] **Implement**: `PhysicalResolve` — lexical join, walk to the nearest
+      existing ancestor, `realpath(3)`, re-append the tail
+- [ ] **Test**: `TestSymlinkOutOfTheWorkspaceIsRefused` (the lexical check says
+      inside — the fix)
+- [ ] **Test**: `TestNonExistentTailUsesTheNearestExistingAncestor`,
+      `TestDotDotThroughASymlinkIsConservative`,
+      `TestBoundarySiblingIsNotUnder`
+- [ ] **Implement**: `PhysicalContains` — the both-readings (lexical ∧ physical)
+      rule; the separator boundary
+
+### Phase 6: The extractor (`hildegard.helper.command.paths`, NEW)
+
+- [ ] **Test**: `TestCdParentIsAnOutsideAccess`,
+      `TestAbsoluteArgumentIsAnOutsideAccess`, `TestInBoundsArgumentIsSilent`
+- [ ] **Implement**: reuse `TCommandSegment.Paths`; expand `~`; resolve against
+      the effective base
+- [ ] **Test**: `TestUnresolvedTokenIsChecked`
+- [ ] **Implement**: the unresolved-token rule
+- [ ] **Test**: `TestCdMovesTheBaseForLaterSegments`,
+      `TestSubshellCdDoesNotLeak`, `TestCwdArgumentIsAnAccess`
+- [ ] **Implement**: top-level `cd` tracking (subshell reset); the `cwd`
+      argument as an access
+- [ ] **Test**: `TestOrderAndDedupAreDeterministic`
+
+### Phase 7: Precedence (`hildegard.helper.approval`)
+
+- [ ] **Test**: `TestExactCommandGrantSuppressesThePathAsk`,
+      `TestWildcardCommandGrantDoesNotSuppressIt`
+- [ ] **Implement**: `TApprovalAsk.Covers`/`HasCovers`; the suppression check in
+      `Resolve` (after deny-first, before prompting)
+- [ ] **Test**: `TestPathDenyBeatsWildcardCommandAllow`,
+      `TestAbsolutePathRuleMatchesByDirectory`
+
+### Phase 8: The command tool (`hildegard.helper.command.tool`)
+
+- [ ] **Test**: `TestWildcardAllowedCatStillAsksAboutThePath`,
+      `TestExactlyApprovedCatDoesNotAskAboutThePath`,
+      `TestUnknownCommandAsksForBoth`
+- [ ] **Implement**: `ApprovalAsks` appends a path ask per outside access,
+      carrying `Covers` = the segment's command subject
+- [ ] **Implement**: the path ask's options (`once`/`dir`/`any`/`never`) and the
+      dialog line that says the command is already allowed
+
+### Phase 9: The file tools (`hildegard.helper.files`)
+
+- [ ] **Test**: `file_read` through a symlink pointing outside is refused
+- [ ] **Implement**: `ResolveChecked` uses `PhysicalContains`
+
+### Phase 10: Docs & validation
 
 - [ ] **Update** `docs/features/FEATURES.md` status
-- [ ] **Run**: `make test SUITE=TApprovalTest,TFileToolTest,TStoreTest`
+- [ ] **Run**: `make test SUITE=TApprovalTest,TFileToolTest,TStoreTest,TWorkspaceTest,TCommandPathTest`
 - [ ] **Run**: `make check` (whole suite + leak gate)
 
 ## Dependencies & Ordering
@@ -64,19 +119,29 @@ tasks in real time.
 - Engine fields and helpers before the store migration.
 - The store before the file-tool options (the options persist rules).
 - The file-tool `Approve` signature change before the option tests.
+- Phase 5 (the physical primitive) before Phase 6 (the extractor); Phase 6 and
+  Phase 7 before Phase 8 (the command tool adapter). Phase 9 (the file tools'
+  physical check) depends only on Phase 5.
 
 ## Files to Create/Modify
 
 ### Modified Files
 
 ```
-src/hildegard.helper.approval.pas         (fields, path helpers, matching)
+src/hildegard.helper.approval.pas         (fields, path helpers, matching, Covers)
 src/hildegard.helper.store.pas            (v2 migration, approvals SQL)
-src/hildegard.helper.files.pas            (path on the subject, new options)
-tests/test_approval.pas                   (matcher cases)
+src/hildegard.helper.files.pas            (path on the subject, new options,
+                                           PhysicalContains)
+src/hildegard.helper.workspace.pas        (PhysicalResolve / PhysicalContains)
+src/hildegard.helper.command.paths.pas    (NEW: the extractor)
+src/hildegard.helper.command.tool.pas     (path asks, Covers)
+tests/test_approval.pas                   (matcher cases, suppression)
 tests/test_store.pas                      (migration, round-trip)
-tests/test_file_tool.pas                  (option sets)
+tests/test_file_tool.pas                  (option sets, the symlink refusal)
 tests/test_tui_approvalmodal.pas          (many options)
+tests/test_workspace.pas                  (physical containment)
+tests/test_command_paths.pas              (NEW)
+tests/test_command_tool.pas               (the boundary asks)
 docs/features/FEATURES.md                 (status)
 ```
 
@@ -84,6 +149,9 @@ docs/features/FEATURES.md                 (status)
 
 - [ ] All tasks above checked
 - [ ] One click grants "`.md` under `docs/`"; existing rules are bit-compatible
+- [ ] `cat /etc/hosts` asks about the path, and an **exact** grant clears it once
+      (a wildcard grant does not)
+- [ ] A symlink inside the workspace pointing out is refused by the file tools
 - [ ] `make check` passes (tests + leak gate)
 
 ## Notes & Considerations
@@ -100,3 +168,8 @@ docs/features/FEATURES.md                 (status)
 - **`file:list` breadth:** a `file:list` grant (including a directory one)
   covers recursive listing, because `recursive` is not a parameter. Documented,
   not changed, to keep existing rules byte-compatible.
+- **The command boundary is separate from scoping.** The file tools' path is
+  workspace-relative and *confined*; the command's is absolute and *outside* —
+  the two spaces never cross-match. The engine is shared; the boundary policy
+  (which accesses ask, and the exact-grant suppression) lives in the command
+  tool.
