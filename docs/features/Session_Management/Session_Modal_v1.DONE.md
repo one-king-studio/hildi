@@ -112,12 +112,15 @@ src/hildegard.helper.harness.app.pas    (the sessions command + plane)
 - [x] Every SPEC acceptance criterion maps to a passing test
 - [x] `make check` passes (tests + leak gate)
 - [x] The modal lists, searches, and manages; opening a session is not in v1
+      (delivered by `Session_Switching_v1` — see the Notes)
 - [x] State is glyph-carried, not colour-only; theme roles only
 
 ## Notes & Considerations
 
-- **Management only.** Activation (open another session) is deferred — the
-  driver seam.
+- **Management only in v1.** Activation (open another session) was deferred — the
+  driver seam — and **delivered by `Session_Switching_v1`**: the modal's Enter now
+  opens the selected session (`TSessionsModal.OnActivate` → `THarnessApp.
+  SwitchSession`), including mid-turn (it detaches).
 - **Read, don't derive.** Titles/keywords come from Reply Metadata; the modal
   never parses a reply.
 - **No per-keystroke query.** Filter the loaded rows in memory.

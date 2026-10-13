@@ -46,7 +46,7 @@ TDD-first; `make check` before moving on. `main` only.
 ### Phase 4: Validation & docs
 
 - [x] **Run**: `make test SUITE=TSessionsModalTest,THarnessAppTest`
-- [x] **Run**: `make check` (all gates) — 1300 tests, 0 failures, leak-clean
+- [x] **Run**: `make check` (all gates) — 1305 tests, 0 failures, leak-clean
 - [x] **Update the SPEC** if behaviour diverged; rename this TODO to
       `Session_Switching_v1.DONE.md`.
 - [x] **Update** `FEATURE.md` (Decision 5 -> opened; activation is now in scope).
@@ -104,7 +104,7 @@ tests/test_harness_app.pas                    (the switch)
 
 Implemented on `main` (`c7921a9`, `4ce8334`, `23e6163`): the modal's Enter key,
 the app's `SwitchSession` swap, and the composition root's `TLauncher.Switch`.
-`make check` green (1300 tests, leak-clean); the example compiles.
+`make check` green (1305 tests, leak-clean); the example compiles.
 
 **Deviations from the SPEC, with reasons:**
 
