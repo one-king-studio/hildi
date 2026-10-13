@@ -309,6 +309,11 @@ type
   cycles every 90 ms. Shared by the stream's indicator and the toolbar. }
 function ThinkingSparkle(ANowMs: Int64): UnicodeString;
 
+{ Truncate AText to fit AMaxW display columns, appending an ellipsis when it is
+  cut. Grapheme-aware (a cluster is never split). Shared with the chat panel's
+  header, so a long session title cannot push the context usage off the border. }
+function TruncateTitle(const AText: UnicodeString; AMaxW: Integer): UnicodeString;
+
 implementation
 
 const

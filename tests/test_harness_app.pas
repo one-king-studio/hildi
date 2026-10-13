@@ -116,6 +116,9 @@ type
     procedure TestTranscriptIsBoundedToTheTail;
     procedure TestFullPagingIsContinuous;
     procedure TestHeaderShowsSessionIdAndContext;
+    procedure TestHeaderShowsTheSessionTitle;
+    procedure TestHeaderTruncatesALongTitle;
+    procedure TestRenamingTheCurrentSessionUpdatesTheHeader;
     procedure TestStatusShowsWorkspaceAndConsumption;
     procedure TestStatusSumsTurns;
     procedure TestResumeHeaderMatchesLive;
@@ -1135,6 +1138,71 @@ begin
   { The consumption is on the status bar, not the header. }
   AssertFalse('no consumption in the header',
     Pos('cached', FApp.Panel.HeaderRight) > 0);
+end;
+
+procedure THarnessAppTest.TestHeaderShowsTheSessionTitle;
+var
+  Err: TStoreError;
+begin
+  BuildWithStore;
+  { No title yet: the id prefix names the header. }
+  AssertEquals('id prefix without a title',
+    Copy(FSession.View.SessionId, 1, 12), FApp.Panel.HeaderLeft);
+
+  { An extracted title is shown instead of the id. Set it directly, then trigger
+    a header refresh the way a completed turn does (UpdateStats -> UpdateHeader).
+    A no-op status render is not enough, so submit a turn. }
+  AssertTrue('set title', FSession.View.Store.SetSessionTitle(
+    FSession.View.SessionId, 'Fix the drain', Err));
+  FFake.AddResponse([TextDelta('hi'), FinishFrame('stop'), DoneFrame]);
+  SubmitPrompt('hello');
+  AssertTrue('turn finished', Pump(300));
+  AssertEquals('the title names the header', 'Fix the drain',
+    FApp.Panel.HeaderLeft);
+end;
+
+procedure THarnessAppTest.TestHeaderTruncatesALongTitle;
+var
+  Err: TStoreError;
+  Long: string;
+  I: Integer;
+begin
+  BuildWithStore;
+  Long := '';
+  for I := 1 to 80 do
+    Long := Long + 'x';
+  AssertTrue('set a long title', FSession.View.Store.SetSessionTitle(
+    FSession.View.SessionId, Long, Err));
+  FFake.AddResponse([TextDelta('hi'), FinishFrame('stop'), DoneFrame]);
+  SubmitPrompt('hello');
+  AssertTrue('turn finished', Pump(300));
+  { The header left is bounded, so the context usage stays on the border. The
+    surface is 60 wide, so the title is cut well below its 80 characters. }
+  AssertTrue('the beginning is kept', Pos('xx', FApp.Panel.HeaderLeft) > 0);
+  AssertTrue('the title is truncated', Length(FApp.Panel.HeaderLeft) < 80);
+  AssertTrue('the context is still shown', FApp.Panel.HeaderRight <> '');
+end;
+
+procedure THarnessAppTest.TestRenamingTheCurrentSessionUpdatesTheHeader;
+var
+  I: Integer;
+begin
+  BuildWithStore;
+  { Rename the current session through the modal's action path. Open the modal,
+    then drive a rename: the app refreshes the header when the renamed session is
+    the current one. }
+  FApp.Panel.Palette.OnRun('sessions');
+  FApp.Step;
+  AssertTrue('the modal opened', FApp.ModalActive);
+  { Ctrl+R starts the inline rename; type a name and submit. Each key needs its
+    own Step to be consumed. }
+  FInput.Push(Ctrl('r'));
+  FInput.Push(Ch('h'));
+  FInput.Push(Ch('i'));
+  FInput.Push(Key(kkEnter));
+  for I := 1 to 8 do
+    FApp.Step;
+  AssertEquals('the rename reached the header', 'hi', FApp.Panel.HeaderLeft);
 end;
 
 procedure THarnessAppTest.TestResumeHeaderMatchesLive;

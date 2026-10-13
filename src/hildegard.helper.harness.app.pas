@@ -827,14 +827,31 @@ end;
 
 procedure THarnessApp.UpdateHeader;
 var
-  Context: string;
+  Context, Title, Left: string;
+  StoreErr: TStoreError;
+  MaxW: Integer;
 begin
   { Read the persisted session, so a live session and a resumed one show the
     same header. The header carries only the context; the consumption is on the
     status bar. }
   Context := FormatContextUsage(FSession.SessionTotals.ContextTokens,
     FSession.MaxContextTokens);
-  FPanel.SetHeader(Copy(FSession.SessionId, 1, 12), Context);
+  { The session's title (the operator's override, else the model's extracted one)
+    names the header when present; a session without one shows the id prefix, so
+    an unnamed session is still identifiable. }
+  Left := '';
+  if (FSession.Store <> nil) and
+    FSession.Store.SessionTitle(FSession.SessionId, Title, StoreErr) and
+    (Title <> '') then
+    Left := Title;
+  if Left = '' then
+    Left := Copy(FSession.SessionId, 1, 12);
+  { Keep the title within the border: reserve room for the right-aligned context
+    (and the corners), so a long title cannot push the usage off the border. }
+  MaxW := FSurface.Width - 30;
+  if MaxW < 8 then
+    MaxW := 8;
+  FPanel.SetHeader(string(TruncateTitle(UnicodeString(Left), MaxW)), Context);
   { A continuation session runs on pages (one per checkpoint): the messages
     panel's left border is the gauge, the current page heavy, and a click on it
     scrolls (the coarse scroll; the right scrollbar is the fine one). }
@@ -1587,6 +1604,9 @@ begin
     Exit;
   { An empty title clears the override (back to the extracted title). }
   FSession.Store.SetSessionTitleOverride(ASessionId, ANewTitle, Err);
+  { A rename of the current session renames the header too. }
+  if (FSession <> nil) and (ASessionId = FSession.SessionId) then
+    UpdateHeader;
   RefreshSessions;
   FApp.Invalidate;
 end;
