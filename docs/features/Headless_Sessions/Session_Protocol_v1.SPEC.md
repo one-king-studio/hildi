@@ -132,7 +132,11 @@ type
     ekApprovalRequest, ekApprovalResolved,
     ekDriveRequested, ekDriveGranted, ekDriveReleased,
     ekTurnFinished, ekError, ekGap, ekLoopExited,
-    ekReasoningDone);
+    ekReasoningDone,
+    { A transient request failure is being retried (Request Retry v1): the event
+      carries the attempt number, the total, and the delay before the next try.
+      Appended last so stored ordinals are unchanged. }
+    ekRetrying);
 
   { One streamed event. A flat record with optional fields, the same shape as
     TTurnEvent: only the fields named by Kind are meaningful. }

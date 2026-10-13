@@ -54,6 +54,10 @@ a text viewport, scroll containers, modal planes, and markdown colourisation.
   a separate plane.
 - Colourise markdown block content through a small mapping from markdown blocks
   and inline spans to text attributes.
+- **Explain a failure, not just report one**: an error block carries the
+  actionable cause — the loop's operator phrase plus the transport's raw detail
+  — and a live line shows a retry in progress, so a transient fault is legible
+  rather than a bare `request failed`.
 - Remain testable without a terminal, by keeping the render target injectable.
 - Reuse existing libraries; add no new dependency.
 
@@ -65,6 +69,8 @@ a text viewport, scroll containers, modal planes, and markdown colourisation.
   independently, so long content stays readable.
 - As a **user**, I want modal prompts for approvals and confirmations, so I can
   respond to the agent without losing sight of the transcript.
+- As a **user**, when a turn fails, I want to read *why* — and see it recover —
+  so I can tell a network blip from a misconfiguration.
 - As a **user**, I want markdown from the model (headings, emphasis, inline code,
   fenced code) rendered with colour, so output is easy to scan.
 - As a **harness author**, I want an injectable render surface, so layout, text
