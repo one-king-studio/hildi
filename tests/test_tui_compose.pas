@@ -27,6 +27,7 @@ type
   published
     procedure TestNeededHeightGrowsWithWrappedText;
     procedure TestEnterSubmitsAndClears;
+    procedure TestEnterSubmitsNonAscii;
     procedure TestShiftEnterAddsALine;
     procedure TestAltEnterAddsALine;
     procedure TestEmptySubmitIsIgnored;
@@ -109,6 +110,27 @@ begin
     AssertEquals('submitted once', 1, FSubmits);
     AssertEquals('submitted the text', 'abc', FSubmitted);
     AssertEquals('box cleared', '', string(C.Text));
+  finally
+    C.Free;
+  end;
+end;
+
+procedure TTuiComposeTest.TestEnterSubmitsNonAscii;
+var
+  C: TComposeBox;
+  U: UnicodeString;
+begin
+  { A non-ASCII character typed into the box must reach the submit handler as
+    the real glyph, not '?' (the implicit UnicodeString->string conversion is
+    lossy here). }
+  C := TComposeBox.Create(FTheme, 'info');
+  try
+    C.OnSubmit := OnSubmit;
+    C.Arrange(Rc(0, 0, 30, 5));
+    U := 'a' + WideChar($2014) + 'b';   { a—b }
+    C.HandleEvent(Ch(string(UTF8Encode(U))));
+    AssertTrue('enter handled', C.HandleEvent(Key(kkEnter)));
+    AssertEquals('submitted the glyph', UTF8Encode(U), FSubmitted);
   finally
     C.Free;
   end;

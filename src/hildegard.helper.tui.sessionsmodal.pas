@@ -378,7 +378,9 @@ begin
       Exit;
     end;
     if (E.Key.Kind = kkChar) and (E.Key.Ch <> '') then
-      FRenameText := FRenameText + string(E.Key.Ch);
+      { Encode explicitly: the implicit UnicodeString->string conversion writes
+        '?' for non-ASCII, so a non-ASCII filter/rename char would be lost. }
+      FRenameText := FRenameText + UTF8Encode(E.Key.Ch);
     Exit;
   end;
   case E.Key.Kind of
@@ -421,7 +423,7 @@ begin
             Result := False;
         end
         else
-          FFilter := FFilter + string(E.Key.Ch);
+          FFilter := FFilter + UTF8Encode(E.Key.Ch);
       end;
   else
     Result := False;

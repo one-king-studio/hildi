@@ -216,9 +216,11 @@ begin
       FEdit.HandleEvent(E);
       Exit(True);
     end;
-    if Assigned(FOnSubmit) and (Trim(string(FEdit.Text)) <> '') then
+    if Assigned(FOnSubmit) and (Trim(UTF8Encode(FEdit.Text)) <> '') then
     begin
-      FOnSubmit(string(FEdit.Text));
+      { Encode explicitly: the implicit UnicodeString->string conversion writes
+        '?' for non-ASCII, which would corrupt a non-ASCII prompt. }
+      FOnSubmit(UTF8Encode(FEdit.Text));
       FEdit.Clear;
     end;
     Exit(True);
