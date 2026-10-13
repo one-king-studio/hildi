@@ -1,5 +1,11 @@
 # Scoping: TUI Startup + Lazy MCP
 
+> **Historical.** This was a scoping pass written when both features were
+> Proposed (no SPEC). Both have since landed: **TUI Startup** (`TUI_Startup_v1.
+> DONE.md`) and **Lazy MCP** (`Lazy_MCP_v1`, core implemented). The dependency
+> chain and recommendation below are kept for the reasoning, not as current
+> status — see `FEATURES.md` for that.
+
 A scoping pass over the two features you want next, their shared cause, the
 dependency chain, and a recommended order. Both are **Proposed** (FEATURE.md
 only — no SPEC yet). Neither is implemented.
