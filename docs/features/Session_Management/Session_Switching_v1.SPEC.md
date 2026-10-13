@@ -49,9 +49,11 @@ increment is a modal key, an app callback, and a composition-root method.
 - [ ] The transcript, header, status bar, and stats reflect the new session.
 - [ ] A **failure** to open the target (spawn timeout, unknown id, no callback)
       is an in-app error line; the current session and transcript are unchanged.
-- [ ] Switching is **refused while a turn is in flight** (`Busy`): an error line,
-      no swap. Rationale: the in-flight turn belongs to the old session's driver;
-      detaching mid-turn is a separate increment (see Out of Scope).
+- [ ] Switching is **allowed while a turn is in flight**: closing the old driver
+      **detaches** from its runtime, which keeps the turn running and persists it
+      (the work is not lost, only the live view), and the new session starts
+      fresh. `CancelTurn` clears the busy state, since the old turn is no longer
+      ours to show.
 - [ ] A switch does **not** create a session row for the session being left (the
       lazy path must not persist an empty session).
 
@@ -115,8 +117,8 @@ type
 ### Data flow
 
 1. **Activate** — Enter in the modal raises `OnActivate(id)`.
-2. **Guard** — `SwitchSession` refuses an empty id, the current id (no-op), a
-   busy app, or a missing callback.
+2. **Guard** — `SwitchSession` refuses an empty id, the current id (no-op), or a
+   missing callback. A live turn does **not** block: the switch detaches.
 3. **Open** — `OnSwitchSession(id, ...)` opens the target view and driver.
 4. **Swap** — close the old driver, adopt the new view+driver, set
    `csConnected`, reset the window, rebuild the transcript, refresh
@@ -126,7 +128,8 @@ type
 ## Validation and error handling
 
 - Empty id or the current id: a no-op (the modal just closes).
-- Busy: `finish or cancel the turn before switching sessions`.
+- A live turn: not an error — the switch detaches (the old runtime keeps the
+  turn; the new session is fresh).
 - No callback: `this build cannot switch sessions`.
 - Callback `False`: `could not open session: <AError>`.
 - All are status lines, never exceptions; the app stays usable on the old
@@ -141,7 +144,8 @@ type
 - [ ] **App**: activating another session swaps the transcript to that session's
       history and updates `SessionId`.
 - [ ] **App**: activating the current session does not switch.
-- [ ] **App**: a switch while busy is refused (transcript unchanged, error shown).
+- [ ] **App**: a switch during a live turn detaches (the new session is shown,
+      busy cleared) rather than refusing.
 - [ ] **App**: a callback returning `False` leaves the current session and shows
       the error.
 - [ ] **App**: a switch with no callback is refused with a status line.
@@ -170,11 +174,12 @@ type
 
 ## Out of scope (documented, not built)
 
-- **Detaching mid-turn / switching while busy** — a turn belongs to the old
-  session's driver; live re-attach is a separate increment.
 - **Returning to the previous session** (a back-stack) — activate it again.
 - **Cross-workspace switching** — the modal is workspace-scoped.
 - **Keeping both runtimes warm** — a switch connects the target on demand.
+- **Attaching the new driver to the old session's still-running turn** — the
+  switch detaches (the old turn keeps running and is persisted), but the new
+  session does not resume rendering the detached turn live.
 
 ## Future considerations
 

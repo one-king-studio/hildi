@@ -118,6 +118,7 @@ type
     procedure TestHeaderShowsSessionIdAndContext;
     procedure TestHeaderShowsTheSessionTitle;
     procedure TestHeaderTruncatesALongTitle;
+    procedure TestHeaderRendersANonAsciiTitle;
     procedure TestRenamingTheCurrentSessionUpdatesTheHeader;
     procedure TestStatusShowsWorkspaceAndConsumption;
     procedure TestStatusSumsTurns;
@@ -147,7 +148,7 @@ type
     { Session switching: Enter opens the selected session. }
     procedure TestSwitchSessionOpensTheTarget;
     procedure TestSwitchToCurrentSessionIsANoOp;
-    procedure TestSwitchWhileBusyIsRefused;
+    procedure TestSwitchWhileBusyDetaches;
     procedure TestSwitchFailureKeepsTheSession;
     procedure TestSwitchWithoutAHookIsRefused;
     { TUI Startup: the connect lifecycle. }
@@ -1183,6 +1184,23 @@ begin
   AssertTrue('the context is still shown', FApp.Panel.HeaderRight <> '');
 end;
 
+procedure THarnessAppTest.TestHeaderRendersANonAsciiTitle;
+var
+  Err: TStoreError;
+  Title: string;
+begin
+  { A non-ASCII title (a UTF-8 em dash) must survive the store and render as the
+    real glyph in the header, not '?'. }
+  BuildWithStore;
+  Title := 'Fix the drain ' + #$E2#$80#$94 + ' phase 2';
+  AssertTrue('set title', FSession.View.Store.SetSessionTitle(
+    FSession.View.SessionId, Title, Err));
+  FFake.AddResponse([TextDelta('hi'), FinishFrame('stop'), DoneFrame]);
+  SubmitPrompt('hello');
+  AssertTrue('turn finished', Pump(300));
+  AssertEquals('the title is in the header', Title, FApp.Panel.HeaderLeft);
+end;
+
 procedure THarnessAppTest.TestRenamingTheCurrentSessionUpdatesTheHeader;
 var
   I: Integer;
@@ -1828,12 +1846,34 @@ begin
   AssertEquals('still on the same session', Before, FApp.SessionId);
 end;
 
-procedure THarnessAppTest.TestSwitchWhileBusyIsRefused;
+procedure THarnessAppTest.TestSwitchWhileBusyDetaches;
 var
   Slow: TSlowChunks;
   I: Integer;
+  Store: TSqliteStore;
+  StoreCfg: TStoreConfig;
+  StoreErr: TStoreError;
+  WorkspaceId: Integer;
+  SidB: string;
+  OldId: string;
 begin
-  Build;
+  { A switch during a live turn detaches from the old turn (the runtime keeps it
+    running) and opens the target, rather than refusing. }
+  BuildWithStore;
+  OldId := FApp.SessionId;
+  { A second session to switch to. }
+  StoreCfg := Default(TStoreConfig);
+  StoreCfg.DatabasePath := FStorePath;
+  StoreCfg.BusyTimeoutMs := 5000;
+  Store := TSqliteStore.Create(StoreCfg);
+  try
+    AssertTrue('open store', Store.Open(StoreErr));
+    Store.EnsureWorkspace(FDir, WorkspaceId, StoreErr);
+    Store.CreateSession(WorkspaceId, SidB, StoreErr);
+  finally
+    Store.Free;
+  end;
+
   Slow := TSlowChunks.Create(80);
   try
     FFake.AfterChunk := Slow.AfterChunk;
@@ -1850,22 +1890,14 @@ begin
 
     FApp.OnSwitchSession := SwitchTo;
     FSwitchResult := True;
-    FApp.SwitchSession('some-other-session');
-    AssertEquals('no switch while busy', 0, FSwitchCalls);
-    AssertTrue('the refusal is shown',
-      FindText(ckError, 'before switching'));
-
-    { Let the turn finish so teardown is clean. }
-    FFake.AfterChunk := nil;
-    for I := 1 to 600 do
-    begin
-      FApp.Step;
-      if not FApp.Busy then
-        Break;
-      Sleep(2);
-    end;
+    FApp.SwitchSession(SidB);
+    AssertEquals('the switch ran', 1, FSwitchCalls);
+    AssertEquals('switched to the target', SidB, FApp.SessionId);
+    AssertFalse('the busy state is cleared by the detach', FApp.Busy);
+    AssertFalse('no refusal', FindText(ckError, 'before switching'));
   finally
     Slow.Free;
+    FFake.AfterChunk := nil;
   end;
 end;
 

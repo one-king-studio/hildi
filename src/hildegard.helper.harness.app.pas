@@ -607,28 +607,26 @@ begin
       FCloseSessions := True;
     Exit;
   end;
-  { The in-flight turn belongs to the old session's driver; detaching mid-turn is
-    a separate increment. }
-  if FBusy then
-  begin
-    AppendError('finish or cancel the turn before switching sessions');
-    Exit;
-  end;
+  { A turn in flight does not block the switch: closing the old driver DETACHES
+    from its runtime (which keeps the turn running and persists it), so switching
+    away loses only the live view, not the work. The new session starts fresh. }
+  NewSession := nil;
+  NewDriver := nil;
   if not Assigned(FOnSwitchSession) then
   begin
     AppendError('this build cannot switch sessions');
     Exit;
   end;
-  NewSession := nil;
-  NewDriver := nil;
   if not FOnSwitchSession(ASessionId, NewSession, NewDriver, Err) then
   begin
     AppendError('could not open session: ' + Err);
     Exit;
   end;
   { Swap the active session and driver. The callback retains ownership of both,
-    so the app holds references only; it closes the old driver (which detaches
-    from the old runtime) before adopting the new one. }
+    so the app holds references only; it closes the old driver (detaching from
+    the old runtime, whose turn keeps running) before adopting the new one.
+    CancelTurn also clears the busy state, since the old turn is no longer ours
+    to show. }
   CancelTurn;
   FSession := NewSession;
   FDriver := NewDriver;
@@ -847,11 +845,14 @@ begin
   if Left = '' then
     Left := Copy(FSession.SessionId, 1, 12);
   { Keep the title within the border: reserve room for the right-aligned context
-    (and the corners), so a long title cannot push the usage off the border. }
+    (and the corners), so a long title cannot push the usage off the border.
+    TruncateTitle returns a UnicodeString; encode it to a UTF-8 `string`
+    explicitly, because the RTL's implicit UnicodeString->string conversion is
+    lossy here (it writes '?' for non-ASCII). }
   MaxW := FSurface.Width - 30;
   if MaxW < 8 then
     MaxW := 8;
-  FPanel.SetHeader(string(TruncateTitle(UnicodeString(Left), MaxW)), Context);
+  FPanel.SetHeader(UTF8Encode(TruncateTitle(UnicodeString(Left), MaxW)), Context);
   { A continuation session runs on pages (one per checkpoint): the messages
     panel's left border is the gauge, the current page heavy, and a click on it
     scrolls (the coarse scroll; the right scrollbar is the fine one). }
