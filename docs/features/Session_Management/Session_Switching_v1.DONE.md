@@ -92,8 +92,10 @@ tests/test_harness_app.pas                    (the switch)
 
 - **Activation is not a row action.** It gets its own event (`OnActivate`), not a
   `TSessionAction`: the host swaps a session rather than writing a store row.
-- **Refuse while busy.** The in-flight turn belongs to the old driver; live
-  detach is a separate increment (SPEC Out of Scope).
+- **Refuse while busy** was the original scope; the follow-up **allows**
+  switching mid-turn by detaching: the runtime keeps the old turn running (no
+  interrupt, no data loss), the app clears its busy state, and the new session
+  starts fresh. Live re-attach to the detached turn is still out of scope.
 - **The callback owns the view and driver.** The app holds references; the
   launcher keeps its opened views alive to shutdown so nothing dangles.
 - Record deviations from the SPEC here.
@@ -119,3 +121,17 @@ the app's `SwitchSession` swap, and the composition root's `TLauncher.Switch`.
   clears the app's state whenever the plane is gone, whatever popped it.
 - **`THarnessApp.SessionId` added** (not in the SPEC's contract block) so the
   active session is observable for the header, tests, and future commands.
+
+**Follow-up (detach + header):** switching while a turn is in flight is now
+**allowed** (it was refused): closing the old driver detaches — the runtime
+keeps the turn running and persists it, so no work is lost — and the app clears
+its busy state and shows the target. The header also names the session now (its
+title, else the id prefix), bounded so the context usage stays visible.
+
+**Encoding (found here, fixed):** the RTL's implicit `UnicodeString`→`string`
+conversion writes `?` for non-ASCII in this build (the widestring manager is not
+a UTF-8 encoder here, though the decode direction is). This corrupted the header
+title, the compose's submitted prompt, and the modal's filter/rename. The fix is
+`UTF8Encode` at each of those boundaries; `UTF8Decode`/`UnicodeString(string)`
+decode correctly and were left alone. A broader audit of implicit `string(...)`
+casts is a separate thread.
