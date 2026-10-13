@@ -15,7 +15,7 @@ program tui_agent;
 
 uses
   {$ifdef unix}cthreads, cwstring,{$endif}   // cthreads first; cwstring for Unicode
-  Classes, SysUtils,
+  Classes, Contnrs, SysUtils,
   hildegard.helper.cli,
   hildegard.helper.tui.base, hildegard.helper.tui.input,
   hildegard.helper.tui.surface, hildegard.helper.tui.surface.video,
@@ -27,16 +27,28 @@ uses
 type
   { The lazy-connect hook: on the first prompt, create the session and spawn its
     runtime, then Attach (or FailConnect). Holds the view and app so the connect
-    is one method of object. }
+    is one method of object. Also opens a session on demand (Switch) when the
+    operator activates a row in /sessions; those opened views are owned here and
+    freed at shutdown. }
   TLauncher = class
   private
     FSession: TSessionView;
     FApp: THarnessApp;
     FStorePath: string;
+    FWorkspaceRoot: string;
+    FModel: string;
+    { The views opened by Switch, kept alive for the app's lifetime (the app
+      holds a reference to the active one). }
+    FOpened: TObjectList;
   public
     constructor Create(ASession: TSessionView; AApp: THarnessApp;
       const AStorePath: string);
+    destructor Destroy; override;
     procedure Connect;
+    { Open another session for the app: a fresh view and a spawned runtime
+      driver. False + AError on failure (the view is released). }
+    function Switch(const ASessionId: string; out ASession: TSessionView;
+      out ADriver: ISessionDriver; out AError: string): Boolean;
   end;
 
 var
@@ -64,6 +76,18 @@ begin
   FSession := ASession;
   FApp := AApp;
   FStorePath := AStorePath;
+  FOpened := TObjectList.Create(True);
+  if ASession <> nil then
+  begin
+    FWorkspaceRoot := ASession.WorkspaceRoot;
+    FModel := ASession.Model;
+  end;
+end;
+
+destructor TLauncher.Destroy;
+begin
+  FOpened.Free;
+  inherited Destroy;
 end;
 
 procedure TLauncher.Connect;
@@ -95,6 +119,49 @@ begin
     Exit;
   end;
   FApp.Attach(FSession, Driver);
+end;
+
+function TLauncher.Switch(const ASessionId: string; out ASession: TSessionView;
+  out ADriver: ISessionDriver; out AError: string): Boolean;
+var
+  Cfg: THarnessSessionConfig;
+  View: TSessionView;
+  ClientCfg: TSessionClientConfig;
+begin
+  Result := False;
+  ASession := nil;
+  ADriver := nil;
+  AError := '';
+  { Open a fresh view for the target (the workspace is already known), then spawn
+    its runtime. The view is owned here and kept alive for the app's lifetime. }
+  Cfg := Default(THarnessSessionConfig);
+  Cfg.WorkspacePath := FWorkspaceRoot;
+  Cfg.StorePath := FStorePath;
+  Cfg.SessionId := ASessionId;
+  Cfg.Resume := True;
+  Cfg.Model := FModel;
+  View := TSessionView.Open(Cfg, AError);
+  if View = nil then
+    Exit;
+  ClientCfg := Default(TSessionClientConfig);
+  ClientCfg.SessionId := ASessionId;
+  ClientCfg.WorkspacePath := FWorkspaceRoot;
+  ClientCfg.StorePath := FStorePath;
+  ClientCfg.Role := srDrive;
+  ClientCfg.FromSeq := 0;
+  ClientCfg.Spawn := True;
+  ClientCfg.SpawnTimeoutMs := 5000;
+  ClientCfg.RuntimeCommand := ResolveRuntimeBinary(
+    GetEnvironmentVariable('HILDEGARD_RUNTIME_BIN'), ParamStr(0));
+  ADriver := RemoteDriver(ClientCfg, AError);
+  if ADriver = nil then
+  begin
+    View.Free;
+    Exit;
+  end;
+  FOpened.Add(View);
+  ASession := View;
+  Result := True;
 end;
 
 { End the run loop on SIGTERM/SIGINT/SIGHUP so the terminal is restored. }
@@ -180,6 +247,9 @@ begin
   App := THarnessApp.Create(Surface, Input, Session, nil, ThemeMode, Light);
   Launcher := TLauncher.Create(Session, App, StorePath);
   try
+    { The /sessions modal can open another session: the launcher owns the view
+      and spawns the runtime. }
+    App.OnSwitchSession := Launcher.Switch;
     if Session.HasSession then
       { A named or resumed session: connect now (the first frame is already up). }
       Launcher.Connect
@@ -190,8 +260,10 @@ begin
       and renders on the frame cadence only while a turn is in flight. }
     App.Run(@ShouldStop);
   finally
-    Launcher.Free;
+    { Free the app before the launcher: the app holds references to the launcher's
+      opened views (the active one), so the views must outlive it. }
     App.Free;
+    Launcher.Free;
     Input := nil;
     Surface := nil;
     Session.Free;
