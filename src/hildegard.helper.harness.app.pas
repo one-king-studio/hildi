@@ -1048,7 +1048,9 @@ begin
         else
           FPanel.Stream.Add(ckTool, Rec.ToolName, Rec.Content);
       mrError:
-        FPanel.Stream.Add(ckError, '', Rec.Content);
+        { The detail is stored in the tool_arguments column (see the store's
+          AppendError); show it, so a resumed session reads like the live one. }
+        FPanel.Stream.Add(ckError, '', ErrorText(Rec.Content, Rec.ToolArguments));
       mrSystem:
         { The system prompt is never drawn live, so it is not drawn on resume
           either; live and resume stay identical. }
@@ -1415,7 +1417,7 @@ begin
         { The pending response was dropped by the loop, so drop its blocks here
           too, then show the error. }
         RollBackPendingResponse;
-        AppendError(E.Text);
+        AppendError(ErrorText(E.Text, E.Detail));
         FinishTurn(psError, 'error');
       end;
   else

@@ -200,7 +200,7 @@ begin
       FWriter.OnToolResult(AEvent.ToolId, AEvent.ToolName, AEvent.Text,
         AEvent.ToolOk);
     ekError:
-      FWriter.WriteError(AEvent.Text + ' (' + AEvent.Detail + ')');
+      FWriter.WriteError(ErrorText(AEvent.Text, AEvent.Detail));
     ekTurnFinished:
       begin
         if FTurnOpen then
@@ -1251,7 +1251,7 @@ begin
         end
         else
         begin
-          Writer.WriteError(Err.Message + ' (' + Err.Detail + ')');
+          Writer.WriteError(ErrorText(Err.Message, Err.Detail));
           Writer.EndTurn;
         end;
       end;
@@ -1266,7 +1266,7 @@ begin
         Writer.EndTurn
       else
       begin
-        Writer.WriteError(Err.Message + ' (' + Err.Detail + ')');
+        Writer.WriteError(ErrorText(Err.Message, Err.Detail));
         Writer.EndTurn;
         Halt(1);
       end;

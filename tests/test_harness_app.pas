@@ -926,7 +926,7 @@ begin
       'check the date', False);
     Add(mrTool, 'noon', 'c1', 'run_command', '', '', True);
     Add(mrAssistant, 'done', '', '', '', '', False);
-    Add(mrError, 'boom', '', '', '', '', False);
+    Add(mrError, 'boom', '', '', 'DNS failed', '', False);
   finally
     Store.Free;
   end;
@@ -968,6 +968,9 @@ begin
   AssertFalse('the raw call is not restored', FindText(ckTool, 'run_command'));
   AssertTrue('assistant block restored', SawAssistant);
   AssertTrue('error block restored', SawError);
+  { The stored detail (in tool_arguments) is shown, so a resumed session reads
+    like the live one. }
+  AssertTrue('the error detail is restored', FindText(ckError, 'DNS failed'));
 end;
 
 procedure THarnessAppTest.TestTranscriptIsBoundedToTheTail;
@@ -1525,6 +1528,8 @@ begin
   AssertFalse('the streamed fragment was rolled back',
     FindText(ckAssistant, 'partial answer'));
   AssertTrue('an error block exists', FindText(ckError, 'failed'));
+  { The cause is shown, not just the generic message. }
+  AssertTrue('the cause is shown', FindText(ckError, 'simulated network failure'));
   AssertTrue('prompt re-enabled', FApp.PromptActive);
 end;
 

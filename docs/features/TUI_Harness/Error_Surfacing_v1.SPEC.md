@@ -17,6 +17,11 @@ A failed turn must say **what happened** and, where the loop is recovering,
 generic `'request failed'` — and drops `Detail`, the actual cause. The data is
 already on the wire; this makes the client use it.
 
+> **Status (2026-10-13).** The **error-detail half has landed**: `ErrorText`, the
+> live and resumed block text, and the CLI. The **retry line waits** on Request
+> Retry v1 — `RetryText` and `teRetrying` are the client's half of a signal that
+> does not exist yet, so implementing them now would be dead code.
+
 ## Problem Statement
 
 The loop sends `teError` with `Text` (`'request failed'`) and `Detail`
@@ -124,6 +129,11 @@ function RetryText(AAttempt, AAttempts: Integer; ADelayMs: Int64): string;
 ### Unit Tests (`tests/test_cli.pas`)
 
 - [ ] `TestCliPrintsMessageAndDetail`.
+
+  *Deviation:* the CLI's error formatting is `ErrorText`, unit-tested in
+  `test_llm.pas`; the CLI's session observer lives in the example, not a unit, so
+  a dedicated test is not reachable. The call site is a one-liner over the tested
+  function.
 
 ## Performance Targets
 

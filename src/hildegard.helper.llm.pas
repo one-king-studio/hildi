@@ -155,6 +155,11 @@ type
 function ResolveLLMConfig(const AConfig: TLLMConfig): TLLMConfig;
 function RoleToString(ARole: TChatRole): string;
 
+{ A failure's display text: the message, plus the cause after a colon when there
+  is one. Pure, so the format is pinned without a surface, and shared by the TUI
+  and the CLI so a failure reads the same everywhere. }
+function ErrorText(const AMessage, ADetail: string): string;
+
 const
   DefaultLLMEndpoint = 'https://api.fireworks.ai/inference/v1/chat/completions';
   DefaultConnectTimeoutMs = 10000;
@@ -273,6 +278,14 @@ begin
     crAssistant: Result := 'assistant';
     crTool: Result := 'tool';
   end;
+end;
+
+function ErrorText(const AMessage, ADetail: string): string;
+begin
+  if Trim(ADetail) = '' then
+    Result := AMessage
+  else
+    Result := AMessage + ': ' + ADetail;
 end;
 
 { --- TChunkProxyStream -------------------------------------------------- }

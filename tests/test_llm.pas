@@ -80,6 +80,7 @@ type
     procedure TestFirstTokenMsZeroWithoutContent;
     procedure TestRequestAsksForUsage;
     procedure TestClientExposesResolvedModel;
+    procedure TestErrorText;
   end;
 
 implementation
@@ -983,6 +984,16 @@ begin
     Client.Free;
     Fake.Free;
   end;
+end;
+
+procedure TLLMClientTest.TestErrorText;
+begin
+  { A failure reads the same everywhere: the message, plus the cause when there
+    is one. }
+  AssertEquals('message alone', 'request failed', ErrorText('request failed', ''));
+  AssertEquals('message and cause', 'network error: DNS failed',
+    ErrorText('network error', 'DNS failed'));
+  AssertEquals('whitespace is no cause', 'boom', ErrorText('boom', '   '));
 end;
 
 initialization
