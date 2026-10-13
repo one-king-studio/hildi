@@ -106,6 +106,15 @@ Hard-won constraints; please respect them:
   widestring manager, so implicit `AnsiString`↔`UnicodeString` conversions
   (fpjson, tool arguments, command strings) replace each non-ASCII code unit with
   `?`.
+- **`cwstring` present is not enough: the implicit `UnicodeString`→`string`
+  conversion is still lossy here.** The *decode* direction
+  (`UnicodeString(s)`, `UTF8Decode`) is fine, but `string(U)`/`AnsiString(U)`
+  writes `?` for non-ASCII (the widestring manager is not a UTF-8 encoder in this
+  build; `SetMultiByteConversionCodePage(CP_UTF8)` does **not** fix it). Encode
+  explicitly with `UTF8Encode(U)` — assign the `RawByteString` result to a
+  `string`, and the panel's `UnicodeString(string)` decode reads it back
+  correctly. This bit the session title, the compose's submitted prompt, and the
+  modal's filter/rename; the fix is `UTF8Encode` at each such boundary.
 - `TSemaphore` is unusable on macOS (`sem_init` returns `ENOSYS`). Use
   `TCriticalSection` + `TSimpleEvent`.
 - FPC's `TDictionary` `D[key] := value` setter raises `EListError` when the key
