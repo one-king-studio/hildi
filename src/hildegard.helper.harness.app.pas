@@ -43,6 +43,13 @@ type
     start; when unset, an idle app cannot send. }
   TConnectEvent = procedure of object;
 
+  { Opens a different session for the app: returns its view and driver, or False
+    + AError. The callback retains ownership of both (the app holds references
+    only). Wired by the composition root, which can spawn a runtime. }
+  TSwitchSessionEvent = function(const ASessionId: string;
+    out ASession: TSessionView; out ADriver: ISessionDriver;
+    out AError: string): Boolean of object;
+
   { Builds the tree and owns the TTuiApp and the current worker. The session is
     owned by the caller and must outlive the app. }
   THarnessApp = class
@@ -58,6 +65,9 @@ type
     FConnectPhase: string;
     FConnectError: string;
     FOnNeedConnect: TConnectEvent;
+    { Open a different session (the /sessions modal's Enter): the composition
+      root's hook. Unset => switching is refused with a status line. }
+    FOnSwitchSession: TSwitchSessionEvent;
     { A prompt submitted while idle, held until Attach delivers the driver. }
     FPendingSubmit: string;
     FApp: TTuiApp;
@@ -68,6 +78,10 @@ type
     { The /sessions modal (nil when closed) and its wrap. }
     FSessionsModal: TSessionsModal;
     FSessionsShown: Boolean;
+    { A deferred close: the modal's Enter is dispatched from inside the modal, so
+      popping the plane there would free the widget mid-dispatch. The swap runs
+      inline; the pop waits for the next Step/OnLoop. }
+    FCloseSessions: Boolean;
     FPendingAskRef: string;
     FCloseModal: Boolean;
     FAskQueue: array of TTurnEvent;
@@ -135,6 +149,8 @@ type
       operator once when streamed output was dropped (the mailbox bound). }
     FLastDropped: Int64;
     function BuildTree: TWidget;
+    function GetSessionId: string;
+    procedure ResetWindow;
     procedure Submit(const AText: string);
     procedure DrainQueue;
     procedure FlushToolOutput;
@@ -151,6 +167,10 @@ type
     procedure CloseSessions;
     procedure OnSessionAction(const ASessionId: string; AAction: TSessionAction);
     procedure OnSessionRename(const ASessionId, ANewTitle: string);
+    { Reconcile the app's modal state with the plane state: pop a requested close,
+      and clear FSessionsModal when the plane is gone (an unhandled Escape pops
+      it in TTuiApp). Called each Step/OnLoop, like CloseModal. }
+    procedure SyncSessionsModal;
     { Subagents: feed the roster, toggle/show the sidebar, spy on a child. }
     procedure HandleSubagentEvent(const E: TTurnEvent);
     { Show a queued prompt (a violet 'Queued' box) at the end of the stream. }
@@ -257,11 +277,20 @@ type
     { A phase label for the connecting frame (e.g. 'connecting', 'loading
       history'), so the wait is honest. }
     procedure SetConnectPhase(const APhase: string);
+    { Enter on a /sessions row: open that session. Refuses when busy, when there
+      is no hook, or when the hook fails. The swap happens inline; the modal is
+      popped on the next Step (it is the caller). }
+    procedure SwitchSession(const ASessionId: string);
 
     property ConnState: TConnState read GetConnState;
     { The lazy-start hook: called on the first submit when idle. }
     property OnNeedConnect: TConnectEvent read FOnNeedConnect
       write FOnNeedConnect;
+    { The open-a-session hook (the /sessions modal's Enter). }
+    property OnSwitchSession: TSwitchSessionEvent read FOnSwitchSession
+      write FOnSwitchSession;
+    { The active session's id, '' when there is none (an idle lazy app). }
+    property SessionId: string read GetSessionId;
 
     property Busy: Boolean read FBusy;
     property PromptActive: Boolean read GetPromptActive;
@@ -521,11 +550,10 @@ begin
   FSession := ASession;
   FDriver := ADriver;
   FConnState := csConnected;
-  { A fresh tail: the window has not reached the head yet. }
-  FAtHead := False;
-  FOlderPages := 0;
-  { Replace the connecting/idle frame with the transcript. }
-  FPanel.Stream.Clear;
+  { A fresh window for this session: no older pages, not at head, no stale live
+    blocks. Shared with SwitchSession, which rebuilds the transcript the same
+    way. }
+  ResetWindow;
   RenderHistory;
   SetState(psReady, 'ready');
   UpdateStats;
@@ -535,6 +563,84 @@ begin
   FPendingSubmit := '';
   if Pending <> '' then
     Submit(Pending);
+end;
+
+procedure THarnessApp.ResetWindow;
+begin
+  { Replace the transcript with a fresh window for the active session. }
+  FAtHead := False;
+  FOlderPages := 0;
+  FWindowStart := 0;
+  FAssistant := nil;
+  FAssistantRaw := '';
+  FAssistantSupp := Default(TFrontMatterSuppressor);
+  FThought := nil;
+  FThoughtMs := 0;
+  FTool := nil;
+  FPendingToolOutput := '';
+  FCheckpointBlock := nil;
+  FQueuedBlocks := nil;
+  FUserBlock := nil;
+  FPanel.Stream.Clear;
+end;
+
+function THarnessApp.GetSessionId: string;
+begin
+  if FSession <> nil then
+    Result := FSession.SessionId
+  else
+    Result := '';
+end;
+
+procedure THarnessApp.SwitchSession(const ASessionId: string);
+var
+  NewSession: TSessionView;
+  NewDriver: ISessionDriver;
+  Err: string;
+begin
+  if ASessionId = '' then
+    Exit;
+  { Activating the current session is a no-op beyond closing the modal. }
+  if (FSession <> nil) and (ASessionId = FSession.SessionId) then
+  begin
+    if FSessionsShown then
+      FCloseSessions := True;
+    Exit;
+  end;
+  { The in-flight turn belongs to the old session's driver; detaching mid-turn is
+    a separate increment. }
+  if FBusy then
+  begin
+    AppendError('finish or cancel the turn before switching sessions');
+    Exit;
+  end;
+  if not Assigned(FOnSwitchSession) then
+  begin
+    AppendError('this build cannot switch sessions');
+    Exit;
+  end;
+  NewSession := nil;
+  NewDriver := nil;
+  if not FOnSwitchSession(ASessionId, NewSession, NewDriver, Err) then
+  begin
+    AppendError('could not open session: ' + Err);
+    Exit;
+  end;
+  { Swap the active session and driver. The callback retains ownership of both,
+    so the app holds references only; it closes the old driver (which detaches
+    from the old runtime) before adopting the new one. }
+  CancelTurn;
+  FSession := NewSession;
+  FDriver := NewDriver;
+  FConnState := csConnected;
+  ResetWindow;
+  RenderHistory;
+  SetState(psReady, 'ready');
+  UpdateStats;
+  { The modal raised this from inside its own event dispatch, so pop it on the
+    next Step rather than freeing it mid-dispatch. }
+  if FSessionsShown then
+    FCloseSessions := True;
 end;
 
 procedure THarnessApp.BeginIdle;
@@ -1395,6 +1501,8 @@ begin
   FSessionsModal.SetCurrent(FSession.SessionId);
   FSessionsModal.OnAction := OnSessionAction;
   FSessionsModal.OnRename := OnSessionRename;
+  { Enter opens the selected session (SwitchSession closes the modal on swap). }
+  FSessionsModal.OnActivate := SwitchSession;
   RefreshSessions;
   Wrap := TContainer.Create([Fill(1), Auto, Fill(1)], [Fill(1), Auto, Fill(1)]);
   Wrap.Add(FSessionsModal, 1, 1);
@@ -1418,11 +1526,30 @@ begin
   SetState(psReady, 'ready');
 end;
 
+procedure THarnessApp.SyncSessionsModal;
+begin
+  if FCloseSessions then
+  begin
+    { A deferred close (Enter, or the modal's own Escape): the caller is not
+      dispatching, so it is safe to pop now. }
+    FCloseSessions := False;
+    CloseSessions;
+    Exit;
+  end;
+  { An unhandled key (Escape) pops the plane in TTuiApp without telling the app;
+    clear the dangling widget and the shown flag so the state does not lie. }
+  if FSessionsShown and (not FApp.ModalActive) then
+  begin
+    FSessionsModal := nil;
+    FSessionsShown := False;
+    SetState(psReady, 'ready');
+  end;
+end;
+
 procedure THarnessApp.OnSessionAction(const ASessionId: string;
   AAction: TSessionAction);
 var
   Err: TStoreError;
-  Row: TSessionRow;
   I: Integer;
   Rows: TSessionRowArray;
   Pinned, Archived: Boolean;
@@ -1681,6 +1808,7 @@ begin
   { Drain each iteration, then reflect the resulting busy state so Run picks the
     frame cadence (not the idle wait) while a turn is streaming. }
   CloseModal;
+  SyncSessionsModal;
   CheckInterruptWindow;
   DrainQueue;
   FlushToolOutput;
@@ -1695,6 +1823,7 @@ begin
   { Pop an answered modal (and show the next queued ask) before draining, so a
     fresh ask is never stacked on top of one still being answered. }
   CloseModal;
+  SyncSessionsModal;
   CheckInterruptWindow;
   DrainQueue;
   FlushToolOutput;

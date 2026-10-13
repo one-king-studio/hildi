@@ -62,6 +62,15 @@ type
     FApp: THarnessApp;
     FFake: TFakeTransport;
     FStorePath: string;
+    { The switch-session tests: views and harness sessions opened by the fake
+      callback (owned here, freed in TearDown), and the scripted outcome. }
+    FSwitchViews: array of TSessionView;
+    FSwitchSessions: array of THarnessSession;
+    FSwitchResult: Boolean;
+    FSwitchErr: string;
+    FSwitchCalls: Integer;
+    function SwitchTo(const ASessionId: string; out ASession: TSessionView;
+      out ADriver: ISessionDriver; out AError: string): Boolean;
     procedure Build;
     procedure BuildWithStore;
     function Key(AKind: TKeyKind): TInputEvent;
@@ -86,6 +95,7 @@ type
     { The lazy-connect hook: attach a local driver to the current app. }
     procedure AttachLocal;
   protected
+    procedure SetUp; override;
     procedure TearDown; override;
   published
     procedure TestStreamedTurnRendersAndReenables;
@@ -130,6 +140,13 @@ type
     procedure TestCtrlCQuitsOnlyWhenComposeIsEmpty;
     procedure TestApprovalDimsTheBackground;
     procedure TestSessionsCommandOpensAndClosesTheModal;
+    procedure TestEnterInTheSessionsModalClosesIt;
+    { Session switching: Enter opens the selected session. }
+    procedure TestSwitchSessionOpensTheTarget;
+    procedure TestSwitchToCurrentSessionIsANoOp;
+    procedure TestSwitchWhileBusyIsRefused;
+    procedure TestSwitchFailureKeepsTheSession;
+    procedure TestSwitchWithoutAHookIsRefused;
     { TUI Startup: the connect lifecycle. }
     procedure TestNoSessionStartsIdle;
     procedure TestPaintBeforeConnectOrder;
@@ -183,13 +200,33 @@ end;
 
 { THarnessAppTest }
 
+procedure THarnessAppTest.SetUp;
+begin
+  FSwitchResult := False;
+  FSwitchErr := '';
+  FSwitchCalls := 0;
+  FSwitchViews := nil;
+  FSwitchSessions := nil;
+end;
+
 procedure THarnessAppTest.TearDown;
+var
+  I: Integer;
 begin
   FApp.Free;
   FInput := nil;
   FSurface := nil;
   FSession.Free;
   FFake.Free;
+  { The switch callback's opens: free the harness sessions (they own their
+    internal views and loops) and the target views. FApp is freed first so the
+    drivers referencing them are released. }
+  for I := 0 to High(FSwitchSessions) do
+    FSwitchSessions[I].Free;
+  FSwitchSessions := nil;
+  for I := 0 to High(FSwitchViews) do
+    FSwitchViews[I].Free;
+  FSwitchViews := nil;
   if FStorePath <> '' then
   begin
     DeleteFile(FStorePath);
@@ -213,6 +250,43 @@ end;
 procedure THarnessAppTest.AttachLocal;
 begin
   FApp.Attach(FSession.View, LocalDriver(FSession));
+end;
+
+function THarnessAppTest.SwitchTo(const ASessionId: string;
+  out ASession: TSessionView; out ADriver: ISessionDriver;
+  out AError: string): Boolean;
+var
+  Cfg: THarnessSessionConfig;
+  Err: string;
+  H: THarnessSession;
+begin
+  Inc(FSwitchCalls);
+  ASession := nil;
+  ADriver := nil;
+  AError := '';
+  if not FSwitchResult then
+  begin
+    AError := FSwitchErr;
+    Exit(False);
+  end;
+  { Open the target view from the same store, then a local driver over a harness
+    session on it (for its queue). Both are owned here and freed in TearDown. }
+  Cfg := Config;
+  Cfg.StorePath := FStorePath;
+  Cfg.SessionId := ASessionId;
+  ASession := TSessionView.Open(Cfg, Err);
+  if ASession = nil then
+  begin
+    AError := Err;
+    Exit(False);
+  end;
+  SetLength(FSwitchViews, Length(FSwitchViews) + 1);
+  FSwitchViews[High(FSwitchViews)] := ASession;
+  H := THarnessSession.Open(Cfg, Err);
+  SetLength(FSwitchSessions, Length(FSwitchSessions) + 1);
+  FSwitchSessions[High(FSwitchSessions)] := H;
+  ADriver := LocalDriver(H);
+  Result := True;
 end;
 
 procedure THarnessAppTest.Build;
@@ -1595,6 +1669,159 @@ begin
   FApp.Step;
   FApp.Step;
   AssertFalse('the modal closed', FApp.ModalActive);
+end;
+
+procedure THarnessAppTest.TestEnterInTheSessionsModalClosesIt;
+begin
+  { The selected row is the current session (the only one), so Enter activates it
+    and the no-op switch closes the modal on the next Step. This exercises the
+    OnActivate wiring end to end. }
+  BuildWithStore;
+  FApp.Panel.Palette.OnRun('sessions');
+  FApp.Step;
+  AssertTrue('the modal opened', FApp.ModalActive);
+  FInput.Push(Key(kkEnter));
+  FApp.Step;
+  FApp.Step;
+  AssertFalse('Enter closed the modal', FApp.ModalActive);
+end;
+
+procedure THarnessAppTest.TestSwitchSessionOpensTheTarget;
+var
+  Store: TSqliteStore;
+  StoreCfg: TStoreConfig;
+  StoreErr: TStoreError;
+  Cfg: THarnessSessionConfig;
+  WorkspaceId: Integer;
+  SidA, SidB: string;
+  TurnId: Int64;
+  Rec: TMessageRecord;
+  Err: string;
+begin
+  { Seed two sessions; A is empty, B carries a marker message. }
+  FDir := IncludeTrailingPathDelimiter(GetTempDir) + 'hh-app-' +
+    IntToStr(Random(1000000));
+  ForceDirectories(FDir);
+  FStorePath := IncludeTrailingPathDelimiter(FDir) + 'store.db';
+  StoreCfg := Default(TStoreConfig);
+  StoreCfg.DatabasePath := FStorePath;
+  StoreCfg.BusyTimeoutMs := 5000;
+  Store := TSqliteStore.Create(StoreCfg);
+  try
+    AssertTrue('open store', Store.Open(StoreErr));
+    Store.EnsureWorkspace(FDir, WorkspaceId, StoreErr);
+    Store.CreateSession(WorkspaceId, SidA, StoreErr);
+    Store.CreateSession(WorkspaceId, SidB, StoreErr);
+    Store.BeginTurn(SidB, TurnId, StoreErr);
+    Rec := Default(TMessageRecord);
+    Rec.SessionId := SidB;
+    Rec.TurnId := TurnId;
+    Rec.Role := mrUser;
+    Rec.Content := 'the other session marker';
+    Store.AppendMessage(Rec, StoreErr);
+  finally
+    Store.Free;
+  end;
+
+  FFake := TFakeTransport.Create;
+  FSurface := TSurfaceMemory.Create(60, 20);
+  FInput := TInputSourceScripted.Create;
+  Cfg := Config;
+  Cfg.StorePath := FStorePath;
+  Cfg.SessionId := SidA;
+  Cfg.Resume := True;
+  FSession := THarnessSession.Open(Cfg, Err);
+  AssertTrue('resumed: ' + Err, FSession <> nil);
+  FApp := THarnessApp.Create(FSurface, FInput, FSession.View, LocalDriver(FSession));
+  FApp.Step;
+
+  AssertEquals('starts on A', SidA, FApp.SessionId);
+  AssertFalse('A has no marker', FindText(ckUser, 'the other session marker'));
+
+  FApp.OnSwitchSession := SwitchTo;
+  FSwitchResult := True;
+  FApp.SwitchSession(SidB);
+
+  AssertEquals('switched to B', SidB, FApp.SessionId);
+  AssertTrue('B transcript is shown',
+    FindText(ckUser, 'the other session marker'));
+end;
+
+procedure THarnessAppTest.TestSwitchToCurrentSessionIsANoOp;
+var
+  Before: string;
+begin
+  BuildWithStore;
+  FApp.OnSwitchSession := SwitchTo;
+  FSwitchResult := True;
+  Before := FApp.SessionId;
+  FApp.SwitchSession(Before);
+  AssertEquals('no callback for the current session', 0, FSwitchCalls);
+  AssertEquals('still on the same session', Before, FApp.SessionId);
+end;
+
+procedure THarnessAppTest.TestSwitchWhileBusyIsRefused;
+var
+  Slow: TSlowChunks;
+  I: Integer;
+begin
+  Build;
+  Slow := TSlowChunks.Create(80);
+  try
+    FFake.AfterChunk := Slow.AfterChunk;
+    FFake.AddResponse([TextDelta('one'), FinishFrame('stop'), DoneFrame]);
+    SubmitPrompt('go');
+    for I := 1 to 300 do
+    begin
+      FApp.Step;
+      if FApp.Busy then
+        Break;
+      Sleep(2);
+    end;
+    AssertTrue('turn in flight', FApp.Busy);
+
+    FApp.OnSwitchSession := SwitchTo;
+    FSwitchResult := True;
+    FApp.SwitchSession('some-other-session');
+    AssertEquals('no switch while busy', 0, FSwitchCalls);
+    AssertTrue('the refusal is shown',
+      FindText(ckError, 'before switching'));
+
+    { Let the turn finish so teardown is clean. }
+    FFake.AfterChunk := nil;
+    for I := 1 to 600 do
+    begin
+      FApp.Step;
+      if not FApp.Busy then
+        Break;
+      Sleep(2);
+    end;
+  finally
+    Slow.Free;
+  end;
+end;
+
+procedure THarnessAppTest.TestSwitchFailureKeepsTheSession;
+var
+  Before: string;
+begin
+  BuildWithStore;
+  Before := FApp.SessionId;
+  FApp.OnSwitchSession := SwitchTo;
+  FSwitchResult := False;
+  FSwitchErr := 'boom';
+  FApp.SwitchSession('a-target');
+  AssertEquals('the callback ran', 1, FSwitchCalls);
+  AssertTrue('the error is shown',
+    FindText(ckError, 'could not open session: boom'));
+  AssertEquals('the current session is kept', Before, FApp.SessionId);
+end;
+
+procedure THarnessAppTest.TestSwitchWithoutAHookIsRefused;
+begin
+  BuildWithStore;
+  FApp.SwitchSession('a-target');
+  AssertTrue('the refusal is shown', FindText(ckError, 'cannot switch sessions'));
 end;
 
 procedure THarnessAppTest.TestSidebarTogglesWithCtrlB;
