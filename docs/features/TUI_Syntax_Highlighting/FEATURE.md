@@ -170,6 +170,13 @@ markdown view's span pipeline. Nothing more.
 - **No vendored parser (tree-sitter, chroma, bat).** External-process or
   vendored-C solutions add deployment weight (the thing the static-binary
   decision fights) for fidelity the 16-colour attribute medium cannot show.
+  **Superseded (2026-10-12) for tree-sitter specifically** — see
+  [`Tree_Sitter`](../Tree_Sitter/FEATURE.md). The dependency is bought by the
+  approval gate's need for *correct* shell parsing, not by colour: the splitter
+  names shell keywords as programs and misses programs inside `$(…)`. This
+  feature's own criteria (additive, computed once, no regex on untrusted text)
+  are preserved: tree-sitter becomes the engine for languages with a vendored
+  grammar, and the rule-table tokenizer stays for the rest.
 - **No regex engine on code.** FPC's `regexpr` is available, but the markdown
   parser already refuses regex on untrusted output (ReDoS); the tokenizer scans
   literal delimiters instead, so the same guarantee holds here.
