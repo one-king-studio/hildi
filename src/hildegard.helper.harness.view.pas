@@ -34,6 +34,9 @@ type
     MaxContextTokens: Integer;
     { Loop-only: the system prompt override. The view ignores it. }
     SystemPrompt: string;
+    { Loop-only: transient-failure retry attempts (0 => the loop default,
+      negative => disabled). The view ignores it. }
+    RetryMaxAttempts: Integer;
     { The session whose approval scope this session resolves against. A subagent
       sets this to its lineage root (the parent), so approvals are lineage-wide:
       a grant made for one child is in force for the parent and every sibling.

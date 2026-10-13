@@ -20,6 +20,8 @@ type
   public
     StatusCode: Integer;
     FailNetwork: Boolean;
+    { Fail this many calls with a network error, then succeed (0 = never). }
+    NetworkFailuresLeft: Integer;
     Calls: Integer;
     LastURL: string;
     LastBody: string;
@@ -64,6 +66,7 @@ begin
   LastHeaders := TStringList.Create;
   StatusCode := 200;
   FailNetwork := False;
+  NetworkFailuresLeft := 0;
   Calls := 0;
 end;
 
@@ -105,8 +108,10 @@ begin
   LastHeaders.Assign(AHeaders);
   AError := '';
   ACancelled := False;
-  if FailNetwork then
+  if FailNetwork or (NetworkFailuresLeft > 0) then
   begin
+    if NetworkFailuresLeft > 0 then
+      Dec(NetworkFailuresLeft);
     AStatusCode := 0;
     AError := 'simulated network failure';
     Exit(False);

@@ -375,6 +375,7 @@ begin
   { State the workspace root in the user turn's <context>, so the model grounds
     shell paths instead of guessing one. }
   AgentConfig.WorkspaceRoot := FView.WorkspaceRoot;
+  AgentConfig.RetryMaxAttempts := AConfig.RetryMaxAttempts;
 
   FLoop := TAgentLoop.Create(FClient, FConversation, FTools, AgentConfig);
   { The skill registry is the capability layer; register it as the provider. Its

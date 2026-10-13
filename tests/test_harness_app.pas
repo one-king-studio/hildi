@@ -249,6 +249,9 @@ begin
   { Pin the context limit so the header is deterministic (the environment may
     set HILDEGARD_MAX_CONTEXT_TOKENS). }
   Result.MaxContextTokens := 120000;
+  { The retry would delay a failed turn by seconds; the tests exercise the
+    failure paths, not the retry. }
+  Result.RetryMaxAttempts := -1;
 end;
 
 procedure THarnessAppTest.AttachLocal;
@@ -1527,7 +1530,7 @@ begin
 
   AssertFalse('the streamed fragment was rolled back',
     FindText(ckAssistant, 'partial answer'));
-  AssertTrue('an error block exists', FindText(ckError, 'failed'));
+  AssertTrue('an error block exists', FindText(ckError, 'network error'));
   { The cause is shown, not just the generic message. }
   AssertTrue('the cause is shown', FindText(ckError, 'simulated network failure'));
   AssertTrue('prompt re-enabled', FApp.PromptActive);

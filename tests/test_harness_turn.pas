@@ -418,6 +418,8 @@ begin
   FStore := TMemoryConversationStore.Create;
   FTools := TToolRegistry.Create;
   ACfg := Default(TAgentConfig);
+  { The retry would delay a failed turn; these tests exercise the event mapping. }
+  ACfg.RetryMaxAttempts := -1;
   FLoop := TAgentLoop.Create(FClient, FStore, FTools, ACfg);
   if ARegisterTools then
     RegisterDefaultTools(FTools);
@@ -496,7 +498,7 @@ begin
   Worker.Start;
   Worker.WaitFor;
   try
-    AssertEquals('network error', 'E:2:request failed|', Drain);
+    AssertEquals('network error', 'E:2:network error|', Drain);
   finally
     Worker.Free;
   end;

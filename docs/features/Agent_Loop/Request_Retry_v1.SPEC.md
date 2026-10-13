@@ -17,6 +17,21 @@ message (`leNetwork` → `'request failed'`). Nothing retries. This adds a bound
 cancellable **retry policy** around each request, and makes every failure
 **legible**: a short operator-facing phrase plus the raw cause.
 
+> **Status (2026-10-13).** The retry has landed for the common case: a retryable
+> failure is retried with exponential backoff + jitter, bounded by the budget,
+> cancellable during the wait, one `requests` row per attempt, and the exhaustion
+> message counts the attempts (`network error after 4 attempts: …`). Two pieces
+> are **deferred**:
+>
+> - **`Retry-After`** needs the transport to surface the response header
+>   (`PostStream` returns only the status), so the backoff is time-based for now.
+> - **`teRetrying`/`ekRetrying`** (the live progress line, and the rollback
+>   signal it would carry) is not implemented. Because of that, a retry is
+>   attempted **only while the attempt produced no output** — a partial stream
+>   cannot be rolled back without that signal, so a mid-stream failure keeps the
+>   fail-and-drop path. The observed failure (a DNS failure before any response)
+>   is covered; a mid-stream reset is not.
+
 ## Problem Statement
 
 The observed failure: six `leNetwork` turns over two days, each carrying

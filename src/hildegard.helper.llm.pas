@@ -91,6 +91,9 @@ type
     Code: TLLMErrorCode;
     Message: string;
     Detail: string;
+    { The HTTP status when the failure came from a response (0 otherwise), so a
+      caller can tell a retryable 5xx from a terminal 4xx. }
+    Status: Integer;
   end;
 
   TLLMTextEvent = procedure(const AText: string) of object;
@@ -159,6 +162,15 @@ function RoleToString(ARole: TChatRole): string;
   is one. Pure, so the format is pinned without a surface, and shared by the TUI
   and the CLI so a failure reads the same everywhere. }
 function ErrorText(const AMessage, ADetail: string): string;
+
+{ Whether a request failure is worth retrying: a network/transport failure, a
+  429, or a 5xx. A terminal error - auth, config, malformed, provider, cancelled,
+  loop, truncated - is never retried. }
+function IsRetryable(const AError: TLLMError): Boolean;
+
+{ A short, operator-facing phrase for an error code ("network error",
+  "rate limited", "authentication failed", ...). }
+function OperatorPhrase(ACode: TLLMErrorCode): string;
 
 const
   DefaultLLMEndpoint = 'https://api.fireworks.ai/inference/v1/chat/completions';
@@ -234,6 +246,7 @@ begin
   Result.Code := ACode;
   Result.Message := AMessage;
   Result.Detail := ADetail;
+  Result.Status := 0;
 end;
 
 function OkLLM: TLLMError;
@@ -286,6 +299,36 @@ begin
     Result := AMessage
   else
     Result := AMessage + ': ' + ADetail;
+end;
+
+function IsRetryable(const AError: TLLMError): Boolean;
+begin
+  case AError.Code of
+    leNetwork, leRateLimit:
+      Result := True;
+    leHttpStatus:
+      { A 5xx is the provider's fault and may clear; a 4xx will not. }
+      Result := (AError.Status >= 500) and (AError.Status < 600);
+  else
+    Result := False;
+  end;
+end;
+
+function OperatorPhrase(ACode: TLLMErrorCode): string;
+begin
+  case ACode of
+    leOk: Result := '';
+    leConfig: Result := 'configuration error';
+    leNetwork: Result := 'network error';
+    leHttpStatus: Result := 'provider error';
+    leAuth: Result := 'authentication failed';
+    leRateLimit: Result := 'rate limited';
+    leMalformedStream: Result := 'could not parse the provider stream';
+    leProvider: Result := 'provider error';
+    leCancelled: Result := 'cancelled';
+    leLoop: Result := 'agent loop stopped';
+    leTruncated: Result := 'response truncated';
+  end;
 end;
 
 { --- TChunkProxyStream -------------------------------------------------- }
@@ -841,7 +884,7 @@ begin
     end;
     if not SinkOk then
     begin
-      AError := ErrLLM(leNetwork, 'request failed', TransportError);
+      AError := ErrLLM(leNetwork, 'network error', TransportError);
       Exit(False);
     end;
 
@@ -856,6 +899,8 @@ begin
       else
         AError := ErrLLM(leHttpStatus, 'provider returned an error',
           'HTTP ' + IntToStr(Status) + ': ' + TransportError);
+      { The status lets a retry policy tell a 5xx from a terminal 4xx. }
+      AError.Status := Status;
       Exit(False);
     end;
 

@@ -244,6 +244,13 @@ type
     { Followup requests allowed for one truncated response before the turn fails
       with leTruncated. 0 takes the default; negative disables continuation. }
     MaxContinuations: Integer;
+    { Transient-failure retry (a network failure, a 429, a 5xx): attempts beyond
+      the first, the base backoff, its cap, and the total wait budget. 0 fields
+      take the defaults; a negative RetryMaxAttempts disables retry. }
+    RetryMaxAttempts: Integer;
+    RetryBaseMs: Integer;
+    RetryMaxMs: Integer;
+    RetryBudgetMs: Integer;
   end;
 
   TAgentLoop = class
@@ -287,6 +294,9 @@ type
       assistant's tool_calls stay paired with results. }
     procedure InterceptToolCalls(const ACalls: TChatToolCallArray;
       const ANotice: string; const AEvents: TAgentEvents);
+    { Wait ADelayMs, polling the cancel check so an operator interrupt stops a
+      backoff wait; True when cancelled. }
+    function SleepCancellable(ADelayMs: Integer): Boolean;
   public
     { Resolve a called name against the base registry, then providers. }
     function ResolveTool(const AName: string;
@@ -346,6 +356,11 @@ function ExtractToolReason(const AArgumentsJson: string;
   of the context. }
 function IsPrewrappedUserMessage(const AContent: string): Boolean;
 
+{ The backoff ceiling before the next attempt: exponential from ABaseMs, capped
+  at AMaxMs. The loop applies full jitter within [0, result], so a retry never
+  waits longer than this and a burst does not synchronise. }
+function RetryBackoffMs(AAttempt, ABaseMs, AMaxMs: Integer): Integer;
+
 const
   { Tool-call budget: nudge from 30, lock down at 50, and end the turn on the
     next call after that. }
@@ -354,6 +369,12 @@ const
   DefaultToolNoticeStep = 5;
   { Followup requests allowed for one truncated response. }
   DefaultMaxContinuations = 3;
+  { Transient-failure retry: attempts beyond the first, the base backoff, its
+    cap, and the total wait budget. }
+  DefaultRetryMaxAttempts = 3;
+  DefaultRetryBaseMs = 500;
+  DefaultRetryMaxMs = 10000;
+  DefaultRetryBudgetMs = 30000;
   { The user message that asks the model to resume a truncated response. It
     exists only in the continuation request: never persisted, never drawn. }
   ContinuationInstruction =
@@ -859,6 +880,15 @@ begin
     FConfig.MaxContextTokens := DefaultMaxContextTokens;
   if FConfig.MaxContinuations = 0 then
     FConfig.MaxContinuations := DefaultMaxContinuations;
+  if FConfig.RetryBaseMs <= 0 then
+    FConfig.RetryBaseMs := DefaultRetryBaseMs;
+  if FConfig.RetryMaxMs <= 0 then
+    FConfig.RetryMaxMs := DefaultRetryMaxMs;
+  if FConfig.RetryBudgetMs <= 0 then
+    FConfig.RetryBudgetMs := DefaultRetryBudgetMs;
+  { RetryMaxAttempts: 0 takes the default; a negative value disables retry. }
+  if FConfig.RetryMaxAttempts = 0 then
+    FConfig.RetryMaxAttempts := DefaultRetryMaxAttempts;
 end;
 
 destructor TAgentLoop.Destroy;
@@ -896,6 +926,30 @@ end;
 function IsPrewrappedUserMessage(const AContent: string): Boolean;
 begin
   Result := (Pos('<ambient', AContent) = 1) or (Pos('<handoff', AContent) = 1);
+end;
+
+function RetryBackoffMs(AAttempt, ABaseMs, AMaxMs: Integer): Integer;
+var
+  I: Integer;
+begin
+  Result := ABaseMs;
+  if Result <= 0 then
+    Exit(0);
+  for I := 1 to AAttempt do
+  begin
+    { Stop at the cap, and never overflow before reaching it. }
+    if ((AMaxMs > 0) and (Result >= AMaxMs)) or
+       (Result > (MaxInt div 2)) then
+    begin
+      Result := AMaxMs;
+      Exit;
+    end;
+    Result := Result * 2;
+  end;
+  if (AMaxMs > 0) and (Result > AMaxMs) then
+    Result := AMaxMs;
+  if Result < 0 then
+    Result := 0;
 end;
 
 function TAgentLoop.BuildRequest(const APendingContent: string;
@@ -1224,6 +1278,27 @@ begin
   end;
 end;
 
+function TAgentLoop.SleepCancellable(ADelayMs: Integer): Boolean;
+const
+  { How often a backoff wait polls the cancel check. }
+  PollMs = 50;
+var
+  Waited, Slice: Integer;
+begin
+  Waited := 0;
+  while Waited < ADelayMs do
+  begin
+    if Assigned(FCancel) and FCancel() then
+      Exit(True);
+    Slice := ADelayMs - Waited;
+    if Slice > PollMs then
+      Slice := PollMs;
+    Sleep(Slice);
+    Inc(Waited, Slice);
+  end;
+  Result := Assigned(FCancel) and FCancel();
+end;
+
 function TAgentLoop.DoSend(const AUserText: string; const AEvents: TAgentEvents;
   out AAnswer: string; out AError: TLLMError): Boolean;
 var
@@ -1237,6 +1312,8 @@ var
   StartMs, EndMs: Int64;
   Outcome: TRequestOutcome;
   TurnOutcome: TTurnOutcome;
+  Attempt, RetryWaitedMs, Delay: Integer;
+  Ok: Boolean;
 
   procedure FailTurn(ACode: TLLMErrorCode; const AMessage, ADetail,
     AFinishReason: string);
@@ -1334,35 +1411,76 @@ begin
     TruncatedRound := False;
     repeat
       Request := BuildRequest(Pending.Content, Continuations > 0);
-      RequestId := FStore.BeginRequest(TurnId, FClient.Model,
-        Length(Request.Messages));
-      StartMs := GetTickCount64;
-      Outcome := Default(TRequestOutcome);
-      { Time the response's phases; the timed callbacks forward to AEvents. }
-      FTimedEvents := AEvents;
-      FReasonStartMs := 0;
-      FContentStartMs := 0;
-      FReasoningMs := 0;
-      FContentMs := 0;
 
-      { The client consults the same check mid-stream, so a cancel aborts the
-        request itself rather than waiting for the provider to finish. }
-      FClient.CancelCheck := FCancel;
-      if not FClient.Complete(Request, OnTimedText, OnTimedReasoning,
-        ChatResult, AError) then
-      begin
+      { One request, retried on a transient failure (a network error, a 429, a
+        5xx) up to the budget. A retry is attempted only while the attempt
+        produced no output: a partial stream cannot be rolled back without a
+        retry signal, so a mid-stream failure keeps the fail-and-drop path. }
+      Attempt := 0;
+      RetryWaitedMs := 0;
+      repeat
+        RequestId := FStore.BeginRequest(TurnId, FClient.Model,
+          Length(Request.Messages));
+        StartMs := GetTickCount64;
+        Outcome := Default(TRequestOutcome);
+        { Time the response's phases; the timed callbacks forward to AEvents. }
+        FTimedEvents := AEvents;
+        FReasonStartMs := 0;
+        FContentStartMs := 0;
+        FReasoningMs := 0;
+        FContentMs := 0;
+
+        { The client consults the same check mid-stream, so a cancel aborts the
+          request itself rather than waiting for the provider to finish. }
+        FClient.CancelCheck := FCancel;
+        Ok := FClient.Complete(Request, OnTimedText, OnTimedReasoning,
+          ChatResult, AError);
+        if Ok then
+          Break;
+
         Outcome.Ok := False;
         Outcome.ErrorCode := AError.Code;
         Outcome.ErrorMessage := AError.Message;
         Outcome.ErrorDetail := AError.Detail;
         Outcome.DurationMs := Int64(GetTickCount64 - StartMs);
         FStore.FinishRequest(RequestId, Outcome);
+
+        if AError.Code = leCancelled then
+          Break;
+        if (not IsRetryable(AError)) or (Attempt >= FConfig.RetryMaxAttempts) then
+          Break;
+        if (FReasonStartMs <> 0) or (FContentStartMs <> 0) then
+          Break;   { partial output: do not retry }
+
+        Delay := Random(RetryBackoffMs(Attempt, FConfig.RetryBaseMs,
+          FConfig.RetryMaxMs) + 1);
+        if RetryWaitedMs + Delay > FConfig.RetryBudgetMs then
+          Delay := FConfig.RetryBudgetMs - RetryWaitedMs;
+        if Delay < 0 then
+          Delay := 0;
+        if (Delay > 0) and SleepCancellable(Delay) then
+        begin
+          { The operator interrupted during the wait: report a cancel. }
+          AError := AgentError(leCancelled, 'cancelled', '');
+          Break;
+        end;
+        Inc(RetryWaitedMs, Delay);
+        Inc(Attempt);
+      until False;
+
+      if not Ok then
+      begin
         if (AError.Code = leCancelled) and (not Committed) then
         begin
           FStore.DropTurnMessages(TurnId);
           FLastTurnDropped := True;
         end;
-        FailTurn(AError.Code, AError.Message, AError.Detail, '');
+        if Attempt > 0 then
+          FailTurn(AError.Code,
+            AError.Message + ' after ' + IntToStr(Attempt + 1) + ' attempts',
+            AError.Detail, '')
+        else
+          FailTurn(AError.Code, AError.Message, AError.Detail, '');
         Exit(False);
       end;
 

@@ -167,6 +167,8 @@ type
     function BuildLoopRecording(AMaxContinuations: Integer = 0): TRecordingStore;
     function BuildLoopBudget(ASoft, AHard, AStep,
       AMaxContext: Integer): TRecordingStore;
+    function BuildLoopRetry(const APrompt: string;
+      AMaxIters, AMaxAttempts: Integer): TAgentLoop;
     function MessageCount(const ABody: string): Integer;
     function RoleAt(const ABody: string; AIndex: Integer): string;
     function ToolCallIdAt(const ABody: string; AIndex: Integer): string;
@@ -225,6 +227,10 @@ type
     procedure TestQueuedAmbientDrainsAsAmbient;
     procedure TestSendAmbientStartsWithoutUserMessage;
     procedure TestPrewrappedUserMessagesAreNotWrappedAgain;
+    procedure TestRetryBackoffIsExponentialAndCapped;
+    procedure TestRetryOnNetworkThenSucceed;
+    procedure TestRetryExhaustionReportsAttempts;
+    procedure TestRetryDisabledWhenNegative;
     procedure TestSendAmbientDrainsQueuedAmbient;
     procedure TestRegistrationAddsRequiredReasonParam;
     procedure TestRegistrationPreservesExistingParams;
@@ -608,6 +614,37 @@ begin
   { Give the budget headroom so most tests never hit an interception. }
   ACfg.SoftToolLimit := AMaxIters;
   ACfg.HardToolLimit := AMaxIters + 1;
+  { Retry is exercised by BuildLoopRetry; here it would only add delay. }
+  ACfg.RetryMaxAttempts := -1;
+  FLoop := TAgentLoop.Create(FClient, FStore, FTools, ACfg);
+  Result := FLoop;
+end;
+
+function TAgentLoopTest.BuildLoopRetry(const APrompt: string;
+  AMaxIters, AMaxAttempts: Integer): TAgentLoop;
+var
+  Cfg: TLLMConfig;
+  ACfg: TAgentConfig;
+begin
+  Cfg.Endpoint := 'https://example.test/v1/chat/completions';
+  Cfg.Model := 'm';
+  Cfg.ApiKey := 'k';
+  Cfg.ConnectTimeoutMs := 1000;
+  Cfg.ReadTimeoutMs := 5000;
+  FFake := TFakeTransport.Create;
+  FClient := TLLMClient.Create(Cfg, FFake);
+  FStore := TMemoryConversationStore.Create;
+  FTools := TToolRegistry.Create;
+  FFailTools := TFailTools.Create;
+  ACfg := Default(TAgentConfig);
+  ACfg.SystemPrompt := APrompt;
+  ACfg.SoftToolLimit := AMaxIters;
+  ACfg.HardToolLimit := AMaxIters + 1;
+  ACfg.RetryMaxAttempts := AMaxAttempts;
+  { A 1 ms base keeps the backoff out of the test's wall clock. }
+  ACfg.RetryBaseMs := 1;
+  ACfg.RetryMaxMs := 2;
+  ACfg.RetryBudgetMs := 1000;
   FLoop := TAgentLoop.Create(FClient, FStore, FTools, ACfg);
   Result := FLoop;
 end;
@@ -997,6 +1034,55 @@ begin
   AssertFalse('a plain turn', IsPrewrappedUserMessage('fix the modal'));
   AssertFalse('a mid-text mention',
     IsPrewrappedUserMessage('see the <handoff> docs'));
+end;
+
+procedure TAgentLoopTest.TestRetryBackoffIsExponentialAndCapped;
+begin
+  AssertEquals('base', 500, RetryBackoffMs(0, 500, 10000));
+  AssertEquals('doubles', 1000, RetryBackoffMs(1, 500, 10000));
+  AssertEquals('quadruples', 2000, RetryBackoffMs(2, 500, 10000));
+  AssertEquals('capped', 10000, RetryBackoffMs(10, 500, 10000));
+  AssertEquals('no base, no wait', 0, RetryBackoffMs(3, 0, 10000));
+end;
+
+procedure TAgentLoopTest.TestRetryOnNetworkThenSucceed;
+var
+  Answer: string;
+  Err: TLLMError;
+begin
+  BuildLoopRetry('', 8, 3);
+  FFake.NetworkFailuresLeft := 2;
+  FFake.AddResponse([TextDelta('recovered'), FinishFrame('stop'), DoneFrame]);
+  AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
+  AssertEquals('the retry succeeded', 'recovered', Answer);
+  AssertEquals('three attempts were made', 3, FFake.Calls);
+end;
+
+procedure TAgentLoopTest.TestRetryExhaustionReportsAttempts;
+var
+  Answer: string;
+  Err: TLLMError;
+begin
+  BuildLoopRetry('', 8, 2);
+  FFake.NetworkFailuresLeft := 99;
+  AssertFalse('send fails', FLoop.Send('go', nil, Answer, Err));
+  AssertEquals('network code', Ord(leNetwork), Ord(Err.Code));
+  AssertEquals('the message counts the attempts',
+    'network error after 3 attempts', Err.Message);
+  AssertEquals('the cause is carried', 'simulated network failure', Err.Detail);
+  AssertEquals('three attempts were made', 3, FFake.Calls);
+end;
+
+procedure TAgentLoopTest.TestRetryDisabledWhenNegative;
+var
+  Answer: string;
+  Err: TLLMError;
+begin
+  BuildLoopRetry('', 8, -1);
+  FFake.NetworkFailuresLeft := 99;
+  AssertFalse('send fails', FLoop.Send('go', nil, Answer, Err));
+  AssertEquals('one attempt only', 1, FFake.Calls);
+  AssertEquals('no attempt count in the message', 'network error', Err.Message);
 end;
 
 procedure TAgentLoopTest.TestSendAmbientStartsWithoutUserMessage;

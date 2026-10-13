@@ -81,6 +81,8 @@ type
     procedure TestRequestAsksForUsage;
     procedure TestClientExposesResolvedModel;
     procedure TestErrorText;
+    procedure TestIsRetryable;
+    procedure TestOperatorPhrase;
   end;
 
 implementation
@@ -994,6 +996,50 @@ begin
   AssertEquals('message and cause', 'network error: DNS failed',
     ErrorText('network error', 'DNS failed'));
   AssertEquals('whitespace is no cause', 'boom', ErrorText('boom', '   '));
+end;
+
+procedure TLLMClientTest.TestIsRetryable;
+var
+  E: TLLMError;
+begin
+  E := Default(TLLMError);
+  E.Code := leNetwork;
+  AssertTrue('network', IsRetryable(E));
+  E.Code := leRateLimit;
+  AssertTrue('rate limit', IsRetryable(E));
+  E.Code := leHttpStatus;
+  E.Status := 500;
+  AssertTrue('500', IsRetryable(E));
+  E.Status := 503;
+  AssertTrue('503', IsRetryable(E));
+  E.Status := 599;
+  AssertTrue('599', IsRetryable(E));
+  E.Status := 400;
+  AssertFalse('400', IsRetryable(E));
+  E.Status := 404;
+  AssertFalse('404', IsRetryable(E));
+  E.Code := leAuth;
+  AssertFalse('auth', IsRetryable(E));
+  E.Code := leConfig;
+  AssertFalse('config', IsRetryable(E));
+  E.Code := leProvider;
+  AssertFalse('provider', IsRetryable(E));
+  E.Code := leMalformedStream;
+  AssertFalse('malformed', IsRetryable(E));
+  E.Code := leCancelled;
+  AssertFalse('cancelled', IsRetryable(E));
+  E.Code := leLoop;
+  AssertFalse('loop', IsRetryable(E));
+  E.Code := leTruncated;
+  AssertFalse('truncated', IsRetryable(E));
+end;
+
+procedure TLLMClientTest.TestOperatorPhrase;
+begin
+  AssertEquals('network', 'network error', OperatorPhrase(leNetwork));
+  AssertEquals('rate limit', 'rate limited', OperatorPhrase(leRateLimit));
+  AssertEquals('auth', 'authentication failed', OperatorPhrase(leAuth));
+  AssertEquals('provider', 'provider error', OperatorPhrase(leProvider));
 end;
 
 initialization
