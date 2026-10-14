@@ -130,14 +130,15 @@ spying, and is restored on leave).
 
 ## Out of scope (documented, not built)
 
-- The spy-mode **Abort/Release actions bar** (deferred from the sidebar v1) - the
-  operator aborts/releases through the parent agent or the CLI.
+- ~~The spy-mode **Abort/Release actions bar**~~ - **delivered** (`Subagent_Spy_v2`
+  follow-up): the compose gives way to a reusable CTA actions bar (`TActionsBar`)
+  with `a abort` / `r release` / `esc leave`.
 - **Driving** the child from the spy (type / approve) - the spy is observe-only.
 - A **separate pane/scrollback** for the spy - v2 takes over the panel.
-- Depth > 1 and the tree sidebar.
 
 ## Future considerations
 
-- The Abort/Release actions bar.
+- A **read-only view of any session** (not just a child) reusing the same take-over
+  + actions-bar machinery (the panel mode is already generic).
 - A spy that follows the child's *turn boundary* with the parent's dividers.
 - Sidebar-driven child driving (type/approve in spy mode).

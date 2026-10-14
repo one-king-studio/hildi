@@ -128,4 +128,11 @@ green (1317 tests, leak-clean).
   so the spy state machine is testable without a live child socket; the real
   socket path stays covered by `TSubagentSpyTest`.
 
-Deferred (unchanged): the spy-mode Abort/Release actions bar, and the live smoke.
+Deferred (unchanged): the live smoke.
+
+**Follow-up (delivered): the spy's Abort/Release actions bar.** The compose gives
+way to a CTA actions bar while spying (`a abort`, `r release`, `esc leave`);
+Abort/Release route through the parent driver. The bar is a new **reusable**
+widget (`hildegard.helper.tui.actions`, `TActionsBar`), and the chat panel swaps
+compose <-> actions (`SetActionsMode`), so the same take-over + CTA machinery can
+back a read-only view of **any** session, not only a subagent spy.
