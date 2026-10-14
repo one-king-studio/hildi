@@ -17,7 +17,7 @@ unit hildegard.helper.approval;
 interface
 
 uses
-  SysUtils;
+  SysUtils, SyncObjs;
 
 type
   TApprovalScope = (asGlobal, asWorkspace, asSession);
@@ -123,18 +123,34 @@ type
     function Remove(const ARule: TApprovalRule; out AError: string): Boolean;
   end;
 
-  { Orchestrates matching, prompting, and persistence. }
+  { Orchestrates matching, prompting, and persistence.
+
+    Safe for concurrent calls (a parallel tool batch). The rule set is a shared
+    snapshot guarded briefly by FDecisionLock; a caller whose subject is already
+    allowed reads the snapshot and returns without ever touching FPromptLock, so
+    it is not blocked by a sibling that is prompting. Prompts are serialized by
+    FPromptLock (one dialog at a time), and each prompter re-checks the snapshot
+    first, so a rule granted by one call is seen by the next and the operator is
+    not asked twice for it. }
   TApprovalService = class(TInterfacedObject, IApprovalService)
   private
     FStore: IApprovalStore;
     FPrompt: TApprovalPrompt;
     FContext: TApprovalContext;
+    FDecisionLock: TCriticalSection;
+    FPromptLock: TCriticalSection;
+    { The rule snapshot. Guarded by FDecisionLock for every read and write; a
+      prompter never holds FDecisionLock while the prompt is up. }
+    FRules: TApprovalRuleArray;
     function ApplyChoice(const ARule: TApprovalRule;
       const AChoice: TApprovalChoice; out AApplied: TApprovalRule;
       out AError: string): Boolean;
+    { Decide ASubject against the current snapshot. FDecisionLock must be held. }
+    function DecideLocked(const ASubject: TApprovalSubject): TApprovalDecision;
   public
     constructor Create(AStore: IApprovalStore; APrompt: TApprovalPrompt;
       const AContext: TApprovalContext);
+    destructor Destroy; override;
     function Resolve(const AAsks: TApprovalAskArray;
       out AResult: TApprovalBatchResult): Boolean;
   end;
@@ -311,6 +327,148 @@ begin
   FStore := AStore;
   FPrompt := APrompt;
   FContext := AContext;
+  FDecisionLock := TCriticalSection.Create;
+  FPromptLock := TCriticalSection.Create;
+  FRules := nil;
+end;
+
+destructor TApprovalService.Destroy;
+begin
+  FPromptLock.Free;
+  FDecisionLock.Free;
+  inherited Destroy;
+end;
+
+function TApprovalService.DecideLocked(
+  const ASubject: TApprovalSubject): TApprovalDecision;
+begin
+  Result := Decide(FRules, ASubject);
+end;
+
+function TApprovalService.Resolve(const AAsks: TApprovalAskArray;
+  out AResult: TApprovalBatchResult): Boolean;
+var
+  LoadErr, SaveErr: string;
+  I: Integer;
+  Decision: TApprovalDecision;
+  Choice: TApprovalChoice;
+  Option: TApprovalOption;
+  Applied: TApprovalRule;
+begin
+  AResult := Default(TApprovalBatchResult);
+  if FStore = nil then
+  begin
+    AResult.Denied := True;
+    AResult.Reason := 'no approval store';
+    Exit(False);
+  end;
+
+  { Load the rule set (the store is the source of truth) and deny-first scan it.
+    The lock is held only for the load + scan, never across a prompt. }
+  FDecisionLock.Acquire;
+  try
+    if not FStore.Load(FContext, FRules, LoadErr) then
+    begin
+      AResult.Denied := True;
+      AResult.Reason := 'approval store error: ' + LoadErr;
+      Exit(False);
+    end;
+    for I := 0 to High(AAsks) do
+      if DecideLocked(AAsks[I].Subject) = adDeny then
+      begin
+        AResult.Denied := True;
+        AResult.Reason := 'denied by policy: ' + AAsks[I].Summary;
+        Exit(True);
+      end;
+  finally
+    FDecisionLock.Release;
+  end;
+
+  for I := 0 to High(AAsks) do
+  begin
+    { A fast path: an already-allowed subject returns without touching
+      FPromptLock, so it is not blocked behind a sibling that is prompting. }
+    FDecisionLock.Acquire;
+    try
+      Decision := DecideLocked(AAsks[I].Subject);
+    finally
+      FDecisionLock.Release;
+    end;
+
+    if Decision = adAllow then
+      Continue;
+
+    { This call must prompt. Serialize prompts so one dialog is up at a time. }
+    FPromptLock.Acquire;
+    try
+      { Re-check against a fresh load: a sibling may have just granted a rule
+        covering this subject, in which case the operator is not asked again. }
+      FDecisionLock.Acquire;
+      try
+        FStore.Load(FContext, FRules, LoadErr);
+        Decision := DecideLocked(AAsks[I].Subject);
+      finally
+        FDecisionLock.Release;
+      end;
+
+      if Decision = adAllow then
+        Continue;
+
+      Choice := Default(TApprovalChoice);
+      if not Assigned(FPrompt) then
+      begin
+        AResult.Denied := True;
+        AResult.Reason := 'denied: no approver available for ' +
+          AAsks[I].Summary;
+        Exit(True);
+      end;
+      Choice := FPrompt(AAsks[I]);
+      if not Choice.Allowed then
+      begin
+        AResult.Denied := True;
+        { A timeout is not an operator decision: say so, so the operator is not
+          blamed for a call no one answered. }
+        if Choice.TimedOut then
+          AResult.Reason := 'approval timed out (no operator response): ' +
+            AAsks[I].Summary
+        else
+          AResult.Reason := 'denied by operator: ' + AAsks[I].Summary;
+        Exit(True);
+      end;
+
+      if not FindOption(AAsks[I], Choice.OptionKey, Option) then
+      begin
+        AResult.Denied := True;
+        AResult.Reason := 'invalid approval option: ' + Choice.OptionKey;
+        Exit(False);
+      end;
+      { Persist and publish the grant atomically under the decision lock, so a
+        concurrent sibling's Load/Decide cannot race the store write. The lock
+        is NOT held during the prompt above, so a no-prompt sibling still runs
+        freely; only this brief section is serialized. }
+      if Option.Persists then
+      begin
+        FDecisionLock.Acquire;
+        try
+          if not ApplyChoice(Option.Rule, Choice, Applied, SaveErr) then
+          begin
+            AResult.Denied := True;
+            AResult.Reason := 'could not persist approval: ' + SaveErr;
+            Exit(False);
+          end;
+          SetLength(FRules, Length(FRules) + 1);
+          FRules[High(FRules)] := Applied;
+        finally
+          FDecisionLock.Release;
+        end;
+      end;
+    finally
+      FPromptLock.Release;
+    end;
+  end;
+
+  AResult.Allowed := True;
+  Result := True;
 end;
 
 function TApprovalService.ApplyChoice(const ARule: TApprovalRule;
@@ -328,86 +486,6 @@ begin
   if AApplied.Scope = asSession then
     AApplied.SessionId := FContext.SessionId;
   Result := FStore.Save(AApplied, AError);
-end;
-
-function TApprovalService.Resolve(const AAsks: TApprovalAskArray;
-  out AResult: TApprovalBatchResult): Boolean;
-var
-  Rules: TApprovalRuleArray;
-  LoadErr, SaveErr: string;
-  I: Integer;
-  Decision: TApprovalDecision;
-  Choice: TApprovalChoice;
-  Option: TApprovalOption;
-  Applied: TApprovalRule;
-begin
-  AResult := Default(TApprovalBatchResult);
-  if FStore = nil then
-  begin
-    AResult.Denied := True;
-    AResult.Reason := 'no approval store';
-    Exit(False);
-  end;
-  if not FStore.Load(FContext, Rules, LoadErr) then
-  begin
-    AResult.Denied := True;
-    AResult.Reason := 'approval store error: ' + LoadErr;
-    Exit(False);
-  end;
-
-  { Deny-first pre-scan: never prompt when something is denied. }
-  for I := 0 to High(AAsks) do
-    if Decide(Rules, AAsks[I].Subject) = adDeny then
-    begin
-      AResult.Denied := True;
-      AResult.Reason := 'denied by policy: ' + AAsks[I].Summary;
-      Exit(True);
-    end;
-
-  for I := 0 to High(AAsks) do
-  begin
-    Decision := Decide(Rules, AAsks[I].Subject);
-    if Decision = adAllow then
-      Continue;
-
-    Choice := Default(TApprovalChoice);
-    if Assigned(FPrompt) then
-      Choice := FPrompt(AAsks[I]);
-    if not Choice.Allowed then
-    begin
-      AResult.Denied := True;
-      { A timeout is not an operator decision: say so, so the operator is not
-        blamed for a call no one answered. }
-      if Choice.TimedOut then
-        AResult.Reason := 'approval timed out (no operator response): ' +
-          AAsks[I].Summary
-      else
-        AResult.Reason := 'denied by operator: ' + AAsks[I].Summary;
-      Exit(True);
-    end;
-
-    if not FindOption(AAsks[I], Choice.OptionKey, Option) then
-    begin
-      AResult.Denied := True;
-      AResult.Reason := 'invalid approval option: ' + Choice.OptionKey;
-      Exit(False);
-    end;
-    if Option.Persists then
-    begin
-      if not ApplyChoice(Option.Rule, Choice, Applied, SaveErr) then
-      begin
-        AResult.Denied := True;
-        AResult.Reason := 'could not persist approval: ' + SaveErr;
-        Exit(False);
-      end;
-      { Make the new rule visible to later asks in this batch. }
-      SetLength(Rules, Length(Rules) + 1);
-      Rules[High(Rules)] := Applied;
-    end;
-  end;
-
-  AResult.Allowed := True;
-  Result := True;
 end;
 
 end.

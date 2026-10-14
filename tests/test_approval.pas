@@ -7,7 +7,7 @@ unit test_approval;
 interface
 
 uses
-  SysUtils, fpcunit, testregistry, hildegard.helper.approval,
+  Classes, SysUtils, SyncObjs, fpcunit, testregistry, hildegard.helper.approval,
   hildegard.helper.approval.store, hildegard.helper.store;
 
 type
@@ -21,6 +21,39 @@ type
     Calls: Integer;
     LastSummary: string;
     function Prompt(const AAsk: TApprovalAsk): TApprovalChoice;
+  end;
+
+  { A prompt that blocks until the test releases it, so a second (no-prompt)
+    resolve can be observed running concurrently. }
+  TBlockingPrompt = class
+  private
+    FEntered: TSimpleEvent;
+    FRelease: TSimpleEvent;
+  public
+    Allowed: Boolean;
+    OptionKey: string;
+    Calls: Integer;
+    constructor Create;
+    destructor Destroy; override;
+    function Prompt(const AAsk: TApprovalAsk): TApprovalChoice;
+    function WaitEntered(ATimeoutMs: Integer): Boolean;
+    procedure Release;
+  end;
+
+  { Runs one Resolve on its own thread, so concurrent resolution is exercisable.
+    The service is a shared interface ref held by the test. }
+  TResolveThread = class(TThread)
+  private
+    FSvc: IApprovalService;
+    FAsks: TApprovalAskArray;
+  public
+    Done: Boolean;
+    Allowed: Boolean;
+    Denied: Boolean;
+    Reason: string;
+    constructor Create(const ASvc: IApprovalService;
+      const AAsks: TApprovalAskArray);
+    procedure Execute; override;
   end;
 
   TApprovalTest = class(TTestCase)
@@ -63,12 +96,68 @@ type
     procedure TestStoreFiltersByContext;
     procedure TestChildResolvesAgainstRootScope;
     procedure TestGrantForOneChildAppliesToSibling;
+    procedure TestConcurrentResolveDoesNotDoublePrompt;
+    procedure TestNoPromptResolveIsNotBlockedByAPromptingSibling;
   protected
     procedure SetUp; override;
     procedure TearDown; override;
   end;
 
 implementation
+
+constructor TResolveThread.Create(const ASvc: IApprovalService;
+  const AAsks: TApprovalAskArray);
+begin
+  inherited Create(True);
+  FreeOnTerminate := False;
+  FSvc := ASvc;
+  FAsks := AAsks;
+end;
+
+procedure TResolveThread.Execute;
+var
+  Batch: TApprovalBatchResult;
+begin
+  FSvc.Resolve(FAsks, Batch);
+  Allowed := Batch.Allowed;
+  Denied := Batch.Denied;
+  Reason := Batch.Reason;
+  Done := True;
+end;
+
+constructor TBlockingPrompt.Create;
+begin
+  inherited Create;
+  FEntered := TSimpleEvent.Create;
+  FRelease := TSimpleEvent.Create;
+end;
+
+destructor TBlockingPrompt.Destroy;
+begin
+  FRelease.Free;
+  FEntered.Free;
+  inherited Destroy;
+end;
+
+function TBlockingPrompt.Prompt(const AAsk: TApprovalAsk): TApprovalChoice;
+begin
+  Inc(Calls);
+  FEntered.SetEvent;              // signal the test that the prompt is up
+  FRelease.WaitFor(INFINITE);     // block until the test releases it
+  Result := Default(TApprovalChoice);
+  Result.Allowed := Allowed;
+  Result.OptionKey := OptionKey;
+end;
+
+function TBlockingPrompt.WaitEntered(ATimeoutMs: Integer): Boolean;
+begin
+  Result := FEntered.WaitFor(ATimeoutMs) <> wrTimeout;
+end;
+
+procedure TBlockingPrompt.Release;
+begin
+  FRelease.SetEvent;
+end;
 
 procedure TApprovalTest.SetUp;
 begin
@@ -640,6 +729,107 @@ begin
     AssertTrue('child B resolved', SvcB.Resolve(Asks, Result_));
     AssertTrue('child B allowed from the shared grant', Result_.Allowed);
     AssertEquals('no extra prompt for the sibling', 1, Prompt.Calls);
+  finally
+    Prompt.Free;
+  end;
+end;
+
+procedure TApprovalTest.TestConcurrentResolveDoesNotDoublePrompt;
+var
+  Store: IApprovalStore;
+  Prompt: TBlockingPrompt;
+  Svc: IApprovalService;
+  Asks: TApprovalAskArray;
+  T1, T2: TResolveThread;
+begin
+  { Two concurrent resolutions of the same subject, both needing a prompt. The
+    first prompts and (on grant) persists a rule; the second must see that rule
+    after acquiring the prompt lock and NOT prompt again. }
+  Store := TMemoryApprovalStore.Create;
+  Prompt := TBlockingPrompt.Create;
+  try
+    Prompt.Allowed := True;
+    Prompt.OptionKey := 'any';
+    Svc := TApprovalService.Create(Store, Prompt.Prompt,
+      Default(TApprovalContext));
+    SetLength(Asks, 1);
+    Asks[0] := Ask('run_command:cat', 'cat a', [],
+      [Option('any', 'always', True, 'run_command:cat', [], True)]);
+
+    T1 := TResolveThread.Create(Svc, Asks);
+    T2 := TResolveThread.Create(Svc, Asks);
+    T1.Start;
+    { Wait until T1 is inside the prompt. }
+    AssertTrue('first prompt entered', Prompt.WaitEntered(2000));
+    T2.Start;
+    { Let T2 reach the prompt lock (it will block behind T1). }
+    Sleep(50);
+
+    { Release T1's prompt; both should now complete. }
+    Prompt.Release;
+    T1.WaitFor;
+    T2.WaitFor;
+
+    AssertTrue('T1 allowed', T1.Allowed);
+    AssertTrue('T2 allowed', T2.Allowed);
+    AssertEquals('prompted exactly once (no double-prompt)', 1, Prompt.Calls);
+
+    T1.Free;
+    T2.Free;
+  finally
+    Prompt.Free;
+  end;
+end;
+
+procedure TApprovalTest.TestNoPromptResolveIsNotBlockedByAPromptingSibling;
+var
+  Store: IApprovalStore;
+  Prompt: TBlockingPrompt;
+  Svc: IApprovalService;
+  GatedAsks, AllowedAsks: TApprovalAskArray;
+  T1, T2: TResolveThread;
+  R: TApprovalRule;
+  Err: string;
+begin
+  { One resolve prompts and blocks; a second resolve whose subject is already
+    allowed must complete while the first is still waiting on the operator. This
+    is the whole point: approval must not head-of-line block cleared work. }
+  Store := TMemoryApprovalStore.Create;
+  R := Rule(aeAllow, asGlobal, 0, '', 'file:read', [], True);
+  Store.Save(R, Err);
+  Prompt := TBlockingPrompt.Create;
+  try
+    Prompt.Allowed := True;
+    Prompt.OptionKey := 'any';
+    Svc := TApprovalService.Create(Store, Prompt.Prompt,
+      Default(TApprovalContext));
+
+    { The gated ask (no matching rule) and the already-allowed ask. }
+    SetLength(GatedAsks, 1);
+    GatedAsks[0] := Ask('run_command:rm', 'rm -rf', [],
+      [Option('any', 'always', True, 'run_command:rm', [], True)]);
+    SetLength(AllowedAsks, 1);
+    AllowedAsks[0] := Ask('file:read', 'read x', [],
+      [Option('once', 'once', False, 'file:read', [], False)]);
+
+    T1 := TResolveThread.Create(Svc, GatedAsks);
+    T1.Start;
+    AssertTrue('gated prompt entered', Prompt.WaitEntered(2000));
+
+    { While T1 is blocked in the prompt, T2 (allowed) must finish. }
+    T2 := TResolveThread.Create(Svc, AllowedAsks);
+    T2.Start;
+    T2.WaitFor;
+    AssertTrue('the allowed call completed while the sibling prompted',
+      T2.Allowed);
+    AssertFalse('the gated call is still waiting', T1.Done);
+
+    Prompt.Release;
+    T1.WaitFor;
+    AssertTrue('the gated call then completed', T1.Allowed);
+
+    T1.Free;
+    T2.Free;
   finally
     Prompt.Free;
   end;
