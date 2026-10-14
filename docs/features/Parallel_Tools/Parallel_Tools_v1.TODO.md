@@ -14,14 +14,14 @@ output streamed live, per call. TDD-first; `make check` before moving on.
 
 ### Phase 1: The concurrent gate (`hildegard.helper.harness.turn`)
 
-- [ ] **Test**: two concurrent `Ask`s both receive their own answer; answering #2
+- [x] **Test**: two concurrent `Ask`s both receive their own answer; answering #2
       releases #2 and leaves #1 waiting (`test_harness_turn`).
-- [ ] **Implement**: replace the single pending ask with a per-ask registry
+- [x] **Implement**: replace the single pending ask with a per-ask registry
       (id -> event + choice); `Ask` registers, posts, waits on its own event.
-- [ ] **Test**: a timeout denies only the timed-out ask; `CancelAll` denies every
+- [x] **Test**: a timeout denies only the timed-out ask; `CancelAll` denies every
       outstanding ask.
-- [ ] **Implement**: `CancelAll`; per-ask timeout.
-- [ ] **Test**: `Answer` for an unknown id is a no-op (late/duplicate answer).
+- [x] **Implement**: `CancelAll`; per-ask timeout.
+- [x] **Test**: `Answer` for an unknown id is a no-op (late/duplicate answer).
 
 ### Phase 2: Serialize the permission decision (`hildegard.helper.approval`)
 
