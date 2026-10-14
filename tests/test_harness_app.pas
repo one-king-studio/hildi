@@ -55,6 +55,24 @@ type
     procedure AfterChunk(Sender: TObject);
   end;
 
+  { Records subagent commands, so the spy's abort/release path is observable
+    (the local driver's are no-ops). Everything else is inert. }
+  TRecordingDriver = class(TInterfacedObject, ISessionDriver)
+  public
+    AbortedId: string;
+    ReleasedId: string;
+    procedure StartTurn(const AText: string);
+    procedure QueuePrompt(const AText: string);
+    procedure Interrupt;
+    procedure AnswerAsk(const AAskRef: string; const AChoice: TApprovalChoice);
+    procedure AbortSubagent(const ASessionId: string);
+    procedure ReleaseSubagent(const ASessionId: string);
+    procedure Checkpoint;
+    function PopEvent(out AEvent: TTurnEvent): Boolean;
+    function Dropped: Int64;
+    procedure Close;
+  end;
+
   THarnessAppTest = class(TTestCase)
   private
     FDir: string;
@@ -75,6 +93,7 @@ type
       the queue the test pushes child events onto. }
     FSpyOpens: Integer;
     FSpyQueue: TTurnQueue;
+    FRecording: TRecordingDriver;
     function OpenStubSpy(const ASessionId: string;
       const AConfig: TSessionClientConfig; out AError: string): TSubagentSpy;
     function SwitchTo(const ASessionId: string; out ASession: TSessionView;
@@ -146,6 +165,7 @@ type
     procedure TestSpyEscapeRestoresTheParent;
     procedure TestSpySuppressesParentEvents;
     procedure TestSpyUnknownChildIsAnError;
+    procedure TestSpyActionsBarAbortsAndReleases;
     procedure TestThinkingStateDuringATurn;
     procedure TestReasoningSettlesIntoAThoughtBlock;
     procedure TestReadyStateAfterATurn;
@@ -217,6 +237,52 @@ begin
   FFake.FailNetwork := True;
 end;
 
+procedure TRecordingDriver.StartTurn(const AText: string);
+begin
+end;
+
+procedure TRecordingDriver.QueuePrompt(const AText: string);
+begin
+end;
+
+procedure TRecordingDriver.Interrupt;
+begin
+end;
+
+procedure TRecordingDriver.AnswerAsk(const AAskRef: string;
+  const AChoice: TApprovalChoice);
+begin
+end;
+
+procedure TRecordingDriver.AbortSubagent(const ASessionId: string);
+begin
+  AbortedId := ASessionId;
+end;
+
+procedure TRecordingDriver.ReleaseSubagent(const ASessionId: string);
+begin
+  ReleasedId := ASessionId;
+end;
+
+procedure TRecordingDriver.Checkpoint;
+begin
+end;
+
+function TRecordingDriver.PopEvent(out AEvent: TTurnEvent): Boolean;
+begin
+  AEvent := Default(TTurnEvent);
+  Result := False;
+end;
+
+function TRecordingDriver.Dropped: Int64;
+begin
+  Result := 0;
+end;
+
+procedure TRecordingDriver.Close;
+begin
+end;
+
 { THarnessAppTest }
 
 procedure THarnessAppTest.SetUp;
@@ -228,6 +294,7 @@ begin
   FSwitchSessions := nil;
   FSpyOpens := 0;
   FSpyQueue := nil;
+  FRecording := nil;
 end;
 
 procedure THarnessAppTest.TearDown;
@@ -2141,6 +2208,50 @@ begin
   FApp.Step;
   AssertEquals('not in spy mode', '', FApp.SpiedSessionId);
   AssertTrue('the error is shown', FindText(ckError, 'could not open'));
+end;
+
+procedure THarnessAppTest.TestSpyActionsBarAbortsAndReleases;
+var
+  Store: TSqliteStore;
+  StoreCfg: TStoreConfig;
+  StoreErr: TStoreError;
+  WorkspaceId: Integer;
+  ChildId: string;
+begin
+  { In spy mode the compose gives way to the actions bar; pressing 'a' aborts and
+    'r' releases the child through the driver. }
+  BuildWithStore;
+  StoreCfg := Default(TStoreConfig);
+  StoreCfg.DatabasePath := FStorePath;
+  StoreCfg.BusyTimeoutMs := 5000;
+  Store := TSqliteStore.Create(StoreCfg);
+  try
+    AssertTrue('open store', Store.Open(StoreErr));
+    Store.EnsureWorkspace(FDir, WorkspaceId, StoreErr);
+    Store.CreateChildSession(WorkspaceId, FSession.View.SessionId, 1, 'child',
+      ChildId, StoreErr);
+  finally
+    Store.Free;
+  end;
+
+  { A driver that records the subagent commands (the local one is a no-op). }
+  FRecording := TRecordingDriver.Create;
+  FApp.Attach(FSession.View, FRecording);
+
+  FApp.OnSpyFactory := OpenStubSpy;
+  FSpyQueue := TTurnQueue.Create;
+  FApp.ShowSpy(ChildId);
+  FApp.Step;
+
+  AssertTrue('the actions bar replaces the compose', FApp.Panel.ActionsMode);
+
+  FInput.Push(Ch('a'));
+  FApp.Step;
+  AssertEquals('abort reached the driver', ChildId, FRecording.AbortedId);
+
+  FInput.Push(Ch('r'));
+  FApp.Step;
+  AssertEquals('release reached the driver', ChildId, FRecording.ReleasedId);
 end;
 
 { TUI Startup: the connect lifecycle. }

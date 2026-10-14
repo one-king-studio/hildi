@@ -20,7 +20,8 @@ uses
   hildegard.helper.tui.text, hildegard.helper.tui.panel,
   hildegard.helper.tui.theme, hildegard.helper.tui.chat,
   hildegard.helper.tui.grapheme,
-  hildegard.helper.tui.compose, hildegard.helper.tui.palette;
+  hildegard.helper.tui.compose, hildegard.helper.tui.palette,
+  hildegard.helper.tui.actions;
 
 type
   { What the run is doing, shown at the left of the toolbar. psThinking and
@@ -37,6 +38,10 @@ type
     FStateBlock: TTextBlock;
     FHintsBlock: TTextBlock;
     FCompose: TComposeBox;
+    { The alternate bottom panel for a read-only mode (spying): a CTA strip that
+      replaces the compose. Nil until SetActionsMode(True). }
+    FActions: TActionsBar;
+    FActionsMode: Boolean;
     FPalette: TCommandPalette;
     FPaletteActive: Boolean;
     FStatus: TTextBlock;
@@ -96,6 +101,11 @@ type
     procedure SetComposeActive(AValue: Boolean);
     { The compose's primary-action CTA (send / cancel / none). }
     procedure SetCta(AKind: TCtaKind);
+    { Swap the compose for a CTA actions bar (a read-only view like the spy), or
+      back. The bar's hints and action handler are set on the bar itself. }
+    procedure SetActionsMode(AValue: Boolean);
+    function ActionsMode: Boolean;
+    property Actions: TActionsBar read FActions;
   end;
 
 implementation
@@ -210,6 +220,10 @@ begin
 
   FCompose := TComposeBox.Create(ATheme, AInfo);
 
+  FActions := TActionsBar.Create(ATheme);
+  FActions.Visible := False;
+  FActionsMode := False;
+
   FPalette := TCommandPalette.Create(ATheme);
   FPaletteActive := False;
 
@@ -229,6 +243,7 @@ begin
   ClearAnimation;
   FMessages.Free;
   FCta.Free;
+  FActions.Free;
   FCompose.Free;
   FPalette.Free;
   FStatus.Free;
@@ -256,7 +271,7 @@ end;
 procedure TChatPanel.Arrange(const ABounds: TRect);
 var
   MessagesH, ComposeH, MaxH, ComposeY, ChromeW, ChromeX, PalH: Integer;
-  PalSize: TSize;
+  PalSize, Avail2: TSize;
 begin
   inherited Arrange(ABounds);
   MessagesH := ABounds.H - 1;   { the status line }
@@ -264,13 +279,24 @@ begin
     MessagesH := 1;
 
   { The compose is an overlay: it grows upward over the messages panel, which
-    keeps its full size, so the message content and its scroll do not reflow. }
-  ComposeH := FCompose.NeededHeight(ABounds.W);
-  MaxH := (ABounds.H * MaxComposePercent) div 100;
-  if ComposeH > MaxH then
-    ComposeH := MaxH;
-  if ComposeH < 4 then
-    ComposeH := 4;
+    keeps its full size, so the message content and its scroll do not reflow.
+    In actions mode a fixed-height CTA bar takes the compose's slot. }
+  if FActionsMode then
+  begin
+    Avail2 := Default(TSize);
+    Avail2.W := ABounds.W;
+    Avail2.H := ABounds.H;
+    ComposeH := FActions.Measure(Avail2).H;
+  end
+  else
+  begin
+    ComposeH := FCompose.NeededHeight(ABounds.W);
+    MaxH := (ABounds.H * MaxComposePercent) div 100;
+    if ComposeH > MaxH then
+      ComposeH := MaxH;
+    if ComposeH < 4 then
+      ComposeH := 4;
+  end;
   ComposeY := ABounds.Y + MessagesH - ComposeH;
   if ComposeY < ABounds.Y then
     ComposeY := ABounds.Y;
@@ -299,6 +325,7 @@ begin
   else
     FPalette.Visible := False;
   FCompose.Arrange(Rc(ABounds.X, ComposeY, ABounds.W, ComposeH));
+  FActions.Arrange(Rc(ABounds.X, ComposeY, ABounds.W, ComposeH));
   { The toolbar and the status row share the same inset, so their content lines
     up and neither touches the panel edge. }
   ChromeX := ABounds.X + ChromePad;
@@ -345,6 +372,7 @@ begin
   end;
   FCta.Render(S);
   FCompose.Render(S);
+  FActions.Render(S);
   if FPaletteActive then
     FPalette.Render(S);
   FStatus.Render(S);
@@ -382,7 +410,12 @@ begin
   { When the palette is up, it takes the keys first (Up/Down/Enter/Escape). }
   if FPaletteActive and FPalette.HandleEvent(E) then
     Exit(True);
-  if FCompose.HandleEvent(E) then
+  if FActionsMode then
+  begin
+    if FActions.HandleEvent(E) then
+      Exit(True);
+  end
+  else if FCompose.HandleEvent(E) then
     Exit(True);
   if FMessages.HandleEvent(E) then
     Exit(True);
@@ -502,6 +535,18 @@ end;
 procedure TChatPanel.SetCta(AKind: TCtaKind);
 begin
   FCompose.Cta := AKind;
+end;
+
+procedure TChatPanel.SetActionsMode(AValue: Boolean);
+begin
+  FActionsMode := AValue;
+  FActions.Visible := AValue;
+  FCompose.Visible := not AValue;
+end;
+
+function TChatPanel.ActionsMode: Boolean;
+begin
+  Result := FActionsMode;
 end;
 
 end.

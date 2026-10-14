@@ -26,6 +26,7 @@ uses
   hildegard.helper.harness.stats, hildegard.helper.session,
   hildegard.helper.replymeta,
   hildegard.helper.tui.sessionsmodal,
+  hildegard.helper.tui.actions,
   hildegard.helper.harness.subagent, hildegard.helper.harness.subagent.spy,
   hildegard.helper.tui.sidebar, hildegard.helper.tui.list,
   hildegard.helper.session.protocol, hildegard.helper.session.client;
@@ -191,6 +192,9 @@ type
     function SpyLabel: string;
     { Render the child's transcript tail into the panel (the spy view). }
     procedure RenderSpyHistory(const ASessionId: string);
+    { The spy's CTA actions bar (abort / release / leave). }
+    procedure SetupSpyActions;
+    procedure OnSpyAction(AIndex: Integer);
     procedure DrainSpy;
     procedure SendSubagentCommand(AKind: TSessionCommandKind;
       const ASessionId: string);
@@ -2085,12 +2089,51 @@ begin
   FSidebarShown := False;
   FSidebar.Visible := False;
   FPanel.SetComposeActive(False);
+  { The compose gives way to a CTA actions bar (abort/release/leave). }
+  SetupSpyActions;
   { Rebuild the panel to show the child's transcript (history tail, then its live
     stream), and mark the header so the operator knows whose session this is. }
   ResetWindow;
   RenderSpyHistory(ASessionId);
   FPanel.SetHeader(
     UTF8Encode(TruncateTitle(UnicodeString('spying · ' + SpyLabel), 40)), '');
+end;
+
+procedure THarnessApp.SetupSpyActions;
+var
+  Hints: TActionHintArray;
+begin
+  SetLength(Hints, 3);
+  Hints[0].Key := 'a';
+  Hints[0].Action := ' abort';
+  Hints[1].Key := 'r';
+  Hints[1].Action := ' release';
+  Hints[2].Key := 'esc';
+  Hints[2].Action := ' leave';
+  FPanel.Actions.SetHints(Hints);
+  FPanel.Actions.Label_ := 'subagent';
+  FPanel.Actions.OnAction := OnSpyAction;
+  FPanel.SetActionsMode(True);
+end;
+
+procedure THarnessApp.OnSpyAction(AIndex: Integer);
+begin
+  { Index matches SetupSpyActions: 0 abort, 1 release, 2 leave (esc is the global
+    handler's, so it never reaches here). }
+  case AIndex of
+    0:
+      begin
+        SendSubagentCommand(scAbortSubagent, FSpyId);
+        SetState(psReady, 'subagent aborted');
+      end;
+    1:
+      begin
+        SendSubagentCommand(scReleaseSubagent, FSpyId);
+        SetState(psReady, 'subagent released');
+      end;
+  else
+    ;
+  end;
 end;
 
 function THarnessApp.SpyLabel: string;
@@ -2165,7 +2208,9 @@ begin
   if FSpyId <> '' then
   begin
     FSpyId := '';
+    FPanel.SetActionsMode(False);
     FPanel.SetComposeActive(True);
+    UpdateCta;
     { Restore the parent's transcript (the child's view replaced it) and header. }
     ResetWindow;
     RenderHistory;
