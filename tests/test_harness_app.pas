@@ -18,6 +18,8 @@ uses
   hildegard.helper.harness.view,
   hildegard.helper.harness.driver, hildegard.helper.harness.driver.local,
   hildegard.helper.harness.app,
+  hildegard.helper.harness.subagent.spy,
+  hildegard.helper.session.protocol, hildegard.helper.session.client,
   hildegard.helper.store,
   hildegard.helper.session, llm_fakes;
 
@@ -69,6 +71,12 @@ type
     FSwitchResult: Boolean;
     FSwitchErr: string;
     FSwitchCalls: Integer;
+    { The spy tests: a scripted spy-open (a detached spy over a caller queue) and
+      the queue the test pushes child events onto. }
+    FSpyOpens: Integer;
+    FSpyQueue: TTurnQueue;
+    function OpenStubSpy(const ASessionId: string;
+      const AConfig: TSessionClientConfig; out AError: string): TSubagentSpy;
     function SwitchTo(const ASessionId: string; out ASession: TSessionView;
       out ADriver: ISessionDriver; out AError: string): Boolean;
     procedure Build;
@@ -89,6 +97,8 @@ type
     function DividerSignature: string;
     function ThoughtLabel: string;
     function AssistantEvent(const AText: string): TTurnEvent;
+    function SubagentEvent(const ASubSessionId, ALabel,
+      AStatus: string): TTurnEvent;
     function ApprovalEvent(ARequestId: Integer;
       const AAsk: TApprovalAsk): TTurnEvent;
     function Config: THarnessSessionConfig;
@@ -131,6 +141,11 @@ type
     procedure TestCoarseScrollTargetMapsSegments;
     procedure TestShouldTrimHistory;
     procedure TestSidebarTogglesWithCtrlB;
+    procedure TestSidebarRendersItsRows;
+    procedure TestSpyEnterShowsChildAndIndicator;
+    procedure TestSpyEscapeRestoresTheParent;
+    procedure TestSpySuppressesParentEvents;
+    procedure TestSpyUnknownChildIsAnError;
     procedure TestThinkingStateDuringATurn;
     procedure TestReasoningSettlesIntoAThoughtBlock;
     procedure TestReadyStateAfterATurn;
@@ -211,6 +226,8 @@ begin
   FSwitchCalls := 0;
   FSwitchViews := nil;
   FSwitchSessions := nil;
+  FSpyOpens := 0;
+  FSpyQueue := nil;
 end;
 
 procedure THarnessAppTest.TearDown;
@@ -231,6 +248,9 @@ begin
   for I := 0 to High(FSwitchViews) do
     FSwitchViews[I].Free;
   FSwitchViews := nil;
+  { A spy queue the stub never took (the failure test) is still ours. }
+  FSpyQueue.Free;
+  FSpyQueue := nil;
   if FStorePath <> '' then
   begin
     DeleteFile(FStorePath);
@@ -257,6 +277,22 @@ end;
 procedure THarnessAppTest.AttachLocal;
 begin
   FApp.Attach(FSession.View, LocalDriver(FSession));
+end;
+
+function THarnessAppTest.OpenStubSpy(const ASessionId: string;
+  const AConfig: TSessionClientConfig; out AError: string): TSubagentSpy;
+begin
+  { A detached spy over a queue the test owns, so entering spy mode needs no
+    live child socket. An unknown id fails, exercising the error path. }
+  Inc(FSpyOpens);
+  if Copy(ASessionId, 1, 8) = 'no-such-' then
+  begin
+    AError := 'no runtime for session ' + ASessionId;
+    Exit(nil);
+  end;
+  AError := '';
+  Result := TSubagentSpy.CreateStub(ASessionId, FSpyQueue);
+  FSpyQueue := nil;   // the spy owns it now
 end;
 
 function THarnessAppTest.SwitchTo(const ASessionId: string;
@@ -389,6 +425,16 @@ begin
   Result := Default(TTurnEvent);
   Result.Kind := teAssistantDelta;
   Result.Text := AText;
+end;
+
+function THarnessAppTest.SubagentEvent(const ASubSessionId, ALabel,
+  AStatus: string): TTurnEvent;
+begin
+  Result := Default(TTurnEvent);
+  Result.Kind := teSubagent;
+  Result.SubSessionId := ASubSessionId;
+  Result.SubLabel := ALabel;
+  Result.SubStatus := AStatus;
 end;
 
 function THarnessAppTest.ApprovalEvent(ARequestId: Integer;
@@ -1863,12 +1909,10 @@ var
   StoreErr: TStoreError;
   WorkspaceId: Integer;
   SidB: string;
-  OldId: string;
 begin
   { A switch during a live turn detaches from the old turn (the runtime keeps it
     running) and opens the target, rather than refusing. }
   BuildWithStore;
-  OldId := FApp.SessionId;
   { A second session to switch to. }
   StoreCfg := Default(TStoreConfig);
   StoreCfg.DatabasePath := FStorePath;
@@ -1942,6 +1986,161 @@ begin
   FInput.Push(Ctrl('b'));
   Pump(4);
   AssertFalse('hidden again', FApp.SidebarVisible);
+end;
+
+procedure THarnessAppTest.TestSidebarRendersItsRows;
+var
+  Y: Integer;
+  Found: Boolean;
+begin
+  { The regression this guards: the sidebar was created and toggled but never
+    drawn. With a roster entry, Ctrl+B must put the child's label on the
+    surface. }
+  Build;
+  FSession.Queue.Push(SubagentEvent('child-1', 'scan the tree', 'running'));
+  FApp.Step;   { the roster entry is applied }
+  FInput.Push(Ctrl('b'));
+  FApp.Step;
+  FApp.Step;
+
+  Found := False;
+  for Y := 0 to FSurface.Height - 1 do
+    if Pos('scan the tree', FSurface.RowText(Y, 0, FSurface.Width)) > 0 then
+      Found := True;
+  AssertTrue('the sidebar row is rendered', Found);
+end;
+
+procedure THarnessAppTest.TestSpyEnterShowsChildAndIndicator;
+var
+  Store: TSqliteStore;
+  StoreCfg: TStoreConfig;
+  StoreErr: TStoreError;
+  WorkspaceId: Integer;
+  ChildId: string;
+  TurnId: Int64;
+  Rec: TMessageRecord;
+begin
+  { A child session with a message in the store, and a roster entry so the
+    sidebar has a row. Entering it shows the child's transcript and the header
+    indicator. }
+  BuildWithStore;
+  StoreCfg := Default(TStoreConfig);
+  StoreCfg.DatabasePath := FStorePath;
+  StoreCfg.BusyTimeoutMs := 5000;
+  Store := TSqliteStore.Create(StoreCfg);
+  try
+    AssertTrue('open store', Store.Open(StoreErr));
+    Store.EnsureWorkspace(FDir, WorkspaceId, StoreErr);
+    Store.CreateChildSession(WorkspaceId, FSession.View.SessionId, 1, 'child', ChildId,
+      StoreErr);
+    Store.BeginTurn(ChildId, TurnId, StoreErr);
+    Rec := Default(TMessageRecord);
+    Rec.SessionId := ChildId;
+    Rec.TurnId := TurnId;
+    Rec.Role := mrAssistant;
+    Rec.Content := 'the child did the thing';
+    Store.AppendMessage(Rec, StoreErr);
+  finally
+    Store.Free;
+  end;
+
+  FApp.OnSpyFactory := OpenStubSpy;
+  FSpyQueue := TTurnQueue.Create;
+  FApp.ShowSpy(ChildId);
+  FApp.Step;
+
+  AssertEquals('spying on the child', ChildId, FApp.SpiedSessionId);
+  AssertTrue('the child transcript is shown',
+    FindText(ckAssistant, 'the child did the thing'));
+  AssertTrue('the header names the child',
+    Pos('spying', FApp.Panel.HeaderLeft) > 0);
+end;
+
+procedure THarnessAppTest.TestSpyEscapeRestoresTheParent;
+var
+  Store: TSqliteStore;
+  StoreCfg: TStoreConfig;
+  StoreErr: TStoreError;
+  WorkspaceId: Integer;
+  ChildId: string;
+  Before: string;
+begin
+  BuildWithStore;
+  Before := FApp.SessionId;
+  StoreCfg := Default(TStoreConfig);
+  StoreCfg.DatabasePath := FStorePath;
+  StoreCfg.BusyTimeoutMs := 5000;
+  Store := TSqliteStore.Create(StoreCfg);
+  try
+    AssertTrue('open store', Store.Open(StoreErr));
+    Store.EnsureWorkspace(FDir, WorkspaceId, StoreErr);
+    Store.CreateChildSession(WorkspaceId, FSession.View.SessionId, 1, 'child', ChildId,
+      StoreErr);
+  finally
+    Store.Free;
+  end;
+
+  FApp.OnSpyFactory := OpenStubSpy;
+  FSpyQueue := TTurnQueue.Create;
+  FApp.ShowSpy(ChildId);
+  FApp.Step;
+  AssertEquals('in spy mode', ChildId, FApp.SpiedSessionId);
+
+  FInput.Push(Key(kkEscape));
+  FApp.Step;
+  FApp.Step;
+  AssertEquals('left the spy', '', FApp.SpiedSessionId);
+  AssertEquals('still on the parent', Before, FApp.SessionId);
+end;
+
+procedure THarnessAppTest.TestSpySuppressesParentEvents;
+var
+  Store: TSqliteStore;
+  StoreCfg: TStoreConfig;
+  StoreErr: TStoreError;
+  WorkspaceId: Integer;
+  ChildId: string;
+  E: TTurnEvent;
+begin
+  { While spying, a parent event is consumed but not drawn. }
+  BuildWithStore;
+  StoreCfg := Default(TStoreConfig);
+  StoreCfg.DatabasePath := FStorePath;
+  StoreCfg.BusyTimeoutMs := 5000;
+  Store := TSqliteStore.Create(StoreCfg);
+  try
+    AssertTrue('open store', Store.Open(StoreErr));
+    Store.EnsureWorkspace(FDir, WorkspaceId, StoreErr);
+    Store.CreateChildSession(WorkspaceId, FSession.View.SessionId, 1, 'child', ChildId,
+      StoreErr);
+  finally
+    Store.Free;
+  end;
+
+  FApp.OnSpyFactory := OpenStubSpy;
+  FSpyQueue := TTurnQueue.Create;
+  FApp.ShowSpy(ChildId);
+  FApp.Step;
+
+  { A parent event on the parent's driver (the fake queue the app drains). }
+  E := AssistantEvent('parent noise');
+  FSession.Queue.Push(E);
+  FApp.Step;
+
+  AssertFalse('the parent event is not drawn',
+    FindText(ckAssistant, 'parent noise'));
+end;
+
+procedure THarnessAppTest.TestSpyUnknownChildIsAnError;
+begin
+  { An unreachable child shows an error and leaves the parent view in place. }
+  BuildWithStore;
+  FApp.OnSpyFactory := OpenStubSpy;
+  FSpyQueue := TTurnQueue.Create;
+  FApp.ShowSpy('no-such-child');
+  FApp.Step;
+  AssertEquals('not in spy mode', '', FApp.SpiedSessionId);
+  AssertTrue('the error is shown', FindText(ckError, 'could not open'));
 end;
 
 { TUI Startup: the connect lifecycle. }

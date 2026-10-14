@@ -50,6 +50,12 @@ type
     out ASession: TSessionView; out ADriver: ISessionDriver;
     out AError: string): Boolean of object;
 
+  { Opens a spy over a child session. Defaults to TSubagentSpy.Open; overridable
+    so a test can enter spy mode without a live child socket. }
+  TSpyFactoryEvent = function(const ASessionId: string;
+    const AConfig: TSessionClientConfig; out AError: string): TSubagentSpy
+    of object;
+
   { Builds the tree and owns the TTuiApp and the current worker. The session is
     owned by the caller and must outlive the app. }
   THarnessApp = class
@@ -68,6 +74,8 @@ type
     { Open a different session (the /sessions modal's Enter): the composition
       root's hook. Unset => switching is refused with a status line. }
     FOnSwitchSession: TSwitchSessionEvent;
+    { Opens a spy over a child session; nil => TSubagentSpy.Open. }
+    FSpyFactory: TSpyFactoryEvent;
     { A prompt submitted while idle, held until Attach delivers the driver. }
     FPendingSubmit: string;
     FApp: TTuiApp;
@@ -178,8 +186,11 @@ type
     procedure ToggleSidebar(Sender: TObject);
     procedure LayoutSidebar;
     procedure OnSidebarSelect(const ASessionId: string);
-    procedure ShowSpy(const ASessionId: string);
     procedure LeaveSpy;
+    { The spied child's display name: its roster label, else its id prefix. }
+    function SpyLabel: string;
+    { Render the child's transcript tail into the panel (the spy view). }
+    procedure RenderSpyHistory(const ASessionId: string);
     procedure DrainSpy;
     procedure SendSubagentCommand(AKind: TSessionCommandKind;
       const ASessionId: string);
@@ -281,6 +292,10 @@ type
       is no hook, or when the hook fails. The swap happens inline; the modal is
       popped on the next Step (it is the caller). }
     procedure SwitchSession(const ASessionId: string);
+    { Enter spy mode on a child session: rebuild the panel to show the child's
+      transcript and its live stream, mark the header, and hide the composer.
+      Escape leaves. Public so the composition root and tests can drive it. }
+    procedure ShowSpy(const ASessionId: string);
 
     property ConnState: TConnState read GetConnState;
     { The lazy-start hook: called on the first submit when idle. }
@@ -289,6 +304,8 @@ type
     { The open-a-session hook (the /sessions modal's Enter). }
     property OnSwitchSession: TSwitchSessionEvent read FOnSwitchSession
       write FOnSwitchSession;
+    { The spy-open hook; unset uses TSubagentSpy.Open. }
+    property OnSpyFactory: TSpyFactoryEvent read FSpyFactory write FSpyFactory;
     { The active session's id, '' when there is none (an idle lazy app). }
     property SessionId: string read GetSessionId;
 
@@ -366,6 +383,19 @@ type
     constructor Create(AChild: TWidget; AOnQuit, AOnEscape: TNotifyEvent;
       ACanQuit: TQueryEvent);
     procedure SetSidebarToggle(AHandler: TNotifyEvent);
+    function HandleEvent(const E: TInputEvent): Boolean; override;
+  end;
+
+  { Composites the floating sidebar over the app: the base (the chat panel) is
+    drawn first, the sidebar on top when it is visible. Input goes to the sidebar
+    while it is shown (it is the focused overlay); otherwise to the base. Extends
+    TSingleChild so the base's Advance/Animating reach the app loop. }
+  TSidebarOverlay = class(TSingleChild)
+  private
+    FSidebar: TWidget;
+  public
+    constructor Create(AChild, ASidebar: TWidget);
+    procedure Render(const S: ISurface); override;
     function HandleEvent(const E: TInputEvent): Boolean; override;
   end;
 
@@ -459,6 +489,30 @@ begin
       FOnEscape(Self);
     Exit(True);
   end;
+  Result := inherited HandleEvent(E);
+end;
+
+{ TSidebarOverlay }
+
+constructor TSidebarOverlay.Create(AChild, ASidebar: TWidget);
+begin
+  inherited Create(AChild);
+  FSidebar := ASidebar;
+end;
+
+procedure TSidebarOverlay.Render(const S: ISurface);
+begin
+  inherited Render(S);
+  if (FSidebar <> nil) and FSidebar.Visible then
+    FSidebar.Render(S);
+end;
+
+function TSidebarOverlay.HandleEvent(const E: TInputEvent): Boolean;
+begin
+  { While the sidebar is shown it is the focused overlay, but global keys
+    (Ctrl+B/Ctrl+C, Escape) still fall through to the base shell. }
+  if (FSidebar <> nil) and FSidebar.Visible and FSidebar.HandleEvent(E) then
+    Exit(True);
   Result := inherited HandleEvent(E);
 end;
 
@@ -708,7 +762,7 @@ begin
   FSidebar.Visible := False;
   Shell := TAppShell.Create(FPanel, Quit, HandleEscape, ComposeIsEmpty);
   Shell.SetSidebarToggle(ToggleSidebar);
-  Result := Shell;
+  Result := TSidebarOverlay.Create(Shell, FSidebar);
 end;
 
 procedure THarnessApp.Quit(Sender: TObject);
@@ -890,6 +944,18 @@ begin
   if FSessionsShown then
   begin
     CloseSessions;
+    Exit;
+  end;
+  { Then dismisses the subagent sidebar. }
+  if FSidebarShown then
+  begin
+    ToggleSidebar(Sender);
+    Exit;
+  end;
+  { Then leaves the subagent spy (never a dead end). }
+  if FSpyId <> '' then
+  begin
+    LeaveSpy;
     Exit;
   end;
   if not FBusy then
@@ -1644,7 +1710,22 @@ begin
   begin
     if not FDriver.PopEvent(E) then
       Break;
-    HandleTurnEvent(E);
+    { While spying, the parent's events are consumed but not drawn: its turn
+      keeps running and is persisted, and its transcript is rebuilt on leave. Only
+      the state (busy / roster) is updated, so the two streams never interleave. }
+    if FSpyId <> '' then
+    begin
+      case E.Kind of
+        teDone, teError:
+          FBusy := False;
+        teSubagent:
+          HandleSubagentEvent(E);
+      else
+        ;
+      end;
+    end
+    else
+      HandleTurnEvent(E);
   end;
   { Surface a dropped-output warning once, the first frame the bound was hit. }
   if (FLastDropped = 0) and (FDriver.Dropped > 0) then
@@ -1941,8 +2022,9 @@ begin
   begin
     FSidebar.Refresh;
     LayoutSidebar;
-  end;
-  FApp.Invalidate;
+  end
+  else
+    FApp.Invalidate;
 end;
 
 procedure THarnessApp.LayoutSidebar;
@@ -1988,12 +2070,88 @@ begin
   Cfg.WorkspacePath := FSession.WorkspaceRoot;
   Cfg.Spawn := False;
   Cfg.Role := srObserve;
-  FSpy := TSubagentSpy.Open(ASessionId, Cfg, Err);
+  if Assigned(FSpyFactory) then
+    FSpy := FSpyFactory(ASessionId, Cfg, Err)
+  else
+    FSpy := TSubagentSpy.Open(ASessionId, Cfg, Err);
   if FSpy = nil then
+  begin
+    AppendError('could not open the child session: ' + Err);
     Exit;
+  end;
   FSpyId := ASessionId;
+  { The spy takes over the panel; the sidebar is hidden AND its shown flag
+    cleared, so Escape leaves the spy rather than re-showing the sidebar. }
+  FSidebarShown := False;
   FSidebar.Visible := False;
   FPanel.SetComposeActive(False);
+  { Rebuild the panel to show the child's transcript (history tail, then its live
+    stream), and mark the header so the operator knows whose session this is. }
+  ResetWindow;
+  RenderSpyHistory(ASessionId);
+  FPanel.SetHeader(
+    UTF8Encode(TruncateTitle(UnicodeString('spying · ' + SpyLabel), 40)), '');
+end;
+
+function THarnessApp.SpyLabel: string;
+var
+  I: Integer;
+  Entries: TSubagentEntryArray;
+begin
+  { The child's label from the roster when known, else its id prefix. }
+  Result := '';
+  Entries := FRoster.Entries;
+  for I := 0 to High(Entries) do
+    if Entries[I].SessionId = FSpyId then
+    begin
+      Result := Entries[I].LabelText;
+      Break;
+    end;
+  if Result = '' then
+    Result := Copy(FSpyId, 1, 12);
+end;
+
+procedure THarnessApp.RenderSpyHistory(const ASessionId: string);
+var
+  History: TMessageRecordArray;
+  StoreErr: TStoreError;
+  I: Integer;
+  Rec: TMessageRecord;
+begin
+  { The child's transcript: a bounded tail from the store (a child has no
+    checkpoints in v1). The live stream is appended by DrainSpy. }
+  History := nil;
+  if (FSession <> nil) and (FSession.Store <> nil) then
+    FSession.Store.QueryActiveMessagesTail(ASessionId, StartupTailCount,
+      History, StoreErr);
+  for I := 0 to High(History) do
+  begin
+    Rec := History[I];
+    case Rec.Role of
+      mrUser:
+        if Rec.Content <> '' then
+          FPanel.Stream.Add(ckUser, '', Rec.Content);
+      mrAssistant:
+        if Rec.Content <> '' then
+          FPanel.Stream.Add(ckAssistant, '', Rec.Content);
+      mrReasoning:
+        FPanel.Stream.Add(ckThought, FormatThoughtLabel(Rec.DurationMs),
+          Rec.Content);
+      mrToolCall:
+        FPanel.Stream.Add(ckTool, Rec.ToolReason, '');
+      mrTool:
+        FPanel.Stream.Add(ckTool, Rec.ToolName, Rec.Content);
+      mrError:
+        FPanel.Stream.Add(ckError, '', Rec.Content);
+      mrAmbient:
+        if Rec.Content <> '' then
+          FPanel.Stream.Add(ckAmbient, Rec.LabelText + ' · ' + Rec.Status,
+            Rec.Content);
+    else
+      ;
+    end;
+  end;
+  FPanel.Stream.FollowBottom;
 end;
 
 procedure THarnessApp.LeaveSpy;
@@ -2008,9 +2166,17 @@ begin
   begin
     FSpyId := '';
     FPanel.SetComposeActive(True);
-  end;
-  if FSidebarShown then
+    { Restore the parent's transcript (the child's view replaced it) and header. }
+    ResetWindow;
+    RenderHistory;
+    UpdateStats;
+    { Re-show the sidebar the operator used to pick the child. }
+    FSidebarShown := True;
     FSidebar.Visible := True;
+    FSidebar.Refresh;
+    LayoutSidebar;
+  end;
+  FApp.Invalidate;
 end;
 
 procedure THarnessApp.DrainSpy;

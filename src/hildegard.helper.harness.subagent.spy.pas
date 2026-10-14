@@ -43,6 +43,11 @@ type
       nil with AError when the child is unreachable. }
     class function Open(const ASessionId: string;
       const AConfig: TSessionClientConfig; out AError: string): TSubagentSpy;
+    { A detached spy over a caller-supplied queue and no socket: a test seam, so
+      the app's spy state machine is exercisable without a live child. The spy
+      owns AQueue. }
+    class function CreateStub(const ASessionId: string;
+      AQueue: TTurnQueue): TSubagentSpy;
     destructor Destroy; override;
     { UI thread: pop the next child event, if any. }
     function PopEvent(out AEvent: TTurnEvent): Boolean;
@@ -125,6 +130,16 @@ begin
   Close;
   FQueue.Free;
   inherited Destroy;
+end;
+
+class function TSubagentSpy.CreateStub(const ASessionId: string;
+  AQueue: TTurnQueue): TSubagentSpy;
+begin
+  { A detached spy: a queue with no client, so PopEvent/Close work and the app's
+    spy mode is testable without a socket. The spy owns the queue. }
+  Result := TSubagentSpy.Create;
+  Result.FSessionId := ASessionId;
+  Result.FQueue := AQueue;
 end;
 
 function TSubagentSpy.PopEvent(out AEvent: TTurnEvent): Boolean;
