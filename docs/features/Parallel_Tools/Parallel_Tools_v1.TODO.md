@@ -25,9 +25,15 @@ output streamed live, per call. TDD-first; `make check` before moving on.
 
 ### Phase 2: Serialize the permission decision (`hildegard.helper.approval`)
 
-- [ ] **Test**: two concurrent `Resolve`s do not double-prompt for a rule one
+- [x] **Test**: two concurrent `Resolve`s do not double-prompt for a rule one
       just granted; deny-first still short-circuits (`test_approval`).
-- [ ] **Implement**: a lock around the load -> scan -> prompt -> apply section.
+- [x] **Implement**: a lock around the load -> scan -> prompt -> apply section.
+
+> **Note (deviation):** the *prompt* is serialized by a second lock
+> (`FPromptLock`) but the *decision snapshot* by `FDecisionLock`; the
+> already-allowed fast path never touches `FPromptLock`, so a cleared call is not
+> blocked behind a prompting sibling. The persist+publish of a grant is atomic
+> under `FDecisionLock`. See `a094053`.
 
 ### Phase 3: Fan-out and join (`hildegard.helper.agent`)
 
