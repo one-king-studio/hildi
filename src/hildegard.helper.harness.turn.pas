@@ -89,32 +89,49 @@ type
     property Dropped: Int64 read GetDropped;
   end;
 
-  { Bridges the worker's approval prompt to the UI thread. The worker's Ask
-    blocks until the UI Answers or Cancels (or ATimeoutMs elapses); the UI
-    thread never blocks. At most one ask is pending at a time. }
+  { One outstanding approval ask: its own event and choice, so a concurrent batch's
+    asks do not clobber each other. Owned by the gate. }
+  TAskSlot = class
+  public
+    Event: TSimpleEvent;
+    Choice: TApprovalChoice;
+    constructor Create;
+    destructor Destroy; override;
+  end;
+
+  { Bridges the worker's approval prompt to the UI thread. A worker's Ask blocks
+    until the UI Answers or Cancels *that* ask (or ATimeoutMs elapses); the UI
+    thread never blocks.
+
+    Concurrent asks are supported: a parallel tool batch may have several asks
+    outstanding at once, each with its own id, and answering one releases only
+    that one. The UI presents one at a time (it queues the teApprovalAsk events),
+    so the *display* stays single, but a call whose ask is already answered does
+    not wait on its siblings. }
   TApprovalGate = class
   private
     FQueue: TTurnQueue;
     FTimeoutMs: Integer;
     FLock: TCriticalSection;
-    FEvent: TSimpleEvent;
-    FRequestId: Integer;
+    FSlots: TFPList;   // TAskSlot or nil, indexed by (request id - 1)
     FNextId: Integer;
-    FPending: Boolean;
-    FChoice: TApprovalChoice;
+    { Settle every outstanding slot (ATimeout marks them timed-out, else denied)
+      and signal each. Assumes FLock is held by the caller. }
+    procedure SettleAllLocked(ATimeout: Boolean);
   public
     constructor Create(AQueue: TTurnQueue; ATimeoutMs: Integer = 0);
     destructor Destroy; override;
 
     { Worker thread. Posts teApprovalAsk (with a fresh RequestId) and waits for
-      Answer/Cancel, or until ATimeoutMs elapses (then denies). }
+      Answer/Cancel of *that* id, or until ATimeoutMs elapses (then denies).
+      Concurrent calls are safe: each Ask owns its own slot. }
     function Ask(const AAsk: TApprovalAsk): TApprovalChoice;
 
     { TApprovalPrompt-compatible; passes through to Ask. }
     function Prompt(const AAsk: TApprovalAsk): TApprovalChoice;
 
-    { UI thread. Resolve the pending ask and unblock the worker. Ignored when
-      ARequestId is not the pending ask. }
+    { UI thread. Resolve the ask with ARequestId and unblock its worker. Ignored
+      when no ask has that id (a late or stale answer). }
     procedure Answer(ARequestId: Integer; const AChoice: TApprovalChoice);
 
     { The wait used by the NEXT ask. 0 = wait indefinitely. A connected client
@@ -127,6 +144,9 @@ type
 
     { Deny any pending ask and unblock the worker (used on quit). }
     procedure Cancel;
+
+    { Deny every outstanding ask (used on quit / interrupt under concurrency). }
+    procedure CancelAll;
   end;
 
 const
@@ -185,6 +205,19 @@ begin
   Result := FItems.Dropped;
 end;
 
+constructor TAskSlot.Create;
+begin
+  inherited Create;
+  Event := TSimpleEvent.Create;
+  Choice := Default(TApprovalChoice);
+end;
+
+destructor TAskSlot.Destroy;
+begin
+  Event.Free;
+  inherited Destroy;
+end;
+
 { TApprovalGate }
 
 constructor TApprovalGate.Create(AQueue: TTurnQueue; ATimeoutMs: Integer);
@@ -193,57 +226,86 @@ begin
   FQueue := AQueue;
   FTimeoutMs := ATimeoutMs;
   FLock := TCriticalSection.Create;
-  FEvent := TSimpleEvent.Create;
-  FRequestId := 0;
+  FSlots := TFPList.Create;
   FNextId := 0;
-  FPending := False;
 end;
 
 destructor TApprovalGate.Destroy;
+var
+  I: Integer;
 begin
-  FEvent.Free;
+  for I := 0 to FSlots.Count - 1 do
+    TAskSlot(FSlots[I]).Free;
+  FSlots.Free;
   FLock.Free;
   inherited Destroy;
+end;
+
+procedure TApprovalGate.SettleAllLocked(ATimeout: Boolean);
+var
+  I: Integer;
+  Slot: TAskSlot;
+begin
+  for I := 0 to FSlots.Count - 1 do
+  begin
+    Slot := TAskSlot(FSlots[I]);
+    if Slot <> nil then
+    begin
+      Slot.Choice := Default(TApprovalChoice);
+      Slot.Choice.TimedOut := ATimeout;
+      Slot.Event.SetEvent;
+    end;
+  end;
 end;
 
 function TApprovalGate.Ask(const AAsk: TApprovalAsk): TApprovalChoice;
 var
   Event: TTurnEvent;
   WaitRes: TWaitResult;
+  Slot: TAskSlot;
+  RequestId: Integer;
 begin
-  FEvent.ResetEvent;
-  FLock.Acquire;
+  Slot := TAskSlot.Create;
   try
-    Inc(FNextId);
-    FRequestId := FNextId;
-    FPending := True;
-    FChoice := Default(TApprovalChoice);
-  finally
-    FLock.Release;
-  end;
-
-  Event := Default(TTurnEvent);
-  Event.Kind := teApprovalAsk;
-  Event.RequestId := FRequestId;
-  Event.Ask := AAsk;
-  FQueue.Push(Event);
-
-  if FTimeoutMs > 0 then
-    WaitRes := FEvent.WaitFor(FTimeoutMs)
-  else
-    WaitRes := FEvent.WaitFor(INFINITE);
-
-  FLock.Acquire;
-  try
-    if WaitRes = wrTimeout then
-    begin
-      FChoice := Default(TApprovalChoice);
-      FChoice.TimedOut := True;
+    FLock.Acquire;
+    try
+      Inc(FNextId);
+      RequestId := FNextId;
+      { The slot list is indexed by (id - 1), so grow to hold this id. }
+      while FSlots.Count < RequestId do
+        FSlots.Add(nil);
+      FSlots[RequestId - 1] := Slot;
+    finally
+      FLock.Release;
     end;
-    FPending := False;
-    Result := FChoice;
+
+    Event := Default(TTurnEvent);
+    Event.Kind := teApprovalAsk;
+    Event.RequestId := RequestId;
+    Event.Ask := AAsk;
+    FQueue.Push(Event);
+
+    if FTimeoutMs > 0 then
+      WaitRes := Slot.Event.WaitFor(FTimeoutMs)
+    else
+      WaitRes := Slot.Event.WaitFor(INFINITE);
+
+    FLock.Acquire;
+    try
+      { Detach the slot: a late Answer for this id must not touch it again. }
+      if (RequestId <= FSlots.Count) and (FSlots[RequestId - 1] = Slot) then
+        FSlots[RequestId - 1] := nil;
+      if WaitRes = wrTimeout then
+      begin
+        Slot.Choice := Default(TApprovalChoice);
+        Slot.Choice.TimedOut := True;
+      end;
+      Result := Slot.Choice;
+    finally
+      FLock.Release;
+    end;
   finally
-    FLock.Release;
+    Slot.Free;
   end;
 end;
 
@@ -254,13 +316,18 @@ end;
 
 procedure TApprovalGate.Answer(ARequestId: Integer;
   const AChoice: TApprovalChoice);
+var
+  Slot: TAskSlot;
 begin
+  Slot := nil;
   FLock.Acquire;
   try
-    if FPending and (ARequestId = FRequestId) then
+    if (ARequestId >= 1) and (ARequestId <= FSlots.Count) then
+      Slot := TAskSlot(FSlots[ARequestId - 1]);
+    if Slot <> nil then
     begin
-      FChoice := AChoice;
-      FEvent.SetEvent;
+      Slot.Choice := AChoice;
+      Slot.Event.SetEvent;
     end;
   finally
     FLock.Release;
@@ -281,12 +348,7 @@ procedure TApprovalGate.CancelAsTimeout;
 begin
   FLock.Acquire;
   try
-    if FPending then
-    begin
-      FChoice := Default(TApprovalChoice);
-      FChoice.TimedOut := True;
-      FEvent.SetEvent;
-    end;
+    SettleAllLocked(True);
   finally
     FLock.Release;
   end;
@@ -296,11 +358,18 @@ procedure TApprovalGate.Cancel;
 begin
   FLock.Acquire;
   try
-    if FPending then
-    begin
-      FChoice := Default(TApprovalChoice);
-      FEvent.SetEvent;
-    end;
+    SettleAllLocked(False);
+  finally
+    FLock.Release;
+  end;
+end;
+
+procedure TApprovalGate.CancelAll;
+begin
+  { Deny every outstanding ask, so a batch's waiting calls all release. }
+  FLock.Acquire;
+  try
+    SettleAllLocked(False);
   finally
     FLock.Release;
   end;

@@ -64,6 +64,8 @@ type
     procedure TestTimeoutDenies;
     procedure TestCancelDenies;
     procedure TestStaleAnswerIgnored;
+    procedure TestConcurrentAsksAreIndependent;
+    procedure TestCancelAllDeniesEveryOutstandingAsk;
   end;
 
   TTurnWorkerTest = class(TTestCase)
@@ -376,6 +378,98 @@ begin
     AssertTrue('stale ignored; real applied', Thread.Choice.Allowed);
     AssertEquals('real option', 'exact', Thread.Choice.OptionKey);
     Thread.Free;
+  finally
+    Gate.Free;
+  end;
+end;
+
+procedure TApprovalGateTest.TestConcurrentAsksAreIndependent;
+var
+  Gate: TApprovalGate;
+  T1, T2: TGateAskThread;
+  Ask: TTurnEvent;
+  Choice: TApprovalChoice;
+  IdA, IdB: Integer;
+  Finished: Integer;
+begin
+  { Two asks outstanding at once. Answering one must release exactly that one;
+    the other stays blocked until it is answered. The asks carry the same
+    content, so we track them by id, not by thread - pop order is not the start
+    order. }
+  Gate := TApprovalGate.Create(FQueue);
+  try
+    T1 := TGateAskThread.Create(Gate, MakeAsk);
+    T2 := TGateAskThread.Create(Gate, MakeAsk);
+    T1.Start;
+    T2.Start;
+
+    AssertTrue('ask A posted', WaitForAsk(Ask));
+    IdA := Ask.RequestId;
+    AssertTrue('ask B posted', WaitForAsk(Ask));
+    IdB := Ask.RequestId;
+    AssertTrue('distinct ids', IdA <> IdB);
+
+    { Answer B only. Exactly one worker must release; the other stays blocked. }
+    Choice := Default(TApprovalChoice);
+    Choice.Allowed := True;
+    Choice.OptionKey := 'once';
+    Gate.Answer(IdB, Choice);
+
+    { Give the released worker a moment; then count how many finished. }
+    Sleep(50);
+    Finished := 0;
+    if T1.Finished then
+      Inc(Finished);
+    if T2.Finished then
+      Inc(Finished);
+    AssertEquals('exactly one released', 1, Finished);
+
+    { Now answer A (denied): both are released. }
+    Choice := Default(TApprovalChoice);
+    Gate.Answer(IdA, Choice);
+    T1.WaitFor;
+    T2.WaitFor;
+    { Whichever thread carried B was allowed; the other was denied. Exactly one
+      allowed. }
+    AssertTrue('exactly one allowed',
+      T1.Choice.Allowed xor T2.Choice.Allowed);
+
+    T1.Free;
+    T2.Free;
+  finally
+    Gate.Free;
+  end;
+end;
+
+procedure TApprovalGateTest.TestCancelAllDeniesEveryOutstandingAsk;
+var
+  Gate: TApprovalGate;
+  T1, T2, T3: TGateAskThread;
+  Ask: TTurnEvent;
+  I: Integer;
+begin
+  { CancelAll releases every outstanding ask (a batch's waiting calls). }
+  Gate := TApprovalGate.Create(FQueue);
+  try
+    T1 := TGateAskThread.Create(Gate, MakeAsk);
+    T2 := TGateAskThread.Create(Gate, MakeAsk);
+    T3 := TGateAskThread.Create(Gate, MakeAsk);
+    T1.Start;
+    T2.Start;
+    T3.Start;
+    for I := 1 to 3 do
+      AssertTrue('ask posted', WaitForAsk(Ask));
+
+    Gate.CancelAll;
+    T1.WaitFor;
+    T2.WaitFor;
+    T3.WaitFor;
+    AssertFalse('all denied', T1.Choice.Allowed or T2.Choice.Allowed or
+      T3.Choice.Allowed);
+
+    T1.Free;
+    T2.Free;
+    T3.Free;
   finally
     Gate.Free;
   end;
