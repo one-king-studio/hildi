@@ -911,6 +911,7 @@ begin
     '"limit":{"type":"integer","description":"Maximum lines to return (0 = all)."},' +
     '"reason":{"type":"string","description":"Short reason this read is needed."}' +
     '},"required":["path","reason"]}';
+  Spec.ParallelSafe := True;   { read-only: safe to run with sibling reads }
   ATools.Add(Spec, ReadFile);
 
   Spec.Name := 'file_write';
@@ -947,6 +948,7 @@ begin
     '"recursive":{"type":"boolean","description":"Descend into subdirectories."},' +
     '"reason":{"type":"string","description":"Short reason this listing is needed."}' +
     '},"required":["reason"]}';
+  Spec.ParallelSafe := True;   { read-only: safe to run with sibling reads }
   ATools.Add(Spec, ListDir);
 
   Spec.Name := 'file_glob';
@@ -958,6 +960,7 @@ begin
     '"path":{"type":"string","description":"Directory to search (default .)."},' +
     '"reason":{"type":"string","description":"Short reason this search is needed."}' +
     '},"required":["pattern","reason"]}';
+  Spec.ParallelSafe := True;   { read-only: safe to run with sibling reads }
   ATools.Add(Spec, Glob);
 
   Spec.Name := 'file_grep';
@@ -971,6 +974,7 @@ begin
     '"max_results":{"type":"integer","description":"Maximum matches (default 200)."},' +
     '"reason":{"type":"string","description":"Short reason this search is needed."}' +
     '},"required":["pattern","reason"]}';
+  Spec.ParallelSafe := True;   { read-only: safe to run with sibling reads }
   ATools.Add(Spec, Grep);
 end;
 

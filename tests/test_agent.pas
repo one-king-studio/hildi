@@ -6,7 +6,8 @@ unit test_agent;
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, fpjson, jsonparser,
+  Classes, SysUtils, SyncObjs, fpcunit, testregistry, fpjson, jsonparser,
+  async.scheduler, async.concurrency,
   hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.session,
   llm_fakes;
 
@@ -28,6 +29,29 @@ type
     function AlwaysRaise(const AArgumentsJson: string;
       out AResult: string; out AError: string;
       AObserver: TToolObserver = nil): Boolean;
+  end;
+
+  { A tool that records how many calls are in flight at once and the order they
+    finish, so a fan-out can be asserted. Each call blocks on a shared gate
+    until AMaxConcurrent calls have arrived, then releases all. }
+  TProbeTool = class
+  private
+    FLock: TCriticalSection;
+    FInFlight: Integer;
+    FPeak: Integer;
+    FArrived: Integer;
+    FGate: TSimpleEvent;
+    FNeed: Integer;
+  public
+    Finished: TStringList;
+    constructor Create(ANeed: Integer);
+    destructor Destroy; override;
+    { Records the peak concurrency; returns the call id from the arguments so
+      results can be checked in order. }
+    function Handle(const AArgumentsJson: string;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
+    property Peak: Integer read FPeak;
   end;
 
   { Captures the raw arguments of each successful handler call. }
@@ -180,6 +204,10 @@ type
     procedure TestToolCallIsExecutedAndFedBack;
     procedure TestMultipleToolCallsAllExecuted;
     procedure TestToolResultsFollowAssistantInOrder;
+    procedure TestParallelToolCallsRunConcurrently;
+    procedure TestParallelToolResultsAreInCallOrder;
+    procedure TestMixedBatchKeepsOrderAndSerializesUnsafe;
+    procedure TestWithoutAToolPoolCallsAreSerial;
     procedure TestUnknownToolReturnsErrorResultAndContinues;
     procedure TestFailingHandlerReturnsErrorResultAndContinues;
     procedure TestRaisingHandlerIsCaughtAndReported;
@@ -391,6 +419,60 @@ begin
   AError := '';
   Result := False;
   raise Exception.Create('kaboom');
+end;
+
+{ TProbeTool }
+
+constructor TProbeTool.Create(ANeed: Integer);
+begin
+  inherited Create;
+  FLock := TCriticalSection.Create;
+  FGate := TSimpleEvent.Create;
+  FNeed := ANeed;
+  FInFlight := 0;
+  FPeak := 0;
+  FArrived := 0;
+  Finished := TStringList.Create;
+end;
+
+destructor TProbeTool.Destroy;
+begin
+  Finished.Free;
+  FGate.Free;
+  FLock.Free;
+  inherited Destroy;
+end;
+
+function TProbeTool.Handle(const AArgumentsJson: string;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
+begin
+  FLock.Acquire;
+  try
+    Inc(FInFlight);
+    if FInFlight > FPeak then
+      FPeak := FInFlight;
+    Inc(FArrived);
+    if FArrived >= FNeed then
+      FGate.SetEvent;
+  finally
+    FLock.Release;
+  end;
+  { Block until every expected call has arrived, so concurrency is forced: if
+    the loop ran the calls serially this would time out (each call waits for a
+    sibling that can never start). The timeout is generous for real threads
+    (they arrive in microseconds) but bounds the serial case. }
+  FGate.WaitFor(500);
+  FLock.Acquire;
+  try
+    Dec(FInFlight);
+    Finished.Add(AArgumentsJson);
+  finally
+    FLock.Release;
+  end;
+  AResult := 'ok';
+  AError := '';
+  Result := True;
 end;
 
 { TCountingStore }
@@ -845,6 +927,170 @@ begin
   AssertEquals('assistant', 'assistant', RoleAt(FFake.LastBody, 1));
   AssertEquals('tool a', 'tool', RoleAt(FFake.LastBody, 2));
   AssertEquals('tool b', 'tool', RoleAt(FFake.LastBody, 3));
+end;
+
+procedure TAgentLoopTest.TestParallelToolCallsRunConcurrently;
+var
+  Answer: string;
+  Err: TLLMError;
+  Spec: TToolSpec;
+  Probe: TProbeTool;
+  Pool: IAsyncScheduler;
+begin
+  { Three parallel-safe calls must overlap: the probe blocks each call until all
+    three have arrived, so a serial loop would time out (not reach the peak). }
+  BuildLoop('', 8);
+  Probe := TProbeTool.Create(3);
+  Pool := TExecutorScheduler.Create(4, 0);
+  try
+    Spec := Default(TToolSpec);
+    Spec.Name := 'probe';
+    Spec.Description := 'concurrency probe';
+    Spec.ParametersJson := '{"type":"object","properties":{}}';
+    Spec.ParallelSafe := True;
+    FTools.Add(Spec, Probe.Handle);
+    FLoop.ToolPool := Pool;
+
+    FFake.AddResponse([
+      ToolNameFrame(0, 'c1', 'probe'),
+      ToolNameFrame(1, 'c2', 'probe'),
+      ToolNameFrame(2, 'c3', 'probe'),
+      ToolArgsFrame(0, '{"reason":"r","id":"c1"}'),
+      ToolArgsFrame(1, '{"reason":"r","id":"c2"}'),
+      ToolArgsFrame(2, '{"reason":"r","id":"c3"}'),
+      FinishFrame('tool_calls'), DoneFrame]);
+    FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
+
+    AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
+    AssertTrue('all three ran at once (peak >= 3)', Probe.Peak >= 3);
+    AssertEquals('answer', 'done', Answer);
+  finally
+    Pool := nil;
+    Probe.Free;
+  end;
+end;
+
+procedure TAgentLoopTest.TestParallelToolResultsAreInCallOrder;
+var
+  Answer: string;
+  Err: TLLMError;
+  Spec: TToolSpec;
+  Probe: TProbeTool;
+  Pool: IAsyncScheduler;
+begin
+  { Completion order is not call order; results must still be paired in call
+    order (a1, a2, a3), so the next request reads correctly. }
+  BuildLoop('', 8);
+  Probe := TProbeTool.Create(3);
+  Pool := TExecutorScheduler.Create(4, 0);
+  try
+    Spec := Default(TToolSpec);
+    Spec.Name := 'probe';
+    Spec.Description := 'probe';
+    Spec.ParametersJson := '{"type":"object","properties":{}}';
+    Spec.ParallelSafe := True;
+    FTools.Add(Spec, Probe.Handle);
+    FLoop.ToolPool := Pool;
+
+    FFake.AddResponse([
+      ToolNameFrame(0, 'a1', 'probe'),
+      ToolNameFrame(1, 'a2', 'probe'),
+      ToolNameFrame(2, 'a3', 'probe'),
+      ToolArgsFrame(0, '{"reason":"r"}'),
+      ToolArgsFrame(1, '{"reason":"r"}'),
+      ToolArgsFrame(2, '{"reason":"r"}'),
+      FinishFrame('tool_calls'), DoneFrame]);
+    FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
+    AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
+
+    AssertEquals('first result is a1', 'a1', ToolCallIdAt(FFake.LastBody, 2));
+    AssertEquals('second is a2', 'a2', ToolCallIdAt(FFake.LastBody, 3));
+    AssertEquals('third is a3', 'a3', ToolCallIdAt(FFake.LastBody, 4));
+  finally
+    Pool := nil;
+    Probe.Free;
+  end;
+end;
+
+procedure TAgentLoopTest.TestMixedBatchKeepsOrderAndSerializesUnsafe;
+var
+  Answer: string;
+  Err: TLLMError;
+  Spec: TToolSpec;
+  Probe: TProbeTool;
+  Pool: IAsyncScheduler;
+begin
+  { A not-parallel-safe call between two parallel-safe runs keeps execution
+    order: the two safe runs each overlap, but nothing overlaps the unsafe call,
+    and the result ids stay in call order. }
+  BuildLoop('', 8);
+  Probe := TProbeTool.Create(2);
+  Pool := TExecutorScheduler.Create(4, 0);
+  try
+    Spec := Default(TToolSpec);
+    Spec.Name := 'probe';
+    Spec.Description := 'probe';
+    Spec.ParametersJson := '{"type":"object","properties":{}}';
+    Spec.ParallelSafe := True;
+    FTools.Add(Spec, Probe.Handle);
+    { A serial tool: never overlaps. }
+    Spec.Name := 'serial_probe';
+    Spec.ParallelSafe := False;
+    FTools.Add(Spec, Probe.Handle);
+    FLoop.ToolPool := Pool;
+
+    FFake.AddResponse([
+      ToolNameFrame(0, 's1', 'probe'),
+      ToolNameFrame(1, 's2', 'probe'),
+      ToolNameFrame(2, 'x1', 'serial_probe'),
+      ToolArgsFrame(0, '{"reason":"r"}'),
+      ToolArgsFrame(1, '{"reason":"r"}'),
+      ToolArgsFrame(2, '{"reason":"r"}'),
+      FinishFrame('tool_calls'), DoneFrame]);
+    FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
+    AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
+    AssertEquals('order kept: s1', 's1', ToolCallIdAt(FFake.LastBody, 2));
+    AssertEquals('order kept: s2', 's2', ToolCallIdAt(FFake.LastBody, 3));
+    AssertEquals('order kept: x1', 'x1', ToolCallIdAt(FFake.LastBody, 4));
+  finally
+    Pool := nil;
+    Probe.Free;
+  end;
+end;
+
+procedure TAgentLoopTest.TestWithoutAToolPoolCallsAreSerial;
+var
+  Answer: string;
+  Err: TLLMError;
+  Spec: TToolSpec;
+  Probe: TProbeTool;
+begin
+  { No pool => the original serial path. The probe's gate needs two arrivals, so
+    a serial run times out at 1 (never reaches 2) and the call still returns. }
+  BuildLoop('', 8);
+  Probe := TProbeTool.Create(2);
+  try
+    Spec := Default(TToolSpec);
+    Spec.Name := 'probe';
+    Spec.Description := 'probe';
+    Spec.ParametersJson := '{"type":"object","properties":{}}';
+    Spec.ParallelSafe := True;
+    FTools.Add(Spec, Probe.Handle);
+    { FLoop.ToolPool stays nil. }
+
+    FFake.AddResponse([
+      ToolNameFrame(0, 'a1', 'probe'),
+      ToolNameFrame(1, 'a2', 'probe'),
+      ToolArgsFrame(0, '{"reason":"r"}'),
+      ToolArgsFrame(1, '{"reason":"r"}'),
+      FinishFrame('tool_calls'), DoneFrame]);
+    FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
+    AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
+    AssertEquals('peak stays 1 without a pool', 1, Probe.Peak);
+    AssertEquals('answer', 'done', Answer);
+  finally
+    Probe.Free;
+  end;
 end;
 
 procedure TAgentLoopTest.TestUnknownToolReturnsErrorResultAndContinues;

@@ -52,6 +52,9 @@ type
     { The shared turn pool: one bounded executor for the session, so turns reuse
       threads instead of spawning and joining a TThread per turn. }
     FTurnPool: IAsyncScheduler;
+    { The pool for parallel tool calls, separate from FTurnPool (the turn
+      occupies a turn-pool worker while its tools run). }
+    FToolPool: IAsyncScheduler;
     FApprovalService: IApprovalService;
     { MCP events (server failure etc.) are recorded as session errors. }
     procedure McpEvent(const AMessage, ADetail: string);
@@ -150,6 +153,7 @@ begin
   FGate := nil;
   FQueue.Free;
   FQueue := nil;
+  FToolPool := nil;
   FTurnPool := nil;
 end;
 
@@ -378,6 +382,10 @@ begin
   AgentConfig.RetryMaxAttempts := AConfig.RetryMaxAttempts;
 
   FLoop := TAgentLoop.Create(FClient, FConversation, FTools, AgentConfig);
+  { A separate pool for parallel tool calls: the turn runs on FTurnPool, so tool
+    jobs must not share it (a low concurrency would serialize or deadlock). }
+  FToolPool := TExecutorScheduler.Create(4);
+  FLoop.ToolPool := FToolPool;
   { The skill registry is the capability layer; register it as the provider. Its
     load_skill is offered once any skill is declared. Empty by default. }
   FSkills := TSkillRegistry.Create;

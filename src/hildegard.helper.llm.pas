@@ -39,6 +39,12 @@ type
     Name: string;
     Description: string;
     ParametersJson: string;
+    { Opt-in: the loop may run this tool's calls concurrently with other
+      parallel-safe calls in the same batch. Default False (serial), so an
+      unmarked tool is never run concurrently and adding parallelism cannot
+      silently race an unsafe handler. A read-only, self-contained tool sets it
+      True. (The SPEC proposed default True; we default False for safety.) }
+    ParallelSafe: Boolean;
   end;
 
   TToolSpecArray = array of TToolSpec;

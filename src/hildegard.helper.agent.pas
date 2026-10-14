@@ -9,7 +9,9 @@ unit hildegard.helper.agent;
 interface
 
 uses
-  Classes, SysUtils, SyncObjs, hildegard.helper.llm, hildegard.helper.session,
+  Classes, SysUtils, SyncObjs,
+  async.base, async.scheduler,
+  hildegard.helper.llm, hildegard.helper.session,
   hildegard.helper.ambient, hildegard.helper.wrap;
 
 type
@@ -273,6 +275,10 @@ type
     { The turn in flight is an ambient turn: its opening content is a queued
       ambient notification, so no user message is appended. }
     FAmbientTurn: Boolean;
+    { The executor for parallel tool calls. Nil => tools run serially (the
+      original behaviour). The session sets a pool SEPARATE from the turn pool,
+      because the turn occupies a turn-pool worker while its tools run. }
+    FToolPool: IAsyncScheduler;
     { The response in flight is timed so the reasoning and content phases can be
       persisted per block: the first reasoning delta, the first content delta,
       and the resulting durations. }
@@ -290,6 +296,18 @@ type
       AContinuing: Boolean): TChatRequest;
     procedure ExecuteToolCalls(const ACalls: TChatToolCallArray;
       const AEvents: TAgentEvents; out AAllOk: Boolean);
+    { The per-call pipeline: validate the reason, resolve the tool, run the
+      handler (which resolves approval internally), forward output. Emits no
+      events; the caller emits OnToolCall up front and OnToolResult after the
+      join. Safe to run on a pool worker. }
+    procedure RunOneCall(const ACall: TChatToolCall;
+      const AEvents: TAgentEvents; out AResult: string; out AOk: Boolean;
+      out ADurMs: Int64);
+    { Emit OnToolResult and append the result to the store, in call order. }
+    procedure FinishCall(const ACall: TChatToolCall; const AText: string;
+      AOk: Boolean; ADurMs: Int64; const AEvents: TAgentEvents);
+    { Whether AName may run concurrently with its parallel-safe siblings. }
+    function IsParallelSafe(const AName: string): Boolean;
     { Answer each call with a notice instead of running the tool, so the
       assistant's tool_calls stay paired with results. }
     procedure InterceptToolCalls(const ACalls: TChatToolCallArray;
@@ -334,6 +352,10 @@ type
     procedure PrepareProviders;
     { Prompts the operator injects into a running turn. }
     property PromptQueue: TPromptQueue read FPromptQueue;
+    { The executor for parallel tool calls. Nil => serial. Set by the session to
+      a pool separate from the turn pool (the turn occupies a turn-pool worker
+      while its tools run). }
+    property ToolPool: IAsyncScheduler read FToolPool write FToolPool;
     { True when the last turn was cancelled before any response was committed,
       so its messages were dropped. }
     property LastTurnDropped: Boolean read FLastTurnDropped;
@@ -418,6 +440,41 @@ type
       AObserver: TToolObserver = nil): Boolean;
   end;
 
+  { The shared state for one fan-out: the results (indexed by call) and the
+    countdown the join waits on. Owned by ExecuteToolCalls for the run. }
+  TToolBatchState = class
+  private
+    FLock: TCriticalSection;
+    FRemaining: Integer;
+    FDone: TSimpleEvent;
+  public
+    Results: array of string;
+    Oks: array of Boolean;
+    Durs: array of Int64;
+    constructor Create(ACount: Integer);
+    destructor Destroy; override;
+    { A job finished: store its result and count down; the last one signals. }
+    procedure Complete(AIndex: Integer; const AResult: string; AOk: Boolean;
+      ADurMs: Int64);
+    { Block until every job has completed. }
+    procedure Wait;
+  end;
+
+  { One parallel-safe call's unit of work: the closure the executor runs. It
+    writes the result into the batch's shared array and counts down the join. }
+  TToolCallJob = class
+  private
+    FLoop: TAgentLoop;
+    FCall: TChatToolCall;
+    FEvents: TAgentEvents;
+    FBatch: TToolBatchState;
+    FIndex: Integer;
+  public
+    constructor Create(ALoop: TAgentLoop; const ACall: TChatToolCall;
+      const AEvents: TAgentEvents; ABatch: TToolBatchState; AIndex: Integer);
+    procedure Run;
+  end;
+
 var
   BuiltinTools: TBuiltinTools;
 
@@ -471,6 +528,73 @@ begin
   FDone := True;
 end;
 
+{ --- TToolBatchState ---------------------------------------------------- }
+
+constructor TToolBatchState.Create(ACount: Integer);
+begin
+  inherited Create;
+  FLock := TCriticalSection.Create;
+  FDone := TSimpleEvent.Create;
+  FRemaining := ACount;
+  SetLength(Results, ACount);
+  SetLength(Oks, ACount);
+  SetLength(Durs, ACount);
+  { A zero-count batch is already done. }
+  if ACount = 0 then
+    FDone.SetEvent;
+end;
+
+destructor TToolBatchState.Destroy;
+begin
+  FDone.Free;
+  FLock.Free;
+  inherited Destroy;
+end;
+
+procedure TToolBatchState.Complete(AIndex: Integer; const AResult: string;
+  AOk: Boolean; ADurMs: Int64);
+begin
+  FLock.Acquire;
+  try
+    Results[AIndex] := AResult;
+    Oks[AIndex] := AOk;
+    Durs[AIndex] := ADurMs;
+    Dec(FRemaining);
+    if FRemaining = 0 then
+      FDone.SetEvent;
+  finally
+    FLock.Release;
+  end;
+end;
+
+procedure TToolBatchState.Wait;
+begin
+  FDone.WaitFor(INFINITE);
+end;
+
+{ --- TToolCallJob ------------------------------------------------------- }
+
+constructor TToolCallJob.Create(ALoop: TAgentLoop; const ACall: TChatToolCall;
+  const AEvents: TAgentEvents; ABatch: TToolBatchState; AIndex: Integer);
+begin
+  inherited Create;
+  FLoop := ALoop;
+  FCall := ACall;
+  FEvents := AEvents;
+  FBatch := ABatch;
+  FIndex := AIndex;
+end;
+
+procedure TToolCallJob.Run;
+var
+  ResultText: string;
+  Ok: Boolean;
+  DurMs: Int64;
+begin
+  FLoop.RunOneCall(FCall, FEvents, ResultText, Ok, DurMs);
+  FBatch.Complete(FIndex, ResultText, Ok, DurMs);
+end;
+
 procedure RegisterDefaultTools(ATools: TToolRegistry);
 var
   Spec: TToolSpec;
@@ -478,6 +602,7 @@ begin
   Spec.Name := BuiltinGetSystemTimeName;
   Spec.Description := 'Return the current UTC time as an ISO 8601 timestamp.';
   Spec.ParametersJson := '{"type":"object","properties":{},"required":[]}';
+  Spec.ParallelSafe := True;   { self-contained: safe to run concurrently }
   ATools.Add(Spec, BuiltinTools.GetSystemTime);
 end;
 
@@ -1097,71 +1222,160 @@ end;
 procedure TAgentLoop.ExecuteToolCalls(const ACalls: TChatToolCallArray;
   const AEvents: TAgentEvents; out AAllOk: Boolean);
 var
-  I: Integer;
+  I, K, N, RunEnd, Count: Integer;
+  Reason, ReasonError, ResultText: string;
+  HandlerOk: Boolean;
+  DurMs: Int64;
+  Batch: TToolBatchState;
+  Jobs: array of TToolCallJob;
+  Subs: array of ISubscription;
+begin
+  AAllOk := True;
+  N := Length(ACalls);
+  if N = 0 then
+    Exit;
+
+  { Emit every call up front, in call order, so the UI creates the tool blocks
+    in order regardless of completion order. }
+  for I := 0 to N - 1 do
+    if Assigned(AEvents.OnToolCall) then
+    begin
+      Reason := '';
+      ExtractToolReason(ACalls[I].Arguments, Reason, ReasonError);
+      AEvents.OnToolCall(ACalls[I].Id, ACalls[I].Name, ACalls[I].Arguments,
+        Reason);
+    end;
+
+  I := 0;
+  while I < N do
+  begin
+    { A run of consecutive parallel-safe calls runs concurrently; anything else
+      runs serially, in order. Execution order is preserved (a [write, read]
+      batch does not reorder), and a not-parallel-safe tool never overlaps. }
+    if (FToolPool <> nil) and IsParallelSafe(ACalls[I].Name) then
+    begin
+      RunEnd := I;
+      while (RunEnd < N) and IsParallelSafe(ACalls[RunEnd].Name) do
+        Inc(RunEnd);
+    end
+    else
+      RunEnd := I + 1;
+    Count := RunEnd - I;
+
+    if Count > 1 then
+    begin
+      { Fan out the run: schedule every call, then join. The results land in
+        the batch array by index, so they are emitted in call order below. }
+      Batch := TToolBatchState.Create(Count);
+      SetLength(Jobs, Count);
+      SetLength(Subs, Count);
+      try
+        for K := 0 to Count - 1 do
+        begin
+          Jobs[K] := TToolCallJob.Create(Self, ACalls[I + K], AEvents, Batch,
+            K);
+          Subs[K] := FToolPool.Schedule(Jobs[K].Run, 0);
+        end;
+        Batch.Wait;
+        for K := 0 to Count - 1 do
+        begin
+          ResultText := Batch.Results[K];
+          HandlerOk := Batch.Oks[K];
+          DurMs := Batch.Durs[K];
+          if not HandlerOk then
+            AAllOk := False;
+          FinishCall(ACalls[I + K], ResultText, HandlerOk, DurMs, AEvents);
+        end;
+      finally
+        for K := 0 to High(Jobs) do
+          Jobs[K].Free;
+        Batch.Free;
+      end;
+    end
+    else
+    begin
+      { A single parallel-safe call, or a not-parallel-safe one: run it here,
+        on the loop's own thread, as before. }
+      for K := I to RunEnd - 1 do
+      begin
+        RunOneCall(ACalls[K], AEvents, ResultText, HandlerOk, DurMs);
+        if not HandlerOk then
+          AAllOk := False;
+        FinishCall(ACalls[K], ResultText, HandlerOk, DurMs, AEvents);
+      end;
+    end;
+
+    I := RunEnd;
+  end;
+end;
+
+function TAgentLoop.IsParallelSafe(const AName: string): Boolean;
+var
   Tool: TRegisteredTool;
-  ResultText, HandlerError, Reason, ReasonError: string;
-  HandlerOk, ReasonOk: Boolean;
-  Msg: TChatMessage;
+begin
+  Result := ResolveTool(AName, Tool) and Tool.Spec.ParallelSafe;
+end;
+
+procedure TAgentLoop.RunOneCall(const ACall: TChatToolCall;
+  const AEvents: TAgentEvents; out AResult: string; out AOk: Boolean;
+  out ADurMs: Int64);
+var
+  Tool: TRegisteredTool;
+  Reason, ReasonError, HandlerError: string;
+  ReasonOk: Boolean;
   StartMs: Int64;
   Observer: TToolForwardObserver;
 begin
-  AAllOk := True;
-  for I := 0 to High(ACalls) do
+  AResult := '';
+  AOk := False;
+  StartMs := GetTickCount64;
+  Reason := '';
+  ReasonOk := ExtractToolReason(ACall.Arguments, Reason, ReasonError);
+  if not ReasonOk then
+    AResult := 'error: tool "' + ACall.Name + '" ' + ReasonError
+  else if (FTools = nil) or not ResolveTool(ACall.Name, Tool) then
+    AResult := 'error: unknown tool "' + ACall.Name + '"'
+  else
   begin
-    Reason := '';
-    ReasonOk := ExtractToolReason(ACalls[I].Arguments, Reason, ReasonError);
-
-    if Assigned(AEvents.OnToolCall) then
-      AEvents.OnToolCall(ACalls[I].Id, ACalls[I].Name, ACalls[I].Arguments,
-        Reason);
-
-    ResultText := '';
-    HandlerOk := False;
-    StartMs := GetTickCount64;
-    if not ReasonOk then
-      ResultText := 'error: tool "' + ACalls[I].Name + '" ' + ReasonError
-    else if (FTools = nil) or not ResolveTool(ACalls[I].Name, Tool) then
-      ResultText := 'error: unknown tool "' + ACalls[I].Name + '"'
-    else
-    begin
-      HandlerError := '';
-      { A per-call observer forwards the tool's chunks to the caller's event. }
-      Observer := TToolForwardObserver.Create(ACalls[I].Id, ACalls[I].Name,
-        AEvents.OnToolOutput);
+    HandlerError := '';
+    { A per-call observer forwards the tool's chunks to the caller's event. }
+    Observer := TToolForwardObserver.Create(ACall.Id, ACall.Name,
+      AEvents.OnToolOutput);
+    try
       try
-        try
-          HandlerOk := Tool.Handler(ACalls[I].Arguments, ResultText,
-            HandlerError, Observer);
-        except
-          on E: Exception do
-          begin
-            HandlerOk := False;
-            HandlerError := E.Message;
-          end;
+        AOk := Tool.Handler(ACall.Arguments, AResult, HandlerError, Observer);
+      except
+        on E: Exception do
+        begin
+          AOk := False;
+          HandlerError := E.Message;
         end;
-      finally
-        Observer.Complete;
-        Observer.Free;
       end;
-      if not HandlerOk then
-        ResultText := 'error: tool "' + ACalls[I].Name + '" failed: ' +
-          HandlerError;
+    finally
+      Observer.Complete;
+      Observer.Free;
     end;
-    if not HandlerOk then
-      AAllOk := False;
-
-    if Assigned(AEvents.OnToolResult) then
-      AEvents.OnToolResult(ACalls[I].Id, ACalls[I].Name, ResultText, HandlerOk);
-
-    Msg := Default(TChatMessage);
-    Msg.Role := crTool;
-    Msg.ToolCallId := ACalls[I].Id;
-    Msg.Content := ResultText;
-    Msg.ToolName := ACalls[I].Name;
-    Msg.ToolOk := HandlerOk;
-    Msg.DurationMs := Int64(GetTickCount64 - StartMs);
-    FStore.Append(Msg);
+    if not AOk then
+      AResult := 'error: tool "' + ACall.Name + '" failed: ' + HandlerError;
   end;
+  ADurMs := Int64(GetTickCount64 - StartMs);
+end;
+
+procedure TAgentLoop.FinishCall(const ACall: TChatToolCall; const AText: string;
+  AOk: Boolean; ADurMs: Int64; const AEvents: TAgentEvents);
+var
+  Msg: TChatMessage;
+begin
+  if Assigned(AEvents.OnToolResult) then
+    AEvents.OnToolResult(ACall.Id, ACall.Name, AText, AOk);
+  Msg := Default(TChatMessage);
+  Msg.Role := crTool;
+  Msg.ToolCallId := ACall.Id;
+  Msg.Content := AText;
+  Msg.ToolName := ACall.Name;
+  Msg.ToolOk := AOk;
+  Msg.DurationMs := ADurMs;
+  FStore.Append(Msg);
 end;
 
 function ToolSoftNotice(ARound, AHard: Integer): string;
