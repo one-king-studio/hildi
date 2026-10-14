@@ -103,3 +103,9 @@ Deviations from the SPEC, recorded:
 
 Deferred: the spy-mode actions bar, and the live smoke test (the parent→child
 path is covered in-process).
+
+**Correction (`Subagent_Spy_v2`):** the sidebar was created and toggled here, but
+`BuildTree` never added it to the widget tree, so `Ctrl+B` arranged a panel that
+was never rendered or fed input — the spy was unreachable. `Subagent_Spy_v2`
+added the `TSidebarOverlay` wiring (render + input routing) and the spy's
+enter/leave/indicator, with a render test. The deferred actions bar is unchanged.
