@@ -30,6 +30,7 @@ type
     procedure TestReadyStateShowsACheck;
     procedure TestThinkingStateAnimates;
     procedure TestCtaRendersAboveTheCompose;
+    procedure TestTypedTextIsVisibleInNormalMode;
     procedure TestInactiveComposeIgnoresInput;
     procedure TestLastMessageKeepsTwoBlankRowsAboveTheCompose;
     procedure TestSinglePageLeavesTheLeftBorderUniform;
@@ -116,6 +117,32 @@ begin
     end;
   finally
     S.Free;
+  end;
+end;
+
+procedure TTuiChatPanelTest.TestTypedTextIsVisibleInNormalMode;
+var
+  P: TChatPanel;
+  S: TSurfaceMemory;
+  Y: Integer;
+  Found: Boolean;
+begin
+  { Regression: the actions bar must not paint over the compose in normal mode —
+    a typed prompt has to be on screen. }
+  P := TChatPanel.Create(FTheme, 'info', 'cta');
+  S := TSurfaceMemory.Create(40, 20);
+  try
+    P.Arrange(Rc(0, 0, 40, 20));
+    P.Compose.Edit.InsertText('hello world');
+    P.Render(S);
+    Found := False;
+    for Y := 0 to 19 do
+      if Pos('hello world', S.RowText(Y, 0, 40)) > 0 then
+        Found := True;
+    AssertTrue('the typed prompt is visible', Found);
+  finally
+    S.Free;
+    P.Free;
   end;
 end;
 

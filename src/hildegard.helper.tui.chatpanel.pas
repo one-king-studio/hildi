@@ -371,8 +371,13 @@ begin
     end;
   end;
   FCta.Render(S);
-  FCompose.Render(S);
-  FActions.Render(S);
+  { Only the active bottom panel is drawn: the actions bar would otherwise paint
+    an empty frame over the compose box (the panel renders its children
+    directly, without the Visible check a TContainer would apply). }
+  if FActionsMode then
+    FActions.Render(S)
+  else
+    FCompose.Render(S);
   if FPaletteActive then
     FPalette.Render(S);
   FStatus.Render(S);
