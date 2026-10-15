@@ -8,7 +8,13 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
+  {$ifdef unix}BaseUnix,{$endif}
   hildegard.helper.store, hildegard.helper.workspace;
+
+{$ifdef unix}
+function c_symlink(ATarget, ALinkPath: PAnsiChar): cint; cdecl;
+  external 'c' name 'symlink';
+{$endif}
 
 type
   TWorkspaceTest = class(TTestCase)
@@ -29,6 +35,11 @@ type
     procedure TestDoesNotContainSiblingPrefix;
     procedure TestDoesNotContainEscape;
     procedure TestEnsureWorkspaceIsIdempotent;
+    procedure TestPhysicalContainsAcceptsInside;
+    procedure TestPhysicalContainsRefusesOutside;
+    procedure TestSymlinkOutOfTheWorkspaceIsRefused;
+    procedure TestNonExistentTailUsesTheNearestExistingAncestor;
+    procedure TestBoundarySiblingIsNotUnder;
   end;
 
 implementation
@@ -204,6 +215,69 @@ begin
   finally
     S.Free;
   end;
+end;
+
+procedure TWorkspaceTest.TestPhysicalContainsAcceptsInside;
+begin
+  { A path under the root is in-bounds, existing or not. }
+  AssertTrue('existing child',
+    PhysicalContains(FWork, IncludeTrailingPathDelimiter(FWork) + 'a.txt'));
+  AssertTrue('the root itself', PhysicalContains(FWork, FWork));
+  AssertTrue('non-existent nested',
+    PhysicalContains(FWork, 'sub/deep/a.txt'));
+end;
+
+procedure TWorkspaceTest.TestPhysicalContainsRefusesOutside;
+begin
+  AssertFalse('absolute outside',
+    PhysicalContains(FWork, '/etc/hosts'));
+  AssertFalse('escape with ..',
+    PhysicalContains(FWork, '../../etc/hosts'));
+end;
+
+procedure TWorkspaceTest.TestSymlinkOutOfTheWorkspaceIsRefused;
+var
+  Link: string;
+  Ws: TWorkspace;
+  Err: string;
+begin
+  { A symlink INSIDE the workspace that points OUTSIDE: the lexical reading
+    says "inside" (the link path is under the root), but the physical reading
+    resolves it out. The two-readings rule refuses it. }
+  Link := IncludeTrailingPathDelimiter(FWork) + 'escape';
+  if c_symlink(PAnsiChar(AnsiString(FWorkshop)),
+    PAnsiChar(AnsiString(Link))) <> 0 then
+    Exit;   { no symlink support: skip }
+  Ws := TWorkspace.Open(FWork, Err);
+  try
+    AssertTrue('lexical says inside', Ws.Contains('escape/secret.txt'));
+  finally
+    Ws.Free;
+  end;
+  AssertFalse('physical refuses it',
+    PhysicalContains(FWork, 'escape/secret.txt'));
+  AssertFalse('physical refuses the link too',
+    PhysicalContains(FWork, 'escape'));
+end;
+
+procedure TWorkspaceTest.TestNonExistentTailUsesTheNearestExistingAncestor;
+var
+  R: string;
+begin
+  { The tail does not exist; the nearest existing ancestor (FWork) is
+    realpath-resolved and the tail re-appended. }
+  R := PhysicalResolve(FWork, 'a/b/c.txt');
+  AssertTrue('kept the tail', Pos('a' + PathDelim + 'b' + PathDelim + 'c.txt',
+    R) > 0);
+end;
+
+procedure TWorkspaceTest.TestBoundarySiblingIsNotUnder;
+begin
+  { `work` must not be considered under `workshop` (the separator boundary). }
+  AssertFalse('sibling prefix',
+    PhysicalContains(FWorkshop, FWork));
+  AssertFalse('sibling prefix with a child',
+    PhysicalContains(FWorkshop, IncludeTrailingPathDelimiter(FWork) + 'x'));
 end;
 
 initialization

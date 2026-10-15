@@ -31,9 +31,26 @@ type
     function Contains(const APath: string): Boolean;
   end;
 
+{ Canonicalises APath (empty => the process working directory), verifies it
+  exists and is a readable directory, and returns an instance. On failure
+  returns nil with AError set. }
 function CanonicalWorkspacePath(const APath: string): string;
 function WorkspaceAccessible(const APath: string;
   out AError: string): Boolean;
+
+{ Resolve APath (relative allowed) against ABase ('' => ARoot) *physically*:
+  the lexical join is walked up to its nearest EXISTING ancestor, that ancestor
+  is realpath(3)-resolved (symlinks collapsed), and the non-existent tail is
+  re-appended. Never raises; a resolution failure yields the lexical path. }
+function PhysicalResolve(const ARoot, APath: string;
+  const ABase: string = ''): string;
+
+{ True only when BOTH the lexical and the physical readings of APath are
+  in-bounds under ARoot. The two-readings rule is deliberate: `..` after a
+  symlink is mode-dependent (bash's cd is logical by default, physical with
+  -P), so neither reading alone is trusted. }
+function PhysicalContains(const ARoot, APath: string;
+  const ABase: string = ''): Boolean;
 
 implementation
 
@@ -120,6 +137,87 @@ end;
 function TWorkspace.Contains(const APath: string): Boolean;
 begin
   Result := IsUnder(FRoot, Resolve(APath));
+end;
+
+{ --- the physical primitive --------------------------------------------- }
+
+{$ifdef unix}
+{ realpath(3): resolve every symlink and `..` to a canonical absolute path.
+  Returns '' when the path does not exist or cannot be resolved. }
+function c_realpath(APath: PAnsiChar; AResolved: PAnsiChar): PAnsiChar;
+  cdecl; external 'c' name 'realpath';
+{$endif}
+
+{ The absolute lexical path for APath against ABase (no symlink resolution). }
+function LexicalJoin(const ARoot, APath, ABase: string): string;
+var
+  Base: string;
+begin
+  Base := ABase;
+  if Base = '' then
+    Base := ARoot;
+  if Trim(APath) = '' then
+    Exit(ExpandFileName(Base));
+  if APath[1] = PathDelim then
+    Result := ExpandFileName(APath)
+  else
+    Result := ExpandFileName(IncludeTrailingPathDelimiter(Base) + APath);
+end;
+
+{ Resolve APath physically: walk up to the nearest existing ancestor, realpath
+  it, then re-append the (non-existent) tail. }
+function PhysicalResolve(const ARoot, APath: string;
+  const ABase: string = ''): string;
+var
+  Lex, Ancestor, Tail, Resolved: string;
+  Buf: array[0..4095] of AnsiChar;
+  P: PAnsiChar;
+  Slash: Integer;
+begin
+  Lex := LexicalJoin(ARoot, APath, ABase);
+  Result := Lex;
+  {$ifdef unix}
+  { Walk up: find the nearest ancestor that exists. }
+  Ancestor := Lex;
+  Tail := '';
+  while (Ancestor <> '') and (not FileExists(Ancestor)) and
+    (not DirectoryExists(Ancestor)) do
+  begin
+    Slash := LastDelimiter(PathDelim, Ancestor);
+    if Slash <= 1 then
+      Break;
+    if Tail = '' then
+      Tail := Copy(Ancestor, Slash + 1, MaxInt)
+    else
+      Tail := Copy(Ancestor, Slash + 1, MaxInt) + PathDelim + Tail;
+    Ancestor := Copy(Ancestor, 1, Slash - 1);
+  end;
+  P := c_realpath(PAnsiChar(AnsiString(Ancestor)), @Buf[0]);
+  if P <> nil then
+  begin
+    Resolved := string(AnsiString(P));
+    if Tail <> '' then
+      Resolved := IncludeTrailingPathDelimiter(Resolved) + Tail;
+    Result := Resolved;
+  end;
+  {$endif}
+end;
+
+function PhysicalContains(const ARoot, APath: string;
+  const ABase: string = ''): Boolean;
+var
+  Lex, Phys, RootPhys: string;
+begin
+  Lex := LexicalJoin(ARoot, APath, ABase);
+  { Lexical reading: must be under the lexical root. }
+  if not IsUnder(ARoot, Lex) then
+    Exit(False);
+  { Physical reading: the root may itself be behind a symlink (e.g. /var ->
+    /private/var), so compare the physical path against the root's PHYSICAL
+    form. Both readings must hold; neither alone is trusted. }
+  RootPhys := PhysicalResolve(ARoot, ARoot);
+  Phys := PhysicalResolve(ARoot, APath, ABase);
+  Result := IsUnder(RootPhys, Phys);
 end;
 
 end.
