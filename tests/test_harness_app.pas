@@ -129,6 +129,7 @@ type
   published
     procedure TestStreamedTurnRendersAndReenables;
     procedure TestAssistantMetadataIsStrippedAndShown;
+    procedure TestAssistantUnterminatedBlockIsNotLost;
     procedure TestAssistantFinalizedAfterTurn;
     procedure TestToolLineAppears;
     procedure TestEmptyToolResultShowsPlaceholder;
@@ -645,6 +646,43 @@ begin
     if Pos('Fix the drain', FSurface.RowText(Y, 0, FSurface.Width)) > 0 then
       SawTitle := True;
   AssertTrue('the title is drawn', SawTitle);
+end;
+
+procedure THarnessAppTest.TestAssistantUnterminatedBlockIsNotLost;
+var
+  Y: Integer;
+  SawTitle, SawBody: Boolean;
+begin
+  { The model forgot the closing `---` but left a blank line: the block is still
+    extracted (title drawn, block stripped) and the body is shown. This is the
+    bug: previously the whole reply vanished. }
+  Build;
+  FFake.AddChunk(TextDelta('---' + #10));
+  FFake.AddChunk(TextDelta('title: Fix the drain' + #10));
+  FFake.AddChunk(TextDelta('keywords: [drain]' + #10));
+  FFake.AddChunk(TextDelta(#10));
+  FFake.AddChunk(TextDelta('The body after a blank line.'));
+  FFake.AddChunk(FinishFrame('stop'));
+  FFake.AddChunk(DoneFrame);
+  SubmitPrompt('hi');
+  AssertTrue('turn finished', Pump(300));
+
+  AssertTrue('the body is present',
+    FindText(ckAssistant, 'The body after a blank line.'));
+  AssertFalse('the block is not in the body', FindText(ckAssistant, 'title:'));
+  FApp.Step;   // render
+  SawTitle := False;
+  SawBody := False;
+  for Y := 0 to FSurface.Height - 1 do
+  begin
+    if Pos('Fix the drain', FSurface.RowText(Y, 0, FSurface.Width)) > 0 then
+      SawTitle := True;
+    if Pos('The body after a blank line.',
+      FSurface.RowText(Y, 0, FSurface.Width)) > 0 then
+      SawBody := True;
+  end;
+  AssertTrue('the title is drawn', SawTitle);
+  AssertTrue('the body is drawn', SawBody);
 end;
 
 procedure THarnessAppTest.TestAssistantFinalizedAfterTurn;

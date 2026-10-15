@@ -141,3 +141,14 @@ Implemented on `main` (`28d8da2`, `b6a9657`, `8811e83`, `ae18cde`, `e4b5741`).
   code path, and the streamed view and a resumed view match.
 - **`MessageCount` was added to the store** (a `COUNT(*)`) for the coarse
   scrollbar's virtual extent — a TUI-Startup need, landed here.
+
+**Follow-up — the missing closing fence.** In practice the model often omits the
+closing `---`. Both the extractor and the streaming suppressor now end a leading
+block **tolerantly at a blank line after content** (YAML frontmatter has no blank
+lines), so the title/keywords are still read and the body is shown; a
+`FlushFrontMatter` at end-of-reply releases anything still withheld (a block
+closed by neither a fence nor a blank line is not frontmatter, so its bytes are
+body — previously they vanished). The prompt example now shows both `---` lines
+explicitly. See `TestMissingClosingFenceEndsAtBlankLine`,
+`TestSuppressorMissingFenceEndsAtBlankLine`, `TestFlushReleasesAnUnclosedBlock`,
+`TestAssistantUnterminatedBlockIsNotLost`.

@@ -26,6 +26,7 @@ type
     procedure TestUnknownKeysIgnored;
     procedure TestCrlf;
     procedure TestEmptyTitle;
+    procedure TestMissingClosingFenceEndsAtBlankLine;
     procedure TestDuplicateKeywordsDeduped;
     procedure TestKeywordsLowercased;
     { The suppressor. }
@@ -34,6 +35,8 @@ type
     procedure TestSuppressorNoBlockFlushesAll;
     procedure TestSuppressorAcrossEveryBoundary;
     procedure TestSuppressorLaterRuleIsNotABlock;
+    procedure TestSuppressorMissingFenceEndsAtBlankLine;
+    procedure TestFlushReleasesAnUnclosedBlock;
   end;
 
 implementation
@@ -86,6 +89,21 @@ begin
   M := ExtractReplyMeta('---' + #10 + 'title: T' + #10 + 'no close');
   AssertFalse('no meta', M.HasMeta);
   AssertEquals('unchanged', '---' + #10 + 'title: T' + #10 + 'no close', M.Body);
+end;
+
+procedure TReplyMetaTest.TestMissingClosingFenceEndsAtBlankLine;
+var
+  M: TReplyMeta;
+begin
+  { The model forgot the closing `---` but left a blank line after the block:
+    the blank line ends it, so the title/keywords are still read and the body is
+    the text after the blank line. }
+  M := ExtractReplyMeta('---' + #10 + 'title: Fix the drain' + #10 +
+    'keywords: [tui, drain]' + #10 + #10 + 'Here is the body.');
+  AssertTrue('has meta', M.HasMeta);
+  AssertEquals('title read', 'Fix the drain', M.Title);
+  AssertTrue('keyword read', ListHasKeyword(M.Keywords, 'drain'));
+  AssertEquals('body after the blank line', 'Here is the body.', M.Body);
 end;
 
 procedure TReplyMetaTest.TestRuleInBodyIsNotABlock;
@@ -243,6 +261,46 @@ begin
   SuppressFrontMatter(S, 'more', Out);
   Acc := Acc + Out;
   AssertEquals('all flushed', 'Intro' + #10 + '---' + #10 + 'more', Acc);
+end;
+
+procedure TReplyMetaTest.TestSuppressorMissingFenceEndsAtBlankLine;
+var
+  S: TFrontMatterSuppressor;
+  Out, Acc: string;
+begin
+  { The missing-closing-fence case: the block is withheld, then a blank line
+    ends it and the body after the blank line is shown. }
+  S := Default(TFrontMatterSuppressor);
+  Acc := '';
+  SuppressFrontMatter(S, '---' + #10, Out);
+  Acc := Acc + Out;
+  SuppressFrontMatter(S, 'title: T' + #10, Out);
+  Acc := Acc + Out;
+  SuppressFrontMatter(S, #10 + 'the body', Out);
+  Acc := Acc + Out;
+  AssertEquals('block hidden, body shown', 'the body', Acc);
+end;
+
+procedure TReplyMetaTest.TestFlushReleasesAnUnclosedBlock;
+var
+  S: TFrontMatterSuppressor;
+  Out, Acc: string;
+begin
+  { A block that never closes (no fence, no blank line) is not frontmatter: the
+    end-of-reply flush must release its bytes so the reply is not blank. }
+  S := Default(TFrontMatterSuppressor);
+  Acc := '';
+  SuppressFrontMatter(S, '---' + #10, Out);
+  Acc := Acc + Out;
+  SuppressFrontMatter(S, 'title: T' + #10 + 'no close', Out);
+  Acc := Acc + Out;
+  AssertEquals('still withheld', '', Acc);
+  AssertTrue('flush releases', FlushFrontMatter(S, Out));
+  Acc := Acc + Out;
+  { The opening `---` was consumed as the fence; the withheld bytes are what
+    followed it. }
+  AssertEquals('the withheld bytes are the body',
+    'title: T' + #10 + 'no close', Acc);
 end;
 
 initialization

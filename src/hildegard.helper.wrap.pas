@@ -25,9 +25,15 @@ const
     'Respond with plain Markdown only. Do not wrap your response in XML tags ' +
     'such as <message>, <context>, or <summary> - those are system-provided ' +
     'metadata, not part of your output format. ' +
-    'For a substantive reply, open with a YAML frontmatter block - the first ' +
-    'line is `---`, then `title:` (a short subject) and `keywords:` (3-8 ' +
-    'lowercase topical terms, e.g. [drain, tui, freeze]), then a closing `---`. ' +
+    'For a substantive reply, open with a YAML frontmatter block: the first ' +
+    'line is exactly `---`, then `title:` (a short subject) and `keywords:` ' +
+    '(3-8 lowercase topical terms), then a closing line that is exactly `---`. ' +
+    'Both `---` lines are required. Example:' + #10 +
+    '---' + #10 +
+    'title: Fix the drain' + #10 +
+    'keywords: [tui, drain, freeze]' + #10 +
+    '---' + #10 +
+    'The body starts here.' + #10 +
     'A terse acknowledgement needs no block. Use CommonMark with GFM pipe ' +
     'tables for the body.';
 

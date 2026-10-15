@@ -1219,9 +1219,15 @@ end;
 procedure THarnessApp.FinalizeAssistant;
 var
   Meta: TReplyMeta;
+  Tail: string;
 begin
   if FAssistant <> nil then
   begin
+    { Flush anything the suppressor still withheld: a block that never closed
+      (no fence, no blank line) is not frontmatter, so its bytes are body and
+      must be shown. Without this, an unterminated block left the reply blank. }
+    if FlushFrontMatter(FAssistantSupp, Tail) and (Tail <> '') then
+      FAssistant.AppendText(Tail);
     FAssistant.Finalize;
     { The reply's frontmatter is metadata: strip it from the displayed body and
       draw the title/keyword header instead. The block was already withheld

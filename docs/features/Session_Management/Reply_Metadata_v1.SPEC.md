@@ -40,9 +40,11 @@ No YAML dependency: extraction is a tolerant line scanner over the block.
 
 ### Functional
 
-- [ ] A **leading** YAML frontmatter block (first line `---`, terminated by a
-      later `---`) is recognised; a `---` anywhere else is an ordinary thematic
-      break and is left to the parser.
+- [ ] A **leading** YAML frontmatter block (first line `---`) is terminated by a
+      later `---`, **or** tolerantly by a **blank line after block content** (the
+      model often omits the closing fence; YAML frontmatter has no blank lines).
+      A `---` anywhere else is an ordinary thematic break and is left to the
+      parser.
 - [ ] Extraction is a pure function over reply text: it yields a title, a keyword
       set, and the **body with the block removed**. Malformed input yields no
       metadata and the **unmodified** text (it never raises).
@@ -168,7 +170,8 @@ The system prompt gains, once:
 
 ## Validation and error handling
 
-- No leading block, or an unterminated one: `HasMeta = False`, `Body = ARaw`.
+- No leading block, or one closed by neither a `---` nor a blank line:
+  `HasMeta = False`, `Body = ARaw` (the suppressor flushes it at end of reply).
 - Unknown keys / wrong value types: ignored; a partial block still yields the
   keys it did parse.
 - A store error on persist: recorded as a session error; the reply is unaffected.

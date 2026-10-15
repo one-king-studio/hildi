@@ -45,6 +45,12 @@ type
 function SuppressFrontMatter(var S: TFrontMatterSuppressor;
   const AChunk: string; out AOut: string): Boolean;
 
+{ At the end of the reply: flush anything still withheld. A block that never
+  closed (no fence, no blank line) is not frontmatter, so its bytes are body and
+  must be shown - the streaming suppressor would otherwise have swallowed them. }
+function FlushFrontMatter(var S: TFrontMatterSuppressor;
+  out AOut: string): Boolean;
+
 implementation
 
 { The line starting at AStart (up to but not including #10), with a trailing #13
@@ -179,7 +185,7 @@ function ExtractReplyMeta(const ARaw: string): TReplyMeta;
 var
   Line, BlockText: string;
   NextPos, BlockStart, CloseStart, CloseNext, P: Integer;
-  Found: Boolean;
+  Found, HasContent: Boolean;
 begin
   Result := Default(TReplyMeta);
   Result.HasMeta := False;
@@ -192,8 +198,13 @@ begin
   if not IsFence(Line) then
     Exit;
   BlockStart := NextPos;
-  { Find the closing fence. }
+  { Find the closing fence - or, tolerantly, a blank line after block content:
+    the model often forgets the closing `---`, and a blank line is a reliable
+    end-of-block signal (YAML frontmatter has no blank lines). The blank line is
+    consumed; the body starts after it. A blank line with no content before it is
+    not a close (that is a leading rule, not an empty block). }
   Found := False;
+  HasContent := False;
   CloseStart := 0;
   CloseNext := 0;
   P := NextPos;
@@ -206,6 +217,15 @@ begin
       Found := True;
       Break;
     end;
+    if (Trim(Line) = '') and HasContent then
+    begin
+      CloseStart := P;
+      CloseNext := NextPos;
+      Found := True;
+      Break;
+    end;
+    if Trim(Line) <> '' then
+      HasContent := True;
     P := NextPos;
   end;
   if not Found then
@@ -221,6 +241,7 @@ function SuppressFrontMatter(var S: TFrontMatterSuppressor;
 var
   Line, Rest: string;
   P, NextPos: Integer;
+  HasContent: Boolean;
 begin
   AOut := '';
   S.Pending := S.Pending + AChunk;
@@ -280,8 +301,11 @@ begin
       Exit(AOut <> '');
     end;
   end;
-  { fmInBlock: look for the closing fence line. }
+  { fmInBlock: look for the closing fence line - or, tolerantly, a blank line
+    after content (the model often forgets the closing `---`; a blank line ends
+    the block, since YAML frontmatter has no blank lines). }
   P := 1;
+  HasContent := False;
   while NextLine(S.Pending, P, Line, NextPos) do
   begin
     if IsFence(Line) and (NextPos <= Length(S.Pending)) then
@@ -296,10 +320,34 @@ begin
       AOut := Rest;
       Exit(AOut <> '');
     end;
+    if (Trim(Line) = '') and HasContent then
+    begin
+      { A blank line after block content ends the block (the missing-fence case).
+        The blank line is consumed; the body starts after it. }
+      Rest := Copy(S.Pending, NextPos, MaxInt);
+      S.Pending := '';
+      S.State := fmDone;
+      AOut := Rest;
+      Exit(AOut <> '');
+    end;
+    if Trim(Line) <> '' then
+      HasContent := True;
     P := NextPos;
   end;
   { No closing fence yet: keep buffering (nothing displayed). }
   Result := False;
+end;
+
+{ At the end of the reply: flush anything still withheld. A block that never
+  closed (no fence, no blank line) is not frontmatter, so its bytes are body and
+  must be shown - the streaming suppressor would otherwise have swallowed them. }
+function FlushFrontMatter(var S: TFrontMatterSuppressor;
+  out AOut: string): Boolean;
+begin
+  AOut := S.Pending;
+  S.Pending := '';
+  S.State := fmDone;
+  Result := AOut <> '';
 end;
 
 end.
