@@ -37,19 +37,31 @@ output streamed live, per call. TDD-first; `make check` before moving on.
 
 ### Phase 3: Fan-out and join (`hildegard.helper.agent`)
 
-- [ ] **Test**: `ExecuteToolCalls` stores and emits results in **call order**
+- [x] **Test**: `ExecuteToolCalls` stores and emits results in **call order**
       when calls complete out of order (a fake tool with a controllable delay).
-- [ ] **Implement**: schedule each `RunToolCall` on an injected executor; join
+- [x] **Implement**: schedule each `RunToolCall` on an injected executor; join
       with a countdown latch; append in index order.
-- [ ] **Test**: a batch of K calls runs with bounded concurrency (a probe records
+- [x] **Test**: a batch of K calls runs with bounded concurrency (a probe records
       the max simultaneous calls <= the worker count).
-- [ ] **Implement**: the executor is injected (default: a small pool); bounded.
-- [ ] **Test**: a not-parallel-safe tool never overlaps another call.
-- [ ] **Implement**: `TToolSpec.ParallelSafe`; a serialized lane for it.
-- [ ] **Test**: a gated call + an ungated call - the ungated completes while the
+- [x] **Implement**: the executor is injected (default: a small pool); bounded.
+- [x] **Test**: a not-parallel-safe tool never overlaps another call.
+- [x] **Implement**: `TToolSpec.ParallelSafe`; a serialized lane for it.
+- [x] **Test**: a gated call + an ungated call - the ungated completes while the
       gated is still awaiting approval.
-- [ ] **Implement**: the per-call pipeline resolves approval inside the handler,
+- [x] **Implement**: the per-call pipeline resolves approval inside the handler,
       so the wait is per-call.
+
+> **Deviations (Phase 3):**
+> - `TToolSpec.ParallelSafe` defaults **False** (opt-in), not True as the SPEC
+>   proposed: an unmarked tool must never run concurrently, so adding
+>   parallelism cannot silently race an unsafe handler.
+> - **Runs, not the whole batch.** Only *consecutive* parallel-safe calls fan
+>   out; a mixed batch runs in order, parallelizing the safe stretches. This
+>   preserves **execution order** (a `[write, read]` batch must not reorder),
+>   which the SPEC left implicit.
+> - **A separate tool pool.** The turn runs on the turn pool, so tool jobs use a
+>   distinct `FToolPool` (4 workers); sharing the turn pool would serialize or
+>   deadlock at low concurrency.
 
 ### Phase 4: Output routing and cancellation
 
