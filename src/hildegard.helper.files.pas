@@ -13,7 +13,7 @@ unit hildegard.helper.files;
 interface
 
 uses
-  Classes, SysUtils, fpjson,
+  Classes, SysUtils, fpjson, regexpr,
   hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.approval,
   hildegard.helper.workspace;
 
@@ -82,6 +82,12 @@ type
       out AResult: string; out AError: string;
       AObserver: TToolObserver = nil): Boolean;
     function StatFile(const AArgumentsJson: string;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
+    function ReplaceRegex(const AArgumentsJson: string;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
+    function SearchReplace(const AArgumentsJson: string;
       out AResult: string; out AError: string;
       AObserver: TToolObserver = nil): Boolean;
   end;
@@ -1307,7 +1313,247 @@ begin
   end;
 end;
 
-{ --- registration ------------------------------------------------------- }
+{ Apply a regex to AText: returns the new text and the number of matches. A
+  non-compiling pattern yields AError. AAll replaces every match; otherwise only
+  the first (TRegExpr.Replace replaces all, so count first for the one-only
+  case). }
+function RegexReplace(const AText, APattern, ARepl: string; AAll, AIgnoreCase:
+  Boolean; out AOut: string; out ACount: Integer; out AError: string): Boolean;
+var
+  RE: TRegExpr;
+begin
+  AOut := AText;
+  ACount := 0;
+  AError := '';
+  RE := TRegExpr.Create;
+  try
+    RE.Expression := APattern;
+    RE.ModifierI := AIgnoreCase;
+    try
+      if not RE.Exec(AText) then
+        Exit(True);   { no match: unchanged, count 0 }
+    except
+      on E: Exception do
+      begin
+        AError := 'invalid regex: ' + E.Message;
+        Exit(False);
+      end;
+    end;
+    if AAll then
+    begin
+      ACount := 0;
+      repeat
+        Inc(ACount);
+      until not RE.ExecNext;
+      AOut := RE.Replace(AText, ARepl, True);
+    end
+    else
+    begin
+      ACount := 1;
+      AOut := RE.Replace(AText, ARepl, True);
+    end;
+    Result := True;
+  finally
+    RE.Free;
+  end;
+end;
+
+{ A JSON string field, or ADefault when absent. }
+function JsonStringDef(ARoot: TJSONObject; const AName,
+  ADefault: string): string;
+begin
+  if not JsonString(ARoot, AName, Result) then
+    Result := ADefault;
+end;
+
+function BoolToJson(AValue: Boolean): string;
+begin
+  if AValue then
+    Result := 'true'
+  else
+    Result := 'false';
+end;
+
+{ The directory a glob searches: everything up to the first wildcard, else '.'. }
+function GlobSearchDir(const AGlob: string): string;
+var
+  I, LastSlash: Integer;
+begin
+  LastSlash := 0;
+  for I := 1 to Length(AGlob) do
+  begin
+    if (AGlob[I] = '*') or (AGlob[I] = '?') then
+      Break;
+    if AGlob[I] = '/' then
+      LastSlash := I;
+  end;
+  if LastSlash = 0 then
+    Result := '.'
+  else
+    Result := Copy(AGlob, 1, LastSlash - 1);
+  if Result = '' then
+    Result := '.';
+end;
+
+{ The whole file's text, or '' if it cannot be read. }
+function ReadRawFile(const APath: string): string;
+var
+  FS: TFileStream;
+begin
+  Result := '';
+  if not FileExists(APath) then
+    Exit;
+  FS := TFileStream.Create(APath, fmOpenRead or fmShareDenyNone);
+  try
+    SetLength(Result, FS.Size);
+    if FS.Size > 0 then
+      FS.ReadBuffer(Result[1], FS.Size);
+  finally
+    FS.Free;
+  end;
+end;
+
+function TFileTool.ReplaceRegex(const AArgumentsJson: string;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
+var
+  Data: TJSONData;
+  Root: TJSONObject;
+  Rel, Abs, PathArg, Pattern, Repl, Text, NewText, IgnoreCase: string;
+  All, AllFlag: Boolean;
+  Count: Integer;
+  Lines: TStringList;
+begin
+  AResult := '';
+  AError := '';
+  Data := nil;
+  if not ParseArgs(AArgumentsJson, Data, Root, AError) then
+    Exit(False);
+  try
+    if not JsonString(Root, 'path', PathArg) or (Trim(PathArg) = '') then
+    begin
+      AError := 'missing required "path"';
+      Exit(False);
+    end;
+    if not JsonString(Root, 'pattern', Pattern) or (Pattern = '') then
+    begin
+      AError := 'missing required "pattern"';
+      Exit(False);
+    end;
+    if not JsonString(Root, 'replacement', Repl) then
+    begin
+      AError := 'missing required "replacement"';
+      Exit(False);
+    end;
+    AllFlag := JsonBool(Root, 'all', True);
+    IgnoreCase := LowerCase(JsonStringDef(Root, 'flags', ''));
+    if not ResolveChecked(PathArg, Abs, AError) then
+      Exit(False);
+    if not FileExists(Abs) then
+    begin
+      AError := 'no such file: ' + RelOf(Abs);
+      Exit(False);
+    end;
+    Rel := RelOf(Abs);
+    if not Approve('file:edit', 'regex-replace ' + Rel,
+      ToolReasonOf(AArgumentsJson), Rel, [Rel], AError) then
+      Exit(False);
+    Text := ReadRawFile(Abs);
+    if not RegexReplace(Text, Pattern, Repl, AllFlag,
+      Pos('i', IgnoreCase) > 0, NewText, Count, AError) then
+      Exit(False);
+    if Count > 0 then
+    begin
+      if not WriteAtomic(Abs, NewText, AError) then
+        Exit(False);
+    end;
+    AResult := '{"replaced":' + IntToStr(Count) + ',"path":"' + Rel + '"}';
+    Result := True;
+  finally
+    Data.Free;
+  end;
+end;
+
+function TFileTool.SearchReplace(const AArgumentsJson: string;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
+var
+  Data: TJSONData;
+  Root: TJSONObject;
+  Rel, Abs, DirArg, Pattern, Repl, IgnoreCase: string;
+  AllFlag, DryRun: Boolean;
+  Files: TStringList;
+  I, Total, Count: Integer;
+  Text, NewText: string;
+  Paths: string;
+begin
+  AResult := '';
+  AError := '';
+  Data := nil;
+  if not ParseArgs(AArgumentsJson, Data, Root, AError) then
+    Exit(False);
+  Files := nil;
+  try
+    if not JsonString(Root, 'pattern', Pattern) or (Pattern = '') then
+    begin
+      AError := 'missing required "pattern"';
+      Exit(False);
+    end;
+    if not JsonString(Root, 'replacement', Repl) then
+    begin
+      AError := 'missing required "replacement"';
+      Exit(False);
+    end;
+    AllFlag := JsonBool(Root, 'all', True);
+    DryRun := JsonBool(Root, 'dryRun', False);
+    IgnoreCase := LowerCase(JsonStringDef(Root, 'flags', ''));
+    { The glob selects files; the directory scopes the ask. A pattern with a '/'
+      is resolved as a path under the workspace. }
+    if not JsonString(Root, 'glob', DirArg) or (Trim(DirArg) = '') then
+      DirArg := '.';
+    { The directory to search is the glob's leading directory (up to the first
+      wildcard), else '.'; the ask scopes on it. }
+    Rel := GlobSearchDir(DirArg);
+    if not ResolveChecked(Rel, Abs, AError) then
+      Exit(False);
+    Rel := RelOf(Abs);
+    if not Approve('file:edit', 'search-replace in ' + Rel,
+      ToolReasonOf(AArgumentsJson), Rel, [Rel], AError) then
+      Exit(False);
+    Files := TStringList.Create;
+    { Collect from the workspace root so the glob (workspace-relative) matches
+      the whole path, not just the searched subdirectory. }
+    CollectInto(Files, FWorkspace.Root, True, False, DefaultCollectLimit);
+    Total := 0;
+    Paths := '';
+    for I := 0 to Files.Count - 1 do
+    begin
+      if not GlobMatch(DirArg, RelOf(Files[I])) then
+        Continue;
+      Text := ReadRawFile(Files[I]);
+      if not RegexReplace(Text, Pattern, Repl, AllFlag,
+        Pos('i', IgnoreCase) > 0, NewText, Count, AError) then
+        Exit(False);
+      if Count = 0 then
+        Continue;
+      Inc(Total, Count);
+      if Paths <> '' then
+        Paths := Paths + ',';
+      Paths := Paths + '"' + RelOf(Files[I]) + '"';
+      if not DryRun then
+      begin
+        if not WriteAtomic(Files[I], NewText, AError) then
+          Exit(False);
+      end;
+    end;
+    AResult := '{"files":[' + Paths + '],"replacements":' + IntToStr(Total) +
+      ',"dryRun":' + BoolToJson(DryRun) + '}';
+    Result := True;
+  finally
+    Files.Free;
+    Data.Free;
+  end;
+end;
 
 procedure TFileTool.Register(ATools: TToolRegistry);
 var
@@ -1447,6 +1693,35 @@ begin
     '"reason":{"type":"string","description":"Short reason this stat is needed."}' +
     '},"required":["path","reason"]}');
   ATools.Add(Spec, StatFile);
+
+  Spec := MakeToolSpec('file_replace_regex',
+    'Replace a regular expression within one file. Requires a short reason. ' +
+    'Gated by approval.',
+    '{"type":"object","properties":{' +
+    '"path":{"type":"string","description":"File path relative to the workspace."},' +
+    '"pattern":{"type":"string","description":"Regular expression to match."},' +
+    '"replacement":{"type":"string","description":"Replacement ($1 etc. for groups)."},' +
+    '"all":{"type":"boolean","description":"Replace every match (default true)."},' +
+    '"flags":{"type":"string","description":"Regex flags, e.g. i for case-insensitive."},' +
+    '"reason":{"type":"string","description":"Short reason this edit is needed."}' +
+    '},"required":["path","pattern","replacement","reason"]}');
+  Spec.SerialOnly := True;
+  ATools.Add(Spec, ReplaceRegex);
+
+  Spec := MakeToolSpec('file_search_replace',
+    'Replace a regular expression across every file matching a glob. ' +
+    'dryRun counts without writing. Requires a short reason. Gated by approval.',
+    '{"type":"object","properties":{' +
+    '"glob":{"type":"string","description":"Glob selecting files, e.g. src/**/*.pas."},' +
+    '"pattern":{"type":"string","description":"Regular expression to match."},' +
+    '"replacement":{"type":"string","description":"Replacement ($1 etc. for groups)."},' +
+    '"all":{"type":"boolean","description":"Replace every match (default true)."},' +
+    '"dryRun":{"type":"boolean","description":"Count and list without writing."},' +
+    '"flags":{"type":"string","description":"Regex flags, e.g. i for case-insensitive."},' +
+    '"reason":{"type":"string","description":"Short reason this edit is needed."}' +
+    '},"required":["glob","pattern","replacement","reason"]}');
+  Spec.SerialOnly := True;
+  ATools.Add(Spec, SearchReplace);
 end;
 
 end.

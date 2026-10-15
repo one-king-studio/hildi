@@ -78,6 +78,11 @@ type
     procedure TestMakeDirCreatesParents;
     procedure TestStatReportsTypeAndSize;
     procedure TestV2ToolsAreRegistered;
+    procedure TestReplaceRegexAll;
+    procedure TestReplaceRegexBadPattern;
+    procedure TestSearchReplaceAcrossGlob;
+    procedure TestSearchReplaceDryRunWritesNothing;
+    procedure TestSearchReplaceAskScopesOnTheGlobDirectory;
   end;
 
 implementation
@@ -453,7 +458,7 @@ begin
   Registry := TToolRegistry.Create;
   try
     FTool.Register(Registry);
-    AssertEquals('six v1 + six v2 tools', 12, Registry.Count);
+    AssertEquals('v1 six + v2 eight tools', 14, Registry.Count);
     Specs := Registry.Specs;
     for I := 0 to High(Specs) do
       AssertTrue(Specs[I].Name + ' requires reason',
@@ -658,6 +663,77 @@ begin
   finally
     Registry.Free;
   end;
+end;
+
+procedure TFileToolTest.TestReplaceRegexAll;
+var
+  Res, Err: string;
+begin
+  WriteRaw(Full('a.txt'), 'cat bat cat');
+  AssertTrue('replace', FTool.ReplaceRegex(
+    Args(['path', 'a.txt', 'pattern', 'cat', 'replacement', 'dog',
+      'reason', 'r']), Res, Err));
+  AssertTrue('two replaced', Pos('"replaced":2', Res) > 0);
+  AssertEquals('all replaced', 'dog bat dog' + LineEnding,
+    ReadRaw(Full('a.txt')));
+end;
+
+procedure TFileToolTest.TestReplaceRegexBadPattern;
+var
+  Res, Err: string;
+begin
+  WriteRaw(Full('a.txt'), 'x');
+  AssertFalse('bad pattern', FTool.ReplaceRegex(
+    Args(['path', 'a.txt', 'pattern', '([', 'replacement', 'y',
+      'reason', 'r']), Res, Err));
+  AssertTrue('error mentions regex', Pos('regex', Err) > 0);
+end;
+
+procedure TFileToolTest.TestSearchReplaceAcrossGlob;
+var
+  Res, Err: string;
+begin
+  WriteRaw(Full('src/a.pas'), 'OldName here');
+  WriteRaw(Full('src/b.pas'), 'OldName there');
+  WriteRaw(Full('src/c.txt'), 'OldName ignored');
+  AssertTrue('search-replace', FTool.SearchReplace(
+    Args(['glob', 'src/*.pas', 'pattern', 'OldName', 'replacement', 'NewName',
+      'reason', 'r']), Res, Err));
+  AssertTrue('two replacements', Pos('"replacements":2', Res) > 0);
+  AssertEquals('a changed', 'NewName here' + LineEnding,
+    ReadRaw(Full('src/a.pas')));
+  AssertEquals('txt untouched', 'OldName ignored' + LineEnding,
+    ReadRaw(Full('src/c.txt')));
+end;
+
+procedure TFileToolTest.TestSearchReplaceDryRunWritesNothing;
+var
+  Res, Err: string;
+begin
+  WriteRaw(Full('src/a.pas'), 'OldName');
+  { dryRun must be a JSON boolean, not a string (the Args helper quotes). }
+  AssertTrue('dry run', FTool.SearchReplace(
+    '{"glob":"src/*.pas","pattern":"OldName","replacement":"NewName",' +
+    '"dryRun":true,"reason":"r"}', Res, Err));
+  AssertTrue('counted', Pos('"replacements":1', Res) > 0);
+  AssertEquals('file unchanged', 'OldName' + LineEnding,
+    ReadRaw(Full('src/a.pas')));
+end;
+
+procedure TFileToolTest.TestSearchReplaceAskScopesOnTheGlobDirectory;
+var
+  Res, Err: string;
+begin
+  { A multi-file replace is a write-shaped ask scoped on the glob's leading
+    directory, so one dir/dir_ext grant covers the whole batch. }
+  WriteRaw(Full('src/a.pas'), 'x');
+  AssertTrue('search-replace', FTool.SearchReplace(
+    Args(['glob', 'src/*.pas', 'pattern', 'x', 'replacement', 'y',
+      'reason', 'r']), Res, Err));
+  AssertEquals('scopes on the directory', 'src', FApproval.LastPath);
+  AssertTrue('offers dir', FApproval.HasOption('dir'));
+  AssertTrue('offers ext', FApproval.HasOption('ext'));
+  AssertTrue('offers dir_ext', FApproval.HasOption('dir_ext'));
 end;
 
 initialization
