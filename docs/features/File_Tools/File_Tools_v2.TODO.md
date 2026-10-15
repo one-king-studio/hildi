@@ -15,34 +15,43 @@ TDD-first; `make check` before moving on. `main` only.
 > This plan can start before that lands (the tools work with the existing asks),
 > but the multi-file ask is only *useful* once Path Scoping does.
 
+> **Progress (Phases 1–3 done, `1b48bf3` + `e7c35e3`):** the six simple tools
+> (`file_append`/`delete`/`move`/`copy`/`mkdir`/`stat`), `file_replace_regex`
+> (over FPC's in-tree `regexpr`), and `file_search_replace` (glob-driven, with
+> `dryRun`; the ask scopes on the glob's leading directory, so one `dir_ext`
+> grant covers the batch). `make check` green (1366 tests, leak-clean).
+> **Remaining:** Phases 4–5 — the structured formats (`json_read`/`json_edit`,
+> `yaml_read`/`yaml_edit`) and `patch_apply` (the two new pure units
+> `hildegard.helper.patch` and `hildegard.helper.yaml`).
+
 ## Implementation Tasks
 
 ### Phase 1: The simple tools (`hildegard.helper.files`)
 
-- [ ] **Test**: `file_append` creates then appends (`test_file_tools`).
-- [ ] **Implement**: `AppendFile`.
-- [ ] **Test**: `file_delete`/`file_move`/`file_copy`/`file_mkdir`/`file_stat`
+- [x] **Test**: `file_append` creates then appends (`test_file_tools`).
+- [x] **Implement**: `AppendFile`.
+- [x] **Test**: `file_delete`/`file_move`/`file_copy`/`file_mkdir`/`file_stat`
       round-trip on a temp dir.
-- [ ] **Implement**: `DeleteFile`/`MoveFile`/`CopyFile`/`MakeDir`/`StatFile`.
-- [ ] **Register** them with `MakeToolSpec` + the `reason` param.
+- [x] **Implement**: `DeleteFile`/`MoveFile`/`CopyFile`/`MakeDir`/`StatFile`.
+- [x] **Register** them with `MakeToolSpec` + the `reason` param.
 
 ### Phase 2: Regex replace
 
-- [ ] **Test**: `file_replace_regex` replaces all/one, honours `i`, errors on a
+- [x] **Test**: `file_replace_regex` replaces all/one, honours `i`, errors on a
       bad pattern, and bounds the count.
-- [ ] **Implement**: `ReplaceRegex` over FPC `RegExpr`.
-- [ ] **Test**: a path outside the workspace is refused; approval is asked first
+- [x] **Implement**: `ReplaceRegex` over FPC `RegExpr`.
+- [x] **Test**: a path outside the workspace is refused; approval is asked first
       (a fake service records the subject path).
-- [ ] **Implement**: `ResolveChecked` + `Approve` with the operation's path.
+- [x] **Implement**: `ResolveChecked` + `Approve` with the operation's path.
 
 ### Phase 3: Multi-file search/replace
 
-- [ ] **Test**: `file_search_replace` over a glob hits the right files; `dryRun`
+- [x] **Test**: `file_search_replace` over a glob hits the right files; `dryRun`
       writes nothing; the count is bounded.
-- [ ] **Implement**: `SearchReplace` (reuse the glob matcher; apply
+- [x] **Implement**: `SearchReplace` (reuse the glob matcher; apply
       `ReplaceRegex` per file).
-- [ ] **Test**: the ask is write-shaped and scopes on the searched directory.
-- [ ] **Implement**: the ask's subject path = the searched directory.
+- [x] **Test**: the ask is write-shaped and scopes on the searched directory.
+- [x] **Implement**: the ask's subject path = the searched directory.
 
 ### Phase 4: Structured formats
 
