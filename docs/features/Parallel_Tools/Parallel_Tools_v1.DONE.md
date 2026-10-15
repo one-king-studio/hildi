@@ -84,9 +84,9 @@ output streamed live, per call. TDD-first; `make check` before moving on.
 
 ### Phase 5: Validation & docs
 
-- [ ] **Run**: `make test SUITE=TAgentLoopTest,TApprovalTest,THarnessTurnTest,THarnessAppTest`
-- [ ] **Run**: `make check` (all gates)
-- [ ] **Update the SPEC** if behaviour diverged; rename this TODO to
+- [x] **Run**: `make test SUITE=TAgentLoopTest,TApprovalTest,THarnessTurnTest,THarnessAppTest`
+- [x] **Run**: `make check` (all gates)
+- [x] **Update the SPEC** if behaviour diverged; rename this TODO to
       `Parallel_Tools_v1.DONE.md`; add the row to `FEATURES.md`.
 
 ## Files to Create/Modify
@@ -130,11 +130,11 @@ tests/test_harness_app.pas               (output routing)
 
 ## Success Criteria
 
-- [ ] All tasks checked
-- [ ] Every SPEC acceptance criterion maps to a passing test
-- [ ] `make check` passes (tests + leak gate)
-- [ ] A gated call no longer blocks an ungated sibling's work
-- [ ] Results and blocks are in call order; the gate remains authoritative
+- [x] All tasks checked
+- [x] Every SPEC acceptance criterion maps to a passing test
+- [x] `make check` passes (tests + leak gate)
+- [x] A gated call no longer blocks an ungated sibling's work
+- [x] Results and blocks are in call order; the gate remains authoritative
 
 ## Notes & Considerations
 
@@ -146,3 +146,28 @@ tests/test_harness_app.pas               (output routing)
   latch, as `TAgentPool` does.
 - **Call order, not completion order.** Index-tag every result.
 - Record deviations from the SPEC here.
+
+## Outcome
+
+Implemented on `main` (`020539f`, `a094053`, `438bf94`, `1ee3c38`): a concurrent
+approval gate, concurrent approval resolution, the tool-call fan-out/join with
+ordered results, and per-call output routing with interrupt-releases-the-gate.
+`make check` green (1331 tests, leak-clean).
+
+**Deviations from the SPEC, with reasons:**
+
+- **`ParallelSafe` defaults False (opt-in).** The SPEC proposed default True; an
+  unmarked tool must never run concurrently, so adding parallelism cannot
+  silently race an unsafe handler.
+- **Runs, not the whole batch.** Only *consecutive* parallel-safe calls fan out,
+  preserving execution order (a `[write, read]` batch must not reorder).
+- **A separate tool pool** (`FToolPool`, 4), because the turn occupies a
+  turn-pool worker while its tools run.
+- **Cancellation is not per-job tokens.** The loop never breaks a batch
+  part-way (calls and results stay paired), so the fix is that an interrupt
+  **releases the approval gate**, unblocking a batch waiting on approval at once
+  instead of after the timeout.
+- **The gate's prompt is serialized by a second lock** (`FPromptLock`) separate
+  from the decision snapshot (`FDecisionLock`); the already-allowed fast path
+  never touches `FPromptLock`, so a cleared call is not blocked behind a
+  prompting sibling.
