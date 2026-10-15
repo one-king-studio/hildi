@@ -70,6 +70,14 @@ type
     procedure TestReadAskOmitsExtensionScoping;
     procedure TestGlobAskScopesOnTheDirectoryNotThePattern;
     procedure TestAskCarriesTheSubjectPath;
+    { File Tools v2, Phase 1. }
+    procedure TestAppendCreatesThenAppends;
+    procedure TestDeleteFileOp;
+    procedure TestMoveFileOp;
+    procedure TestCopyFileOp;
+    procedure TestMakeDirCreatesParents;
+    procedure TestStatReportsTypeAndSize;
+    procedure TestV2ToolsAreRegistered;
   end;
 
 implementation
@@ -445,7 +453,7 @@ begin
   Registry := TToolRegistry.Create;
   try
     FTool.Register(Registry);
-    AssertEquals('six tools', 6, Registry.Count);
+    AssertEquals('six v1 + six v2 tools', 12, Registry.Count);
     Specs := Registry.Specs;
     for I := 0 to High(Specs) do
       AssertTrue(Specs[I].Name + ' requires reason',
@@ -550,6 +558,106 @@ begin
   AssertTrue('write', FTool.WriteFile(
     Args(['path', 'docs/x/a.md', 'content', 'y', 'reason', 'r']), Res, Err));
   AssertEquals('the operation path', 'docs/x/a.md', FApproval.LastPath);
+end;
+
+procedure TFileToolTest.TestAppendCreatesThenAppends;
+var
+  Res, Err: string;
+begin
+  AssertTrue('append creates', FTool.AppendFile(
+    Args(['path', 'log.txt', 'content', 'a', 'reason', 'r']), Res, Err));
+  AssertEquals('created with a', 'a', ReadRaw(Full('log.txt')));
+  AssertTrue('append again', FTool.AppendFile(
+    Args(['path', 'log.txt', 'content', 'b', 'reason', 'r']), Res, Err));
+  AssertEquals('appended b', 'ab', ReadRaw(Full('log.txt')));
+end;
+
+procedure TFileToolTest.TestDeleteFileOp;
+var
+  Res, Err: string;
+begin
+  WriteRaw(Full('gone.txt'), 'x');
+  AssertTrue('delete', FTool.DeleteFileOp(
+    Args(['path', 'gone.txt', 'reason', 'r']), Res, Err));
+  AssertFalse('file is gone', FileExists(Full('gone.txt')));
+end;
+
+procedure TFileToolTest.TestMoveFileOp;
+var
+  Res, Err: string;
+begin
+  WriteRaw(Full('a.txt'), 'hi');
+  AssertTrue('move', FTool.MoveFileOp(
+    Args(['from', 'a.txt', 'to', 'sub/b.txt', 'reason', 'r']), Res, Err));
+  AssertFalse('source gone', FileExists(Full('a.txt')));
+  AssertEquals('destination has the content', 'hi' + LineEnding,
+    ReadRaw(Full('sub/b.txt')));
+end;
+
+procedure TFileToolTest.TestCopyFileOp;
+var
+  Res, Err: string;
+begin
+  WriteRaw(Full('a.txt'), 'hi');
+  AssertTrue('copy', FTool.CopyFileOp(
+    Args(['from', 'a.txt', 'to', 'b.txt', 'reason', 'r']), Res, Err));
+  AssertEquals('source stays', 'hi' + LineEnding, ReadRaw(Full('a.txt')));
+  AssertEquals('copy made', 'hi' + LineEnding, ReadRaw(Full('b.txt')));
+end;
+
+procedure TFileToolTest.TestMakeDirCreatesParents;
+var
+  Res, Err: string;
+begin
+  AssertTrue('mkdir', FTool.MakeDir(
+    Args(['path', 'x/y/z', 'reason', 'r']), Res, Err));
+  AssertTrue('deep dir exists', DirectoryExists(Full('x/y/z')));
+end;
+
+procedure TFileToolTest.TestStatReportsTypeAndSize;
+var
+  Res, Err: string;
+begin
+  WriteRaw(Full('a.txt'), 'hello');
+  AssertTrue('stat file', FTool.StatFile(
+    Args(['path', 'a.txt', 'reason', 'r']), Res, Err));
+  AssertTrue('type file', Pos('"type":"file"', Res) > 0);
+  { WriteRaw adds a trailing newline, so 6 bytes. }
+  AssertTrue('size 6', Pos('"size":6', Res) > 0);
+  AssertTrue('stat dir', FTool.StatFile(
+    Args(['path', '.', 'reason', 'r']), Res, Err));
+  AssertTrue('type dir', Pos('"type":"dir"', Res) > 0);
+end;
+
+procedure TFileToolTest.TestV2ToolsAreRegistered;
+var
+  Registry: TToolRegistry;
+  Specs: TToolSpecArray;
+  I, J: Integer;
+  Saw: Boolean;
+  Names: array[0..5] of string;
+begin
+  Names[0] := 'file_append';
+  Names[1] := 'file_delete';
+  Names[2] := 'file_move';
+  Names[3] := 'file_copy';
+  Names[4] := 'file_mkdir';
+  Names[5] := 'file_stat';
+  Registry := TToolRegistry.Create;
+  try
+    FTool.Register(Registry);
+    Specs := Registry.Specs;
+    for I := Low(Names) to High(Names) do
+    begin
+      Saw := False;
+      for J := 0 to High(Specs) do
+        if Specs[J].Name = Names[I] then
+          Saw := True;
+      AssertTrue(Names[I] + ' registered', Saw);
+    end;
+  finally
+    Registry.Free;
+  end;
 end;
 
 initialization

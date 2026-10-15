@@ -65,6 +65,25 @@ type
     function Grep(const AArgumentsJson: string;
       out AResult: string; out AError: string;
       AObserver: TToolObserver = nil): Boolean;
+    { File Tools v2: the first-class edit tools. }
+    function AppendFile(const AArgumentsJson: string;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
+    function DeleteFileOp(const AArgumentsJson: string;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
+    function MoveFileOp(const AArgumentsJson: string;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
+    function CopyFileOp(const AArgumentsJson: string;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
+    function MakeDir(const AArgumentsJson: string;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
+    function StatFile(const AArgumentsJson: string;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
   end;
 
 const
@@ -972,6 +991,322 @@ begin
   end;
 end;
 
+{ --- File Tools v2: the first-class edit tools ------------------------- }
+
+function TFileTool.AppendFile(const AArgumentsJson: string;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
+var
+  Data: TJSONData;
+  Root: TJSONObject;
+  Rel, Abs, PathArg, Content: string;
+  FS: TFileStream;
+begin
+  AResult := '';
+  AError := '';
+  Data := nil;
+  if not ParseArgs(AArgumentsJson, Data, Root, AError) then
+    Exit(False);
+  try
+    if not JsonString(Root, 'path', PathArg) or (Trim(PathArg) = '') then
+    begin
+      AError := 'missing required "path"';
+      Exit(False);
+    end;
+    if not JsonString(Root, 'content', Content) then
+    begin
+      AError := 'missing required "content"';
+      Exit(False);
+    end;
+    if not ResolveChecked(PathArg, Abs, AError) then
+      Exit(False);
+    Rel := RelOf(Abs);
+    if not Approve('file:write', 'append ' + Rel,
+      ToolReasonOf(AArgumentsJson), Rel, [Rel], AError) then
+      Exit(False);
+    ForceDirectories(ExtractFileDir(Abs));
+    try
+      if FileExists(Abs) then
+        FS := TFileStream.Create(Abs, fmOpenReadWrite or fmShareDenyNone)
+      else
+        FS := TFileStream.Create(Abs, fmCreate);
+      try
+        FS.Seek(0, soEnd);
+        if Content <> '' then
+          FS.WriteBuffer(Content[1], Length(Content));
+      finally
+        FS.Free;
+      end;
+    except
+      on E: Exception do
+      begin
+        AError := 'could not append: ' + E.Message;
+        Exit(False);
+      end;
+    end;
+    AResult := 'appended ' + IntToStr(Length(Content)) + ' bytes to ' + Rel;
+    Result := True;
+  finally
+    Data.Free;
+  end;
+end;
+
+function TFileTool.DeleteFileOp(const AArgumentsJson: string;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
+var
+  Data: TJSONData;
+  Root: TJSONObject;
+  Rel, Abs, PathArg: string;
+begin
+  AResult := '';
+  AError := '';
+  Data := nil;
+  if not ParseArgs(AArgumentsJson, Data, Root, AError) then
+    Exit(False);
+  try
+    if not JsonString(Root, 'path', PathArg) or (Trim(PathArg) = '') then
+    begin
+      AError := 'missing required "path"';
+      Exit(False);
+    end;
+    if not ResolveChecked(PathArg, Abs, AError) then
+      Exit(False);
+    Rel := RelOf(Abs);
+    if not Approve('file:delete', 'delete ' + Rel,
+      ToolReasonOf(AArgumentsJson), Rel, [Rel], AError) then
+      Exit(False);
+    if DirectoryExists(Abs) then
+    begin
+      if not RemoveDir(Abs) then
+      begin
+        AError := 'could not delete directory (not empty?): ' + Rel;
+        Exit(False);
+      end;
+    end
+    else if FileExists(Abs) then
+    begin
+      if not DeleteFile(Abs) then
+      begin
+        AError := 'could not delete: ' + Rel;
+        Exit(False);
+      end;
+    end
+    else
+    begin
+      AError := 'no such file: ' + Rel;
+      Exit(False);
+    end;
+    AResult := 'deleted ' + Rel;
+    Result := True;
+  finally
+    Data.Free;
+  end;
+end;
+
+function TFileTool.MoveFileOp(const AArgumentsJson: string;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
+var
+  Data: TJSONData;
+  Root: TJSONObject;
+  SrcRel, DstRel, SrcAbs, DstAbs, SrcArg, DstArg: string;
+begin
+  AResult := '';
+  AError := '';
+  Data := nil;
+  if not ParseArgs(AArgumentsJson, Data, Root, AError) then
+    Exit(False);
+  try
+    if not JsonString(Root, 'from', SrcArg) or (Trim(SrcArg) = '') then
+    begin
+      AError := 'missing required "from"';
+      Exit(False);
+    end;
+    if not JsonString(Root, 'to', DstArg) or (Trim(DstArg) = '') then
+    begin
+      AError := 'missing required "to"';
+      Exit(False);
+    end;
+    if not ResolveChecked(SrcArg, SrcAbs, AError) then
+      Exit(False);
+    if not ResolveChecked(DstArg, DstAbs, AError) then
+      Exit(False);
+    SrcRel := RelOf(SrcAbs);
+    DstRel := RelOf(DstAbs);
+    if not Approve('file:move', 'move ' + SrcRel + ' to ' + DstRel,
+      ToolReasonOf(AArgumentsJson), SrcRel, [SrcRel], AError) then
+      Exit(False);
+    ForceDirectories(ExtractFileDir(DstAbs));
+    if not RenameFile(SrcAbs, DstAbs) then
+    begin
+      AError := 'could not move: ' + SrcRel;
+      Exit(False);
+    end;
+    AResult := 'moved ' + SrcRel + ' to ' + DstRel;
+    Result := True;
+  finally
+    Data.Free;
+  end;
+end;
+
+function TFileTool.CopyFileOp(const AArgumentsJson: string;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
+var
+  Data: TJSONData;
+  Root: TJSONObject;
+  SrcRel, DstRel, SrcAbs, DstAbs, SrcArg, DstArg: string;
+  Src, Dst: TFileStream;
+begin
+  AResult := '';
+  AError := '';
+  Data := nil;
+  if not ParseArgs(AArgumentsJson, Data, Root, AError) then
+    Exit(False);
+  try
+    if not JsonString(Root, 'from', SrcArg) or (Trim(SrcArg) = '') then
+    begin
+      AError := 'missing required "from"';
+      Exit(False);
+    end;
+    if not JsonString(Root, 'to', DstArg) or (Trim(DstArg) = '') then
+    begin
+      AError := 'missing required "to"';
+      Exit(False);
+    end;
+    if not ResolveChecked(SrcArg, SrcAbs, AError) then
+      Exit(False);
+    if not ResolveChecked(DstArg, DstAbs, AError) then
+      Exit(False);
+    SrcRel := RelOf(SrcAbs);
+    DstRel := RelOf(DstAbs);
+    if not Approve('file:copy', 'copy ' + SrcRel + ' to ' + DstRel,
+      ToolReasonOf(AArgumentsJson), DstRel, [DstRel], AError) then
+      Exit(False);
+    if not FileExists(SrcAbs) then
+    begin
+      AError := 'no such file: ' + SrcRel;
+      Exit(False);
+    end;
+    ForceDirectories(ExtractFileDir(DstAbs));
+    try
+      Src := TFileStream.Create(SrcAbs, fmOpenRead or fmShareDenyNone);
+      try
+        Dst := TFileStream.Create(DstAbs, fmCreate);
+        try
+          Dst.CopyFrom(Src, 0);
+        finally
+          Dst.Free;
+        end;
+      finally
+        Src.Free;
+      end;
+    except
+      on E: Exception do
+      begin
+        AError := 'could not copy: ' + E.Message;
+        Exit(False);
+      end;
+    end;
+    AResult := 'copied ' + SrcRel + ' to ' + DstRel;
+    Result := True;
+  finally
+    Data.Free;
+  end;
+end;
+
+function TFileTool.MakeDir(const AArgumentsJson: string;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
+var
+  Data: TJSONData;
+  Root: TJSONObject;
+  Rel, Abs, PathArg: string;
+begin
+  AResult := '';
+  AError := '';
+  Data := nil;
+  if not ParseArgs(AArgumentsJson, Data, Root, AError) then
+    Exit(False);
+  try
+    if not JsonString(Root, 'path', PathArg) or (Trim(PathArg) = '') then
+    begin
+      AError := 'missing required "path"';
+      Exit(False);
+    end;
+    if not ResolveChecked(PathArg, Abs, AError) then
+      Exit(False);
+    Rel := RelOf(Abs);
+    if not Approve('file:mkdir', 'mkdir ' + Rel,
+      ToolReasonOf(AArgumentsJson), Rel, [Rel], AError) then
+      Exit(False);
+    if not ForceDirectories(Abs) then
+    begin
+      AError := 'could not create directory: ' + Rel;
+      Exit(False);
+    end;
+    AResult := 'created ' + Rel;
+    Result := True;
+  finally
+    Data.Free;
+  end;
+end;
+
+function TFileTool.StatFile(const AArgumentsJson: string;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
+var
+  Data: TJSONData;
+  Root: TJSONObject;
+  Rel, Abs, PathArg, Kind: string;
+  Size: Int64;
+  Sr: TSearchRec;
+begin
+  AResult := '';
+  AError := '';
+  Data := nil;
+  if not ParseArgs(AArgumentsJson, Data, Root, AError) then
+    Exit(False);
+  try
+    if not JsonString(Root, 'path', PathArg) or (Trim(PathArg) = '') then
+    begin
+      AError := 'missing required "path"';
+      Exit(False);
+    end;
+    if not ResolveChecked(PathArg, Abs, AError) then
+      Exit(False);
+    Rel := RelOf(Abs);
+    if not Approve('file:stat', 'stat ' + Rel,
+      ToolReasonOf(AArgumentsJson), Rel, [Rel], AError) then
+      Exit(False);
+    if DirectoryExists(Abs) then
+    begin
+      Kind := 'dir';
+      Size := 0;
+    end
+    else if FindFirst(Abs, faAnyFile, Sr) = 0 then
+    begin
+      Size := Sr.Size;
+      if (Sr.Attr and faDirectory) <> 0 then
+        Kind := 'dir'
+      else
+        Kind := 'file';
+      FindClose(Sr);
+    end
+    else
+    begin
+      AError := 'no such path: ' + Rel;
+      Exit(False);
+    end;
+    AResult := '{"path":"' + Rel + '","type":"' + Kind + '","size":' +
+      IntToStr(Size) + '}';
+    Result := True;
+  finally
+    Data.Free;
+  end;
+end;
+
 { --- registration ------------------------------------------------------- }
 
 procedure TFileTool.Register(ATools: TToolRegistry);
@@ -1049,6 +1384,69 @@ begin
     '"reason":{"type":"string","description":"Short reason this search is needed."}' +
     '},"required":["pattern","reason"]}';
   ATools.Add(Spec, Grep);
+
+  { --- File Tools v2 --- }
+  Spec := MakeToolSpec('file_append',
+    'Append text to a file inside the workspace, creating it if absent. ' +
+    'Requires a short reason. Gated by approval.',
+    '{"type":"object","properties":{' +
+    '"path":{"type":"string","description":"File path relative to the workspace."},' +
+    '"content":{"type":"string","description":"Text to append."},' +
+    '"reason":{"type":"string","description":"Short reason this append is needed."}' +
+    '},"required":["path","content","reason"]}');
+  Spec.SerialOnly := True;   { mutates the tree; keep it ordered }
+  ATools.Add(Spec, AppendFile);
+
+  Spec := MakeToolSpec('file_delete',
+    'Delete a file (or an empty directory) inside the workspace. ' +
+    'Requires a short reason. Gated by approval.',
+    '{"type":"object","properties":{' +
+    '"path":{"type":"string","description":"Path relative to the workspace."},' +
+    '"reason":{"type":"string","description":"Short reason this delete is needed."}' +
+    '},"required":["path","reason"]}');
+  Spec.SerialOnly := True;
+  ATools.Add(Spec, DeleteFileOp);
+
+  Spec := MakeToolSpec('file_move',
+    'Move or rename a file inside the workspace. ' +
+    'Requires a short reason. Gated by approval.',
+    '{"type":"object","properties":{' +
+    '"from":{"type":"string","description":"Source path relative to the workspace."},' +
+    '"to":{"type":"string","description":"Destination path relative to the workspace."},' +
+    '"reason":{"type":"string","description":"Short reason this move is needed."}' +
+    '},"required":["from","to","reason"]}');
+  Spec.SerialOnly := True;
+  ATools.Add(Spec, MoveFileOp);
+
+  Spec := MakeToolSpec('file_copy',
+    'Copy a file inside the workspace. ' +
+    'Requires a short reason. Gated by approval.',
+    '{"type":"object","properties":{' +
+    '"from":{"type":"string","description":"Source path relative to the workspace."},' +
+    '"to":{"type":"string","description":"Destination path relative to the workspace."},' +
+    '"reason":{"type":"string","description":"Short reason this copy is needed."}' +
+    '},"required":["from","to","reason"]}');
+  Spec.SerialOnly := True;
+  ATools.Add(Spec, CopyFileOp);
+
+  Spec := MakeToolSpec('file_mkdir',
+    'Create a directory (and its parents) inside the workspace. ' +
+    'Requires a short reason. Gated by approval.',
+    '{"type":"object","properties":{' +
+    '"path":{"type":"string","description":"Directory relative to the workspace."},' +
+    '"reason":{"type":"string","description":"Short reason this directory is needed."}' +
+    '},"required":["path","reason"]}');
+  Spec.SerialOnly := True;
+  ATools.Add(Spec, MakeDir);
+
+  Spec := MakeToolSpec('file_stat',
+    'Report a path''s type and size inside the workspace. ' +
+    'Requires a short reason. Gated by approval.',
+    '{"type":"object","properties":{' +
+    '"path":{"type":"string","description":"Path relative to the workspace."},' +
+    '"reason":{"type":"string","description":"Short reason this stat is needed."}' +
+    '},"required":["path","reason"]}');
+  ATools.Add(Spec, StatFile);
 end;
 
 end.
