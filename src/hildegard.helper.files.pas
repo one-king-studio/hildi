@@ -406,6 +406,14 @@ begin
     AErr := 'path escapes the workspace: ' + P;
     Exit(False);
   end;
+  { The physical check: a symlink INSIDE the workspace that points OUT can pass
+    the lexical check (the link path is under the root) but resolves outside.
+    PhysicalContains requires both readings to be in-bounds, closing that hole. }
+  if not PhysicalContains(FWorkspace.Root, P) then
+  begin
+    AErr := 'path escapes the workspace (physical): ' + P;
+    Exit(False);
+  end;
   AAbs := FWorkspace.Resolve(P);
   Result := True;
 end;

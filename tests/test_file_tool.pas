@@ -9,8 +9,14 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
+  {$ifdef unix}BaseUnix,{$endif}
   hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.approval,
   hildegard.helper.workspace, hildegard.helper.files;
+
+{$ifdef unix}
+function c_symlink(ATarget, ALinkPath: PAnsiChar): cint; cdecl;
+  external 'c' name 'symlink';
+{$endif}
 
 type
   TFakeApproval = class(TInterfacedObject, IApprovalService)
@@ -62,6 +68,7 @@ type
     procedure TestGrep;
     procedure TestGrepIgnoreCaseAndCap;
     procedure TestPathEscapeRefused;
+    procedure TestSymlinkOutIsRefused;
     procedure TestNoApprovalService;
     procedure TestRegisterAdvertisesSixGatedTools;
     procedure TestDescriptionsHintTheBashReplacement;
@@ -439,6 +446,32 @@ begin
   AssertFalse('absolute', FTool.ReadFile(
     Args(['path', '/etc/hosts', 'reason', 'r']), Res, Err));
   AssertTrue('escape error', Pos('escapes the workspace', Err) > 0);
+end;
+
+procedure TFileToolTest.TestSymlinkOutIsRefused;
+var
+  Res, Err, Link, Outside: string;
+begin
+  { A symlink inside the workspace that points OUTSIDE: the lexical check
+    passes (the link path is under the root), but the physical check refuses. }
+  Outside := IncludeTrailingPathDelimiter(GetTempDir) + 'hh-out-' +
+    IntToStr(Random(1000000));
+  ForceDirectories(Outside);
+  Link := Full('escape');
+  if c_symlink(PAnsiChar(AnsiString(Outside)), PAnsiChar(AnsiString(Link))) <> 0
+  then
+  begin
+    RemoveDir(Outside);
+    Exit;   { no symlink support: skip }
+  end;
+  try
+    AssertFalse('read through the symlink is refused', FTool.ReadFile(
+      Args(['path', 'escape/x', 'reason', 'r']), Res, Err));
+    AssertTrue('physical escape error', Pos('escapes the workspace', Err) > 0);
+  finally
+    DeleteFile(Link);
+    RemoveDir(Outside);
+  end;
 end;
 
 procedure TFileToolTest.TestNoApprovalService;
