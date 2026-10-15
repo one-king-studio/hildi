@@ -98,33 +98,33 @@ real time.
 
 ### Phase 7: Precedence (`hildegard.helper.approval`)
 
-- [ ] **Test**: `TestExactCommandGrantSuppressesThePathAsk`,
+- [x] **Test**: `TestExactCommandGrantSuppressesThePathAsk`,
       `TestWildcardCommandGrantDoesNotSuppressIt`
-- [ ] **Implement**: `TApprovalAsk.Covers`/`HasCovers`; the suppression check in
+- [x] **Implement**: `TApprovalAsk.Covers`/`HasCovers`; the suppression check in
       `Resolve` (after deny-first, before prompting)
-- [ ] **Test**: `TestPathDenyBeatsWildcardCommandAllow`,
+- [x] **Test**: `TestPathDenyBeatsWildcardCommandAllow`,
       `TestAbsolutePathRuleMatchesByDirectory`
 
 ### Phase 8: The command tool (`hildegard.helper.command.tool`)
 
-- [ ] **Test**: `TestWildcardAllowedCatStillAsksAboutThePath`,
+- [x] **Test**: `TestWildcardAllowedCatStillAsksAboutThePath`,
       `TestExactlyApprovedCatDoesNotAskAboutThePath`,
       `TestUnknownCommandAsksForBoth`
-- [ ] **Implement**: `ApprovalAsks` appends a path ask per outside access,
+- [x] **Implement**: `ApprovalAsks` appends a path ask per outside access,
       carrying `Covers` = the segment's command subject
-- [ ] **Implement**: the path ask's options (`once`/`dir`/`any`/`never`) and the
+- [x] **Implement**: the path ask's options (`once`/`dir`/`any`/`never`) and the
       dialog line that says the command is already allowed
 
 ### Phase 9: The file tools (`hildegard.helper.files`)
 
-- [ ] **Test**: `file_read` through a symlink pointing outside is refused
-- [ ] **Implement**: `ResolveChecked` uses `PhysicalContains`
+- [x] **Test**: `file_read` through a symlink pointing outside is refused
+- [x] **Implement**: `ResolveChecked` uses `PhysicalContains`
 
 ### Phase 10: Docs & validation
 
-- [ ] **Update** `docs/features/FEATURES.md` status
-- [ ] **Run**: `make test SUITE=TApprovalTest,TFileToolTest,TStoreTest,TWorkspaceTest,TCommandPathTest`
-- [ ] **Run**: `make check` (whole suite + leak gate)
+- [x] **Update** `docs/features/FEATURES.md` status
+- [x] **Run**: `make test SUITE=TApprovalTest,TFileToolTest,TStoreTest,TWorkspaceTest,TCommandPathTest`
+- [x] **Run**: `make check` (whole suite + leak gate)
 
 ## Dependencies & Ordering
 
@@ -159,12 +159,35 @@ docs/features/FEATURES.md                 (status)
 
 ## Success Criteria
 
-- [ ] All tasks above checked
-- [ ] One click grants "`.md` under `docs/`"; existing rules are bit-compatible
-- [ ] `cat /etc/hosts` asks about the path, and an **exact** grant clears it once
+- [x] All tasks above checked
+- [x] One click grants "`.md` under `docs/`"; existing rules are bit-compatible
+- [x] `cat /etc/hosts` asks about the path, and an **exact** grant clears it once
       (a wildcard grant does not)
-- [ ] A symlink inside the workspace pointing out is refused by the file tools
-- [ ] `make check` passes (tests + leak gate)
+- [x] A symlink inside the workspace pointing out is refused by the file tools
+- [x] `make check` passes (tests + leak gate)
+
+## Outcome
+
+Implemented on `main`: the engine fields + path matching + helpers, the v12
+store migration, the file-tool `dir`/`ext`/`dir_ext`/`never` asks, the
+physical primitive (`PhysicalResolve`/`PhysicalContains`), the command path
+extractor (`hildegard.helper.command.paths`), exact-grant suppression, the
+command tool's outside-path asks, and the file tools' physical check.
+`make check` green (1403 tests, leak-clean).
+
+**Deviations, with reasons:**
+
+- **The extractor takes a root string, not a `TWorkspace`.** The command tool
+  holds the root as `DefaultCwd` (a string) and has no `TWorkspace`; the
+  primitive needs only the root, so the signature is simpler.
+- **The physical check compares physical-to-physical and lexical-to-lexical**
+  (each against its own root form), because the root itself can be behind a
+  symlink (`/var` -> `/private/var` on macOS). A single cross-comparison would
+  wrongly refuse every in-bounds path under such a root.
+- **`PhysicalResolve` walks to the nearest existing ancestor** and re-appends
+  the tail, so a non-existent target still compares.
+- **The `never` option is offered on the file asks**; a scoped deny rule is
+  supported by the engine and authored outside the ask in v1.
 
 ## Notes & Considerations
 
