@@ -15,7 +15,7 @@ interface
 uses
   Classes, SysUtils, fpjson, regexpr,
   hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.approval,
-  hildegard.helper.workspace;
+  hildegard.helper.workspace, hildegard.helper.yaml, hildegard.helper.patch;
 
 type
   TFileToolConfig = record
@@ -90,6 +90,27 @@ type
     function SearchReplace(const AArgumentsJson: string;
       out AResult: string; out AError: string;
       AObserver: TToolObserver = nil): Boolean;
+    function JsonRead(const AArgumentsJson: string;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
+    function JsonEdit(const AArgumentsJson: string;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
+    function YamlRead(const AArgumentsJson: string;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
+    function YamlEdit(const AArgumentsJson: string;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
+    function PatchApply(const AArgumentsJson: string;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
+    { The unified-diff applier's I/O: resolve a diff path against the workspace
+      and read/write it (confined). }
+    function ReadPatchFile(const APath: string; out AText: string;
+      out AError: string): Boolean;
+    function WritePatchFile(const APath: string; const AText: string;
+      out AError: string): Boolean;
   end;
 
 const
@@ -1374,6 +1395,56 @@ begin
     Result := 'false';
 end;
 
+{ A JSON Pointer (RFC 6901): '/' then reference tokens, each optionally
+  '~1'-escaped for '/' and '~0' for '~'. '' (or '/') is the whole document.
+  Returns nil when the pointer does not resolve. }
+function JsonPointerFind(ARoot: TJSONData; const APointer: string): TJSONData;
+var
+  I, Start: Integer;
+  Tok, Raw: string;
+  Cur: TJSONData;
+  Obj: TJSONObject;
+  Arr: TJSONArray;
+  Idx: Integer;
+begin
+  Result := ARoot;
+  Cur := ARoot;
+  if (APointer = '') or (APointer = '/') then
+    Exit;
+  I := 1;
+  while I <= Length(APointer) do
+  begin
+    if APointer[I] = '/' then
+      Inc(I);
+    Start := I;
+    while (I <= Length(APointer)) and (APointer[I] <> '/') do
+      Inc(I);
+    Raw := Copy(APointer, Start, I - Start);
+    { Unescape ~1 then ~0 (order matters). }
+    Tok := StringReplace(Raw, '~1', '/', [rfReplaceAll]);
+    Tok := StringReplace(Tok, '~0', '~', [rfReplaceAll]);
+    if Cur is TJSONObject then
+    begin
+      Obj := TJSONObject(Cur);
+      Cur := Obj.Find(Tok);
+    end
+    else if Cur is TJSONArray then
+    begin
+      Arr := TJSONArray(Cur);
+      Idx := StrToIntDef(Tok, -1);
+      if (Idx >= 0) and (Idx < Arr.Count) then
+        Cur := Arr.Items[Idx]
+      else
+        Cur := nil;
+    end
+    else
+      Cur := nil;
+    if Cur = nil then
+      Exit(nil);
+  end;
+  Result := Cur;
+end;
+
 { The directory a glob searches: everything up to the first wildcard, else '.'. }
 function GlobSearchDir(const AGlob: string): string;
 var
@@ -1553,6 +1624,311 @@ begin
     Files.Free;
     Data.Free;
   end;
+end;
+
+function TFileTool.JsonRead(const AArgumentsJson: string;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
+var
+  Data: TJSONData;
+  Root: TJSONObject;
+  Rel, Abs, PathArg, Pointer, Text: string;
+  Doc, Found: TJSONData;
+begin
+  AResult := '';
+  AError := '';
+  Data := nil;
+  if not ParseArgs(AArgumentsJson, Data, Root, AError) then
+    Exit(False);
+  try
+    if not JsonString(Root, 'path', PathArg) or (Trim(PathArg) = '') then
+    begin
+      AError := 'missing required "path"';
+      Exit(False);
+    end;
+    if not ResolveChecked(PathArg, Abs, AError) then
+      Exit(False);
+    Rel := RelOf(Abs);
+    if not Approve('file:read', 'read json ' + Rel,
+      ToolReasonOf(AArgumentsJson), Rel, [Rel], AError) then
+      Exit(False);
+    Text := ReadRawFile(Abs);
+    if Text = '' then
+    begin
+      AError := 'could not read (or empty): ' + Rel;
+      Exit(False);
+    end;
+    Doc := nil;
+    try
+      try
+        Doc := GetJSON(Text);
+      except
+        on E: Exception do
+        begin
+          AError := 'invalid JSON: ' + E.Message;
+          Exit(False);
+        end;
+      end;
+      if JsonString(Root, 'pointer', Pointer) and (Pointer <> '') then
+      begin
+        Found := JsonPointerFind(Doc, Pointer);
+        if Found = nil then
+        begin
+          AError := 'pointer not found: ' + Pointer;
+          Exit(False);
+        end;
+        AResult := Found.AsJSON;
+      end
+      else
+        AResult := Doc.AsJSON;
+      Result := True;
+    finally
+      Doc.Free;
+    end;
+  finally
+    Data.Free;
+  end;
+end;
+
+function TFileTool.JsonEdit(const AArgumentsJson: string;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
+var
+  Data: TJSONData;
+  Root: TJSONObject;
+  Rel, Abs, PathArg, Pointer, Text: string;
+  Doc, Value: TJSONData;
+  Obj: TJSONObject;
+begin
+  AResult := '';
+  AError := '';
+  Data := nil;
+  if not ParseArgs(AArgumentsJson, Data, Root, AError) then
+    Exit(False);
+  try
+    if not JsonString(Root, 'path', PathArg) or (Trim(PathArg) = '') then
+    begin
+      AError := 'missing required "path"';
+      Exit(False);
+    end;
+    if not JsonString(Root, 'pointer', Pointer) or (Pointer = '') then
+    begin
+      AError := 'missing required "pointer"';
+      Exit(False);
+    end;
+    Value := Root.Find('value');
+    if Value = nil then
+    begin
+      AError := 'missing required "value"';
+      Exit(False);
+    end;
+    if not ResolveChecked(PathArg, Abs, AError) then
+      Exit(False);
+    Rel := RelOf(Abs);
+    if not Approve('file:write', 'edit json ' + Rel,
+      ToolReasonOf(AArgumentsJson), Rel, [Rel], AError) then
+      Exit(False);
+    Text := ReadRawFile(Abs);
+    Doc := nil;
+    try
+      try
+        Doc := GetJSON(Text);
+      except
+        on E: Exception do
+        begin
+          { A parse failure never writes. }
+          AError := 'invalid JSON (not written): ' + E.Message;
+          Exit(False);
+        end;
+      end;
+      { Only a top-level pointer is set in v1 (the common case: a config key). }
+      if not (Doc is TJSONObject) then
+      begin
+        AError := 'the document root is not an object';
+        Exit(False);
+      end;
+      Obj := TJSONObject(Doc);
+      Obj.Elements[Pointer] := Value.Clone;
+      if not WriteAtomic(Abs, Obj.FormatJSON + #10, AError) then
+        Exit(False);
+      AResult := '{"written":true,"path":"' + Rel + '"}';
+      Result := True;
+    finally
+      Doc.Free;
+    end;
+  finally
+    Data.Free;
+  end;
+end;
+
+function TFileTool.YamlRead(const AArgumentsJson: string;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
+var
+  Data: TJSONData;
+  Root: TJSONObject;
+  Rel, Abs, PathArg, Text: string;
+  Doc, Found: TJSONData;
+begin
+  AResult := '';
+  AError := '';
+  Data := nil;
+  if not ParseArgs(AArgumentsJson, Data, Root, AError) then
+    Exit(False);
+  try
+    if not JsonString(Root, 'path', PathArg) or (Trim(PathArg) = '') then
+    begin
+      AError := 'missing required "path"';
+      Exit(False);
+    end;
+    if not ResolveChecked(PathArg, Abs, AError) then
+      Exit(False);
+    Rel := RelOf(Abs);
+    if not Approve('file:read', 'read yaml ' + Rel,
+      ToolReasonOf(AArgumentsJson), Rel, [Rel], AError) then
+      Exit(False);
+    Text := ReadRawFile(Abs);
+    Doc := ParseYaml(Text, AError);
+    if Doc = nil then
+    begin
+      AError := 'invalid YAML: ' + AError;
+      Exit(False);
+    end;
+    try
+      AResult := Doc.AsJSON;
+      Result := True;
+    finally
+      Doc.Free;
+    end;
+  finally
+    Data.Free;
+  end;
+end;
+
+function TFileTool.YamlEdit(const AArgumentsJson: string;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
+var
+  Data: TJSONData;
+  Root: TJSONObject;
+  Rel, Abs, PathArg, YamlPath, Text, NewText: string;
+  Value: TJSONData;
+begin
+  AResult := '';
+  AError := '';
+  Data := nil;
+  if not ParseArgs(AArgumentsJson, Data, Root, AError) then
+    Exit(False);
+  try
+    if not JsonString(Root, 'path', PathArg) or (Trim(PathArg) = '') then
+    begin
+      AError := 'missing required "path"';
+      Exit(False);
+    end;
+    if not JsonString(Root, 'key', YamlPath) or (YamlPath = '') then
+    begin
+      AError := 'missing required "key" (a dotted path)';
+      Exit(False);
+    end;
+    Value := Root.Find('value');
+    if Value = nil then
+    begin
+      AError := 'missing required "value"';
+      Exit(False);
+    end;
+    if not ResolveChecked(PathArg, Abs, AError) then
+      Exit(False);
+    Rel := RelOf(Abs);
+    if not Approve('file:write', 'edit yaml ' + Rel,
+      ToolReasonOf(AArgumentsJson), Rel, [Rel], AError) then
+      Exit(False);
+    Text := ReadRawFile(Abs);
+    NewText := SetYamlPath(Text, YamlPath, Value, AError);
+    if NewText = '' then
+    begin
+      AError := 'invalid YAML (not written): ' + AError;
+      Exit(False);
+    end;
+    if not WriteAtomic(Abs, NewText, AError) then
+      Exit(False);
+    AResult := '{"written":true,"path":"' + Rel + '"}';
+    Result := True;
+  finally
+    Data.Free;
+  end;
+end;
+
+function TFileTool.PatchApply(const AArgumentsJson: string;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
+var
+  Data: TJSONData;
+  Root: TJSONObject;
+  Patch, Rel, Abs, PathArg: string;
+  DryRun: Boolean;
+  Strip: Integer;
+  Pr: TPatchResult;
+begin
+  AResult := '';
+  AError := '';
+  Data := nil;
+  if not ParseArgs(AArgumentsJson, Data, Root, AError) then
+    Exit(False);
+  try
+    if not JsonString(Root, 'patch', Patch) or (Patch = '') then
+    begin
+      AError := 'missing required "patch"';
+      Exit(False);
+    end;
+    DryRun := JsonBool(Root, 'dryRun', False);
+    Strip := JsonInt(Root, 'strip', 1);
+    if not JsonString(Root, 'path', PathArg) or (Trim(PathArg) = '') then
+      PathArg := '.';
+    if not ResolveChecked(PathArg, Abs, AError) then
+      Exit(False);
+    Rel := RelOf(Abs);
+    if not Approve('file:edit', 'apply patch in ' + Rel,
+      ToolReasonOf(AArgumentsJson), Rel, [Rel], AError) then
+      Exit(False);
+    if not ApplyUnifiedPatch(Patch, Strip, DryRun, ReadPatchFile,
+      WritePatchFile, Pr, AError) then
+      Exit(False);
+    AResult := '{"applied":' + IntToStr(Pr.Applied) + ',"rejected":' +
+      IntToStr(Pr.Rejected) + ',"dryRun":' + BoolToJson(DryRun) + '}';
+    Result := True;
+  finally
+    Data.Free;
+  end;
+end;
+
+function TFileTool.ReadPatchFile(const APath: string; out AText: string;
+  out AError: string): Boolean;
+var
+  Abs: string;
+begin
+  AText := '';
+  AError := '';
+  if not ResolveChecked(APath, Abs, AError) then
+    Exit(False);
+  if not FileExists(Abs) then
+  begin
+    AError := 'no such file: ' + APath;
+    Exit(False);
+  end;
+  AText := ReadRawFile(Abs);
+  Result := True;
+end;
+
+function TFileTool.WritePatchFile(const APath: string; const AText: string;
+  out AError: string): Boolean;
+var
+  Abs: string;
+begin
+  AError := '';
+  if not ResolveChecked(APath, Abs, AError) then
+    Exit(False);
+  ForceDirectories(ExtractFileDir(Abs));
+  Result := WriteAtomic(Abs, AText, AError);
 end;
 
 procedure TFileTool.Register(ATools: TToolRegistry);
@@ -1737,6 +2113,66 @@ begin
     '},"required":["glob","pattern","replacement","reason"]}');
   Spec.SerialOnly := True;
   ATools.Add(Spec, SearchReplace);
+
+  Spec := MakeToolSpec('json_read',
+    'Read and parse a JSON file (optionally at a JSON pointer). ' +
+    'Prefer this over the shell: jq. ' +
+    'Requires a short reason. Gated by approval.',
+    '{"type":"object","properties":{' +
+    '"path":{"type":"string","description":"File path relative to the workspace."},' +
+    '"pointer":{"type":"string","description":"A JSON pointer, e.g. /a/b/0 (optional)."},' +
+    '"reason":{"type":"string","description":"Short reason this read is needed."}' +
+    '},"required":["path","reason"]}');
+  ATools.Add(Spec, JsonRead);
+
+  Spec := MakeToolSpec('json_edit',
+    'Set a top-level key in a JSON file and write it back, validated. ' +
+    'A parse failure never writes. Prefer this over the shell: jq. ' +
+    'Requires a short reason. Gated by approval.',
+    '{"type":"object","properties":{' +
+    '"path":{"type":"string","description":"File path relative to the workspace."},' +
+    '"pointer":{"type":"string","description":"The top-level key to set."},' +
+    '"value":{"description":"The JSON value to set."},' +
+    '"reason":{"type":"string","description":"Short reason this edit is needed."}' +
+    '},"required":["path","pointer","value","reason"]}');
+  Spec.SerialOnly := True;
+  ATools.Add(Spec, JsonEdit);
+
+  Spec := MakeToolSpec('yaml_read',
+    'Read and parse a YAML file into JSON. Prefer this over the shell: yq. ' +
+    'Requires a short reason. Gated by approval.',
+    '{"type":"object","properties":{' +
+    '"path":{"type":"string","description":"File path relative to the workspace."},' +
+    '"reason":{"type":"string","description":"Short reason this read is needed."}' +
+    '},"required":["path","reason"]}');
+  ATools.Add(Spec, YamlRead);
+
+  Spec := MakeToolSpec('yaml_edit',
+    'Set a dotted key path in a YAML file and write it back, validated. ' +
+    'A parse failure never writes. Prefer this over the shell: yq -i. ' +
+    'Requires a short reason. Gated by approval.',
+    '{"type":"object","properties":{' +
+    '"path":{"type":"string","description":"File path relative to the workspace."},' +
+    '"key":{"type":"string","description":"A dotted key path, e.g. server.port."},' +
+    '"value":{"description":"The value to set."},' +
+    '"reason":{"type":"string","description":"Short reason this edit is needed."}' +
+    '},"required":["path","key","value","reason"]}');
+  Spec.SerialOnly := True;
+  ATools.Add(Spec, YamlEdit);
+
+  Spec := MakeToolSpec('patch_apply',
+    'Apply a unified diff to files in the workspace. ' +
+    'dryRun counts without writing. Prefer this over the shell: patch -p1, ' +
+    'git apply. Requires a short reason. Gated by approval.',
+    '{"type":"object","properties":{' +
+    '"patch":{"type":"string","description":"A unified diff."},' +
+    '"path":{"type":"string","description":"Base directory (default .)."},' +
+    '"strip":{"type":"integer","description":"Path components to strip (default 1)."},' +
+    '"dryRun":{"type":"boolean","description":"Count without writing."},' +
+    '"reason":{"type":"string","description":"Short reason this patch is needed."}' +
+    '},"required":["patch","reason"]}');
+  Spec.SerialOnly := True;
+  ATools.Add(Spec, PatchApply);
 end;
 
 end.

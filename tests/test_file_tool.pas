@@ -84,6 +84,13 @@ type
     procedure TestSearchReplaceAcrossGlob;
     procedure TestSearchReplaceDryRunWritesNothing;
     procedure TestSearchReplaceAskScopesOnTheGlobDirectory;
+    { File Tools v2, Phases 4-5. }
+    procedure TestJsonReadAndPointer;
+    procedure TestJsonEdit;
+    procedure TestYamlReadSubset;
+    procedure TestYamlEdit;
+    procedure TestYamlOutOfSubsetErrors;
+    procedure TestPatchApply;
   end;
 
 implementation
@@ -459,7 +466,7 @@ begin
   Registry := TToolRegistry.Create;
   try
     FTool.Register(Registry);
-    AssertEquals('v1 six + v2 eight tools', 14, Registry.Count);
+    AssertEquals('v1 six + v2 thirteen tools', 19, Registry.Count);
     Specs := Registry.Specs;
     for I := 0 to High(Specs) do
       AssertTrue(Specs[I].Name + ' requires reason',
@@ -755,6 +762,85 @@ begin
   AssertTrue('offers dir', FApproval.HasOption('dir'));
   AssertTrue('offers ext', FApproval.HasOption('ext'));
   AssertTrue('offers dir_ext', FApproval.HasOption('dir_ext'));
+end;
+
+procedure TFileToolTest.TestJsonReadAndPointer;
+var
+  Res, Err: string;
+begin
+  WriteRaw(Full('c.json'), '{"a": {"b": 42}, "list": [1,2]}');
+  AssertTrue('read', FTool.JsonRead(
+    Args(['path', 'c.json', 'reason', 'r']), Res, Err));
+  AssertTrue('whole doc', Pos('"b" : 42', Res) > 0);
+  AssertTrue('pointer', FTool.JsonRead(
+    Args(['path', 'c.json', 'pointer', '/a/b', 'reason', 'r']), Res, Err));
+  AssertEquals('pointer value', '42', Res);
+end;
+
+procedure TFileToolTest.TestJsonEdit;
+var
+  Res, Err: string;
+begin
+  WriteRaw(Full('c.json'), '{"a": 1, "b": 2}');
+  AssertTrue('edit', FTool.JsonEdit(
+    '{"path":"c.json","pointer":"b","value":99,"reason":"r"}', Res, Err));
+  AssertTrue('written', Pos('"written":true', Res) > 0);
+  AssertTrue('value set', Pos('99', ReadRaw(Full('c.json'))) > 0);
+end;
+
+procedure TFileToolTest.TestYamlReadSubset;
+var
+  Res, Err: string;
+begin
+  WriteRaw(Full('c.yaml'),
+    'name: app' + LineEnding + 'server:' + LineEnding + '  port: 8080' +
+    LineEnding + 'tags:' + LineEnding + '- a' + LineEnding + '- b');
+  AssertTrue('read', FTool.YamlRead(
+    Args(['path', 'c.yaml', 'reason', 'r']), Res, Err));
+  AssertTrue('scalar', Pos('"name" : "app"', Res) > 0);
+  AssertTrue('nested', Pos('"port" : 8080', Res) > 0);
+  AssertTrue('sequence', Pos('"tags"', Res) > 0);
+end;
+
+procedure TFileToolTest.TestYamlEdit;
+var
+  Res, Err: string;
+begin
+  WriteRaw(Full('c.yaml'),
+    'server:' + LineEnding + '  port: 8080' + LineEnding);
+  AssertTrue('edit', FTool.YamlEdit(
+    '{"path":"c.yaml","key":"server.port","value":9090,"reason":"r"}',
+    Res, Err));
+  AssertTrue('written', Pos('"written":true', Res) > 0);
+  AssertTrue('value set', Pos('port: 9090', ReadRaw(Full('c.yaml'))) > 0);
+end;
+
+procedure TFileToolTest.TestYamlOutOfSubsetErrors;
+var
+  Res, Err: string;
+begin
+  { A tab in indentation is outside the subset: a clear error, no write. }
+  WriteRaw(Full('c.yaml'), 'a:' + LineEnding + #9 + 'b: 1' + LineEnding);
+  AssertFalse('rejected', FTool.YamlRead(
+    Args(['path', 'c.yaml', 'reason', 'r']), Res, Err));
+  AssertTrue('error names the line', Pos('line', Err) > 0);
+end;
+
+procedure TFileToolTest.TestPatchApply;
+var
+  Res, Err, Patch: string;
+begin
+  WriteRaw(Full('a.txt'), 'one' + LineEnding + 'two' + LineEnding +
+    'three' + LineEnding);
+  Patch := '--- a/a.txt' + #10 + '+++ b/a.txt' + #10 +
+    '@@ -1,3 +1,3 @@' + #10 + ' one' + #10 + '-two' + #10 + '+TWO' + #10 +
+    ' three' + #10;
+  AssertTrue('apply', FTool.PatchApply(
+    '{"patch":' + '"' + StringReplace(Patch, #10, '\n', [rfReplaceAll]) +
+    '","reason":"r"}', Res, Err));
+  AssertTrue('applied one', Pos('"applied":1', Res) > 0);
+  AssertEquals('patched', 'one' + LineEnding + 'TWO' + LineEnding +
+    'three' + LineEnding, ReadRaw(Full('a.txt')));
 end;
 
 initialization
