@@ -144,6 +144,7 @@ type
     procedure TestAsksDoNotStack;
     procedure TestOneFramePerStep;
     procedure TestRenderHistoryRestoresToolBlocks;
+    procedure TestResumeStripsAStoredMalformedBlock;
     procedure TestTranscriptIsBoundedToTheTail;
     procedure TestFullPagingIsContinuous;
     procedure TestHeaderShowsSessionIdAndContext;
@@ -1176,6 +1177,72 @@ begin
   { The stored detail (in tool_arguments) is shown, so a resumed session reads
     like the live one. }
   AssertTrue('the error detail is restored', FindText(ckError, 'DNS failed'));
+end;
+
+procedure THarnessAppTest.TestResumeStripsAStoredMalformedBlock;
+var
+  Store: TSqliteStore;
+  StoreCfg: TStoreConfig;
+  StoreErr: TStoreError;
+  Cfg: THarnessSessionConfig;
+  WorkspaceId: Integer;
+  Sid: string;
+  TurnId: Int64;
+  Rec: TMessageRecord;
+  Err: string;
+  Y: Integer;
+  SawTitle: Boolean;
+begin
+  { A reply stored BEFORE the closing-fence fix - the operator's case: a blank
+    line right after the opening `---`, no closing fence. On resume it must
+    still be stripped and drawn as a title header, not the raw block. }
+  FDir := IncludeTrailingPathDelimiter(GetTempDir) + 'hh-app-' +
+    IntToStr(Random(1000000));
+  ForceDirectories(FDir);
+  FStorePath := IncludeTrailingPathDelimiter(FDir) + 'store.db';
+  StoreCfg := Default(TStoreConfig);
+  StoreCfg.DatabasePath := FStorePath;
+  StoreCfg.BusyTimeoutMs := 5000;
+  Store := TSqliteStore.Create(StoreCfg);
+  try
+    AssertTrue('open store', Store.Open(StoreErr));
+    Store.EnsureWorkspace(FDir, WorkspaceId, StoreErr);
+    Store.CreateSession(WorkspaceId, Sid, StoreErr);
+    Store.BeginTurn(Sid, TurnId, StoreErr);
+    Rec := Default(TMessageRecord);
+    Rec.SessionId := Sid;
+    Rec.TurnId := TurnId;
+    Rec.Role := mrAssistant;
+    Rec.Content := '---' + #10 + #10 + 'title: This is the Tigle' + #10 +
+      'keywords: [test]' + #10 + #10 + 'The rest of the response is here';
+    Store.AppendMessage(Rec, StoreErr);
+  finally
+    Store.Free;
+  end;
+
+  FFake := TFakeTransport.Create;
+  FSurface := TSurfaceMemory.Create(60, 20);
+  FInput := TInputSourceScripted.Create;
+  Cfg := Config;
+  Cfg.StorePath := FStorePath;
+  Cfg.SessionId := Sid;
+  Cfg.Resume := True;
+  FSession := THarnessSession.Open(Cfg, Err);
+  AssertTrue('resumed: ' + Err, FSession <> nil);
+  FApp := THarnessApp.Create(FSurface, FInput, FSession.View,
+    LocalDriver(FSession));
+  FApp.Step;
+
+  { The block is not drawn as body; the title is; the body is present. }
+  AssertFalse('the block is not in the body', FindText(ckAssistant, 'title:'));
+  AssertTrue('the body is present',
+    FindText(ckAssistant, 'The rest of the response is here'));
+  FApp.Step;   // render
+  SawTitle := False;
+  for Y := 0 to FSurface.Height - 1 do
+    if Pos('This is the Tigle', FSurface.RowText(Y, 0, FSurface.Width)) > 0 then
+      SawTitle := True;
+  AssertTrue('the title is drawn', SawTitle);
 end;
 
 procedure THarnessAppTest.TestTranscriptIsBoundedToTheTail;

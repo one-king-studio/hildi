@@ -222,6 +222,10 @@ type
     procedure SettleOpenTool;
     { End a completed loop with its metrics; a zero/absent turn draws nothing. }
     procedure AddTurnDivider;
+    { Add a stored assistant reply to the stream: strip a leading frontmatter
+      block and draw it as the title/keyword header (a resume path, so a
+      previously-stored malformed block is still cleaned up). }
+    procedure AddAssistantBlock(const AContent: string);
     { Put text at the front of the compose box, keeping whatever is typed. }
     procedure PrependCompose(const AText: string);
     { Undo the current turn's UI after an early cancel and restore the prompt. }
@@ -1095,9 +1099,9 @@ begin
           FPanel.Stream.Add(ckUser, '', Rec.Content);
       mrAssistant:
         { An intermediate assistant row can be empty (it only carried tool
-          calls), so do not draw an empty bubble. }
-        if Rec.Content <> '' then
-          FPanel.Stream.Add(ckAssistant, '', Rec.Content);
+          calls), so do not draw an empty bubble. A substantive reply's leading
+          frontmatter is stripped and drawn as the title/keyword header. }
+        AddAssistantBlock(Rec.Content);
       mrReasoning:
         FPanel.Stream.Add(ckThought, FormatThoughtLabel(Rec.DurationMs),
           Rec.Content);
@@ -1257,6 +1261,27 @@ begin
   Stats := FormatTurnStats(Turn);
   if Stats <> '' then
     FPanel.Stream.Add(ckTurn, '', Stats);
+end;
+
+procedure THarnessApp.AddAssistantBlock(const AContent: string);
+var
+  Meta: TReplyMeta;
+  Block: TChatItem;
+begin
+  if AContent = '' then
+    Exit;
+  { A stored reply may open with a frontmatter block (from before the model
+    learned to close it, or a malformed one). Extract it here too, so a resumed
+    session renders the same as the live one: the block is stripped and drawn as
+    the title/keyword header. }
+  Meta := ExtractReplyMeta(AContent);
+  if Meta.HasMeta then
+  begin
+    Block := FPanel.Stream.Add(ckAssistant, '', Meta.Body);
+    Block.SetMeta(Meta.Title, Meta.Keywords);
+  end
+  else
+    FPanel.Stream.Add(ckAssistant, '', AContent);
 end;
 
 procedure THarnessApp.AppendToolResult(ABlock: TChatItem; const AText: string);
@@ -2210,8 +2235,7 @@ begin
         if Rec.Content <> '' then
           FPanel.Stream.Add(ckUser, '', Rec.Content);
       mrAssistant:
-        if Rec.Content <> '' then
-          FPanel.Stream.Add(ckAssistant, '', Rec.Content);
+        AddAssistantBlock(Rec.Content);
       mrReasoning:
         FPanel.Stream.Add(ckThought, FormatThoughtLabel(Rec.DurationMs),
           Rec.Content);

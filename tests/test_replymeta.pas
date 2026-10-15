@@ -27,6 +27,7 @@ type
     procedure TestCrlf;
     procedure TestEmptyTitle;
     procedure TestMissingClosingFenceEndsAtBlankLine;
+    procedure TestBlankLineAfterOpeningFence;
     procedure TestDuplicateKeywordsDeduped;
     procedure TestKeywordsLowercased;
     { The suppressor. }
@@ -104,6 +105,21 @@ begin
   AssertEquals('title read', 'Fix the drain', M.Title);
   AssertTrue('keyword read', ListHasKeyword(M.Keywords, 'drain'));
   AssertEquals('body after the blank line', 'Here is the body.', M.Body);
+end;
+
+procedure TReplyMetaTest.TestBlankLineAfterOpeningFence;
+var
+  M: TReplyMeta;
+begin
+  { The operator's real-world case: a blank line right after the opening `---`
+    (and no closing fence). The leading blank line must NOT close the block (no
+    content yet); the blank line after the keywords does. }
+  M := ExtractReplyMeta('---' + #10 + #10 + 'title: This is the Tigle' + #10 +
+    'keywords: [test]' + #10 + #10 + 'The rest of the response is here');
+  AssertTrue('has meta', M.HasMeta);
+  AssertEquals('title read', 'This is the Tigle', M.Title);
+  AssertTrue('keyword read', ListHasKeyword(M.Keywords, 'test'));
+  AssertEquals('body', 'The rest of the response is here', M.Body);
 end;
 
 procedure TReplyMetaTest.TestRuleInBodyIsNotABlock;
