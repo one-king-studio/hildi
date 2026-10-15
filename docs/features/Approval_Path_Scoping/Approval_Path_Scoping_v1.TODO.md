@@ -70,31 +70,31 @@ real time.
 
 ### Phase 5: The physical primitive (`hildegard.helper.workspace`)
 
-- [ ] **Test**: `TestPhysicalContainsRefusesOutside`,
+- [x] **Test**: `TestPhysicalContainsRefusesOutside`,
       `TestPhysicalContainsAcceptsInside`
-- [ ] **Implement**: `PhysicalResolve` — lexical join, walk to the nearest
+- [x] **Implement**: `PhysicalResolve` — lexical join, walk to the nearest
       existing ancestor, `realpath(3)`, re-append the tail
-- [ ] **Test**: `TestSymlinkOutOfTheWorkspaceIsRefused` (the lexical check says
+- [x] **Test**: `TestSymlinkOutOfTheWorkspaceIsRefused` (the lexical check says
       inside — the fix)
-- [ ] **Test**: `TestNonExistentTailUsesTheNearestExistingAncestor`,
+- [x] **Test**: `TestNonExistentTailUsesTheNearestExistingAncestor`,
       `TestDotDotThroughASymlinkIsConservative`,
       `TestBoundarySiblingIsNotUnder`
-- [ ] **Implement**: `PhysicalContains` — the both-readings (lexical ∧ physical)
+- [x] **Implement**: `PhysicalContains` — the both-readings (lexical ∧ physical)
       rule; the separator boundary
 
 ### Phase 6: The extractor (`hildegard.helper.command.paths`, NEW)
 
-- [ ] **Test**: `TestCdParentIsAnOutsideAccess`,
+- [x] **Test**: `TestCdParentIsAnOutsideAccess`,
       `TestAbsoluteArgumentIsAnOutsideAccess`, `TestInBoundsArgumentIsSilent`
-- [ ] **Implement**: reuse `TCommandSegment.Paths`; expand `~`; resolve against
+- [x] **Implement**: reuse `TCommandSegment.Paths`; expand `~`; resolve against
       the effective base
-- [ ] **Test**: `TestUnresolvedTokenIsChecked`
-- [ ] **Implement**: the unresolved-token rule
-- [ ] **Test**: `TestCdMovesTheBaseForLaterSegments`,
+- [x] **Test**: `TestUnresolvedTokenIsChecked`
+- [x] **Implement**: the unresolved-token rule
+- [x] **Test**: `TestCdMovesTheBaseForLaterSegments`,
       `TestSubshellCdDoesNotLeak`, `TestCwdArgumentIsAnAccess`
-- [ ] **Implement**: top-level `cd` tracking (subshell reset); the `cwd`
+- [x] **Implement**: top-level `cd` tracking (subshell reset); the `cwd`
       argument as an access
-- [ ] **Test**: `TestOrderAndDedupAreDeterministic`
+- [x] **Test**: `TestOrderAndDedupAreDeterministic`
 
 ### Phase 7: Precedence (`hildegard.helper.approval`)
 
