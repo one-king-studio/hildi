@@ -55,27 +55,27 @@ TDD-first; `make check` before moving on. `main` only.
 
 ### Phase 4: Structured formats
 
-- [ ] **Test**: `json_read`/`json_edit` at a pointer; a parse failure never
+- [x] **Test**: `json_read`/`json_edit` at a pointer; a parse failure never
       writes.
-- [ ] **Implement**: `JsonRead`/`JsonEdit` over `fpjson`.
-- [ ] **Test**: `yaml_read`/`yaml_edit` on the subset; an out-of-subset
+- [x] **Implement**: `JsonRead`/`JsonEdit` over `fpjson`.
+- [x] **Test**: `yaml_read`/`yaml_edit` on the subset; an out-of-subset
       construct errors with a line number.
-- [ ] **Implement**: `hildegard.helper.yaml` (`ParseYaml`, `SetYamlPath`) and the
+- [x] **Implement**: `hildegard.helper.yaml` (`ParseYaml`, `SetYamlPath`) and the
       two handlers.
 
 ### Phase 5: Patches
 
-- [ ] **Test**: `hildegard.helper.patch` applies a clean diff, counts a bad hunk
+- [x] **Test**: `hildegard.helper.patch` applies a clean diff, counts a bad hunk
       rejected, `dryRun` writes nothing (`test_patch`).
-- [ ] **Implement**: `ApplyUnifiedPatch` (pure; injected read/write).
-- [ ] **Test**: `patch_apply` wires it to the workspace + approval.
-- [ ] **Implement**: `PatchApply`.
+- [x] **Implement**: `ApplyUnifiedPatch` (pure; injected read/write).
+- [x] **Test**: `patch_apply` wires it to the workspace + approval.
+- [x] **Implement**: `PatchApply`.
 
 ### Phase 6: Validation & docs
 
-- [ ] **Run**: `make test SUITE=TFileToolTest,TPatchTest,TYamlTest`
-- [ ] **Run**: `make check` (all gates)
-- [ ] **Update** `FEATURES.md`; **Update the SPEC** if behaviour diverged;
+- [x] **Run**: `make test SUITE=TFileToolTest,TPatchTest,TYamlTest`
+- [x] **Run**: `make check` (all gates)
+- [x] **Update** `FEATURES.md`; **Update the SPEC** if behaviour diverged;
       rename this TODO to `File_Tools_v2.DONE.md`.
 
 ## Files to Create/Modify
@@ -110,13 +110,31 @@ tests/hildegard_helper_tests.pas   (register test_patch, test_yaml)
 
 1 (simple tools) -> 2 (regex) -> 3 (multi-file) -> 4 (formats) -> 5 (patch) -> 6.
 
+## Outcome
+
+Implemented on `main` (`1b48bf3`, `e7c35e3`, `e6264c8`, `e2b9c6e`): the six
+simple tools, the regex tools, and the format/patch tools (13 new tools, 19
+total with the v1 six). Two new pure units (`hildegard.helper.yaml`,
+`hildegard.helper.patch`). `make check` green (1385 tests, leak-clean).
+
+**Deviations from the SPEC, with reasons:**
+
+- **`json_edit` sets a top-level key only** (the SPEC left the pointer depth
+  open): the common case is a config key, and a full-pointer setter is a
+  follow-up. `json_read` supports a full RFC-6901 pointer.
+- **The YAML subset is minimal and errors on the rest** (anchors, tags,
+  multi-line scalars, inline mappings in sequence items) with a line number,
+  as specced - a clear error, never a silent mis-parse.
+- **`file_search_replace` collects from the workspace root** and matches the
+  workspace-relative path, so a glob like `src/**/*.pas` works as written.
+
 ## Success Criteria
 
-- [ ] All tasks checked
-- [ ] Every SPEC acceptance criterion maps to a passing test
-- [ ] `make check` passes (tests + leak gate)
-- [ ] Each tool maps to a `bash` idiom, and each is gated + confined + reasoned
-- [ ] A `dir_ext` grant makes a multi-file replace one prompt
+- [x] All tasks checked
+- [x] Every SPEC acceptance criterion maps to a passing test
+- [x] `make check` passes (tests + leak gate)
+- [x] Each tool maps to a `bash` idiom, and each is gated + confined + reasoned
+- [x] A `dir_ext` grant makes a multi-file replace one prompt
 
 ## Notes & Considerations
 
