@@ -366,7 +366,9 @@ begin
   Spec.Description :=
     'Run a shell command on the host and return its output. Requires a short ' +
     'reason. Commands are checked against the approval whitelist and may need ' +
-    'approval.';
+    'approval. Prefer a dedicated tool when one fits (file_read/write/edit, ' +
+    'file_glob, file_grep, file_search_replace, ...): they are gated, confined ' +
+    'to the workspace, and diffable. Use the shell for what no tool covers. ';
   { State where the shell starts, so the model grounds relative paths instead of
     guessing a directory (it has guessed /workspace). }
   if FConfig.DefaultCwd <> '' then

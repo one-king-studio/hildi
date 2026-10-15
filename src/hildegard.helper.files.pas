@@ -1560,7 +1560,8 @@ var
   Spec: TToolSpec;
 begin
   Spec.Name := 'file_read';
-  Spec.Description := 'Read a text file inside the workspace. ' +
+  Spec.Description := 'Read a text file inside the workspace (with an optional line range). ' +
+    'Prefer this over the shell: cat, head, tail, sed -n. ' +
     'Requires a short reason. Gated by approval.';
   Spec.ParametersJson :=
     '{"type":"object","properties":{' +
@@ -1573,6 +1574,7 @@ begin
 
   Spec.Name := 'file_write';
   Spec.Description := 'Create or overwrite a file inside the workspace. ' +
+    'Prefer this over the shell: cat > f, printf > f, tee. ' +
     'Requires a short reason. Gated by approval.';
   Spec.ParametersJson :=
     '{"type":"object","properties":{' +
@@ -1585,6 +1587,7 @@ begin
   Spec.Name := 'file_edit';
   Spec.Description := 'Replace an exact string in a file inside the workspace. ' +
     'Fails if the string is absent or ambiguous (unless replace_all). ' +
+    'Prefer this over the shell: ed, ex, a small sed. ' +
     'Requires a short reason. Gated by approval.';
   Spec.ParametersJson :=
     '{"type":"object","properties":{' +
@@ -1598,6 +1601,7 @@ begin
 
   Spec.Name := 'file_list';
   Spec.Description := 'List directory entries inside the workspace. ' +
+    'Prefer this over the shell: ls, find. ' +
     'Requires a short reason. Gated by approval.';
   Spec.ParametersJson :=
     '{"type":"object","properties":{' +
@@ -1609,7 +1613,8 @@ begin
 
   Spec.Name := 'file_glob';
   Spec.Description := 'Find files by path pattern (*, ?, **) inside the ' +
-    'workspace. Requires a short reason. Gated by approval.';
+    'workspace. Prefer this over the shell: find -name, shell globs. ' +
+    'Requires a short reason. Gated by approval.';
   Spec.ParametersJson :=
     '{"type":"object","properties":{' +
     '"pattern":{"type":"string","description":"Glob pattern, e.g. src/**/*.pas."},' +
@@ -1620,7 +1625,8 @@ begin
 
   Spec.Name := 'file_grep';
   Spec.Description := 'Search file contents for a substring inside the ' +
-    'workspace. Requires a short reason. Gated by approval.';
+    'workspace. Prefer this over the shell: grep, rg. ' +
+    'Requires a short reason. Gated by approval.';
   Spec.ParametersJson :=
     '{"type":"object","properties":{' +
     '"pattern":{"type":"string","description":"Substring to find."},' +
@@ -1634,6 +1640,7 @@ begin
   { --- File Tools v2 --- }
   Spec := MakeToolSpec('file_append',
     'Append text to a file inside the workspace, creating it if absent. ' +
+    'Prefer this over the shell: >>, tee -a. ' +
     'Requires a short reason. Gated by approval.',
     '{"type":"object","properties":{' +
     '"path":{"type":"string","description":"File path relative to the workspace."},' +
@@ -1645,6 +1652,7 @@ begin
 
   Spec := MakeToolSpec('file_delete',
     'Delete a file (or an empty directory) inside the workspace. ' +
+    'Prefer this over the shell: rm. ' +
     'Requires a short reason. Gated by approval.',
     '{"type":"object","properties":{' +
     '"path":{"type":"string","description":"Path relative to the workspace."},' +
@@ -1655,6 +1663,7 @@ begin
 
   Spec := MakeToolSpec('file_move',
     'Move or rename a file inside the workspace. ' +
+    'Prefer this over the shell: mv. ' +
     'Requires a short reason. Gated by approval.',
     '{"type":"object","properties":{' +
     '"from":{"type":"string","description":"Source path relative to the workspace."},' +
@@ -1666,6 +1675,7 @@ begin
 
   Spec := MakeToolSpec('file_copy',
     'Copy a file inside the workspace. ' +
+    'Prefer this over the shell: cp. ' +
     'Requires a short reason. Gated by approval.',
     '{"type":"object","properties":{' +
     '"from":{"type":"string","description":"Source path relative to the workspace."},' +
@@ -1677,6 +1687,7 @@ begin
 
   Spec := MakeToolSpec('file_mkdir',
     'Create a directory (and its parents) inside the workspace. ' +
+    'Prefer this over the shell: mkdir -p. ' +
     'Requires a short reason. Gated by approval.',
     '{"type":"object","properties":{' +
     '"path":{"type":"string","description":"Directory relative to the workspace."},' +
@@ -1687,6 +1698,7 @@ begin
 
   Spec := MakeToolSpec('file_stat',
     'Report a path''s type and size inside the workspace. ' +
+    'Prefer this over the shell: stat, ls -l. ' +
     'Requires a short reason. Gated by approval.',
     '{"type":"object","properties":{' +
     '"path":{"type":"string","description":"Path relative to the workspace."},' +
@@ -1695,8 +1707,9 @@ begin
   ATools.Add(Spec, StatFile);
 
   Spec := MakeToolSpec('file_replace_regex',
-    'Replace a regular expression within one file. Requires a short reason. ' +
-    'Gated by approval.',
+    'Replace a regular expression within one file. ' +
+    'Prefer this over the shell: sed -i, perl -pi -e. ' +
+    'Requires a short reason. Gated by approval.',
     '{"type":"object","properties":{' +
     '"path":{"type":"string","description":"File path relative to the workspace."},' +
     '"pattern":{"type":"string","description":"Regular expression to match."},' +
@@ -1710,7 +1723,9 @@ begin
 
   Spec := MakeToolSpec('file_search_replace',
     'Replace a regular expression across every file matching a glob. ' +
-    'dryRun counts without writing. Requires a short reason. Gated by approval.',
+    'dryRun counts without writing. Prefer this over the shell: ' +
+    'grep -rl X | xargs sed -i, find -exec sed. ' +
+    'Requires a short reason. Gated by approval.',
     '{"type":"object","properties":{' +
     '"glob":{"type":"string","description":"Glob selecting files, e.g. src/**/*.pas."},' +
     '"pattern":{"type":"string","description":"Regular expression to match."},' +

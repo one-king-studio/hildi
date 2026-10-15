@@ -64,6 +64,7 @@ type
     procedure TestPathEscapeRefused;
     procedure TestNoApprovalService;
     procedure TestRegisterAdvertisesSixGatedTools;
+    procedure TestDescriptionsHintTheBashReplacement;
     procedure TestGlobMatchMatcher;
     procedure TestExactAllowPersists;
     procedure TestWriteAskOffersPathOptions;
@@ -463,6 +464,26 @@ begin
     for I := 0 to High(Specs) do
       AssertTrue(Specs[I].Name + ' requires reason',
         Pos('"reason"', Specs[I].ParametersJson) > 0);
+  finally
+    Registry.Free;
+  end;
+end;
+
+procedure TFileToolTest.TestDescriptionsHintTheBashReplacement;
+var
+  Registry: TToolRegistry;
+  Specs: TToolSpecArray;
+  I: Integer;
+begin
+  { Every tool's description names the bash idiom it replaces, so the model
+    reaches for the gated tool instead of the shell. }
+  Registry := TToolRegistry.Create;
+  try
+    FTool.Register(Registry);
+    Specs := Registry.Specs;
+    for I := 0 to High(Specs) do
+      AssertTrue(Specs[I].Name + ' hints the shell command it replaces',
+        Pos('Prefer this over the shell', Specs[I].Description) > 0);
   finally
     Registry.Free;
   end;
