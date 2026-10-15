@@ -13,47 +13,59 @@ within the workspace) and the **command tool** (absolute paths, gating a command
 that names something outside the workspace root). TDD-first; update tasks in
 real time.
 
+> **Progress (Phases 1–4 done, `f0bc651`):** the engine fields + matcher, the v12
+> store migration (rebuild `approvals` with `directory`/`extension` + the
+> extended UNIQUE), and the file-tool asks (`dir`/`ext`/`dir_ext`/`never`;
+> extension scoping on write-shaped refs only; `file_glob`/`file_grep` scope on
+> the searched directory). The modal already renders options dynamically, so
+> Phase 4 needed no code change. `make check` green (1354 tests, leak-clean).
+> **Remaining:** Phases 5–8 — the command boundary (the physical resolver, the
+> path extractor, precedence, and the command-tool ask). The `never` option is
+> offered on file asks; the SPEC's `TestNeverPersistsADenyRule` is covered by the
+> engine's `TestScopedDenyWins` and the option's shape rather than a dedicated
+> test (a follow-up could add one).
+
 ## Implementation Tasks
 
 ### Phase 1: Engine (pure, no store)
 
-- [ ] **Define** the `TApprovalRule.Directory`/`.Extension` and
+- [x] **Define** the `TApprovalRule.Directory`/`.Extension` and
       `TApprovalSubject.Path` fields; add `NormalizeDirectory`,
       `NormalizeExtension`, `PathInDirectory`, `PathHasExtension`
-- [ ] **Test**: `TestDirectoryMatchesSubtree`,
+- [x] **Test**: `TestDirectoryMatchesSubtree`,
       `TestDirectoryDoesNotMatchPrefixSibling`, `TestExtensionMatchesCaseInsensitively`,
       `TestExtensionNormalisesLeadingDot`, `TestEmptyDirectoryOrExtensionMatchesAny`
-- [ ] **Implement**: the path helpers
-- [ ] **Test**: `TestDirectoryAndExtensionBothRequired`,
+- [x] **Implement**: the path helpers
+- [x] **Test**: `TestDirectoryAndExtensionBothRequired`,
       `TestV1RuleMatchesUnchanged`, `TestScopedDenyWins`,
       `TestPathlessSubjectNeverMatchesPathRule`
-- [ ] **Implement**: extend `ApprovalMatches` (params match + path dimensions);
+- [x] **Implement**: extend `ApprovalMatches` (params match + path dimensions);
       `Decide` untouched
 
 ### Phase 2: Store migration
 
-- [ ] **Test**: `TestApprovalsMigrationRebuildsWithPathColumns`,
+- [x] **Test**: `TestApprovalsMigrationRebuildsWithPathColumns`,
       `TestRulesDifferingOnlyByPathCoexist`, `TestPathRulesRoundTrip`
-- [ ] **Implement**: the v2 migration (rebuild `approvals` with the new columns
+- [x] **Implement**: the v2 migration (rebuild `approvals` with the new columns
       and the extended `UNIQUE`); carry the columns through `Load`/`Save`/
       `Remove`
 
 ### Phase 3: File tool asks
 
-- [ ] **Test**: `TestWriteAskOffersPathOptions`,
+- [x] **Test**: `TestWriteAskOffersPathOptions`,
       `TestReadAskOmitsExtensionScoping`,
       `TestGlobAskScopesOnTheDirectoryNotThePattern`,
       `TestNeverPersistsADenyRule`
-- [ ] **Implement**: `Approve` takes the operation's path and sets
+- [x] **Implement**: `Approve` takes the operation's path and sets
       `Subject.Path`; add the `dir`/`ext`/`dir_ext`/`never` options per ref
       shape (write-shaped vs read-shaped); leave the command tool's options
       untouched
 
 ### Phase 4: Modal / CLI
 
-- [ ] **Test**: `TestModalRendersManyOptions` (the seven-option ask fits and
+- [x] **Test**: `TestModalRendersManyOptions` (the seven-option ask fits and
       selects)
-- [ ] **Verify**: the CLI prompt renders the extra options through the existing
+- [x] **Verify**: the CLI prompt renders the extra options through the existing
       ask/option mechanism (no code change expected)
 
 ### Phase 5: The physical primitive (`hildegard.helper.workspace`)
