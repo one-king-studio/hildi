@@ -34,14 +34,14 @@ type
   TPathAccessArray = array of TPathAccess;
 
 { Every path-like token in the plan, resolved against ACwd (the command's
-  effective base, '' => the workspace root) with a top-level `cd` tracked. In
-  segment order, then token order; duplicates (same resolved path) are dropped. }
-function PathAccesses(const APlan: TCommandPlan; const AWorkspace: TWorkspace;
-  const ACwd: string): TPathAccessArray;
+  effective base, '' => ARoot) with a top-level `cd` tracked. In segment order,
+  then token order; duplicates (same resolved path) are dropped. }
+function PathAccesses(const APlan: TCommandPlan; const ARoot, ACwd: string):
+  TPathAccessArray;
 
 { The subset of PathAccesses that are physically OUTSIDE the workspace root. }
-function OutsideAccesses(const APlan: TCommandPlan;
-  const AWorkspace: TWorkspace; const ACwd: string): TPathAccessArray;
+function OutsideAccesses(const APlan: TCommandPlan; const ARoot,
+  ACwd: string): TPathAccessArray;
 
 { Expand a leading `~` (and `~/`) to AHome. }
 function ExpandHome(const APath, AHome: string): string;
@@ -85,8 +85,8 @@ begin
   AList[High(AList)].Segment := ASegment;
 end;
 
-function PathAccesses(const APlan: TCommandPlan; const AWorkspace: TWorkspace;
-  const ACwd: string): TPathAccessArray;
+function PathAccesses(const APlan: TCommandPlan; const ARoot, ACwd: string):
+  TPathAccessArray;
 var
   Base: string;
   I, J: Integer;
@@ -100,7 +100,7 @@ var
     if Trim(AToken) = '' then
       Exit;
     R := ResolveToken(AToken, Base);
-    AddAccess(Result, AToken, R, PhysicalContains(AWorkspace.Root, R), ASegment);
+    AddAccess(Result, AToken, R, PhysicalContains(ARoot, R), ASegment);
   end;
 
 begin
@@ -109,7 +109,7 @@ begin
     Exit;
   Base := ACwd;
   if Base = '' then
-    Base := AWorkspace.Root;
+    Base := ARoot;
   { The command's own cwd argument is itself an access to check. }
   if ACwd <> '' then
     AddToken(ACwd, 0);
@@ -131,19 +131,19 @@ begin
       if (not TopLevel) and (ACwd <> '') then
         Base := ACwd;   { a subshell's cd does not leak }
       if not TopLevel then
-        Base := ResolveToken('', AWorkspace.Root);
+        Base := ResolveToken('', ARoot);
     end;
   end;
 end;
 
 function OutsideAccesses(const APlan: TCommandPlan;
-  const AWorkspace: TWorkspace; const ACwd: string): TPathAccessArray;
+  const ARoot, ACwd: string): TPathAccessArray;
 var
   All: TPathAccessArray;
   I: Integer;
 begin
   Result := nil;
-  All := PathAccesses(APlan, AWorkspace, ACwd);
+  All := PathAccesses(APlan, ARoot, ACwd);
   for I := 0 to High(All) do
     if not All[I].Inside then
     begin

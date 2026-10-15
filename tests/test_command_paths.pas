@@ -59,7 +59,7 @@ end;
 function TCommandPathsTest.Outside(const ACmd: string;
   const ACwd: string): TPathAccessArray;
 begin
-  Result := OutsideAccesses(Plan(ACmd), FWs, ACwd);
+  Result := OutsideAccesses(Plan(ACmd), FWork, ACwd);
 end;
 
 procedure TCommandPathsTest.TestAbsoluteArgumentIsAnOutsideAccess;

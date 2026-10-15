@@ -19,6 +19,7 @@ uses
   Classes, SysUtils, SyncObjs,
   hildegard.helper.agent, hildegard.helper.llm,
   hildegard.helper.command.policy, hildegard.helper.approval,
+  hildegard.helper.command.paths,
   hildegard.helper.process;
 
 type
@@ -134,12 +135,13 @@ end;
 
 { Builds the approval ask for each parsed segment. Pure; nil on parse error. }
 function BuildAsks(const ACommand: string;
-  ASyntax: TShellSyntax): TApprovalAskArray;
+  ASyntax: TShellSyntax; const ARoot, ACwd: string): TApprovalAskArray;
 var
   Plan: TCommandPlan;
-  I: Integer;
+  I, J: Integer;
   Seg: TCommandSegment;
-  Bin, Ref: string;
+  Bin, Ref, PathRef: string;
+  Access: TPathAccessArray;
 
   function OneParam(const AValue: string): TApprovalParams;
   begin
@@ -196,6 +198,46 @@ begin
       AddOption(Result[High(Result)], 'prefix',
         'always ' + Bin + ' ' + Seg.Arguments[0] + ' ...', True,
         OneParam(Seg.Arguments[0]), True);
+  end;
+  { Path asks: for each access that leaves the workspace, one ask whose subject
+    is the absolute path (a distinct coordinate space from a file tool's
+    relative path, so the two never cross-match). It carries Covers = the
+    segment's command subject, so an EXACT command grant suppresses it. }
+  if ARoot <> '' then
+  begin
+    Access := OutsideAccesses(Plan, ARoot, ACwd);
+    for J := 0 to High(Access) do
+    begin
+      PathRef := 'path:' + Access[J].Resolved;
+      SetLength(Result, Length(Result) + 1);
+      Result[High(Result)] := Default(TApprovalAsk);
+      Result[High(Result)].Summary := 'access outside the workspace: ' +
+        Access[J].Resolved;
+      Result[High(Result)].Subject.Ref := PathRef;
+      Result[High(Result)].Subject.Path := Access[J].Resolved;
+      { Covers: the segment's command subject, so an exact grant suppresses. }
+      if Access[J].Segment <= High(Plan.Segments) then
+      begin
+        Bin := ExtractFileName(Plan.Segments[Access[J].Segment].Executable);
+        if Bin <> '' then
+        begin
+          Result[High(Result)].HasCovers := True;
+          Result[High(Result)].Covers.Ref := 'run_command:' + Bin;
+          Result[High(Result)].Covers.Params :=
+            Copy(Plan.Segments[Access[J].Segment].Arguments, 0,
+              Length(Plan.Segments[Access[J].Segment].Arguments));
+        end;
+      end;
+      { The path ask's options: once / dir / any / never (no ext). AddOption
+        reads the outer Ref, so point it at the path ref first. }
+      Ref := PathRef;
+      AddOption(Result[High(Result)], 'once', 'allow once', False, nil, False);
+      AddOption(Result[High(Result)], 'dir',
+        'always allow paths under ' + ExtractFileDir(Access[J].Resolved),
+        True, nil, True);
+      AddOption(Result[High(Result)], 'any',
+        'always allow any path outside the workspace', True, nil, True);
+    end;
   end;
 end;
 
@@ -391,7 +433,7 @@ function TCommandTool.ApprovalAsks(
 var
   Data: TJSONData;
   Root: TJSONObject;
-  Command, Reason, ReasonError: string;
+  Command, Reason, ReasonError, Cwd: string;
   I: Integer;
 begin
   Result := nil;
@@ -408,7 +450,9 @@ begin
       Root := TJSONObject(Data);
       if not ReadStringArg(Root, 'command', Command) or (Trim(Command) = '') then
         Exit;
-      Result := BuildAsks(Command, FConfig.Shell.Syntax);
+      Cwd := '';
+      ReadStringArg(Root, 'cwd', Cwd);
+      Result := BuildAsks(Command, FConfig.Shell.Syntax, FConfig.DefaultCwd, Cwd);
       { The reason is already in the call's arguments; carry it so the dialog
         can show why the model wants to run this. }
       Reason := '';
@@ -492,7 +536,7 @@ begin
         AError := 'no approval service configured';
         Exit(False);
       end;
-      Asks := BuildAsks(Command, FConfig.Shell.Syntax);
+      Asks := BuildAsks(Command, FConfig.Shell.Syntax, FConfig.DefaultCwd, Cwd);
       { Carry the model's reason into the ask so the dialog can show it. }
       for I := 0 to High(Asks) do
         Asks[I].Reason := Reason;

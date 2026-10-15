@@ -54,6 +54,7 @@ type
     function MakeConfig(AMaxBytes: Integer): TCommandToolConfig;
     function BuildTool(APrompt: TApprovalPrompt;
       AMaxBytes: Integer): TCommandTool;
+    function BuildToolWithRoot(ARoot: string): TCommandTool;
     function AddRule(AEffect: TApprovalEffect; const ARef: string;
       const AParams: array of string; AAny: Boolean): TApprovalRule;
     function ServiceWith(APrompt: TApprovalPrompt): IApprovalService;
@@ -76,6 +77,9 @@ type
     procedure TestPromptAnyAllowsOtherArgs;
     procedure TestPromptPrefixScopesSubtree;
     procedure TestApprovalAsksPerSegment;
+    procedure TestWildcardAllowedCatStillAsksAboutThePath;
+    procedure TestExactlyApprovedCatDoesNotAskAboutThePath;
+    procedure TestUnknownCommandAsksForBoth;
     procedure TestApprovalAsksCarryTheReason;
     procedure TestRunCarriesTheReasonIntoTheAsk;
     procedure TestOutputIsTruncatedWithMarker;
@@ -471,6 +475,123 @@ begin
     AssertEquals('second ref', 'run_command:uname', Asks[1].Subject.Ref);
     AssertEquals('second summary', 'uname -a', Asks[1].Summary);
     AssertTrue('has once option', Asks[0].Options[0].Key = 'once');
+  finally
+    Tool.Free;
+  end;
+end;
+
+function TCommandToolTest.BuildToolWithRoot(ARoot: string): TCommandTool;
+var
+  Cfg: TCommandToolConfig;
+begin
+  Cfg := MakeConfig(0);
+  Cfg.DefaultCwd := ARoot;
+  Result := TCommandTool.Create(Cfg, ServiceWith(nil), FExecutor);
+end;
+
+procedure TCommandToolTest.TestWildcardAllowedCatStillAsksAboutThePath;
+var
+  Tool: TCommandTool;
+  Asks: TApprovalAskArray;
+  I: Integer;
+  PathAsk: Integer;
+begin
+  { `cat` is allowed with any arguments, but a path OUTSIDE the workspace is a
+    separate ask: any-arguments is not any-location. }
+  Tool := BuildToolWithRoot('/tmp/nowhere');
+  try
+    Asks := Tool.ApprovalAsks(
+      '{"command":"cat /etc/hosts","reason":"r"}');
+    PathAsk := -1;
+    for I := 0 to High(Asks) do
+      if Pos('path:', Asks[I].Subject.Ref) = 1 then
+        PathAsk := I;
+    AssertTrue('a path ask is present', PathAsk >= 0);
+    AssertEquals('the absolute path', '/etc/hosts',
+      Asks[PathAsk].Subject.Path);
+    AssertTrue('carries a covers subject', Asks[PathAsk].HasCovers);
+    AssertEquals('covers the command', 'run_command:cat',
+      Asks[PathAsk].Covers.Ref);
+    AssertTrue('offers a dir option', Asks[PathAsk].Options[1].Key = 'dir');
+  finally
+    Tool.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestExactlyApprovedCatDoesNotAskAboutThePath;
+var
+  Tool: TCommandTool;
+  Asks: TApprovalAskArray;
+  I: Integer;
+  Choice: TApprovalChoice;
+  Prompt: TFakePrompt;
+  Store: IApprovalStore;
+  Svc: IApprovalService;
+  Batch: TApprovalBatchResult;
+  Ctx: TApprovalContext;
+begin
+  { With `cat /etc/hosts` granted EXACTLY, the path ask is suppressed: the
+    operator already said yes to this precise command. }
+  Prompt := TFakePrompt.Create;
+  Store := FApprovalStore;
+  try
+    Prompt.Allowed := True;
+    Prompt.OptionKey := 'exact';
+    Prompt.Scope := asWorkspace;
+    Ctx.WorkspaceId := 1;
+    Svc := TApprovalService.Create(Store, Prompt.Prompt, Ctx);
+    { Grant the exact command first. }
+    Tool := TCommandTool.Create(MakeConfig(0), Svc, FExecutor);
+    try
+      Asks := Tool.ApprovalAsks(
+        '{"command":"cat /etc/hosts","reason":"r"}');
+      AssertTrue('resolved', Svc.Resolve(Asks, Batch));
+      AssertTrue('allowed', Batch.Allowed);
+    finally
+      Tool.Free;
+    end;
+    { Now the exact rule exists; re-resolving should not prompt again (the
+      suppression covers the path ask). }
+    Prompt.Calls := 0;
+    Tool := BuildToolWithRoot('/tmp/nowhere');
+    try
+      Asks := Tool.ApprovalAsks(
+        '{"command":"cat /etc/hosts","reason":"r"}');
+      Svc := TApprovalService.Create(Store, Prompt.Prompt, Ctx);
+      AssertTrue('resolved again', Svc.Resolve(Asks, Batch));
+      AssertEquals('no new prompt (suppressed)', 0, Prompt.Calls);
+    finally
+      Tool.Free;
+    end;
+  finally
+    Prompt.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestUnknownCommandAsksForBoth;
+var
+  Tool: TCommandTool;
+  Asks: TApprovalAskArray;
+  I: Integer;
+  SawCmd, SawPath: Boolean;
+begin
+  { An unknown command naming an outside path asks about BOTH the command and
+    the path. }
+  Tool := BuildToolWithRoot('/tmp/nowhere');
+  try
+    Asks := Tool.ApprovalAsks(
+      '{"command":"frobnicate /etc/hosts","reason":"r"}');
+    SawCmd := False;
+    SawPath := False;
+    for I := 0 to High(Asks) do
+    begin
+      if Asks[I].Subject.Ref = 'run_command:frobnicate' then
+        SawCmd := True;
+      if Pos('path:', Asks[I].Subject.Ref) = 1 then
+        SawPath := True;
+    end;
+    AssertTrue('asks about the command', SawCmd);
+    AssertTrue('asks about the path', SawPath);
   finally
     Tool.Free;
   end;
