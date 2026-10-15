@@ -31,6 +31,28 @@ type
       AObserver: TToolObserver = nil): Boolean;
   end;
 
+  { A tool whose call blocks (as one waiting on the approval gate does) until a
+    sibling releases it, proving the sibling ran while it was blocked. The block
+    has a timeout, so a serial run finishes (and reports the sibling did NOT
+    overlap) rather than hanging. }
+  TGatedProbe = class
+  private
+    FLock: TCriticalSection;
+    FSlowStarted: TSimpleEvent;
+    FRelease: TSimpleEvent;
+  public
+    SlowFinished: Boolean;
+    FastSawSlowInFlight: Boolean;
+    constructor Create;
+    destructor Destroy; override;
+    function Slow(const AArgumentsJson: string;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
+    function Fast(const AArgumentsJson: string;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
+  end;
+
   { A tool that records how many calls are in flight at once and the order they
     finish, so a fan-out can be asserted. Each call blocks on a shared gate
     until AMaxConcurrent calls have arrived, then releases all. }
@@ -208,6 +230,7 @@ type
     procedure TestParallelToolResultsAreInCallOrder;
     procedure TestMixedBatchKeepsOrderAndSerializesUnsafe;
     procedure TestWithoutAToolPoolCallsAreSerial;
+    procedure TestABlockedCallDoesNotHoldUpItsSibling;
     procedure TestUnknownToolReturnsErrorResultAndContinues;
     procedure TestFailingHandlerReturnsErrorResultAndContinues;
     procedure TestRaisingHandlerIsCaughtAndReported;
@@ -419,6 +442,68 @@ begin
   AError := '';
   Result := False;
   raise Exception.Create('kaboom');
+end;
+
+{ TGatedProbe }
+
+constructor TGatedProbe.Create;
+begin
+  inherited Create;
+  FLock := TCriticalSection.Create;
+  FSlowStarted := TSimpleEvent.Create;
+  FRelease := TSimpleEvent.Create;
+  SlowFinished := False;
+  FastSawSlowInFlight := False;
+end;
+
+destructor TGatedProbe.Destroy;
+begin
+  FRelease.Free;
+  FSlowStarted.Free;
+  FLock.Free;
+  inherited Destroy;
+end;
+
+function TGatedProbe.Slow(const AArgumentsJson: string;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
+begin
+  { Announce that the slow call is in flight, then block as an approval wait
+    does. The finite timeout means a serial run still completes (with
+    FastSawSlowInFlight False) rather than hanging. }
+  FSlowStarted.SetEvent;
+  FRelease.WaitFor(1000);
+  FLock.Acquire;
+  try
+    SlowFinished := True;
+  finally
+    FLock.Release;
+  end;
+  AResult := 'slow done';
+  AError := '';
+  Result := True;
+end;
+
+function TGatedProbe.Fast(const AArgumentsJson: string;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
+begin
+  { Wait for the slow call to be in flight (a serial loop has already finished
+    it by now, so this returns at once with SlowFinished True), then check
+    whether it is STILL in flight: that means the fast call ran while the slow
+    one was blocked. }
+  FSlowStarted.WaitFor(1000);
+  FLock.Acquire;
+  try
+    FastSawSlowInFlight := not SlowFinished;
+  finally
+    FLock.Release;
+  end;
+  { Release the slow call so the batch can finish. }
+  FRelease.SetEvent;
+  AResult := 'fast done';
+  AError := '';
+  Result := True;
 end;
 
 { TProbeTool }
@@ -947,7 +1032,6 @@ begin
     Spec.Name := 'probe';
     Spec.Description := 'concurrency probe';
     Spec.ParametersJson := '{"type":"object","properties":{}}';
-    Spec.ParallelSafe := True;
     FTools.Add(Spec, Probe.Handle);
     FLoop.ToolPool := Pool;
 
@@ -988,7 +1072,6 @@ begin
     Spec.Name := 'probe';
     Spec.Description := 'probe';
     Spec.ParametersJson := '{"type":"object","properties":{}}';
-    Spec.ParallelSafe := True;
     FTools.Add(Spec, Probe.Handle);
     FLoop.ToolPool := Pool;
 
@@ -1031,11 +1114,10 @@ begin
     Spec.Name := 'probe';
     Spec.Description := 'probe';
     Spec.ParametersJson := '{"type":"object","properties":{}}';
-    Spec.ParallelSafe := True;
     FTools.Add(Spec, Probe.Handle);
     { A serial tool: never overlaps. }
     Spec.Name := 'serial_probe';
-    Spec.ParallelSafe := False;
+    Spec.SerialOnly := True;   { never overlaps a sibling }
     FTools.Add(Spec, Probe.Handle);
     FLoop.ToolPool := Pool;
 
@@ -1074,7 +1156,6 @@ begin
     Spec.Name := 'probe';
     Spec.Description := 'probe';
     Spec.ParametersJson := '{"type":"object","properties":{}}';
-    Spec.ParallelSafe := True;
     FTools.Add(Spec, Probe.Handle);
     { FLoop.ToolPool stays nil. }
 
@@ -1089,6 +1170,51 @@ begin
     AssertEquals('peak stays 1 without a pool', 1, Probe.Peak);
     AssertEquals('answer', 'done', Answer);
   finally
+    Probe.Free;
+  end;
+end;
+
+procedure TAgentLoopTest.TestABlockedCallDoesNotHoldUpItsSibling;
+var
+  Answer: string;
+  Err: TLLMError;
+  SlowSpec, FastSpec: TToolSpec;
+  Probe: TGatedProbe;
+  Pool: IAsyncScheduler;
+begin
+  { The requirement: if call #1 is blocked (as one awaiting the approval gate
+    is) and call #2 is not, #2 runs while #1 waits. Here 'slow' blocks until
+    'fast' releases it, so a serial loop would never overlap (FastSawSlowInFlight
+    stays False and the slow call times out at 1s). }
+  BuildLoop('', 8);
+  Probe := TGatedProbe.Create;
+  Pool := TExecutorScheduler.Create(4, 0);
+  try
+    SlowSpec := Default(TToolSpec);
+    SlowSpec.Name := 'slow';
+    SlowSpec.Description := 'blocks';
+    SlowSpec.ParametersJson := '{"type":"object","properties":{}}';
+    FTools.Add(SlowSpec, Probe.Slow);
+    FastSpec := Default(TToolSpec);
+    FastSpec.Name := 'fast';
+    FastSpec.Description := 'quick';
+    FastSpec.ParametersJson := '{"type":"object","properties":{}}';
+    FTools.Add(FastSpec, Probe.Fast);
+    FLoop.ToolPool := Pool;
+
+    FFake.AddResponse([
+      ToolNameFrame(0, 'g1', 'slow'),
+      ToolNameFrame(1, 'u1', 'fast'),
+      ToolArgsFrame(0, '{"reason":"r"}'),
+      ToolArgsFrame(1, '{"reason":"r"}'),
+      FinishFrame('tool_calls'), DoneFrame]);
+    FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
+    AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
+    AssertTrue('the sibling ran while the first was blocked',
+      Probe.FastSawSlowInFlight);
+    AssertEquals('answer', 'done', Answer);
+  finally
+    Pool := nil;
     Probe.Free;
   end;
 end;

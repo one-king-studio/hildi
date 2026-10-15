@@ -122,9 +122,10 @@ type
     Name: string;
     Description: string;
     ParametersJson: string;
-    { When False, the loop runs this tool's calls in a serialized lane: never
-      concurrently with any other call. Default True. }
-    ParallelSafe: Boolean;
+    { When True, the loop runs this tool's calls in a serialized lane: never
+      concurrently with any other call. Default False (a batch is the model's
+      intent to parallelize). }
+    SerialOnly: Boolean;
   end;
 ```
 

@@ -602,7 +602,6 @@ begin
   Spec.Name := BuiltinGetSystemTimeName;
   Spec.Description := 'Return the current UTC time as an ISO 8601 timestamp.';
   Spec.ParametersJson := '{"type":"object","properties":{},"required":[]}';
-  Spec.ParallelSafe := True;   { self-contained: safe to run concurrently }
   ATools.Add(Spec, BuiltinTools.GetSystemTime);
 end;
 
@@ -1313,7 +1312,9 @@ function TAgentLoop.IsParallelSafe(const AName: string): Boolean;
 var
   Tool: TRegisteredTool;
 begin
-  Result := ResolveTool(AName, Tool) and Tool.Spec.ParallelSafe;
+  { A batch is the model's intent to run the calls together, so a tool is
+    parallel-safe unless it declares itself SerialOnly. }
+  Result := ResolveTool(AName, Tool) and (not Tool.Spec.SerialOnly);
 end;
 
 procedure TAgentLoop.RunOneCall(const ACall: TChatToolCall;

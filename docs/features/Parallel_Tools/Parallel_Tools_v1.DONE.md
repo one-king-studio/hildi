@@ -45,20 +45,20 @@ output streamed live, per call. TDD-first; `make check` before moving on.
       the max simultaneous calls <= the worker count).
 - [x] **Implement**: the executor is injected (default: a small pool); bounded.
 - [x] **Test**: a not-parallel-safe tool never overlaps another call.
-- [x] **Implement**: `TToolSpec.ParallelSafe`; a serialized lane for it.
-- [x] **Test**: a gated call + an ungated call - the ungated completes while the
-      gated is still awaiting approval.
-- [x] **Implement**: the per-call pipeline resolves approval inside the handler,
-      so the wait is per-call.
+- [x] **Implement**: `TToolSpec.SerialOnly` (opt-out; default parallel).
+- [x] **Test**: a blocked call + a fast sibling - the sibling completes while the
+      blocked call is still in flight (`TestABlockedCallDoesNotHoldUpItsSibling`).
+- [x] **Implement**: the per-call pipeline runs concurrently by default, so the
+      wait (approval) is per-call.
 
 > **Deviations (Phase 3):**
-> - `TToolSpec.ParallelSafe` defaults **False** (opt-in), not True as the SPEC
->   proposed: an unmarked tool must never run concurrently, so adding
->   parallelism cannot silently race an unsafe handler.
+> - **Parallel by default.** A batch of calls in one assistant message is the
+>   model's intent to run them together, so `TToolSpec.SerialOnly` is an
+>   **opt-out** (default: parallel). `run_command` therefore runs in parallel
+>   too. (An earlier pass made it opt-in with `ParallelSafe`; the operator
+>   corrected that - a parallel batch is the intent.)
 > - **Runs, not the whole batch.** Only *consecutive* parallel-safe calls fan
->   out; a mixed batch runs in order, parallelizing the safe stretches. This
->   preserves **execution order** (a `[write, read]` batch must not reorder),
->   which the SPEC left implicit.
+>   out, preserving execution order (a `[write, read]` batch must not reorder).
 > - **A separate tool pool.** The turn runs on the turn pool, so tool jobs use a
 >   distinct `FToolPool` (4 workers); sharing the turn pool would serialize or
 >   deadlock at low concurrency.
@@ -104,7 +104,7 @@ docs/features/Parallel_Tools/Parallel_Tools_v1.TODO.md
 ```
 src/hildegard.helper.harness.turn.pas   (concurrent TApprovalGate)
 src/hildegard.helper.approval.pas        (serialize the decision section)
-src/hildegard.helper.agent.pas           (fan-out/join, ParallelSafe, ordered results)
+src/hildegard.helper.agent.pas           (fan-out/join, SerialOnly, ordered results)
 src/hildegard.helper.harness.session.pas (inject the executor into the loop)
 src/hildegard.helper.harness.app.pas     (per-call output routing)
 tests/test_harness_turn.pas              (the concurrent gate)
@@ -152,13 +152,15 @@ tests/test_harness_app.pas               (output routing)
 Implemented on `main` (`020539f`, `a094053`, `438bf94`, `1ee3c38`): a concurrent
 approval gate, concurrent approval resolution, the tool-call fan-out/join with
 ordered results, and per-call output routing with interrupt-releases-the-gate.
-`make check` green (1331 tests, leak-clean).
+`make check` green (1332 tests, leak-clean).
 
 **Deviations from the SPEC, with reasons:**
 
-- **`ParallelSafe` defaults False (opt-in).** The SPEC proposed default True; an
-  unmarked tool must never run concurrently, so adding parallelism cannot
-  silently race an unsafe handler.
+- **Parallel by default (opt-out).** A batch of calls in one assistant message
+  is the model's intent to run them together, so the flag is `TToolSpec.
+  SerialOnly` (default parallel), not the SPEC's opt-in `ParallelSafe`. This
+  means `run_command` runs in parallel too - corrected by the operator, who
+  rejected the earlier opt-in pass.
 - **Runs, not the whole batch.** Only *consecutive* parallel-safe calls fan out,
   preserving execution order (a `[write, read]` batch must not reorder).
 - **A separate tool pool** (`FToolPool`, 4), because the turn occupies a
