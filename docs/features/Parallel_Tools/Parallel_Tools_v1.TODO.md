@@ -65,13 +65,22 @@ output streamed live, per call. TDD-first; `make check` before moving on.
 
 ### Phase 4: Output routing and cancellation
 
-- [ ] **Test**: concurrent tool output is routed per call (keyed by tool id) and
+- [x] **Test**: concurrent tool output is routed per call (keyed by tool id) and
       the blocks appear in call order (headless surface).
-- [ ] **Implement**: `OnToolOutput` carries the id; the app/panel routes per id.
-- [ ] **Test**: an interrupt cancels and joins every in-flight call; each gets a
+- [x] **Implement**: `OnToolOutput` carries the id; the app/panel routes per id.
+- [x] **Test**: an interrupt cancels and joins every in-flight call; each gets a
       paired result.
-- [ ] **Implement**: `ScheduleCancellable` per call; trip the token on interrupt;
+- [x] **Implement**: `ScheduleCancellable` per call; trip the token on interrupt;
       `CancelAll` the gate.
+
+> **Deviation (Phase 4):** cancellation is not per-job tokens. The loop's
+> invariant is that a tool batch is **never broken part-way** (calls and results
+> stay paired), so the fix was narrower: the app routes output per call id, and
+> an **interrupt releases the approval gate** (both the runtime and the local
+> driver `Cancel` it) so a batch blocked on approval unblocks at once rather than
+> waiting out the timeout; the loop's cancel check then stops the turn at the
+> next boundary. The gate tests (`TestCancelDenies`, `TestCancelAll…`) cover the
+> release.
 
 ### Phase 5: Validation & docs
 
