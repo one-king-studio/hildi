@@ -70,6 +70,14 @@ type
     Reason: string;
     Subject: TApprovalSubject;
     Options: TApprovalOptionArray;
+    { A subject this ask is REDUNDANT with when it is already allowed by an
+      exact-params rule (Approval Path Scoping). The command boundary uses it: a
+      path ask carries the segment's command subject, so an EXACT command grant
+      suppresses the path ask (the operator already said yes to this precise
+      command). A WILDCARD grant does not suppress it: "any arguments" is not
+      "any location". }
+    Covers: TApprovalSubject;
+    HasCovers: Boolean;
   end;
 
   TApprovalAskArray = array of TApprovalAsk;
@@ -166,6 +174,11 @@ type
       out AError: string): Boolean;
     { Decide ASubject against the current snapshot. FDecisionLock must be held. }
     function DecideLocked(const ASubject: TApprovalSubject): TApprovalDecision;
+    { True when ASubject is allowed by a rule with AnyParams = False (an exact
+      grant) - the condition that suppresses a covering path ask. Assumes
+      FDecisionLock is held. }
+    function CoversExactlyAllowedLocked(
+      const ASubject: TApprovalSubject): Boolean;
   public
     constructor Create(AStore: IApprovalStore; APrompt: TApprovalPrompt;
       const AContext: TApprovalContext);
@@ -436,6 +449,21 @@ begin
   Result := Decide(FRules, ASubject);
 end;
 
+function TApprovalService.CoversExactlyAllowedLocked(
+  const ASubject: TApprovalSubject): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 0 to High(FRules) do
+    { An EXACT grant: an allow rule whose params are not a wildcard, and which
+      matches the covered subject. A wildcard allow (AnyParams) does NOT
+      suppress - "any arguments" is not "any location". }
+    if (FRules[I].Effect = aeAllow) and (not FRules[I].AnyParams) and
+      ApprovalMatches(FRules[I], ASubject) then
+      Exit(True);
+end;
+
 function TApprovalService.Resolve(const AAsks: TApprovalAskArray;
   out AResult: TApprovalBatchResult): Boolean;
 var
@@ -482,6 +510,12 @@ begin
     FDecisionLock.Acquire;
     try
       Decision := DecideLocked(AAsks[I].Subject);
+      { Suppression: an ask that COVERS a subject already allowed by an EXACT
+        (non-wildcard) rule is redundant - skip it. A wildcard grant does not
+        suppress (any-args is not any-location). }
+      if (Decision <> adAllow) and AAsks[I].HasCovers and
+        CoversExactlyAllowedLocked(AAsks[I].Covers) then
+        Decision := adAllow;
     finally
       FDecisionLock.Release;
     end;

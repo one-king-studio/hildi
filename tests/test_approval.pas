@@ -91,6 +91,8 @@ type
     procedure TestV1RuleMatchesUnchanged;
     procedure TestScopedDenyWins;
     procedure TestPathlessSubjectNeverMatchesPathRule;
+    procedure TestExactCommandGrantSuppressesThePathAsk;
+    procedure TestWildcardCommandGrantDoesNotSuppressIt;
     procedure TestMemoryStoreSuppressesDuplicates;
     procedure TestMemoryStoreFiltersByContext;
     procedure TestBatchDenyPreScanDoesNotPrompt;
@@ -473,6 +475,85 @@ begin
   AssertFalse('no path', ApprovalMatches(
     PathRule(aeAllow, 'file:write', 'docs', ''),
     PathSubject('file:write', '')));
+end;
+
+procedure TApprovalTest.TestExactCommandGrantSuppressesThePathAsk;
+var
+  Store: IApprovalStore;
+  Prompt: TFakePrompt;
+  Svc: IApprovalService;
+  Asks: TApprovalAskArray;
+  R: TApprovalRule;
+  Res: TApprovalBatchResult;
+  Err: string;
+begin
+  { An EXACT command grant ("allow exactly `cat /etc/hosts`") suppresses the
+    path ask that covers it: the operator already said yes to this precise
+    command, so the location ask is redundant. }
+  Store := TMemoryApprovalStore.Create;
+  R := Default(TApprovalRule);
+  R.Effect := aeAllow;
+  R.Scope := asGlobal;
+  R.Ref := 'run_command:cat';
+  R.Params := Params(['/etc/hosts']);
+  R.AnyParams := False;
+  Store.Save(R, Err);
+  Prompt := TFakePrompt.Create;
+  try
+    Svc := TApprovalService.Create(Store, Prompt.Prompt,
+      Default(TApprovalContext));
+    SetLength(Asks, 1);
+    Asks[0] := Default(TApprovalAsk);
+    Asks[0].Summary := 'read /etc/hosts';
+    Asks[0].Subject := Subject('path:/etc/hosts', []);
+    Asks[0].HasCovers := True;
+    Asks[0].Covers := Subject('run_command:cat', ['/etc/hosts']);
+    AssertTrue('resolved', Svc.Resolve(Asks, Res));
+    AssertTrue('allowed', Res.Allowed);
+    AssertEquals('no prompt', 0, Prompt.Calls);
+  finally
+    Prompt.Free;
+  end;
+end;
+
+procedure TApprovalTest.TestWildcardCommandGrantDoesNotSuppressIt;
+var
+  Store: IApprovalStore;
+  Prompt: TFakePrompt;
+  Svc: IApprovalService;
+  Asks: TApprovalAskArray;
+  R: TApprovalRule;
+  Res: TApprovalBatchResult;
+  Err: string;
+begin
+  { A WILDCARD grant ("allow any cat") covers the command but NOT the location,
+    so the path ask still prompts. }
+  Store := TMemoryApprovalStore.Create;
+  R := Default(TApprovalRule);
+  R.Effect := aeAllow;
+  R.Scope := asGlobal;
+  R.Ref := 'run_command:cat';
+  R.AnyParams := True;
+  Store.Save(R, Err);
+  Prompt := TFakePrompt.Create;
+  try
+    Prompt.Allowed := True;
+    Prompt.OptionKey := 'once';
+    Svc := TApprovalService.Create(Store, Prompt.Prompt,
+      Default(TApprovalContext));
+    SetLength(Asks, 1);
+    Asks[0] := Default(TApprovalAsk);
+    Asks[0].Summary := 'read /etc/hosts';
+    Asks[0].Subject := Subject('path:/etc/hosts', []);
+    Asks[0].HasCovers := True;
+    Asks[0].Covers := Subject('run_command:cat', ['/etc/hosts']);
+    Asks[0].Options := [Option('once', 'allow once', False,
+      'path:/etc/hosts', [], False)];
+    AssertTrue('resolved', Svc.Resolve(Asks, Res));
+    AssertEquals('still prompted', 1, Prompt.Calls);
+  finally
+    Prompt.Free;
+  end;
 end;
 
 procedure TApprovalTest.TestMemoryStoreSuppressesDuplicates;
