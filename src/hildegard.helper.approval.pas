@@ -34,6 +34,13 @@ type
     Ref: string;            // 'run_command:cat', 'browser:navigate_to_url'
     Params: TApprovalParams;
     AnyParams: Boolean;
+    { Path-shaped scoping (Approval Path Scoping v1). A rule with either set is a
+      path grant: its params are empty with AnyParams set, and it matches only a
+      subject that carries a Path. Directory is workspace-relative,
+      subtree-inclusive; Extension is normalised (no leading dot, lower-case).
+      '' = any. }
+    Directory: string;
+    Extension: string;
   end;
 
   TApprovalRuleArray = array of TApprovalRule;
@@ -41,6 +48,10 @@ type
   TApprovalSubject = record
     Ref: string;
     Params: TApprovalParams;
+    { The operation's path, in the coordinate space the declaring tool owns: a
+      workspace-relative path for the file tools, an absolute path (outside the
+      root) for the command tool. '' = none (never matches a path rule). }
+    Path: string;
   end;
 
   TApprovalOption = record
@@ -107,6 +118,14 @@ function ApprovalMatches(const ARule: TApprovalRule;
   const ASubject: TApprovalSubject): Boolean;
 function Decide(const ARules: TApprovalRuleArray;
   const ASubject: TApprovalSubject): TApprovalDecision;
+{ Normalise a directory (strip a trailing '/', a leading './'; '.' → ''). }
+function NormalizeDirectory(const ADirectory: string): string;
+{ Normalise an extension (strip a leading '.'; lower-case). }
+function NormalizeExtension(const AExtension: string): string;
+{ True when APath is ADirectory or below it, component-wise. '' dir = any. }
+function PathInDirectory(const APath, ADirectory: string): Boolean;
+{ True when APath's final component ends in '.' + AExtension. '' ext = any. }
+function PathHasExtension(const APath, AExtension: string): Boolean;
 function DefaultApprovalRule(const AEffect: TApprovalEffect): TApprovalRule;
 function FindOption(const AAsk: TApprovalAsk; const AKey: string;
   out AOption: TApprovalOption): Boolean;
@@ -189,6 +208,78 @@ begin
     Result := IsPrefix(ARule.Params, ASubject.Params)
   else
     Result := ParamsEqual(ARule.Params, ASubject.Params);
+  if not Result then
+    Exit;
+  { Path-shaped scoping: when the rule carries a directory/extension, the
+    subject must carry a path that satisfies them. A rule with neither behaves
+    exactly as v1. A pathless subject never matches a path rule. }
+  if (ARule.Directory <> '') or (ARule.Extension <> '') then
+  begin
+    if ASubject.Path = '' then
+      Exit(False);
+    if (ARule.Directory <> '') and
+      (not PathInDirectory(ASubject.Path, ARule.Directory)) then
+      Exit(False);
+    if (ARule.Extension <> '') and
+      (not PathHasExtension(ASubject.Path, ARule.Extension)) then
+      Exit(False);
+  end;
+end;
+
+function NormalizeDirectory(const ADirectory: string): string;
+begin
+  Result := Trim(ADirectory);
+  { Strip a leading './' (repeatedly) and a trailing '/'. '.' alone is the root,
+    i.e. the empty directory. Backslashes are not a path separator here. }
+  while (Length(Result) >= 2) and (Result[1] = '.') and (Result[2] = '/') do
+    Result := Copy(Result, 3, MaxInt);
+  while (Length(Result) > 1) and (Result[Length(Result)] = '/') do
+    SetLength(Result, Length(Result) - 1);
+  if Result = '.' then
+    Result := '';
+end;
+
+function NormalizeExtension(const AExtension: string): string;
+begin
+  Result := Trim(AExtension);
+  while (Length(Result) >= 1) and (Result[1] = '.') do
+    Result := Copy(Result, 2, MaxInt);
+  Result := LowerCase(Result);
+end;
+
+function PathInDirectory(const APath, ADirectory: string): Boolean;
+var
+  Dir, P: string;
+begin
+  if ADirectory = '' then
+    Exit(True);
+  Dir := NormalizeDirectory(ADirectory);
+  if Dir = '' then
+    Exit(True);
+  P := Trim(APath);
+  while (Length(P) >= 2) and (P[1] = '.') and (P[2] = '/') do
+    P := Copy(P, 3, MaxInt);
+  { Component-wise: the path equals the directory or continues with '/'. }
+  Result := (P = Dir) or
+    ((Length(P) > Length(Dir)) and (Copy(P, 1, Length(Dir)) = Dir) and
+     (P[Length(Dir) + 1] = '/'));
+end;
+
+function PathHasExtension(const APath, AExtension: string): Boolean;
+var
+  P, Ext: string;
+  Slash, Dot: Integer;
+begin
+  if AExtension = '' then
+    Exit(True);
+  Ext := NormalizeExtension(AExtension);
+  P := Trim(APath);
+  Slash := LastDelimiter('/', P);
+  Dot := LastDelimiter('.', P);
+  { The dot must be in the final component (after the last '/'), and the suffix
+    must equal the extension, case-insensitively. }
+  Result := (Dot > Slash) and (Dot > 0) and
+    (LowerCase(Copy(P, Dot + 1, MaxInt)) = Ext);
 end;
 
 function Decide(const ARules: TApprovalRuleArray;

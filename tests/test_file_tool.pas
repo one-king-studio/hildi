@@ -19,8 +19,11 @@ type
     Calls: Integer;
     LastRef: string;
     LastSummary: string;
+    LastPath: string;
+    LastOptions: TApprovalOptionArray;
     function Resolve(const AAsks: TApprovalAskArray;
       out AResult: TApprovalBatchResult): Boolean;
+    function HasOption(const AKey: string): Boolean;
   end;
 
   TChoiceRecorder = class
@@ -63,6 +66,10 @@ type
     procedure TestRegisterAdvertisesSixGatedTools;
     procedure TestGlobMatchMatcher;
     procedure TestExactAllowPersists;
+    procedure TestWriteAskOffersPathOptions;
+    procedure TestReadAskOmitsExtensionScoping;
+    procedure TestGlobAskScopesOnTheDirectoryNotThePattern;
+    procedure TestAskCarriesTheSubjectPath;
   end;
 
 implementation
@@ -78,6 +85,8 @@ begin
   begin
     LastRef := AAsks[0].Subject.Ref;
     LastSummary := AAsks[0].Summary;
+    LastPath := AAsks[0].Subject.Path;
+    LastOptions := AAsks[0].Options;
   end;
   if Allow then
     AResult.Allowed := True
@@ -87,6 +96,16 @@ begin
     AResult.Reason := 'denied by test';
   end;
   Result := True;
+end;
+
+function TFakeApproval.HasOption(const AKey: string): Boolean;
+var
+  I: Integer;
+begin
+  for I := 0 to High(LastOptions) do
+    if LastOptions[I].Key = AKey then
+      Exit(True);
+  Result := False;
 end;
 
 { TChoiceRecorder }
@@ -480,6 +499,57 @@ begin
   finally
     Rec.Free;
   end;
+end;
+
+procedure TFileToolTest.TestWriteAskOffersPathOptions;
+var
+  Res, Err: string;
+begin
+  { A write-shaped ask offers once/exact/dir/ext/dir_ext/any/never. }
+  AssertTrue('write', FTool.WriteFile(
+    Args(['path', 'docs/a.md', 'content', 'x', 'reason', 'r']), Res, Err));
+  AssertTrue('once', FApproval.HasOption('once'));
+  AssertTrue('exact', FApproval.HasOption('exact'));
+  AssertTrue('dir', FApproval.HasOption('dir'));
+  AssertTrue('ext', FApproval.HasOption('ext'));
+  AssertTrue('dir_ext', FApproval.HasOption('dir_ext'));
+  AssertTrue('any', FApproval.HasOption('any'));
+  AssertTrue('never', FApproval.HasOption('never'));
+end;
+
+procedure TFileToolTest.TestReadAskOmitsExtensionScoping;
+var
+  Res, Err: string;
+begin
+  { A read-shaped ask offers no extension scoping. }
+  WriteRaw(Full('a.md'), 'hi');
+  AssertTrue('read', FTool.ReadFile(
+    Args(['path', 'a.md', 'reason', 'r']), Res, Err));
+  AssertTrue('dir', FApproval.HasOption('dir'));
+  AssertFalse('no ext', FApproval.HasOption('ext'));
+  AssertFalse('no dir_ext', FApproval.HasOption('dir_ext'));
+  AssertTrue('never', FApproval.HasOption('never'));
+end;
+
+procedure TFileToolTest.TestGlobAskScopesOnTheDirectoryNotThePattern;
+var
+  Res, Err: string;
+begin
+  { file_glob's subject path is the searched directory, not the pattern. }
+  ForceDirectories(Full('src'));
+  AssertTrue('glob', FTool.Glob(
+    Args(['pattern', '**/*.pas', 'path', 'src', 'reason', 'r']), Res, Err));
+  AssertEquals('scopes on the directory', 'src', FApproval.LastPath);
+end;
+
+procedure TFileToolTest.TestAskCarriesTheSubjectPath;
+var
+  Res, Err: string;
+begin
+  WriteRaw(Full('docs/x/a.md'), 'hi');
+  AssertTrue('write', FTool.WriteFile(
+    Args(['path', 'docs/x/a.md', 'content', 'y', 'reason', 'r']), Res, Err));
+  AssertEquals('the operation path', 'docs/x/a.md', FApproval.LastPath);
 end;
 
 initialization

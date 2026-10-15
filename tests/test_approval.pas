@@ -82,6 +82,15 @@ type
     procedure TestDenyWinsOverAllow;
     procedure TestScopePrecedenceSessionOverWorkspaceOverGlobal;
     procedure TestNoMatchAsks;
+    procedure TestDirectoryMatchesSubtree;
+    procedure TestDirectoryDoesNotMatchPrefixSibling;
+    procedure TestExtensionMatchesCaseInsensitively;
+    procedure TestExtensionNormalisesLeadingDot;
+    procedure TestEmptyDirectoryOrExtensionMatchesAny;
+    procedure TestDirectoryAndExtensionBothRequired;
+    procedure TestV1RuleMatchesUnchanged;
+    procedure TestScopedDenyWins;
+    procedure TestPathlessSubjectNeverMatchesPathRule;
     procedure TestMemoryStoreSuppressesDuplicates;
     procedure TestMemoryStoreFiltersByContext;
     procedure TestBatchDenyPreScanDoesNotPrompt;
@@ -92,6 +101,9 @@ type
     procedure TestTimedOutPromptReportsTimeout;
     procedure TestInvalidOptionDenies;
     procedure TestStoreSaveLoadRemoveRoundTrip;
+    procedure TestPathRulesRoundTrip;
+    procedure TestRulesDifferingOnlyByPathCoexist;
+    procedure TestApprovalsMigrationRebuildsWithPathColumns;
     procedure TestStoreSuppressesDuplicates;
     procedure TestStoreFiltersByContext;
     procedure TestChildResolvesAgainstRootScope;
@@ -345,6 +357,122 @@ procedure TApprovalTest.TestNoMatchAsks;
 begin
   AssertEquals('ask', Ord(adAsk),
     Ord(Decide(nil, Subject('run_command:rm', ['x']))));
+end;
+
+{ --- Approval Path Scoping (v1) ----------------------------------------- }
+
+function PathSubject(const ARef, APath: string): TApprovalSubject;
+begin
+  Result := Default(TApprovalSubject);
+  Result.Ref := ARef;
+  Result.Path := APath;
+end;
+
+function PathRule(AEffect: TApprovalEffect; const ARef, ADirectory,
+  AExtension: string): TApprovalRule;
+begin
+  Result := Default(TApprovalRule);
+  Result.Effect := AEffect;
+  Result.Scope := asGlobal;
+  Result.Ref := ARef;
+  Result.AnyParams := True;
+  Result.Directory := ADirectory;
+  Result.Extension := AExtension;
+end;
+
+procedure TApprovalTest.TestDirectoryMatchesSubtree;
+begin
+  AssertTrue('direct child', ApprovalMatches(
+    PathRule(aeAllow, 'file:write', 'docs', ''),
+    PathSubject('file:write', 'docs/a.md')));
+  AssertTrue('deep descendant', ApprovalMatches(
+    PathRule(aeAllow, 'file:write', 'docs', ''),
+    PathSubject('file:write', 'docs/x/b.md')));
+end;
+
+procedure TApprovalTest.TestDirectoryDoesNotMatchPrefixSibling;
+begin
+  { `docs` must not match `docs.md` (a sibling prefix) nor `src/docs/a`. }
+  AssertFalse('prefix sibling', ApprovalMatches(
+    PathRule(aeAllow, 'file:write', 'docs', ''),
+    PathSubject('file:write', 'docs.md')));
+  AssertFalse('nested elsewhere', ApprovalMatches(
+    PathRule(aeAllow, 'file:write', 'docs', ''),
+    PathSubject('file:write', 'src/docs/a.md')));
+end;
+
+procedure TApprovalTest.TestExtensionMatchesCaseInsensitively;
+begin
+  AssertTrue('lower', ApprovalMatches(PathRule(aeAllow, 'file:edit', '', 'md'),
+    PathSubject('file:edit', 'a.md')));
+  AssertTrue('upper', ApprovalMatches(PathRule(aeAllow, 'file:edit', '', 'md'),
+    PathSubject('file:edit', 'A.MD')));
+  AssertFalse('other ext', ApprovalMatches(
+    PathRule(aeAllow, 'file:edit', '', 'md'),
+    PathSubject('file:edit', 'a.txt')));
+end;
+
+procedure TApprovalTest.TestExtensionNormalisesLeadingDot;
+begin
+  AssertTrue('rule with dot', ApprovalMatches(
+    PathRule(aeAllow, 'file:edit', '', '.md'),
+    PathSubject('file:edit', 'a.md')));
+  AssertEquals('normalise strips dot', 'md', NormalizeExtension('.MD'));
+end;
+
+procedure TApprovalTest.TestEmptyDirectoryOrExtensionMatchesAny;
+begin
+  { A rule with neither dimension is a plain any-params rule (v1 behaviour),
+    and a path is not required. }
+  AssertTrue('v1 any', ApprovalMatches(PathRule(aeAllow, 'file:read', '', ''),
+    PathSubject('file:read', 'anything.txt')));
+  AssertTrue('pathless ok', ApprovalMatches(PathRule(aeAllow, 'file:read', '', ''),
+    PathSubject('file:read', '')));
+end;
+
+procedure TApprovalTest.TestDirectoryAndExtensionBothRequired;
+var
+  R: TApprovalRule;
+begin
+  R := PathRule(aeAllow, 'file:edit', 'docs', 'md');
+  AssertTrue('both hold', ApprovalMatches(R,
+    PathSubject('file:edit', 'docs/x/a.md')));
+  AssertFalse('right dir, wrong ext', ApprovalMatches(R,
+    PathSubject('file:edit', 'docs/a.txt')));
+  AssertFalse('right ext, wrong dir', ApprovalMatches(R,
+    PathSubject('file:edit', 'src/a.md')));
+end;
+
+procedure TApprovalTest.TestV1RuleMatchesUnchanged;
+begin
+  { A rule from v1 (no path dimensions) still matches an exact/prefix subject,
+    path or no path. }
+  AssertTrue('exact', ApprovalMatches(Rule(aeAllow, asGlobal, 0, '',
+    'run_command:cat', ['/etc/os-release'], False),
+    Subject('run_command:cat', ['/etc/os-release'])));
+end;
+
+procedure TApprovalTest.TestScopedDenyWins;
+var
+  Rules: TApprovalRuleArray;
+begin
+  { An allow for .md under docs/, and a deny for .env anywhere: the deny wins
+    for a .env, the allow for the .md. }
+  SetLength(Rules, 2);
+  Rules[0] := PathRule(aeAllow, 'file:edit', 'docs', 'md');
+  Rules[1] := PathRule(aeDeny, 'file:edit', '', 'env');
+  AssertEquals('md allowed', Ord(adAllow),
+    Ord(Decide(Rules, PathSubject('file:edit', 'docs/a.md'))));
+  AssertEquals('env denied', Ord(adDeny),
+    Ord(Decide(Rules, PathSubject('file:edit', 'docs/.env'))));
+end;
+
+procedure TApprovalTest.TestPathlessSubjectNeverMatchesPathRule;
+begin
+  { A subject with no path cannot be matched by a directory/extension rule. }
+  AssertFalse('no path', ApprovalMatches(
+    PathRule(aeAllow, 'file:write', 'docs', ''),
+    PathSubject('file:write', '')));
 end;
 
 procedure TApprovalTest.TestMemoryStoreSuppressesDuplicates;
@@ -602,6 +730,91 @@ begin
     AssertTrue('remove', Src.Remove(Rules[0], E));
     AssertTrue('load empty', Src.Load(Ctx, Rules, E));
     AssertEquals('none', 0, Length(Rules));
+  finally
+    Store.Free;
+  end;
+end;
+
+procedure TApprovalTest.TestPathRulesRoundTrip;
+var
+  Store: TSqliteStore;
+  Src: IApprovalStore;
+  Ctx: TApprovalContext;
+  Rules: TApprovalRuleArray;
+  R: TApprovalRule;
+  E: string;
+begin
+  Store := OpenStore;
+  try
+    Src := TStoreApprovalStore.Create(Store);
+    Ctx.WorkspaceId := 7;
+    Ctx.SessionId := 's1';
+    R := PathRule(aeAllow, 'file:edit', 'docs', 'md');
+    R.Scope := asWorkspace;
+    R.WorkspaceId := 7;
+    AssertTrue('save', Src.Save(R, E));
+    AssertTrue('load', Src.Load(Ctx, Rules, E));
+    AssertEquals('one', 1, Length(Rules));
+    AssertEquals('directory', 'docs', Rules[0].Directory);
+    AssertEquals('extension', 'md', Rules[0].Extension);
+    AssertTrue('remove', Src.Remove(Rules[0], E));
+  finally
+    Store.Free;
+  end;
+end;
+
+procedure TApprovalTest.TestRulesDifferingOnlyByPathCoexist;
+var
+  Store: TSqliteStore;
+  Src: IApprovalStore;
+  Ctx: TApprovalContext;
+  Rules: TApprovalRuleArray;
+  R: TApprovalRule;
+  E: string;
+begin
+  { Two rules with the same ref/scope/params but different directories must
+    coexist (the extended UNIQUE includes them). }
+  Store := OpenStore;
+  try
+    Src := TStoreApprovalStore.Create(Store);
+    Ctx.WorkspaceId := 7;
+    Ctx.SessionId := 's1';
+    R := PathRule(aeAllow, 'file:edit', 'docs', 'md');
+    R.Scope := asWorkspace; R.WorkspaceId := 7;
+    AssertTrue('save docs', Src.Save(R, E));
+    R.Directory := 'src';
+    AssertTrue('save src', Src.Save(R, E));
+    AssertTrue('load', Src.Load(Ctx, Rules, E));
+    AssertEquals('both coexist', 2, Length(Rules));
+  finally
+    Store.Free;
+  end;
+end;
+
+procedure TApprovalTest.TestApprovalsMigrationRebuildsWithPathColumns;
+var
+  Store: TSqliteStore;
+  Src: IApprovalStore;
+  Ctx: TApprovalContext;
+  Rules: TApprovalRuleArray;
+  E: string;
+begin
+  { A v1-shaped rule (no path dimensions) survives the v12 rebuild and still
+    loads with empty path columns. }
+  Store := OpenStore;
+  try
+    Src := TStoreApprovalStore.Create(Store);
+    Ctx.WorkspaceId := 7;
+    Ctx.SessionId := 's1';
+    AssertTrue('save v1 rule', Src.Save(Rule(aeAllow, asWorkspace, 7, '',
+      'run_command:cat', ['test'], False), E));
+    AssertTrue('load', Src.Load(Ctx, Rules, E));
+    AssertEquals('one', 1, Length(Rules));
+    AssertEquals('no directory', '', Rules[0].Directory);
+    AssertEquals('no extension', '', Rules[0].Extension);
+    { And it still matches exactly as before. }
+    AssertTrue('matches unchanged', ApprovalMatches(Rules[0],
+      Subject('run_command:cat', ['test'])));
   finally
     Store.Free;
   end;

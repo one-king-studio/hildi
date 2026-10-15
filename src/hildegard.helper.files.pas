@@ -31,7 +31,7 @@ type
     FWorkspace: TWorkspace;
     function RelOf(const AAbs: string): string;
     function ResolveChecked(const ARel: string; out AAbs, AErr: string): Boolean;
-    function Approve(const ARef, ASummary, AReason: string;
+    function Approve(const ARef, ASummary, AReason, APath: string;
       const AParams: TApprovalParams; out AError: string): Boolean;
     function ParseArgs(const AJson: string; out AData: TJSONData;
       out ARoot: TJSONObject; out AError: string): Boolean;
@@ -399,12 +399,54 @@ begin
   ExtractToolReason(AJson, Result, Err);
 end;
 
-function TFileTool.Approve(const ARef, ASummary, AReason: string;
+function TFileTool.Approve(const ARef, ASummary, AReason, APath: string;
   const AParams: TApprovalParams; out AError: string): Boolean;
 var
   Ask: TApprovalAsk;
   Asks: TApprovalAskArray;
   Batch: TApprovalBatchResult;
+
+  function DirOfPath(const P: string): string;
+  var
+    Slash: Integer;
+  begin
+    Slash := LastDelimiter('/', P);
+    if Slash <= 0 then
+      Result := ''
+    else
+      Result := Copy(P, 1, Slash - 1);
+  end;
+
+  function ExtOfPath(const P: string): string;
+  var
+    Slash, Dot: Integer;
+  begin
+    Slash := LastDelimiter('/', P);
+    Dot := LastDelimiter('.', P);
+    if (Dot > Slash) and (Dot > 0) and (Dot < Length(P)) then
+      Result := LowerCase(Copy(P, Dot + 1, MaxInt))
+    else
+      Result := '';
+  end;
+
+  { A path grant: empty params with AnyParams, plus the directory/extension. }
+  procedure AddPathOption(const AKey, ACaption: string; const ADir,
+    AExt: string);
+  var
+    Opt: TApprovalOption;
+  begin
+    Opt := Default(TApprovalOption);
+    Opt.Key := AKey;
+    Opt.Caption := ACaption;
+    Opt.Persists := True;
+    Opt.Rule := DefaultApprovalRule(aeAllow);
+    Opt.Rule.Ref := ARef;
+    Opt.Rule.AnyParams := True;
+    Opt.Rule.Directory := ADir;
+    Opt.Rule.Extension := AExt;
+    SetLength(Ask.Options, Length(Ask.Options) + 1);
+    Ask.Options[High(Ask.Options)] := Opt;
+  end;
 
   procedure AddOption(const AKey, ACaption: string; APersists: Boolean;
     const AOptionParams: TApprovalParams; AAny: Boolean);
@@ -423,6 +465,24 @@ var
     Ask.Options[High(Ask.Options)] := Opt;
   end;
 
+  procedure AddNever;
+  var
+    Opt: TApprovalOption;
+  begin
+    Opt := Default(TApprovalOption);
+    Opt.Key := 'never';
+    Opt.Caption := 'never allow ' + ARef;
+    Opt.Persists := True;
+    Opt.Rule := DefaultApprovalRule(aeDeny);
+    Opt.Rule.Ref := ARef;
+    Opt.Rule.AnyParams := True;
+    SetLength(Ask.Options, Length(Ask.Options) + 1);
+    Ask.Options[High(Ask.Options)] := Opt;
+  end;
+
+var
+  Dir, Ext: string;
+  WriteShaped: Boolean;
 begin
   AError := '';
   if FService = nil then
@@ -435,9 +495,26 @@ begin
   Ask.Reason := AReason;
   Ask.Subject.Ref := ARef;
   Ask.Subject.Params := AParams;
+  Ask.Subject.Path := APath;
+  Dir := DirOfPath(APath);
+  Ext := ExtOfPath(APath);
+  { Extension scoping is offered for write-shaped effects only (asking "allow
+    editing all .md anywhere" is meaningful; "reading all .md" is not). }
+  WriteShaped := (ARef = 'file:write') or (ARef = 'file:edit');
   AddOption('once', 'allow once', False, nil, False);
   AddOption('exact', 'always this exact operation', True, AParams, False);
+  if Dir = '' then
+    AddPathOption('dir', 'always in the workspace', '', '')
+  else
+    AddPathOption('dir', 'always in ' + Dir + '/', Dir, '');
+  if WriteShaped then
+  begin
+    AddPathOption('ext', 'always .' + Ext + ' files', '', Ext);
+    AddPathOption('dir_ext', 'always .' + Ext + ' files in ' + Dir + '/',
+      Dir, Ext);
+  end;
   AddOption('any', 'always ' + ARef, True, nil, True);
+  AddNever;
   SetLength(Asks, 1);
   Asks[0] := Ask;
   if not FService.Resolve(Asks, Batch) then
@@ -508,7 +585,7 @@ begin
     Limit := JsonInt(Root, 'limit', 0);
     { The tool defines how its ask reads, so a ranged read says so. }
     if not Approve('file:read', 'read ' + Rel + ReadRangeLabel(Offset, Limit),
-      ToolReasonOf(AArgumentsJson), [Rel], AError) then
+      ToolReasonOf(AArgumentsJson), Rel, [Rel], AError) then
       Exit(False);
     if DirectoryExists(Abs) then
     begin
@@ -581,7 +658,7 @@ begin
       Exit(False);
     Rel := RelOf(Abs);
     if not Approve('file:write', 'write ' + Rel, ToolReasonOf(AArgumentsJson),
-      [Rel], AError) then
+      Rel, [Rel], AError) then
       Exit(False);
     ForceDirectories(ExtractFileDir(Abs));
     if not WriteAtomic(Abs, Content, AError) then
@@ -632,7 +709,7 @@ begin
       Exit(False);
     Rel := RelOf(Abs);
     if not Approve('file:edit', 'edit ' + Rel, ToolReasonOf(AArgumentsJson),
-      [Rel], AError) then
+      Rel, [Rel], AError) then
       Exit(False);
     if not FileExists(Abs) then
     begin
@@ -716,7 +793,7 @@ begin
     Rel := RelOf(Abs);
     Recursive := JsonBool(Root, 'recursive', False);
     if not Approve('file:list', 'list ' + Rel, ToolReasonOf(AArgumentsJson),
-      [Rel], AError) then
+      Rel, [Rel], AError) then
       Exit(False);
     if not DirectoryExists(Abs) then
     begin
@@ -768,7 +845,7 @@ begin
       Exit(False);
     Rel := RelOf(Abs);
     if not Approve('file:glob', 'glob ' + Pattern + ' in ' + Rel,
-      ToolReasonOf(AArgumentsJson), [Pattern, Rel], AError) then
+      ToolReasonOf(AArgumentsJson), Rel, [Pattern, Rel], AError) then
       Exit(False);
     if not DirectoryExists(Abs) then
     begin
@@ -832,7 +909,7 @@ begin
       Exit(False);
     Rel := RelOf(Abs);
     if not Approve('file:grep', 'grep ' + Pattern + ' in ' + Rel,
-      ToolReasonOf(AArgumentsJson), [Pattern, Rel], AError) then
+      ToolReasonOf(AArgumentsJson), Rel, [Pattern, Rel], AError) then
       Exit(False);
 
     Files := TStringList.Create;

@@ -343,7 +343,7 @@ end;
 function DefaultMigrations: TMigrationArray;
 begin
   Result := nil;
-  SetLength(Result, 11);
+  SetLength(Result, 12);
   Result[0].Version := 1;
   Result[0].Name := 'session history';
   Result[0].Statements := [
@@ -568,6 +568,37 @@ begin
   Result[10].Statements := [
     'ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0',
     'ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0'
+  ];
+  { v12: approval path scoping - directory/extension dimensions on a rule.
+    SQLite cannot ALTER a UNIQUE constraint in place, so the table is rebuilt
+    with the extended UNIQUE; existing rows keep their exact meaning (the new
+    columns default to ''). }
+  Result[11].Version := 12;
+  Result[11].Name := 'approval path scoping';
+  Result[11].Statements := [
+    'CREATE TABLE approvals_new (' +
+      'id INTEGER PRIMARY KEY AUTOINCREMENT, ' +
+      'effect INTEGER NOT NULL, ' +
+      'scope INTEGER NOT NULL, ' +
+      'workspace_id INTEGER NOT NULL DEFAULT 0, ' +
+      'session_id TEXT NOT NULL DEFAULT '''', ' +
+      'ref TEXT NOT NULL, ' +
+      'params TEXT NOT NULL DEFAULT ''[]'', ' +
+      'any_params INTEGER NOT NULL DEFAULT 0, ' +
+      'directory TEXT NOT NULL DEFAULT '''', ' +
+      'extension TEXT NOT NULL DEFAULT '''', ' +
+      'created_at INTEGER NOT NULL, ' +
+      'UNIQUE (effect, scope, workspace_id, session_id, ref, params, ' +
+      'any_params, directory, extension))',
+    'INSERT INTO approvals_new ' +
+      '(id, effect, scope, workspace_id, session_id, ref, params, any_params, ' +
+      'directory, extension, created_at) ' +
+      'SELECT id, effect, scope, workspace_id, session_id, ref, params, ' +
+      'any_params, '''', '''', created_at FROM approvals',
+    'DROP TABLE approvals',
+    'ALTER TABLE approvals_new RENAME TO approvals',
+    'CREATE INDEX idx_approvals_scope ON approvals (scope, workspace_id, ' +
+      'session_id)'
   ];
 end;
 
@@ -1230,7 +1261,7 @@ begin
       Exit(False);
     Stmt := TStmt.Create(FDb,
       'SELECT effect, scope, workspace_id, session_id, ref, params, ' +
-      'any_params FROM approvals ' +
+      'any_params, directory, extension FROM approvals ' +
       'WHERE scope = 0 OR (scope = 1 AND workspace_id = ?) ' +
       'OR (scope = 2 AND session_id = ? AND ? <> '''')');
     try
@@ -1250,6 +1281,8 @@ begin
         Rule.Ref := Stmt.ColText(4);
         DecodeApprovalParams(Stmt.ColText(5), Rule.Params);
         Rule.AnyParams := Stmt.ColInt(6) <> 0;
+        Rule.Directory := Stmt.ColText(7);
+        Rule.Extension := Stmt.ColText(8);
         SetLength(ARules, N + 1);
         ARules[N] := Rule;
         Inc(N);
@@ -1278,7 +1311,7 @@ begin
     Stmt := TStmt.Create(FDb,
       'INSERT OR IGNORE INTO approvals ' +
       '(effect, scope, workspace_id, session_id, ref, params, any_params, ' +
-      'created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+      'directory, extension, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     try
       if not Stmt.Valid then
         Exit(Fail(AError, seError, 'could not save approval', DbErrorText));
@@ -1289,7 +1322,9 @@ begin
       Stmt.BindText(5, ARule.Ref);
       Stmt.BindText(6, EncodeApprovalParams(ARule.Params));
       Stmt.BindInt(7, Ord(ARule.AnyParams));
-      Stmt.BindInt64(8, NowMs);
+      Stmt.BindText(8, ARule.Directory);
+      Stmt.BindText(9, ARule.Extension);
+      Stmt.BindInt64(10, NowMs);
       if Stmt.Step <> SQLITE_DONE then
         Exit(Fail(AError, seError, 'could not save approval', DbErrorText));
     finally
@@ -1314,7 +1349,7 @@ begin
     Stmt := TStmt.Create(FDb,
       'DELETE FROM approvals WHERE effect = ? AND scope = ? AND ' +
       'workspace_id = ? AND session_id = ? AND ref = ? AND params = ? AND ' +
-      'any_params = ?');
+      'any_params = ? AND directory = ? AND extension = ?');
     try
       if not Stmt.Valid then
         Exit(Fail(AError, seError, 'could not remove approval', DbErrorText));
@@ -1325,6 +1360,8 @@ begin
       Stmt.BindText(5, ARule.Ref);
       Stmt.BindText(6, EncodeApprovalParams(ARule.Params));
       Stmt.BindInt(7, Ord(ARule.AnyParams));
+      Stmt.BindText(8, ARule.Directory);
+      Stmt.BindText(9, ARule.Extension);
       if Stmt.Step <> SQLITE_DONE then
         Exit(Fail(AError, seError, 'could not remove approval', DbErrorText));
     finally
