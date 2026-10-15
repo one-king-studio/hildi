@@ -1012,6 +1012,11 @@ begin
   end;
   if FWorker <> nil then
     FWorker.RequestCancel;
+  { Release any tool call blocked in the approval gate, so the interrupt is not
+    held up until the (possibly infinite) approval timeout. The loop's cancel
+    check then stops the turn at the next boundary; the batch's calls and
+    results stay paired. }
+  FSession.Gate.Cancel;
   ReplyTo(AClient, ACommand.Id, True, '');
 end;
 

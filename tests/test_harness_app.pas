@@ -134,6 +134,7 @@ type
     procedure TestEmptyToolResultShowsPlaceholder;
     procedure TestAppStreamsToolOutput;
     procedure TestStreamedToolOutputCoalescesOneAppendPerFrame;
+    procedure TestConcurrentToolOutputRoutesPerCall;
     procedure TestLiveToolBlockIsCapped;
     procedure TestDrainStopsAtTheBudget;
     procedure TestResumeShowsTheResult;
@@ -780,6 +781,56 @@ begin
   FApp.Step;
   AssertEquals('the coalesced burst landed in one append', 'xxx',
     BlockText(BlockCount - 1));
+end;
+
+procedure THarnessAppTest.TestConcurrentToolOutputRoutesPerCall;
+var
+  CallA, CallB, Chunk: TTurnEvent;
+  Idx: Integer;
+begin
+  { Two calls in one batch (both announced up front, as the parallel loop does),
+    then interleaved output. Each call's output must land in ITS block. }
+  Build;
+  CallA := Default(TTurnEvent);
+  CallA.Kind := teToolCall;
+  CallA.ToolId := 'callA';
+  CallA.ToolName := 'file_read';
+  CallA.ToolReason := 'read a';
+  CallB := Default(TTurnEvent);
+  CallB.Kind := teToolCall;
+  CallB.ToolId := 'callB';
+  CallB.ToolName := 'file_read';
+  CallB.ToolReason := 'read b';
+  FSession.Queue.Push(CallA);
+  FSession.Queue.Push(CallB);
+  FApp.Step;
+
+  { Interleaved chunks: A, B, A, B. }
+  Chunk := Default(TTurnEvent);
+  Chunk.Kind := teToolOutput;
+  Chunk.ToolName := 'file_read';
+  Chunk.ToolId := 'callA';
+  Chunk.Text := 'a1';
+  FSession.Queue.Push(Chunk);
+  Chunk.ToolId := 'callB';
+  Chunk.Text := 'b1';
+  FSession.Queue.Push(Chunk);
+  Chunk.ToolId := 'callA';
+  Chunk.Text := 'a2';
+  FSession.Queue.Push(Chunk);
+  Chunk.ToolId := 'callB';
+  Chunk.Text := 'b2';
+  FSession.Queue.Push(Chunk);
+  FApp.Step;
+
+  { Each block holds only its own call's chunks. }
+  for Idx := 0 to BlockCount - 1 do
+    if BlockLabel(Idx) = 'read a' then
+      AssertEquals('block A got only A chunks', 'a1a2', BlockText(Idx))
+    else if BlockLabel(Idx) = 'read b' then
+      AssertEquals('block B got only B chunks', 'b1b2', BlockText(Idx));
+  AssertTrue('A text present', FindText(ckTool, 'a1a2'));
+  AssertTrue('B text present', FindText(ckTool, 'b1b2'));
 end;
 
 procedure THarnessAppTest.TestLiveToolBlockIsCapped;

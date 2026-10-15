@@ -11,7 +11,7 @@ unit hildegard.helper.harness.app;
 interface
 
 uses
-  Classes, SysUtils,
+  Classes, SysUtils, Generics.Collections,
   hildegard.helper.llm, hildegard.helper.approval,
   hildegard.helper.tui.base, hildegard.helper.tui.input,
   hildegard.helper.tui.surface, hildegard.helper.tui.widget,
@@ -108,10 +108,13 @@ type
     FAssistantRaw: string;
     FAssistantSupp: TFrontMatterSuppressor;
     FThought: TChatItem;
-    FTool: TChatItem;
-    { Streamed tool output is buffered and appended once per frame, so a chatty
-      command costs one layout, not one per chunk. Flushed by FlushToolOutput. }
-    FPendingToolOutput: string;
+    { Live tool blocks keyed by tool-call id, so a parallel batch's streamed
+      output lands in the right block. Non-owning: the stream owns the items. }
+    FToolBlocks: TDictionary<string, TChatItem>;
+    { Streamed tool output buffered per call and appended once per frame, so a
+      chatty command costs one layout, not one per chunk. Flushed by
+      FlushToolOutput. }
+    FToolPending: TDictionary<string, string>;
     { The reasoning phase's duration for the live thought block, set by
       teReasoningDone and consumed when the block settles. }
     FThoughtMs: Int64;
@@ -531,6 +534,8 @@ begin
   FDriver := ADriver;
   FTheme := SelectTheme(AMode, ALightDetected);
   FRoster := TSubagentRoster.Create;
+  FToolBlocks := TDictionary<string, TChatItem>.Create;
+  FToolPending := TDictionary<string, string>.Create;
   FApp := TTuiApp.Create(ASurface, AInput, BuildTree);
   FApp.InputHook := PageScrub;
   FApp.ScreenBg := FTheme.Bg;
@@ -634,8 +639,8 @@ begin
   FAssistantSupp := Default(TFrontMatterSuppressor);
   FThought := nil;
   FThoughtMs := 0;
-  FTool := nil;
-  FPendingToolOutput := '';
+  FToolBlocks.Clear;
+  FToolPending.Clear;
   FCheckpointBlock := nil;
   FQueuedBlocks := nil;
   FUserBlock := nil;
@@ -719,6 +724,8 @@ begin
   FSpy.Free;
   FSidebar.Free;
   FRoster.Free;
+  FToolBlocks.Free;
+  FToolPending.Free;
   FApp.Free;
   inherited Destroy;
 end;
@@ -1189,7 +1196,8 @@ begin
   FAssistant := nil;
   FThought := nil;
   FlushToolOutput;
-  FTool := nil;
+  FToolBlocks.Clear;
+  FToolPending.Clear;
   if FDriver <> nil then
     FDriver.StartTurn(AText);
 end;
@@ -1267,15 +1275,17 @@ begin
 end;
 
 procedure THarnessApp.SettleOpenTool;
+var
+  Pair: TPair<string, TChatItem>;
 begin
   FlushToolOutput;
-  if FTool <> nil then
+  for Pair in FToolBlocks do
   begin
-    FTool.Live := False;
-    if FTool.Text = '' then
-      FTool.SetText('(no result)');
+    Pair.Value.Live := False;
+    if Pair.Value.Text = '' then
+      Pair.Value.SetText('(no result)');
   end;
-  FTool := nil;
+  FToolBlocks.Clear;
 end;
 
 procedure THarnessApp.PrependCompose(const AText: string);
@@ -1370,6 +1380,8 @@ end;
 procedure THarnessApp.HandleTurnEvent(const E: TTurnEvent);
 var
   Suppressed: string;
+  Block: TChatItem;
+  Pending: string;
 begin
   { Anything that is not more reasoning (or the reasoning-end marker, which
     carries its duration) means the reasoning stream has ended. }
@@ -1409,31 +1421,34 @@ begin
     teToolCall:
       begin
         { A tool is running; the sparkle keeps animating because the turn is
-          still in flight. }
+          still in flight. Blocks are keyed by call id, so a parallel batch's
+          calls each get their own block, created here in call order. }
         SetState(psTool, 'running ' + E.ToolName);
         { The reason is the block's title, so collapsed tool lines read as the
           story of the agent's decisions. The raw call is not shown: the result
           is the body, visible when the block is expanded. }
         if E.ToolReason <> '' then
-          FTool := FPanel.Stream.Add(ckTool, E.ToolReason, '')
+          FToolBlocks.AddOrSetValue(E.ToolId,
+            FPanel.Stream.Add(ckTool, E.ToolReason, ''))
         else
-          FTool := FPanel.Stream.Add(ckTool, E.ToolName, '');
-        FTool.Expanded := False;
+          FToolBlocks.AddOrSetValue(E.ToolId,
+            FPanel.Stream.Add(ckTool, E.ToolName, ''));
+        FToolBlocks[E.ToolId].Expanded := False;
       end;
     teToolResult:
       begin
         FlushToolOutput;
-        if FTool <> nil then
+        if FToolBlocks.TryGetValue(E.ToolId, Block) then
         begin
-          AppendToolResult(FTool, E.Text);
-          FTool := nil;
+          AppendToolResult(Block, E.Text);
+          FToolBlocks.Remove(E.ToolId);
         end
         else
         begin
-          FTool := FPanel.Stream.Add(ckTool, E.ToolName, '');
-          AppendToolResult(FTool, E.Text);
-          FTool := nil;
+          Block := FPanel.Stream.Add(ckTool, E.ToolName, '');
+          AppendToolResult(Block, E.Text);
         end;
+        FToolPending.Remove(E.ToolId);
         { The tools are done, so the next deltas belong to the following message:
           start fresh blocks, after the tool lines. The turn is still in flight,
           so the state returns to thinking. }
@@ -1443,13 +1458,22 @@ begin
       end;
     teToolOutput:
       begin
-        if FTool = nil then
-          FTool := FPanel.Stream.Add(ckTool, E.ToolName, '');
         { Live shows the tail and auto-expands, so the operator can watch a long
           command; the block settles back to collapsed when the result arrives.
-          The text is buffered and appended once per frame (FlushToolOutput). }
-        FTool.Live := True;
-        FPendingToolOutput := FPendingToolOutput + E.Text;
+          The text is buffered per call and appended once per frame
+          (FlushToolOutput), so parallel calls do not interleave. }
+        if not FToolBlocks.TryGetValue(E.ToolId, Block) then
+        begin
+          Block := FPanel.Stream.Add(ckTool, E.ToolName, '');
+          FToolBlocks.AddOrSetValue(E.ToolId, Block);
+        end;
+        Block.Live := True;
+        { Append to the call's buffer; the getter is strict, so read it safely
+          (a missing key would raise rather than yield ''). }
+        if FToolPending.TryGetValue(E.ToolId, Pending) then
+          FToolPending[E.ToolId] := Pending + E.Text
+        else
+          FToolPending.AddOrSetValue(E.ToolId, E.Text);
       end;
     teApprovalAsk:
       begin
@@ -1744,23 +1768,28 @@ const
     limit. Older text is trimmed, with a marker naming how much went. }
   MaxLiveChars = 65536;
 var
+  Pair: TPair<string, string>;
+  Block: TChatItem;
   Text: string;
   Excess: Integer;
 begin
-  if FPendingToolOutput = '' then
+  if FToolPending.Count = 0 then
     Exit;
-  if FTool <> nil then
+  for Pair in FToolPending do
   begin
-    FTool.AppendText(FPendingToolOutput);
-    Text := FTool.Text;
+    if (Pair.Value = '') or
+      (not FToolBlocks.TryGetValue(Pair.Key, Block)) then
+      Continue;
+    Block.AppendText(Pair.Value);
+    Text := Block.Text;
     if Length(Text) > MaxLiveChars then
     begin
       Excess := Length(Text) - MaxLiveChars;
-      FTool.SetText('[' + IntToStr(Excess) + ' earlier chars trimmed]' + #10 +
+      Block.SetText('[' + IntToStr(Excess) + ' earlier chars trimmed]' + #10 +
         Copy(Text, Excess + 1, MaxLiveChars));
     end;
   end;
-  FPendingToolOutput := '';
+  FToolPending.Clear;
 end;
 
 procedure THarnessApp.SyncBusy;

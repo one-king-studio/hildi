@@ -85,6 +85,10 @@ procedure TLocalDriver.Interrupt;
 begin
   if FWorker <> nil then
     FWorker.RequestCancel;
+  { Release any tool call blocked in the approval gate, so the interrupt is not
+    held up until the approval timeout. }
+  if FSession <> nil then
+    FSession.Gate.Cancel;
 end;
 
 procedure TLocalDriver.AnswerAsk(const AAskRef: string;
