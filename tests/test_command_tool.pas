@@ -512,7 +512,10 @@ begin
     AssertTrue('carries a covers subject', Asks[PathAsk].HasCovers);
     AssertEquals('covers the command', 'run_command:cat',
       Asks[PathAsk].Covers.Ref);
-    AssertTrue('offers a dir option', Asks[PathAsk].Options[1].Key = 'dir');
+    AssertTrue('offers an exact option', Asks[PathAsk].Options[1].Key = 'exact');
+    AssertTrue('offers a dir option', Asks[PathAsk].Options[2].Key = 'dir');
+    AssertEquals('the dir option carries a Directory rule',
+      ExtractFileDir('/etc/hosts'), Asks[PathAsk].Options[2].Rule.Directory);
   finally
     Tool.Free;
   end;

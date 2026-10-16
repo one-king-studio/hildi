@@ -499,7 +499,7 @@ begin
   Registry := TToolRegistry.Create;
   try
     FTool.Register(Registry);
-    AssertEquals('v1 six + v2 thirteen tools', 19, Registry.Count);
+    AssertEquals('v1 six + v2 fourteen tools', 20, Registry.Count);
     Specs := Registry.Specs;
     for I := 0 to High(Specs) do
       AssertTrue(Specs[I].Name + ' requires reason',

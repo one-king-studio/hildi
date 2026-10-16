@@ -238,23 +238,14 @@ end;
 procedure TWorkspaceTest.TestSymlinkOutOfTheWorkspaceIsRefused;
 var
   Link: string;
-  Ws: TWorkspace;
-  Err: string;
 begin
-  { A symlink INSIDE the workspace that points OUTSIDE: the lexical reading
-    says "inside" (the link path is under the root), but the physical reading
-    resolves it out. The two-readings rule refuses it. }
+  { A symlink INSIDE the workspace that points OUTSIDE: the physical reading
+    resolves it out, so it is refused. }
   Link := IncludeTrailingPathDelimiter(FWork) + 'escape';
   if c_symlink(PAnsiChar(AnsiString(FWorkshop)),
     PAnsiChar(AnsiString(Link))) <> 0 then
     Exit;   { no symlink support: skip }
-  Ws := TWorkspace.Open(FWork, Err);
-  try
-    AssertTrue('lexical says inside', Ws.Contains('escape/secret.txt'));
-  finally
-    Ws.Free;
-  end;
-  AssertFalse('physical refuses it',
+  AssertFalse('physical refuses a path through the link',
     PhysicalContains(FWork, 'escape/secret.txt'));
   AssertFalse('physical refuses the link too',
     PhysicalContains(FWork, 'escape'));

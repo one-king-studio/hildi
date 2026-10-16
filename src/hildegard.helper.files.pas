@@ -84,6 +84,11 @@ type
     function StatFile(const AArgumentsJson: string;
       out AResult: string; out AError: string;
       AObserver: TToolObserver = nil): Boolean;
+    { Resolve a workspace directory to its absolute path, so the model can pass
+      it to run_command's `cwd` instead of shelling `cd`. Read-only. }
+    function Cwd(const AArgumentsJson: string;
+      out AResult: string; out AError: string;
+      AObserver: TToolObserver = nil): Boolean;
     function ReplaceRegex(const AArgumentsJson: string;
       out AResult: string; out AError: string;
       AObserver: TToolObserver = nil): Boolean;
@@ -1288,11 +1293,46 @@ begin
   end;
 end;
 
-function TFileTool.StatFile(const AArgumentsJson: string;
+function TFileTool.Cwd(const AArgumentsJson: string;
   out AResult: string; out AError: string;
   AObserver: TToolObserver = nil): Boolean;
 var
   Data: TJSONData;
+  Root: TJSONObject;
+  Rel, Abs, PathArg: string;
+begin
+  AResult := '';
+  AError := '';
+  Data := nil;
+  if not ParseArgs(AArgumentsJson, Data, Root, AError) then
+    Exit(False);
+  try
+    if not JsonString(Root, 'path', PathArg) or (Trim(PathArg) = '') then
+      PathArg := '.';
+    if not ResolveChecked(PathArg, Abs, AError) then
+      Exit(False);
+    Rel := RelOf(Abs);
+    if not Approve('file:list', 'resolve dir ' + Rel,
+      ToolReasonOf(AArgumentsJson), Rel, [Rel], AError) then
+      Exit(False);
+    if not DirectoryExists(Abs) then
+    begin
+      AError := 'not a directory: ' + Rel;
+      Exit(False);
+    end;
+    { The absolute path, so the model passes it to run_command's cwd instead of
+      shelling `cd`. }
+    AResult := Abs;
+    Result := True;
+  finally
+    Data.Free;
+  end;
+end;
+
+function TFileTool.StatFile(const AArgumentsJson: string;
+  out AResult: string; out AError: string;
+  AObserver: TToolObserver = nil): Boolean;
+var  Data: TJSONData;
   Root: TJSONObject;
   Rel, Abs, PathArg, Kind: string;
   Size: Int64;
@@ -2089,6 +2129,17 @@ begin
     '"reason":{"type":"string","description":"Short reason this stat is needed."}' +
     '},"required":["path","reason"]}');
   ATools.Add(Spec, StatFile);
+
+  Spec := MakeToolSpec('file_cwd',
+    'Resolve a directory inside the workspace to its absolute path, for use as ' +
+    'a run_command cwd. Prefer this over the shell: cd. ' +
+    'Requires a short reason. Gated by approval.',
+    '{"type":"object","properties":{' +
+    '"path":{"type":"string","description":"Directory relative to the workspace (default .)."},' +
+    '"reason":{"type":"string","description":"Short reason this is needed."}' +
+    '},"required":["reason"]}');
+  Spec.SerialOnly := False;   { read-only }
+  ATools.Add(Spec, Cwd);
 
   Spec := MakeToolSpec('file_replace_regex',
     'Replace a regular expression within one file. ' +

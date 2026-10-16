@@ -206,15 +206,14 @@ end;
 function PhysicalContains(const ARoot, APath: string;
   const ABase: string = ''): Boolean;
 var
-  Lex, Phys, RootPhys: string;
+  Phys, RootPhys: string;
 begin
-  Lex := LexicalJoin(ARoot, APath, ABase);
-  { Lexical reading: must be under the lexical root. }
-  if not IsUnder(ARoot, Lex) then
-    Exit(False);
-  { Physical reading: the root may itself be behind a symlink (e.g. /var ->
-    /private/var), so compare the physical path against the root's PHYSICAL
-    form. Both readings must hold; neither alone is trusted. }
+  { The PHYSICAL reading is authoritative: a path is in-bounds when it resolves
+    (symlinks + `..` collapsed) under the root's physical form. Comparing
+    physical-to-physical is what lets an absolute path that names a symlinked
+    workspace (e.g. /var -> /private/var) be recognised as inside, and it still
+    refuses a symlink inside that points out. The lexical reading is not
+    required: it would wrongly reject a real path under a symlinked root. }
   RootPhys := PhysicalResolve(ARoot, ARoot);
   Phys := PhysicalResolve(ARoot, APath, ABase);
   Result := IsUnder(RootPhys, Phys);

@@ -167,6 +167,25 @@ var
     AAsk.Options[High(AAsk.Options)] := Opt;
   end;
 
+  { A path-grant option: a Directory rule (subtree-inclusive), empty params
+    with AnyParams set, so the directory is what matches. }
+  procedure AddDirOption(var AAsk: TApprovalAsk; const AKey, ACaption,
+    ADirectory: string);
+  var
+    Opt: TApprovalOption;
+  begin
+    Opt := Default(TApprovalOption);
+    Opt.Key := AKey;
+    Opt.Caption := ACaption;
+    Opt.Persists := True;
+    Opt.Rule := DefaultApprovalRule(aeAllow);
+    Opt.Rule.Ref := Ref;
+    Opt.Rule.AnyParams := True;
+    Opt.Rule.Directory := ADirectory;
+    SetLength(AAsk.Options, Length(AAsk.Options) + 1);
+    AAsk.Options[High(AAsk.Options)] := Opt;
+  end;
+
 begin
   Result := nil;
   Plan := ParseCommand(ACommand, ASyntax);
@@ -208,13 +227,17 @@ begin
     Access := OutsideAccesses(Plan, ARoot, ACwd);
     for J := 0 to High(Access) do
     begin
-      PathRef := 'path:' + Access[J].Resolved;
+      PathRef := 'path:';
       SetLength(Result, Length(Result) + 1);
       Result[High(Result)] := Default(TApprovalAsk);
       Result[High(Result)].Summary := 'access outside the workspace: ' +
         Access[J].Resolved;
       Result[High(Result)].Subject.Ref := PathRef;
       Result[High(Result)].Subject.Path := Access[J].Resolved;
+      { The path also rides Params, so an `exact` rule (ParamsEqual) can name
+        this precise path. }
+      SetLength(Result[High(Result)].Subject.Params, 1);
+      Result[High(Result)].Subject.Params[0] := Access[J].Resolved;
       { Covers: the segment's command subject, so an exact grant suppresses. }
       if Access[J].Segment <= High(Plan.Segments) then
       begin
@@ -228,13 +251,18 @@ begin
               Length(Plan.Segments[Access[J].Segment].Arguments));
         end;
       end;
-      { The path ask's options: once / dir / any / never (no ext). AddOption
-        reads the outer Ref, so point it at the path ref first. }
+      { The path ask's options: once / exact / dir / any. AddOption reads the
+        outer Ref, so point it at the path ref first. `exact` names this path;
+        `dir` is a Directory rule (subtree-inclusive); `any` allows every
+        outside path. }
       Ref := PathRef;
       AddOption(Result[High(Result)], 'once', 'allow once', False, nil, False);
-      AddOption(Result[High(Result)], 'dir',
+      AddOption(Result[High(Result)], 'exact',
+        'always allow ' + Access[J].Resolved, True,
+        Result[High(Result)].Subject.Params, False);
+      AddDirOption(Result[High(Result)], 'dir',
         'always allow paths under ' + ExtractFileDir(Access[J].Resolved),
-        True, nil, True);
+        ExtractFileDir(Access[J].Resolved));
       AddOption(Result[High(Result)], 'any',
         'always allow any path outside the workspace', True, nil, True);
     end;
