@@ -410,3 +410,52 @@ Design points to pin:
 - **Reuse note (Ponytail):** the engine is a dependency, not something to build; the
   new work is a facade, a `tools` view, a tool, and a build integration. The
   capability model is reused wholesale rather than reimplemented.
+
+### Spike results (2026-10-16, FPC 3.3.1 aarch64-darwin)
+
+**The engine builds, embeds, and runs.** A minimal program — core-only
+`TGocciaEngine` + `TGocciaInterpreterExecutor`, no capabilities — compiles against
+the vendored tree and executes a script (`for (let i of [1,2,3,4,5]) total += i`
+→ `15`). Numbers, measured:
+
+| Metric | Value |
+| --- | --- |
+| Clean build (291k lines) | **~43 s** |
+| Full engine binary | **23.5 MB** |
+| Lean (drop Intl + TZ + UCD) | **21.2 MB** |
+| Engine code alone | ~8.2 MB |
+| Intl resource | 1.19 MB |
+| TimeZone resource | 0.72 MB |
+| UCD resource | 0.39 MB |
+| Empty FPC program (baseline) | 0.47 MB |
+| Our TUI binary, for scale | 8.2 MB |
+
+**Verdict: the binary delta is the concern, and it is larger than the FEATURE
+feared.** The engine adds ~**8.2 MB of code** over a baseline — roughly the size
+of the *entire current TUI binary* — before any data. Dropping all three
+resources saves ~2.3 MB (23.5 → 21.2 MB), so **the resources are not the main
+cost; the engine code is.** The Intl opt-out alone saves ~1.2 MB and is the
+cheapest single win.
+
+**Two integration obstacles found, both real:**
+
+1. **A `constref` vs `const` mismatch.** Seven engine sites declare comparison
+   callbacks as `{$IFDEF FPC}constref{$ELSE}const{$ENDIF}`, but this FPC's
+   `TComparison<Int64>` wants plain `const`. Verified in isolation: `const`
+   compiles, `constref` fails with *"Incompatible type … expected
+   `TCOMPARISON<System.Int64>`"*. A vendored-patch or an upstream fix is needed.
+2. **The FPC compiler crashes (EAccessViolation) on the debug build.** Building
+   with `-gl` (line info) makes `ppca64` die with an internal exception, at a
+   *different* unit each run (nondeterministic — heap/stack pressure, not one
+   construct). The engine's own **production** flags (`-O4 -dPRODUCTION`) build
+   cleanly; the debug build does not. This matters because `make check` uses
+   debug flags — the engine cannot be compiled into the test binary as-is.
+
+**Recommendation:** gate the SPEC on the size decision. ~8 MB of engine code
+against an 8 MB TUI (doubling it) is a real cost for a feature whose value is
+"one turn instead of N". The lighter path — the first-class edit tools, already
+landed — delivers most of the bash-avoidance value at zero engine cost. Proceed
+to a SPEC only if the composition win justifies roughly doubling the binary, or
+if the engine can be trimmed (a build-time feature set, or the bytecode VM
+dropped for the interpreter only).
+
