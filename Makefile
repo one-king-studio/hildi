@@ -145,16 +145,19 @@ $(GOCCIA_STAMP):
 	@scripts/patch-goccia.sh
 	@scripts/gen-goccia-version.sh
 	@mkdir -p $(GOCCIA_UNITS)
-	@# The engine's {$R Generated.*.res} resolves against the unit OUTPUT dir, so
-	@# copy the generated resources there before compiling.
+	@# {\$R Generated.*.res} resolves against the unit OUTPUT dir, so copy the
+	@# generated resources next to the ppus.
 	cp $(GOCCIA_DIR)/source/generated/*.res $(GOCCIA_UNITS)/
-	@# Two passes: FPC settles ppu checksums on the second. Run from the engine
-	@# dir so its @config.cfg resolves the generated .res resources.
-	cd $(GOCCIA_DIR) && $(FPC) -Sh -O- -Crtio -Sa $(GOCCIA_DEFINES) @config.cfg \
-	  -FUbuild/compiled -FEbuild -obuild/closure \
+	@# Compile from the REPO ROOT with ABSOLUTE paths: the ppu records the source
+	@# path, so an absolute build is what a consumer (also absolute) can reuse.
+	@# Two passes: FPC settles ppu checksums on the second.
+	$(FPC) -Sh -O- -Crtio -Sa $(GOCCIA_DEFINES) $(GOCCIA_PATHS) \
+	  -FU$(GOCCIA_UNITS) -FE$(abspath $(BUILD))/goccia-gen \
+	  -o$(abspath $(BUILD))/goccia-gen/closure \
 	  $(abspath $(BUILD))/goccia-gen/engine_closure.pas
-	cd $(GOCCIA_DIR) && $(FPC) -Sh -O- -Crtio -Sa $(GOCCIA_DEFINES) @config.cfg \
-	  -FUbuild/compiled -FEbuild -obuild/closure \
+	$(FPC) -Sh -O- -Crtio -Sa $(GOCCIA_DEFINES) $(GOCCIA_PATHS) \
+	  -FU$(GOCCIA_UNITS) -FE$(abspath $(BUILD))/goccia-gen \
+	  -o$(abspath $(BUILD))/goccia-gen/closure \
 	  $(abspath $(BUILD))/goccia-gen/engine_closure.pas
 	@touch $@
 
@@ -303,9 +306,9 @@ async-examples: $(ASYNC_SRCS)
 	$(FPC) $(DEBUG) -Fu$(SRC)/async -FU$(DBGUNITS) -FE$(BIN) -o$(BIN)/async-examples $(EXAMPLES)/async_examples.pas
 	$(BIN)/async-examples
 
-$(BIN)/hildegard-helper-tests: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
+$(BIN)/hildegard-helper-tests: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ) $(GOCCIA_STAMP)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/async -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) $(GOCCIA_DEFINES) $(GOCCIA_PATHS) -Fu$(SRC) -Fu$(SRC)/async -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 test-leak: libsqlite libmbedtls $(BIN)/hildegard-helper-tests-leak
 	HEAPTRC=$(HEAPTRC) $(BIN)/hildegard-helper-tests-leak $(TESTARGS)
@@ -314,9 +317,9 @@ test-leak: libsqlite libmbedtls $(BIN)/hildegard-helper-tests-leak
 watch:
 	@scripts/watch.sh $(TARGET)
 
-$(BIN)/hildegard-helper-tests-leak: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
+$(BIN)/hildegard-helper-tests-leak: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ) $(GOCCIA_STAMP)
 	@mkdir -p $(BIN) $(LEAKUNITS)
-	$(FPC) $(LEAKFLAGS) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/async -Fu$(TESTS) -FU$(LEAKUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(LEAKFLAGS) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) $(GOCCIA_DEFINES) $(GOCCIA_PATHS) -Fu$(SRC) -Fu$(SRC)/async -Fu$(TESTS) -FU$(LEAKUNITS) -FE$(BIN) -o$@ $<
 
 # All quality gates, for CI: functional tests + leak check.
 check: test test-leak

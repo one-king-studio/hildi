@@ -130,6 +130,24 @@ Hard-won constraints; please respect them:
   every frame - CPU that scales with the block count while typing or streaming.
   A `select` timeout of `0` is a busy poll: return it only when about to exit.
   See `docs/guidelines/tui-rendering.md`.
+- **A vendored engine can use a different `{$mode}` than ours.** The GocciaScript
+  engine (`deps/goccia`) is `{$mode delphiunicode}` per unit; forcing `-Mdelphi`
+  on it clashes and the FPC 3.3.1 compiler **crashes** (first a type error, then
+  a nondeterministic `EAccessViolation`). Every unit in `src/` self-declares
+  `{$mode delphi}`, so the build simply **does not pass `-Mdelphi`** — it is
+  redundant. Same lesson for any vendored FPC library: let it set its own mode.
+- **`{$R name.res}` resolves against the unit's OUTPUT dir, not its source dir.**
+  A unit compiled into a `-FU` cache that uses `{$R Generated.X.res}` needs the
+  `.res` copied next to the `.ppu`, or the resource compiler fails ("Can't open
+  file .../Generated.X.res"). The Goccia `libgoccia` target copies them.
+- **FPC reuses a precompiled unit only when the consumer's flags match and the
+  source is still on the search path.** The ppu records the *relative* source
+  path; `-FU` (output) and `-Fu` (search) must point at the **same** cache dir,
+  the engine's source dirs must stay on `-Fu`/`-Fi` (for its `{$I}` includes),
+  and the defines must match. Reuse then converges over two passes (the first
+  build settles ppu checksums); a steady-state consumer compiles only its own
+  units. See `docs/features/Composed_Tool_Sandbox/Composed_Tool_Sandbox_v1.SPEC.md`
+  and `Makefile` (`libgoccia`, `GOCCIA_PATHS`).
 
 ## Code Style
 
