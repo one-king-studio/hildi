@@ -18,12 +18,12 @@ on. `main` only.
 
 ### Phase 1: Vendored build integration
 
-- [ ] **Create** `scripts/patch-goccia.sh`: apply the `constref`→`const` fix (7
+- [x] **Create** `scripts/patch-goccia.sh`: apply the `constref`→`const` fix (7
       sites) to `deps/goccia`, idempotent.
-- [ ] **Add** a `libgoccia` Makefile target: fetch + patch + compile the engine's
+- [x] **Add** a `libgoccia` Makefile target: fetch + patch + compile the engine's
       units once with its production flags into `build/units/goccia`, with
       `GOCCIA_INTL_NO_EMBEDDED_CLDR` set.
-- [ ] **Verify**: a throwaway program links the precompiled units and runs a
+- [x] **Verify**: a throwaway program links the precompiled units and runs a
       script, under the debug flags (no compiler crash).
 
 ### Phase 2: The facade (`hildegard.helper.script`)
