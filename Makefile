@@ -57,8 +57,35 @@ ifeq ($(UNAME_S),Darwin)
 TLS_CCFLAGS       += -mmacosx-version-min=11.0
 endif
 
-# Language and strictness. -Sew turns warnings into hard errors.
-MODE      := -Mdelphi -Sh
+# Vendored GocciaScript (the embedded JS engine for the composed-tool sandbox).
+# It is compiled ONCE into a cached unit dir; consumers point BOTH -FU (output)
+# and -Fu (search) at that SAME dir, plus the engine's source dirs (for include
+# resolution), so the ~291k-line engine is never recompiled. Two constraints,
+# both found the hard way (docs/features/Composed_Tool_Sandbox/):
+#   1. The engine is {$mode delphiunicode}; a consumer's -Mdelphi clashes and
+#      makes the compiler crash. Our units each declare their own mode, so the
+#      build never passes -Mdelphi.
+#   2. The engine's ppus record relative source paths, so the source dirs must
+#      stay on -Fu/-Fi for the ppus to validate; with them present and the ppus
+#      current, FPC reuses them (warm build ~0.7s, not ~45s).
+GOCCIA_DIR      := $(abspath deps/goccia)
+GOCCIA_UNITS    := $(GOCCIA_DIR)/build/compiled
+GOCCIA_STAMP    := $(GOCCIA_DIR)/build/.harness-built
+# Drop the Intl CLDR resource (the cheapest ~1.2 MB win; TZ/UCD kept).
+GOCCIA_DEFINES  := -dGOCCIA_INTL_NO_EMBEDDED_CLDR
+# Consumers point at the cache FIRST, then the engine's source dirs (the ppus
+# record relative source paths, so the source must be findable). The engine's
+# own @config.cfg supplies the .res search paths; a consumer only needs -Fu.
+GOCCIA_PATHS    := -Fu$(GOCCIA_UNITS) \
+                   -Fu$(GOCCIA_DIR)/source/generated -Fu$(GOCCIA_DIR)/source/units \
+                   -Fu$(GOCCIA_DIR)/source/shared -Fu$(GOCCIA_DIR)/source/app \
+                   -Fi$(GOCCIA_DIR)/source/units -Fi$(GOCCIA_DIR)/source/shared
+
+# Language and strictness. Every unit self-declares {$mode delphi}, so the
+# command line does NOT force -Mdelphi: the vendored GocciaScript engine is
+# {$mode delphiunicode} per unit, and a forced -Mdelphi clashes with it (the
+# compiler crashes). -Sh keeps ansistrings. -Sew turns warnings into errors.
+MODE      := -Sh
 STRICT    := -vw -Sew
 DEBUG     := $(MODE) $(STRICT) -O- -Crtio -Sa -gl
 RELEASE   := $(MODE) $(STRICT) -O2 -CX -XX -Xs
@@ -89,7 +116,7 @@ TEST_SRCS := $(wildcard $(TESTS)/*.pas)
 
 .PHONY: all test test-leak watch check release clean help libsqlite libmbedtls \
         store-demo agent-cli release-agent-cli tui-demo widgets-demo layout-demo \
-        headless-agent tui-agent bench perf agents agent-% mcp-smoke async-standalone async-bench async-freeze async-examples
+        libgoccia headless-agent tui-agent bench perf agents agent-% mcp-smoke async-standalone async-bench async-freeze async-examples
 
 all: $(BIN)/hildegard-helper-demo
 
@@ -106,6 +133,30 @@ $(SQLITE_DIR)/sqlite3.c:
 
 # Build the vendored mbedTLS archives, the CA embed, and the Pascal TLS shim.
 libmbedtls: $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ)
+
+# Precompile the vendored GocciaScript engine into the cache dir (once). The
+# flags deliberately omit -Mdelphi (the engine sets its own mode) and MATCH the
+# consumer's debug flags, so the ppus are reusable (mismatched flags invalidate
+# every ppu). Consumers add $(GOCCIA_PATHS) and reuse the cache.
+libgoccia: $(GOCCIA_STAMP)
+
+$(GOCCIA_STAMP):
+	@scripts/fetch-goccia.sh
+	@scripts/patch-goccia.sh
+	@scripts/gen-goccia-version.sh
+	@mkdir -p $(GOCCIA_UNITS)
+	@# The engine's {$R Generated.*.res} resolves against the unit OUTPUT dir, so
+	@# copy the generated resources there before compiling.
+	cp $(GOCCIA_DIR)/source/generated/*.res $(GOCCIA_UNITS)/
+	@# Two passes: FPC settles ppu checksums on the second. Run from the engine
+	@# dir so its @config.cfg resolves the generated .res resources.
+	cd $(GOCCIA_DIR) && $(FPC) -Sh -O- -Crtio -Sa $(GOCCIA_DEFINES) @config.cfg \
+	  -FUbuild/compiled -FEbuild -obuild/closure \
+	  $(abspath $(BUILD))/goccia-gen/engine_closure.pas
+	cd $(GOCCIA_DIR) && $(FPC) -Sh -O- -Crtio -Sa $(GOCCIA_DEFINES) @config.cfg \
+	  -FUbuild/compiled -FEbuild -obuild/closure \
+	  $(abspath $(BUILD))/goccia-gen/engine_closure.pas
+	@touch $@
 
 $(MBEDTLS_STAMP):
 	@scripts/fetch-mbedtls.sh

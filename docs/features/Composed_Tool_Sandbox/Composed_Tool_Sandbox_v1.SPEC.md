@@ -156,22 +156,31 @@ direct call.
 ### Build integration
 
 - `scripts/fetch-goccia.sh` (exists) vendors the pinned tree into `deps/goccia`.
-- A **patch step** applies the two spike fixes to the vendored tree (they are
-  engine bugs against this FPC, not our code):
-  1. the seven `{$IFDEF FPC}constref…` comparison callbacks → `const`;
-  2. (if still needed) any follow-on compiler-compatibility fix.
-  The patch is a small, documented, idempotent `scripts/patch-goccia.sh` — a
-  vendored-tree patch, like a `deps/` fixup, never a change to our `src/`.
-- The Makefile gains a `libgoccia` target that compiles the engine's units
-  **once**, with the engine's own flags (`-O4 -dPRODUCTION` + the resource
-  opt-outs), into `build/units/goccia`. The debug, leak, and release builds add
-  `-Fu<that dir>` and never recompile the engine.
-  - **Resource opt-outs:** build with `GOCCIA_INTL_NO_EMBEDDED_CLDR` (the
-    cheapest ~1.2 MB win) by default; TZ/UCD stay unless a need appears.
-  - **Why a separate compile:** the spike found FPC 3.3.1's compiler
-    EAccessViolations on the engine under `-gl` (nondeterministic, unit-varying
-    — heap pressure, not one construct). Precompiled prod-flag units sidestep it
-    and keep `make check`'s debug/leak flags intact for our own code.
+- `scripts/patch-goccia.sh` applies the `constref`→`const` fix (7 sites) to the
+  vendored tree — a genuine FPC-3.3.1 incompatibility, not our code.
+- `scripts/gen-goccia-version.sh` writes the engine's `Goccia.Version.Generated.inc`
+  (build.pas normally generates it).
+- The Makefile gains a `libgoccia` target that compiles the engine **once** into
+  `build/units/goccia`. Consumers add `$(GOCCIA_PATHS)` and reuse it.
+
+**The recipe, found the hard way (three constraints):**
+
+1. **No `-Mdelphi`.** The engine is `{$mode delphiunicode}` per unit; a forced
+   `-Mdelphi` clashes and the compiler crashes (first a `TComparison` type
+   error, then a nondeterministic `EAccessViolation`). Our units each declare
+   their own `{$mode delphi}`, so the build simply omits `-Mdelphi` — verified
+   transparent (`make check` unchanged, 1403 tests).
+2. **`-FU` and `-Fu` must be the SAME cache dir**, and the engine's source dirs
+   must stay on `-Fu`/`-Fi` — the engine's ppus record *relative* source paths, so
+   FPC needs the source present (for its `Goccia.inc`/`Shared.inc` includes) to
+   validate the ppu. With them present, the ppus are reused.
+3. **Reuse converges after two passes.** Cold: 294 units compile; second: 184;
+   third onward: **8** (the consumer's own), ~0.7 s. The `libgoccia` stamp makes
+   the two cold passes a one-time cost.
+
+**Resource opt-out:** build with `GOCCIA_INTL_NO_EMBEDDED_CLDR` (the cheapest
+~1.2 MB win); TZ/UCD stay unless a need appears.
+
 
 ### The engine's boundary
 
