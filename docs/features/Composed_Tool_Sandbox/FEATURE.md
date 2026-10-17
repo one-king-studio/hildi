@@ -459,3 +459,61 @@ to a SPEC only if the composition win justifies roughly doubling the binary, or
 if the engine can be trimmed (a build-time feature set, or the bytecode VM
 dropped for the interpreter only).
 
+
+---
+
+## Status: parked (2026-10-17)
+
+**Decision: park this feature.** The engine works — Phase 1–5 landed, `make
+check` is green, the AST arena is fixed and the leak floor is bounded — but the
+engine is **still too buggy to be a load-bearing security boundary**, and the
+cost/benefit no longer holds.
+
+### Why
+
+The arena work fixed a real, deep defect (a whole-tree leak, ~8 blocks per
+statement, unbounded in script size; and a latent use-after-free for any closure
+that outlived its run). Fixing it took **six fork commits** and exposed **five
+further ownership defects of the same kind**, each found only by running the
+engine's own heaptrc suite:
+
+1. `TGocciaProgram` had no destructor — the body list leaked.
+2. Four node-holding classes never registered with the arena
+   (`TGocciaDestructuringProperty`, `TGocciaObjectMatchProperty`,
+   `TGocciaMatchClause`, `TGocciaClassDefinition`).
+3. Four parser **recovery** paths freed arena-owned nodes — a double free that
+   crashed the test runner (`EBusError`/`EAccessViolation`) in
+   warning-recovery mode.
+4. `DefaultOptions` left a new struct field uninitialized.
+5. A class-var singleton graph is pinned at engine construction with no unpin.
+
+Every one of these is the *same shape*: ownership declared in one place and
+violated in another, invisible until a specific path runs. That is not a
+one-time debt; it is the engine's current maturity. A security boundary cannot
+rest on a component whose failure mode we keep discovering by accident.
+
+### What "park" means here
+
+- **Code stays in the tree**, working and green: `hildegard.helper.script`,
+  `hildegard.helper.tool.script`, `run_script`, the session wiring, the fork
+  pin, the leak-floor machinery. It is not deleted; it is not advertised as the
+  answer to compound work.
+- **The vendored fork is kept** (`github.com/johnrcui/GocciaScript`, branch
+  `ast-arena`, six commits) so the fixes are preserved and can become an
+  upstream PR whenever that is worth doing.
+- **The `run_script` tool stays available** but is not the recommended path for
+  a batch; the first-class file tools and the shell remain the recommended
+  paths.
+
+### The reason we were here, restated
+
+The engine was adopted to gate **compound scripts** — the case where the model
+would otherwise reach for `bash` and hide a loop inside one unobservable
+approval. The deeper reading of that goal is: **the problem is the shell, not
+the absence of a scripting tier.** A script engine we gate is a second
+interpreter to maintain; gating the shell we already have addresses the same
+risk at the boundary where it actually occurs.
+
+That reframing moves the work to
+[Tree-Sitter](../Tree_Sitter/FEATURE.md) — a correct shell ask set for the
+approval gate — and the lessons below are carried there.

@@ -150,6 +150,12 @@ docs/features/TUI_Syntax_Highlighting/FEATURE.md (the reversal note)
 
 ## Notes & Considerations
 
+- **Read first: `docs/research/vendored-engine-lessons.md`.** The parked Composed
+  Tool Sandbox cost six fork commits to a third-party engine, all of them
+  ownership defects in a tree we did not author. The lessons there are the
+  reason this feature prefers a C parser with value semantics over a runtime,
+  and the method (heaptrc + `atos`; line-count bisection) applies to any vendored
+  component.
 - **The union rule is the safety net.** A parser is imperfect; the gate must
   never become blinder for it. Every error path widens the ask set.
 - **Do not remove the splitter.** `ParseCommand` stays as the fallback and as

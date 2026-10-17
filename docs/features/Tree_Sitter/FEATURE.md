@@ -65,6 +65,67 @@ semantic accuracy, so a parser is not worth its weight. It is the wrong call for
 **correctness of a security boundary**. The dependency is now bought by the
 approval gate; highlighting rides along for free.
 
+## Prior art: just-bash
+
+[vercel-labs/just-bash](https://github.com/vercel-labs/just-bash) is a
+TypeScript **simulated bash** — an in-memory filesystem plus reimplemented
+coreutils (`cat`, `grep`, `sed`, `awk`, `jq`, …), with `curl`/`python`/`js-exec`
+opt-in and off by default. It is the closest thing to a reference for "gate
+compound shell work", and the comparison sharpens what this feature is and is
+not.
+
+**What it validates.** Two design choices here match its conclusions:
+
+- **The shell is the boundary.** just-bash does not add a general-purpose
+  interpreter to make work observable; it reimplements *the shell* and its
+  commands, so every program is a known, inspectable implementation. That is the
+  same reframing this feature makes: correct the shell boundary rather than add
+  a second runtime.
+- **An AST of the shell is a first-class artifact.** just-bash ships an
+  `BashTransformPipeline` that parses bash to an AST, lets plugins transform it,
+  and serializes back — with a `CommandCollectorPlugin` that extracts exactly the
+  command list we need for asks. Its existence is evidence that *the ask set is
+  a real thing to compute*, and that a parse tree (not a lexical split) is how
+  you compute it.
+
+**Where this feature deliberately differs.** just-bash **replaces** the shell:
+guest commands run against an in-memory FS, and the host never executes them.
+This feature **keeps** the real shell and makes the *gate* correct:
+
+| | just-bash | this feature |
+| --- | --- | --- |
+| What runs | reimplemented coreutils in TS | the real `bash` on the host |
+| Sandbox | in-memory/overlay FS; no host disk by default | the existing workspace confinement + approval gate |
+| The ask set | a by-product of the transform pipeline | **the point** — the approval gate's correctness |
+| New runtime to secure | a full TS shell + a QuickJS realm for `js-exec` | none (a C parser; the shell is unchanged) |
+| Where risk moves | into the reimplementation's fidelity (its `grep`/`sed` must be right) | into the parser's correctness, with a fail-safe union |
+
+The last row is the trade-off that matters. just-bash's containment is stronger
+— guest code literally cannot reach the host FS or a real binary — but it buys
+that with a large surface that must itself be correct (every reimplemented
+command, every FS op) and, for `js-exec`, a whole second runtime with its own
+security model. Its own README is explicit that this is *not* a hard security
+boundary ("All execution happens without VM isolation… designed to be robust
+against prototype-pollution attacks", and strong memory containment needs a
+process or a VM).
+
+**What we could borrow later, not now.** If the harness ever wants *guest
+commands that never touch the host*, just-bash's shape (in-memory FS + known
+command implementations) is the model to copy — and the composed-sandbox idea
+that is now parked would fit inside it better than inside a general JS engine.
+For v1 this feature stays narrower: **parse the real shell, ask for every real
+program, fail safe.** That is the smallest change that fixes the reported bug,
+and it adds no runtime to secure.
+
+**The contrast that settles the parked decision.** The composed sandbox vendored
+a *language runtime* (GocciaScript) with an ownership graph we did not author —
+which is where all six of its bugs lived (see
+[vendored-engine-lessons.md](../../research/vendored-engine-lessons.md)).
+just-bash vendors nothing; it reimplements. This feature vendors a **C parser
+with value semantics** — one handle to free, no tree to own. Three ways to make
+compound work safe, and the middle one (correct the boundary you have) is the
+cheapest.
+
 ## Goals
 
 - **One parser, two consumers.** A vendored tree-sitter runtime, an FPC binding,
