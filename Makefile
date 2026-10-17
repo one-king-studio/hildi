@@ -239,20 +239,27 @@ $(BIN)/hildegard-helper-tui-layout-demo: $(EXAMPLES)/tui_layout_demo.pas $(LIB_S
 
 # Headless agent: hosts a session's runtime; spawned detached by the TUI or the
 # CLI. No terminal. A client finds it as a sibling (or via HILDEGARD_RUNTIME_BIN).
+# This is the ONLY target that links the GocciaScript engine: the runtime owns
+# the agent loop, the tool registry, and run_script. The TUI does NOT — it is a
+# client over the socket (session.client + the ISessionDriver interface), so
+# keep $(GOCCIA_PATHS) off it.
 headless-agent: libsqlite libmbedtls $(BIN)/hildegard-helper-agent
 
-$(BIN)/hildegard-helper-agent: $(EXAMPLES)/headless_agent.pas $(LIB_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
+$(BIN)/hildegard-helper-agent: $(EXAMPLES)/headless_agent.pas $(LIB_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(GOCCIA_STAMP)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) $(GOCCIA_DEFINES) $(GOCCIA_PATHS) -Fu$(SRC) -Fu$(SRC)/async -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Full-screen agent harness (conversation + approvals + sessions). Builds and
-# runs; Ctrl-C quits. Drives the headless agent.
+# runs; Ctrl-C quits. Drives the headless agent. A pure client: no engine.
 tui-agent: headless-agent $(BIN)/hildegard-helper-tui
 	$(BIN)/hildegard-helper-tui $(ARGS)
 
-$(BIN)/hildegard-helper-tui: $(EXAMPLES)/tui_agent.pas $(LIB_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
+$(BIN)/hildegard-helper-tui: $(EXAMPLES)/tui_agent.pas $(LIB_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	@# Deliberately NO $(GOCCIA_PATHS): the TUI must stay engine-free. It talks
+	@# to the runtime over the socket; linking the engine here would re-couple
+	@# the two binaries.
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/async -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Printable wall-clock benchmark. `make bench ARGS=--real` measures the real
 # terminal; `make perf` asserts the budgets and is not part of `make check`.
