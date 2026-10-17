@@ -18,6 +18,7 @@ type
   private
     FTools: TToolRegistry;
     FService: IApprovalService;
+    FCancelCheck: TScriptCancelCheck;
     FScriptName: string;
     { Resolve one sub-call through the registry, with the script's reason. }
     function Invoke(const AName, AArgumentsJson, AReason: string;
@@ -28,6 +29,9 @@ type
     function Approve(const AReason: string; out AError: string): Boolean;
   public
     constructor Create(ATools: TToolRegistry; AService: IApprovalService);
+    { The turn's cancel check, so a cancelled turn stops a running script. }
+    property CancelCheck: TScriptCancelCheck read FCancelCheck
+      write FCancelCheck;
     { Registers run_script. }
     procedure Register(ATools: TToolRegistry);
     { Matches TToolHandler; public for direct testing. }
@@ -230,7 +234,8 @@ begin
       Exit(False);
 
     Limits := Default(TScriptLimits);
-    SR := RunScript(ScriptText, Reason, Invoke, ExposedToolNames, Limits);
+    SR := RunScript(ScriptText, Reason, Invoke, ExposedToolNames, Limits,
+      FCancelCheck);
     if not SR.Ok then
     begin
       AError := SR.Error;

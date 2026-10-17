@@ -78,6 +78,7 @@ end;
 procedure THarnessSessionTest.TestInMemoryBuildsLoopAndTools;
 var
   Session: THarnessSession;
+  Tool: TRegisteredTool;
   Err: string;
 begin
   Session := THarnessSession.Open(Config('', '', False), Err);
@@ -87,8 +88,13 @@ begin
     AssertTrue('store is nil', Session.View.Store = nil);
     AssertEquals('ephemeral session id', '', Session.View.SessionId);
     AssertEquals('workspace root', FDir, Session.View.WorkspaceRoot);
-    { builtins (get_system_time) plus run_command }
+    { builtins (get_system_time) plus run_command, the file tools, and the
+      script tool. }
     AssertTrue('tools registered', Session.Tools.Count >= 2);
+    AssertTrue('run_script registered',
+      Session.Tools.Find('run_script', Tool));
+    AssertTrue('shell registered',
+      Session.Tools.Find('run_command', Tool));
   finally
     Session.Free;
   end;

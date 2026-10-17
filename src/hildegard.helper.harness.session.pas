@@ -21,6 +21,7 @@ uses
   hildegard.helper.session, hildegard.helper.session.store,
   hildegard.helper.store,
   hildegard.helper.recall.tool, hildegard.helper.harness.turn,
+  hildegard.helper.tool.script,
   hildegard.helper.harness.view,
   hildegard.helper.mcp.config, hildegard.helper.mcp.client,
   hildegard.helper.mcp.transport, hildegard.helper.mcp.oauth.flow;
@@ -38,6 +39,7 @@ type
     FCommandTool: TCommandTool;
     FFileTool: TFileTool;
     FRecallTool: TRecallTool;
+    FScriptTool: TScriptTool;
     FMcp: TMcpManager;
     FMcpTokenProviders: TObjectList;
     { The skill registry: the capability layer (manifest + load_skill + decay).
@@ -64,6 +66,9 @@ type
     procedure ReconcileMcpSkills;
     { The current effective MCP config from the store, for the provider. }
     function McpConfigSource: TMcpConfig;
+    { The turn's cancel check, for the script tool's timeout seam: reads the
+      loop's per-turn check (set by the turn worker while a turn runs). }
+    function ScriptCancelled: Boolean;
     { A token source for a server with a stored OAuth token (or nil). }
     function McpTokenSourceFor(const AServer: TMcpServerConfig): TMcpTokenSource;
     function Init(const AConfig: THarnessSessionConfig; out AError: string):
@@ -142,6 +147,8 @@ begin
   FFileTool := nil;
   FRecallTool.Free;
   FRecallTool := nil;
+  FScriptTool.Free;
+  FScriptTool := nil;
   FTools.Free;
   FTools := nil;
   FClient.Free;
@@ -222,6 +229,12 @@ begin
   Rows := nil;
   if FView.Store.LoadMcpServers(Ctx, Rows, StoreErr) then
     Result.Servers := ResolveMcpConfig(Rows, Ctx);
+end;
+
+function THarnessSession.ScriptCancelled: Boolean;
+begin
+  Result := (FLoop <> nil) and Assigned(FLoop.CancelCheck) and
+    FLoop.CancelCheck();
 end;
 
 procedure THarnessSession.ReconcileMcpSkills;
@@ -353,6 +366,11 @@ begin
     FRecallTool.Register(FTools);
   end;
 
+  { run_script: one script, N gated tool calls. Registered after the tools it
+    composes (it reads the registry's specs to expose them) and before the loop,
+    so the loop's cancel check can be threaded in below. }
+  FScriptTool := TScriptTool.Create(FTools, ApprovalService);
+  FScriptTool.Register(FTools);
   { MCP servers: effective config comes from the store (scoped), resolved for
     this workspace. The manager is created LAZY (no connect on startup), so the
     runtime's socket binds without touching a server; each enabled server becomes
@@ -382,6 +400,10 @@ begin
   AgentConfig.RetryMaxAttempts := AConfig.RetryMaxAttempts;
 
   FLoop := TAgentLoop.Create(FClient, FConversation, FTools, AgentConfig);
+  { The script tool's timeout seam is the turn's cancel check: the loop's
+    CancelCheck is set by the turn worker while a turn runs, so a cancelled turn
+    also stops a running script. }
+  FScriptTool.CancelCheck := ScriptCancelled;
   { A separate pool for parallel tool calls: the turn runs on FTurnPool, so tool
     jobs must not share it (a low concurrency would serialize or deadlock). }
   FToolPool := TExecutorScheduler.Create(4);
