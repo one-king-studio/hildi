@@ -328,3 +328,86 @@ no longer proportional to the *AST* (the parse-only probe is flat), so it is a
 second, smaller retention path — likely tokens or destructuring keys held past
 the tree. Worth a follow-up; the harness floor (294) is stable and flat, so it
 does not block.
+
+## Deeper dig (2026-10-17): the residual was more ownership gaps, not one leak
+
+Chasing the remaining engine-suite blocks found **three more defects of the same
+kind** — ownership declared in one place and violated in another. They are worth
+recording because the pattern repeats.
+
+### 1. Four "node-ish" classes that never registered with the arena
+
+The arena works by inheritance: `TGocciaASTNode.Create` registers. Four classes
+that *hold* AST nodes do not descend from it, so they never registered and their
+subtrees leaked:
+
+| class | file |
+| --- | --- |
+| `TGocciaDestructuringProperty` | `Goccia.AST.Expressions` |
+| `TGocciaObjectMatchProperty` | `Goccia.AST.Expressions` |
+| `TGocciaMatchClause` | `Goccia.AST.Expressions` |
+| `TGocciaClassDefinition` | `Goccia.AST.Statements` |
+
+`TGocciaClassDefinition` was the worst: the arena flip **dropped the free of the
+node that holds it**, assuming the arena owned it. It did not. The fix registers
+each with the active arena in its constructor.
+
+**Lesson:** an ownership scheme that keys on a base class has a hole for every
+holder that is not that base class. `grep -E '^  TGoccia\w+ = class$'` (bare
+classes) is the audit — there is no way to find these by reading the tree.
+
+### 2. A container that owned nothing and was freed by no one
+
+`TGocciaParser.Parse` builds the program body list with `Create(False)` (the
+statements are arena-owned) and hands it to `TGocciaProgram`. The program had no
+destructor, so **the list container itself leaked — one per parsed script**. The
+program now frees the list, not the statements.
+
+**Lesson:** flipping a list to non-owning moves the *nodes* to the arena but
+leaves the *container* unowned. Every `Create(False)` handed to a node needs a
+destructor that frees the container. The same shape recurs in the AST
+destructors (they free `FArguments`, `FElements`, … — containers — and must not
+free their contents).
+
+### 3. A double free the other way
+
+`TGocciaClassDefinition.Destroy` freed `FElements[I].StaticBlockBody` — a
+`TGocciaBlockStatement`, which is arena-owned. Under the arena that is a double
+free, and it surfaced as an `EAccessViolation` in every worker thread, not as a
+leak. Dropped.
+
+**Lesson:** an arena turns a *leak* into a *crash* wherever a destructor still
+frees a node. Every `X.Free` in a node destructor must be checked: container
+(keep) or node (drop). This is why the flip has to be exhaustive — a half-flip
+is worse than no flip.
+
+### Measured
+
+| corpus (engine heaptrc) | before arena | after arena | now |
+| --- | --- | --- | --- |
+| parse-only, 100 stmts | 805 | 6 | **6** |
+| `language/asi` (67 tests) | 18,890 | 1,534 | **355** |
+| `language/arguments` (45) | — | 989 | **225** |
+| harness `make check` floor | 2,588 | 294 | **244** |
+
+The residual is no longer AST at all: it is engine **prototype state** —
+`TGocciaPropertyDescriptorData` (pinned singletons), `TGocciaSymbolValue`,
+`TGocciaTypedArrayStaticFrom`, `TGocciaEngine.RegisterTypedArrayConstructor` —
+i.e. per-engine built-in graph, which the singleton pin holds. That is the
+process-lifetime floor, and it is the *next* thing to fix if we ever want a
+strict zero (it is the `PinSingletons`-without-unpin issue, unchanged).
+
+### The transferable method
+
+The tooling mattered as much as the fix. For any "who leaks this?" question on
+macOS FPC:
+
+1. Build the suspect under `-gh`.
+2. `DYLD_PRINT_SEGMENTS=1` to get the binary's `__TEXT` base (PIE slide).
+3. `atos -o <bin> -l <text-base>` on the raw heaptrc addresses.
+4. Group by the first frame in *our* units (`leakcat.py`), then read one full
+   trace (`trace_needle.py`) to see the allocation path.
+
+That turned "18,890 blocks" into "`ParseObjectPattern` → `ScanIdentifier`" in
+one step, and the fix was then obvious. Worth keeping for any vendored
+dependency, not just this one.
