@@ -14,12 +14,16 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.." || exit 1
 
-GOCCIA_SHA="531fb523efe10375858ac29faf3da5dd15195418"
-GOCCIA_SHA256="c0a97fe9282df598e94b1e7c8b2bf32dc4bd353bfb3138f3ddaf49e38f64aef5"
+GOCCIA_SHA="312ddd1988954189b96b058af148d572e380080d"
+GOCCIA_SHA256="272ec3342f89887f4d2ddffc57251751b67abce20cf6188894cb3fd86fbfddca"
 
 DEST="deps/goccia"
 TARBALL="GocciaScript-${GOCCIA_SHA}.tar.gz"
-URL="https://github.com/frostney/GocciaScript/archive/${GOCCIA_SHA}.tar.gz"
+# The fork, not upstream: our FPC-compatibility fixes live on its `hildegard`
+# branch as three commits (see docs/research/goccia-embedding-findings.md).
+# Keeping the fixes in the fork rather than in patch-goccia.sh means the sed
+# script can go away and `deps/goccia` is exactly a fork commit.
+URL="https://github.com/johnrcui/GocciaScript/archive/${GOCCIA_SHA}.tar.gz"
 
 if [ -d "$DEST/source/units" ]; then
   echo "goccia: source already present in $DEST"

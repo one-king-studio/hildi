@@ -64,3 +64,38 @@ drops the harness suite's unfreed count from 77,917 to a fixed 2,481 (independen
 of how many scripts run). The harness's leak gate (`Makefile`, `test-leak`)
 allows that documented floor and fails on any count above it, so a new per-run
 leak still fails the gate.
+
+## The fork (2026-10-17)
+
+The three compatibility fixes now live in a **fork**, not in `patch-goccia.sh`:
+
+- Fork: <https://github.com/johnrcui/GocciaScript>
+- Branch: `hildegard`, based on upstream `531fb52`
+- Commit pinned by the harness: `312ddd19`
+
+```
+92775fda  fix(fpc):   constref -> const for FPC 3.3.1's TComparison<T>
+88b0cb5c  build:      silence the engine's own warnings under -Sew
+312ddd19  fix(units): rename JSONParser to Goccia.JSONParser
+```
+
+`scripts/fetch-goccia.sh` now fetches
+`https://github.com/johnrcui/GocciaScript/archive/312ddd19....tar.gz` and
+verifies its SHA-256
+(`272ec3342f89887f4d2ddffc57251751b67abce20cf6188894cb3fd86fbfddca`).
+`scripts/patch-goccia.sh` is reduced to an **assertion**: it checks the fetched
+tree actually carries all three fixes, so a bad pin fails loudly instead of
+silently building an unpatched engine. A re-fetch can no longer lose the fixes.
+
+Why a fork rather than `scripts/patches/*.patch`: the harness's own reason for
+the fixes is FPC-3.3.1 compatibility, not upstream adoption, and the fork keeps
+them as reviewable commits against the exact base. The upstream PR, when we
+choose to send it, is a rebase of these commits onto current `main` — the
+findings above are its body.
+
+### Still ours to finish (the AST leak)
+
+The arena work is unchanged and unstarted in the tree; see
+`docs/research/goccia-ast-arena.md` for the decision, the three-scope
+correction (entry / module / shim), the resume steps and the WIP location.
+When it lands it becomes a fourth commit on `hildegard`.
