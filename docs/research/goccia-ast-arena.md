@@ -122,3 +122,88 @@ explicitly.
   fed from the arena.
 - `TGocciaLiteralExpression` keeps its handoff: the value it holds stays
   outside the collector and dies with the node, which now dies with the arena.
+
+## State at the time of writing
+
+- `deps/goccia` is **gitignored**; the tracked tree is clean. HEAD is
+  `7aec819` (this record).
+- **The vendored tree is reset to pristine + the three existing patches**
+  (re-fetch + `patch-goccia.sh`), and the harness suite is green
+  (`make test SUITE=TScriptTest` → 0 failures). No arena work is in the tree.
+- **The partial arena work is saved at `/tmp/goccia-arena-wip/`** (may not
+  survive a reboot — treat the plan below as the source of truth):
+  `Goccia.AST.Arena.pas` (new unit), `Goccia.AST.Node.pas` (arena hook),
+  `Goccia.Parser.pas` (the 20-list flip).
+- Harness-side tools already present: `scripts/patch-goccia.sh` (three
+  patches), `build/script-check/parse_probe.pas` (the repro),
+  `build/script-check/leakcat.py`, `leaksites.py`, `list_owners.py`,
+  `classify_frees.py` (heaptrc trace symbolizers and AST-ownership audits —
+  FPC emits raw addresses; `atos -o <bin> -l <text-base>` resolves them).
+
+## Resume here — exact steps
+
+1. **Add `Goccia.AST.Arena.pas`** (written; in `/tmp/goccia-arena-wip/`): a
+   `TGocciaASTArena` with an owning `TObjectList<TObject>` and
+   `Register(ANode)`; a `threadvar GCurrentASTArena`.
+2. **Hook the base node.** In `Goccia.AST.Node.pas`, add `Goccia.AST.Arena` to
+   `uses` and, in `TGocciaASTNode.Create`, `if GCurrentASTArena <> nil then
+   GCurrentASTArena.Register(Self)`.
+3. **Set the active arena** in `TGocciaSourcePipeline.Parse` (create the arena,
+   set `GCurrentASTArena`, restore in `finally`).
+4. **Flip the parser's node lists to non-owning.** Exactly 20 sites in
+   `Goccia.Parser.pas`: `TObjectList<TGoccia{Expression,Statement,ASTNode,
+   CaseClause,DestructuringPattern,DestructuringProperty}>.Create(True)` →
+   `(False)`. **Leave `FPrivateClassContexts` owning** (lines 599/620) — those
+   are parser state, not nodes. No other unit constructs an owning node list.
+5. **Fix the AST destructors.** 12 classes hold a node list and need a
+   destructor that frees **only the list** (in `Goccia.AST.Expressions.pas`
+   unless noted): `TGocciaTemplateWithInterpolationExpression.FParts`,
+   `TGocciaCallExpression.FArguments`, `TGocciaArrayExpression.FElements`,
+   `TGocciaNewExpression.FArguments`, `TGocciaArrayDestructuringPattern.FElements`,
+   `TGocciaObjectDestructuringPattern.FProperties`, `TGocciaBlockStatement.FNodes`
+   (Statements). The four that already have one keep it
+   (`TaggedTemplateExpression.FExpressions`, `SequenceExpression.FExpressions`,
+   `CaseClause.FConsequent`, `SwitchStatement.FCases`) — their lists are
+   non-owning, so `.Free` still frees only the container.
+6. **Drop the child frees from existing destructors.** `classify_frees.py`
+   prints the exact list; `DROP (node child)` items must go (the arena frees
+   them), e.g. `ClassDefinition.FSuperClassExpression`,
+   `ClassDeclaration/ClassExpression.FClassDefinition`, `CaseClause.FTest`,
+   `SwitchStatement.FDiscriminant`,
+   `ExportDestructuringDeclaration/ExportClassDeclaration.FDeclaration`.
+   **Keep** every map/string-list `.Free` (`FMethods`, `FGetters`,
+   `FInstancePropertyTypes`, …) — verify each against `TGocciaExpressionMap`.
+7. **Remove `TGocciaProgram`'s ownership of `FBody`** — no destructor (the arena
+   frees the statements). Confirm nothing else frees the program: today
+   `TGocciaSourcePipelineResult.Destroy` calls `FProgramNode.Free` and must
+   stop; `TakeProgramNode` must be reworked to borrow.
+8. **Wire the arena to the engine.** Create it in `TGocciaEngine` (per realm),
+   free it in `TGocciaEngine.Destroy` after the closures are gone; make
+   `TGocciaSourcePipelineResult` a non-owning view. This is the step that also
+   closes the closure use-after-free — do not skip it, and do not free the
+   arena at the end of `Execute`.
+9. **Verify:** parse-only probe → **0** (1 and 100 statements); the engine's
+   heaptrc runner → **0**; the harness gate with `LEAK_MAX_BLOCKS=0`; then
+   `make check`.
+10. **Patch-package it:** `scripts/patches/000{1..4}-*.patch` applied with
+    `patch -p1 --forward`; migrate the three existing patches; add the arena
+    patch. The arena patch's diff is the upstream PR.
+11. **Update the pin** from `531fb52` to upstream `main` (`1284dbb1`) and
+    re-verify (the arena rebases onto current main; a pristine tree of main is
+    at `/tmp/goccia-main/`).
+
+### Traps found while implementing (do not rediscover these)
+
+- **A half-applied flip is worse than the leak.** With lists flipped to
+  non-owning but destructors still freeing children, a node is freed twice.
+  Steps 4–6 must land together, and the build must be checked after each file.
+- **`TakeProgramNode` is the module path's hand-off.** It sets
+  `FProgramNode := nil` so the result will not free it; under the arena the
+  program is never the result's to free, so this must change (step 7).
+- **The existing `TGocciaLiteralExpression` destructor is already correct**:
+  it frees the literal's `TGocciaValue` (a non-GC handoff) and must stay.
+- **`CopyStatementList` already makes a non-owning list**
+  (`Create(False)`), so closure bodies need no change; they are exactly the
+  pointers the arena now owns.
+- **Upstream `main` has diverged** (230 changed source files, `0142` is its
+  newest ADR) but has the *same* AST shape, so the arena applies there.
