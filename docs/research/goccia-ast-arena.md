@@ -207,3 +207,64 @@ explicitly.
   pointers the arena now owns.
 - **Upstream `main` has diverged** (230 changed source files, `0142` is its
   newest ADR) but has the *same* AST shape, so the arena applies there.
+
+## Update (2026-10-17): the module loader and shims already depend on AST lifetime
+
+Implementing steps 4–8 surfaced a constraint the first plan missed, and it is
+the reason the arena is **not** a mechanical change. Two independent places
+already rely on a parsed program outliving its run:
+
+1. **`Goccia.Shims.pas` (threadvar comment, ~line 1008) states it outright:**
+
+   > One parsed program per DEFAULT_SHIMS entry, filled on first use. A parsed
+   > program is never released while the thread's engines run: the functions a
+   > shim defines keep pointing into its AST, and `TGocciaProgram.Free` releases
+   > only the program node, not the statements under it. Parsing per engine
+   > therefore leaked the shim ASTs of every engine: about 1.1 MB per engine
+   > that uses Date on 64-bit…
+
+   So the *existing* design deliberately keeps shim ASTs alive for the thread
+   and caches one program per shim. It also documents the very defect this ADR
+   fixes ("releases only the program node, not the statements under it") as the
+   cause of a *previous* 1.1 MB-per-engine leak.
+
+2. **`Goccia.Modules.Loader.pas`** frees programs at five sites —
+   `TGocciaModuleLoadState.Destroy` (`ProgramNode.Free`),
+   `TGocciaDeferredModuleBody.Destroy` (`FProgramNode.Free`), and three more in
+   the load path. Each is a program whose lifetime the loader owns, on the
+   failure path and on the deferred-body path.
+
+Consequences for the plan:
+
+- **The arena cannot be engine-scoped without touching the module loader.**
+  A program the loader parses and frees is not the engine's to own. Either the
+  loader gets the engine's arena and stops freeing programs, or a program's
+  arena is per-program and the loader keeps owning it — which is the module
+  case, and it is not engine-scoped.
+- **Shims want a thread-lifetime arena**, not an engine- or run-scoped one.
+  They are cached per thread and explicitly outlive engines.
+- So there are **three arena scopes**, not one: the run's tree (freed with the
+  engine), the module's tree (owned by the loader / module), and the shim's
+  tree (thread-lifetime, already cached). A single engine arena would
+  double-free the module and shim programs.
+
+The corrected shape: an arena is an **owner object a program is parsed into**,
+and the *caller that owns the program* owns the arena —
+`TGocciaSourcePipelineOptions.Arena` already carries this, and `FASTArena` on
+the engine is right only for the entry program. The module loader passes its
+own arena and keeps its `ProgramNode.Free` → arena-free equivalence; the shim
+cache keeps its per-thread arena.
+
+Steps 4–8 as written are therefore **necessary but not sufficient**; step 8
+must be split per program owner (entry / module / shim). Nothing was left
+half-applied: the vendored tree is reset to pristine + patches, and the harness
+is green (`make test SUITE=TScriptTest` → 16 tests, 0 failures).
+
+### WIP location (this session)
+
+`/tmp/goccia-arena-wip2/` holds the eight edited units from this attempt:
+`Goccia.AST.Arena.pas`, `Goccia.AST.Node.pas`, `Goccia.Parser.pas`,
+`Goccia.AST.Expressions.pas`, `Goccia.AST.Statements.pas`,
+`Goccia.SourcePipeline.pas`, `Goccia.Engine.pas`, `Goccia.Interpreter.pas`.
+They compile as far as the pipeline; the module loader and shims are untouched,
+which is exactly where it must be finished.
