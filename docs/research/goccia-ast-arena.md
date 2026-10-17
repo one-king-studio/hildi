@@ -412,7 +412,47 @@ That turned "18,890 blocks" into "`ParseObjectPattern` → `ScanIdentifier`" in
 one step, and the fix was then obvious. Worth keeping for any vendored
 dependency, not just this one.
 
-## Open item: an integrity fault in the test runner's warning-recovery path
+## RESOLVED: the warning-recovery integrity fault was four parser double frees
+
+The crash recorded below is fixed (fork commit `b5acee64`). It was **not** an
+arena-scope problem — it was the double-free class the arena creates, in the
+parser's *recovery* paths. Those paths run only when a feature is disabled and
+the parser skips the construct, which is why no single-file probe hit them.
+
+Four sites freed an arena-owned node:
+
+| site | node |
+| --- | --- |
+| `WhileStatement` recovery | the skipped `BodyStmt` |
+| `DoWhileStatement` recovery | the skipped `BodyStmt` |
+| loose-equality warning | `DiscardedLeft`, `Right` |
+| invalid labeled declaration | `Result` |
+
+A nine-line repro (the while case) crashed the runner with `EBusError`:
+
+```js
+describe.runIf(true)("x", () => {
+  test("while skipped", () => {
+    let x = 1;
+    while (x < 10) { x = 99; }
+    expect(x).toBe(1);
+  });
+});
+```
+
+The bisection that found it: truncate the failing file and re-run until the
+fault appears between two line counts (60→100, then 70→80, then 74→76), then
+read the construct at that line. `tests/language/statements/unsupported-features`
+now passes 34/34 with no fault, and `statements`, `expressions` (1414 tests),
+`classes`, and `modules` all pass with zero failures.
+
+**Lesson added to the set:** the arena's double-free risk is not only in
+destructors — it is in every **error/recovery path** that discards a half-built
+node. `grep -nE '\w+\.Free;'` over the parser, not just the AST, is part of the
+flip's audit. Recovery paths are exactly where a parser is least likely to be
+exercised, so they are the last to be caught.
+
+### The original open-item record (kept for the method)
 
 Chasing the residual surfaced a **crash** that the arena work must still
 explain. It is real and reproducible, not heaptrc-only:

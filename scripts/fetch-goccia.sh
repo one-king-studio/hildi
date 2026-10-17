@@ -14,8 +14,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.." || exit 1
 
-GOCCIA_SHA="28bffaad0079e9fb5ab1a09cfc06a521d2d14ee6"
-GOCCIA_SHA256="bb92d082fe02b2b7819ea622578f7e887c67290fde1d06a6af7c6a3978f6dbac"
+GOCCIA_SHA="b5acee640000aff9fe0309bae9499e7d2f1e71ea"
+GOCCIA_SHA256="1bd89459ce2b5061a148768be1f0471cf56f33d88649e18a717d5d037b617f4b"
 
 DEST="deps/goccia"
 TARBALL="GocciaScript-${GOCCIA_SHA}.tar.gz"
