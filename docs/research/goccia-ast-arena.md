@@ -268,3 +268,63 @@ is green (`make test SUITE=TScriptTest` → 16 tests, 0 failures).
 `Goccia.SourcePipeline.pas`, `Goccia.Engine.pas`, `Goccia.Interpreter.pas`.
 They compile as far as the pipeline; the module loader and shims are untouched,
 which is exactly where it must be finished.
+
+## Landed (2026-10-17): the arena is implemented and shipped
+
+The arena is done and the harness vendors it. Two commits on the fork's
+`ast-arena` branch, both pushed:
+
+```
+aacf1c4f  fix(ast):    own parsed trees with a per-owner arena
+6660c78e  fix(parser): free the object-literal insertion-order temporary
+```
+
+`scripts/fetch-goccia.sh` pins **`6660c78e`** (SHA-256
+`a17ae4e9ec70f05e078581381eca3acb8a34ed5fdd468475cce3ec0342bb7f3c`).
+
+### The design, as built
+
+Three arena scopes, one per program owner — exactly the correction this record
+called for:
+
+| owner | arena | freed |
+| --- | --- | --- |
+| the engine | `TGocciaEngine.FASTArena` | engine `Destroy`, **last** |
+| the module loader | `TGocciaModuleLoader.FASTModuleArena` | loader `Destroy` |
+| the shim cache | `GShimArena` (thread lifetime) | the cache's thread cleanup |
+
+`TGocciaSourcePipelineOptions.Arena` carries the owner's arena into the parse;
+`TGocciaSourcePipelineResult` borrows the program instead of owning it.
+`GCurrentASTArena` is a plain `Pointer` threadvar with typed accessors, an
+`initialization` nil and a thread-exit cleanup — not an object-reference
+threadvar (the `#892` hazard).
+
+### Measured
+
+| | before | after |
+| --- | --- | --- |
+| parse-only, 1 stmt | 13 | **6** |
+| parse-only, 100 stmts | 805 | **6** (flat) |
+| engine heaptrc, `language/asi` | 18,890 | **1,534** |
+| harness `make check` leak floor | 2,588 | **294** |
+
+`make check` green (1425 tests); `LEAK_MAX_BLOCKS` tightened 3000 → 400.
+
+### Five bugs the ownership change exposed (all fixed)
+
+1. `DefaultOptions` left `Arena` uninitialized — callers passed a garbage
+   pointer. (This was the crash.)
+2. The shim cache is thread-lifetime and needed its own arena (above).
+3. The engine freed its arena *before* the builtins, interpreter, realm and
+   module loader that parse into it. Moved last.
+4. The module result and the tagged-template destructor freed arena-owned nodes.
+5. The object-literal parser orphaned its insertion-order temporary.
+
+### Still open
+
+The residual ~1,534 on `language/asi` still scales with file count and is
+dominated by lexer identifier strings reached from `ParseObjectPattern`. It is
+no longer proportional to the *AST* (the parse-only probe is flat), so it is a
+second, smaller retention path — likely tokens or destructuring keys held past
+the tree. Worth a follow-up; the harness floor (294) is stable and flat, so it
+does not block.

@@ -87,17 +87,15 @@ RELEASE   := $(MODE) $(STRICT) -O2 -CX -XX -Xs
 # -gh links heaptrc into the test binary for leak checking.
 LEAKFLAGS := $(MODE) $(STRICT) -O- -Crtio -Sa -gh -gl
 # heaptrc prints a summary to stderr; the test-leak target parses the unfreed
-# count and fails above a floor. The embedded GocciaScript engine pins
-# process-global singletons (HoleValue, BigInt zero/one, the primitive
-# singletons) at engine construction and never unpins them — the pin has no
-# counterpart anywhere in the engine, and its own heaptrc CI runs Linux-only,
-# so the macOS leak is untested upstream. That is a FIXED ~2.5k-block floor, not
-# a per-run leak: the facade's post-run GC.Collect releases each run's realm
-# graph, so the count does not grow with the number of scripts run. The floor
-# lets that through while still failing on any NEW per-run leak. Set
-# LEAK_MAX_BLOCKS=0 for a strict run. When the engine gains an unpin, set it to 0.
+# count and fails above a floor. The floor is the engine's own process-lifetime
+# state, not a per-run leak: the facade's post-run GC.Collect releases each
+# run's realm graph, and the AST is owned by an engine arena (fork commit
+# 6660c78e), so the count does not grow with the number of scripts run.
+# Measured 294 with the arena (was 2,588 before it). The floor lets the engine's
+# fixed state through while still failing on any NEW per-run leak. Set
+# LEAK_MAX_BLOCKS=0 for a strict run, or tighten it as the engine's floor drops.
 HEAPTRC   := skipifnoleaks
-LEAK_MAX_BLOCKS ?= 3000
+LEAK_MAX_BLOCKS ?= 400
 
 # TDD knobs:
 #   make test SUITE=TAgentPoolTest          -> one suite
