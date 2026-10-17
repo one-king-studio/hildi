@@ -137,17 +137,36 @@ Hard-won constraints; please respect them:
   `{$mode delphi}`, so the build simply **does not pass `-Mdelphi`** — it is
   redundant. Same lesson for any vendored FPC library: let it set its own mode.
 - **`{$R name.res}` resolves against the unit's OUTPUT dir, not its source dir.**
-  A unit compiled into a `-FU` cache that uses `{$R Generated.X.res}` needs the
-  `.res` copied next to the `.ppu`, or the resource compiler fails ("Can't open
-  file .../Generated.X.res"). The Goccia `libgoccia` target copies them.
+  A unit that uses `{$R Generated.X.res}` needs the `.res` findable — either
+  copied next to the `.ppu`, or on the unit search path. The Goccia engine's
+  `.res` files live in `deps/goccia/source/generated`, which is on
+  `$(GOCCIA_PATHS)`'s `-Fu`, so the engine's units find them there.
 - **FPC reuses a precompiled unit only when the consumer's flags match and the
   source is still on the search path.** The ppu records the *relative* source
   path; `-FU` (output) and `-Fu` (search) must point at the **same** cache dir,
   the engine's source dirs must stay on `-Fu`/`-Fi` (for its `{$I}` includes),
-  and the defines must match. Reuse then converges over two passes (the first
-  build settles ppu checksums); a steady-state consumer compiles only its own
-  units. See `docs/features/Composed_Tool_Sandbox/Composed_Tool_Sandbox_v1.SPEC.md`
-  and `Makefile` (`libgoccia`, `GOCCIA_PATHS`).
+  and the defines must match. This is why the engine is compiled **per target**
+  rather than from a shared cache: a cache whose flags differ from the
+  consumer's invalidates every engine ppu (and can crash the compiler), and it
+  never converged in practice — FPC recompiled the engine's circular core
+  cluster on every build regardless. See the next bullet.
+- **The GocciaScript engine is compiled per target, not from a cache.** A
+  prebuilt cache was tried and abandoned: FPC recompiled the engine's circular
+  core cluster on every build regardless, and a consumer whose flags differed
+  crashed the compiler. Consumers add `$(GOCCIA_PATHS)` and let the engine build
+  into their own unit dir. Two vendored patches make this work
+  (`scripts/patch-goccia.sh`): `{$WARNINGS OFF}` in the engine's shared include
+  (its own warnings are fatal under our `-Sew`), and `JSONParser` →
+  `Goccia.JSONParser` (the engine's unit collides with the FCL's `jsonparser`;
+  on a case-insensitive FS it shadows it and breaks every host `fpjson` call).
+  Re-run `patch-goccia.sh` after any `fetch-goccia.sh`.
+- **Only the runtime links the engine; the TUI must not.** `hildegard-helper-agent`
+  (the runtime) owns the agent loop, the tool registry, and `run_script`, so it
+  needs `$(GOCCIA_PATHS)`. The TUI (`hildegard-helper-tui`) is a client over the
+  socket (`session.client` + the `ISessionDriver` interface); it links no engine.
+  Keep `$(GOCCIA_PATHS)` off the TUI target — if it ever compiles there, a unit
+  grew a runtime dependency it should not have. A cheap guard:
+  `nm build/bin/hildegard-helper-tui | grep -c TGocciaEngine` must be 0.
 
 ## Code Style
 

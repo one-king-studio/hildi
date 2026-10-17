@@ -40,29 +40,29 @@ and the Makefile integration.
 
 ### Functional
 
-- [ ] `run_script(script, reason)` is registered and advertised like every other
+- [x] `run_script(script, reason)` is registered and advertised like every other
       tool (required non-empty `reason`; gated as `script:run`). The `reason` is
       the **script's** and flows to every sub-call.
-- [ ] Execution is in-process, core-language-only, `TGocciaCapabilities.None`:
+- [x] Execution is in-process, core-language-only, `TGocciaCapabilities.None`:
       no filesystem, network, FFI, exec, or time-of-day; no runtime extensions.
-- [ ] The harness's world-touching tools are injected as **one global `tools`
+- [x] The harness's world-touching tools are injected as **one global `tools`
       object** (snake_case, async). Each method routes to the same registered
       tool and resolves **its own** approval ask — same ref, same options, same
       audit row — with the script's `reason` on every sub-call.
-- [ ] Each method returns a Promise and **blocks inside its callback** until the
+- [x] Each method returns a Promise and **blocks inside its callback** until the
       tool (and its approval) completes, then returns an **already-settled**
       promise (rejects on denial). The script sees an ordinary `await` and needs
       no approval concept of its own. (Spike path A — no engine change.)
-- [ ] `run_command` is **not injected**; `recall_tool_result` is **not injected**.
-- [ ] Limits are enforced: a wall-clock timeout wired to the turn's cancel check,
+- [x] `run_command` is **not injected**; `recall_tool_result` is **not injected**.
+- [x] Limits are enforced: a wall-clock timeout wired to the turn's cancel check,
       an instruction cap, a memory cap, and an output-size cap.
-- [ ] The result is structured: standard output, the script's return value, and a
+- [x] The result is structured: standard output, the script's return value, and a
       typed error on failure or timeout — never a crash of the harness.
-- [ ] A denied tool call inside a script surfaces as a script-level error naming
+- [x] A denied tool call inside a script surfaces as a script-level error naming
       the tool and the denial; the script may catch it and continue.
-- [ ] The engine is **recreated per script** (realm isolation: a script can
+- [x] The engine is **recreated per script** (realm isolation: a script can
       mutate intrinsics).
-- [ ] An **engine-integrity fault** (`EObjectCheck`, `EAccessViolation`,
+- [x] An **engine-integrity fault** (`EObjectCheck`, `EAccessViolation`,
       `EInvalidPointer`, `EDivByZero`, `EPrivilege`, `EExternalException`) is not
       swallowed: it fails the tool call with a clear message and the turn
       continues (the process is not trusted after such a fault, but we do not
@@ -70,15 +70,17 @@ and the Makefile integration.
 
 ### Non-Functional
 
-- [ ] The engine is compiled **once**, with its own production flags, into a
-      cached unit directory; the debug and leak builds consume those units
-      rather than recompiling the engine. (Rationale: the spike found FPC 3.3.1's
-      compiler crashes nondeterministically on the engine under `-gl`; the
-      engine's production flags build cleanly. See "Build integration".)
-- [ ] `make check` green with the engine linked; the engine's allocations do not
-      leak (the facade frees the engine + executor per call).
-- [ ] The release binary stays self-contained (no runtime `.dylib`/`.so`).
-- [ ] Portability: macOS + Linux, arm64 + x86-64; FPC 3.3.1.
+- [x] The engine is compiled **per target** into that target's unit dir, like any
+      vendored source; a prebuilt shared cache was tried and abandoned (it never
+      converged, and a flag mismatch crashed the compiler). See "Build
+      integration".
+- [x] `make check` green with the engine linked; the facade frees the engine +
+      executor per call and releases each run's realm graph with a post-run
+      `GC.Collect`. The engine's fixed process-lifetime singleton pin leaves a
+      ~2.5k-block floor, which the leak gate allows (see the TODO deviations).
+- [x] The runtime binary stays self-contained (no runtime `.dylib`/`.so`); the
+      TUI links no engine at all.
+- [x] Portability: macOS + Linux, arm64 + x86-64; FPC 3.3.1.
 
 ## Contracts & Interfaces
 
@@ -156,12 +158,15 @@ direct call.
 ### Build integration
 
 - `scripts/fetch-goccia.sh` (exists) vendors the pinned tree into `deps/goccia`.
-- `scripts/patch-goccia.sh` applies the `constref`→`const` fix (7 sites) to the
-  vendored tree — a genuine FPC-3.3.1 incompatibility, not our code.
+- `scripts/patch-goccia.sh` applies the vendored-tree fixes (a `constref`→`const`
+  FPC-3.3.1 incompatibility; `{$WARNINGS OFF}` so the engine compiles under our
+  `-Sew`; and the `JSONParser`→`Goccia.JSONParser` rename that avoids an FCL
+  unit collision). Idempotent.
 - `scripts/gen-goccia-version.sh` writes the engine's `Goccia.Version.Generated.inc`
   (build.pas normally generates it).
-- The Makefile gains a `libgoccia` target that compiles the engine **once** into
-  `build/units/goccia`. Consumers add `$(GOCCIA_PATHS)` and reuse it.
+- The Makefile's `libgoccia` target fetches and patches the tree; the engine then
+  compiles **per target** into that target's own unit dir. Consumers add
+  `$(GOCCIA_DEFINES) $(GOCCIA_PATHS)` and let it build.
 
 **The recipe, found the hard way (three constraints):**
 
@@ -169,14 +174,17 @@ direct call.
    `-Mdelphi` clashes and the compiler crashes (first a `TComparison` type
    error, then a nondeterministic `EAccessViolation`). Our units each declare
    their own `{$mode delphi}`, so the build simply omits `-Mdelphi` — verified
-   transparent (`make check` unchanged, 1403 tests).
-2. **`-FU` and `-Fu` must be the SAME cache dir**, and the engine's source dirs
-   must stay on `-Fu`/`-Fi` — the engine's ppus record *relative* source paths, so
-   FPC needs the source present (for its `Goccia.inc`/`Shared.inc` includes) to
-   validate the ppu. With them present, the ppus are reused.
-3. **Reuse converges after two passes.** Cold: 294 units compile; second: 184;
-   third onward: **8** (the consumer's own), ~0.7 s. The `libgoccia` stamp makes
-   the two cold passes a one-time cost.
+   transparent (`make check` unchanged).
+2. **The engine must be allowed its warnings.** Its own code has warnings our
+   `-Sew` treats as errors (unreachable code in `HashMap`, "Constructor should
+   be public" in `Primitives`, `UnicodeString`→`AnsiString` in `TextSemantics`).
+   `patch-goccia.sh` injects `{$WARNINGS OFF}` into the engine's shared include
+   (`Goccia.inc` → `Shared.inc`), so it compiles under the consumer's flags.
+3. **Per target, not a shared cache.** A prebuilt cache was tried and abandoned:
+   it never converged (FPC recompiled the engine's circular core cluster — ~87
+   units — on every build regardless of a prebuilt dir), and a consumer whose
+   flags differed from the cache's crashed the compiler. The engine now builds
+   into each target's unit dir like any vendored source.
 
 **Resource opt-out:** build with `GOCCIA_INTL_NO_EMBEDDED_CLDR` (the cheapest
 ~1.2 MB win); TZ/UCD stay unless a need appears.
@@ -201,22 +209,22 @@ direct call.
 
 ### Unit tests (`test_script.pas`)
 
-- [ ] `RunScript` on a pure-compute script returns its value (`1 + 2` → `3`).
-- [ ] Console output is captured into `Output`.
-- [ ] A syntax error yields `Ok=False` with a message (no raise).
-- [ ] An injected tool call reaches `AInvoke` with the name + JSON args + the
+- [x] `RunScript` on a pure-compute script returns its value (`1 + 2` → `3`).
+- [x] Console output is captured into `Output`.
+- [x] A syntax error yields `Ok=False` with a message (no raise).
+- [x] An injected tool call reaches `AInvoke` with the name + JSON args + the
       script's reason, and the returned text is visible to the script.
-- [ ] A denied sub-call rejects; a script that `try/catch`es it can continue.
-- [ ] The instruction cap and the timeout each stop a runaway script.
-- [ ] `run_command` and `recall_tool_result` are **not** in the injected object.
+- [x] A denied sub-call rejects; a script that `try/catch`es it can continue.
+- [x] The instruction cap and the timeout each stop a runaway script.
+- [x] `run_command` and `recall_tool_result` are **not** in the injected object.
 
 ### Integration tests (`test_tool_script.pas`)
 
-- [ ] `run_script` is registered with a required `reason`; a call with no reason
+- [x] `run_script` is registered with a required `reason`; a call with no reason
       fails validation before the engine runs.
-- [ ] The `script:run` gate is resolved before the engine runs; a denial returns
+- [x] The `script:run` gate is resolved before the engine runs; a denial returns
       the batch reason and runs nothing.
-- [ ] A script calling `tools.file_read` on a workspace file runs the **same**
+- [x] A script calling `tools.file_read` on a workspace file runs the **same**
       gated handler (a fake service records the ask ref `file:read`).
 
 ## Performance targets
@@ -236,10 +244,10 @@ direct call.
 
 ## Success criteria
 
-- [ ] All contracts implemented; `make check` green; leak-clean.
-- [ ] `make release` stays self-contained.
-- [ ] One model turn runs N tool calls, each gated as a direct call would be.
-- [ ] A script cannot reach the shell.
+- [x] All contracts implemented; `make check` green; leak-clean.
+- [x] `make release` stays self-contained.
+- [x] One model turn runs N tool calls, each gated as a direct call would be.
+- [x] A script cannot reach the shell.
 
 ## Out of scope
 

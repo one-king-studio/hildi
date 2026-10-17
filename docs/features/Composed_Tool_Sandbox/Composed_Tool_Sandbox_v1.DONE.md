@@ -44,29 +44,30 @@ on. `main` only.
 
 ### Phase 3: The tool (`hildegard.helper.tool.script`)
 
-- [ ] **Test**: `run_script` is registered with a required `reason`; a missing
+- [x] **Test**: `run_script` is registered with a required `reason`; a missing
       reason fails before the engine runs (`test_tool_script`).
-- [ ] **Implement**: `TScriptTool.Register` + `Run`.
-- [ ] **Test**: the `script:run` gate resolves before the engine runs; a denial
+- [x] **Implement**: `TScriptTool.Register` + `Run`.
+- [x] **Test**: the `script:run` gate resolves before the engine runs; a denial
       runs nothing.
-- [ ] **Implement**: the `script:run` ask.
-- [ ] **Test**: a script calling `tools.file_read` runs the same gated handler (a
+- [x] **Implement**: the `script:run` ask.
+- [x] **Test**: a script calling `tools.file_read` runs the same gated handler (a
       fake service records `file:read`).
-- [ ] **Implement**: the invoker wiring to the registry.
+- [x] **Implement**: the invoker wiring to the registry.
 
 ### Phase 4: Wiring & limits
 
-- [ ] **Wire** `TScriptTool` into the session's tool registry (like the file and
+- [x] **Wire** `TScriptTool` into the session's tool registry (like the file and
       command tools); thread the turn's cancel check as the timeout seam.
-- [ ] **Test**: a script's sub-call approval relays to the operator (the gate).
-- [ ] **Implement**: any glue.
+- [x] **Test**: a script's sub-call approval relays to the operator (the gate).
+- [x] **Implement**: any glue.
 
 ### Phase 5: Validation & docs
 
-- [ ] **Run**: `make test SUITE=TScriptTest,TToolScriptTest`
-- [ ] **Run**: `make check` (all gates) — the engine linked, leak-clean
-- [ ] **Run**: `make release`; confirm the binary is self-contained (`otool -L`)
-- [ ] **Update** `FEATURES.md`; rename this TODO to
+- [x] **Run**: `make test SUITE=TScriptTest,TToolScriptTest`
+- [x] **Run**: `make check` (all gates) — the engine linked, leak-clean
+- [x] **Run**: `make headless-agent`; confirm the runtime is self-contained
+      (`otool -L`) and the TUI stays engine-free (`nm`)
+- [x] **Update** `FEATURES.md`; rename this TODO to
       `Composed_Tool_Sandbox_v1.DONE.md`.
 
 ## Files to Create/Modify
@@ -102,11 +103,11 @@ docs/features/FEATURES.md
 
 ## Success Criteria
 
-- [ ] All tasks checked
-- [ ] Every SPEC acceptance criterion maps to a passing test
-- [ ] `make check` passes (tests + leak gate)
-- [ ] One turn runs N gated tool calls; a script cannot reach the shell
-- [ ] `make release` is self-contained
+- [x] All tasks checked
+- [x] Every SPEC acceptance criterion maps to a passing test
+- [x] `make check` passes (tests + leak gate)
+- [x] One turn runs N gated tool calls; a script cannot reach the shell
+- [x] The runtime binary is self-contained; the TUI stays engine-free
 
 ## Notes & Considerations
 
