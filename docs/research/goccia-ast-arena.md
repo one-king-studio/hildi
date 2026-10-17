@@ -502,3 +502,44 @@ This is recorded rather than fixed because it is the last known defect and the
 harness is unaffected (the harness facade uses the interpreter executor, does
 not enable warning-recovery, and its `make check` is green at a flat 244-block
 floor).
+
+## The floor, fully characterized (2026-10-17)
+
+The residual is now understood end to end, and it is **not a leak**.
+
+**What it is.** Every engine pins its realm's shared-prototype graph
+(`TGocciaSharedPrototype.Create` → `PinObject(FPrototype)`, and the method host
+with it). Those objects — `TGocciaPropertyDescriptorData`, `TGocciaShapePropertyMap`,
+`TGocciaNativeFunctionValue`, `TGocciaObjectValue` — are the per-engine built-in
+graph, and they are *pinned*: the collector will not sweep them while they are
+reachable, and the pins are the engine's own. Added to that are the class-var
+singletons (`TGocciaSymbolValue` well-known symbols, the primitive singletons),
+which have no unit `finalization`.
+
+**Why it does not grow per run.** The harness facade already collects after each
+run, so a long-lived host reaches a steady state. Measured: the harness suite
+is a flat **244** blocks whether it runs 16 script tests or 1,425 tests of the
+whole suite.
+
+**Why the engine's own runner is higher.** It builds one engine per test file and
+never collects between them, so each file's realm graph is still waiting when
+the process exits — 6,010 blocks on a one-file corpus, 22,895 on the full
+`language` corpus (4,562 tests). That is per-engine, not per-test, and it is the
+runner's choice not to collect, not a defect in the arena.
+
+**What was tried and reverted.** Adding a `Collect` to `TGocciaEngine.Destroy`
+(unpinning is already done there) moved the one-file number only 6,702 → 6,010,
+because the graph is *pinned*, not merely unreferenced — a collect cannot free
+what is pinned. It also put a collection on every host's `Destroy`, including
+nested engines. Reverted as the wrong trade.
+
+**What would actually clear it** (if a strict zero is ever wanted): a
+host-callable engine `Shutdown` that unpins the shared-prototype graph and frees
+the class-var singletons in a unit `finalization`. That is the `PinSingletons`
+counterpart the engine has never had, and it is a deliberate lifetime decision
+for upstream, not a bug fix.
+
+**Bottom line for the harness:** the floor is bounded, flat, and the engine's.
+`LEAK_MAX_BLOCKS=400` is the right setting — a new *per-run* leak still fails the
+gate (the tripwire at 0 proves it), while the engine's process-lifetime state
+passes.
