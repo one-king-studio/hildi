@@ -28,19 +28,19 @@ on. `main` only.
 
 ### Phase 2: The facade (`hildegard.helper.script`)
 
-- [ ] **Test**: a pure-compute script returns its value (`test_script`).
-- [ ] **Implement**: `RunScript` — engine + interpreter per call, console
+- [x] **Test**: a pure-compute script returns its value (`test_script`).
+- [x] **Implement**: `RunScript` — engine + interpreter per call, console
       capture, `TGocciaCapabilities.None`.
-- [ ] **Test**: a syntax error yields `Ok=False` (no raise); console output is
+- [x] **Test**: a syntax error yields `Ok=False` (no raise); console output is
       captured.
-- [ ] **Implement**: the error mapping.
-- [ ] **Test**: an injected tool call reaches `AInvoke` with name + args +
+- [x] **Implement**: the error mapping.
+- [x] **Test**: an injected tool call reaches `AInvoke` with name + args +
       reason; the returned text is visible to the script.
-- [ ] **Implement**: the `tools` object (native methods, already-settled
+- [x] **Implement**: the `tools` object (native methods, already-settled
       promises, the `reason` threaded).
-- [ ] **Test**: the instruction cap and the timeout each stop a runaway script;
+- [x] **Test**: the instruction cap and the timeout each stop a runaway script;
       `run_command`/`recall_tool_result` are absent.
-- [ ] **Implement**: the limits; the tool filter.
+- [x] **Implement**: the limits; the tool filter.
 
 ### Phase 3: The tool (`hildegard.helper.tool.script`)
 
@@ -110,10 +110,38 @@ docs/features/FEATURES.md
 
 ## Notes & Considerations
 
-- **The engine is precompiled once**, not per build — the spike found the
-  compiler crashes on it under `-gl`. Our debug/leak flags stay intact for our
-  own code; the engine's units come from `build/units/goccia`.
+- **The engine compiles per target**, not from a cache. The cache was tried and
+  abandoned: it never converged (FPC recompiled the engine's circular core
+  cluster on every build regardless) and a consumer whose flags differed
+  crashed the compiler. The engine now builds into each target's own unit dir,
+  like any vendored source. Its own warnings are silenced by a vendored patch
+  so it compiles under our `-Sew`.
 - **Path A (block in the callback).** No engine change; the script sees an
   ordinary `await`.
 - **Recreate the engine per script** (realm isolation).
 - Record deviations from the SPEC here.
+
+## Deviations from the SPEC
+
+- **`console` is injected, not the engine's.** The SPEC's "Console capture" row
+  says "reuse the engine's `OutputCallback`", but core-only has no `console` at
+  all (it is a runtime extension). The facade injects an inert capture-only
+  `console` object (log/info/warn/error/debug → the output buffer); no host
+  access. When a real console extension is added, the capture moves there.
+- **`RunScript` takes the exposed tool names** (`AExposedTools`), not just the
+  invoker. The SPEC signature carries only `AInvoke`, but the facade cannot
+  enumerate the registry itself; the caller (the Phase 3 tool) filters `Specs`
+  through `FilterScriptTools`. `ScriptExcludedTools` names the exclusions.
+- **The engine's compatibility set is enabled.** GocciaScript is strict-subset
+  by default — no `for`/`while`/`function`/`var` — which defeats the feature.
+  The facade sets `Engine.Compatibility` to the standard-JS surface. Top-level
+  await and TS-style type annotations need no flag. Deliberately off:
+  `cfNonStrictMode`, `cfExperimentalJSModuleSource`.
+- **The leak gate is bounded at a documented floor.** The engine pins
+  process-global singletons at construction and never unpins them (a fixed
+  ~2.5k-block floor; its own heaptrc CI is Linux-only). The facade releases each
+  run's realm graph with a post-run `GC.Collect`, so the count does not grow per
+  script; the gate parses the unfreed count and fails above the floor.
+- **Two new vendored patches** (`patch-goccia.sh`): `{$WARNINGS OFF}` in the
+  engine's shared include, and `JSONParser` → `Goccia.JSONParser` (an FCL
+  collision that broke every harness `fpjson` call once the engine linked).
