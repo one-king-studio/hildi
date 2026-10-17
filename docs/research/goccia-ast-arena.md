@@ -411,3 +411,54 @@ macOS FPC:
 That turned "18,890 blocks" into "`ParseObjectPattern` → `ScanIdentifier`" in
 one step, and the fix was then obvious. Worth keeping for any vendored
 dependency, not just this one.
+
+## Open item: an integrity fault in the test runner's warning-recovery path
+
+Chasing the residual surfaced a **crash** that the arena work must still
+explain. It is real and reproducible, not heaptrc-only:
+
+```
+./build/GocciaTestRunner -P tests/language/statements/unsupported-features
+  → Integrity fault: EBusError in warning-recovery.js: Bus error or misaligned data access
+  → exit 70
+```
+
+`tests/language/statements/unsupported-features/goccia.json` sets
+`"warning-unsupported-features": true`, so the file exercises the parser's
+"unsupported syntax becomes a no-op warning" mode.
+
+**What it is not.** Ruled out by direct probes, each of which runs the same file
+cleanly (exit 0, no fault):
+
+| probe | path |
+| --- | --- |
+| `warn_file_probe` | interpreter executor, `WarningUnsupportedFeatures := True` |
+| `warn_bc_probe` | bytecode executor, same flag |
+| `warn_mod_probe` | bytecode + `SourceType := stModule` + loader flag |
+
+All three complete and then leak only the realm graph, which a post-free
+`Collect` clears — the same pattern the harness facade already handles.
+
+**So the fault needs the runner's own setup**: the testing-library globals, the
+module loader, and the shims, together. That combination is where the arena
+lifetime must still be wrong — most likely a program parsed into one arena and
+freed by an owner that is not that arena's owner (the three-scope problem), or a
+node the runner synthesizes outside the parse (the testing library builds
+statements at run time).
+
+**Why it matters beyond this bug:** the runner is the closest thing to a
+long-lived, many-file host, and it is the case the shim cache and module loader
+were designed for. If the arena is right, this passes; the fact that it does not
+means one of the three scopes is still leaking or double-freeing under a path
+the single-file probes do not reach.
+
+**Next step:** run the runner's exact path under `-gh` with a one-file corpus and
+symbolize the faulting frame (the runner catches the fault, so instrument
+`Goccia.EngineFault` to print the raw stack, or set `-dDEBUG` on the fault
+handler). The three probes above are the template; the missing ingredient is the
+testing-library globals.
+
+This is recorded rather than fixed because it is the last known defect and the
+harness is unaffected (the harness facade uses the interpreter executor, does
+not enable warning-recovery, and its `make check` is green at a flat 244-block
+floor).
