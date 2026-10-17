@@ -53,10 +53,11 @@ const
   DefaultScriptMaxOutputBytes = 32768;
 
   { The shell stays a separate, first-class call; recall is harness-internal and
-    ungated. Neither is reachable from a script. }
-  ScriptExcludedToolCount = 2;
+    ungated; run_script is this feature's own tool. None is reachable from a
+    script. }
+  ScriptExcludedToolCount = 3;
   ScriptExcludedTools: array[0..ScriptExcludedToolCount - 1] of string =
-    ('run_command', 'recall_tool_result');
+    ('run_command', 'recall_tool_result', 'run_script');
 
 { True when AName may not be exposed to a script. }
 function IsScriptExcludedTool(const AName: string): Boolean;
