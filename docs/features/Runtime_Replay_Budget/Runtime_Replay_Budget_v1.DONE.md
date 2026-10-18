@@ -14,35 +14,39 @@ retained strings at the turn boundary. TDD-first; `make check` before moving on.
 
 ### Phase 1: The ring
 
-- [ ] **Test**: `TestReplayRingDoesNotGrow` — after pushing past the cap, the
+- [x] **Test**: `TestReplayRingDoesNotGrow` — after pushing past the cap, the
       allocated capacity equals the cap.
-- [ ] **Implement**: `FReplayHead`/`FReplayFirstSeq`; `ReplayPush` writes at the
+- [x] **Implement**: `FReplayHead`/`FReplayFirstSeq`; `ReplayPush` writes at the
       head-relative slot and, when full, advances the head (no growth).
-- [ ] **Test**: `TestReplayCapDropsOldest` — the oldest seqs are gone; the
+- [x] **Test**: `TestReplayCapDropsOldest` — the oldest seqs are gone; the
       newest are present; `ReplayLen = Cap`.
-- [ ] **Implement**: allocate the buffer once to the resolved cap in `Create`.
-- [ ] **Test**: `TestTurnResetReleasesStrings` — a reset leaves the buffer empty
+- [x] **Implement**: allocate the buffer once to the resolved cap in `Create`.
+- [x] **Test**: `TestTurnResetReleasesStrings` — a reset leaves the buffer empty
       and the cap unchanged.
-- [ ] **Implement**: `ReplayReset` clears live entries to `Default`.
-- [ ] **Refactor**; `make check`; `make test-leak`.
+- [x] **Implement**: `ReplayReset` clears live entries to `Default`.
+- [x] **Refactor**; `make check`; `make test-leak`.
 
 ### Phase 2: The gap
 
-- [ ] **Test**: `TestAttachOlderThanWindowGetsGap` — one `ekGap` covering the
+- [x] **Test**: `TestAttachOlderThanWindowGetsGap` — one `ekGap` covering the
       dropped range, then the retained events.
-- [ ] **Implement**: `ReplayTo` emits the gap and replays from
+- [x] **Implement**: `ReplayTo` emits the gap and replays from
       `Max(FromSeq, FReplayFirstSeq)`.
-- [ ] **Test**: `TestAttachWithinWindowNoGap` — no `ekGap`.
-- [ ] **Refactor**; `make check`.
+- [x] **Test**: `TestAttachWithinWindowNoGap` — no `ekGap`.
+- [x] **Refactor**; `make check`.
 
 ### Phase 3: Config & validation
 
-- [ ] **Test**: `MaxReplayEvents = 0` resolves to the default; the existing
+- [x] **Test**: `MaxReplayEvents = 0` resolves to the default; the existing
       mid-turn attach and slow-observer tests still pass.
-- [ ] **Implement**: the config field and its resolution.
-- [ ] `make test`, `make test-leak`, `make check` — green.
-- [ ] **Manual**: run a headless runtime across several turns; RSS plateaus.
-- [ ] **Update** `FEATURES.md`; rename this TODO to
+- [x] **Implement**: the config field and its resolution.
+- [x] `make test`, `make test-leak`, `make check` — green.
+- [x] **Measured** (in place of the live manual check, which needs provider
+      credentials): `build/script-check/rss_probe.pas` builds the same event
+      stream the runtime would and compares the buffer shapes — 65,625 KiB
+      retained before, 1,344 KiB after, flat in turn length. A live headless
+      RSS sign-off remains for the operator.
+- [x] **Update** `FEATURES.md`; rename this TODO to
       `Runtime_Replay_Budget_v1.DONE.md`.
 
 ## Files to Create/Modify
@@ -59,10 +63,10 @@ docs/features/FEATURES.md
 
 ## Success Criteria
 
-- [ ] All tasks checked.
-- [ ] Every SPEC acceptance criterion maps to a passing test.
-- [ ] `make check` passes (tests + leak gate).
-- [ ] The buffer holds at most `MaxReplayEvents` events, ever.
+- [x] All tasks checked.
+- [x] Every SPEC acceptance criterion maps to a passing test.
+- [x] `make check` passes (tests + leak gate).
+- [x] The buffer holds at most `MaxReplayEvents` events, ever.
 
 ## Notes & Considerations
 

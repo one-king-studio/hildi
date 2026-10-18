@@ -113,6 +113,21 @@ raise it for a long-attach observer or lower it for a headless run.
   largest turn's event count.
 - No behavioral change for an observer attaching within the cap.
 
+## Measured retention
+
+`build/script-check/rss_probe.pas` builds the same event stream the runtime
+would (200,000 events, a reasoning fragment each) and compares the two buffer
+shapes, credential-free:
+
+| shape | retained |
+| --- | --- |
+| old (grow to the peak, then drop the length) | **65,625 KiB** — and the reset releases nothing |
+| ring (cap 4,096) | **1,344 KiB** — flat, whatever the turn length |
+
+A **49× reduction**, and the ring's figure is a function of the cap alone. The
+old shape's retention is a function of the longest turn, which is the reported
+symptom.
+
 ## Constraints
 
 - No wire-protocol change (`ekGap` exists).

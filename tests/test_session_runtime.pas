@@ -117,6 +117,7 @@ type
     procedure TestReplayRingDoesNotGrow;
     procedure TestAttachOlderThanWindowGetsGap;
     procedure TestAttachWithinWindowNoGap;
+    procedure TestTurnResetShrinksTheLiveWindow;
   end;
 
 implementation
@@ -1538,6 +1539,70 @@ begin
       finally
         Obs.Free;
         ObsSink := nil;
+      end;
+    finally
+      Rt.Stop;
+      WaitFinished(Th, 3000);
+      Th.Free;
+      DeleteSocket(Id);
+    end;
+  finally
+    Fake.Free;
+  end;
+end;
+
+procedure TSessionRuntimeTest.TestTurnResetShrinksTheLiveWindow;
+var
+  Id: string;
+  Fake: TFakeTransport;
+  Rt: TSessionRuntime;
+  Th: TRuntimeThread;
+  DriverSink: TRecordingSink;
+  Driver: TSessionClient;
+  Err: string;
+  Cmd: TSessionCommand;
+  Reply: TSessionMessage;
+  I: Integer;
+  Chunks: array of RawByteString;
+  Peak: Integer;
+begin
+  { A turn boundary resets the live window (releasing the turn's strings) while
+    the allocation stays at the cap. The live count after the turn is far below
+    the turn's event count. }
+  Id := NewSession;
+  Fake := TFakeTransport.Create;
+  try
+    SetLength(Chunks, 202);
+    for I := 0 to 199 do
+      Chunks[I] := TextDelta('wwwwwwwwwwwwwwww');
+    Chunks[200] := FinishFrame('stop');
+    Chunks[201] := DoneFrame;
+    Fake.AddResponse(Chunks);
+
+    Rt := MakeRuntimeCapped(Id, Fake, 8192);
+    Th := TRuntimeThread.Create(Rt);
+    try
+      Th.Start;
+      AssertTrue('bound', WaitForSocket(Id, 5000));
+      DriverSink := TRecordingSink.Create;
+      Driver := TSessionClient.Open(MakeClientConfig(Id, srDrive), DriverSink,
+        Err);
+      AssertNotNull('driver attaches: ' + Err, Driver);
+      try
+        Cmd := Default(TSessionCommand);
+        Cmd.Kind := scPrompt;
+        Cmd.Id := 'p1';
+        Cmd.Text := 'go';
+        AssertTrue('prompt replied', Driver.SendAndWait(Cmd, 5000, Reply));
+        AssertTrue('turn done', WaitCount(DriverSink, ekTurnFinished, 1, 10000));
+        Peak := Rt.ReplayCount;
+        { 200 deltas ran; after the boundary the live window holds only the
+          post-turn events (loop_started plus the turn's terminal events). }
+        AssertTrue('live window shrank after the turn', Peak < 50);
+        AssertEquals('allocation stays at the cap', 8192, Rt.ReplayCapacity);
+      finally
+        Driver.Free;
+        DriverSink := nil;
       end;
     finally
       Rt.Stop;
