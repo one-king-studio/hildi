@@ -88,11 +88,8 @@ begin
     AssertTrue('store is nil', Session.View.Store = nil);
     AssertEquals('ephemeral session id', '', Session.View.SessionId);
     AssertEquals('workspace root', FDir, Session.View.WorkspaceRoot);
-    { builtins (get_system_time) plus run_command, the file tools, and the
-      script tool. }
+    { builtins (get_system_time) plus run_command and the file tools. }
     AssertTrue('tools registered', Session.Tools.Count >= 2);
-    AssertTrue('run_script registered',
-      Session.Tools.Find('run_script', Tool));
     AssertTrue('shell registered',
       Session.Tools.Find('run_command', Tool));
   finally

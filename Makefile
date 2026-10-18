@@ -57,45 +57,17 @@ ifeq ($(UNAME_S),Darwin)
 TLS_CCFLAGS       += -mmacosx-version-min=11.0
 endif
 
-# Vendored GocciaScript (the embedded JS engine for the composed-tool sandbox).
-# It is compiled PER TARGET into that target's unit dir, exactly like any other
-# vendored source — there is no prebuilt cache. A cache was tried and abandoned:
-# FPC recompiles the engine's circular core cluster (~87 units) on every build
-# regardless of a prebuilt dir, and a consumer whose flags differ from the
-# cache's makes the FPC 3.3.1 compiler crash (EAccessViolation/EBusError). The
-# one real constraint is that the engine's own warnings must be silenced, or
-# the harness's -Sew turns them into errors: scripts/patch-goccia.sh injects
-# {$WARNINGS OFF} into the engine's shared include.
-GOCCIA_DIR      := $(abspath deps/goccia)
-GOCCIA_STAMP    := $(GOCCIA_DIR)/build/.harness-fetched
-# Drop the Intl CLDR resource (the cheapest ~1.2 MB win; TZ/UCD kept).
-GOCCIA_DEFINES  := -dGOCCIA_INTL_NO_EMBEDDED_CLDR
-# Consumers add the engine's source dirs to -Fu/-Fi; the engine's own
-# @config.cfg supplies its .res search paths, so a consumer needs nothing else.
-GOCCIA_PATHS    := -Fu$(GOCCIA_DIR)/source/generated -Fu$(GOCCIA_DIR)/source/units \
-                   -Fu$(GOCCIA_DIR)/source/shared -Fu$(GOCCIA_DIR)/source/app \
-                   -Fi$(GOCCIA_DIR)/source/units -Fi$(GOCCIA_DIR)/source/shared
-
 # Language and strictness. Every unit self-declares {$mode delphi}, so the
-# command line does NOT force -Mdelphi: the vendored GocciaScript engine is
-# {$mode delphiunicode} per unit, and a forced -Mdelphi clashes with it (the
-# compiler crashes). -Sh keeps ansistrings. -Sew turns warnings into errors.
+# command line does NOT force -Mdelphi: -Sh keeps ansistrings, -Sew turns
+# warnings into errors.
 MODE      := -Sh
 STRICT    := -vw -Sew
 DEBUG     := $(MODE) $(STRICT) -O- -Crtio -Sa -gl
 RELEASE   := $(MODE) $(STRICT) -O2 -CX -XX -Xs
 # -gh links heaptrc into the test binary for leak checking.
 LEAKFLAGS := $(MODE) $(STRICT) -O- -Crtio -Sa -gh -gl
-# heaptrc prints a summary to stderr; the test-leak target parses the unfreed
-# count and fails above a floor. The floor is the engine's own process-lifetime
-# state, not a per-run leak: the facade's post-run GC.Collect releases each
-# run's realm graph, and the AST is owned by an engine arena (fork commit
-# 6660c78e), so the count does not grow with the number of scripts run.
-# Measured 294 with the arena (was 2,588 before it). The floor lets the engine's
-# fixed state through while still failing on any NEW per-run leak. Set
-# LEAK_MAX_BLOCKS=0 for a strict run, or tighten it as the engine's floor drops.
-HEAPTRC   := skipifnoleaks
-LEAK_MAX_BLOCKS ?= 400
+# heaptrc: exit 203 if anything is still allocated; stay quiet when clean.
+HEAPTRC   := haltonnotreleased:skipifnoleaks
 
 # TDD knobs:
 #   make test SUITE=TAgentPoolTest          -> one suite
@@ -119,7 +91,7 @@ TEST_SRCS := $(wildcard $(TESTS)/*.pas)
 
 .PHONY: all test test-leak watch check release clean help libsqlite libmbedtls \
         store-demo agent-cli release-agent-cli tui-demo widgets-demo layout-demo \
-        libgoccia headless-agent tui-agent bench perf agents agent-% mcp-smoke async-standalone async-bench async-freeze async-examples
+        headless-agent tui-agent bench perf agents agent-% mcp-smoke async-standalone async-bench async-freeze async-examples
 
 all: $(BIN)/hildegard-helper-demo
 
@@ -136,17 +108,6 @@ $(SQLITE_DIR)/sqlite3.c:
 
 # Build the vendored mbedTLS archives, the CA embed, and the Pascal TLS shim.
 libmbedtls: $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ)
-
-# Fetch and patch the vendored engine (once). The engine is then compiled per
-# target into that target's own unit dir — there is no shared cache.
-libgoccia: $(GOCCIA_STAMP)
-
-$(GOCCIA_STAMP):
-	@scripts/fetch-goccia.sh
-	@scripts/patch-goccia.sh
-	@scripts/gen-goccia-version.sh
-	@mkdir -p $(GOCCIA_DIR)/build
-	@touch $@
 
 $(MBEDTLS_STAMP):
 	@scripts/fetch-mbedtls.sh
@@ -237,15 +198,11 @@ $(BIN)/hildegard-helper-tui-layout-demo: $(EXAMPLES)/tui_layout_demo.pas $(LIB_S
 
 # Headless agent: hosts a session's runtime; spawned detached by the TUI or the
 # CLI. No terminal. A client finds it as a sibling (or via HILDEGARD_RUNTIME_BIN).
-# This is the ONLY target that links the GocciaScript engine: the runtime owns
-# the agent loop, the tool registry, and run_script. The TUI does NOT — it is a
-# client over the socket (session.client + the ISessionDriver interface), so
-# keep $(GOCCIA_PATHS) off it.
 headless-agent: libsqlite libmbedtls $(BIN)/hildegard-helper-agent
 
-$(BIN)/hildegard-helper-agent: $(EXAMPLES)/headless_agent.pas $(LIB_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(GOCCIA_STAMP)
+$(BIN)/hildegard-helper-agent: $(EXAMPLES)/headless_agent.pas $(LIB_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) $(GOCCIA_DEFINES) $(GOCCIA_PATHS) -Fu$(SRC) -Fu$(SRC)/async -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/async -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Full-screen agent harness (conversation + approvals + sessions). Builds and
 # runs; Ctrl-C quits. Drives the headless agent. A pure client: no engine.
@@ -254,9 +211,7 @@ tui-agent: headless-agent $(BIN)/hildegard-helper-tui
 
 $(BIN)/hildegard-helper-tui: $(EXAMPLES)/tui_agent.pas $(LIB_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	@# Deliberately NO $(GOCCIA_PATHS): the TUI must stay engine-free. It talks
-	@# to the runtime over the socket; linking the engine here would re-couple
-	@# the two binaries.
+	@# The TUI is a pure client: no agent, loop, tool or runtime unit links here.
 	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/async -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Printable wall-clock benchmark. `make bench ARGS=--real` measures the real
@@ -300,30 +255,20 @@ async-examples: $(ASYNC_SRCS)
 	$(FPC) $(DEBUG) -Fu$(SRC)/async -FU$(DBGUNITS) -FE$(BIN) -o$(BIN)/async-examples $(EXAMPLES)/async_examples.pas
 	$(BIN)/async-examples
 
-$(BIN)/hildegard-helper-tests: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ) $(GOCCIA_STAMP)
+$(BIN)/hildegard-helper-tests: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) $(GOCCIA_DEFINES) $(GOCCIA_PATHS) -Fu$(SRC) -Fu$(SRC)/async -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/async -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 test-leak: libsqlite libmbedtls $(BIN)/hildegard-helper-tests-leak
-	@HEAPTRC=$(HEAPTRC) $(BIN)/hildegard-helper-tests-leak $(TESTARGS) \
-	  2> $(BUILD)/heaptrc.log; status=$$?; \
-	blocks=$$(grep -oE '[0-9]+ unfreed memory blocks' $(BUILD)/heaptrc.log \
-	  | grep -oE '^[0-9]+' | head -1); blocks=$${blocks:-0}; \
-	if [ "$$blocks" -gt "$(LEAK_MAX_BLOCKS)" ]; then \
-	  echo "leak gate: $$blocks unfreed blocks exceeds the floor $(LEAK_MAX_BLOCKS)"; \
-	  tail -5 $(BUILD)/heaptrc.log; exit 203; \
-	fi; \
-	[ "$$blocks" -gt 0 ] && \
-	  echo "leak gate: $$blocks unfreed blocks (engine floor, <= $(LEAK_MAX_BLOCKS))"; \
-	exit $$status
+	HEAPTRC=$(HEAPTRC) $(BIN)/hildegard-helper-tests-leak $(TESTARGS)
 
 # Auto-rerun TARGET (default: test) whenever sources change.
 watch:
 	@scripts/watch.sh $(TARGET)
 
-$(BIN)/hildegard-helper-tests-leak: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ) $(GOCCIA_STAMP)
+$(BIN)/hildegard-helper-tests-leak: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
 	@mkdir -p $(BIN) $(LEAKUNITS)
-	$(FPC) $(LEAKFLAGS) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) $(GOCCIA_DEFINES) $(GOCCIA_PATHS) -Fu$(SRC) -Fu$(SRC)/async -Fu$(TESTS) -FU$(LEAKUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(LEAKFLAGS) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/async -Fu$(TESTS) -FU$(LEAKUNITS) -FE$(BIN) -o$@ $<
 
 # All quality gates, for CI: functional tests + leak check.
 check: test test-leak

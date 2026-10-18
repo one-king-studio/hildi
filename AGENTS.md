@@ -130,43 +130,38 @@ Hard-won constraints; please respect them:
   every frame - CPU that scales with the block count while typing or streaming.
   A `select` timeout of `0` is a busy poll: return it only when about to exit.
   See `docs/guidelines/tui-rendering.md`.
-- **A vendored engine can use a different `{$mode}` than ours.** The GocciaScript
-  engine (`deps/goccia`) is `{$mode delphiunicode}` per unit; forcing `-Mdelphi`
-  on it clashes and the FPC 3.3.1 compiler **crashes** (first a type error, then
-  a nondeterministic `EAccessViolation`). Every unit in `src/` self-declares
-  `{$mode delphi}`, so the build simply **does not pass `-Mdelphi`** — it is
-  redundant. Same lesson for any vendored FPC library: let it set its own mode.
+- **A vendored FPC library can use a different `{$mode}` than ours.** A vendored
+  engine (the parked GocciaScript engine did) may be `{$mode delphiunicode}` per
+  unit; forcing `-Mdelphi` on it clashes and the FPC 3.3.1 compiler **crashes**
+  (first a type error, then a nondeterministic `EAccessViolation`). Every unit in
+  `src/` self-declares `{$mode delphi}`, so the build simply **does not pass
+  `-Mdelphi`** — it is redundant. Let any vendored FPC library set its own mode.
 - **`{$R name.res}` resolves against the unit's OUTPUT dir, not its source dir.**
   A unit that uses `{$R Generated.X.res}` needs the `.res` findable — either
-  copied next to the `.ppu`, or on the unit search path. The Goccia engine's
-  `.res` files live in `deps/goccia/source/generated`, which is on
-  `$(GOCCIA_PATHS)`'s `-Fu`, so the engine's units find them there.
+  copied next to the `.ppu`, or on the unit search path.
 - **FPC reuses a precompiled unit only when the consumer's flags match and the
   source is still on the search path.** The ppu records the *relative* source
-  path; `-FU` (output) and `-Fu` (search) must point at the **same** cache dir,
-  the engine's source dirs must stay on `-Fu`/`-Fi` (for its `{$I}` includes),
-  and the defines must match. This is why the engine is compiled **per target**
-  rather than from a shared cache: a cache whose flags differ from the
-  consumer's invalidates every engine ppu (and can crash the compiler), and it
-  never converged in practice — FPC recompiled the engine's circular core
-  cluster on every build regardless. See the next bullet.
-- **The GocciaScript engine is compiled per target, not from a cache.** A
-  prebuilt cache was tried and abandoned: FPC recompiled the engine's circular
-  core cluster on every build regardless, and a consumer whose flags differed
-  crashed the compiler. Consumers add `$(GOCCIA_PATHS)` and let the engine build
-  into their own unit dir. Two vendored patches make this work
-  (`scripts/patch-goccia.sh`): `{$WARNINGS OFF}` in the engine's shared include
-  (its own warnings are fatal under our `-Sew`), and `JSONParser` →
-  `Goccia.JSONParser` (the engine's unit collides with the FCL's `jsonparser`;
-  on a case-insensitive FS it shadows it and breaks every host `fpjson` call).
-  Re-run `patch-goccia.sh` after any `fetch-goccia.sh`.
-- **Only the runtime links the engine; the TUI must not.** `hildegard-helper-agent`
-  (the runtime) owns the agent loop, the tool registry, and `run_script`, so it
-  needs `$(GOCCIA_PATHS)`. The TUI (`hildegard-helper-tui`) is a client over the
-  socket (`session.client` + the `ISessionDriver` interface); it links no engine.
-  Keep `$(GOCCIA_PATHS)` off the TUI target — if it ever compiles there, a unit
-  grew a runtime dependency it should not have. A cheap guard:
-  `nm build/bin/hildegard-helper-tui | grep -c TGocciaEngine` must be 0.
+  path, so `-FU` (output) and `-Fu` (search) must point at the **same** dir and
+  the defines must match; a mismatch silently invalidates every ppu (and can
+  crash the compiler). This is why a vendored engine is better compiled **per
+  target** than from a shared cache — a cache never converged in practice, and
+  FPC recompiled the engine's circular core cluster on every build regardless.
+- **Vendored C/FPC dependencies: pin a fork you can patch, and checksum it.**
+  The parked sandbox's fixes ended up as commits on a fork, fetched by SHA and
+  checksummed, with the patch script reduced to an *assertion* that the tree
+  carries them. Better than `sed` patches: the tree is exactly a revision, a
+  re-fetch cannot lose the fixes, and the diff is the upstream PR.
+- **The GocciaScript engine is detached from the build (parked 2026-10-18).**
+  The composed-tool sandbox was parked: the engine works, but its AST/ownership
+  defects cost far more than the feature returned, and the *real* goal — gating
+  compound shell work — is better served by gating bash itself. Its code,
+  tests, scripts and vendored fork are kept under
+  `docs/features/Composed_Tool_Sandbox/`; nothing in `src/`, `tests/`,
+  `examples/` or the `Makefile` references it, and `deps/goccia` is deleted.
+  Read `docs/research/vendored-engine-lessons.md` before adopting another
+  vendored parser or runtime: it carries the nine lessons (ownership, fail-safe,
+  the heaptrc + `atos` method, prefer the boundary you already have) into the
+  Tree-Sitter work.
 
 ## Code Style
 
