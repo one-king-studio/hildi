@@ -1,5 +1,12 @@
 # Implementation Plan: Tool Approvals v1
 
+> **Status: complete.** The plan was finished without ticking its boxes; the
+> `Progress` note below records what landed, and the code is in
+> `hildegard.helper.approval`/`.approval.store`/`.tui.approvalmodal`. Renamed to
+> `Approvals_v1.DONE.md` on 2026-10-18 as part of a docs-index audit. The one
+> item left open in the original plan — a live CLI smoke — is tracked on the
+> feature row in `FEATURES.md`.
+
 **Related Specification:** `Approvals_v1.SPEC.md`
 **Related Feature:** `FEATURE.md`
 

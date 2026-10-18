@@ -10,8 +10,13 @@ in `../guidelines/spec-driven-development.md`:
 
 - **Proposed** - `FEATURE.md` exists, no spec yet
 - **Specified** - at least one `SPEC.md` exists
-- **In Progress** - a `TODO.md` is being worked
-- **Implemented** - all tasks done, `make check` green, `DONE.md` recorded
+- **In Progress** - work is underway (a `TODO.md`, or code landed ahead of one)
+- **Implemented** - all tasks done, `make check` green. A `DONE.md` is recorded
+  when the feature had a `TODO.md`; a small feature that landed directly may
+  have only `FEATURE.md` (noted in its row).
+- **Parked** - decided against for now, or awaiting a need; the code (if any) is
+  kept, not built
+- **Superseded** - replaced by another feature; kept for history
 
 ## Features
 
@@ -23,7 +28,7 @@ in `../guidelines/spec-driven-development.md`:
 | [TUI Widgets](TUI_Widgets/FEATURE.md) | Implemented | TUI Widgets v1 | A widget kit over TUI Core: `TSingleChild`/`TPanel`, `TTheme`, a focus group (`Tab`/click), and `TButton`/`TListView`. Adopted by the `tui_widgets_demo`. |
 | [TUI Text Editing](TUI_Text_Editing/FEATURE.md) | Implemented | Text Edit v1 | A caret-aware multi-line editor (`TTextEdit`) over shared grapheme/width helpers: insert/delete, arrow navigation, soft wrapping, and a blinking caret. Reused by the chat compose box and, later, the editor panel. |
 | [TUI Animation](TUI_Animation/FEATURE.md) | Implemented | TUI Animation v1 | One app-owned frame clock (default 10 ms); widgets derive content from time via `Advance(nowMs)`/`Animating`; one composite+diff per frame; idle waits on a long timeout. Clients: `TSpinner`, `TProgress`. |
-| [Tool Approvals](Tool_Approvals/FEATURE.md) | In Progress | Approvals v1 | Generic, durable whitelist for tool calls: `ref` + `params`, scoped global/workspace/session; `run_command:<bin>` for the shell, `suite:function` for external tools. Supersedes the command policy and audit. Engine, persistence, command adapter, and CLI done; live smoke pending. Path gating dropped by decision. |
+| [Tool Approvals](Tool_Approvals/FEATURE.md) | Implemented | Approvals v1 | Generic, durable whitelist for tool calls: `ref` + `params`, scoped global/workspace/session; `run_command:<bin>` for the shell, `suite:function` for external tools. Supersedes the command policy and audit. Engine, persistence, command adapter, and CLI done (`Approvals_v1.DONE.md`); a live CLI smoke remains. Path gating dropped by decision. |
 | [Workspaces](Workspaces/FEATURE.md) | Implemented | Workspaces v1 | The directory the agent operates in: canonical identity, access check, relative-path base, and the trust boundary for path checks; scopes approvals and sessions. |
 | [Sessions and Ledger](Sessions_And_Ledger/FEATURE.md) | Implemented | Sessions v2, Turn Stats v1, Turn Stats v2 | Relational history: `sessions -> turns (loops) -> requests` and `sessions -> messages` (user, assistant, reasoning, tool call, tool, error). Token usage and timings per request, rolled up per turn; restore renders the streamed blocks (tool reasons and reasoning included). Turn Stats v1 renders the latest turn's metrics in the status bar (workspace left, stats right) with the hints in the CTA toolbar, identically live and resumed. Turn Stats v2 makes the status bar show the session's usage for cost (`total <ctx> ctx · <used> used · <cached>% cached · <time> · <req> req`: the final context, the billed total, the token-weighted cache hit, the wall time, and the request count), ends each successful loop with a dimmed divider of its metrics, and collects per-block reasoning/content durations so a thought reads `Thought for 2.3s` (live and resumed from the same measured value, carried as the `reasoning_done` event). The loop's context guard is overridable via `HILDEGARD_MAX_CONTEXT_TOKENS` until the model API supplies the limit. Supersedes the v1 flat ledger; a full schema reset with no data migrations. |
 | [Remote Agent Link](Remote_Agent_Link/FEATURE.md) | Proposed | - | Pair a device to an account and hold an outbound link to execute requests locally. Helper-side only in v1. |
@@ -51,10 +56,18 @@ in `../guidelines/spec-driven-development.md`:
 | [Subagents](Subagents/FEATURE.md) | Implemented | Subagents v1, Subagent Sidebar v1, Subagent Spy v2 | Delegated task execution: the parent hands a task to a **subagent** — a new, independent session with its own context, headless process, and socket, plus a lineage link. Delegation is **asynchronous**: `delegate_task` spawns and returns a handle, and the child's result returns later as an **ambient notification** that wakes the parent. `message_subagent`/`abort_subagent`/`release_subagent` steer it; approvals relay up the lineage (a grant under the root covers the child and its siblings). A `Ctrl+B` **sidebar** lists live children; **Enter spies** on one (observe-only), showing its transcript and live stream with a `spying · <label>` header; the compose gives way to a CTA actions bar (`a abort` / `r release` / `esc leave`), and Escape leaves. v1 is one level deep. |
 | [Workspace Snapshots](Workspace_Snapshots/FEATURE.md) | Proposed | - | Per-turn workspace snapshots with a changed-files view and a diff view, plus undo/redo that walks the history and brings the files along with it. Self-contained on the vendored SQLite; no git dependency. Prior art: SynProject's `TVersions` (GPL-3, Windows-only — shape only). |
 | [Async Core](Async_Core/FEATURE.md) | Implemented | Async Core v1 | A standalone, dependency-free Object Pascal library for async and reactive programming: **futures** (one async value) and **observables** (a stream) over **one spine** — scheduler, continuation-scoped context, cancellation. No event loop; a synchronous driver, the GocciaScript model. Concurrency is a scheduler choice (`RunOn`, `SubscribeOn`/`ObserveOn` over a bounded executor); the UI never awaits. The surface is free functions composed RxJS-style (`Pipe(src, [FilterOp(p), TakeOp(3)])`): creation, transform, filter, fan-in, flatten (`MergeMap`/`ConcatMap`/`SwitchMap`/`ExhaustMap`/`Expand`), combine (`Zip`/`CombineLatest`/`WithLatestFrom`), utility, aggregate, error, multicasting, and the full time set on the virtual clock. `TBoundedQueue` backs the real TUI's turn queue. FPC 3.3.1's incomplete generics cap the surface (see `FPC_Generics_Notes.md`); the container-returning family (`Buffer`/`Window`/`GroupBy`/`MergeAll`/`ForkJoin`) is the genuinely blocked set, tracked by `test_async_parity`. All ten phases done (`Async_Core_v1.DONE.md`); leak-clean. No harness or engine dependency, so it is extractable. |
-| [TUI Event Graph (RxPascal)](TUI_Event_Graph/FEATURE.md) | In Progress | TUI Event Graph v1 | The TUI is one drain on one thread — correct — but it drained **unbounded**, so a streaming `run_command` kept the UI inside `DrainQueue` and froze it. **v1 is implemented**: the drain is bounded per frame (256 events), the turn queue is a bounded `TBoundedQueue<TTurnEvent>` with O(1) push (control events are never dropped — a streamed event yields instead), the streamed tool output is coalesced per frame, and the live tool block is capped at 64 KiB. The direction is the whole TUI as an event graph on Async Core ("RxPascal"): sources are streams, state is a `Scan`, rendering is a frame-paced subscription — with a two-lane split (commands lossless, signals coalescible). |
+| [TUI Event Graph (RxPascal)](TUI_Event_Graph/FEATURE.md) | Proposed | - | The TUI is one drain on one thread — correct — but it drained **unbounded**, so a streaming `run_command` kept the UI inside `DrainQueue` and froze it. **That repair is done** (bounded drain per frame, a bounded `TBoundedQueue<TTurnEvent>` with O(1) push, streamed output coalesced per frame, the live tool block capped at 64 KiB). The **RxPascal direction** — the whole TUI as an event graph on Async Core (sources as streams, state as a `Scan`, rendering as a frame-paced subscription, two lanes for lossless commands vs coalescible signals) — is ideated, not yet spec'd. |
 | [Dynamic Tools](Dynamic_Tools/FEATURE.md) | Implemented | Tool Boundary v1, MCP Lifecycle v1 | A running session's MCP tool surface is dynamic: reconcile from the store at each turn boundary, with enable/disable/remove and reconnect (bounded backoff) for dropped servers. Adds `TAgentLoop.OnTurnStart`, `TToolRegistry.Remove`, and a per-server MCP lifecycle manager. Trust unchanged (every call stays approval-gated). |
 | [Turn Injection](Turn_Injection/FEATURE.md) | Implemented | Turn Assembly v1, MCP Provider v1 | Assemble the loop's tools **and prompt** fresh each turn from registered contributors, so tools can load dynamically and skills can inject prompt + tools. Adds the `IToolProvider` seam (`Prepare`/`Specs`/`PromptFragment`/`Find`); MCP is one contributor. Prompt fragments are request-only (never persisted). |
 | [Runtime Lifecycle](Runtime_Lifecycle/FEATURE.md) | Implemented | Runtime Shutdown v1 | The session runtime stops promptly and gracefully: an in-band `scShutdown` command, SIGTERM/SIGINT handling, and an exit-when-no-clients policy with a short grace. |
+| [User Message Wrapping](User_Message_Wrapping/FEATURE.md) | Implemented | - | Every user message reaches the provider wrapped in XML so dynamic context (skills manifest, time, preferences) can never be mistaken for the operator's words; the persisted record stays plain. `hildegard.helper.wrap` (`FormatUserMessage`/`FormatAdvisory`), consumed by the agent loop; a port of `hildegard/main`'s message formatter. |
+| [Approval Timeout](Approval_Timeout/FEATURE.md) | Implemented | - | An unanswered approval ask is **not** a denial: it is reported as a timeout, and the auto-deny applies only to a **headless** run (no connected client). A connected client owns the timeout. `TApprovalChoice.TimedOut` through `TApprovalService` and `TApprovalGate`. |
+| [Tool Limits](Tool_Limits/FEATURE.md) | In Progress | - | One model for every limit a tool can hit, so a limit **advises** the model rather than **failing** its call: only an absolute ceiling blocks, and only hard errors and truncations persist. The nudge channel is the tool response's loop-only `<context>` block. Landed: the soft tool-call limit runs its calls and nudges (`FPendingAdvisory`/`ToolSoftNotice`); the soft-vs-hard classification of the remaining limits is open. |
+| [Turn Lifecycle](Turn_Lifecycle/FEATURE.md) | In Progress | Turn Recovery v1 | Guarantee a turn always reaches a terminal state: no orphaned `tsRunning` turns, no worker blocked on an unanswerable approval, no resume fed a dangling tool call. Landed: the store's `FinalizeRunningTurns` and the runtime's reconcile-on-start; the client-loss, shutdown, bounded-gate and resume-repair mechanisms are specified but not all wired. |
+| [Context Checkpoint](Context_Checkpoint/FEATURE.md) | In Progress | Context Checkpoint v1 | Replace destructive compaction with a **recoverable checkpoint** in one continuous session: a checkpoint archives the messages before it, resume starts from the latest checkpoint forward, and the archived messages stay intact (back-pagination) and recallable via FTS5. Implemented: the checkpoint is an ordinary ambient turn whose reply is the document, carried forward on resume as a wrapped `<handoff>`; back-pagination, the page gauge, and the per-page metric are in. Open: the checkpoint **revert** (`scCheckpointRevert` + `DeleteCheckpoint`/`DropTurnsFrom`) and the back-pagination tests. |
+| [MCP Client](MCP_Client/FEATURE.md) | Implemented | MCP v1, MCP Admin CLI v1, JsonRpc v1, Config v1 | Consume MCP servers' tools as first-class registry tools over stdio: a bidirectional child manager, a JSON-RPC 2.0 client, `inputSchema`/result mapping, and a scoped SQLite config — namespaced `mcp/<server>/<tool>` approval refs through the existing approvals/ledger/reason gates, zero special cases in the loop. The helper is an MCP **client**, not a server. v1 (stdio) is done; v2 (HTTP/OAuth) is parked pending a decision on the shared OAuth pipeline. |
+| [Doom Loop Detection](Doom_Loop_Detection/FEATURE.md) | Proposed | - | A signal-only detector over the reasoning stream: a deflate-style backwards match of the tail against recent history, keeping the *parse* (coverage, max run, dominant period) as the diagnosis, with trend/period-band/arm-length false-positive guards. Soft response reuses notice interception; hard response reuses Interrupt v1. Tool-call loop detection is a separate, simpler future feature. Design sketch in the doc. |
+| [Tool Response Wrapping](Tool_Response_Wrapping/FEATURE.md) | Parked | - | Wrap every in-turn tool response (`<result>` + a `<context>` sibling + `<ambient>` advisories). Parked: tool results are already typed by role, and the manifest belongs in the system prompt plus the `load_skill` result, not a per-request fragment. The invariant is kept in `User_Message_Wrapping`; the two behaviours it enabled (no per-request manifest re-injection; non-blocking tool limits) landed directly. See *Parked* below. |
 
 ## Parked (ideated, awaiting a need)
 
@@ -68,50 +81,11 @@ in `../guidelines/spec-driven-development.md`:
   longer re-injected per request, and tool limits non-blocking — are implemented
   directly.
 
-- **Reasoning Doom Loop Detection** (`Doom_Loop_Detection/FEATURE.md`) — a
-  signal-only detector over the reasoning stream: deflate-style backwards
-  match pass of the tail against recent history, keeping the *parse*
-  (coverage, max run, dominant period) as the diagnosis, with
-  trend/period-band/arm-length false-positive guards. Soft response reuses
-  notice interception; hard response reuses Interrupt v1. Tool-call loop
-  detection (signature-based) is a separate, simpler future feature. Parked
-  with the full design sketch in the doc.
-
-- **MCP Client** (`MCP_Client/FEATURE.md`) — consume MCP servers' tools as
-  first-class registry tools over stdio (a new bidirectional child manager, a
-  JSON-RPC 2.0 client, `inputSchema`/result mapping, and a scoped SQLite
-  config) — namespaced `mcp/<server>/<tool>` approval refs through the existing
-  approvals/ledger/reason gates — zero special cases in the loop. Helper is
-  MCP client, not server. **v1 (stdio) is implemented & tested** (see
-  `MCP_Client/MCP_v1.DONE.md`); v2 (HTTP/OAuth) is parked pending a decision on
-  the shared OAuth pipeline (Remote Agent Link specifies device pairing +
-  bearer token, not OAuth). v1 is independent of that and of TLS. Full FEATURE
-  doc and v1 SPECs in the directory.
-
-- **Turn Lifecycle** (`Turn_Lifecycle/FEATURE.md`) — guarantee a turn always
-  reaches a terminal state: reconcile orphaned `tsRunning` turns on runtime
-  start, self-heal in `BeginTurn`, finalize the in-flight turn on client loss
-  and shutdown, bound the approval wait, and repair a dangling tool call on
-  resume. Fixes the non-stable session state (pending approvals, unresolved tool
-  calls) that long-running commands make likely. Spec'd (v1); not yet
-  implemented.
-
-- **Context Checkpoint** (`Context_Checkpoint/FEATURE.md`) — replace destructive
-  compaction with a **recoverable checkpoint** in one continuous session: a
-  checkpoint archives the messages before it, resume starts from the latest
-  checkpoint forward, and the archived messages stay intact (back-pagination) and
-  are recallable via whole-session SQLite FTS5 weighted toward tool
-  reasons/names. One session id. Implemented: the checkpoint is an ordinary
-  ambient turn whose reply is the document, recorded at the boundary; on resume
-  the document is carried forward as a **handoff** — the new page's first user
-  message, wrapped `<handoff>` and framed as orientation, not authority, pointing
-  at the sources to ground on (`hildegard.helper.handoff`) — and the TUI draws it
-  as its own `ckHandoff` block; resume and the TUI use the active window;
-  back-pagination, the left-border page gauge (which doubles as the coarse
-  scroll), the per-page context metric, and the nudge are in. The live manual
-  sign-off is pending. A documented **revert** of the latest checkpoint (drop the
-  checkpoint and its turn; the conversation sibling of Workspace Snapshots'
-  undo/redo) is specified, not yet built.
+- **MCP Client v2** (`MCP_Client/FEATURE.md`) — the HTTP/OAuth transport. v1
+  (stdio) is **Implemented** (see the table and `MCP_Client/MCP_v1.DONE.md`);
+  only v2 is parked, pending a decision on the shared OAuth pipeline (Remote
+  Agent Link specifies device pairing + bearer token, not OAuth). v1 is
+  independent of that and of TLS.
 
 ## Backlog (low priority)
 

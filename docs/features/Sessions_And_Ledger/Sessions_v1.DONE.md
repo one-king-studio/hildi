@@ -1,5 +1,11 @@
 # Implementation Plan: Sessions and Ledger v1
 
+> **Status: superseded and complete.** Sessions v1 landed (see the `Progress`
+> note below), then **Sessions v2** replaced it — `Sessions_v2.DONE.md` is the
+> current artifact, and the feature row in `FEATURES.md` names v2. This plan's
+> boxes were never ticked. Renamed to `Sessions_v1.DONE.md` on 2026-10-18 as
+> part of a docs-index audit.
+
 **Related Specification:** `Sessions_v1.SPEC.md`
 **Related Feature:** `FEATURE.md`
 
