@@ -46,6 +46,10 @@ type
     { The lineage root whose approval scope this session resolves against (a
       subagent sets this to its parent). '' => the session's own id. }
     ApprovalRootSessionId: string;
+    { Most turn events the replay buffer retains for a late-attaching client.
+      0 or negative => DefaultMaxReplayEvents. There is no "unbounded": the
+      ceiling is the point. }
+    MaxReplayEvents: Integer;
     Transport: TLLMTransport;   // test seam
   end;
 
@@ -90,8 +94,10 @@ type
     FIdleDeadline: Int64;
     FLoopStarted: TSessionEvent;
     FReplay: array of TSessionEvent;
-    FReplayLen: Integer;      { logical length; FReplay may hold spare capacity }
-    FReplayCap: Integer;      { allocated slots in FReplay }
+    FReplayLen: Integer;      { live entries, <= FReplayCap }
+    FReplayCap: Integer;      { allocated slots; the resolved event cap }
+    FReplayHead: Integer;     { ring index of the oldest live entry }
+    FReplayFirstSeq: Int64;   { seq of the oldest live entry; 0 when empty }
     FReadSet, FWriteSet: TFDSet;
     FMaxFd: Integer;
     { Subagents: the supervisor (nil when this session may not delegate), its
@@ -180,6 +186,12 @@ type
     procedure Stop;
     property SessionId: string read FSessionId;
     property SocketPath: string read FSocketPath;
+    { Replay-ring observability (Runtime Replay Budget): the live event count,
+      the allocated ceiling, and the seq of the oldest retained event (0 when
+      empty). A runtime's replay memory is bounded by MaxReplayEvents. }
+    property ReplayCount: Integer read FReplayLen;
+    property ReplayCapacity: Integer read FReplayCap;
+    property ReplayFirstSeq: Int64 read FReplayFirstSeq;
   end;
 
 const
@@ -190,6 +202,12 @@ const
   DefaultDriveRequestMs = 30000;
   { Per-client outbound ceiling; a slower observer is dropped with a gap. }
   DefaultMaxOutBytes = 262144;
+  { Most turn events the replay buffer retains for a late-attaching client. The
+    buffer is a ring: past this it drops the oldest, so a runtime's replay memory
+    is bounded by this rather than by its longest turn. A client whose FromSeq
+    predates the window is told with an ekGap. Generous by default so a normal
+    turn replays whole. }
+  DefaultMaxReplayEvents = 65536;
 
 { Resolve the subagent knobs from the environment (defaults when unset). }
 function ResolveSubagentMax: Integer;
@@ -272,6 +290,15 @@ begin
     Runtime.FListenFd := -1;
     Runtime.FSeq := 0;
     Runtime.FNextClientId := 0;
+    { The replay ring: allocate once to the resolved cap, so the buffer never
+      grows past it. }
+    Runtime.FReplayCap := AConfig.MaxReplayEvents;
+    if Runtime.FReplayCap <= 0 then
+      Runtime.FReplayCap := DefaultMaxReplayEvents;
+    SetLength(Runtime.FReplay, Runtime.FReplayCap);
+    Runtime.FReplayLen := 0;
+    Runtime.FReplayHead := 0;
+    Runtime.FReplayFirstSeq := 0;
 
     HConfig := Default(THarnessSessionConfig);
     { Headless until a client attaches: auto-deny so an unattended run does not
@@ -439,27 +466,48 @@ begin
 end;
 
 procedure TSessionRuntime.ReplayReset;
+var
+  I, Idx: Integer;
 begin
-  { Keep the allocated capacity; just drop the logical length. The next push
-    reuses the buffer, so a per-turn reset no longer frees and reallocates. }
+  { Release the previous turn's event strings (Text/Detail/ToolArguments/
+    ToolReason are refcounted heap allocations) rather than pinning them until a
+    later turn overwrites the slots. Only the live window can hold strings from
+    this turn, so clear just it — O(len), not O(cap). Keep the allocation. }
+  for I := 0 to FReplayLen - 1 do
+  begin
+    Idx := (FReplayHead + I) mod FReplayCap;
+    FReplay[Idx] := Default(TSessionEvent);
+  end;
   FReplayLen := 0;
+  FReplayHead := 0;
+  FReplayFirstSeq := 0;
 end;
 
 procedure TSessionRuntime.ReplayPush(const AEvent: TSessionEvent);
+var
+  Idx: Integer;
 begin
-  { Amortised growth: double the capacity instead of SetLength(n+1), which
-    reallocates and copies on every event (O(n^2) within a chatty turn - the
-    streaming deltas alone can be thousands of events). }
-  if FReplayLen = FReplayCap then
+  { A ring: once full, overwrite the oldest slot and advance the head. O(1), and
+    the buffer never grows past the cap, so a runtime's replay memory is bounded
+    by the cap rather than by its longest turn. }
+  if FReplayCap <= 0 then
+    Exit;
+  if FReplayLen < FReplayCap then
   begin
-    if FReplayCap = 0 then
-      FReplayCap := 16
-    else
-      FReplayCap := FReplayCap * 2;
-    SetLength(FReplay, FReplayCap);
+    Idx := (FReplayHead + FReplayLen) mod FReplayCap;
+    FReplay[Idx] := AEvent;
+    if FReplayLen = 0 then
+      FReplayFirstSeq := AEvent.Seq;
+    Inc(FReplayLen);
+  end
+  else
+  begin
+    FReplay[FReplayHead] := AEvent;
+    FReplayHead := (FReplayHead + 1) mod FReplayCap;
+    { The oldest live entry is now the one after the head; its seq is the
+      event's seq less the (Cap - 1) still ahead of it. }
+    FReplayFirstSeq := AEvent.Seq - (FReplayCap - 1);
   end;
-  FReplay[FReplayLen] := AEvent;
-  Inc(FReplayLen);
 end;
 
 procedure TSessionRuntime.Broadcast(const AEvent: TSessionEvent);
@@ -586,17 +634,38 @@ end;
 
 procedure TSessionRuntime.ReplayTo(AClient: TClientConn; AFromSeq: Int64);
 var
-  I: Integer;
+  I, Idx: Integer;
   M: TSessionMessage;
+  E: TSessionEvent;
+  Start: Int64;
 begin
+  if FReplayLen = 0 then
+    Exit;
+  Start := AFromSeq;
+  { AFromSeq = 0 means "the whole live turn" (the protocol's convention), so it
+    is never a gap. Only a positive FromSeq below the retained window is. }
+  if (Start > 0) and (Start < FReplayFirstSeq) then
+  begin
+    M := Default(TSessionMessage);
+    M.Kind := mkEvent;
+    M.Event := Default(TSessionEvent);
+    M.Event.Seq := FSeq;
+    M.Event.Ts := NowMs;
+    M.Event.Kind := ekGap;
+    M.Event.FromSeq := Start;
+    M.Event.ToSeq := FReplayFirstSeq - 1;
+    QueueLine(AClient, TSessionCodec.Encode(M));
+    Start := FReplayFirstSeq;
+  end;
   for I := 0 to FReplayLen - 1 do
   begin
-    if FReplay[I].Seq < AFromSeq then
+    Idx := (FReplayHead + I) mod FReplayCap;
+    if FReplay[Idx].Seq < Start then
       Continue;
     M := Default(TSessionMessage);
     M.Kind := mkEvent;
-    M.Event := FReplay[I];
-    AClient.LastSentSeq := FReplay[I].Seq;
+    M.Event := FReplay[Idx];
+    AClient.LastSentSeq := FReplay[Idx].Seq;
     QueueLine(AClient, TSessionCodec.Encode(M));
   end;
 end;

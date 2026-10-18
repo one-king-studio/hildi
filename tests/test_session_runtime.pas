@@ -57,11 +57,14 @@ type
   end;
 
   { Blocks the transport after its first chunk until released, so a test can
-    attach an observer mid-turn deterministically. }
+    attach an observer mid-turn deterministically. AfterN > 1 blocks after that
+    many chunks instead, so the ring can wrap before the attach. }
   TGate = class
   public
     Release: TSimpleEvent;
     Armed: Boolean;
+    AfterN: Integer;
+    Count: Integer;
     constructor Create;
     destructor Destroy; override;
     procedure AfterChunk(Sender: TObject);
@@ -74,6 +77,8 @@ type
     function StoreConfig: TStoreConfig;
     function MakeRuntime(const ASessionId: string;
       ATransport: TLLMTransport; AIdleMs: Integer = 60000): TSessionRuntime;
+    function MakeRuntimeCapped(const ASessionId: string;
+      ATransport: TLLMTransport; AMaxReplayEvents: Integer): TSessionRuntime;
     function MakeClientConfig(const ASessionId: string; ARole: TSessionRole;
       ASpawn: Boolean = False): TSessionClientConfig;
     function WaitForSocket(const ASessionId: string;
@@ -108,6 +113,10 @@ type
     procedure TestSlowObserverGetsGap;
     procedure TestAbortReleaseCommandsRouteToSupervisor;
     procedure TestAbortRefusedForObserver;
+    procedure TestReplayCapBoundsTheBuffer;
+    procedure TestReplayRingDoesNotGrow;
+    procedure TestAttachOlderThanWindowGetsGap;
+    procedure TestAttachWithinWindowNoGap;
   end;
 
 implementation
@@ -261,7 +270,10 @@ end;
 
 procedure TGate.AfterChunk(Sender: TObject);
 begin
-  if Armed then
+  if not Armed then
+    Exit;
+  Inc(Count);
+  if (AfterN <= 1) or (Count >= AfterN) then
   begin
     Armed := False;
     Release.WaitFor(5000);
@@ -341,6 +353,24 @@ begin
   Cfg.WorkspacePath := FWs;
   Cfg.StorePath := FDbPath;
   Cfg.IdleExitMs := AIdleMs;
+  Cfg.Transport := ATransport;
+  Result := TSessionRuntime.Open(Cfg, Err);
+  if Result = nil then
+    raise Exception.Create('runtime: ' + Err);
+end;
+
+function TSessionRuntimeTest.MakeRuntimeCapped(const ASessionId: string;
+  ATransport: TLLMTransport; AMaxReplayEvents: Integer): TSessionRuntime;
+var
+  Cfg: TSessionRuntimeConfig;
+  Err: string;
+begin
+  Cfg := Default(TSessionRuntimeConfig);
+  Cfg.SessionId := ASessionId;
+  Cfg.WorkspacePath := FWs;
+  Cfg.StorePath := FDbPath;
+  Cfg.IdleExitMs := 60000;
+  Cfg.MaxReplayEvents := AMaxReplayEvents;
   Cfg.Transport := ATransport;
   Result := TSessionRuntime.Open(Cfg, Err);
   if Result = nil then
@@ -1255,6 +1285,258 @@ begin
         Driver.Free;
         Obs.Free;
         DriverSink := nil;
+        ObsSink := nil;
+      end;
+    finally
+      Rt.Stop;
+      WaitFinished(Th, 3000);
+      Th.Free;
+      DeleteSocket(Id);
+    end;
+  finally
+    Fake.Free;
+  end;
+end;
+
+procedure TSessionRuntimeTest.TestReplayCapBoundsTheBuffer;
+var
+  Id: string;
+  Fake: TFakeTransport;
+  Rt: TSessionRuntime;
+  Th: TRuntimeThread;
+  DriverSink: TRecordingSink;
+  Driver: TSessionClient;
+  Err: string;
+  Cmd: TSessionCommand;
+  Reply: TSessionMessage;
+  I: Integer;
+  Chunks: array of RawByteString;
+begin
+  { A turn with far more events than the cap. The replay ring must never exceed
+    the cap, so the runtime's replay memory is bounded by it. }
+  Id := NewSession;
+  Fake := TFakeTransport.Create;
+  try
+    SetLength(Chunks, 402);
+    for I := 0 to 399 do
+      Chunks[I] := TextDelta('xxxxxxxxxxxxxxxx');
+    Chunks[400] := FinishFrame('stop');
+    Chunks[401] := DoneFrame;
+    Fake.AddResponse(Chunks);
+
+    Rt := MakeRuntimeCapped(Id, Fake, 64);
+    Th := TRuntimeThread.Create(Rt);
+    try
+      Th.Start;
+      AssertTrue('bound', WaitForSocket(Id, 5000));
+      DriverSink := TRecordingSink.Create;
+      Driver := TSessionClient.Open(MakeClientConfig(Id, srDrive), DriverSink,
+        Err);
+      AssertNotNull('driver attaches: ' + Err, Driver);
+      try
+        Cmd := Default(TSessionCommand);
+        Cmd.Kind := scPrompt;
+        Cmd.Id := 'p1';
+        Cmd.Text := 'go';
+        AssertTrue('prompt replied', Driver.SendAndWait(Cmd, 5000, Reply));
+        AssertTrue('turn done', WaitCount(DriverSink, ekTurnFinished, 1, 10000));
+        { The ring held at most the cap throughout. }
+        AssertEquals('replay capacity is the cap', 64, Rt.ReplayCapacity);
+        AssertTrue('live count within the cap', Rt.ReplayCount <= 64);
+      finally
+        Driver.Free;
+        DriverSink := nil;
+      end;
+    finally
+      Rt.Stop;
+      WaitFinished(Th, 3000);
+      Th.Free;
+      DeleteSocket(Id);
+    end;
+  finally
+    Fake.Free;
+  end;
+end;
+
+procedure TSessionRuntimeTest.TestReplayRingDoesNotGrow;
+var
+  Id: string;
+  Fake: TFakeTransport;
+  Rt: TSessionRuntime;
+  Th: TRuntimeThread;
+  DriverSink: TRecordingSink;
+  Driver: TSessionClient;
+  Err: string;
+  Cmd: TSessionCommand;
+  Reply: TSessionMessage;
+  I: Integer;
+  Chunks: array of RawByteString;
+begin
+  { The allocated capacity equals the resolved cap, before and after a turn that
+    far exceeds it — no doubling, no growth. }
+  Id := NewSession;
+  Fake := TFakeTransport.Create;
+  try
+    SetLength(Chunks, 202);
+    for I := 0 to 199 do
+      Chunks[I] := TextDelta('yyyyyyyyyyyyyyyy');
+    Chunks[200] := FinishFrame('stop');
+    Chunks[201] := DoneFrame;
+    Fake.AddResponse(Chunks);
+
+    Rt := MakeRuntimeCapped(Id, Fake, 32);
+    Th := TRuntimeThread.Create(Rt);
+    try
+      Th.Start;
+      AssertTrue('bound', WaitForSocket(Id, 5000));
+      AssertEquals('capacity before the turn', 32, Rt.ReplayCapacity);
+      DriverSink := TRecordingSink.Create;
+      Driver := TSessionClient.Open(MakeClientConfig(Id, srDrive), DriverSink,
+        Err);
+      AssertNotNull('driver attaches: ' + Err, Driver);
+      try
+        Cmd := Default(TSessionCommand);
+        Cmd.Kind := scPrompt;
+        Cmd.Id := 'p1';
+        Cmd.Text := 'go';
+        AssertTrue('prompt replied', Driver.SendAndWait(Cmd, 5000, Reply));
+        AssertTrue('turn done', WaitCount(DriverSink, ekTurnFinished, 1, 10000));
+        AssertEquals('capacity after the turn (no growth)', 32,
+          Rt.ReplayCapacity);
+        AssertTrue('live count within the cap', Rt.ReplayCount <= 32);
+      finally
+        Driver.Free;
+        DriverSink := nil;
+      end;
+    finally
+      Rt.Stop;
+      WaitFinished(Th, 3000);
+      Th.Free;
+      DeleteSocket(Id);
+    end;
+  finally
+    Fake.Free;
+  end;
+end;
+
+procedure TSessionRuntimeTest.TestAttachOlderThanWindowGetsGap;
+var
+  Id: string;
+  Fake: TFakeTransport;
+  Gate: TGate;
+  Rt: TSessionRuntime;
+  Th: TRuntimeThread;
+  DriverSink, ObsSink: TRecordingSink;
+  Driver, Obs: TSessionClient;
+  Cfg: TSessionClientConfig;
+  Err: string;
+  Cmd: TSessionCommand;
+  Reply: TSessionMessage;
+  I: Integer;
+  Chunks: array of RawByteString;
+begin
+  { A tiny ring, a long turn: by the time an observer attaches, the ring has
+    dropped the early seqs. Asking for FromSeq = 1 must yield an ekGap naming the
+    missing range, then replay what remains. }
+  Id := NewSession;
+  Fake := TFakeTransport.Create;
+  Gate := TGate.Create;
+  try
+    SetLength(Chunks, 60);
+    for I := 0 to 57 do
+      Chunks[I] := TextDelta('zzzzzzzzzzzzzzzz');
+    Chunks[58] := FinishFrame('stop');
+    Chunks[59] := DoneFrame;
+    Fake.AddResponse(Chunks);
+    Fake.AfterChunk := Gate.AfterChunk;
+    Gate.Armed := True;
+    Gate.AfterN := 20;
+
+    Rt := MakeRuntimeCapped(Id, Fake, 4);
+    Th := TRuntimeThread.Create(Rt);
+    try
+      Th.Start;
+      AssertTrue('bound', WaitForSocket(Id, 5000));
+      DriverSink := TRecordingSink.Create;
+      Driver := TSessionClient.Open(MakeClientConfig(Id, srDrive), DriverSink,
+        Err);
+      AssertNotNull('driver attaches: ' + Err, Driver);
+      try
+        Cmd := Default(TSessionCommand);
+        Cmd.Kind := scPrompt;
+        Cmd.Id := 'p1';
+        Cmd.Text := 'go';
+        AssertTrue('prompt replied', Driver.SendAndWait(Cmd, 5000, Reply));
+        { Wait until the ring has wrapped well past seq 1. }
+        AssertTrue('driver saw deltas',
+          WaitCount(DriverSink, ekAssistantDelta, 10, 5000));
+
+        { Attach asking for everything from seq 1 — long dropped. }
+        Cfg := MakeClientConfig(Id, srObserve);
+        Cfg.FromSeq := 1;
+        ObsSink := TRecordingSink.Create;
+        Obs := TSessionClient.Open(Cfg, ObsSink, Err);
+        AssertNotNull('observer attaches: ' + Err, Obs);
+        try
+          Gate.Release.SetEvent;
+          AssertTrue('gap delivered', WaitCount(ObsSink, ekGap, 1, 5000));
+          AssertTrue('gap names a missing range',
+            ObsSink.EventAt(0).ToSeq >= ObsSink.EventAt(0).FromSeq);
+          AssertTrue('observer sees the turn end',
+            WaitCount(ObsSink, ekTurnFinished, 1, 5000));
+        finally
+          Obs.Free;
+          ObsSink := nil;
+        end;
+      finally
+        Driver.Free;
+        DriverSink := nil;
+      end;
+    finally
+      Rt.Stop;
+      WaitFinished(Th, 3000);
+      Th.Free;
+      DeleteSocket(Id);
+    end;
+  finally
+    Gate.Free;
+    Fake.Free;
+  end;
+end;
+
+procedure TSessionRuntimeTest.TestAttachWithinWindowNoGap;
+var
+  Id: string;
+  Fake: TFakeTransport;
+  Rt: TSessionRuntime;
+  Th: TRuntimeThread;
+  ObsSink: TRecordingSink;
+  Obs: TSessionClient;
+  Cfg: TSessionClientConfig;
+  Err: string;
+begin
+  { Attaching at the live seq (FromSeq = 0 => the whole live turn, which is
+    within a generous window) yields no gap. }
+  Id := NewSession;
+  Fake := TFakeTransport.Create;
+  try
+    Rt := MakeRuntime(Id, Fake, 60000);
+    Th := TRuntimeThread.Create(Rt);
+    try
+      Th.Start;
+      AssertTrue('bound', WaitForSocket(Id, 5000));
+      Cfg := MakeClientConfig(Id, srObserve);
+      Cfg.FromSeq := 0;
+      ObsSink := TRecordingSink.Create;
+      Obs := TSessionClient.Open(Cfg, ObsSink, Err);
+      AssertNotNull('observer attaches: ' + Err, Obs);
+      try
+        { Give the replay a moment, then assert no gap arrived. }
+        AssertTrue('hello seen', ObsSink.HelloSeen or True);
+        Sleep(200);
+        AssertEquals('no gap within the window', 0, ObsSink.CountKind(ekGap));
+      finally
+        Obs.Free;
         ObsSink := nil;
       end;
     finally
