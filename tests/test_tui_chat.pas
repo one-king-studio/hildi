@@ -946,6 +946,16 @@ begin
     AssertEquals('none again', 0, Stack.AnimatingCount);
     AssertFalse('not animating', Stack.Animating);
     AssertEquals('cleared', 0, AnimationClock.MinIntervalMs);
+    { A live thought/tool box animates too (its corner spinner), and settling
+      it drops the registration. }
+    Item := Stack.Add(ckTool, 'run_command', 'out');
+    AssertEquals('a settled tool does not animate', 0, Stack.AnimatingCount);
+    Item.Live := True;
+    AssertEquals('a live tool animates', 1, Stack.AnimatingCount);
+    AssertTrue('animating', Stack.Animating);
+    Item.Live := False;
+    AssertEquals('settled again', 0, Stack.AnimatingCount);
+    AssertFalse('not animating', Stack.Animating);
   finally
     Stack.Free;
     S.Free;

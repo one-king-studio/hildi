@@ -13,42 +13,42 @@ moving on. `main` only.
 
 ### Phase 1: One frame source
 
-- [ ] **Test**: `TestActivityFrameAdvances` — the frame changes across
+- [x] **Test**: `TestActivityFrameAdvances` — the frame changes across
       `SpinnerIntervalMs` and is stable within it; it cycles `BrailleFrames`.
-- [ ] **Implement**: `ActivityFrame` in `chat`; retire the `Sparkles` set;
+- [x] **Implement**: `ActivityFrame` in `chat`; retire the `Sparkles` set;
       `ThinkingSparkle` delegates to it.
-- [ ] **Test**: `TestThinkingRowDrawsTheSpinner` — the `ckThinking` row renders
+- [x] **Test**: `TestThinkingRowDrawsTheSpinner` — the `ckThinking` row renders
       the current frame.
-- [ ] **Implement**: `TChatItem` (`ckThinking`) draws `ActivityFrame`.
-- [ ] **Implement**: `TChatPanel.RenderState`/`Advance` use `ActivityFrame`.
-- [ ] **Refactor**; `make check`.
+- [x] **Implement**: `TChatItem` (`ckThinking`) draws `ActivityFrame`.
+- [x] **Implement**: `TChatPanel.RenderState`/`Advance` use `ActivityFrame`.
+- [x] **Refactor**; `make check`.
 
 ### Phase 2: Stable live height
 
-- [ ] **Test**: `TestLiveThoughtKeepsAStableHeight` — a live block whose tail
+- [x] **Test**: `TestLiveThoughtKeepsAStableHeight` — a live block whose tail
       ends in a blank row measures the same as one that does not.
-- [ ] **Implement**: in `ApplyDisplay`'s live branch, pad the tail to
+- [x] **Implement**: in `ApplyDisplay`'s live branch, pad the tail to
       `LiveTailLines` at the top.
-- [ ] **Refactor**; `make check`.
+- [x] **Refactor**; `make check`.
 
 ### Phase 3: The box spinner
 
-- [ ] **Test**: `TestLiveBoxDrawsTheSpinner` — a live thought/tool box renders
+- [x] **Test**: `TestLiveBoxDrawsTheSpinner` — a live thought/tool box renders
       the spinner at the bottom-right; no caret.
-- [ ] **Test**: `TestIdleBoxShowsTheCaret` — a settled collapsible box still
+- [x] **Test**: `TestIdleBoxShowsTheCaret` — a settled collapsible box still
       draws its caret.
-- [ ] **Implement**: `TChatItem.Render` draws the spinner in the caret slot when
+- [x] **Implement**: `TChatItem.Render` draws the spinner in the caret slot when
       `FLive`; suppress the caret then.
-- [ ] **Implement**: an active box registers the spinner interval for animation
+- [x] **Implement**: an active box registers the spinner interval for animation
       (so the frame advances while live).
-- [ ] **Refactor**; `make check`.
+- [x] **Refactor**; `make check`.
 
 ### Phase 4: Validation & docs
 
-- [ ] `make test`, `make test-leak`, `make check` — green.
-- [ ] **Manual**: watch a slow `run_command` — the box spins at the bottom-right
+- [x] `make test`, `make test-leak`, `make check` — green.
+- [x] **Manual**: watch a slow `run_command` — the box spins at the bottom-right
       and the toolbar matches; a streaming thought does not jump.
-- [ ] **Update** `FEATURES.md`; rename this TODO to
+- [x] **Update** `FEATURES.md`; rename this TODO to
       `Activity_Spinner_v1.DONE.md`.
 
 ## Files to Create/Modify
@@ -66,10 +66,10 @@ docs/features/FEATURES.md
 
 ## Success Criteria
 
-- [ ] All tasks checked.
-- [ ] Every SPEC acceptance criterion maps to a passing test.
-- [ ] `make check` passes.
-- [ ] The three indicators show the same frame; a live block's height is stable.
+- [x] All tasks checked.
+- [x] Every SPEC acceptance criterion maps to a passing test.
+- [x] `make check` passes.
+- [x] The three indicators show the same frame; a live block's height is stable.
 
 ## Notes & Considerations
 
