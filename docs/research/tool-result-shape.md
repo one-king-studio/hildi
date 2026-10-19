@@ -111,6 +111,35 @@ File Tools writes the `tool_changes` row for the call it just made; Snapshots
 reads those rows (or its own snapshot) to offer undo. Building the diff capture
 now is not wasted work for Snapshots — it is its input.
 
+## Granularity: two levels, and the shell is blind at the lower one
+
+The snapshot is per **turn** (bounded, atomic, safe to undo). The *review* is per
+**tool call** — a twenty-call turn read as one total hides which step went wrong,
+and "what did this `file_search_replace` do?" is a different question from "what
+did the turn do?".
+
+- **Tool change** — one call (or one parallel batch), captured at `WriteAtomic`,
+  stored beside the tool result, **zero** prompt cost.
+- **Turn snapshot** — the boundary scan; the undo/redo chain and retention.
+
+| | tool level | turn level |
+| --- | --- | --- |
+| edit tools (`file_write`, `file_search_replace`, `patch_apply`, …) | **complete** | complete |
+| `run_command` (`sed -i`, a build, `git checkout`) | **blind** | complete |
+| cost | one file read per write, bounded | a tree scan, incremental |
+
+The asymmetry is the design's honest limit: the tool level sees only the tools
+that go through `WriteAtomic`. A turn whose snapshot differs from the sum of its
+tool changes has **unattributed** changes, and the UI should say so rather than
+imply a shell call changed nothing.
+
+**Attribution with parallel batches.** Each call keeps its own record (the call
+id is known in the handler), and a batch's results arrive in call order, so the
+blocks keep their attribution; the view can group the batch or list per call.
+
+**Context cost stays zero** in both cases — the diff never enters the prompt.
+
+
 ## Cost, honestly
 
 | piece | who | size |
