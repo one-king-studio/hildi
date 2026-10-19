@@ -195,6 +195,10 @@ procedure TShellCommandsTest.TestHeadAndTail;
 begin
   AssertEquals('head default', 'alpha' + #10 + 'beta' + #10, RunCmd('head', ['a.txt']).Stdout);
   AssertEquals('head 1', 'alpha' + #10, RunCmd('head', ['-n', '1', 'a.txt']).Stdout);
+  AssertEquals('head -1 (BSD shorthand)', 'alpha' + #10,
+    RunCmd('head', ['-1', 'a.txt']).Stdout);
+  AssertEquals('tail -1 (BSD shorthand)', 'beta' + #10,
+    RunCmd('tail', ['-1', 'a.txt']).Stdout);
   AssertEquals('head 0', '', RunCmd('head', ['-n', '0', 'a.txt']).Stdout);
   AssertEquals('tail 1', 'beta' + #10, RunCmd('tail', ['-n', '1', 'a.txt']).Stdout);
   AssertEquals('tail default', 'alpha' + #10 + 'beta' + #10,
@@ -388,6 +392,10 @@ begin
   AssertFalse('double dash', IsUnsupportedOption('--', '-a'));
   AssertTrue('no options at all', IsUnsupportedOption('-x', ''));
   AssertFalse('not an option', IsUnsupportedOption('x', ''));
+  AssertFalse('numeric shorthand allowed', IsUnsupportedOption('-20', '-nN'));
+  AssertTrue('numeric shorthand refused without N',
+    IsUnsupportedOption('-20', '-n'));
+  AssertTrue('numeric must be digits', IsUnsupportedOption('-2x', '-nN'));
 end;
 
 procedure TShellCommandsTest.TestToolDispatch;

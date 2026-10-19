@@ -75,8 +75,12 @@ function HasRegexMeta(const APattern: string): Boolean;
 
 { True when a literal argument is an option the command does not support.
   A combined short flag is decomposed (-rf -> r, f); '--' is always allowed;
-  a long option is unsupported. An empty AOptions means "no options at all". }
+  a long option is unsupported. 'N' in AOptions allows the BSD numeric
+  shorthand (-20; head/tail). An empty AOptions means "no options at all". }
 function IsUnsupportedOption(const AArg, AOptions: string): Boolean;
+
+{ True when AArg is -<digits> and AOptions allows the numeric shorthand. }
+function IsNumericOption(const AArg, AOptions: string): Boolean;
 
 implementation
 
@@ -97,8 +101,8 @@ type
 const
   CommandSpecs: array[0..21] of TCommandSpec = (
     (Name: 'echo'; Options: '-n'),
-    (Name: 'head'; Options: '-n'),
-    (Name: 'tail'; Options: '-n'),
+    (Name: 'head'; Options: '-nN'),
+    (Name: 'tail'; Options: '-nN'),
     (Name: 'wc'; Options: '-lwc'),
     (Name: 'grep'; Options: '-nivlcF'),
     (Name: 'ls'; Options: '-ad'),
@@ -140,6 +144,19 @@ begin
   Result := BuiltinCommandOptions(AName, Dummy);
 end;
 
+function IsNumericOption(const AArg, AOptions: string): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  if (Pos('N', AOptions) = 0) or (Length(AArg) < 2) or (AArg[1] <> '-') then
+    Exit;
+  for I := 2 to Length(AArg) do
+    if (AArg[I] < '0') or (AArg[I] > '9') then
+      Exit;
+  Result := True;
+end;
+
 function IsUnsupportedOption(const AArg, AOptions: string): Boolean;
 var
   I: Integer;
@@ -151,6 +168,8 @@ begin
     Exit(True);
   if (Length(AArg) > 2) and (AArg[2] = '-') then
     Exit(True);   // long options are not supported anywhere
+  if IsNumericOption(AArg, AOptions) then
+    Exit(False);
   for I := 2 to Length(AArg) do
   begin
     Ch := AArg[I];
@@ -337,6 +356,13 @@ begin
         Exit(Usage('head: invalid number of lines: ' + ACall.Args[I + 1]));
       Inc(I, 2);
     end
+    else if IsNumericOption(ACall.Args[I], '-nN') then
+    begin
+      N := StrToIntDef(Copy(ACall.Args[I], 2, MaxInt), -1);
+      if N < 0 then
+        Exit(Usage('head: invalid number of lines: ' + ACall.Args[I]));
+      Inc(I);
+    end
     else
       Break;
   end;
@@ -380,6 +406,13 @@ begin
       if N < 0 then
         Exit(Usage('tail: invalid number of lines: ' + ACall.Args[I + 1]));
       Inc(I, 2);
+    end
+    else if IsNumericOption(ACall.Args[I], '-nN') then
+    begin
+      N := StrToIntDef(Copy(ACall.Args[I], 2, MaxInt), -1);
+      if N < 0 then
+        Exit(Usage('tail: invalid number of lines: ' + ACall.Args[I]));
+      Inc(I);
     end
     else
       Break;

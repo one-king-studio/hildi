@@ -24,3 +24,7 @@ mkdir -p d/e; test -d d/e && echo made	made\n		0
 touch t.txt; test -f t.txt && echo touched	touched\n		0
 cp a.txt copy.txt; cat copy.txt	alpha\nbeta\ngamma\n		0
 cp a.txt copy.txt; mv copy.txt moved.txt; cat moved.txt	alpha\nbeta\ngamma\n		0
+head -2 a.txt	alpha\nbeta\n		0
+tail -1 a.txt	gamma\n		0
+head -20 a.txt	alpha\nbeta\ngamma\n		0
+tail -2 b.txt	a\nb\n		0
