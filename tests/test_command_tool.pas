@@ -24,11 +24,14 @@ type
     LastTimeoutMs: QWord;
     ResultExec: TCommandExecution;
     Chunks: array of string;   // forwarded to the observer, in order
+    LastMode: TCommandMode;
     constructor Create;
-    function OwnsApproval(const ACommand: string): Boolean;
+    function OwnsApproval(const ACommand: string; AMode: TCommandMode;
+      out AWhy: string): Boolean;
     function Execute(const AProfile: TShellProfile; const ACommand,
       AWorkDir: string; ATimeoutMs: QWord; AObserver: TToolObserver;
-      const AReason: string; out AExecution: TCommandExecution): Boolean;
+      const AReason: string; AMode: TCommandMode;
+      out AExecution: TCommandExecution): Boolean;
   end;
 
   TFakePrompt = class
@@ -91,6 +94,10 @@ type
     procedure TestRunCommandStreamsOutput;
     procedure TestCommandTimeoutIsClampedToMax;
     procedure TestTimeoutIsHonouredWithoutACap;
+    procedure TestModeBashIsPassedThrough;
+    procedure TestModeDefaultsToAuto;
+    procedure TestInvalidModeIsRejected;
+    procedure TestModeBuiltinRefusesUnsupportedWithoutAsking;
   end;
 
 implementation
@@ -105,14 +112,17 @@ begin
   ResultExec.ExitCode := 0;
 end;
 
-function TFakeExecutor.OwnsApproval(const ACommand: string): Boolean;
+function TFakeExecutor.OwnsApproval(const ACommand: string;
+  AMode: TCommandMode; out AWhy: string): Boolean;
 begin
+  AWhy := '';
   Result := False;
 end;
 
 function TFakeExecutor.Execute(const AProfile: TShellProfile;
   const ACommand, AWorkDir: string; ATimeoutMs: QWord; AObserver: TToolObserver;
-  const AReason: string; out AExecution: TCommandExecution): Boolean;
+  const AReason: string; AMode: TCommandMode;
+  out AExecution: TCommandExecution): Boolean;
 var
   I: Integer;
 begin
@@ -122,6 +132,7 @@ begin
   LastCommand := ACommand;
   LastCwd := AWorkDir;
   LastTimeoutMs := ATimeoutMs;
+  LastMode := AMode;
   for I := 0 to High(Chunks) do
     if AObserver <> nil then
       AObserver.Next(Chunks[I]);
@@ -727,7 +738,7 @@ var
 begin
   Exec := TProcessCommandExecutor.Create;
   AssertTrue('ok', Exec.Execute(DefaultShellProfile, 'printf hello', '', 5000,
-    nil, 'test reason', ExecResult));
+    nil, 'test reason', cmAuto, ExecResult));
   AssertEquals('exit code', 0, ExecResult.ExitCode);
   AssertTrue('output captured', Pos('hello', ExecResult.Output) > 0);
   AssertFalse('not timed out', ExecResult.TimedOut);
@@ -788,6 +799,80 @@ begin
     AssertEquals('requested kept', 2000, FExecutor.LastTimeoutMs);
   finally
     Tool.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestModeBashIsPassedThrough;
+var
+  Tool: TCommandTool;
+  R, E: string;
+begin
+  AddRule(aeAllow, 'run_command:echo', [], True);
+  FExecutor.ResultExec.Output := 'hi';
+  Tool := BuildTool(nil, 0);
+  try
+    AssertTrue('ok', Tool.Run(
+      '{"command":"echo hi","reason":"r","mode":"bash"}', R, E));
+    AssertEquals('executor saw bash', Ord(cmBash), Ord(FExecutor.LastMode));
+    AssertEquals('executed once', 1, FExecutor.Calls);
+  finally
+    Tool.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestModeDefaultsToAuto;
+var
+  Tool: TCommandTool;
+  R, E: string;
+begin
+  AddRule(aeAllow, 'run_command:echo', [], True);
+  Tool := BuildTool(nil, 0);
+  try
+    AssertTrue('ok', Tool.Run('{"command":"echo hi","reason":"r"}', R, E));
+    AssertEquals('auto by default', Ord(cmAuto), Ord(FExecutor.LastMode));
+  finally
+    Tool.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestInvalidModeIsRejected;
+var
+  Tool: TCommandTool;
+  R, E: string;
+begin
+  Tool := BuildTool(nil, 0);
+  try
+    AssertFalse('rejected', Tool.Run(
+      '{"command":"echo hi","reason":"r","mode":"weird"}', R, E));
+    AssertTrue('names the values', Pos('invalid "mode"', E) > 0);
+    AssertEquals('never executed', 0, FExecutor.Calls);
+  finally
+    Tool.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestModeBuiltinRefusesUnsupportedWithoutAsking;
+var
+  Tool: TCommandTool;
+  Prompt: TFakePrompt;
+  R, E: string;
+begin
+  Prompt := TFakePrompt.Create;
+  Prompt.Allowed := True;
+  try
+    Tool := BuildTool(Prompt.Prompt, 0);
+    try
+      { The fake executor never owns approval, so builtin must refuse. }
+      AssertFalse('refused', Tool.Run(
+        '{"command":"git status","reason":"r","mode":"builtin"}', R, E));
+      AssertTrue('names the executor', Pos('the builtin shell cannot run', E) > 0);
+      AssertEquals('never executed', 0, FExecutor.Calls);
+      AssertEquals('never asked', 0, Prompt.Calls);
+    finally
+      Tool.Free;
+    end;
+  finally
+    Prompt.Free;
   end;
 end;
 

@@ -33,8 +33,11 @@ with the library, executed in-process, behind the existing approval service.
 
 1. **The tier is an executor, not a replacement.** It plugs into
    `TCommandTool`'s existing `ICommandExecutor` seam as a first choice; the
-   current `/bin/bash` executor remains the fallback. Nothing about
-   `run_command`'s schema, result shape or approval model changes.
+   current `/bin/bash` executor remains the fallback. The call gains an
+   optional `mode` (`auto` / `builtin` / `bash`) so the model chooses
+   deliberately: `builtin` for composed file work and never falls back,
+   `bash` for real programs. The result shape and approval model do not
+   change.
 2. **A script runs builtin only if the whole script is supported.** Before
    executing anything, the tier parses the script and checks that every command
    name is registered and the whole script is inside the library's v1 subset.
@@ -104,6 +107,9 @@ with the library, executed in-process, behind the existing approval service.
 - `mcp <server>:<tool>` calls the MCP tool through its normal gate; `run_command`
   inside the tier is refused; a tool outside the allow-list is refused.
 - Existing `run_command` grants still apply without re-prompting.
+- `mode=builtin` runs a supported script without spawning and refuses an
+  unsupported one without asking or falling back; `mode=bash` never consults
+  the tier.
 - `make check` green, leak-clean.
 
 ## Alternatives Considered

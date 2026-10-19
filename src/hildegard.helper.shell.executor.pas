@@ -28,10 +28,12 @@ type
     constructor Create(const AConfig: TBuiltinShellConfig;
       AApproval: IApprovalService; AFallback: ICommandExecutor;
       AInvoke: TShellToolInvoke = nil);
-    function OwnsApproval(const ACommand: string): Boolean;
+    function OwnsApproval(const ACommand: string; AMode: TCommandMode;
+      out AWhy: string): Boolean;
     function Execute(const AProfile: TShellProfile; const ACommand,
       AWorkDir: string; ATimeoutMs: QWord; AObserver: TToolObserver;
-      const AReason: string; out AExecution: TCommandExecution): Boolean;
+      const AReason: string; AMode: TCommandMode;
+      out AExecution: TCommandExecution): Boolean;
   end;
 
 implementation
@@ -47,25 +49,31 @@ begin
   FInvoke := AInvoke;
 end;
 
-function TBuiltinCommandExecutor.OwnsApproval(const ACommand: string): Boolean;
-var
-  Why: string;
+function TBuiltinCommandExecutor.OwnsApproval(const ACommand: string;
+  AMode: TCommandMode; out AWhy: string): Boolean;
 begin
-  Result := TierSupportsCommand(ACommand, Why);
+  AWhy := '';
+  if AMode = cmBash then
+    Exit(False);   // the process tier's splitter asks are the gate
+  Result := TierSupportsCommand(ACommand, AWhy);
 end;
 
 function TBuiltinCommandExecutor.Execute(const AProfile: TShellProfile;
   const ACommand, AWorkDir: string; ATimeoutMs: QWord;
-  AObserver: TToolObserver; const AReason: string;
+  AObserver: TToolObserver; const AReason: string; AMode: TCommandMode;
   out AExecution: TCommandExecution): Boolean;
 var
   Tier: TBuiltinShell;
-  Output, TierError: string;
+  Output, TierError, Why: string;
   ExitCode: Integer;
   Owned: Boolean;
 begin
   AExecution := Default(TCommandExecution);
-  Owned := OwnsApproval(ACommand);
+  { mode=bash is the explicit escalation: the process tier, with its asks. }
+  if AMode = cmBash then
+    Exit(FFallback.Execute(AProfile, ACommand, AWorkDir, ATimeoutMs,
+      AObserver, AReason, AMode, AExecution));
+  Owned := OwnsApproval(ACommand, AMode, Why);
   TierError := '';
   try
     try
@@ -95,6 +103,12 @@ begin
   finally
     { Fall through to the decision below. }
   end;
+  { mode=builtin is a requirement: declining is an error, never a fallback. }
+  if AMode = cmBuiltin then
+  begin
+    AExecution.Error := 'the builtin shell cannot run this command: ' + TierError;
+    Exit(False);
+  end;
   { When the tool skipped its own asks because the tier owns approval, a tier
     failure must NOT fall through to the ungated process path. Fail closed. }
   if Owned then
@@ -103,7 +117,7 @@ begin
     Exit(False);
   end;
   Result := FFallback.Execute(AProfile, ACommand, AWorkDir, ATimeoutMs,
-    AObserver, AReason, AExecution);
+    AObserver, AReason, AMode, AExecution);
 end;
 
 end.

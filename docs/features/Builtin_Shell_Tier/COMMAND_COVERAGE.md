@@ -173,10 +173,10 @@ Three options for the next feature, in order of cost:
 1. **Keep whole-script, grow the set** (P2–P5). Simple, safe, and the win is
    concentrated in scripts the agent writes itself. Coverage rises with the
    flags it actually uses.
-2. **Steer the model** to write tier-friendly scripts when it wants an
-   in-process, per-command-gated run (the tool description and the system
-   prompt can say what the tier supports). Cheap; no code change; shifts the
-   corpus over time.
+2. **Steer the model** — **implemented**: the `mode` parameter (`builtin` /
+   `bash` / `auto`) plus the tool description that lists the command set and
+   when to use each. `builtin` fails instead of falling back, so an explicit
+   builtin request is honoured exactly.
 3. **Mixed execution** — run the supported commands in the tier and hand the
    rest to `/bin/bash`, syncing cwd and exported variables across the boundary.
    That is the only way to own `cd /ws && sed -n … | grep …`, but it is a
@@ -185,6 +185,21 @@ Three options for the next feature, in order of cost:
 
 Recommendation: do (1) and (2) now; treat (3) as its own feature if the tier is
 meant to carry the bulk of the traffic rather than the self-contained scripts.
+
+## Choosing the executor: `mode`
+
+`run_command` takes an optional `mode`, and the tool description tells the model
+when to use which:
+
+| mode | use it for |
+|---|---|
+| `builtin` | composed file work: loops, pipelines, redirects, `tool`/`mcp` composition. Gated once per command, never spawns, and **fails** rather than silently falling back. |
+| `bash` | real programs: `git`, `sed`, `make`, `curl`, builds, package managers — anything outside the table above. The splitter's asks are the gate. |
+| `auto` (default) | no opinion: the tier when the whole command is supported, `/bin/bash` otherwise. |
+
+That turns "which tier?" into an explicit choice the model makes per call, and
+makes the fallback intentional instead of incidental. It does not change the
+coverage numbers above — only who decides.
 
 ## Adding a flag or a command
 

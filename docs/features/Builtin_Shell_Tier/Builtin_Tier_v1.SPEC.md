@@ -26,6 +26,9 @@ src/hildegard.helper.shell.executor.pas   TBuiltinCommandExecutor (ICommandExecu
 - `hildegard.helper.command.tool`: `ICommandExecutor.Execute` gains
   `const AReason: string`; `TProcessCommandExecutor` accepts and ignores it.
   `TCommandTool.Run` passes the model's reason.
+- `ICommandExecutor` also carries the **executor mode**: `TCommandMode =
+  (cmAuto, cmBuiltin, cmBash)`, passed to `Execute` and to
+  `OwnsApproval(ACommand, AMode, out AWhy)`.
 - `TCommandTool.Run` must not build its own asks when the executor owns the
   command. The interface therefore also gains
   `function OwnsApproval(const ACommand: string): Boolean` — True only for the
@@ -233,6 +236,22 @@ A `TShellGate` implementation on `TBuiltinShell`:
 - No recursion: the dispatcher is the session's normal tool resolution, and the
   tier refuses shell-entry tools by name.
 
+## 3a. Executor mode (the model's explicit choice)
+
+`run_command` gains an optional `mode`:
+
+| mode | behaviour |
+|---|---|
+| `auto` (default) | the tier when the whole command is supported, `/bin/bash` otherwise; the tool skips its own asks when the tier owns approval |
+| `builtin` | **require** the tier. If the command is outside it, the call fails with `the builtin shell cannot run this command: <why>` — before any ask and before anything runs. Never falls back. |
+| `bash` | force the process shell; the tool's splitter asks are the gate. The tier is not consulted. |
+
+The tool description states the same, with the command list, so the model can
+choose deliberately: prefer `builtin` for composed file work (loops, pipelines,
+redirects, tool composition) and `bash` for real programs (`git`, `sed`,
+`make`, `curl`, builds). That is the model-facing contract; there is no
+separate system-prompt text to drift from it.
+
 ## 4. `TBuiltinCommandExecutor`
 
 ```pascal
@@ -258,6 +277,10 @@ type
   `OwnsApproval` said the tier would handle the command, a tier failure fails
   closed (`builtin shell failed: …`). Falling back there would run the command
   with no gate at all.
+- `mode=builtin` never falls back: a decline is `the builtin shell cannot run
+  this command: <why>`.
+- `mode=bash` delegates to the process executor directly, before constructing
+  the tier.
 
 ## 5. Session wiring
 
@@ -318,6 +341,8 @@ special-case it.
 ### `tests/test_shell_executor.pas`
 - the executor uses the tier when the script is supported (the fallback is not
   called) and falls back when it is not;
+- `mode=bash` uses the fallback directly; `mode=builtin` runs a supported
+  script and refuses an unsupported one without falling back;
 - reasons are passed through; `TCommandExecution` fields are set.
 
 ### Differential (existing)
@@ -328,6 +353,8 @@ fixtures already pin the language. A new fixture set pins the command outputs
 ## Acceptance
 
 - A registered, in-subset script never spawns a process.
+- `mode=builtin` never falls back and never asks for a command it cannot run;
+  `mode=bash` never consults the tier.
 - The fallback is chosen before any side effect.
 - The gate sees every command once, in order, with the model's reason.
 - `run_command` inside the tier and an unlisted `tool` are refused.

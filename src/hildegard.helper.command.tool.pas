@@ -49,27 +49,37 @@ type
   { Execution seam. The real implementation wraps TCommandRunner; tests use a
     fake. AObserver receives the command's output as it arrives (it may be nil).
     Returns False only on infrastructure failure. }
+  { Which executor the model asked for. auto picks the builtin shell when the
+    whole command is supported; builtin requires it (fails rather than falling
+    back); bash forces the process shell. }
+  TCommandMode = (cmAuto, cmBuiltin, cmBash);
+
   ICommandExecutor = interface
     { True when this executor handles the whole command and raises its own
       approval asks per command (the builtin tier). The tool then must not
       pre-resolve the splitter's asks, or one command would prompt twice. A
-      process executor returns False: the tool's asks are the gate. }
-    function OwnsApproval(const ACommand: string): Boolean;
+      process executor returns False: the tool's asks are the gate. AWhy says
+      why a mode cannot handle the command. }
+    function OwnsApproval(const ACommand: string; AMode: TCommandMode;
+      out AWhy: string): Boolean;
     { AReason is the model's reason for the call; the builtin tier inherits it
       into every approval ask. A process executor may ignore it. }
     function Execute(const AProfile: TShellProfile; const ACommand,
       AWorkDir: string; ATimeoutMs: QWord; AObserver: TToolObserver;
-      const AReason: string; out AExecution: TCommandExecution): Boolean;
+      const AReason: string; AMode: TCommandMode;
+      out AExecution: TCommandExecution): Boolean;
   end;
 
   { Runs one command through TCommandRunner, streaming its output to the
     observer and collecting it for the result. }
   TProcessCommandExecutor = class(TInterfacedObject, ICommandExecutor)
   public
-    function OwnsApproval(const ACommand: string): Boolean;
+    function OwnsApproval(const ACommand: string; AMode: TCommandMode;
+      out AWhy: string): Boolean;
     function Execute(const AProfile: TShellProfile; const ACommand,
       AWorkDir: string; ATimeoutMs: QWord; AObserver: TToolObserver;
-      const AReason: string; out AExecution: TCommandExecution): Boolean;
+      const AReason: string; AMode: TCommandMode;
+      out AExecution: TCommandExecution): Boolean;
   end;
 
   TCommandTool = class(TInterfacedObject, IApprovableTool)
@@ -384,14 +394,17 @@ begin
     FInner.Complete;
 end;
 
-function TProcessCommandExecutor.OwnsApproval(const ACommand: string): Boolean;
+function TProcessCommandExecutor.OwnsApproval(const ACommand: string;
+  AMode: TCommandMode; out AWhy: string): Boolean;
 begin
+  AWhy := '';
   Result := False;
 end;
 
 function TProcessCommandExecutor.Execute(const AProfile: TShellProfile;
   const ACommand, AWorkDir: string; ATimeoutMs: QWord; AObserver: TToolObserver;
-  const AReason: string; out AExecution: TCommandExecution): Boolean;
+  const AReason: string; AMode: TCommandMode;
+  out AExecution: TCommandExecution): Boolean;
 var
   Collector: TOutputCollector;
   Runner: TCommandRunner;
@@ -448,10 +461,18 @@ begin
   Spec.Name := CommandToolName;
   Spec.Description :=
     'Run a shell command on the host and return its output. Requires a short ' +
-    'reason. Commands are checked against the approval whitelist and may need ' +
-    'approval. Prefer a dedicated tool when one fits (file_read/write/edit, ' +
-    'file_glob, file_grep, file_search_replace, ...): they are gated, confined ' +
-    'to the workspace, and diffable. Use the shell for what no tool covers. ';
+    'reason. Two executors: the builtin shell runs in-process over the ' +
+    'workspace (echo, cat, head, tail, wc, grep, ls, mkdir, rm, mv, cp, touch, ' +
+    'sort, uniq, basename, dirname, test, [, true, false, tool, mcp) and asks ' +
+    'approval once per command; /bin/bash runs everything else. Prefer ' +
+    'mode="builtin" for composed file work - loops, pipelines, redirects, ' +
+    'tool composition - because it is gated per command and never spawns; it ' +
+    'fails rather than falling back. Use mode="bash" for real programs: git, ' +
+    'sed, make, curl, builds, package managers. mode="auto" (the default) ' +
+    'picks the builtin shell when the whole command is supported. Prefer a ' +
+    'dedicated tool when one fits (file_read/write/edit, file_glob, file_grep, ' +
+    'file_search_replace, ...): they are gated, confined to the workspace, and ' +
+    'diffable. Use the shell for what no tool covers. ';
   { State where the shell starts, so the model grounds relative paths instead of
     guessing a directory (it has guessed /workspace). }
   if FConfig.DefaultCwd <> '' then
@@ -464,7 +485,11 @@ begin
     '"cwd":{"type":"string","description":"Working directory; defaults to the ' +
     'workspace root."},' +
     '"timeout_ms":{"type":"integer","description":"Timeout in ms; omit or 0 ' +
-    'for the default. Set higher for slow commands."}' +
+    'for the default. Set higher for slow commands."},' +
+    '"mode":{"type":"string","enum":["auto","builtin","bash"],' +
+    '"description":"auto (default): the builtin shell when the whole command ' +
+    'is supported, else /bin/bash. builtin: require the builtin shell; fail ' +
+    'if unsupported, no fallback. bash: force /bin/bash for real programs."}' +
     '},"required":["command","reason"]}';
   ATools.Add(Spec, Run);
 end;
@@ -514,7 +539,8 @@ function TCommandTool.Run(const AArgumentsJson: string;
 var
   Data: TJSONData;
   Root: TJSONObject;
-  Command, Reason, Cwd, EffectiveCwd: string;
+  Command, Reason, Cwd, EffectiveCwd, ModeText, Why: string;
+  Mode: TCommandMode;
   TimeoutMs: QWord;
   Plan: TCommandPlan;
   Asks: TApprovalAskArray;
@@ -554,6 +580,21 @@ begin
         Exit(False);
       end;
       ReadStringArg(Root, 'cwd', Cwd);
+      Mode := cmAuto;
+      if ReadStringArg(Root, 'mode', ModeText) and (Trim(ModeText) <> '') then
+      begin
+        if ModeText = 'auto' then
+          Mode := cmAuto
+        else if ModeText = 'builtin' then
+          Mode := cmBuiltin
+        else if ModeText = 'bash' then
+          Mode := cmBash
+        else
+        begin
+          AError := 'invalid "mode": use "auto", "builtin" or "bash"';
+          Exit(False);
+        end;
+      end;
       TimeoutMs := ReadOptionalUInt(Root, 'timeout_ms', FConfig.DefaultTimeoutMs);
       { The model defines its own timeout. An operator may still impose a cap via
         MaxTimeoutMs (0 = none). }
@@ -580,8 +621,17 @@ begin
       { The builtin tier understands the whole script and raises one ask per
         command itself; asking here as well would prompt twice for one command
         (and the second prompt would never be answered). Only the process path
-        uses the splitter's asks. }
-      if not FExecutor.OwnsApproval(Command) then
+        uses the splitter's asks.
+
+        mode=builtin makes that a requirement: an unsupported command fails
+        here, before any ask and before anything runs. }
+      if (Mode = cmBuiltin) and
+        (not FExecutor.OwnsApproval(Command, Mode, Why)) then
+      begin
+        AError := 'the builtin shell cannot run this command: ' + Why;
+        Exit(False);
+      end;
+      if not FExecutor.OwnsApproval(Command, Mode, Why) then
       begin
         Asks := BuildAsks(Command, FConfig.Shell.Syntax, FConfig.DefaultCwd, Cwd);
         { Carry the model's reason into the ask so the dialog can show it. }
@@ -612,7 +662,7 @@ begin
         if AObserver <> nil then
           AObserver.Next('$ ' + Command + LineEnding + LineEnding);
         if not FExecutor.Execute(FConfig.Shell, Command, EffectiveCwd,
-          TimeoutMs, Stream, Reason, Execution) then
+          TimeoutMs, Stream, Reason, Mode, Execution) then
         begin
           AError := 'failed to execute: ' + Execution.Error;
           Exit(False);

@@ -19,10 +19,13 @@ type
     Calls: Integer;
     LastReason: string;
     LastCommand: string;
-    function OwnsApproval(const ACommand: string): Boolean;
+    LastMode: TCommandMode;
+    function OwnsApproval(const ACommand: string; AMode: TCommandMode;
+      out AWhy: string): Boolean;
     function Execute(const AProfile: TShellProfile; const ACommand,
       AWorkDir: string; ATimeoutMs: QWord; AObserver: TToolObserver;
-      const AReason: string; out AExecution: TCommandExecution): Boolean;
+      const AReason: string; AMode: TCommandMode;
+      out AExecution: TCommandExecution): Boolean;
   end;
 
   TRecordObserver = class(TToolObserver)
@@ -49,7 +52,8 @@ type
     FExecutor: ICommandExecutor;
     function P(const AName: string): string;
     function RunExec(const ACommand: string; out AExecution: TCommandExecution;
-      AObserver: TToolObserver = nil): Boolean;
+      AObserver: TToolObserver = nil;
+      AMode: TCommandMode = cmAuto): Boolean;
   protected
     procedure SetUp; override;
     procedure TearDown; override;
@@ -60,24 +64,30 @@ type
     procedure TestFallbackReceivesTheReason;
     procedure TestObserverReceivesTierOutput;
     procedure TestOwnsApprovalOnlyForTierScripts;
+    procedure TestModeBashUsesTheFallback;
+    procedure TestModeBuiltinRunsSupported;
+    procedure TestModeBuiltinRefusesUnsupported;
     procedure TestDenialIsAResultNotAFallback;
   end;
 
 implementation
 
-function TFakeFallback.OwnsApproval(const ACommand: string): Boolean;
+function TFakeFallback.OwnsApproval(const ACommand: string;
+  AMode: TCommandMode; out AWhy: string): Boolean;
 begin
+  AWhy := '';
   Result := False;
 end;
 
 function TFakeFallback.Execute(const AProfile: TShellProfile;
   const ACommand, AWorkDir: string; ATimeoutMs: QWord;
-  AObserver: TToolObserver; const AReason: string;
+  AObserver: TToolObserver; const AReason: string; AMode: TCommandMode;
   out AExecution: TCommandExecution): Boolean;
 begin
   Inc(Calls);
   LastReason := AReason;
   LastCommand := ACommand;
+  LastMode := AMode;
   AExecution := Default(TCommandExecution);
   AExecution.Output := 'fallback output';
   AExecution.ExitCode := 0;
@@ -152,10 +162,11 @@ begin
 end;
 
 function TShellExecutorTest.RunExec(const ACommand: string;
-  out AExecution: TCommandExecution; AObserver: TToolObserver): Boolean;
+  out AExecution: TCommandExecution; AObserver: TToolObserver;
+  AMode: TCommandMode): Boolean;
 begin
   Result := FExecutor.Execute(DefaultShellProfile, ACommand, FRoot, 5000,
-    AObserver, 'the reason', AExecution);
+    AObserver, 'the reason', AMode, AExecution);
 end;
 
 procedure TShellExecutorTest.TestUsesTierWhenSupported;
@@ -212,11 +223,47 @@ begin
 end;
 
 procedure TShellExecutorTest.TestOwnsApprovalOnlyForTierScripts;
+var
+  W: string;
 begin
-  AssertTrue('supported owns approval', FExecutor.OwnsApproval('echo hi'));
-  AssertFalse('unknown does not', FExecutor.OwnsApproval('git status'));
-  AssertFalse('parse error does not', FExecutor.OwnsApproval('echo $(date)'));
-  AssertFalse('unsupported option does not', FExecutor.OwnsApproval('ls -l'));
+  AssertTrue('supported owns approval',
+    FExecutor.OwnsApproval('echo hi', cmAuto, W));
+  AssertFalse('unknown does not',
+    FExecutor.OwnsApproval('git status', cmAuto, W));
+  AssertFalse('parse error does not',
+    FExecutor.OwnsApproval('echo $(date)', cmAuto, W));
+  AssertFalse('unsupported option does not',
+    FExecutor.OwnsApproval('ls -l', cmAuto, W));
+  AssertFalse('bash mode never owns approval',
+    FExecutor.OwnsApproval('echo hi', cmBash, W));
+end;
+
+procedure TShellExecutorTest.TestModeBashUsesTheFallback;
+var
+  Exec: TCommandExecution;
+begin
+  AssertTrue('ran', RunExec('echo hi', Exec, nil, cmBash));
+  AssertEquals('fallback used', 1, FFallback.Calls);
+  AssertEquals('mode passed', Ord(cmBash), Ord(FFallback.LastMode));
+  AssertEquals('fallback output', 'fallback output', Exec.Output);
+end;
+
+procedure TShellExecutorTest.TestModeBuiltinRunsSupported;
+var
+  Exec: TCommandExecution;
+begin
+  AssertTrue('ran', RunExec('echo hi', Exec, nil, cmBuiltin));
+  AssertEquals('fallback untouched', 0, FFallback.Calls);
+  AssertEquals('tier output', 'hi' + #10, Exec.Output);
+end;
+
+procedure TShellExecutorTest.TestModeBuiltinRefusesUnsupported;
+var
+  Exec: TCommandExecution;
+begin
+  AssertFalse('refused', RunExec('git status', Exec, nil, cmBuiltin));
+  AssertEquals('fallback untouched', 0, FFallback.Calls);
+  AssertTrue('names the executor', Pos('cannot run', Exec.Error) > 0);
 end;
 
 procedure TShellExecutorTest.TestDenialIsAResultNotAFallback;
