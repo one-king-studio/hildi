@@ -494,16 +494,25 @@ rest on a component whose failure mode we keep discovering by accident.
 
 ### What "park" means here
 
-- **Code stays in the tree**, working and green: `hildegard.helper.script`,
+- **Code is kept, not deleted**: `hildegard.helper.script`,
   `hildegard.helper.tool.script`, `run_script`, the session wiring, the fork
-  pin, the leak-floor machinery. It is not deleted; it is not advertised as the
-  answer to compound work.
+  pin, the leak-floor machinery. It is not advertised as the answer to compound
+  work. *(Moved out of the build on 2026-10-18 — see the note below.)*
 - **The vendored fork is kept** (`github.com/johnrcui/GocciaScript`, branch
   `ast-arena`, six commits) so the fixes are preserved and can become an
   upstream PR whenever that is worth doing.
 - **The `run_script` tool stays available** but is not the recommended path for
   a batch; the first-class file tools and the shell remain the recommended
   paths.
+
+> **Superseded 2026-10-18.** The bullets above described *parked* (in the
+> tree, not recommended). The operator then went further and **detached** the
+> engine: `9e4e584` removed `libgoccia` from the Makefile and stripped the
+> session wiring, deleted `deps/goccia`, and moved this directory's code, tests
+> and scripts here. So `run_script` is **not** available in the built binary,
+> and this code is not compiled or gated — it is reference material. The leak
+> gate is strict zero again. Decision and re-entry conditions:
+> [REWRITE_PROPOSAL.md](REWRITE_PROPOSAL.md).
 
 ### The reason we were here, restated
 
@@ -517,3 +526,9 @@ risk at the boundary where it actually occurs.
 That reframing moves the work to
 [Tree-Sitter](../Tree_Sitter/FEATURE.md) — a correct shell ask set for the
 approval gate — and the lessons below are carried there.
+
+**If the engine is ever fixed enough to reconsider this**, read
+[REWRITE_PROPOSAL.md](REWRITE_PROPOSAL.md) first: it lists every defect we hit,
+separates what was ours from what was the engine's, names what to drop, and gives
+an admission battery the engine must pass *before* any v2 code is written.
+Building this feature is not the first task; running that battery is.

@@ -1,5 +1,12 @@
 # Component Specification: Composed Tool Sandbox v1
 
+> **Status: parked, and detached from the build (2026-10-17 / 2026-10-18).** This
+> SPEC describes a feature that is not built. It is retained because its
+> *security design* — a `tools` object that is a view over the registry, the
+> invoker seam, the exclusions, the limits — is the part worth rebuilding; see
+> `REWRITE_PROPOSAL.md` §3. `deps/goccia` no longer exists and no Makefile target
+> references it.
+
 **Related Feature:** [FEATURE.md](FEATURE.md)
 
 **Depends on:** `hildegard.helper.agent` (the tool registry + `TToolHandler`),

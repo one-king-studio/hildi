@@ -1,5 +1,13 @@
 # Implementation Plan: Composed Tool Sandbox v1
 
+> **Status: parked, and detached from the build (2026-10-17 / 2026-10-18).** The
+> tasks below were all completed and the suite was green; the feature was then
+> parked and its code moved here. **Nothing in this file is built, tested, or
+> gated any more** — it is the record of what v1 was, not a plan to execute. Do
+> not resume it from this file: read `REWRITE_PROPOSAL.md` (re-entry conditions
+> and the admission battery) and `docs/research/gocciascript-embedder-issues.md`
+> (the engine defects, as a standalone register).
+
 **Related Specification:** `Composed_Tool_Sandbox_v1.SPEC.md`
 **Related Feature:** `FEATURE.md`
 
