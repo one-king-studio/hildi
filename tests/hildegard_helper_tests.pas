@@ -38,7 +38,7 @@ uses
   test_command_paths,
   smoke_provider, test_smoke_provider,
   test_shell_parser, test_shell_isolation, test_shell_interpreter,
-  test_shell_corpus, test_shell_differential;
+  test_shell_corpus, test_shell_differential, test_shell_harness_fs;
 
 var
   Runner: TTestRunner;
