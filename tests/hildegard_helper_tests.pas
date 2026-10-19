@@ -37,7 +37,8 @@ uses
   test_tui_sessionsmodal, test_fuzzy, test_tui_actions, test_patch, test_yaml,
   test_command_paths,
   smoke_provider, test_smoke_provider,
-  test_shell_parser, test_shell_isolation, test_shell_interpreter;
+  test_shell_parser, test_shell_isolation, test_shell_interpreter,
+  test_shell_corpus, test_shell_differential;
 
 var
   Runner: TTestRunner;

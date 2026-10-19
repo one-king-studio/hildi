@@ -318,12 +318,17 @@ begin
       while (Peek(0) <> #0) and (Peek(0) <> '"') do
       begin
         if Peek(0) = '\' then
-          Advance
+        begin
+          Advance;
+          if Peek(0) <> #0 then
+            Advance;
+        end
         else if (Peek(0) = '$') and (Peek(1) = '(') then
           SkipParenGroup
         else if (Peek(0) = '$') and (Peek(1) = '{') then
-          SkipBraceGroup;
-        Advance;
+          SkipBraceGroup
+        else
+          Advance;
       end;
       if Peek(0) = '"' then
         Advance
@@ -361,6 +366,13 @@ begin
         SkipParenGroup
       else if Peek(1) = '{' then
         SkipBraceGroup
+      else if Peek(1) = '''' then
+      begin
+        { ANSI-C quoting is outside v1; reject it here so the extent is not
+          misread as an ordinary single-quoted region. }
+        Fail('ANSI-C quoting is not supported', Start, FLine, FCol);
+        Exit;
+      end
       else
         Advance;
       Continue;

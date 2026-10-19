@@ -434,7 +434,7 @@ end;
 
 procedure TShellParserTest.TestBraceOperatorRejected;
 begin
-  AssertEquals('names the construct', '${...} operators are not supported',
+  AssertEquals('names the construct', 'parameter-expansion operators are not supported',
     ParseErr('echo ${x:-y}').Message);
 end;
 

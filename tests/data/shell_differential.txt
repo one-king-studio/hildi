@@ -1,0 +1,29 @@
+# Differential fixtures: script<TAB>stdout<TAB>status, recorded from /bin/bash.
+# \n, \t and \\ are escapes; lines starting with # are comments.
+echo hello world	hello world\n	0
+echo "a  b"	a  b\n	0
+echo 'single $X'	single $X\n	0
+echo a"b"c	abc\n	0
+X=1; echo $X	1\n	0
+echo "$X"	\n	0
+echo a && echo b || echo c	a\nb\n	0
+false || echo recovered	recovered\n	0
+true && echo after	after\n	0
+for f in a b c; do echo $f; done	a\nb\nc\n	0
+for i in 1 2; do echo $i; done | cat	1\n2\n	0
+if true; then echo yes; else echo no; fi	yes\n	0
+if false; then echo yes; else echo no; fi	no\n	0
+if false; then echo a; elif true; then echo b; fi	b\n	0
+while false; do echo never; done; echo done	done\n	0
+until true; do echo never; done; echo done	done\n	0
+case x in x) echo match;; *) echo no;; esac	match\n	0
+case x in *.md) echo md;; x) echo x;; esac	x\n	0
+f() { echo $1; }; f arg	arg\n	0
+f() { return 3; }; f || echo failed	failed\n	0
+echo one > f; cat f	one\n	0
+echo one > f; echo two >> f; cat f	one\ntwo\n	0
+echo piped | cat | cat	piped\n	0
+echo x 2>&1	x\n	0
+cat <<EOF\nhi\nEOF	hi\n	0
+X=there; cat <<EOF\nhi $X\nEOF	hi there\n	0
+cat <<'EOF'\nhi $X\nEOF	hi $X\n	0

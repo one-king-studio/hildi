@@ -183,7 +183,7 @@ var
     Inner := Copy(ARaw, AStart + 1, J - AStart - 1);
     if not IsIdentifier(Inner) then
     begin
-      FailAt(AStart, '${...} operators are not supported');
+      FailAt(AStart, 'parameter-expansion operators are not supported');
       Exit(False);
     end;
     AName := Inner;
