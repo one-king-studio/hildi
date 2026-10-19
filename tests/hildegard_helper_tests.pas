@@ -36,7 +36,8 @@ uses
   test_async_parity, test_skills, test_wrap, test_replymeta, test_handoff,
   test_tui_sessionsmodal, test_fuzzy, test_tui_actions, test_patch, test_yaml,
   test_command_paths,
-  smoke_provider, test_smoke_provider;
+  smoke_provider, test_smoke_provider,
+  test_shell_parser, test_shell_isolation;
 
 var
   Runner: TTestRunner;
