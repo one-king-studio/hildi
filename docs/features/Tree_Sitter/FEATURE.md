@@ -17,6 +17,14 @@ tool:
 The first job is the reason this feature exists. The second is a consequence of
 having the engine.
 
+> **Scope change (2026-10-19).** The command-tool half is **withdrawn**. The
+> shell ask extractor will be built on the harness's own shell parser — a
+> standalone, publishable library — not on tree-sitter; see
+> [`docs/research/just-bash-and-the-builtin-shell-tier.md`](../../research/just-bash-and-the-builtin-shell-tier.md).
+> Tree-sitter remains **only** the TUI syntax-highlighting engine, so this
+> feature is now the highlighting half alone. The SPEC/TODO's shell phases are
+> superseded; the highlighting phases stand.
+
 ## Problem Statement
 
 ### The approval gate is wrong in both directions
