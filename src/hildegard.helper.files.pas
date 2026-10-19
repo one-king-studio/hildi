@@ -1493,6 +1493,60 @@ begin
   Result := Cur;
 end;
 
+{ Set the value at a JSON Pointer (RFC 6901), creating no intermediate objects:
+  the pointer's parent must exist and be an object. A top-level pointer ('/key')
+  sets a key on the document root. Returns False with AMissing set when the
+  parent does not resolve, so the caller can name the pointer rather than
+  silently creating a junk key. }
+function JsonPointerSet(ARoot: TJSONData; const APointer: string;
+  const AValue: TJSONData; out AMissing: Boolean): Boolean;
+var
+  I, LastSlash, Start, Idx: Integer;
+  Tok, Raw, ParentPtr: string;
+  Cur: TJSONData;
+  Obj: TJSONObject;
+  Arr: TJSONArray;
+begin
+  AMissing := False;
+  Result := False;
+  if not (ARoot is TJSONObject) then
+    Exit;
+  { Split the pointer into its parent path and final token. }
+  LastSlash := 0;
+  for I := 1 to Length(APointer) do
+    if APointer[I] = '/' then
+      LastSlash := I;
+  if LastSlash < 1 then
+    Exit;                       { a pointer must start with '/' }
+  ParentPtr := Copy(APointer, 1, LastSlash - 1);
+  Raw := Copy(APointer, LastSlash + 1, MaxInt);
+  Tok := StringReplace(Raw, '~1', '/', [rfReplaceAll]);
+  Tok := StringReplace(Tok, '~0', '~', [rfReplaceAll]);
+
+  if ParentPtr = '' then
+    Cur := ARoot
+  else
+  begin
+    Cur := JsonPointerFind(ARoot, ParentPtr);
+    if Cur = nil then
+    begin
+      AMissing := True;
+      Exit;
+    end;
+  end;
+
+  if Cur is TJSONObject then
+  begin
+    Obj := TJSONObject(Cur);
+    Obj.Elements[Tok] := AValue.Clone;
+    Exit(True);
+  end;
+  { An array index is not settable in place with the FCL's API (no Elements
+    setter); treat it as a missing parent so the caller names the pointer
+    rather than silently doing nothing. }
+  AMissing := True;
+end;
+
 { The directory a glob searches: everything up to the first wildcard, else '.'. }
 function GlobSearchDir(const AGlob: string): string;
 var
@@ -1746,7 +1800,8 @@ var
   Root: TJSONObject;
   Rel, Abs, PathArg, Pointer, Text: string;
   Doc, Value: TJSONData;
-  Obj: TJSONObject;
+  Existing: TJSONData;
+  Missing: Boolean;
 begin
   AResult := '';
   AError := '';
@@ -1762,6 +1817,16 @@ begin
     if not JsonString(Root, 'pointer', Pointer) or (Pointer = '') then
     begin
       AError := 'missing required "pointer"';
+      Exit(False);
+    end;
+    { Both json_read and json_edit take an RFC 6901 pointer, so the same
+      '/a/b' form means the same thing. A bare key is rejected rather than
+      treated as a top-level name — that silent reading is what made the two
+      tools diverge. }
+    if Pointer[1] <> '/' then
+    begin
+      AError := 'pointer must be a JSON pointer starting with "/" ' +
+        '(e.g. /service/port), got: ' + Pointer;
       Exit(False);
     end;
     Value := Root.Find('value');
@@ -1789,15 +1854,21 @@ begin
           Exit(False);
         end;
       end;
-      { Only a top-level pointer is set in v1 (the common case: a config key). }
-      if not (Doc is TJSONObject) then
+      { Set the value at the pointer. The parent must already exist, so a typo
+        is an error rather than a silently-created junk key; and because both
+        json_read and json_edit take the same '/a/b' form, the pointer means one
+        thing across the pair. }
+      if not JsonPointerSet(Doc, Pointer, Value, Missing) then
       begin
-        AError := 'the document root is not an object';
+        if Missing then
+        begin
+          AError := 'pointer not found: ' + Pointer;
+          Exit(False);
+        end;
+        AError := 'could not set the pointer: ' + Pointer;
         Exit(False);
       end;
-      Obj := TJSONObject(Doc);
-      Obj.Elements[Pointer] := Value.Clone;
-      if not WriteAtomic(Abs, Obj.FormatJSON + #10, AError) then
+      if not WriteAtomic(Abs, TJSONObject(Doc).FormatJSON + #10, AError) then
         Exit(False);
       AResult := '{"written":true,"path":"' + Rel + '"}';
       Result := True;
@@ -2185,12 +2256,14 @@ begin
   ATools.Add(Spec, JsonRead);
 
   Spec := MakeToolSpec('json_edit',
-    'Set a top-level key in a JSON file and write it back, validated. ' +
-    'A parse failure never writes. Prefer this over the shell: jq. ' +
+    'Set the value at a JSON pointer in a JSON file and write it back, ' +
+    'validated. The pointer''s parent must already exist (so a typo is an ' +
+    'error, not a new key). A parse failure never writes. ' +
+    'Prefer this over the shell: jq. ' +
     'Requires a short reason. Gated by approval.',
     '{"type":"object","properties":{' +
     '"path":{"type":"string","description":"File path relative to the workspace."},' +
-    '"pointer":{"type":"string","description":"The top-level key to set."},' +
+    '"pointer":{"type":"string","description":"A JSON pointer to set, e.g. /service/port (the parent must exist)."},' +
     '"value":{"description":"The JSON value to set."},' +
     '"reason":{"type":"string","description":"Short reason this edit is needed."}' +
     '},"required":["path","pointer","value","reason"]}');

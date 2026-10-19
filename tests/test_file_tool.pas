@@ -94,6 +94,9 @@ type
     { File Tools v2, Phases 4-5. }
     procedure TestJsonReadAndPointer;
     procedure TestJsonEdit;
+    procedure TestJsonEditNestedPointer;
+    procedure TestJsonEditRejectsABareKey;
+    procedure TestJsonEditMissingParentFails;
     procedure TestYamlReadSubset;
     procedure TestYamlEdit;
     procedure TestYamlOutOfSubsetErrors;
@@ -816,9 +819,51 @@ var
 begin
   WriteRaw(Full('c.json'), '{"a": 1, "b": 2}');
   AssertTrue('edit', FTool.JsonEdit(
-    '{"path":"c.json","pointer":"b","value":99,"reason":"r"}', Res, Err));
+    '{"path":"c.json","pointer":"/b","value":99,"reason":"r"}', Res, Err));
   AssertTrue('written', Pos('"written":true', Res) > 0);
   AssertTrue('value set', Pos('99', ReadRaw(Full('c.json'))) > 0);
+end;
+
+procedure TFileToolTest.TestJsonEditNestedPointer;
+var
+  Res, Err: string;
+begin
+  { json_edit takes the same RFC 6901 pointer json_read does, so /a/b means the
+    nested value in both. }
+  WriteRaw(Full('c.json'), '{"a": {"b": 42}, "list": [1,2]}');
+  AssertTrue('edit nested', FTool.JsonEdit(
+    '{"path":"c.json","pointer":"/a/b","value":7,"reason":"r"}', Res, Err));
+  AssertTrue('nested read', FTool.JsonRead(
+    '{"path":"c.json","pointer":"/a/b","reason":"r"}', Res, Err));
+  AssertEquals('nested value set', '7', Res);
+end;
+
+procedure TFileToolTest.TestJsonEditRejectsABareKey;
+var
+  Res, Err: string;
+begin
+  { A bare key is not a pointer. Rejecting it stops the silent top-level write
+    that made json_edit and json_read mean different things by "pointer". }
+  WriteRaw(Full('c.json'), '{"a": 1}');
+  AssertFalse('bare key rejected', FTool.JsonEdit(
+    '{"path":"c.json","pointer":"a","value":9,"reason":"r"}', Res, Err));
+  AssertTrue('says what a pointer is', Pos('must be a JSON pointer', Err) > 0);
+  AssertEquals('file untouched', '{"a": 1}' + LineEnding,
+    ReadRaw(Full('c.json')));
+end;
+
+procedure TFileToolTest.TestJsonEditMissingParentFails;
+var
+  Res, Err: string;
+begin
+  { The parent must exist: a typo is an error, not a new key. }
+  WriteRaw(Full('c.json'), '{"a": {"b": 1}}');
+  AssertFalse('missing parent', FTool.JsonEdit(
+    '{"path":"c.json","pointer":"/nope/deep","value":1,"reason":"r"}', Res,
+    Err));
+  AssertTrue('names the pointer', Pos('pointer not found', Err) > 0);
+  AssertEquals('file untouched', '{"a": {"b": 1}}' + LineEnding,
+    ReadRaw(Full('c.json')));
 end;
 
 procedure TFileToolTest.TestYamlReadSubset;
