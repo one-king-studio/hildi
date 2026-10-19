@@ -91,7 +91,7 @@ TEST_SRCS := $(wildcard $(TESTS)/*.pas)
 
 .PHONY: all test test-leak watch check release clean help libsqlite libmbedtls \
         store-demo agent-cli release-agent-cli tui-demo widgets-demo layout-demo \
-        headless-agent tui-agent bench perf agents agent-% mcp-smoke async-standalone async-bench async-freeze async-examples
+        headless-agent tui-agent bench perf agents agent-% mcp-smoke smoke smoke-list async-standalone async-bench async-freeze async-examples
 
 all: $(BIN)/hildegard-helper-demo
 
@@ -270,6 +270,20 @@ $(BIN)/hildegard-helper-tests-leak: $(TESTS)/hildegard_helper_tests.pas $(TEST_S
 	@mkdir -p $(BIN) $(LEAKUNITS)
 	$(FPC) $(LEAKFLAGS) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/async -Fu$(TESTS) -FU$(LEAKUNITS) -FE$(BIN) -o$@ $<
 
+# Live smoke: drive the REAL headless runtime through a scripted turn against a
+# loopback fake provider. Hermetic (loopback only, ephemeral port, temp store);
+# safe in `make check`, but kept separate because it forks a process. Needs the
+# runtime binary, so it depends on `headless-agent`. See docs/features/Live_Smoke/.
+smoke: libsqlite libmbedtls headless-agent $(BIN)/hildegard-smoke
+	HILDEGARD_RUNTIME_BIN=$(BIN)/hildegard-helper-agent $(BIN)/hildegard-smoke $(if $(SCENARIO),--scenario $(SCENARIO),)
+
+smoke-list: libsqlite libmbedtls $(BIN)/hildegard-smoke
+	$(BIN)/hildegard-smoke --list
+
+$(BIN)/hildegard-smoke: $(EXAMPLES)/smoke.pas $(TESTS)/smoke_runner.pas $(TESTS)/smoke_provider.pas $(LIB_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ)
+	@mkdir -p $(BIN) $(DBGUNITS)
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/async -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+
 # All quality gates, for CI: functional tests + leak check.
 check: test test-leak
 
@@ -329,6 +343,8 @@ help:
 	@echo "  make layout-demo              build & run the responsive two-column layout demo"
 	@echo "  make headless-agent           build the headless session runtime (no TUI)"
 	@echo "  make mcp-smoke                live MCP smoke against a real server (needs Docker)"
+	@echo "  make smoke [SCENARIO=<name>]  live end-to-end smoke (fake provider, real runtime)"
+	@echo "  make smoke-list               list the smoke scenarios"
 	@echo "  make agents                   list agent playgrounds (ahead/behind, stale flags)"
 	@echo "  make agent-<target>           run <target> in the ACTIVE playground"
 	@echo "  make async-standalone         build & run the Async Core isolation check"
