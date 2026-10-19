@@ -50,18 +50,26 @@ type
     fake. AObserver receives the command's output as it arrives (it may be nil).
     Returns False only on infrastructure failure. }
   ICommandExecutor = interface
+    { True when this executor handles the whole command and raises its own
+      approval asks per command (the builtin tier). The tool then must not
+      pre-resolve the splitter's asks, or one command would prompt twice. A
+      process executor returns False: the tool's asks are the gate. }
+    function OwnsApproval(const ACommand: string): Boolean;
+    { AReason is the model's reason for the call; the builtin tier inherits it
+      into every approval ask. A process executor may ignore it. }
     function Execute(const AProfile: TShellProfile; const ACommand,
       AWorkDir: string; ATimeoutMs: QWord; AObserver: TToolObserver;
-      out AExecution: TCommandExecution): Boolean;
+      const AReason: string; out AExecution: TCommandExecution): Boolean;
   end;
 
   { Runs one command through TCommandRunner, streaming its output to the
     observer and collecting it for the result. }
   TProcessCommandExecutor = class(TInterfacedObject, ICommandExecutor)
   public
+    function OwnsApproval(const ACommand: string): Boolean;
     function Execute(const AProfile: TShellProfile; const ACommand,
       AWorkDir: string; ATimeoutMs: QWord; AObserver: TToolObserver;
-      out AExecution: TCommandExecution): Boolean;
+      const AReason: string; out AExecution: TCommandExecution): Boolean;
   end;
 
   TCommandTool = class(TInterfacedObject, IApprovableTool)
@@ -376,9 +384,14 @@ begin
     FInner.Complete;
 end;
 
+function TProcessCommandExecutor.OwnsApproval(const ACommand: string): Boolean;
+begin
+  Result := False;
+end;
+
 function TProcessCommandExecutor.Execute(const AProfile: TShellProfile;
   const ACommand, AWorkDir: string; ATimeoutMs: QWord; AObserver: TToolObserver;
-  out AExecution: TCommandExecution): Boolean;
+  const AReason: string; out AExecution: TCommandExecution): Boolean;
 var
   Collector: TOutputCollector;
   Runner: TCommandRunner;
@@ -564,19 +577,26 @@ begin
         AError := 'no approval service configured';
         Exit(False);
       end;
-      Asks := BuildAsks(Command, FConfig.Shell.Syntax, FConfig.DefaultCwd, Cwd);
-      { Carry the model's reason into the ask so the dialog can show it. }
-      for I := 0 to High(Asks) do
-        Asks[I].Reason := Reason;
-      if not FService.Resolve(Asks, Batch) then
+      { The builtin tier understands the whole script and raises one ask per
+        command itself; asking here as well would prompt twice for one command
+        (and the second prompt would never be answered). Only the process path
+        uses the splitter's asks. }
+      if not FExecutor.OwnsApproval(Command) then
       begin
-        AError := 'approval error: ' + Batch.Reason;
-        Exit(False);
-      end;
-      if Batch.Denied then
-      begin
-        AError := Batch.Reason;
-        Exit(False);
+        Asks := BuildAsks(Command, FConfig.Shell.Syntax, FConfig.DefaultCwd, Cwd);
+        { Carry the model's reason into the ask so the dialog can show it. }
+        for I := 0 to High(Asks) do
+          Asks[I].Reason := Reason;
+        if not FService.Resolve(Asks, Batch) then
+        begin
+          AError := 'approval error: ' + Batch.Reason;
+          Exit(False);
+        end;
+        if Batch.Denied then
+        begin
+          AError := Batch.Reason;
+          Exit(False);
+        end;
       end;
 
       EffectiveCwd := Cwd;
@@ -592,7 +612,7 @@ begin
         if AObserver <> nil then
           AObserver.Next('$ ' + Command + LineEnding + LineEnding);
         if not FExecutor.Execute(FConfig.Shell, Command, EffectiveCwd,
-          TimeoutMs, Stream, Execution) then
+          TimeoutMs, Stream, Reason, Execution) then
         begin
           AError := 'failed to execute: ' + Execution.Error;
           Exit(False);

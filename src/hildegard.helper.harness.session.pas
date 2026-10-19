@@ -23,7 +23,9 @@ uses
   hildegard.helper.recall.tool, hildegard.helper.harness.turn,
   hildegard.helper.harness.view,
   hildegard.helper.mcp.config, hildegard.helper.mcp.client,
-  hildegard.helper.mcp.transport, hildegard.helper.mcp.oauth.flow;
+  hildegard.helper.mcp.transport, hildegard.helper.mcp.oauth.flow,
+  hildegard.helper.shell.commands, hildegard.helper.shell.tier,
+  hildegard.helper.shell.executor;
 type
   { The loop side of one session. Owns a TSessionView for the workspace, store,
     identity, history, and metrics. Not thread-safe except that Queue/Gate are
@@ -58,6 +60,11 @@ type
     FApprovalService: IApprovalService;
     { MCP events (server failure etc.) are recorded as session errors. }
     procedure McpEvent(const AMessage, ADetail: string);
+    { The builtin shell tier's `tool`/`mcp` dispatch: the normal resolution
+      (the base registry, then the MCP manager), so every dispatched tool still
+      passes its own gate. }
+    function InvokeShellTool(const AName, AArgumentsJson, AReason: string;
+      out AResult, AError: string): Boolean;
     { At each turn boundary, re-declare the MCP skills from the current config so
       a server added/enabled/removed is picked up without a restart. Lazy: it
       declares, it does not connect. }
@@ -182,6 +189,21 @@ begin
   Result := Session;
 end;
 
+function THarnessSession.InvokeShellTool(const AName, AArgumentsJson,
+  AReason: string; out AResult, AError: string): Boolean;
+var
+  Tool: TRegisteredTool;
+begin
+  AResult := '';
+  AError := '';
+  if FTools.Find(AName, Tool) then
+    Exit(Tool.Handler(AArgumentsJson, AResult, AError));
+  if (FMcp <> nil) and FMcp.Find(AName, Tool) then
+    Exit(Tool.Handler(AArgumentsJson, AResult, AError));
+  AError := 'unknown tool: ' + AName;
+  Result := False;
+end;
+
 procedure THarnessSession.McpEvent(const AMessage, ADetail: string);
 begin
   if FConversation <> nil then
@@ -269,6 +291,7 @@ var
   ApprovalService: IApprovalService;
   ApprovalCtx: TApprovalContext;
   ToolConfig: TCommandToolConfig;
+  TierConfig: TBuiltinShellConfig;
   FileConfig: TFileToolConfig;
   AgentConfig: TAgentConfig;
   Conv: TSqliteConversationStore;
@@ -338,7 +361,22 @@ begin
   EnvValue := GetEnvironmentVariable('HILDEGARD_COMMAND_TIMEOUT_MS');
   if EnvValue <> '' then
     ToolConfig.MaxTimeoutMs := StrToInt64Def(EnvValue, 0);
-  FCommandTool := TCommandTool.Create(ToolConfig, ApprovalService);
+  { The builtin shell tier runs supported scripts in-process; anything else
+    falls through to the process executor. HILDEGARD_BUILTIN_SHELL=0 disables it
+    for a session (the process tier is then used exactly as before). }
+  if GetEnvironmentVariable('HILDEGARD_BUILTIN_SHELL') <> '0' then
+  begin
+    TierConfig := Default(TBuiltinShellConfig);
+    TierConfig.Root := FView.WorkspaceRoot;
+    TierConfig.MaxOutputBytes := DefaultMaxOutputBytes;
+    TierConfig.AllowedTools := ['file_read', 'file_list', 'file_glob',
+      'file_grep', 'file_stat', 'mcp_*'];
+    FCommandTool := TCommandTool.Create(ToolConfig, ApprovalService,
+      TBuiltinCommandExecutor.Create(TierConfig, ApprovalService,
+        TProcessCommandExecutor.Create, InvokeShellTool));
+  end
+  else
+    FCommandTool := TCommandTool.Create(ToolConfig, ApprovalService);
   FCommandTool.Register(FTools);
 
   FileConfig := Default(TFileToolConfig);

@@ -42,22 +42,12 @@ type
     FFs: IShellFileSystem;
     FCmd: TBuiltinCommands;
     FRegistry: TShellRegistry;
-    FFunctions: TStringList;
     FReason: string;
     FDeny: string;
     FLastError: string;
     function Gate(const ACall: TShellCall): Boolean;
     function BuildAsk(const ACall: TShellCall): TApprovalAsk;
     function Preflight(const AScript: TScript): Boolean;
-    procedure CollectFunctions(const ASt: TStatement);
-    procedure CollectFunctionsAndOr(const AA: TAndOr);
-    procedure CollectFunctionsCommand(const AC: TCommand);
-    procedure CheckStatement(const ASt: TStatement);
-    procedure CheckAndOr(const AA: TAndOr);
-    procedure CheckCommand(const AC: TCommand);
-    function IsKnownName(const AName: string): Boolean;
-    function LiteralText(const AW: TWord; out AText: string): Boolean;
-    function CheckGrepPattern(const AC: TCommand): Boolean;
   public
     { Not thread-safe: the executor creates one per run_command call. }
     constructor Create(const AConfig: TBuiltinShellConfig;
@@ -69,6 +59,11 @@ type
       ATimeoutMs: QWord; out AOutput: string; out AExitCode: Integer): Boolean;
     property LastError: string read FLastError;
   end;
+
+{ True when the tier would run ACommand: it parses, every command name is
+  known, and every literal option is supported. Side-effect free, so the
+  command tool can decide whether the tier owns approval before it asks. }
+function TierSupportsCommand(const ACommand: string; out AWhy: string): Boolean;
 
 implementation
 
@@ -127,13 +122,10 @@ begin
   FRegistry.Register('false', FCmd.FalseCmd);
   FRegistry.Register('tool', FCmd.Tool);
   FRegistry.Register('mcp', FCmd.Mcp);
-  FFunctions := TStringList.Create;
-  FFunctions.CaseSensitive := True;
 end;
 
 destructor TBuiltinShell.Destroy;
 begin
-  FFunctions.Free;
   FRegistry.Free;
   FCmd.Free;
   FFs := nil;   // releases the filesystem
@@ -196,8 +188,7 @@ begin
   end;
 end;
 
-function TBuiltinShell.LiteralText(const AW: TWord;
-  out AText: string): Boolean;
+function LiteralTextOf(const AW: TWord; out AText: string): Boolean;
 var
   I: Integer;
   P: TWordPart;
@@ -215,73 +206,68 @@ begin
   end;
 end;
 
-function TBuiltinShell.IsKnownName(const AName: string): Boolean;
+function KnownTierName(const AName: string; AFunctions: TStringList): Boolean;
 begin
   if AName = '' then
     Exit(True);
   if IsBuiltinCommand(AName) then
     Exit(True);
-  if FFunctions.IndexOf(AName) >= 0 then
+  if AFunctions.IndexOf(AName) >= 0 then
     Exit(True);
   Result := (AName = 'cd') or (AName = 'pwd') or (AName = 'export') or
     (AName = 'unset') or (AName = 'local') or (AName = 'shift') or
     (AName = 'return') or (AName = 'exit') or (AName = 'set');
 end;
 
-procedure TBuiltinShell.CollectFunctions(const ASt: TStatement);
-var
-  I: Integer;
-begin
-  if ASt = nil then
-    Exit;
-  for I := 0 to High(ASt.Items) do
-    CollectFunctionsAndOr(ASt.Items[I]);
-end;
+procedure CollectFunctionsOf(const ASt: TStatement; AFunctions: TStringList); forward;
 
-procedure TBuiltinShell.CollectFunctionsAndOr(const AA: TAndOr);
-var
-  I, J: Integer;
-begin
-  for I := 0 to High(AA.Pipelines) do
-    for J := 0 to High(AA.Pipelines[I].Commands) do
-      CollectFunctionsCommand(AA.Pipelines[I].Commands[J]);
-end;
-
-procedure TBuiltinShell.CollectFunctionsCommand(const AC: TCommand);
+procedure CollectFunctionsCmd(const AC: TCommand; AFunctions: TStringList);
 var
   I: Integer;
 begin
   case AC.Kind of
     ckFunction:
       begin
-        FFunctions.Add(AC.FuncName);
+        AFunctions.Add(AC.FuncName);
         if AC.FuncBody <> nil then
-          CollectFunctionsCommand(AC.FuncBody);
+          CollectFunctionsCmd(AC.FuncBody, AFunctions);
       end;
-    ckGroup, ckSubshell: CollectFunctions(AC.Group);
+    ckGroup, ckSubshell: CollectFunctionsOf(AC.Group, AFunctions);
     ckIf:
       begin
         for I := 0 to High(AC.Clauses) do
         begin
-          CollectFunctions(AC.Clauses[I].Condition);
-          CollectFunctions(AC.Clauses[I].Body);
+          CollectFunctionsOf(AC.Clauses[I].Condition, AFunctions);
+          CollectFunctionsOf(AC.Clauses[I].Body, AFunctions);
         end;
-        CollectFunctions(AC.ElseBody);
+        CollectFunctionsOf(AC.ElseBody, AFunctions);
       end;
-    ckFor: CollectFunctions(AC.LoopBody);
+    ckFor: CollectFunctionsOf(AC.LoopBody, AFunctions);
     ckWhile, ckUntil:
       begin
-        CollectFunctions(AC.Condition);
-        CollectFunctions(AC.LoopBody);
+        CollectFunctionsOf(AC.Condition, AFunctions);
+        CollectFunctionsOf(AC.LoopBody, AFunctions);
       end;
     ckCase:
       for I := 0 to High(AC.CaseItems) do
-        CollectFunctions(AC.CaseItems[I].Body);
+        CollectFunctionsOf(AC.CaseItems[I].Body, AFunctions);
     ckSimple: ;
   end;
 end;
 
-function TBuiltinShell.CheckGrepPattern(const AC: TCommand): Boolean;
+procedure CollectFunctionsOf(const ASt: TStatement; AFunctions: TStringList);
+var
+  I, J, K: Integer;
+begin
+  if ASt = nil then
+    Exit;
+  for I := 0 to High(ASt.Items) do
+    for J := 0 to High(ASt.Items[I].Pipelines) do
+      for K := 0 to High(ASt.Items[I].Pipelines[J].Commands) do
+        CollectFunctionsCmd(ASt.Items[I].Pipelines[J].Commands[K], AFunctions);
+end;
+
+function CheckGrepPatternOf(const AC: TCommand): Boolean;
 var
   I: Integer;
   Arg, Pattern: string;
@@ -293,7 +279,7 @@ begin
   Pattern := '';
   for I := 1 to High(AC.Words) do
   begin
-    if not LiteralText(AC.Words[I], Arg) then
+    if not LiteralTextOf(AC.Words[I], Arg) then
       Continue;
     if (not Seen) and (Arg <> '') and (Arg[1] = '-') and (Arg <> '-') then
     begin
@@ -309,101 +295,140 @@ begin
   end;
   if Seen and (not Fixed) and HasRegexMeta(Pattern) then
   begin
-    FDeny := 'grep: the builtin shell matches fixed strings only ' +
-      '(the pattern has a regex metacharacter; use -F)';
-    Exit(False);
+    Result := False;
   end;
 end;
 
-procedure TBuiltinShell.CheckCommand(const AC: TCommand);
+procedure CheckTierCommand(const AC: TCommand; AFunctions: TStringList;
+  var ADeny: string); forward;
+
+procedure CheckTierStatement(const ASt: TStatement; AFunctions: TStringList;
+  var ADeny: string);
+var
+  I, J, K: Integer;
+begin
+  if (ASt = nil) or (ADeny <> '') then
+    Exit;
+  for I := 0 to High(ASt.Items) do
+    for J := 0 to High(ASt.Items[I].Pipelines) do
+      for K := 0 to High(ASt.Items[I].Pipelines[J].Commands) do
+      begin
+        CheckTierCommand(ASt.Items[I].Pipelines[J].Commands[K], AFunctions,
+          ADeny);
+        if ADeny <> '' then
+          Exit;
+      end;
+end;
+
+procedure CheckTierCommand(const AC: TCommand; AFunctions: TStringList;
+  var ADeny: string);
 var
   I: Integer;
   Name, Arg, Options: string;
 begin
-  if FDeny <> '' then
+  if ADeny <> '' then
     Exit;
   case AC.Kind of
     ckSimple:
       begin
         if Length(AC.Words) = 0 then
           Exit;
-        if not LiteralText(AC.Words[0], Name) then
-          Exit;   // the name is only known at run time; accept
-        if not IsKnownName(Name) then
+        if not LiteralTextOf(AC.Words[0], Name) then
+          Exit;
+        if not KnownTierName(Name, AFunctions) then
         begin
-          FDeny := 'the builtin shell does not know "' + Name + '"';
+          ADeny := 'the builtin shell does not know "' + Name + '"';
           Exit;
         end;
         if Name = 'grep' then
-          if not CheckGrepPattern(AC) then
+          if not CheckGrepPatternOf(AC) then
+          begin
+            ADeny := 'grep: the builtin shell matches fixed strings only ' +
+              '(the pattern has a regex metacharacter; use -F)';
             Exit;
+          end;
+        { test/[ arguments are operands, not options: -f, -d, -eq are the
+          expression itself. }
+        if (Name = 'test') or (Name = '[') then
+          Exit;
         if BuiltinCommandOptions(Name, Options) then
           for I := 1 to High(AC.Words) do
-            if LiteralText(AC.Words[I], Arg) and IsUnsupportedOption(Arg, Options) then
+            if LiteralTextOf(AC.Words[I], Arg) and IsUnsupportedOption(Arg, Options) then
             begin
-              FDeny := 'the builtin shell does not support the option "' + Arg +
+              ADeny := 'the builtin shell does not support the option "' + Arg +
                 '" for ' + Name;
               Exit;
             end;
       end;
-    ckGroup, ckSubshell: CheckStatement(AC.Group);
+    ckGroup, ckSubshell: CheckTierStatement(AC.Group, AFunctions, ADeny);
     ckIf:
       begin
         for I := 0 to High(AC.Clauses) do
         begin
-          CheckStatement(AC.Clauses[I].Condition);
-          CheckStatement(AC.Clauses[I].Body);
+          CheckTierStatement(AC.Clauses[I].Condition, AFunctions, ADeny);
+          CheckTierStatement(AC.Clauses[I].Body, AFunctions, ADeny);
         end;
-        CheckStatement(AC.ElseBody);
+        CheckTierStatement(AC.ElseBody, AFunctions, ADeny);
       end;
-    ckFor: CheckStatement(AC.LoopBody);
+    ckFor: CheckTierStatement(AC.LoopBody, AFunctions, ADeny);
     ckWhile, ckUntil:
       begin
-        CheckStatement(AC.Condition);
-        CheckStatement(AC.LoopBody);
+        CheckTierStatement(AC.Condition, AFunctions, ADeny);
+        CheckTierStatement(AC.LoopBody, AFunctions, ADeny);
       end;
     ckCase:
       for I := 0 to High(AC.CaseItems) do
-        CheckStatement(AC.CaseItems[I].Body);
+        CheckTierStatement(AC.CaseItems[I].Body, AFunctions, ADeny);
     ckFunction:
       if AC.FuncBody <> nil then
-        CheckCommand(AC.FuncBody);
+        CheckTierCommand(AC.FuncBody, AFunctions, ADeny);
   end;
 end;
 
-procedure TBuiltinShell.CheckAndOr(const AA: TAndOr);
+function ScriptInTier(const AScript: TScript; out AWhy: string): Boolean;
 var
-  I, J: Integer;
+  Fns: TStringList;
 begin
-  for I := 0 to High(AA.Pipelines) do
-    for J := 0 to High(AA.Pipelines[I].Commands) do
-      CheckCommand(AA.Pipelines[I].Commands[J]);
+  AWhy := '';
+  Fns := TStringList.Create;
+  try
+    Fns.CaseSensitive := True;
+    if AScript <> nil then
+    begin
+      CollectFunctionsOf(AScript.Root, Fns);
+      CheckTierStatement(AScript.Root, Fns, AWhy);
+    end;
+    Result := AWhy = '';
+  finally
+    Fns.Free;
+  end;
 end;
 
-procedure TBuiltinShell.CheckStatement(const ASt: TStatement);
+{ True when the tier would run ACommand (parse + whole-script pre-flight).
+  Deterministic and side-effect free, so the tool can ask "will you own this?"
+  before it builds its own asks. }
+function TierSupportsCommand(const ACommand: string; out AWhy: string): Boolean;
 var
-  I: Integer;
+  S: TScript;
+  E: TShellParseError;
 begin
-  if ASt = nil then
-    Exit;
-  for I := 0 to High(ASt.Items) do
+  AWhy := '';
+  Result := False;
+  if not ParseShellScript(ACommand, S, E) then
   begin
-    if FDeny <> '' then
-      Exit;
-    CheckAndOr(ASt.Items[I]);
+    AWhy := Format('parse error at %d:%d: %s', [E.Line, E.Column, E.Message]);
+    Exit;
+  end;
+  try
+    Result := ScriptInTier(S, AWhy);
+  finally
+    S.Free;
   end;
 end;
 
 function TBuiltinShell.Preflight(const AScript: TScript): Boolean;
 begin
-  FDeny := '';
-  FFunctions.Clear;
-  if AScript <> nil then
-  begin
-    CollectFunctions(AScript.Root);
-    CheckStatement(AScript.Root);
-  end;
-  Result := FDeny = '';
+  Result := ScriptInTier(AScript, FDeny);
   if not Result then
     FLastError := FDeny;
 end;

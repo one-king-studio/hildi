@@ -25,9 +25,10 @@ type
     ResultExec: TCommandExecution;
     Chunks: array of string;   // forwarded to the observer, in order
     constructor Create;
+    function OwnsApproval(const ACommand: string): Boolean;
     function Execute(const AProfile: TShellProfile; const ACommand,
       AWorkDir: string; ATimeoutMs: QWord; AObserver: TToolObserver;
-      out AExecution: TCommandExecution): Boolean;
+      const AReason: string; out AExecution: TCommandExecution): Boolean;
   end;
 
   TFakePrompt = class
@@ -104,9 +105,14 @@ begin
   ResultExec.ExitCode := 0;
 end;
 
+function TFakeExecutor.OwnsApproval(const ACommand: string): Boolean;
+begin
+  Result := False;
+end;
+
 function TFakeExecutor.Execute(const AProfile: TShellProfile;
   const ACommand, AWorkDir: string; ATimeoutMs: QWord; AObserver: TToolObserver;
-  out AExecution: TCommandExecution): Boolean;
+  const AReason: string; out AExecution: TCommandExecution): Boolean;
 var
   I: Integer;
 begin
@@ -721,7 +727,7 @@ var
 begin
   Exec := TProcessCommandExecutor.Create;
   AssertTrue('ok', Exec.Execute(DefaultShellProfile, 'printf hello', '', 5000,
-    nil, ExecResult));
+    nil, 'test reason', ExecResult));
   AssertEquals('exit code', 0, ExecResult.ExitCode);
   AssertTrue('output captured', Pos('hello', ExecResult.Output) > 0);
   AssertFalse('not timed out', ExecResult.TimedOut);

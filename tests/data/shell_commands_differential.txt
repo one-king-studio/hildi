@@ -1,0 +1,26 @@
+# Builtin command differential: script<TAB>stdout<TAB>stderr<TAB>status
+# Recorded from /bin/bash in a prepared workspace; \n, \t, \\ are escapes.
+# Scripts that must run in the builtin tier (no fallback).
+cat a.txt	alpha\nbeta\ngamma\n		0
+head -n 2 a.txt	alpha\nbeta\n		0
+tail -n 1 a.txt	gamma\n		0
+grep beta a.txt	beta\n		0
+grep -n beta a.txt	2:beta\n		0
+grep -c beta a.txt	1\n		0
+grep -i ALPHA a.txt	alpha\n		0
+grep -v beta a.txt	alpha\ngamma\n		0
+sort b.txt	a\na\nb\n		0
+sort -u b.txt	a\nb\n		0
+uniq b.txt	a\nb\n		0
+basename /x/y/z.pas	z.pas\n		0
+dirname /x/y/z.pas	/x/y\n		0
+cat a.txt | grep -n beta	2:beta\n		0
+for f in a.txt b.txt; do head -n 1 $f; done	alpha\na\n		0
+echo one > out.txt; cat out.txt	one\n		0
+test -f a.txt && echo yes	yes\n		0
+test -d sub && echo dir	dir\n		0
+echo a && echo b	a\nb\n		0
+mkdir -p d/e; test -d d/e && echo made	made\n		0
+touch t.txt; test -f t.txt && echo touched	touched\n		0
+cp a.txt copy.txt; cat copy.txt	alpha\nbeta\ngamma\n		0
+cp a.txt copy.txt; mv copy.txt moved.txt; cat moved.txt	alpha\nbeta\ngamma\n		0

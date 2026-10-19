@@ -26,6 +26,12 @@ src/hildegard.helper.shell.executor.pas   TBuiltinCommandExecutor (ICommandExecu
 - `hildegard.helper.command.tool`: `ICommandExecutor.Execute` gains
   `const AReason: string`; `TProcessCommandExecutor` accepts and ignores it.
   `TCommandTool.Run` passes the model's reason.
+- `TCommandTool.Run` must not build its own asks when the executor owns the
+  command. The interface therefore also gains
+  `function OwnsApproval(const ACommand: string): Boolean` — True only for the
+  builtin executor when the tier's pre-flight would accept the script. Without
+  it, one `run_command` prompts twice (once from the splitter, once per command
+  from the tier) and the second prompt is never answered.
 - `hildegard.helper.harness.session`: construct the builtin executor with the
   approval service, the workspace root, a timeout cap, and a tool dispatcher;
   pass it as `TCommandTool`'s executor. The process executor remains the
@@ -144,6 +150,9 @@ argument that is only known at run time (a variable, a glob) is not checked; if
 it turns out to name an unsupported option, the command returns a usage error
 naming it. That is the documented edge.
 
+`test` and `[` are exempt from the option check: their `-f`/`-d`/`-eq` are the
+expression's operands, not options.
+
 ## 3. `TBuiltinShell`
 
 ```pascal
@@ -244,7 +253,11 @@ type
     `Cancelled := False`, `TimedOut := False`; return True.
   - **declined**: delegate to `AFallback` with the same arguments (so the
     process tier's behaviour and asks are unchanged).
-- A `TBuiltinShell` construction failure is a decline, not an error.
+- A `TBuiltinShell` construction failure is a decline, not an error — **except
+  when the executor owns approval**: if the tool skipped its asks because
+  `OwnsApproval` said the tier would handle the command, a tier failure fails
+  closed (`builtin shell failed: …`). Falling back there would run the command
+  with no gate at all.
 
 ## 5. Session wiring
 
@@ -329,5 +342,8 @@ fixtures already pin the language. A new fixture set pins the command outputs
 - `cp` copies files only; `cp -r` declines via the option check.
 - `ls` prints bare names (no columns, no `-l`); `ls -l` declines.
 - `test` supports one expression, not `-a`/`-o` chains.
+- `wc` prints unpadded counts and `uniq -c` an unpadded count (both coreutils
+  pad); the values are identical, the whitespace is not. Neither is in the
+  command differential for that reason.
 - Glob matching uses the interpreter's matcher (no `fnmatch` extensions such as
   `[[ ]]`).
