@@ -39,7 +39,8 @@ uses
   smoke_provider, test_smoke_provider,
   test_shell_parser, test_shell_isolation, test_shell_interpreter,
   test_shell_corpus, test_shell_differential, test_shell_harness_fs,
-  test_shell_commands, test_shell_tier, test_shell_executor, test_shell_commands_diff;
+  test_shell_commands, test_shell_tier, test_shell_executor, test_shell_commands_diff,
+  test_shell_tier_corpus;
 
 var
   Runner: TTestRunner;

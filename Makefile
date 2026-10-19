@@ -252,6 +252,13 @@ shell-ast: $(SHELL_SRCS)
 	$(FPC) $(DEBUG) -Fu$(SRC)/shell -FU$(DBGUNITS) -FE$(BIN) -o$(BIN)/shell-ast-dump $(EXAMPLES)/shell_ast_dump.pas
 	$(BIN)/shell-ast-dump $(SCRIPT)
 
+# Developer report: the commands and literal flags the corpus actually uses,
+# parsed with the library. Informs which commands/options the tier should add.
+shell-flags: $(SHELL_SRCS)
+	@mkdir -p $(BIN) $(DBGUNITS)
+	$(FPC) $(DEBUG) -Fu$(SRC)/shell -FU$(DBGUNITS) -FE$(BIN) -o$(BIN)/shell-flag-report $(EXAMPLES)/shell_flag_report.pas
+	$(BIN)/shell-flag-report $(CORPUS) $(TOP)
+
 # A release build of the Async Core throughput benchmark.
 async-bench: $(ASYNC_SRCS)
 	@mkdir -p $(BIN) $(RELUNITS)

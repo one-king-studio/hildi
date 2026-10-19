@@ -116,4 +116,6 @@ docs/features/FEATURES.md
 - **Not covered**: anything outside the 22 commands or the listed flags
   (`git`, `curl`, `make`, `ls -l`, `grep -E`, `wc`-style formatting) falls back
   to the process tier, where the asks name the program and the paths. Growing
-  the set means registering a handler, not changing the core.
+  the set means registering a handler, not changing the core. The measured
+  coverage, the per-command flag table and the evidence-ordered backlog are in
+  [COMMAND_COVERAGE.md](COMMAND_COVERAGE.md).
