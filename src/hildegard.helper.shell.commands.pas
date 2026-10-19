@@ -70,6 +70,9 @@ function BuiltinCommandOptions(const AName: string; out AOptions: string): Boole
 { True when the name is one of the tier's commands. }
 function IsBuiltinCommand(const AName: string): Boolean;
 
+{ True when the pattern contains a regular-expression metacharacter. }
+function HasRegexMeta(const APattern: string): Boolean;
+
 { True when a literal argument is an option the command does not support.
   A combined short flag is decomposed (-rf -> r, f); '--' is always allowed;
   a long option is unsupported. An empty AOptions means "no options at all". }
