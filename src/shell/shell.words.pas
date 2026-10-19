@@ -338,20 +338,11 @@ begin
       end
       else if C = '[' then
       begin
-        N := I + 1;
-        while (N <= Length(ARaw)) and (ARaw[N] <> ']') do
-          Inc(N);
-        if N <= Length(ARaw) then
-        begin
-          FlushLiteral;
-          B.AddPart(wpGlob, Copy(ARaw, I, N - I + 1), False);
-          I := N + 1;
-        end
-        else
-        begin
-          Literal := Literal + C;
-          Inc(I);
-        end;
+        { Mark the class opener; the contents are scanned normally, so
+          variables inside a bracket expression still expand. }
+        FlushLiteral;
+        B.AddPart(wpGlob, '[', False);
+        Inc(I);
       end
       else if (C = '{') and IsBraceExpansion(ARaw, I) then
       begin
