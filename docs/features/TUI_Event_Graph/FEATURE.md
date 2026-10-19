@@ -149,7 +149,7 @@ future conversion, not a v1 requirement.
   cadence, dirty flags — not a rewrite. The event graph names the policy the TUI
   already implies.
 - **"RxPascal"** is the working name for the TUI built on the
-  [`Async_Core`](../features/Async_Core/FEATURE.md) library (futures + observables
+  [`Async_Core`](../Async_Core/FEATURE.md) library (futures + observables
   over one scheduler spine).
 - **The immediate repair is small**: a bounded drain, coalescing, and a bounded
   queue. Observables supply the vocabulary, not the fix.

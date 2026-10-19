@@ -1,10 +1,10 @@
 # Tool Results: Text, Not JSON, and Where a Diff Lives
 
 **Status:** design note (not implemented)
-**Related:** [File Tools](../../features/File_Tools/FEATURE.md),
-[Tool Streaming](../../features/Tool_Streaming/FEATURE.md),
-[Workspace Snapshots](../../features/Workspace_Snapshots/FEATURE.md),
-[Sessions and Ledger](../../features/Sessions_And_Ledger/FEATURE.md)
+**Related:** [File Tools](../features/File_Tools/FEATURE.md),
+[Tool Streaming](../features/Tool_Streaming/FEATURE.md),
+[Workspace Snapshots](../features/Workspace_Snapshots/FEATURE.md),
+[Sessions and Ledger](../features/Sessions_And_Ledger/FEATURE.md)
 
 Follows from a live smoke of the file tools, which found two things: a real
 asymmetry between `json_read` and `json_edit` (fixed), and a design question

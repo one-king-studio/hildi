@@ -1,17 +1,17 @@
 # Vendored-Engine Lessons (from the GocciaScript spike)
 
-**Status:** carried into [Tree-Sitter](../../features/Tree_Sitter/FEATURE.md)
+**Status:** carried into [Tree-Sitter](../features/Tree_Sitter/FEATURE.md)
 **Related:** [goccia-ast-arena.md](goccia-ast-arena.md),
 [goccia-embedding-findings.md](goccia-embedding-findings.md),
 [gocciascript-embedder-issues.md](gocciascript-embedder-issues.md) (the engine's
 own 47-item register, project-agnostic),
-[Composed Tool Sandbox](../../features/Composed_Tool_Sandbox/FEATURE.md) (parked)
+[Composed Tool Sandbox](../features/Composed_Tool_Sandbox/FEATURE.md) (parked)
 
 The Composed Tool Sandbox embedded a third-party FPC engine (GocciaScript) as a
 security-relevant component. It is now parked — the engine works, but it is not
 mature enough to gate access. These are the lessons worth keeping, written so
 they transfer to any vendored parser or runtime, and specifically to
-[Tree-Sitter](../../features/Tree_Sitter/FEATURE.md), which vendors a C runtime
+[Tree-Sitter](../features/Tree_Sitter/FEATURE.md), which vendors a C runtime
 and per-language grammars for the **same reason** (a correct shell ask set for
 the approval gate).
 
