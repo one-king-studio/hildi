@@ -95,26 +95,29 @@ Bugs and improvements, not yet scoped into a feature. When one is picked up,
 move it into its own feature directory (or the relevant existing one) and give
 it the usual artifact chain.
 
-- **The run-state label says `thinking` when it should say `working`.** The
-  label is `thinking` for the whole turn, including while the model is calling
-  tools or waiting on a tool result, so it misdescribes what the agent is
-  actually doing. It should reflect the phase (`working`, `calling tools`,
-  `waiting`, …). Touches the harness run state
-  (`hildegard.helper.harness.app`, `TChatPanel.SetState`) and the events that
-  drive it. (TUI_Harness, Live_Turn_Control.)
-
-- **`run_command` should echo the command before streaming its output.** Today
-  the tool block stays blank until the first output chunk arrives, so a slow or
-  silent command looks frozen. Print the resolved command line into the block
-  the moment the tool starts, then stream stdout/stderr into it. (Tool_Streaming,
-  Command_Tool.)
-
 - **Background (non-blocking) tasks, so the UI does not freeze.** A long tool
   call blocks the turn until it returns, and the UI stops showing progress.
   Support running a task in the background: the operator can keep working (or
   the turn continues) and the result is delivered when it lands — likely riding
   the subagent pool (`hildegard.helper.pool`) and the ambient-record path. Needs
   a scoped design. (Agent_Loop, Subagents, Tool_Streaming.)
+
+### Retired (verified already implemented)
+
+Two entries were carried here after the code had moved on. Both were checked
+against the source and the tests; neither needs work.
+
+- ~~The run-state label says `thinking` when it should say `working`.~~ **Done.**
+  `teToolCall` already sets `SetState(psTool, 'running ' + E.ToolName)`, and
+  `TPanelState` distinguishes `psThinking`/`psTool`/`psApproval`/`psError`/
+  `psInterrupt`, so the label reflects the phase. (`hildegard.helper.harness.app`,
+  `hildegard.helper.tui.chatpanel`.)
+- ~~`run_command` should echo the command before streaming its output.~~ **Done**
+  in `6fe43f7` ("stream the full command before its output"): the command tool
+  emits `$ <command>` to the observer *first*, before the output cap, so the
+  live block is never blank; `TestRunCommandStreamsOutput` asserts the streamed
+  text is `'$ echo hi' + sLineBreak + sLineBreak + 'one two '`.
+  (`hildegard.helper.command.tool`.)
 
 ## Existing Behaviour (to be documented)
 
