@@ -128,8 +128,14 @@ begin
 end;
 
 var
-  Commands, Flags: TTally;
+  Commands, Flags, Programs: TTally;
   Parsed, Failed, Simple, NonLiteralName: Integer;
+
+function IsProgramCommand(const AName: string): Boolean;
+begin
+  Result := (AName = 'sed') or (AName = 'awk') or (AName = 'jq') or
+    (AName = 'yq') or (AName = 'rg');
+end;
 
 procedure NoteSimple(const AC: TCommand);
 var
@@ -146,9 +152,22 @@ begin
   end;
   Commands.Add(Name);
   for I := 1 to High(AC.Words) do
-    if LiteralOf(AC.Words[I], Arg) and (Arg <> '') and (Arg[1] = '-') and
-      (Arg <> '-') then
-      Flags.Add(Name + ' ' + Arg);
+  begin
+    if not LiteralOf(AC.Words[I], Arg) then
+      Continue;
+    if (Arg <> '') and (Arg[1] = '-') and (Arg <> '-') then
+    begin
+      if (Arg <> '') and (Arg[1] = '-') and (Arg <> '-') then
+        Flags.Add(Name + ' ' + Arg);
+      Continue;
+    end;
+    { The first non-option literal of a program command is its program text. }
+    if IsProgramCommand(Name) then
+    begin
+      Programs.Add(Name + ' ' + Arg);
+      Break;
+    end;
+  end;
 end;
 
 procedure WalkCommand(const AC: TCommand); forward;
@@ -206,6 +225,7 @@ begin
   Lines := TStringList.Create;
   Commands := TTally.Create;
   Flags := TTally.Create;
+  Programs := TTally.Create;
   try
     if ParamCount >= 1 then
       Lines.LoadFromFile(ParamStr(1))
@@ -242,7 +262,10 @@ begin
       Flags.Counts.Count);
     Commands.Report('COMMAND NAME (how often the corpus calls it)', Top);
     Flags.Report('OPTION TOKEN (command + literal flag)', Top);
+    Programs.Report('PROGRAM TEXT (sed/awk/jq/yq/rg + first non-option literal)',
+      Top);
   finally
+    Programs.Free;
     Flags.Free;
     Commands.Free;
     Lines.Free;

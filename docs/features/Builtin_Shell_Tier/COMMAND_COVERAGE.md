@@ -42,6 +42,7 @@ parser the tier uses; re-run `make shell-flags` to reproduce the tallies.
 | `cat` | — | many files, `-` for stdin |
 | `wc` | `-l -w -c` | default all three; `N name` per file plus a `total` |
 | `grep` | `-n -i -v -l -c -F -E -G -r` | **BRE** by default, **ERE** with `-E`, fixed with `-F`; POSIX classes mapped; `-r` walks directories (sorted; symlinked dirs skipped) and prefixes every hit |
+| `sed` | `-n -E -r -e -i[SUFFIX]` | paging/ranges (`N`, `$`, `/re/`, ranges), `p`/`d`/`q`, `s///` with `g`/`p`/`i`, `&` and groups; `-i` rewrites through the workspace FS |
 | `ls` | `-a -d` | bare names, one path; `-d` prints the path |
 | `mkdir` | `-p` | |
 | `rm` | `-r -f` | directories only with `-r`; `-f` suppresses missing |
@@ -57,8 +58,9 @@ parser the tier uses; re-run `make shell-flags` to reproduce the tallies.
 | `tool` | — | `tool <name> [json]`; allow-list; `run_command` refused |
 | `mcp` | — | `mcp <server>:<tool> [json]`; maps to `mcp_<s>_<t>` |
 
-Anything not listed — `git`, `sed`, `make`, `curl`, `fpc`, `python3`, `find`,
-`awk` — is **not** in the tier and always falls back.
+Anything not listed — `git`, `make`, `curl`, `fpc`, `python3`, `find`, `awk`,
+`jq`, `rg` — is **not** in the tier and always falls back. (`sed` joined the
+set; `awk`/`jq`/`yq`/`rg` are [planned](../Text_Data_Commands/FEATURE.md).)
 
 ## The evidence
 
@@ -71,7 +73,7 @@ Anything not listed — `git`, `sed`, `make`, `curl`, `fpc`, `python3`, `find`,
 | 3 | `cd` | 1732 | yes (builtin) |
 | 4 | `head` | 1598 | yes |
 | 5 | `git` | 1448 | no |
-| 6 | `sed` | 1203 | no |
+| 6 | `sed` | 1203 | yes |
 | 7 | `make` | 500 | no |
 | 8 | `tail` | 465 | yes |
 | 9 | `ls` | 239 | yes |
@@ -105,22 +107,23 @@ Anything not listed — `git`, `sed`, `make`, `curl`, `fpc`, `python3`, `find`,
 
 ### Whole-script coverage
 
-Of the 3.255 corpus entries, the tier runs **751 (23%)** today (76 before
-`head -N`/`tail -N`, 105 before grep regex, 585 before `grep -r`). The rest
-decline, and the **first** blocker per script is:
+Of the 3.255 corpus entries, the tier runs **1,670 (51%)** today (76 before
+`head -N`/`tail -N`, 105 before grep regex, 585 before `grep -r`, 751 before
+`sed`). The rest decline, and the **first** blocker per script is:
 
 | First blocker | scripts |
 |---|---|
-| `sed` not in the tier | 964 |
-| `git` not in the tier | 557 |
+| `git` not in the tier | 564 |
 | `make` not in the tier | 439 |
-| `fpc` not in the tier | 105 |
+| `fpc` not in the tier | 111 |
 | `python3` not in the tier | 23 |
+| `ls -la` (needs `-l`) | 21 |
 | `curl` not in the tier | 21 |
 | `find` not in the tier | 20 |
 
-What remains is dominated by real programs. The in-tier options left are small:
-`ls -l` (49 uses, needs a richer `Stat`) and `find` (20 first-blockers).
+What remains is dominated by real programs. The in-tier options left are
+`ls -l` (needs a richer `Stat`), `find`, and the transform commands in
+[Text & Data Commands](../Text_Data_Commands/FEATURE.md) (`awk`, `jq`, `rg`).
 
 These are *first* blockers and overlap: a script may contain both `sed` and a
 regex grep. `sed`, `git`, `make` are real programs, so the tier will never own
@@ -134,6 +137,10 @@ number and the decline reasons).
 
 **P1 — done:** `head -N` / `tail -N`. 1.308 uses; trivial; the shorthand is what
 the corpus actually writes.
+
+**P1.5 — done:** `sed` (1,245 uses, 964 first-blockers). The subset in
+[sed v1](../Text_Data_Commands/Sed_v1.SPEC.md) covers paging, ranges,
+substitution and in-place edits. Coverage 751 → 1,670 (23% → 51%).
 
 **P2 — done:** grep regex. `grep` is BRE by default, ERE with `-E`, fixed with
 `-F`, using FPC's `regexpr` behind a translation layer: BRE metacharacters,

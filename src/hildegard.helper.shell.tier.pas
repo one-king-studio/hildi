@@ -21,7 +21,7 @@ uses
   shell.types, shell.ast, shell.fs, shell.parser, shell.registry,
   shell.interpreter,
   hildegard.helper.approval, hildegard.helper.shell.fs,
-  hildegard.helper.shell.commands;
+  hildegard.helper.shell.commands, hildegard.helper.shell.pattern;
 
 type
   TBuiltinShellConfig = record
@@ -122,6 +122,7 @@ begin
   FRegistry.Register('false', FCmd.FalseCmd);
   FRegistry.Register('tool', FCmd.Tool);
   FRegistry.Register('mcp', FCmd.Mcp);
+  FRegistry.Register('sed', FCmd.Sed);
 end;
 
 destructor TBuiltinShell.Destroy;
@@ -298,7 +299,7 @@ begin
     end;
   end;
   if Seen then
-    Result := GrepPatternSupported(Pattern, Fixed, Extended, AWhy);
+    Result := PatternSupported(Pattern, Fixed, Extended, AWhy);
 end;
 
 procedure CheckTierCommand(const AC: TCommand; AFunctions: TStringList;
@@ -354,12 +355,19 @@ begin
           Exit;
         if BuiltinCommandOptions(Name, Options) then
           for I := 1 to High(AC.Words) do
-            if LiteralTextOf(AC.Words[I], Arg) and IsUnsupportedOption(Arg, Options) then
+          begin
+            if not LiteralTextOf(AC.Words[I], Arg) then
+              Continue;
+            { sed -i[SUFFIX] carries its suffix on the same token. }
+            if (Name = 'sed') and (Copy(Arg, 1, 2) = '-i') then
+              Continue;
+            if IsUnsupportedOption(Arg, Options) then
             begin
               ADeny := 'the builtin shell does not support the option "' + Arg +
                 '" for ' + Name;
               Exit;
             end;
+          end;
       end;
     ckGroup, ckSubshell: CheckTierStatement(AC.Group, AFunctions, ADeny);
     ckIf:

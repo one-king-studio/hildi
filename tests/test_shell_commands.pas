@@ -50,6 +50,7 @@ type
     procedure TestBracket;
     procedure TestTrueFalse;
     procedure TestOptionTable;
+    procedure TestSed;
     procedure TestToolDispatch;
     procedure TestToolGatewayRefusals;
     procedure TestMcpMapping;
@@ -153,6 +154,8 @@ begin
     Result := FCmd.TrueCmd(Call)
   else if AName = 'false' then
     Result := FCmd.FalseCmd(Call)
+  else if AName = 'sed' then
+    Result := FCmd.Sed(Call)
   else if AName = 'tool' then
     Result := FCmd.Tool(Call)
   else if AName = 'mcp' then
@@ -449,6 +452,52 @@ begin
   AssertTrue('numeric shorthand refused without N',
     IsUnsupportedOption('-20', '-n'));
   AssertTrue('numeric must be digits', IsUnsupportedOption('-2x', '-nN'));
+end;
+
+procedure TShellCommandsTest.TestSed;
+var
+  R: TShellResult;
+  E, Data: string;
+begin
+  R := RunCmd('sed', ['-n', '1,2p', 'a.txt']);
+  AssertEquals('range', 'alpha' + #10 + 'beta' + #10, R.Stdout);
+  R := RunCmd('sed', ['-n', '2p', 'a.txt']);
+  AssertEquals('single line', 'beta' + #10, R.Stdout);
+  R := RunCmd('sed', ['-n', '$p', 'a.txt']);
+  AssertEquals('last line', 'beta' + #10, R.Stdout);
+  R := RunCmd('sed', ['-n', '/alpha/,/beta/p', 'a.txt']);
+  AssertEquals('regex range', 'alpha' + #10 + 'beta' + #10, R.Stdout);
+  R := RunCmd('sed', ['s/alpha/ALPHA/', 'a.txt']);
+  AssertEquals('substitute', 'ALPHA' + #10 + 'beta' + #10, R.Stdout);
+  R := RunCmd('sed', ['-n', 's/a/A/p', 'a.txt']);
+  AssertEquals('s///p prints only on a match', 'Alpha' + #10 + 'betA' + #10,
+    R.Stdout);
+  R := RunCmd('sed', ['s/a/A/g', 'a.txt']);
+  AssertEquals('global', 'AlphA' + #10 + 'betA' + #10, R.Stdout);
+  R := RunCmd('sed', ['s/alpha/[&]/', 'a.txt']);
+  AssertEquals('& is the match', '[alpha]' + #10 + 'beta' + #10, R.Stdout);
+  R := RunCmd('sed', ['-E', 's/(a)lpha/\1LPHA/', 'a.txt']);
+  AssertEquals('ERE group', 'aLPHA' + #10 + 'beta' + #10, R.Stdout);
+  R := RunCmd('sed', ['1d', 'a.txt']);
+  AssertEquals('delete', 'beta' + #10, R.Stdout);
+  R := RunCmd('sed', ['-n', '/beta/q', 'a.txt']);
+  AssertEquals('quit with -n prints nothing', '', R.Stdout);
+  R := RunCmd('sed', ['/beta/q', 'a.txt']);
+  AssertEquals('quit prints the current line',
+    'alpha' + #10 + 'beta' + #10, R.Stdout);
+  R := RunCmd('sed', ['-n', '/beta/,$p', 'a.txt']);
+  AssertEquals('match to end', 'beta' + #10, R.Stdout);
+  R := RunCmd('sed', ['s/a/A/', 'missing.txt']);
+  AssertEquals('missing file', 2, R.ExitCode);
+  R := RunCmd('sed', ['z', 'a.txt']);
+  AssertEquals('unsupported command', 1, R.ExitCode);
+  AssertTrue('names it', Pos('unsupported sed command', R.Stderr) > 0);
+  R := RunCmd('sed', ['-i.bak', 's/alpha/ALPHA/', 'a.txt']);
+  AssertEquals('in-place status', 0, R.ExitCode);
+  AssertTrue('file rewritten', FFs.ReadFile(P('a.txt'), Data, E));
+  AssertEquals('rewritten content', 'ALPHA' + #10 + 'beta' + #10, Data);
+  AssertTrue('backup kept', FFs.ReadFile(P('a.txt.bak'), Data, E));
+  AssertEquals('backup content', 'alpha' + #10 + 'beta' + #10, Data);
 end;
 
 procedure TShellCommandsTest.TestToolDispatch;

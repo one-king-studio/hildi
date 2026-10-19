@@ -43,3 +43,16 @@ grep -rc a . | sort	./a.txt:3\n./b.txt:2\n./c.log:0\n		0
 grep -r beta a.txt	a.txt:beta\n		0
 grep -rn alpha . | sort	./a.txt:1:alpha\n		0
 grep -rn nope . | sort			0
+sed -n '1,2p' a.txt	alpha\nbeta\n		0
+sed -n '2p' a.txt	beta\n		0
+sed -n '$p' a.txt	gamma\n		0
+sed -n '/alpha/,/beta/p' a.txt	alpha\nbeta\n		0
+sed 's/a/A/g' a.txt	AlphA\nbetA\ngAmmA\n		0
+sed -n 's/a/A/p' a.txt	Alpha\nbetA\ngAmma\n		0
+sed 's/alpha/[&]/' a.txt	[alpha]\nbeta\ngamma\n		0
+sed -E 's/(a)lpha/\\1LPHA/' a.txt	aLPHA\nbeta\ngamma\n		0
+sed '1d' a.txt	beta\ngamma\n		0
+sed -n '/beta/q' a.txt			0
+sed -n '/beta/,$p' a.txt	beta\ngamma\n		0
+sed -i.bak 's/alpha/ALPHA/' a.txt; cat a.txt	ALPHA\nbeta\ngamma\n		0
+sed 's/^/  /' a.txt	  alpha\n  beta\n  gamma\n		0
