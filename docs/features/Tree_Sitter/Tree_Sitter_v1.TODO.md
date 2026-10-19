@@ -1,5 +1,10 @@
 # Implementation Plan: Tree-Sitter v1
 
+> **Scope change (2026-10-19).** Phases 3–4 (the shell adapter and the approval
+> integration) are **superseded** by the harness's own shell library
+> ([`Shell_Library`](../Shell_Library/FEATURE.md)). This plan is now the
+> **highlighting path** (Phases 0–2 and 5). Do not build the shell adapter.
+
 **Related Specification:** `Tree_Sitter_v1.SPEC.md`
 **Related Feature:** [FEATURE.md](FEATURE.md)
 

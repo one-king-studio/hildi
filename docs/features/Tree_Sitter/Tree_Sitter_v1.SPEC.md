@@ -1,5 +1,12 @@
 # Component Specification: Tree-Sitter v1
 
+> **Scope change (2026-10-19).** Shell parsing is **out**: the command-tool
+> parser is the harness's own standalone library
+> ([`Shell_Library`](../Shell_Library/FEATURE.md)). This specification is now
+> the **highlighting half only** (the TUI engine). The shell-adapter
+> requirements, contracts, and tests below are superseded; keep the grammar
+> registry, the query runner, and the capture → theme mapping.
+
 **Related Feature:** [FEATURE.md](FEATURE.md)
 
 **Depends on:** `hildegard.helper.command.policy` (the plan types and the
