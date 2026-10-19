@@ -70,6 +70,7 @@ LEAKFLAGS := $(MODE) $(STRICT) -O- -Crtio -Sa -gh -gl
 HEAPTRC   := haltonnotreleased:skipifnoleaks
 
 # TDD knobs:
+#   make shell-ast [SCRIPT='echo hi']       -> dump a parsed shell AST
 #   make test SUITE=TAgentPoolTest          -> one suite
 #   make test SUITE=TestReportsExitCode     -> one test method
 #   make test SUITE=A,B                     -> a list
@@ -243,6 +244,13 @@ shell-standalone: $(SHELL_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) -Fu$(SRC)/shell -FU$(DBGUNITS) -FE$(BIN) -o$(BIN)/shell-standalone $(EXAMPLES)/shell_standalone.pas
 	$(BIN)/shell-standalone
+
+# A developer demo: parse sample scripts and print the AST the library built.
+# Pass a script to dump just that one: make shell-ast SCRIPT='echo hi | cat'
+shell-ast: $(SHELL_SRCS)
+	@mkdir -p $(BIN) $(DBGUNITS)
+	$(FPC) $(DEBUG) -Fu$(SRC)/shell -FU$(DBGUNITS) -FE$(BIN) -o$(BIN)/shell-ast-dump $(EXAMPLES)/shell_ast_dump.pas
+	$(BIN)/shell-ast-dump $(SCRIPT)
 
 # A release build of the Async Core throughput benchmark.
 async-bench: $(ASYNC_SRCS)
