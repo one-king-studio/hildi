@@ -267,14 +267,16 @@ begin
         CollectFunctionsCmd(ASt.Items[I].Pipelines[J].Commands[K], AFunctions);
 end;
 
-function CheckGrepPatternOf(const AC: TCommand): Boolean;
+function CheckGrepPatternOf(const AC: TCommand; out AWhy: string): Boolean;
 var
   I: Integer;
   Arg, Pattern: string;
-  Fixed, Seen: Boolean;
+  Fixed, Extended, Seen: Boolean;
 begin
   Result := True;
+  AWhy := '';
   Fixed := False;
+  Extended := False;
   Seen := False;
   Pattern := '';
   for I := 1 to High(AC.Words) do
@@ -285,6 +287,8 @@ begin
     begin
       if Pos('F', Arg) > 0 then
         Fixed := True;
+      if Pos('E', Arg) > 0 then
+        Extended := True;
       Continue;
     end;
     if not Seen then
@@ -293,10 +297,8 @@ begin
       Pattern := Arg;
     end;
   end;
-  if Seen and (not Fixed) and HasRegexMeta(Pattern) then
-  begin
-    Result := False;
-  end;
+  if Seen then
+    Result := GrepPatternSupported(Pattern, Fixed, Extended, AWhy);
 end;
 
 procedure CheckTierCommand(const AC: TCommand; AFunctions: TStringList;
@@ -341,10 +343,9 @@ begin
           Exit;
         end;
         if Name = 'grep' then
-          if not CheckGrepPatternOf(AC) then
+          if not CheckGrepPatternOf(AC, Arg) then
           begin
-            ADeny := 'grep: the builtin shell matches fixed strings only ' +
-              '(the pattern has a regex metacharacter; use -F)';
+            ADeny := 'grep: ' + Arg;
             Exit;
           end;
         { test/[ arguments are operands, not options: -f, -d, -eq are the

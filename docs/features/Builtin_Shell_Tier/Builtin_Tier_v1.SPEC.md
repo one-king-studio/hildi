@@ -119,7 +119,7 @@ knows).
 | `head` | `-n N` | first N lines (default 10); files or stdin |
 | `tail` | `-n N` | last N lines (default 10); files or stdin |
 | `wc` | `-l -w -c` | selected counts (default all three); `N name` per file |
-| `grep` | `-n -i -v -l -c -F` | fixed-string match; a pattern with a regex metacharacter and no `-F` is an error naming it |
+| `grep` | `-n -i -v -l -c -F -E -G` | BRE by default, ERE with `-E`, fixed with `-F`; POSIX classes mapped; multiple files prefix `file:` |
 | `ls` | `-a -d` | sorted names; `-a` includes dotfiles; `-d` lists the path itself |
 | `mkdir` | `-p` | create directories |
 | `rm` | `-r -f` | remove files; directories only with `-r`; `-f` suppresses missing |
@@ -364,8 +364,14 @@ fixtures already pin the language. A new fixture set pins the command outputs
 ## Recorded Deviations
 
 - `touch` does not update an existing file's mtime (v1).
-- `grep` is fixed-string; a regex pattern without `-F` declines (pre-flight,
-  when literal) or errors (at run time).
+- `grep` matches with bash's languages: BRE by default, ERE with `-E`, fixed
+  with `-F`. BRE metacharacters (`\(`, `\)`, `\{`, `\}`, `\|`, `\+`,
+  `\?`), GNU word boundaries (`\<`, `\>`) and POSIX classes inside brackets
+  are translated to the engine (FPC `regexpr`). A construct the translation
+  cannot express faithfully (an unmapped POSIX class) makes a **literal**
+  pattern decline in the pre-flight, so `auto` falls back to `/bin/bash`; a
+  pattern only known at run time errors with status 2. Unknown letter escapes
+  (`\d`, `\A`) stay literal, as bash treats them.
 - `cp` copies files only; `cp -r` declines via the option check.
 - `ls` prints bare names (no columns, no `-l`); `ls -l` declines.
 - `test` supports one expression, not `-a`/`-o` chains.

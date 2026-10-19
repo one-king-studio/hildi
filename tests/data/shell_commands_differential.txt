@@ -28,3 +28,12 @@ head -2 a.txt	alpha\nbeta\n		0
 tail -1 a.txt	gamma\n		0
 head -20 a.txt	alpha\nbeta\ngamma\n		0
 tail -2 b.txt	a\nb\n		0
+grep '^alpha' a.txt	alpha\n		0
+grep -E 'alpha|gamma' a.txt b.txt	a.txt:alpha\na.txt:gamma\n		0
+grep 'a.*a' a.txt	alpha\ngamma\n		0
+grep -c '[[:alpha:]]' a.txt	3\n		0
+grep 'a\\+' a.txt	alpha\nbeta\ngamma\n		0
+grep 'b\\{1\\}' a.txt	beta\n		0
+grep -i 'ALPHA' a.txt	alpha\n		0
+grep -v 'a' b.txt	b\n		0
+grep -n 'a' a.txt b.txt	a.txt:1:alpha\na.txt:2:beta\na.txt:3:gamma\nb.txt:1:a\nb.txt:2:a\n		0

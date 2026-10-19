@@ -36,7 +36,7 @@ type
     procedure TestHeadAndTail;
     procedure TestWc;
     procedure TestGrep;
-    procedure TestGrepRejectsRegex;
+    procedure TestGrepRegex;
     procedure TestGrepMultipleFiles;
     procedure TestLs;
     procedure TestMkdirAndRm;
@@ -243,15 +243,36 @@ begin
   AssertEquals('stdin', 'beta' + #10, R.Stdout);
 end;
 
-procedure TShellCommandsTest.TestGrepRejectsRegex;
+procedure TShellCommandsTest.TestGrepRegex;
 var
   R: TShellResult;
+  E: string;
 begin
-  R := RunCmd('grep', ['a.*b', 'a.txt']);
-  AssertEquals('usage status', 2, R.ExitCode);
-  AssertTrue('names the limitation', Pos('fixed strings', R.Stderr) > 0);
-  R := RunCmd('grep', ['-F', 'a.*b', 'a.txt']);
-  AssertEquals('fixed form is accepted', 1, R.ExitCode);
+  R := RunCmd('grep', ['a.*a', 'a.txt']);
+  AssertEquals('BRE dot-star status', 0, R.ExitCode);
+  AssertEquals('BRE dot-star output', 'alpha' + #10, R.Stdout);
+  R := RunCmd('grep', ['-E', 'alpha|beta', 'a.txt']);
+  AssertEquals('ERE alternation', 'alpha' + #10 + 'beta' + #10, R.Stdout);
+  R := RunCmd('grep', ['-F', 'a.*a', 'a.txt']);
+  AssertEquals('fixed is literal', 1, R.ExitCode);
+  R := RunCmd('grep', ['^beta$', 'a.txt']);
+  AssertEquals('anchors', 'beta' + #10, R.Stdout);
+  R := RunCmd('grep', ['-i', 'ALPHA', 'a.txt']);
+  AssertEquals('caseless regex', 'alpha' + #10, R.Stdout);
+  R := RunCmd('grep', ['-c', '[[:alpha:]]', 'a.txt']);
+  AssertEquals('POSIX class mapped', '2' + #10, R.Stdout);
+  R := RunCmd('grep', ['b\{1\}', 'a.txt']);
+  AssertEquals('BRE interval', 'beta' + #10, R.Stdout);
+  R := RunCmd('grep', ['a\+', 'a.txt']);
+  AssertEquals('BRE plus', 'alpha' + #10 + 'beta' + #10, R.Stdout);
+  { A Perl-only escape must mean what bash means: \d is a literal "d". }
+  FFs.WriteFile(P('d.txt'), 'dog' + #10 + '123' + #10, False, E);
+  R := RunCmd('grep', ['\d', 'd.txt']);
+  AssertEquals('unknown escape is literal', 'dog' + #10, R.Stdout);
+  R := RunCmd('grep', ['a[', 'a.txt']);
+  AssertEquals('invalid regex status', 2, R.ExitCode);
+  AssertTrue('invalid regex message',
+    Pos('invalid regular expression', R.Stderr) > 0);
 end;
 
 procedure TShellCommandsTest.TestGrepMultipleFiles;
@@ -390,6 +411,8 @@ begin
   AssertTrue('long no', IsUnsupportedOption('--all', '-a'));
   AssertFalse('bare dash', IsUnsupportedOption('-', '-a'));
   AssertFalse('double dash', IsUnsupportedOption('--', '-a'));
+  AssertFalse('triple dash is an argument', IsUnsupportedOption('---', '-n'));
+  AssertTrue('long option with a name', IsUnsupportedOption('--all', '-a'));
   AssertTrue('no options at all', IsUnsupportedOption('-x', ''));
   AssertFalse('not an option', IsUnsupportedOption('x', ''));
   AssertFalse('numeric shorthand allowed', IsUnsupportedOption('-20', '-nN'));

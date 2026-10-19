@@ -44,7 +44,7 @@ type
     procedure TestFunctionsAreKnown;
     procedure TestUnknownCommandDeclines;
     procedure TestUnsupportedOptionDeclines;
-    procedure TestGrepRegexDeclines;
+    procedure TestGrepRegexRuns;
     procedure TestParseErrorDeclines;
     procedure TestGateAskedPerCommand;
     procedure TestAskShapeMatchesRunCommand;
@@ -185,13 +185,17 @@ begin
   AssertTrue('supported option runs', RunTier('ls -a', OutText));
 end;
 
-procedure TShellTierTest.TestGrepRegexDeclines;
+procedure TShellTierTest.TestGrepRegexRuns;
 var
   OutText: string;
 begin
-  AssertFalse('declined', RunTier('grep a.b a.txt', OutText));
-  AssertTrue('names it', Pos('fixed strings', FTier.LastError) > 0);
-  AssertTrue('fixed form runs', RunTier('grep -F a.b a.txt', OutText));
+  AssertTrue('regex runs in the tier', RunTier('grep a.*a a.txt', OutText));
+  AssertTrue('matched the regex', Pos('alpha', OutText) > 0);
+  AssertTrue('fixed form still runs', RunTier('grep -F a.txt a.txt', OutText));
+  { A POSIX class the tier cannot express declines to the process tier. }
+  AssertFalse('unsupported class declines',
+    RunTier('grep "[[:punct:]]" a.txt', OutText));
+  AssertTrue('says why', Pos('POSIX character class', FTier.LastError) > 0);
 end;
 
 procedure TShellTierTest.TestParseErrorDeclines;
