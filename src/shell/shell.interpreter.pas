@@ -56,6 +56,7 @@ type
     function ExecStatement(const ASt: TStatement): TShellResult;
     function ExecAndOr(const AA: TAndOr): TShellResult;
     function ExecPipeline(const AP: TPipeline): TShellResult;
+    function ExecStage(const AC: TCommand; const AStdin: string): TShellResult;
     function ExecSimple(const AC: TCommand; const AStdin: string): TShellResult;
     function ExecIf(const AC: TCommand): TShellResult;
     function ExecFor(const AC: TCommand): TShellResult;
@@ -384,6 +385,34 @@ begin
   end;
 end;
 
+function TShell.ExecStage(const AC: TCommand; const AStdin: string): TShellResult;
+var
+  SavedEnv, StageEnv: TShellEnv;
+  SavedCwd: string;
+  SavedPos: TStringArray;
+  SavedFns: Integer;
+begin
+  SavedEnv := FEnv;
+  StageEnv := SavedEnv.Clone;
+  SavedCwd := FCwd;
+  SavedPos := FPositional;
+  SavedFns := FFunctions.Count;
+  try
+    FEnv := StageEnv;
+    try
+      Result := ExecCommand(AC, AStdin);
+    finally
+      FEnv := SavedEnv;
+    end;
+  finally
+    StageEnv.Free;
+    FCwd := SavedCwd;
+    FPositional := SavedPos;
+    while FFunctions.Count > SavedFns do
+      FFunctions.Delete(FFunctions.Count - 1);
+  end;
+end;
+
 function TShell.ExecPipeline(const AP: TPipeline): TShellResult;
 var
   I: Integer;
@@ -399,7 +428,12 @@ begin
   begin
     if FExitRequested or FReturnRequested then
       Break;
-    R := ExecCommand(AP.Commands[I], Inp);
+    { A one-command pipeline is not a subshell: state changes (cd, assignments,
+      function definitions) must persist. Multi-stage stages are isolated. }
+    if Length(AP.Commands) = 1 then
+      R := ExecCommand(AP.Commands[I], Inp)
+    else
+      R := ExecStage(AP.Commands[I], Inp);
     AllErr := AllErr + R.Stderr;
     Inp := R.Stdout;
     Last := R;

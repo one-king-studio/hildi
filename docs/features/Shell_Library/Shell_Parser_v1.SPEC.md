@@ -235,6 +235,24 @@ function ParseScript(const ASource: string; out AScript: TScript;
 - [ ] The library isolation test passes (no harness dependency).
 - [ ] `make check` green.
 
+## Recorded Deviations (v1 implementation)
+
+- **Bracket expressions are marked at the `[` only.** The word parser emits a
+  glob marker for `[` and scans the contents normally, so `[$X]` still expands
+  `$X` (the corpus contains such words) while the matcher sees the assembled
+  `[...]` pattern.
+- **`$'...'` is rejected by the lexer**, not the word parser: its escapes make
+  an ordinary single-quoted scan misread its extent, which could swallow a later
+  quote. The error names ANSI-C quoting.
+- **The subset-gate messages** are exactly: `command substitution is not
+  supported`, `parameter-expansion operators are not supported`, `backquote
+  command substitution is not supported`, `brace expansion is not supported`,
+  `ANSI-C quoting is not supported`, `process substitution is not supported`.
+- **The corpus fixture is 3,255 unique commands.** The 6,295 figure counts
+  records across sessions; the fixture de-duplicates. 3,182 parse (97.8%); the
+  73 rejections are the named constructs above plus one genuinely unterminated
+  quote.
+
 ## Future Considerations
 
 - v2: `${…}` operators, `$((…))`, `$(…)`/backticks, process substitution,

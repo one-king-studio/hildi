@@ -37,6 +37,7 @@ type
   published
     procedure TestEcho;
     procedure TestPipeline;
+    procedure TestPipelineStagesDoNotLeakState;
     procedure TestAndOr;
     procedure TestAssignmentAndExpansion;
     procedure TestExportAndUnset;
@@ -166,6 +167,15 @@ procedure TShellInterpreterTest.TestPipeline;
 begin
   AssertEquals('status', 0, RunSrc('echo a b | cat'));
   AssertEquals('piped stdin', 'a b' + #10, FOut);
+end;
+
+procedure TShellInterpreterTest.TestPipelineStagesDoNotLeakState;
+begin
+  RunSrc('cd sub | cat; pwd');
+  AssertEquals('cwd unchanged', '/work' + #10, FOut);
+  FOut := '';
+  RunSrc('X=1 | cat; echo [$X]');
+  AssertEquals('variable unchanged', '[]' + #10, FOut);
 end;
 
 procedure TShellInterpreterTest.TestAndOr;

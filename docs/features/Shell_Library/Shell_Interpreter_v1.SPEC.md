@@ -142,8 +142,8 @@ type
 
   TShell = class
     constructor Create(ARegistry: TShellRegistry; AFs: IShellFileSystem;
-      AGate: TShellGate; const ALimits: TShellLimits;
-      AEnv: TShellEnv = nil);
+      const AInitialCwd: string; AGate: TShellGate;
+      const ALimits: TShellLimits; AEnv: TShellEnv = nil);
     { Execute a parsed script in the current shell. }
     function Run(const AScript: TScript; out AOutput, AError: string): Integer;
     { Parse and run; a parse error is reported, nothing is executed. }
@@ -154,8 +154,10 @@ type
 
 ### Data Contracts
 
-- **Pipeline subshell.** Stages run in copies; `cd`/assignments inside a
-  pipeline do not leak to the parent (POSIX). The gate sees each stage's call.
+- **Pipeline subshell.** Each stage runs with a copy of the environment, cwd and
+  positional parameters, and any function it defines is dropped afterwards;
+  `cd`/assignments inside a pipeline do not leak to the parent. The gate sees
+  each stage's call. Stages run sequentially in v1 (see Deviations).
 - **Redirect evaluation order.** Left to right, before the command runs; a
   failure stops the command. `2>&1` duplicates the current fd 2 target.
 - **Gate order.** Expand words → resolve the registry → call the gate → call the
@@ -232,6 +234,36 @@ type
 - [ ] Limits abort a runaway script.
 - [ ] The corpus's supported scripts parse and run.
 - [ ] `make check` green, leak-clean.
+
+## Recorded Deviations (v1 implementation)
+
+The implementation follows this SPEC except where noted. Each is a deliberate,
+tested ceiling with its upgrade path.
+
+- **Pipelines are sequential.** The handler contract is
+  `function(Call): TShellResult`: it returns a whole stdout string, it does not
+  stream. Stages therefore run to completion in order, and `yes | head` would
+  not terminate. Upgrade path: a streaming handler API (an observer, or an
+  input/output stream pair); the AST already separates the stages.
+- **The constructor takes the initial cwd.** `IShellFileSystem` resolves against
+  a cwd, so the shell must be told where it starts; it cannot be derived from the
+  environment alone.
+- **Field splitting is a simple, documented model.** A word that is exactly one
+  unquoted variable (or `$@`) splits on whitespace; any other word is one field.
+  Quotes suppress splitting. That is enough for `for f in $FILES` without the
+  full IFS algorithm.
+- **Redirections are supported on simple commands.** `{ ...; } > f` and
+  `if ...; fi > f` are not v1.
+- **Globs are expanded by the interpreter** through `IShellFileSystem.ListDir`
+  and a small matcher (no regex, no C `fnmatch`). No match yields the literal
+  pattern, which is POSIX's default.
+- **`cd` is a library builtin**, not a consumer handler: cwd, environment,
+  positional parameters and functions are shell state, and a handler could not
+  mutate them without exposing the interpreter's internals. The consumer still
+  supplies the filesystem, so the path bound remains theirs.
+- **Not implemented (v1):** arithmetic, arrays, `eval`/`source`, `trap`, `read`,
+  process substitution, command substitution, brace expansion, parameter
+  operators, `cd -`/`OLDPWD`, and `set -e`/`-u`/`pipefail`.
 
 ## Future Considerations
 
