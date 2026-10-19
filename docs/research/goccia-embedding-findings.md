@@ -1,5 +1,11 @@
 # GocciaScript embedding findings (harness-side)
 
+> **Historical (2026-10-18).** The findings below are folded into the standalone
+> register at [gocciascript-embedder-issues.md](gocciascript-embedder-issues.md)
+> — read that first. `deps/goccia` no longer exists and the scripts referenced
+> here now live in `docs/features/Composed_Tool_Sandbox/scripts/`. This record is
+> kept because it is the pin-a-fork rationale and the upstream PR body.
+
 Observations from embedding the vendored engine (`deps/goccia`, pinned
 `531fb52`) in the harness. Each is a candidate upstream issue/PR; the harness
 works around them in `scripts/patch-goccia.sh`.

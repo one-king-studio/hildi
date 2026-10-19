@@ -13,10 +13,16 @@ there is one feature, not two. The surface and its rules now live in
 
 ## Where the source lives
 
-**Vendored** at `deps/goccia/` by `scripts/fetch-goccia.sh`, which pins upstream
-commit `531fb523efe10375858ac29faf3da5dd15195418`, verifies the archive's SHA-256
+**Vendored** at `deps/goccia/` by `scripts/fetch-goccia.sh` (now in
+`docs/features/Composed_Tool_Sandbox/scripts/`), which pins upstream commit
+`531fb523efe10375858ac29faf3da5dd15195418`, verifies the archive's SHA-256
 (`c0a97fe9…`), and extracts it — the project's `deps/` pattern, like SQLite and
 mbedTLS: fetched, not committed. The script is idempotent; re-run it any time.
+
+> **Historical note (2026-10-18):** `deps/goccia` was deleted and the engine
+> detached from the build when the composed tool sandbox was parked. This document
+> describes the pre-spike survey. For the engine's current state and defects see
+> [gocciascript-embedder-issues.md](gocciascript-embedder-issues.md).
 
 The useful material is its `docs/`: `embedding.md`, `capability-audit.md`,
 `permissions.md`, `architecture.md`, `bytecode-vm.md`, `host-environment.md`,

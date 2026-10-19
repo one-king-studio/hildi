@@ -1,5 +1,11 @@
 # GocciaScript Async & Promises (research)
 
+> **Historical (2026-10-18).** `deps/goccia` was deleted and the engine detached
+> from the build when the composed tool sandbox was parked. This describes the
+> engine at commit `531fb52…` and is kept because the analysis of *how a blocking
+> host call fits an `await`* is still relevant to
+> [pascal-async-await.md](pascal-async-await.md), which is engine-free.
+
 How the engine does `Promise`/`async`/`await`, and where a Pascal host plugs in —
 read for the [Composed Tool Sandbox](../features/Composed_Tool_Sandbox/FEATURE.md),
 whose tool calls must be awaitable so an approval can block them without the

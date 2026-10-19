@@ -1,8 +1,19 @@
 # 0143 - Parsed AST nodes are allocated into an engine-owned arena, and the arena is freed with the engine
 
+> **Historical (2026-10-18).** The engine this describes is detached from the
+> build and `deps/goccia` is deleted; the code it documents lives in a fork. Kept
+> because the ownership analysis, the three-scope correction and the heaptrc +
+> `atos` method are the most reusable artifact from that work — see
+> [vendored-engine-lessons.md](vendored-engine-lessons.md) for the generalised
+> version, and [gocciascript-embedder-issues.md](gocciascript-embedder-issues.md)
+> for the defect register.
+
 **Date:** 2026-10-17
 **Area:** `ast`, `parser`, `engine`, `memory`
-**Related:** [ADR 0017](0017-vmt-dispatch-for-ast-evaluation.md), [ADR 0126](0126-bytecode-call-path-arena-fills-and-thread-binding.md), [ADR 0133](0133-modules-root-their-value-exports.md)
+**Related:** upstream ADRs `0017-vmt-dispatch-for-ast-evaluation.md`,
+`0126-bytecode-call-path-arena-fills-and-thread-binding.md`,
+`0133-modules-root-their-value-exports.md` (in the engine's own tree, not this
+one)
 
 > Harness note: this record is the vendored patch's design note. It is kept in
 > the harness tree (`docs/research/`) so a `fetch-goccia.sh` re-fetch cannot
