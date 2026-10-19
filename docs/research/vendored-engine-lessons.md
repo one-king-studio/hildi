@@ -3,6 +3,8 @@
 **Status:** carried into [Tree-Sitter](../../features/Tree_Sitter/FEATURE.md)
 **Related:** [goccia-ast-arena.md](goccia-ast-arena.md),
 [goccia-embedding-findings.md](goccia-embedding-findings.md),
+[gocciascript-embedder-issues.md](gocciascript-embedder-issues.md) (the engine's
+own 47-item register, project-agnostic),
 [Composed Tool Sandbox](../../features/Composed_Tool_Sandbox/FEATURE.md) (parked)
 
 The Composed Tool Sandbox embedded a third-party FPC engine (GocciaScript) as a

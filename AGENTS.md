@@ -161,7 +161,9 @@ Hard-won constraints; please respect them:
   Read `docs/research/vendored-engine-lessons.md` before adopting another
   vendored parser or runtime: it carries the nine lessons (ownership, fail-safe,
   the heaptrc + `atos` method, prefer the boundary you already have) into the
-  Tree-Sitter work.
+  Tree-Sitter work. The engine's defects themselves are catalogued in
+  `docs/research/gocciascript-embedder-issues.md` — 47 items, no host-project
+  references, written to be handed to the engine's own maintainers.
 
 ## Code Style
 
