@@ -132,6 +132,10 @@ var
   Line, Script, ExpectedOut, ExpectedErr, ActualOut: string;
   Failures: TStringList;
   Cfg: TBuiltinShellConfig;
+  Tmp: TWorkspaceShellFs;
+  Entries: TStringArray;
+  CleanError: string;
+  K: Integer;
 begin
   AssertTrue('fixture exists', FileExists(FixturePath));
   Lines := TStringList.Create;
@@ -153,8 +157,17 @@ begin
       ExpectedOut := Decode(Copy(Line, P1 + 1, P2 - 1));
       ExpectedErr := Decode(Copy(Line, P1 + P2 + 1, P3 - 1));
       ExpectedStatus := StrToIntDef(Copy(Line, P1 + P2 + P3 + 1, MaxInt), 0);
-      { A fresh shell per fixture, like bash's separate invocations. }
+      { A fresh workspace and shell per fixture, like bash's separate
+        invocations (earlier fixtures leave files behind). }
       FTier.Free;
+      Tmp := TWorkspaceShellFs.Create(FRoot);
+      try
+        if Tmp.ListDir(FRoot, Entries, CleanError) then
+          for K := 0 to High(Entries) do
+            Tmp.Delete(FRoot + '/' + Entries[K], True, CleanError);
+      finally
+        Tmp.Free;
+      end;
       Populate;
       Cfg := Default(TBuiltinShellConfig);
       Cfg.Root := FRoot;

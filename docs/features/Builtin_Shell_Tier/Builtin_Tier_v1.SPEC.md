@@ -119,7 +119,7 @@ knows).
 | `head` | `-n N` | first N lines (default 10); files or stdin |
 | `tail` | `-n N` | last N lines (default 10); files or stdin |
 | `wc` | `-l -w -c` | selected counts (default all three); `N name` per file |
-| `grep` | `-n -i -v -l -c -F -E -G` | BRE by default, ERE with `-E`, fixed with `-F`; POSIX classes mapped; multiple files prefix `file:` |
+| `grep` | `-n -i -v -l -c -F -E -G -r` | BRE by default, ERE with `-E`, fixed with `-F`; POSIX classes mapped; `-r` walks directories (sorted, symlinked dirs skipped) and prefixes every hit; multiple files prefix `file:` |
 | `ls` | `-a -d` | sorted names; `-a` includes dotfiles; `-d` lists the path itself |
 | `mkdir` | `-p` | create directories |
 | `rm` | `-r -f` | remove files; directories only with `-r`; `-f` suppresses missing |

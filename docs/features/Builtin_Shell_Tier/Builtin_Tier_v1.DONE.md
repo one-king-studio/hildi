@@ -110,9 +110,10 @@ docs/features/FEATURES.md
 - **The gate**: the same `run_command:<bin>` refs and option shapes, the model's
   reason inherited, one ask per command, and `OwnsApproval` keeps the splitter's
   asks out of the builtin path.
-- **Evidence**: 52 tests across the filesystem, commands, tier and executor;
-  23 recorded `/bin/bash` command scripts match exactly; `make check` green at
-  1,530 tests, leak-clean.
+- **Evidence**: 54 tests across the filesystem, commands, tier and executor;
+  42 recorded `/bin/bash` command scripts match exactly; whole-script corpus
+  coverage 23% (751/3,255) with the rest declining to real programs;
+  `make check` green at 1,540 tests, leak-clean.
 - **Not covered**: anything outside the 22 commands or the listed flags
   (`git`, `curl`, `make`, `ls -l`, `grep -E`, `wc`-style formatting) falls back
   to the process tier, where the asks name the program and the paths. Growing

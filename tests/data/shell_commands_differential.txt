@@ -37,3 +37,9 @@ grep 'b\\{1\\}' a.txt	beta\n		0
 grep -i 'ALPHA' a.txt	alpha\n		0
 grep -v 'a' b.txt	b\n		0
 grep -n 'a' a.txt b.txt	a.txt:1:alpha\na.txt:2:beta\na.txt:3:gamma\nb.txt:1:a\nb.txt:2:a\n		0
+grep -rn beta . | sort	./a.txt:2:beta\n		0
+grep -rl a . | sort	./a.txt\n./b.txt\n		0
+grep -rc a . | sort	./a.txt:3\n./b.txt:2\n./c.log:0\n		0
+grep -r beta a.txt	a.txt:beta\n		0
+grep -rn alpha . | sort	./a.txt:1:alpha\n		0
+grep -rn nope . | sort			0

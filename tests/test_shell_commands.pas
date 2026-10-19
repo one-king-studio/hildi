@@ -38,6 +38,7 @@ type
     procedure TestGrep;
     procedure TestGrepRegex;
     procedure TestGrepMultipleFiles;
+    procedure TestGrepRecursive;
     procedure TestLs;
     procedure TestMkdirAndRm;
     procedure TestMvAndCp;
@@ -282,6 +283,35 @@ begin
   R := RunCmd('grep', ['-n', 'beta', 'a.txt', 'b.txt']);
   AssertEquals('prefixes file', 'a.txt:2:beta' + #10 + 'b.txt:1:beta' + #10,
     R.Stdout);
+end;
+
+procedure TShellCommandsTest.TestGrepRecursive;
+var
+  R: TShellResult;
+  E: string;
+begin
+  FFs.MakeDir(P('dir'), False, E);
+  FFs.MakeDir(P('dir/sub'), False, E);
+  FFs.WriteFile(P('dir/a.txt'), 'alpha' + #10 + 'beta' + #10, False, E);
+  FFs.WriteFile(P('dir/sub/b.txt'), 'beta' + #10 + 'gamma' + #10, False, E);
+  FFs.WriteFile(P('dir/c.txt'), 'nope' + #10, False, E);
+  R := RunCmd('grep', ['-r', 'beta', 'dir']);
+  AssertEquals('recursive prefixes every hit',
+    'dir/a.txt:beta' + #10 + 'dir/sub/b.txt:beta' + #10, R.Stdout);
+  R := RunCmd('grep', ['-rn', 'beta', 'dir']);
+  AssertEquals('recursive -n',
+    'dir/a.txt:2:beta' + #10 + 'dir/sub/b.txt:1:beta' + #10, R.Stdout);
+  R := RunCmd('grep', ['-rl', 'beta', 'dir']);
+  AssertEquals('recursive -l',
+    'dir/a.txt' + #10 + 'dir/sub/b.txt' + #10, R.Stdout);
+  R := RunCmd('grep', ['-rc', 'beta', 'dir']);
+  AssertEquals('recursive -c lists every file',
+    'dir/a.txt:1' + #10 + 'dir/c.txt:0' + #10 + 'dir/sub/b.txt:1' + #10, R.Stdout);
+  R := RunCmd('grep', ['-r', 'beta', 'dir/a.txt']);
+  AssertEquals('a file operand is still prefixed', 'dir/a.txt:beta' + #10,
+    R.Stdout);
+  R := RunCmd('grep', ['-r', 'beta', '.']);
+  AssertTrue('cwd recursion', Pos('./dir/a.txt:beta', R.Stdout) > 0);
 end;
 
 procedure TShellCommandsTest.TestLs;

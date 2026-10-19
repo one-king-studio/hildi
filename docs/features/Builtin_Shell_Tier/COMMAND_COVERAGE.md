@@ -41,7 +41,7 @@ parser the tier uses; re-run `make shell-flags` to reproduce the tallies.
 | `tail` | `-n N`, `-N` | last N lines (default 10); 0 or 1 file, or stdin |
 | `cat` | — | many files, `-` for stdin |
 | `wc` | `-l -w -c` | default all three; `N name` per file plus a `total` |
-| `grep` | `-n -i -v -l -c -F -E -G` | **BRE** by default, **ERE** with `-E`, fixed with `-F`; POSIX classes mapped; multiple files prefix `file:` |
+| `grep` | `-n -i -v -l -c -F -E -G -r` | **BRE** by default, **ERE** with `-E`, fixed with `-F`; POSIX classes mapped; `-r` walks directories (sorted; symlinked dirs skipped) and prefixes every hit |
 | `ls` | `-a -d` | bare names, one path; `-d` prints the path |
 | `mkdir` | `-p` | |
 | `rm` | `-r -f` | directories only with `-r`; `-f` suppresses missing |
@@ -94,7 +94,7 @@ Anything not listed — `git`, `sed`, `make`, `curl`, `fpc`, `python3`, `find`,
 | `head -N` (BSD shorthand) | 851 | **added** (was declining) |
 | `tail -N` (BSD shorthand) | 457 | **added** (was declining) |
 | `grep -E` / `-nE` / `-iE` / `-cE` (`-E` family) | 931 | **added** (BRE/ERE) |
-| `grep -r` / `-rn` / `-rln` (recursive) | 309 | declines |
+| `grep -r` / `-rn` / `-rln` (recursive) | 309 | **added** |
 | `grep -n` | 780 | yes |
 | `grep -v` / `-c` / `-i` | 193 | yes |
 | `head -n` / `tail -n` | 0 | yes (nobody writes it) |
@@ -105,20 +105,22 @@ Anything not listed — `git`, `sed`, `make`, `curl`, `fpc`, `python3`, `find`,
 
 ### Whole-script coverage
 
-Of the 3.255 corpus entries, the tier runs **585 (17%)** today (76 before
-`head -N`/`tail -N`, 105 before grep regex). The rest decline, and the **first**
-blocker per script is:
+Of the 3.255 corpus entries, the tier runs **751 (23%)** today (76 before
+`head -N`/`tail -N`, 105 before grep regex, 585 before `grep -r`). The rest
+decline, and the **first** blocker per script is:
 
 | First blocker | scripts |
 |---|---|
-| `sed` not in the tier | 946 |
-| `git` not in the tier | 554 |
-| `make` not in the tier | 436 |
-| `grep -r` / `-rn` / `-rln` unsupported | 194 |
-| `fpc` not in the tier | 104 |
+| `sed` not in the tier | 964 |
+| `git` not in the tier | 557 |
+| `make` not in the tier | 439 |
+| `fpc` not in the tier | 105 |
 | `python3` not in the tier | 23 |
+| `curl` not in the tier | 21 |
 | `find` not in the tier | 20 |
-| `curl` not in the tier | 20 |
+
+What remains is dominated by real programs. The in-tier options left are small:
+`ls -l` (49 uses, needs a richer `Stat`) and `find` (20 first-blockers).
 
 These are *first* blockers and overlap: a script may contain both `sed` and a
 regex grep. `sed`, `git`, `make` are real programs, so the tier will never own
@@ -140,13 +142,15 @@ literal as bash treats them. A construct the translation cannot express is
 declined for a literal pattern (so `auto` falls back to bash) and errors at run
 time. Coverage 105 → 585 scripts.
 
-**P3 — `grep -r` / `-rn` / `-rln` (309 uses, 194 first-blockers).** Now the top
-in-tier blocker. Walk the directory tree through the FS seam (recursive
-`ListDir`), prefix each hit with the file name, follow the same containment
-rule. Medium.
+**P3 — done:** `grep -r` / `-rn` / `-rln`. Walks directories through the FS
+seam, prefixes every hit (as bash does, even for a file operand), lists every
+file for `-rc`, and skips symlinked directories (that is `-R`, not `-r`). The
+walk is depth-limited and sorted; bash's directory order is not, so fixtures
+that depend on order pipe through `sort`. Coverage 585 → 751.
 
-**P4 — `ls -l` (49 uses).** Needs a richer `Stat` (mode, size, mtime) in
-`IShellFileSystem`; small but touches the seam. Until then `-l` declines.
+**P4 — `ls -l` (49 uses, under 20 first-blockers).** Needs a richer `Stat`
+(mode, size, mtime) in `IShellFileSystem`; small but touches the seam. Until
+then `-l` declines (and falls back).
 
 **P5 — `find -name` / `-type` (33 uses).** A deliberately small `find`
 (`find PATH -name GLOB [-type f|d]`), sharing the recursive walk with `grep -r`.

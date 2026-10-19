@@ -105,7 +105,7 @@ const
     (Name: 'head'; Options: '-nN'),
     (Name: 'tail'; Options: '-nN'),
     (Name: 'wc'; Options: '-lwc'),
-    (Name: 'grep'; Options: '-nivlcFEG'),
+    (Name: 'grep'; Options: '-nivlcFEGr'),
     (Name: 'ls'; Options: '-ad'),
     (Name: 'mkdir'; Options: '-p'),
     (Name: 'rm'; Options: '-rf'),
@@ -790,14 +790,16 @@ end;
 function TBuiltinCommands.Grep(const ACall: TShellCall): TShellResult;
 var
   I, J, P: Integer;
-  ShowN, IgnoreCase, Invert, ListOnly, CountOnly, Fixed, Extended: Boolean;
+  ShowN, IgnoreCase, Invert, ListOnly, CountOnly, Fixed, Extended,
+    Recursive: Boolean;
   Args: TStringArray;
-  Pattern, Data, E, Text: string;
+  Pattern, Data, E, Text, Full: string;
   Lines: TStringArray;
   OutText, ErrText: string;
   Status: Integer;
   Multiple: Boolean;
   Matcher: TGrepMatcher;
+  Kind: TShellFileKind;
 
   procedure ScanStream(const AText, AName: string; AShowName: Boolean);
   var
@@ -830,6 +832,95 @@ var
     end;
   end;
 
+  procedure ScanFile(const AFullPath, ADisplay: string; AShowName: Boolean);
+  var
+    D, Err: string;
+    Ls: TStringArray;
+    K, Count: Integer;
+  begin
+    if not FFs.ReadFile(AFullPath, D, Err) then
+    begin
+      ErrText := ErrText + 'grep: ' + ADisplay + ': ' + Err + #10;
+      Status := 2;
+      Exit;
+    end;
+    if Pos(#0, D) = 0 then
+    begin
+      ScanStream(D, ADisplay, AShowName);
+      Exit;
+    end;
+    { Binary: report existence rather than dump bytes, like grep. }
+    Ls := LinesOf(D);
+    Count := 0;
+    for K := 0 to High(Ls) do
+      if Matcher.Matches(Ls[K]) then
+        Inc(Count);
+    if Count > 0 then
+    begin
+      Status := 0;
+      if ListOnly then
+        OutText := OutText + ADisplay + #10
+      else if CountOnly then
+      begin
+        if AShowName then
+          OutText := OutText + ADisplay + ':';
+        OutText := OutText + IntToStr(Count) + #10;
+      end
+      else
+        OutText := OutText + 'Binary file ' + ADisplay + ' matches' + #10;
+    end
+    else if CountOnly then
+    begin
+      if AShowName then
+        OutText := OutText + ADisplay + ':';
+      OutText := OutText + '0' + #10;
+    end;
+  end;
+
+  procedure WalkDir(const ADir, ADisplayDir: string; ADepth: Integer);
+  var
+    Entries: TStringArray;
+    Err, Child, Display: string;
+    I: Integer;
+    LSt: Stat;
+  begin
+    if ADepth > 64 then
+    begin
+      ErrText := ErrText + 'grep: ' + ADisplayDir +
+        ': directory nesting too deep' + #10;
+      Status := 2;
+      Exit;
+    end;
+    if not FFs.ListDir(ADir, Entries, Err) then
+    begin
+      ErrText := ErrText + 'grep: ' + ADisplayDir + ': ' + Err + #10;
+      Status := 2;
+      Exit;
+    end;
+    for I := 0 to High(Entries) do
+    begin
+      Child := ADir + '/' + Entries[I];
+      if ADisplayDir = '' then
+        Display := Entries[I]
+      else if ADisplayDir = '/' then
+        Display := '/' + Entries[I]
+      else
+        Display := ADisplayDir + '/' + Entries[I];
+      if not FFs.Stat(Child, Kind, Err) then
+        Continue;
+      if Kind = sfkDirectory then
+      begin
+        { -r does not follow symlinked directories (that is -R, unsupported). }
+        if (fpLstat(PChar(Child), LSt) = 0) and
+          ((LSt.st_mode and S_IFMT) = S_IFLNK) then
+          Continue;
+        WalkDir(Child, Display, ADepth + 1);
+      end
+      else
+        ScanFile(Child, Display, True);
+    end;
+  end;
+
 begin
   ShowN := False;
   IgnoreCase := False;
@@ -838,6 +929,7 @@ begin
   CountOnly := False;
   Fixed := False;
   Extended := False;
+  Recursive := False;
   I := 0;
   while I <= High(ACall.Args) do
   begin
@@ -859,6 +951,7 @@ begin
           'F': Fixed := True;
           'E': Extended := True;
           'G': Extended := False;
+          'r': Recursive := True;
         end;
       Inc(I);
     end
@@ -885,21 +978,40 @@ begin
     ErrText := '';
     Status := 1;
     if Length(Args) = 0 then
-      ScanStream(ACall.Stdin, '', False)
+    begin
+      if Recursive then
+        WalkDir(FFs.Resolve(ACall.Cwd, '.'), '.', 0)
+      else
+        ScanStream(ACall.Stdin, '', False);
+    end
     else
       for J := 0 to High(Args) do
       begin
         if Args[J] = '-' then
-          Text := ACall.Stdin
-        else if not FFs.ReadFile(FFs.Resolve(ACall.Cwd, Args[J]), Data, E) then
+        begin
+          if not Recursive then
+            ScanStream(ACall.Stdin, '', False);
+          Continue;
+        end;
+        Full := FFs.Resolve(ACall.Cwd, Args[J]);
+        if not FFs.Stat(Full, Kind, E) then
         begin
           ErrText := ErrText + 'grep: ' + Args[J] + ': ' + E + #10;
           Status := 2;
           Continue;
+        end;
+        if Kind = sfkDirectory then
+        begin
+          if Recursive then
+            WalkDir(Full, Args[J], 0)
+          else
+          begin
+            ErrText := ErrText + 'grep: ' + Args[J] + ': is a directory' + #10;
+            Status := 2;
+          end;
         end
         else
-          Text := Data;
-        ScanStream(Text, Args[J], Multiple);
+          ScanFile(Full, Args[J], Recursive or Multiple);
       end;
     Result.Stdout := OutText;
     Result.Stderr := ErrText;
