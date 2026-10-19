@@ -26,6 +26,10 @@ type
   TChatKind = (ckUser, ckAssistant, ckError, ckThought, ckTool, ckThinking,
     ckTurn, ckAmbient, ckQueued, ckHandoff);
 
+  { An item's animation state changed (a live box started or settled). }
+  TChatAnimatingEvent = procedure(Sender: TObject; AAnimating: Boolean)
+    of object;
+
 const
   { The violet used for the ambient border. }
   QueuedBorderFg = 135;
@@ -71,8 +75,15 @@ type
     FTheme: TTheme;
     FOnToggle: TNotifyEvent;
     FOnChange: TNotifyEvent;
-    FSpark: Integer;
+    { Fires when the item's animation state changes (a live box starts or
+      settles), so the stack can keep its animating count without scanning. }
+    FOnAnimatingChanged: TChatAnimatingEvent;
+    FSpark: UnicodeString;
     FLive: Boolean;
+    { This item animates now (the thinking row, or a live thought/tool box whose
+      corner shows the spinner). The stack keeps a running count so
+      RefreshAnimation is O(1) per transition. }
+    FAnimating: Boolean;
     { True once AppendText has fed the markdown view as a stream. The body must
       then only ever be finished (never re-SetSource), or the open tail would be
       committed early and the next chunk would start a spurious second block. }
@@ -154,6 +165,9 @@ type
     property Live: Boolean read FLive write SetLive;
     property OnToggle: TNotifyEvent read FOnToggle write FOnToggle;
     property OnChange: TNotifyEvent read FOnChange write FOnChange;
+    { Fires on an animation-state transition only (never per delta). }
+    property OnAnimatingChanged: TChatAnimatingEvent read FOnAnimatingChanged
+      write FOnAnimatingChanged;
     { Diagnostic: how many times this block's body text has been laid out. A
       steady-state render/scroll must not increase it. }
     function LayoutBuilds: Integer;
@@ -175,7 +189,7 @@ type
     FOnToggle: TNotifyEvent;
     FOnChange: TNotifyEvent;
     FGeneration: Integer;
-    FAnimatingBlocks: Integer;    { blocks whose kind is ckThinking }
+    FAnimatingBlocks: Integer;    { items whose animation is registered }
     FLayoutValid: Boolean;
     FLayoutWidth: Integer;
     FLayoutGeneration: Integer;
@@ -197,6 +211,8 @@ type
     procedure EnsureLayout(AItemWidth: Integer);
     procedure ItemChanged(Sender: TObject);
     procedure ItemToggled(Sender: TObject);
+    { An item's animation state changed; keep the running count. }
+    procedure ItemAnimatingChanged(Sender: TObject; AAnimating: Boolean);
   public
     constructor Create(const ATheme: TTheme);
     destructor Destroy; override;
@@ -305,8 +321,13 @@ type
     property BottomInset: Integer read FBottomInset write SetBottomInset;
   end;
 
-{ The sparkle glyph for the thinking indicator at time ANowMs: a burst that
-  cycles every 90 ms. Shared by the stream's indicator and the toolbar. }
+{ The activity spinner frame for time ANowMs: a braille spinner that cycles every
+  SpinnerIntervalMs. Shared by the stream's thinking row, the toolbar, and an
+  active block's corner, so they are in step by construction. }
+function ActivityFrame(ANowMs: Int64): UnicodeString;
+
+{ The toolbar's animated-state glyph; now the activity spinner. Kept as the
+  toolbar's name for it. }
 function ThinkingSparkle(ANowMs: Int64): UnicodeString;
 
 { Truncate AText to fit AMaxW display columns, appending an ellipsis when it is
@@ -334,13 +355,17 @@ const
   { Blank rows kept below the last block, so it does not sit flush against the
     compose overlay. }
   ContentBottomPad = 2;
-  { The thinking sparkle advances every 90 ms (matching TChatItem.Advance). }
+  { The activity spinner advances every SpinnerIntervalMs (the toolbar, the
+    thinking row, and the box corners all share ActivityFrame). }
   ThinkingIntervalMs = 90;
+  SpinnerIntervalMs = 90;
   { The scrollbar track starts this many rows below the panel's top border, so
     it does not touch the rounded corner. }
   ScrollTrackTopGap = 1;
-  Sparkles: array[0..12] of UnicodeString =
-    ('∙', '•', '●', '◉', '❂', '✴', '✵', '✶', '✷', '✸', '✹', '✺', '❋');
+  { The spinner frames: the braille set from hildegard.helper.tui.spinner, so a
+    spinner anywhere in the harness is the same glyphs. }
+  SpinnerFrames: array[0..9] of UnicodeString =
+    ('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏');
 
 function Rc(AX, AY, AW, AH: Integer): TRect;
 begin
@@ -360,9 +385,17 @@ begin
     Result := Result + ACh;
 end;
 
+function ActivityFrame(ANowMs: Int64): UnicodeString;
+begin
+  if ANowMs < 0 then
+    ANowMs := 0;
+  Result := SpinnerFrames[(ANowMs div SpinnerIntervalMs) mod Length(SpinnerFrames)];
+end;
+
 function ThinkingSparkle(ANowMs: Int64): UnicodeString;
 begin
-  Result := Sparkles[(ANowMs div 90) mod Length(Sparkles)];
+  { The toolbar's name for the shared activity spinner. }
+  Result := ActivityFrame(ANowMs);
 end;
 
 { A loop divider: a thin rule with the loop's stats right-aligned and one
@@ -398,6 +431,8 @@ begin
   FAppliedVer := 0;
   FAppliedWidth := 0;
   FAppliedSrc := 0;
+  FSpark := ActivityFrame(0);
+  FAnimating := AKind = ckThinking;
   { The rendered body is built lazily by Materialize, so a large history does
     not hold every block's layout at once. }
 end;
@@ -565,14 +600,24 @@ begin
 end;
 
 procedure TChatItem.SetLive(AValue: Boolean);
+var
+  Was: Boolean;
 begin
   if AValue = FLive then
     Exit;
+  Was := FAnimating;
   FLive := AValue;
+  { A live thought/tool box shows the corner spinner, so it animates; a settled
+    one does not. }
+  FAnimating := (FKind = ckThinking) or (FLive and (FKind in [ckThought, ckTool]));
   Inc(FTextVer);
   InvalidateHeight;
   if Assigned(FOnChange) then
     FOnChange(Self);
+  { The animation state changed (a live box started or settled); the stack keeps
+    its running count. Fires only on a transition, never per delta. }
+  if (FAnimating <> Was) and Assigned(FOnAnimatingChanged) then
+    FOnAnimatingChanged(Self, FAnimating);
 end;
 
 procedure TChatItem.SetMeta(const ATitle: string;
@@ -763,7 +808,7 @@ end;
 procedure TChatItem.ApplyDisplay(AWidth: Integer);
 var
   Rows: TWrappedRows;
-  I: Integer;
+  I, J, Start, Pad: Integer;
   Res: UnicodeString;
   One: TSpan;
 begin
@@ -801,18 +846,23 @@ begin
       Res := ''
     else if FLive then
     begin
-      { The last LiveTailLines wrapped rows: a stable row count while
-        streaming. }
-      I := Length(Rows) - LiveTailLines;
-      if I < 0 then
-        I := 0;
+      { The last LiveTailLines wrapped rows, at a stable row count while
+        streaming. When the body wraps to fewer rows than that, pad with blank
+        rows at the top — otherwise a tail that ends in a blank row renders one
+        row short and the block shifts as a paragraph break streams in. }
+      Start := Length(Rows) - LiveTailLines;
+      if Start < 0 then
+        Start := 0;
+      Pad := LiveTailLines - (Length(Rows) - Start);
       Res := '';
-      while I <= High(Rows) do
+      for I := 0 to LiveTailLines - 1 do
       begin
-        if Res <> '' then
+        if I > 0 then
           Res := Res + #10;
-        Res := Res + Rows[I];
-        Inc(I);
+        J := Start + I - Pad;
+        if J >= Start then
+          Res := Res + Rows[J];
+        { else: a pad row, contributing an empty line }
       end;
     end
     else if (not FExpanded) and (Length(Rows) > CondenseThreshold) then
@@ -971,6 +1021,7 @@ var
   Title, DispLabel: UnicodeString;
   CaretCh: UnicodeString;
   Right: UnicodeString;
+  LiveSpinner: Boolean;
 begin
   if (FBounds.W < 1) or (FBounds.H < 1) then
     Exit;
@@ -997,7 +1048,7 @@ begin
       end;
     ckThinking:
       begin
-        PutText(S, FBounds.X + 1, FBounds.Y, Sparkles[FSpark], FTheme.Accent);
+        PutText(S, FBounds.X + 1, FBounds.Y, FSpark, FTheme.Accent);
         PutText(S, FBounds.X + 3, FBounds.Y, 'Thinking', FTheme.Muted);
         Exit;
       end;
@@ -1036,6 +1087,13 @@ begin
   end
   else
     CaretCh := '';
+
+  { An active (live) thought/tool box shows the activity spinner in the caret's
+    slot instead of a caret — it is not toggleable while live, and the spinner
+    says the work is still happening right where it is. }
+  LiveSpinner := FLive and (FKind in [ckThought, ckTool]);
+  if LiveSpinner then
+    CaretCh := FSpark;
 
   { Boxed kinds. }
   if (FKind = ckUser) or (FKind = ckQueued) then
@@ -1203,18 +1261,20 @@ end;
 
 function TChatItem.Advance(const ANowMs: Int64): Boolean;
 var
-  NewSpark: Integer;
+  NewSpark: UnicodeString;
 begin
-  if FKind <> ckThinking then
+  if not Animating then
     Exit(False);
-  NewSpark := (ANowMs div 90) mod Length(Sparkles);
+  NewSpark := ActivityFrame(ANowMs);
   Result := NewSpark <> FSpark;
   FSpark := NewSpark;
 end;
 
 function TChatItem.Animating: Boolean;
 begin
-  Result := FKind = ckThinking;
+  { The thinking row and a live thought/tool box (whose corner shows the
+    spinner) animate. }
+  Result := FAnimating;
 end;
 
 { TChatStack }
@@ -1274,8 +1334,9 @@ begin
   Result := TChatItem.Create(AKind, ALabel, AText, FTheme);
   Result.OnToggle := ItemToggled;
   Result.OnChange := ItemChanged;
+  Result.OnAnimatingChanged := ItemAnimatingChanged;
   FItems[High(FItems)] := Result;
-  if AKind = ckThinking then
+  if Result.Animating then
   begin
     Inc(FAnimatingBlocks);
     RefreshAnimation;
@@ -1302,7 +1363,7 @@ begin
   for I := 0 to High(FItems) do
     if FItems[I] = AItem then
     begin
-      if AItem.Kind = ckThinking then
+      if AItem.Animating then
         Dec(FAnimatingBlocks);
       FItems[I].Free;
       for J := I to High(FItems) - 1 do
@@ -1351,6 +1412,16 @@ begin
   BumpGeneration;
   if Assigned(FOnToggle) then
     FOnToggle(Self);
+end;
+
+procedure TChatStack.ItemAnimatingChanged(Sender: TObject;
+  AAnimating: Boolean);
+begin
+  if AAnimating then
+    Inc(FAnimatingBlocks)
+  else
+    Dec(FAnimatingBlocks);
+  RefreshAnimation;
 end;
 
 { Rebuild the block offset/height arrays when the item width or the content

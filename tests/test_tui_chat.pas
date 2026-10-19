@@ -56,6 +56,12 @@ type
     procedure TestExpandedThoughtDrawsABox;
     procedure TestThinkingIndicatorRenders;
     procedure TestThinkingAnimates;
+    { Activity spinner. }
+    procedure TestActivityFrameAdvances;
+    procedure TestLiveThoughtKeepsAStableHeight;
+    procedure TestLiveBoxDrawsTheSpinner;
+    procedure TestIdleBoxShowsTheCaret;
+    procedure TestThinkingRowDrawsTheSpinner;
     { Interaction. }
     procedure TestClickTogglesAThoughtBlock;
     procedure TestClickOnAssistantIsIgnored;
@@ -627,6 +633,115 @@ begin
     AssertTrue('spark advanced', It.Advance(90));
   finally
     It.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestActivityFrameAdvances;
+var
+  A, B, C: UnicodeString;
+begin
+  A := ActivityFrame(0);
+  AssertEquals('same frame within the interval', A, ActivityFrame(89));
+  B := ActivityFrame(90);
+  AssertTrue('the frame advances across the interval', B <> A);
+  C := ActivityFrame(90 * 10);
+  AssertEquals('the frames cycle', A, C);
+end;
+
+procedure TTuiChatTest.TestLiveThoughtKeepsAStableHeight;
+var
+  A, B: TChatItem;
+begin
+  { Two live thoughts whose tails differ only in a trailing blank row must
+    measure the same height: the tail is padded to a constant row count. }
+  A := TChatItem.Create(ckThought, 'T', 'aaa'#10'bbb'#10'ccc', FTheme);
+  B := TChatItem.Create(ckThought, 'T', 'aaa'#10'bbb'#10'ccc'#10, FTheme);
+  try
+    A.Live := True;
+    B.Live := True;
+    AssertEquals('a trailing blank row does not shrink the block',
+      A.Measure(Avail(30, 40)).H, B.Measure(Avail(30, 40)).H);
+  finally
+    A.Free;
+    B.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestLiveBoxDrawsTheSpinner;
+var
+  It: TChatItem;
+  S: TSurfaceMemory;
+  Row: UnicodeString;
+begin
+  S := TSurfaceMemory.Create(30, 3);
+  try
+    It := TChatItem.Create(ckTool, 'run_command', 'output', FTheme);
+    try
+      It.Live := True;
+      It.Arrange(Rc(0, 0, 30, 3));
+      It.Render(S);
+      { The bottom border carries the spinner frame near the right corner. }
+      Row := S.RowText(2, 0, 30);
+      AssertTrue('a spinner frame rides the bottom border',
+        (Pos(ActivityFrame(0), Row) > 0) or (Pos('⠋', Row) > 0) or
+        (Pos('⠙', Row) > 0) or (Pos('⠹', Row) > 0) or (Pos('⠸', Row) > 0) or
+        (Pos('⠼', Row) > 0) or (Pos('⠴', Row) > 0) or (Pos('⠦', Row) > 0) or
+        (Pos('⠧', Row) > 0) or (Pos('⠇', Row) > 0) or (Pos('⠏', Row) > 0));
+      AssertTrue('a live box animates', It.Animating);
+    finally
+      It.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestIdleBoxShowsTheCaret;
+var
+  It: TChatItem;
+  S: TSurfaceMemory;
+  Row: UnicodeString;
+begin
+  S := TSurfaceMemory.Create(30, 6);
+  try
+    It := TChatItem.Create(ckTool, 'run_command', StringOfChar('x', 400), FTheme);
+    try
+      It.Expanded := False;
+      It.Arrange(Rc(0, 0, 30, 6));
+      It.Render(S);
+      Row := S.RowText(5, 0, 30);
+      AssertTrue('the caret rides the bottom border', Pos('▼', Row) > 0);
+      AssertFalse('a settled box does not animate', It.Animating);
+    finally
+      It.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestThinkingRowDrawsTheSpinner;
+var
+  It: TChatItem;
+  S: TSurfaceMemory;
+  Row: UnicodeString;
+begin
+  S := TSurfaceMemory.Create(20, 1);
+  try
+    It := TChatItem.Create(ckThinking, '', '', FTheme);
+    try
+      It.Advance(0);
+      It.Arrange(Rc(0, 0, 20, 1));
+      It.Render(S);
+      Row := S.RowText(0, 0, 20);
+      AssertTrue('the thinking row shows the spinner frame',
+        Pos(ActivityFrame(0), Row) > 0);
+      AssertTrue('the label follows', Pos('Thinking', Row) > 0);
+    finally
+      It.Free;
+    end;
+  finally
+    S.Free;
   end;
 end;
 
