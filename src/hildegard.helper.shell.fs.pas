@@ -12,7 +12,9 @@ unit hildegard.helper.shell.fs;
 interface
 
 uses
-  SysUtils, Classes, shell.fs, hildegard.helper.workspace;
+  SysUtils, Classes, shell.fs,
+  {$ifdef unix}BaseUnix,{$endif}
+  hildegard.helper.workspace;
 
 type
   TWorkspaceShellFs = class(TInterfacedObject, IShellFileSystem)
@@ -33,6 +35,8 @@ type
     function ListDir(const APath: string; out AEntries: TStringArray;
       out AError: string): Boolean;
     function Stat(const APath: string; out AKind: TShellFileKind;
+      out AError: string): Boolean;
+    function Info(const APath: string; out AInfo: TShellFileInfo;
       out AError: string): Boolean;
     { The operations the command set needs beyond the shell interface. }
     function Delete(const APath: string; ARecursive: Boolean;
@@ -262,6 +266,62 @@ begin
   AKind := sfkMissing;
   AError := 'no such file or directory';
   Result := False;
+end;
+
+function TWorkspaceShellFs.Info(const APath: string; out AInfo: TShellFileInfo;
+  out AError: string): Boolean;
+var
+  {$ifdef unix}
+  St: Stat;
+  {$endif}
+  {$ifndef unix}
+  Fs: TFileStream;
+  Age: LongInt;
+  {$endif}
+begin
+  AInfo := Default(TShellFileInfo);
+  AError := '';
+  if not EnsureInside(APath, AError) then
+    Exit(False);
+  if DirectoryExists(APath) then
+    AInfo.Kind := sfkDirectory
+  else if FileExists(APath) then
+    AInfo.Kind := sfkFile
+  else
+  begin
+    AInfo.Kind := sfkMissing;
+    AError := 'no such file or directory';
+    Exit(False);
+  end;
+  {$ifdef unix}
+  if fpStat(PChar(APath), St) = 0 then
+  begin
+    AInfo.Mode := St.st_mode and $FFF;
+    AInfo.Size := St.st_size;
+    AInfo.Modified := St.st_mtime;
+  end;
+  {$else}
+  AInfo.Mode := 0;
+  AInfo.Size := 0;
+  AInfo.Modified := 0;
+  if AInfo.Kind = sfkFile then
+  begin
+    try
+      Fs := TFileStream.Create(APath, fmOpenRead or fmShareDenyNone);
+      try
+        AInfo.Size := Fs.Size;
+      finally
+        Fs.Free;
+      end;
+    except
+      AInfo.Size := 0;
+    end;
+  end;
+  Age := FileAge(APath);
+  if Age <> -1 then
+    AInfo.Modified := Age;
+  {$endif}
+  Result := True;
 end;
 
 function TWorkspaceShellFs.DeleteTree(const APath: string;

@@ -40,6 +40,7 @@ type
     procedure TestGrepMultipleFiles;
     procedure TestGrepRecursive;
     procedure TestLs;
+    procedure TestLsLong;
     procedure TestMkdirAndRm;
     procedure TestMvAndCp;
     procedure TestTouch;
@@ -352,6 +353,45 @@ begin
   AssertFalse('-a excluded by default', Pos('.hidden', RunCmd('ls', []).Stdout) > 0);
   AssertTrue('-a includes dotfiles', Pos('.hidden', RunCmd('ls', ['-a']).Stdout) > 0);
   AssertEquals('missing', 2, RunCmd('ls', ['nope']).ExitCode);
+end;
+
+procedure TShellCommandsTest.TestLsLong;
+var
+  R: TShellResult;
+  E, Line: string;
+  Lines: TStringList;
+  I: Integer;
+  FoundDir, FoundMode: Boolean;
+begin
+  R := RunCmd('ls', ['-l', 'a.txt']);
+  AssertTrue('mode column', Pos('-rw', R.Stdout) > 0);
+  AssertTrue('size column', Pos('11', R.Stdout) > 0);
+  AssertTrue('name column', Pos('a.txt', R.Stdout) > 0);
+  R := RunCmd('ls', ['-l']);
+  Lines := TStringList.Create;
+  try
+    Lines.Text := R.Stdout;
+    FoundDir := False;
+    FoundMode := False;
+    for I := 0 to Lines.Count - 1 do
+    begin
+      Line := Lines[I];
+      if (Length(Line) > 0) and (Line[1] = 'd') and
+        (Pos(' sub', Line) > 0) then
+        FoundDir := True;
+      if (Length(Line) > 0) and (Line[1] = '-') and (Pos(' a.txt', Line) > 0) then
+        FoundMode := True;
+    end;
+    AssertTrue('directory line starts with d', FoundDir);
+    AssertTrue('file line starts with -', FoundMode);
+  finally
+    Lines.Free;
+  end;
+  FFs.WriteFile(P('.hidden'), 'x', False, E);
+  R := RunCmd('ls', ['-l']);
+  AssertFalse('hidden excluded without -a', Pos('.hidden', R.Stdout) > 0);
+  R := RunCmd('ls', ['-la']);
+  AssertTrue('hidden included with -a', Pos('.hidden', R.Stdout) > 0);
 end;
 
 procedure TShellCommandsTest.TestMkdirAndRm;

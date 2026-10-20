@@ -32,6 +32,8 @@ type
       out AError: string): Boolean;
     function Stat(const APath: string; out AKind: TShellFileKind;
       out AError: string): Boolean;
+    function Info(const APath: string; out AInfo: TShellFileInfo;
+      out AError: string): Boolean;
   end;
 
 implementation
@@ -229,6 +231,27 @@ begin
   finally
     Names.Free;
   end;
+end;
+
+function TMemoryFs.Info(const APath: string; out AInfo: TShellFileInfo;
+  out AError: string): Boolean;
+var
+  P, Data: string;
+begin
+  AInfo := Default(TShellFileInfo);
+  if not Stat(APath, AInfo.Kind, AError) then
+    Exit(False);
+  P := Normalize(APath);
+  if AInfo.Kind = sfkFile then
+  begin
+    if FFiles.TryGetValue(P, Data) then
+      AInfo.Size := Length(Data);
+    AInfo.Mode := $1A4;   // 0644
+  end
+  else
+    AInfo.Mode := $1ED;   // 0755
+  AInfo.Modified := 0;
+  Result := True;
 end;
 
 function TMemoryFs.Stat(const APath: string; out AKind: TShellFileKind;

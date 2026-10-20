@@ -51,7 +51,7 @@ parser the tier uses; re-run `make shell-flags` to reproduce the tallies.
 | `tee` | `-a` | stdin to stdout and to each file, through the workspace FS |
 | `printf` | — | `%s`/`%d`/`%i`/`%%` and `\n \t \r`; the format recycles |
 | `rg` | `-n -i -l -c -F -E -g --hidden --no-ignore` | recursive by default; respects `.gitignore` inside a repo (root + nested, `!` negation); hidden entries and `.git` skipped; binary files skipped; no stdin heuristic |
-| `ls` | `-a -d` | bare names, one path; `-d` prints the path |
+| `ls` | `-a -d -l` | bare names, or a long line (`mode size mtime name` — no owner/group/link count); one path; `-d` prints the path |
 | `mkdir` | `-p` | |
 | `rm` | `-r -f` | directories only with `-r`; `-f` suppresses missing |
 | `mv` | — | one source, one destination |
@@ -115,7 +115,7 @@ pipeline glue joined the set; `yq` is deliberately not planned.)
 
 ### Whole-script coverage
 
-Of the 3.255 corpus entries, the tier runs **1,717 (52%)** today (76 before
+Of the 3.255 corpus entries, the tier runs **1,730 (53%)** today (76 before
 `head -N`/`tail -N`, 105 before grep regex, 585 before `grep -r`, 751 before
 `sed`). The rest decline, and the **first** blocker per script is:
 
@@ -125,7 +125,6 @@ Of the 3.255 corpus entries, the tier runs **1,717 (52%)** today (76 before
 | `make` not in the tier | 439 |
 | `fpc` not in the tier | 111 |
 | `python3` not in the tier | 23 |
-| `ls -la` (needs `-l`) | 21 |
 | `curl` not in the tier | 21 |
 
 What remains is dominated by real programs. The in-tier options left are
@@ -168,9 +167,9 @@ file for `-rc`, and skips symlinked directories (that is `-R`, not `-r`). The
 walk is depth-limited and sorted; bash's directory order is not, so fixtures
 that depend on order pipe through `sort`. Coverage 585 → 751.
 
-**P4 — `ls -l` (49 uses, under 20 first-blockers).** Needs a richer `Stat`
-(mode, size, mtime) in `IShellFileSystem`; small but touches the seam. Until
-then `-l` declines (and falls back).
+**P4 — done:** `ls -l`. `IShellFileSystem` gained `Info` (kind, size, mode,
+mtime), so the long format is `mode size mtime name` — no owner/group or link
+count, which a single-user workspace does not need. Coverage 1,717 → 1,730.
 
 **P5 — `find -name` / `-type` (33 uses).** A deliberately small `find`
 (`find PATH -name GLOB [-type f|d]`), sharing the recursive walk with `grep -r`.

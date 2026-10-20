@@ -23,6 +23,8 @@ type
       out AError: string): Boolean;
     function Stat(const APath: string; out AKind: TShellFileKind;
       out AError: string): Boolean;
+    function Info(const APath: string; out AInfo: TShellFileInfo;
+      out AError: string): Boolean;
   end;
 
 function THostFs.Resolve(const ACwd, APath: string): string;
@@ -138,6 +140,18 @@ begin
   finally
     List.Free;
   end;
+end;
+
+function THostFs.Info(const APath: string; out AInfo: TShellFileInfo;
+  out AError: string): Boolean;
+begin
+  AInfo := Default(TShellFileInfo);
+  if not Stat(APath, AInfo.Kind, AError) then
+    Exit(False);
+  AInfo.Mode := $1A4;
+  AInfo.Size := 0;
+  AInfo.Modified := 0;
+  Result := True;
 end;
 
 function THostFs.Stat(const APath: string; out AKind: TShellFileKind;

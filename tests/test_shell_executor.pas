@@ -233,7 +233,7 @@ begin
   AssertFalse('parse error does not',
     FExecutor.OwnsApproval('echo $(date)', cmAuto, W));
   AssertFalse('unsupported option does not',
-    FExecutor.OwnsApproval('ls -l', cmAuto, W));
+    FExecutor.OwnsApproval('ls -R', cmAuto, W));
   AssertFalse('bash mode never owns approval',
     FExecutor.OwnsApproval('echo hi', cmBash, W));
 end;

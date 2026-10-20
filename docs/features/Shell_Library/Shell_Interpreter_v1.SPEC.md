@@ -130,6 +130,10 @@ type
       out AError: string): Boolean;
     function Stat(const APath: string; out AKind: TShellFileKind;
       out AError: string): Boolean;
+    { Kind + size + mode + mtime, for `ls -l`. A platform without mode bits
+      reports 0; a consumer that cannot supply details still implements it. }
+    function Info(const APath: string; out AInfo: TShellFileInfo;
+      out AError: string): Boolean;
   end;
 
 unit shell.interpreter;

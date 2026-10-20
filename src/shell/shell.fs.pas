@@ -13,6 +13,15 @@ uses
 type
   TShellFileKind = (sfkMissing, sfkFile, sfkDirectory, sfkOther);
 
+  { What a command needs to describe a path (`ls -l`): the permission bits and
+    timestamps a platform can supply, 0 where it cannot. }
+  TShellFileInfo = record
+    Kind: TShellFileKind;
+    Size: Int64;
+    Mode: LongWord;
+    Modified: Int64;
+  end;
+
   IShellFileSystem = interface
     ['{7E2C4B1A-5D3F-4A8B-9C6E-1F0D2A3B4C5D}']
     { Resolve APath against ACwd to an absolute path; it need not exist. }
@@ -24,6 +33,9 @@ type
     function ListDir(const APath: string; out AEntries: TStringArray;
       out AError: string): Boolean;
     function Stat(const APath: string; out AKind: TShellFileKind;
+      out AError: string): Boolean;
+    { Kind + size + mode + mtime. A platform without mode bits reports 0. }
+    function Info(const APath: string; out AInfo: TShellFileInfo;
       out AError: string): Boolean;
   end;
 

@@ -91,7 +91,7 @@ function IsNumericOption(const AArg, AOptions: string): Boolean;
 implementation
 
 uses
-  StrUtils, fpjson, jsonparser, hildegard.helper.shell.pattern,
+  StrUtils, DateUtils, fpjson, jsonparser, hildegard.helper.shell.pattern,
   hildegard.helper.shell.sed, hildegard.helper.shell.awk,
   hildegard.helper.shell.jq, hildegard.helper.shell.textcmd,
   hildegard.helper.gitignore,
@@ -123,7 +123,7 @@ const
     (Name: 'tee'; Options: '-a'),
     (Name: 'printf'; Options: ''),
     (Name: 'rg'; Options: '-nilcFErg'),
-    (Name: 'ls'; Options: '-ad'),
+    (Name: 'ls'; Options: '-adl'),
     (Name: 'mkdir'; Options: '-p'),
     (Name: 'rm'; Options: '-rf'),
     (Name: 'sort'; Options: '-ru'),
@@ -797,17 +797,57 @@ begin
 end;
 
 function TBuiltinCommands.Ls(const ACall: TShellCall): TShellResult;
+const
+  RWX = 'rwxrwxrwx';
 var
   I, J: Integer;
-  All, DirOnly: Boolean;
+  All, DirOnly, Long: Boolean;
   Args: TStringArray;
   Target, E: string;
   Entries: TStringArray;
   Kind: TShellFileKind;
   OutText: string;
+
+  function PadLeft(const AText: string; AWidth: Integer): string;
+  begin
+    if Length(AText) >= AWidth then
+      Result := AText
+    else
+      Result := StringOfChar(' ', AWidth - Length(AText)) + AText;
+  end;
+
+  function LongLine(const AFull, AName: string): string;
+  var
+    Info: TShellFileInfo;
+    Err: string;
+    Mode, When: string;
+    K: Integer;
+  begin
+    Result := '';
+    if not FFs.Info(AFull, Info, Err) then
+      Exit;
+    if Info.Kind = sfkDirectory then
+      Mode := 'd'
+    else
+      Mode := '-';
+    for K := 0 to 8 do
+      if (Info.Mode and (LongWord(1) shl (8 - K))) <> 0 then
+        Mode := Mode + RWX[K + 1]
+      else
+        Mode := Mode + '-';
+    if Info.Modified = 0 then
+      When := '-'
+    else
+      When := FormatDateTime('yyyy-mm-dd hh:nn',
+        UnixToDateTime(Info.Modified, True));
+    Result := Mode + '  ' + PadLeft(IntToStr(Info.Size), 8) + '  ' + When +
+      '  ' + AName;
+  end;
+
 begin
   All := False;
   DirOnly := False;
+  Long := False;
   I := 0;
   while I <= High(ACall.Args) do
   begin
@@ -818,6 +858,7 @@ begin
         case ACall.Args[I][J] of
           'a': All := True;
           'd': DirOnly := True;
+          'l': Long := True;
         end;
       Inc(I);
     end
@@ -842,9 +883,11 @@ begin
     Exit(Failure('ls: ' + Args[0] + ': ' + E, 2));
   if DirOnly or (Kind <> sfkDirectory) then
   begin
-    if Length(Args) = 0 then
-      Exit(ShellResultOk(ACall.Cwd + #10));
-    Exit(ShellResultOk(Args[0] + #10));
+    if Long then
+      OutText := LongLine(Target, IfThen(Length(Args) = 0, ACall.Cwd, Args[0]));
+    if OutText = '' then
+      OutText := IfThen(Length(Args) = 0, ACall.Cwd, Args[0]);
+    Exit(ShellResultOk(OutText + #10));
   end;
   if not FFs.ListDir(Target, Entries, E) then
     Exit(Failure('ls: ' + Args[0] + ': ' + E, 2));
@@ -852,7 +895,10 @@ begin
   begin
     if (not All) and (Entries[I] <> '') and (Entries[I][1] = '.') then
       Continue;
-    OutText := OutText + Entries[I] + #10;
+    if Long then
+      OutText := OutText + LongLine(Target + '/' + Entries[I], Entries[I]) + #10
+    else
+      OutText := OutText + Entries[I] + #10;
   end;
   Result := ShellResultOk(OutText);
 end;

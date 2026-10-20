@@ -180,9 +180,9 @@ procedure TShellTierTest.TestUnsupportedOptionDeclines;
 var
   OutText: string;
 begin
-  AssertFalse('declined', RunTier('ls -l', OutText));
-  AssertTrue('names the option', Pos('-l', FTier.LastError) > 0);
-  AssertTrue('supported option runs', RunTier('ls -a', OutText));
+  AssertFalse('declined', RunTier('ls -R', OutText));
+  AssertTrue('names the option', Pos('-R', FTier.LastError) > 0);
+  AssertTrue('supported option runs', RunTier('ls -la', OutText));
 end;
 
 procedure TShellTierTest.TestGrepRegexRuns;
