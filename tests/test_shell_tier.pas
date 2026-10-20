@@ -44,6 +44,8 @@ type
     procedure TestFunctionsAreKnown;
     procedure TestUnknownCommandDeclines;
     procedure TestGrepMaxCountStaysInTheTier;
+    procedure TestCompoundScriptsRunInTheTier;
+    procedure TestUnmatchedStructureDeclines;
     procedure TestUnsupportedOptionDeclines;
     procedure TestGrepRegexRuns;
     procedure TestParseErrorDeclines;
@@ -191,6 +193,30 @@ begin
   AssertTrue('found', Pos('alpha', OutText) > 0);
   AssertTrue('grep -m 1 runs too',
     RunTier('grep -m 1 alpha a.txt', OutText));
+end;
+
+procedure TShellTierTest.TestCompoundScriptsRunInTheTier;
+var
+  OutText: string;
+begin
+  { The tier's parser matches the structure, so the closers never reach the
+    gate: only the commands inside do. }
+  AssertTrue('if runs', RunTier('if true; then echo hi; fi', OutText));
+  AssertTrue('the body ran', Pos('hi', OutText) > 0);
+  AssertTrue('for runs', RunTier('for i in a b; do echo $i; done', OutText));
+  AssertTrue('first word', Pos('a', OutText) > 0);
+  AssertTrue('second word', Pos('b', OutText) > 0);
+end;
+
+procedure TShellTierTest.TestUnmatchedStructureDeclines;
+var
+  OutText: string;
+begin
+  { A malformed script is identified, not guessed at: the tier declines and the
+    process tier runs it (bash rejects it, so nothing happens). }
+  AssertFalse('missing fi', RunTier('if true; then echo hi', OutText));
+  AssertFalse('a stray done', RunTier('done', OutText));
+  AssertFalse('a stray esac', RunTier('esac', OutText));
 end;
 
 procedure TShellTierTest.TestUnsupportedOptionDeclines;

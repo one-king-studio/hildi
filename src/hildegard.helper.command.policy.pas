@@ -75,6 +75,20 @@ function ParseCommand(const ACommand: string;
   summary uses. Redirections are not included. }
 function SegmentText(const ASegment: TCommandSegment): string;
 
+{ True when AWord is a bash reserved word: it introduces or closes structure
+  (if, then, fi, for, do, done, case, esac, !, time, the brace words), and
+  never names a program. The double-bracket form is deliberately not here: it
+  opens a conditional expression the tokenizer cannot evaluate, so it stays a
+  conservative ask of its own. }
+function IsShellKeyword(const AWord: string): Boolean;
+
+{ The command a segment names, with leading structural words stripped:
+  'then cat a' is 'cat a', 'if [ -f x ]' is '[ -f x ]', '! git status' is
+  'git status'. False when the segment is only structure (fi, done, esac, a
+  close brace, or a for/case/function header) and so names no command. }
+function SegmentCommand(const ASegment: TCommandSegment;
+  out AName: string; out AArgs: TCommandArgArray): Boolean;
+
 implementation
 
 type
@@ -126,6 +140,56 @@ begin
   Result := ASegment.Executable;
   for I := 0 to High(ASegment.Arguments) do
     Result := Result + ' ' + ASegment.Arguments[I];
+end;
+
+function IsShellKeyword(const AWord: string): Boolean;
+begin
+  Result := (AWord = 'if') or (AWord = 'then') or (AWord = 'else') or
+    (AWord = 'elif') or (AWord = 'fi') or (AWord = 'for') or
+    (AWord = 'while') or (AWord = 'until') or (AWord = 'do') or
+    (AWord = 'done') or (AWord = 'case') or (AWord = 'esac') or
+    (AWord = 'select') or (AWord = 'function') or (AWord = 'coproc') or
+    (AWord = 'in') or (AWord = '{') or (AWord = '}') or (AWord = '!') or
+    (AWord = 'time');
+end;
+
+function SegmentCommand(const ASegment: TCommandSegment;
+  out AName: string; out AArgs: TCommandArgArray): Boolean;
+var
+  Name: string;
+  Args: TCommandArgArray;
+begin
+  AName := '';
+  AArgs := nil;
+  Result := False;
+  Name := ASegment.Executable;
+  Args := Copy(ASegment.Arguments, 0, Length(ASegment.Arguments));
+  { Strip leading keywords until a real program is left. Each pass consumes at
+    most one word, so a close brace followed by 'else cat a' resolves to
+    'cat a'. }
+  while Name <> '' do
+  begin
+    { Headers and closers name no command: a for header, a case header, a
+      function header, and the words that close a block. }
+    if (Name = 'for') or (Name = 'case') or (Name = 'select') or
+      (Name = 'function') or (Name = 'coproc') or (Name = 'fi') or
+      (Name = 'done') or (Name = 'esac') or (Name = '}') then
+      Exit;
+    if not IsShellKeyword(Name) then
+      Break;
+    { A keyword that introduces a command inside the same segment: 'then cat
+      a', 'do echo x', 'if [ -f x ]', '{ cat a' (no space before the brace),
+      '! git status'. }
+    if Length(Args) = 0 then
+      Exit;
+    Name := Args[0];
+    Args := Copy(Args, 1, Length(Args) - 1);
+  end;
+  if Name = '' then
+    Exit;
+  AName := Name;
+  AArgs := Args;
+  Result := True;
 end;
 
 { --- tokenizer ---------------------------------------------------------- }

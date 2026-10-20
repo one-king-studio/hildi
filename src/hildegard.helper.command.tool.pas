@@ -227,7 +227,8 @@ var
   Plan: TCommandPlan;
   I, J: Integer;
   Seg: TCommandSegment;
-  Bin, Ref, PathRef, Op, Rel, FileRef: string;
+  Bin, Ref, PathRef, Op, Rel, FileRef, CmdName: string;
+  CmdArgs: TCommandArgArray;
   Access: TPathAccessArray;
 
   function OneParam(const AValue: string): TApprovalParams;
@@ -350,6 +351,8 @@ var
 
 begin
   Result := nil;
+  CmdName := '';
+  CmdArgs := nil;
   Plan := ParseCommand(ACommand, ASyntax);
   if (Plan.ParseError <> '') or (Length(Plan.Segments) = 0) then
     Exit;
@@ -358,33 +361,41 @@ begin
     Seg := Plan.Segments[I];
     if Seg.Executable = '' then
       Continue;
-    { A pure command needs no approval; its redirects are asked separately. }
-    if IsPureCommand(ExtractFileName(Seg.Executable)) then
+    { Structural words are not programs: `then cat a` is the command `cat a`,
+      and a bare `fi`, `done`, `esac` or a for/case header is no command at
+      all, so it must not ask. }
+    if not SegmentCommand(Seg, CmdName, CmdArgs) then
       Continue;
-    Bin := ExtractFileName(Seg.Executable);
+    { A pure command needs no approval; its redirects are asked separately. }
+    if IsPureCommand(ExtractFileName(CmdName)) then
+      Continue;
+    Bin := ExtractFileName(CmdName);
     if Bin = '' then
-      Bin := Seg.Executable;
+      Bin := CmdName;
     Ref := 'run_command:' + Bin;
     SetLength(Result, Length(Result) + 1);
     Result[High(Result)] := Default(TApprovalAsk);
-    { The segment text omits redirects; the operator needs to see them. }
-    Result[High(Result)].Summary := Seg.Text;
+    { The command text omits redirects; the operator needs to see them. }
+    Result[High(Result)].Summary := CmdName;
+    for J := 0 to High(CmdArgs) do
+      Result[High(Result)].Summary := Result[High(Result)].Summary + ' ' +
+        CmdArgs[J];
     for J := 0 to High(Seg.Redirects) do
       Result[High(Result)].Summary := Result[High(Result)].Summary + ' ' +
         Seg.Redirects[J].Operator + ' ' + Seg.Redirects[J].Target;
     Result[High(Result)].Subject.Ref := Ref;
     Result[High(Result)].Subject.Params :=
-      Copy(Seg.Arguments, 0, Length(Seg.Arguments));
+      Copy(CmdArgs, 0, Length(CmdArgs));
     AddOption(Result[High(Result)], 'once', 'allow once', False, nil, False);
     AddOption(Result[High(Result)], 'exact', 'always this exact command', True,
-      Copy(Seg.Arguments, 0, Length(Seg.Arguments)), False);
+      Copy(CmdArgs, 0, Length(CmdArgs)), False);
     AddOption(Result[High(Result)], 'any',
       'always ' + Bin + ' with any arguments', True, nil, True);
-    if (Length(Seg.Arguments) > 0) and (Seg.Arguments[0] <> '') and
-      (Seg.Arguments[0][1] <> '-') then
+    if (Length(CmdArgs) > 0) and (CmdArgs[0] <> '') and
+      (CmdArgs[0][1] <> '-') then
       AddOption(Result[High(Result)], 'prefix',
-        'always ' + Bin + ' ' + Seg.Arguments[0] + ' ...', True,
-        OneParam(Seg.Arguments[0]), True);
+        'always ' + Bin + ' ' + CmdArgs[0] + ' ...', True,
+        OneParam(CmdArgs[0]), True);
     StampFocus(Result[High(Result)], I);
   end;
   { A shell redirect is a file effect: here-docs and fd duplications are not
@@ -425,16 +436,19 @@ begin
       SetLength(Result[High(Result)].Subject.Params, 1);
       Result[High(Result)].Subject.Params[0] := Access[J].Resolved;
       { Covers: the segment's command subject, so an exact grant suppresses. }
-      if Access[J].Segment <= High(Plan.Segments) then
+      { The cover is the segment's *command*, with any structural words
+        stripped, so an exact grant for `cat a` also covers `then cat a`. }
+      if (Access[J].Segment >= 0) and
+        (Access[J].Segment <= High(Plan.Segments)) and
+        SegmentCommand(Plan.Segments[Access[J].Segment], CmdName, CmdArgs) then
       begin
-        Bin := ExtractFileName(Plan.Segments[Access[J].Segment].Executable);
+        Bin := ExtractFileName(CmdName);
         if Bin <> '' then
         begin
           Result[High(Result)].HasCovers := True;
           Result[High(Result)].Covers.Ref := 'run_command:' + Bin;
           Result[High(Result)].Covers.Params :=
-            Copy(Plan.Segments[Access[J].Segment].Arguments, 0,
-              Length(Plan.Segments[Access[J].Segment].Arguments));
+            Copy(CmdArgs, 0, Length(CmdArgs));
         end;
       end;
       { The path ask's options: once / exact / dir / any. AddOption reads the

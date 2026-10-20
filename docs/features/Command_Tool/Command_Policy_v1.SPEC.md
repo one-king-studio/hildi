@@ -26,6 +26,25 @@ Validation Rules).
 v1 implements the POSIX syntax mode only. The `TShellSyntax` type reserves a
 `cmd.exe` mode so a future Windows profile is additive.
 
+> **Structure (v1.2):** the tokenizer is not a parser - it splits on `;`,
+> `&&`, `||`, `|`, `&` and newlines, so a compound command arrives as segments
+> that still carry their shell keywords. `IsShellKeyword` names them (`if`,
+> `then`, `else`, `elif`, `fi`, `for`, `while`, `until`, `do`, `done`, `case`,
+> `esac`, `select`, `function`, `coproc`, `in`, `{`, `}`, `!`, `time`) and
+> `SegmentCommand` returns the command a segment names with them stripped:
+> `then cat a` is `cat a`, `if [ -f x ]` is `[ -f x ]`, `! git status` is
+> `git status`; a segment that is only structure (`fi`, `done`, `esac`, a close
+> brace, or a `for`/`case`/`function` header) names no command and is skipped.
+>
+> This is positional stripping, not validation: the tokenizer does not track
+> whether `fi` matches an `if`. It does not need to - a stray or missing closer
+> is a bash syntax error, so nothing runs - and the *tier's* real parser
+> (`src/shell/shell.parser.pas`) does enforce the matching and declines the
+> script, which is what keeps a malformed compound command out of the in-process
+> tier. The double-bracket `[[` is deliberately not a plain keyword: it opens a
+> conditional the tokenizer cannot evaluate, so it keeps its own conservative
+> ask.
+>
 > **Revision (v1.1):** classification is now per segment
 > (`ClassifySegment`/`ClassifySegments`), and allow/deny patterns may name
 > arguments (`cat /etc/os-release`, `cat *`), so approvals can be exact or

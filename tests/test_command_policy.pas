@@ -28,6 +28,9 @@ type
     procedure TestUnresolvedVariablePathIsUnresolved;
     procedure TestHomeAndAbsoluteAndRelativePathKinds;
     procedure TestSegmentTextJoinsExecutableAndArgs;
+    procedure TestStructuralWordsAreRecognized;
+    procedure TestSegmentCommandStripsStructure;
+    procedure TestSegmentCommandHeadersNameNoCommand;
     procedure TestRedirectionWithoutTargetSetsParseError;
   end;
 
@@ -184,6 +187,49 @@ begin
   P := Parse('cat /etc/os-release && uname -a');
   AssertEquals('first segment text', 'cat /etc/os-release', P.Segments[0].Text);
   AssertEquals('second segment text', 'uname -a', P.Segments[1].Text);
+end;
+
+procedure TCommandPolicyTest.TestStructuralWordsAreRecognized;
+begin
+  AssertTrue('if', IsShellKeyword('if'));
+  AssertTrue('fi', IsShellKeyword('fi'));
+  AssertTrue('done', IsShellKeyword('done'));
+  AssertTrue('brace', IsShellKeyword('{'));
+  AssertTrue('bang', IsShellKeyword('!'));
+  AssertFalse('a program', IsShellKeyword('cat'));
+  AssertFalse('a path', IsShellKeyword('./if'));
+end;
+
+procedure TCommandPolicyTest.TestSegmentCommandStripsStructure;
+var
+  Plan: TCommandPlan;
+  Name: string;
+  Args: TCommandArgArray;
+begin
+  Plan := Parse('if [ -f a ]; then cat a; fi');
+  AssertTrue('condition', SegmentCommand(Plan.Segments[0], Name, Args));
+  AssertEquals('condition name', '[', Name);
+  AssertEquals('condition arg', '-f', Args[0]);
+  AssertTrue('body', SegmentCommand(Plan.Segments[1], Name, Args));
+  AssertEquals('body name', 'cat', Name);
+  AssertEquals('body arg', 'a', Args[0]);
+  AssertFalse('the closer names no command',
+    SegmentCommand(Plan.Segments[2], Name, Args));
+end;
+
+procedure TCommandPolicyTest.TestSegmentCommandHeadersNameNoCommand;
+var
+  Plan: TCommandPlan;
+  Name: string;
+  Args: TCommandArgArray;
+begin
+  Plan := Parse('for x in a b; do echo x; done');
+  AssertFalse('for header', SegmentCommand(Plan.Segments[0], Name, Args));
+  AssertTrue('do echo', SegmentCommand(Plan.Segments[1], Name, Args));
+  AssertEquals('body', 'echo', Name);
+  AssertFalse('done', SegmentCommand(Plan.Segments[2], Name, Args));
+  Plan := Parse('case $x in');
+  AssertFalse('case header', SegmentCommand(Plan.Segments[0], Name, Args));
 end;
 
 procedure TCommandPolicyTest.TestRedirectionWithoutTargetSetsParseError;

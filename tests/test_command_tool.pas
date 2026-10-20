@@ -88,6 +88,7 @@ type
     procedure TestPromptAnyAllowsOtherArgs;
     procedure TestPromptPrefixScopesSubtree;
     procedure TestAsksNameTheScriptAndItsSpan;
+    procedure TestStructuralWordsAreNotCommands;
     procedure TestApprovalAsksPerSegment;
     procedure TestWildcardAllowedCatStillAsksAboutThePath;
     procedure TestExactlyApprovedCatDoesNotAskAboutThePath;
@@ -565,6 +566,48 @@ begin
       Copy(Src, Asks[0].FocusStart, Asks[0].FocusLen));
     AssertEquals('second focus', 'uname -a',
       Copy(Src, Asks[1].FocusStart, Asks[1].FocusLen));
+  finally
+    Tool.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestStructuralWordsAreNotCommands;
+var
+  Tool: TCommandTool;
+  Asks: TApprovalAskArray;
+begin
+  { `if`/`then`/`fi` structure a script; they are not programs, so they must
+    not become asks of their own. Only the condition and the command do. }
+  Tool := BuildTool(nil, 0);
+  try
+    Asks := Tool.ApprovalAsks(
+      '{"command":"if [ -f a ]; then cat a; fi","reason":"r"}');
+    AssertEquals('the condition and the command', 2, Length(Asks));
+    AssertEquals('condition ref', 'run_command:[', Asks[0].Subject.Ref);
+    AssertEquals('condition text', '[ -f a ]', Asks[0].Summary);
+    AssertEquals('command ref', 'run_command:cat', Asks[1].Subject.Ref);
+    AssertEquals('command text', 'cat a', Asks[1].Summary);
+    { `for x in a b` is a header, and the body is pure, so nothing asks. }
+    Asks := Tool.ApprovalAsks(
+      '{"command":"for x in a b; do echo $x; done","reason":"r"}');
+    AssertEquals('no asks for a pure loop', 0, Length(Asks));
+    { A closer alone names nothing. }
+    Asks := Tool.ApprovalAsks('{"command":"done","reason":"r"}');
+    AssertEquals('done asks nothing', 0, Length(Asks));
+    Asks := Tool.ApprovalAsks('{"command":"fi","reason":"r"}');
+    AssertEquals('fi asks nothing', 0, Length(Asks));
+    { A keyword that introduces a command in the same segment: ask the
+      command, not the keyword. }
+    Asks := Tool.ApprovalAsks('{"command":"while true; do git status; done",' +
+      '"reason":"r"}');
+    AssertEquals('the loop body', 1, Length(Asks));
+    AssertEquals('body ref', 'run_command:git', Asks[0].Subject.Ref);
+    Asks := Tool.ApprovalAsks('{"command":"{ cat a; }","reason":"r"}');
+    AssertEquals('the group body', 1, Length(Asks));
+    AssertEquals('group ref', 'run_command:cat', Asks[0].Subject.Ref);
+    Asks := Tool.ApprovalAsks('{"command":"! git status","reason":"r"}');
+    AssertEquals('the negated command', 1, Length(Asks));
+    AssertEquals('negated ref', 'run_command:git', Asks[0].Subject.Ref);
   finally
     Tool.Free;
   end;
