@@ -74,9 +74,9 @@ write a workspace, on any OS:
 |---|---|---|
 | files | `cat`, `head`, `tail`, `wc`, `ls`, `mkdir`, `rm`, `mv`, `cp`, `touch` | done |
 | text | `grep`, `sed`, `sort`, `uniq`, `basename`, `dirname`, `test`, `[` | done |
-| transforms | `awk` (fields), `cut`, `tr`, `tee`, `printf` | `awk` next; the rest small |
-| search | `grep -r`, `rg` (alias with rg's defaults) | `grep -r` done; `rg` small |
-| data | `jq` (paths), `yq` (paths) | `jq` next; `yq` if asked |
+| transforms | `awk` (fields), `cut`, `tr`, `tee`, `printf` | `awk` done; the rest small |
+| search | `grep -r`, `find`, `rg` (alias with rg's defaults) | `grep -r` and `find` done; `rg` small |
+| data | `jq` (paths), `yq` (paths) | `jq` done; `yq` if asked |
 | programs | `git`, `make`, `fpc`, `python3`, `curl`, `sqlite3` | **not** implementable; process tier only |
 
 The last row is the honest boundary: those are real programs, not shell

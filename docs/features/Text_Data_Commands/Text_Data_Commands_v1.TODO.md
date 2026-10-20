@@ -39,18 +39,23 @@ Evidence first: the corpus says `sed` (1,245 uses) is the whole story today;
       assigned in the program, multiple rules beyond the supported shape.
 - [x] **Test** + 10 differential fixtures; coverage 1,670 → 1,686.
 
-### Phase 3: jq paths
+### Phase 3: jq paths (shipped)
 
-- [ ] **Implement** `jq`: `.`, `.foo`, `.foo.bar`, `.foo[]`, `.[N]`,
-      `.["k"]`, `-r` (raw), `-c` (compact), `keys`, `length`.
-- [ ] **Decline**: pipes, `select`, `map`, variables, functions, `-e`.
-- [ ] **Test** + differential fixtures; measure.
+- [x] **Implement** `jq`: `.`, `.foo`, `.foo.bar`, `.foo[]`, `.[N]`,
+      `.["k"]`, `-r` (raw), `-c` (compact) — jq's exact pretty output.
+- [x] **Decline**: pipes, `select`, `map`, variables, functions, `-e`.
+- [x] **Test** + 10 differential fixtures recorded from jq 1.7; measure.
 
 ### Phase 4: yq (last)
 
 - [ ] **Decide** whether to add `yq` at all: the harness already has
       `yaml_read`/`yaml_edit`, and the corpus has no uses.
 - [ ] If added: the same path queries as `jq`, over the existing YAML reader.
+
+### Phase 4a: find (shipped)
+
+- [x] `find [PATH...] [-name GLOB] [-iname GLOB] [-type f|d] [-maxdepth N]`,
+      over the same walk as `grep -r`; 7 differential fixtures.
 
 ### Phase 5: rg
 

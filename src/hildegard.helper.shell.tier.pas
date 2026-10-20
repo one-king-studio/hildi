@@ -124,6 +124,8 @@ begin
   FRegistry.Register('mcp', FCmd.Mcp);
   FRegistry.Register('sed', FCmd.Sed);
   FRegistry.Register('awk', FCmd.Awk);
+  FRegistry.Register('find', FCmd.Find);
+  FRegistry.Register('jq', FCmd.Jq);
 end;
 
 destructor TBuiltinShell.Destroy;
@@ -350,9 +352,8 @@ begin
             ADeny := 'grep: ' + Arg;
             Exit;
           end;
-        { test/[ arguments are operands, not options: -f, -d, -eq are the
-          expression itself. }
-        if (Name = 'test') or (Name = '[') then
+        { test/[ and find take expressions, not options: -f, -d, -name. }
+        if (Name = 'test') or (Name = '[') or (Name = 'find') then
           Exit;
         if BuiltinCommandOptions(Name, Options) then
           for I := 1 to High(AC.Words) do

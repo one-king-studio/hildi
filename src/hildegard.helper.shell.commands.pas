@@ -61,6 +61,8 @@ type
     function FalseCmd(const ACall: TShellCall): TShellResult;
     function Sed(const ACall: TShellCall): TShellResult;
     function Awk(const ACall: TShellCall): TShellResult;
+    function Find(const ACall: TShellCall): TShellResult;
+    function Jq(const ACall: TShellCall): TShellResult;
     function Tool(const ACall: TShellCall): TShellResult;
     function Mcp(const ACall: TShellCall): TShellResult;
   end;
@@ -86,6 +88,7 @@ implementation
 uses
   fpjson, jsonparser, hildegard.helper.shell.pattern,
   hildegard.helper.shell.sed, hildegard.helper.shell.awk,
+  hildegard.helper.shell.jq,
   shell.interpreter, hildegard.helper.mcp.client
   {$ifdef unix}, BaseUnix{$endif};
 
@@ -99,7 +102,7 @@ type
   end;
 
 const
-  CommandSpecs: array[0..23] of TCommandSpec = (
+  CommandSpecs: array[0..25] of TCommandSpec = (
     (Name: 'echo'; Options: '-n'),
     (Name: 'head'; Options: '-nN'),
     (Name: 'tail'; Options: '-nN'),
@@ -107,6 +110,8 @@ const
     (Name: 'grep'; Options: '-nivlcFEGr'),
     (Name: 'sed'; Options: '-nErei'),
     (Name: 'awk'; Options: '-F'),
+    (Name: 'find'; Options: ''),
+    (Name: 'jq'; Options: '-rc'),
     (Name: 'ls'; Options: '-ad'),
     (Name: 'mkdir'; Options: '-p'),
     (Name: 'rm'; Options: '-rf'),
@@ -1585,6 +1590,258 @@ begin
   if not RunAwk(ProgramText, Combined, FieldSep, OutText, Err) then
     Exit(Failure('awk: ' + Err, 1));
   Result := ShellResultOk(OutText);
+end;
+
+function TBuiltinCommands.Find(const ACall: TShellCall): TShellResult;
+var
+  I: Integer;
+  Paths: TStringArray;
+  NamePattern, TypeFilter: string;
+  NameInsensitive: Boolean;
+  MaxDepth: Integer;
+  OutText, ErrText, Full, Err: string;
+  Status: Integer;
+  OperandKind: TShellFileKind;
+
+  function Matches(const ADisplay, AFull: string; AKind: TShellFileKind): Boolean;
+  var
+    Base, Pattern: string;
+  begin
+    if TypeFilter = 'f' then
+    begin
+      if AKind <> sfkFile then Exit(False);
+    end
+    else if TypeFilter = 'd' then
+    begin
+      if AKind <> sfkDirectory then Exit(False);
+    end;
+    if NamePattern = '' then
+      Exit(True);
+    Base := ExtractFileName(ADisplay);
+    Pattern := NamePattern;
+    if NameInsensitive then
+    begin
+      Base := LowerCase(Base);
+      Pattern := LowerCase(Pattern);
+    end;
+    Result := MatchGlob(Pattern, Base);
+  end;
+
+  procedure Walk(const ADir, ADisplay: string; ADepth: Integer); forward;
+
+  procedure Emit(const ADisplay, AFull: string);
+  var
+    Kind: TShellFileKind;
+    E: string;
+  begin
+    if not FFs.Stat(AFull, Kind, E) then
+      Exit;
+    if Matches(ADisplay, AFull, Kind) then
+      OutText := OutText + ADisplay + #10;
+  end;
+
+  procedure Walk(const ADir, ADisplay: string; ADepth: Integer);
+  var
+    Entries: TStringArray;
+    E, Child, ChildDisplay: string;
+    J: Integer;
+    Kind: TShellFileKind;
+    {$ifdef unix}
+    LSt: Stat;
+    {$endif}
+  begin
+    if (MaxDepth >= 0) and (ADepth > MaxDepth) then
+      Exit;
+    Emit(ADisplay, ADir);
+    if (MaxDepth >= 0) and (ADepth >= MaxDepth) then
+      Exit;
+    if not FFs.Stat(ADir, Kind, E) then
+      Exit;
+    if Kind <> sfkDirectory then
+      Exit;
+    if not FFs.ListDir(ADir, Entries, E) then
+    begin
+      ErrText := ErrText + 'find: ' + ADisplay + ': ' + E + #10;
+      Status := 1;
+      Exit;
+    end;
+    for J := 0 to High(Entries) do
+    begin
+      Child := ADir + '/' + Entries[J];
+      if ADisplay = '' then
+        ChildDisplay := Entries[J]
+      else if ADisplay = '/' then
+        ChildDisplay := '/' + Entries[J]
+      else
+        ChildDisplay := ADisplay + '/' + Entries[J];
+      {$ifdef unix}
+      if (fpLstat(PChar(Child), LSt) = 0) and
+        ((LSt.st_mode and S_IFMT) = S_IFLNK) then
+      begin
+        { find does not follow symlinks by default; report the link itself. }
+        Emit(ChildDisplay, Child);
+        Continue;
+      end;
+      {$endif}
+      Walk(Child, ChildDisplay, ADepth + 1);
+    end;
+  end;
+
+begin
+  NamePattern := '';
+  TypeFilter := '';
+  NameInsensitive := False;
+  MaxDepth := -1;
+  Paths := nil;
+  I := 0;
+  while (I <= High(ACall.Args)) and
+    ((ACall.Args[I] = '') or (ACall.Args[I][1] <> '-')) do
+  begin
+    SetLength(Paths, Length(Paths) + 1);
+    Paths[High(Paths)] := ACall.Args[I];
+    Inc(I);
+  end;
+  while I <= High(ACall.Args) do
+  begin
+    if ACall.Args[I] = '-name' then
+    begin
+      if I = High(ACall.Args) then
+        Exit(Usage('find: -name requires an argument'));
+      Inc(I);
+      NamePattern := ACall.Args[I];
+    end
+    else if ACall.Args[I] = '-iname' then
+    begin
+      if I = High(ACall.Args) then
+        Exit(Usage('find: -iname requires an argument'));
+      Inc(I);
+      NamePattern := ACall.Args[I];
+      NameInsensitive := True;
+    end
+    else if ACall.Args[I] = '-type' then
+    begin
+      if I = High(ACall.Args) then
+        Exit(Usage('find: -type requires an argument'));
+      Inc(I);
+      TypeFilter := ACall.Args[I];
+      if (TypeFilter <> 'f') and (TypeFilter <> 'd') then
+        Exit(Usage('find: only -type f and -type d are supported'));
+    end
+    else if ACall.Args[I] = '-maxdepth' then
+    begin
+      if I = High(ACall.Args) then
+        Exit(Usage('find: -maxdepth requires an argument'));
+      Inc(I);
+      MaxDepth := StrToIntDef(ACall.Args[I], -1);
+      if MaxDepth < 0 then
+        Exit(Usage('find: invalid -maxdepth: ' + ACall.Args[I]));
+    end
+    else if ACall.Args[I] = '-print' then
+    begin
+      { the default }
+    end
+    else
+      Exit(Usage('find: unsupported expression: ' + ACall.Args[I]));
+    Inc(I);
+  end;
+  if Length(Paths) = 0 then
+  begin
+    SetLength(Paths, 1);
+    Paths[0] := '.';
+  end;
+  OutText := '';
+  ErrText := '';
+  Status := 0;
+  for I := 0 to High(Paths) do
+  begin
+    Full := FFs.Resolve(ACall.Cwd, Paths[I]);
+    if not FFs.Stat(Full, OperandKind, Err) then
+    begin
+      ErrText := ErrText + 'find: ' + Paths[I] + ': ' + Err + #10;
+      Status := 1;
+      Continue;
+    end;
+    Walk(Full, Paths[I], 0);
+  end;
+  Result.Stdout := OutText;
+  Result.Stderr := ErrText;
+  Result.ExitCode := Status;
+end;
+
+function TBuiltinCommands.Jq(const ACall: TShellCall): TShellResult;
+var
+  I, J, Code: Integer;
+  Raw, Compact: Boolean;
+  A, Filter, OutText, Err, Data, E: string;
+  Files: TStringArray;
+begin
+  Raw := False;
+  Compact := False;
+  I := 0;
+  while I <= High(ACall.Args) do
+  begin
+    A := ACall.Args[I];
+    if A = '--' then
+    begin
+      Inc(I);
+      Break;
+    end;
+    if (A = '') or (A[1] <> '-') or (A = '-') then
+      Break;
+    if A = '-r' then
+      Raw := True
+    else if A = '-c' then
+      Compact := True
+    else
+      Exit(Usage('jq: unsupported option ' + A));
+    Inc(I);
+  end;
+  if I > High(ACall.Args) then
+    Exit(Usage('jq: missing filter'));
+  Filter := ACall.Args[I];
+  Inc(I);
+  SetLength(Files, Length(ACall.Args) - I);
+  J := I;
+  while I <= High(ACall.Args) do
+  begin
+    Files[I - J] := ACall.Args[I];
+    Inc(I);
+  end;
+  Result := Default(TShellResult);
+  if Length(Files) = 0 then
+  begin
+    if not RunJq(Filter, ACall.Stdin, Raw, Compact, OutText, Err) then
+    begin
+      if Pos('parse error', Err) > 0 then
+        Code := 5
+      else
+        Code := 3;
+      Exit(Failure('jq: ' + Err, Code));
+    end;
+    Exit(ShellResultOk(OutText));
+  end;
+  for I := 0 to High(Files) do
+  begin
+    if Files[I] = '-' then
+      Data := ACall.Stdin
+    else if not FFs.ReadFile(FFs.Resolve(ACall.Cwd, Files[I]), Data, E) then
+    begin
+      Result.Stderr := Result.Stderr + 'jq: ' + Files[I] + ': ' + E + #10;
+      Result.ExitCode := 2;
+      Exit;
+    end;
+    if not RunJq(Filter, Data, Raw, Compact, OutText, Err) then
+    begin
+      if Pos('parse error', Err) > 0 then
+        Code := 5
+      else
+        Code := 3;
+      Result.Stderr := Result.Stderr + 'jq: ' + Err + #10;
+      Result.ExitCode := Code;
+      Exit;
+    end;
+    Result.Stdout := Result.Stdout + OutText;
+  end;
 end;
 
 function TBuiltinCommands.Tool(const ACall: TShellCall): TShellResult;

@@ -44,6 +44,8 @@ parser the tier uses; re-run `make shell-flags` to reproduce the tallies.
 | `grep` | `-n -i -v -l -c -F -E -G -r` | **BRE** by default, **ERE** with `-E`, fixed with `-F`; POSIX classes mapped; `-r` walks directories (sorted; symlinked dirs skipped) and prefixes every hit |
 | `sed` | `-n -E -r -e -i[SUFFIX]` | paging/ranges (`N`, `$`, `/re/`, ranges), `p`/`d`/`q`, `s///` with `g`/`p`/`i`, `&` and groups; `-i` rewrites through the workspace FS |
 | `awk` | `-F` | `[condition] { print ... }`: `$N`/`$0`/`NF`/`NR`, comparisons, `~`/`!~`, `&&`/`||`, string and number literals |
+| `find` | — | `-name`/`-iname`/`-type`/`-maxdepth`; symlinked directories are reported, not followed |
+| `jq` | `-r -c` | path filters, `.[N]` (negative too), `.[]`, `.["k"]`; jq's pretty/compact output |
 | `ls` | `-a -d` | bare names, one path; `-d` prints the path |
 | `mkdir` | `-p` | |
 | `rm` | `-r -f` | directories only with `-r`; `-f` suppresses missing |
@@ -59,9 +61,9 @@ parser the tier uses; re-run `make shell-flags` to reproduce the tallies.
 | `tool` | — | `tool <name> [json]`; allow-list; `run_command` refused |
 | `mcp` | — | `mcp <server>:<tool> [json]`; maps to `mcp_<s>_<t>` |
 
-Anything not listed — `git`, `make`, `curl`, `fpc`, `python3`, `find`, `jq`,
-`rg` — is **not** in the tier and always falls back. (`sed` and `awk` joined the
-set; `jq`/`yq`/`rg` are [planned](../Text_Data_Commands/FEATURE.md).)
+Anything not listed — `git`, `make`, `curl`, `fpc`, `python3`, `rg` — is **not**
+in the tier and always falls back. (`sed`, `awk`, `find` and `jq` joined the
+set; `yq`/`rg` are [planned](../Text_Data_Commands/FEATURE.md).)
 
 ## The evidence
 
@@ -83,7 +85,7 @@ set; `jq`/`yq`/`rg` are [planned](../Text_Data_Commands/FEATURE.md).)
 | 12 | `cp` | 60 | yes |
 | 13 | `sqlite3` | 42 | no |
 | 14 | `python3` | 39 | no |
-| 15 | `find` | 36 | no |
+| 15 | `find` | 36 | yes |
 | 16 | `sort` | 35 | yes |
 | 17 | `wc` | 35 | yes |
 | 18 | `awk` | 34 | yes |
@@ -108,7 +110,7 @@ set; `jq`/`yq`/`rg` are [planned](../Text_Data_Commands/FEATURE.md).)
 
 ### Whole-script coverage
 
-Of the 3.255 corpus entries, the tier runs **1,686 (51%)** today (76 before
+Of the 3.255 corpus entries, the tier runs **1,699 (52%)** today (76 before
 `head -N`/`tail -N`, 105 before grep regex, 585 before `grep -r`, 751 before
 `sed`). The rest decline, and the **first** blocker per script is:
 
@@ -120,7 +122,6 @@ Of the 3.255 corpus entries, the tier runs **1,686 (51%)** today (76 before
 | `python3` not in the tier | 23 |
 | `ls -la` (needs `-l`) | 21 |
 | `curl` not in the tier | 21 |
-| `find` not in the tier | 20 |
 
 What remains is dominated by real programs. The in-tier options left are
 `ls -l` (needs a richer `Stat`), `find`, and the transform commands in
@@ -152,6 +153,9 @@ GNU word boundaries and POSIX classes are mapped; unknown letter escapes stay
 literal as bash treats them. A construct the translation cannot express is
 declined for a literal pattern (so `auto` falls back to bash) and errors at run
 time. Coverage 105 → 585 scripts.
+
+**P4/P5 — done:** `find` (`-name`/`-iname`/`-type`/`-maxdepth`) and `jq`
+(path filters, `-r`/`-c`, jq's exact pretty format). Coverage 1,686 → 1,699.
 
 **P3 — done:** `grep -r` / `-rn` / `-rln`. Walks directories through the FS
 seam, prefixes every hit (as bash does, even for a file operand), lists every

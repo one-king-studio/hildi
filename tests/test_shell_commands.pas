@@ -52,6 +52,8 @@ type
     procedure TestOptionTable;
     procedure TestSed;
     procedure TestAwk;
+    procedure TestFind;
+    procedure TestJq;
     procedure TestToolDispatch;
     procedure TestToolGatewayRefusals;
     procedure TestMcpMapping;
@@ -159,6 +161,10 @@ begin
     Result := FCmd.Sed(Call)
   else if AName = 'awk' then
     Result := FCmd.Awk(Call)
+  else if AName = 'find' then
+    Result := FCmd.Find(Call)
+  else if AName = 'jq' then
+    Result := FCmd.Jq(Call)
   else if AName = 'tool' then
     Result := FCmd.Tool(Call)
   else if AName = 'mcp' then
@@ -536,6 +542,64 @@ begin
   R := RunCmd('awk', ['BEGIN {print 1}', 'a.txt']);
   AssertEquals('BEGIN is unsupported', 1, R.ExitCode);
   AssertTrue('names it', Pos('unsupported', R.Stderr) > 0);
+end;
+
+procedure TShellCommandsTest.TestFind;
+var
+  R: TShellResult;
+  E: string;
+begin
+  R := RunCmd('find', ['.', '-name', '*.txt']);
+  AssertEquals('name match', './a.txt' + #10 + './b.txt' + #10, R.Stdout);
+  R := RunCmd('find', ['.', '-name', '*.log']);
+  AssertEquals('log', './c.log' + #10, R.Stdout);
+  R := RunCmd('find', ['.', '-type', 'd']);
+  AssertEquals('directories', '.' + #10 + './sub' + #10, R.Stdout);
+  R := RunCmd('find', ['sub']);
+  AssertEquals('operand itself', 'sub' + #10, R.Stdout);
+  R := RunCmd('find', ['.', '-maxdepth', '1', '-name', '*.txt']);
+  AssertEquals('maxdepth', './a.txt' + #10 + './b.txt' + #10, R.Stdout);
+  R := RunCmd('find', ['.', '-name', 'nope']);
+  AssertEquals('no match status', 0, R.ExitCode);
+  AssertEquals('no match output', '', R.Stdout);
+  R := RunCmd('find', ['.', '-name', '*.txt', '-type', 'd']);
+  AssertEquals('type filters names', '', R.Stdout);
+  R := RunCmd('find', ['missing']);
+  AssertEquals('missing operand', 1, R.ExitCode);
+end;
+
+procedure TShellCommandsTest.TestJq;
+var
+  R: TShellResult;
+  E: string;
+begin
+  FFs.WriteFile(P('d.json'), '{"a":1,"b":[2,3]}', False, E);
+  R := RunCmd('jq', ['.', 'd.json']);
+  AssertEquals('pretty identity',
+    '{' + #10 + '  "a": 1,' + #10 + '  "b": [' + #10 + '    2,' + #10 +
+    '    3' + #10 + '  ]' + #10 + '}' + #10, R.Stdout);
+  R := RunCmd('jq', ['-c', '.', 'd.json']);
+  AssertEquals('compact', '{"a":1,"b":[2,3]}' + #10, R.Stdout);
+  R := RunCmd('jq', ['.a', 'd.json']);
+  AssertEquals('key', '1' + #10, R.Stdout);
+  R := RunCmd('jq', ['.b[0]', 'd.json']);
+  AssertEquals('index', '2' + #10, R.Stdout);
+  R := RunCmd('jq', ['.b[-1]', 'd.json']);
+  AssertEquals('negative index', '3' + #10, R.Stdout);
+  R := RunCmd('jq', ['.b[]', 'd.json']);
+  AssertEquals('iterate', '2' + #10 + '3' + #10, R.Stdout);
+  R := RunCmd('jq', ['.missing', 'd.json']);
+  AssertEquals('missing key is null', 'null' + #10, R.Stdout);
+  FFs.WriteFile(P('s.json'), '{"s":"hi"}', False, E);
+  R := RunCmd('jq', ['-r', '.s', 's.json']);
+  AssertEquals('raw string', 'hi' + #10, R.Stdout);
+  R := RunCmd('jq', ['.s', 's.json']);
+  AssertEquals('quoted string', '"hi"' + #10, R.Stdout);
+  FFs.WriteFile(P('bad.json'), 'not json', False, E);
+  R := RunCmd('jq', ['.', 'bad.json']);
+  AssertEquals('parse error status', 5, R.ExitCode);
+  R := RunCmd('jq', ['.a | .b', 'd.json']);
+  AssertEquals('unsupported filter status', 3, R.ExitCode);
 end;
 
 procedure TShellCommandsTest.TestToolDispatch;

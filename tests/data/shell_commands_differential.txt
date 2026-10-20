@@ -66,3 +66,20 @@ awk '$1 != "a"' b.txt	b\n		0
 awk '{print "x", $1}' b.txt	x a\nx a\nx b\n		0
 awk '$1 ~ /^a/ {print $1}' b.txt	a\na\n		0
 awk '{print NR, NF, $0}' b.txt	1 1 a\n2 1 a\n3 1 b\n		0
+find . -name '*.txt' | sort	./a.txt\n./b.txt\n		0
+find . -type d | sort	.\n./sub\n		0
+find . -name '*.log'	./c.log\n		0
+find . -maxdepth 1 -name '*.txt' | sort	./a.txt\n./b.txt\n		0
+find a.txt	a.txt\n		0
+find sub -type d	sub\n		0
+find . -name '*.txt' -type f | sort	./a.txt\n./b.txt\n		0
+echo '{"a":1,"b":[2,3]}' > d.json; jq . d.json	{\n  "a": 1,\n  "b": [\n    2,\n    3\n  ]\n}\n		0
+echo '{"a":1,"b":[2,3]}' > d.json; jq -c . d.json	{"a":1,"b":[2,3]}\n		0
+echo '{"a":1,"b":[2,3]}' > d.json; jq .a d.json	1\n		0
+echo '{"a":1,"b":[2,3]}' > d.json; jq '.b[0]' d.json	2\n		0
+echo '{"a":1,"b":[2,3]}' > d.json; jq '.b[-1]' d.json	3\n		0
+echo '{"a":1,"b":[2,3]}' > d.json; jq '.b[]' d.json	2\n3\n		0
+echo '{"a":{"b":"x"}}' > d.json; jq -r .a.b d.json	x\n		0
+echo '{"a":1}' > d.json; jq .missing d.json	null\n		0
+echo '{"a":1}' > d.json; jq -r .s d.json	null\n		0
+echo '{"a":1}' > d.json; jq -c '.a' d.json	1\n		0

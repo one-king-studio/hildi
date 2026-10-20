@@ -1,6 +1,6 @@
 # Feature: Text & Data Commands
 
-**Status:** Partially implemented — `sed` and `awk` shipped; `jq`, `yq`, `rg` planned.
+**Status:** Partially implemented — `sed`, `awk` shipped; `jq` shipped (this feature's list); `yq`, `rg` planned.
 
 **Related:** [Builtin Shell Tier](../Builtin_Shell_Tier/FEATURE.md) ·
 [Command & Flag Coverage](../Builtin_Shell_Tier/COMMAND_COVERAGE.md) ·
@@ -40,8 +40,9 @@ still handles the long tail:
 2. **`awk`** (shipped): `-F`, `{print $1, $2, …}`, `$N` comparisons and
    `$N ~ /re/` with `&&`/`||`, `NR`/`NF`, and one pattern-action form. Not a
    general awk: no functions, arrays, getline, printf formats beyond `print`.
-3. **`jq`** (planned): identity, `.foo`, `.foo.bar`, `.foo[]`, `.[N]`,
-   `.["k"]`, `-r`, `-c`, and `keys`/`length`. A query subset, not a language.
+3. **`jq`** (shipped): identity, `.foo`, `.foo.bar`, `.foo[]`, `.[N]`
+   (negative too), `.["k"]`, `-r`, `-c` — jq's exact pretty output. Pipes,
+   `select`, `map`, `keys`/`length` and variables decline.
 4. **`yq`** (planned, last): the same path queries over YAML, since the harness
    already has `yaml_read`/`yaml_edit`; add it only when a workload asks.
 5. **`rg`** (planned, last): recursive search over the same engine as `grep`,
