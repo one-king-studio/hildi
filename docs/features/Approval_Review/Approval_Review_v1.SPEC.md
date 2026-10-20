@@ -133,9 +133,10 @@ operator reads the command in context rather than a reconstructed segment:
   a long word), and the band shows at most **8 rows**; the rest scrolls.
 - The band **opens on the focus**: when the focus row is past the eighth, the
   view starts at `focus - 4` (clamped).
-- The focus span is drawn in bold (the soft accent on the sunken band);
-  everything else is normal text. A `▸` sits in the band's left pad on the
-  focus row.
+- The focus span is drawn **bold** and the rest of the script **dimmed** —
+  rendition only, no colour, so the eye lands on the command being approved.
+  A bold `▸` sits in the band's left pad on the focus row. The effect summary
+  line above the script stays normal text: it is the key information.
 - PageUp/PageDown scroll a page; the wheel scrolls three rows.
 - For an **effect** ask (one with `Subject.Path`, e.g. `file:read`), the
   summary line is shown *above* the script — the path is what is approved,

@@ -446,9 +446,16 @@ begin
     AssertTrue('found the focus text', ColR > 0);
     AssertTrue('focus start is bold',
       sfBold in Surface.CellAt(ColR, 3).Attr.Style);
+    AssertFalse('the focus is not dimmed',
+      sfDim in Surface.CellAt(ColR, 3).Attr.Style);
     AssertTrue('found the leading text', ColE > 0);
     AssertFalse('text before the focus is not bold',
       sfBold in Surface.CellAt(ColE, 3).Attr.Style);
+    AssertTrue('text before the focus is dimmed',
+      sfDim in Surface.CellAt(ColE, 3).Attr.Style);
+    { Rendition only: the focus keeps the band's foreground, no accent colour. }
+    AssertEquals('no colour on the focus',
+      Surface.CellAt(ColE, 3).Attr.Fg, Surface.CellAt(ColR, 3).Attr.Fg);
   finally
     Modal.Free;
     Surface.Free;
@@ -473,6 +480,9 @@ begin
     Modal.Render(Surface);
     AssertTrue('the effect', Pos(UnicodeString('read sub/a.txt'),
       Surface.RowText(3, 0, 60)) > 0);
+    { The effect line is the key information, so it is not dimmed. }
+    AssertFalse('the effect is not dimmed',
+      sfDim in Surface.CellAt(3, 3).Attr.Style);
     AssertTrue('the command', Pos(UnicodeString('cd sub; cat a.txt'),
       Surface.RowText(4, 0, 60)) > 0);
   finally

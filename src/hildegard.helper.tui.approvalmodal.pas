@@ -633,7 +633,7 @@ var
   D, Col, RowIdx: Integer;
   ReasonW, DetailW: Integer;
   Bg, BorderAttr, MutedAttr, ActiveAttr, NormalAttr, DetailAttr: TAttr;
-  FocusAttr: TAttr;
+  DimAttr, FocusAttr: TAttr;
   Key: UnicodeString;
   SRow: TScriptRow;
   ReasonLines, DetailLines: TUnicodeLines;
@@ -712,12 +712,15 @@ begin
 
   { A blank line, then the details on the sunken background, with an inline
     pad on each side. With a script, the whole command is shown, scrolled to
-    the focus and with the focus span in bold; without one (an older producer)
-    the summary is wrapped and compacted. }
+    the focus: the span being approved is bold and the rest of the script is
+    dimmed - rendition only, no colour, so the eye lands on the command being
+    approved. Without a script (an older producer) the summary is wrapped and
+    compacted. }
   Inc(Row);
   if Row < B then
   begin
     DetailAttr := OnBg(FTheme.Text, FTheme.SunkenBg);
+    DimAttr := OnBg(WithStyle(FTheme.Text, [sfDim]), FTheme.SunkenBg);
     if ShowSummary then
       for I := 0 to High(DetailLines) do
       begin
@@ -730,7 +733,7 @@ begin
     if FAsk.Script <> '' then
     begin
       EnsureLayout(DetailW);
-      FocusAttr := OnBg(WithStyle(FTheme.AccentSoft, [sfBold]), FTheme.SunkenBg);
+      FocusAttr := OnBg(WithStyle(FTheme.Text, [sfBold]), FTheme.SunkenBg);
       D := ScriptBandRows;
       for I := 0 to D - 1 do
       begin
@@ -741,23 +744,23 @@ begin
           Break;
         S.FillRect(Rc(InnerL, Row, InnerR - InnerL + 1, 1), DetailAttr);
         if RowIdx = FFocusRow then
-          Text(InnerL + 1, Row, '▸', MutedAttr);
+          Text(InnerL + 1, Row, '▸', FocusAttr);
         SRow := FScriptRows[RowIdx];
         if SRow.HiLen > 0 then
         begin
           Col := InnerL + DetailPad;
           if SRow.HiStart > 1 then
           begin
-            Text(Col, Row, Copy(SRow.Text, 1, SRow.HiStart - 1), DetailAttr);
+            Text(Col, Row, Copy(SRow.Text, 1, SRow.HiStart - 1), DimAttr);
             Inc(Col, StringWidth(Copy(SRow.Text, 1, SRow.HiStart - 1)));
           end;
           Text(Col, Row, Copy(SRow.Text, SRow.HiStart, SRow.HiLen), FocusAttr);
           Inc(Col, StringWidth(Copy(SRow.Text, SRow.HiStart, SRow.HiLen)));
           Text(Col, Row, Copy(SRow.Text, SRow.HiStart + SRow.HiLen, MaxInt),
-            DetailAttr);
+            DimAttr);
         end
         else
-          Text(InnerL + DetailPad, Row, SRow.Text, DetailAttr);
+          Text(InnerL + DetailPad, Row, SRow.Text, DimAttr);
         Inc(Row);
       end;
     end;
