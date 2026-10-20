@@ -524,21 +524,6 @@ var
     Ask.Options[High(Ask.Options)] := Opt;
   end;
 
-  procedure AddNever;
-  var
-    Opt: TApprovalOption;
-  begin
-    Opt := Default(TApprovalOption);
-    Opt.Key := 'never';
-    Opt.Caption := 'never allow ' + ARef;
-    Opt.Persists := True;
-    Opt.Rule := DefaultApprovalRule(aeDeny);
-    Opt.Rule.Ref := ARef;
-    Opt.Rule.AnyParams := True;
-    SetLength(Ask.Options, Length(Ask.Options) + 1);
-    Ask.Options[High(Ask.Options)] := Opt;
-  end;
-
 var
   Dir, Ext: string;
   WriteShaped: Boolean;
@@ -573,7 +558,6 @@ begin
       Dir, Ext);
   end;
   AddOption('any', 'always ' + ARef, True, nil, True);
-  AddNever;
   SetLength(Asks, 1);
   Asks[0] := Ask;
   if not FService.Resolve(Asks, Batch) then

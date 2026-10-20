@@ -20,7 +20,8 @@ uses
   hildegard.helper.agent, hildegard.helper.llm,
   hildegard.helper.command.policy, hildegard.helper.approval,
   hildegard.helper.command.paths,
-  hildegard.helper.process, hildegard.helper.workspace.changes;
+  hildegard.helper.process, hildegard.helper.workspace.changes,
+  hildegard.helper.command.pure;
 
 type
   TShellProfile = record
@@ -298,6 +299,9 @@ begin
     Seg := Plan.Segments[I];
     if Seg.Executable = '' then
       Continue;
+    { A pure command needs no approval; its redirects are asked separately. }
+    if IsPureCommand(ExtractFileName(Seg.Executable)) then
+      Continue;
     Bin := ExtractFileName(Seg.Executable);
     if Bin = '' then
       Bin := Seg.Executable;
@@ -377,18 +381,6 @@ begin
       end;
       AddOption(Result[High(Result)], 'any', 'always ' + FileRef, True, nil,
         True);
-      { A deny option, as the file tools offer. }
-      SetLength(Result[High(Result)].Options,
-        Length(Result[High(Result)].Options) + 1);
-      with Result[High(Result)].Options[High(Result[High(Result)].Options)] do
-      begin
-        Key := 'never';
-        Caption := 'never allow ' + FileRef;
-        Persists := True;
-        Rule := DefaultApprovalRule(aeDeny);
-        Rule.Ref := FileRef;
-        Rule.AnyParams := True;
-      end;
     end;
   end;
   { Path asks: for each access that leaves the workspace, one ask whose subject
@@ -798,15 +790,18 @@ begin
         { Carry the model's reason into the ask so the dialog can show it. }
         for I := 0 to High(Asks) do
           Asks[I].Reason := Reason;
-        if not FService.Resolve(Asks, Batch) then
+        if Length(Asks) > 0 then
         begin
-          AError := 'approval error: ' + Batch.Reason;
-          Exit(False);
-        end;
-        if Batch.Denied then
-        begin
-          AError := Batch.Reason;
-          Exit(False);
+          if not FService.Resolve(Asks, Batch) then
+          begin
+            AError := 'approval error: ' + Batch.Reason;
+            Exit(False);
+          end;
+          if Batch.Denied then
+          begin
+            AError := Batch.Reason;
+            Exit(False);
+          end;
         end;
       end;
 

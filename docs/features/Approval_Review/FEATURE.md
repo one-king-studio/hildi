@@ -1,8 +1,9 @@
 # Feature: Approval Review
 
 **Status:** Phase 1 shipped (redirects are named in the ask and bound to the
-file tools). The full-script review, focus highlighting, scrolling and the
-per-command file effects are specified here.
+file tools on both executors; pure commands are ungated). The full-script
+review, focus highlighting, scrolling and the per-command file effects are
+specified here.
 
 **Related:** [Command Tool](../Command_Tool/Command_Tool_v1.SPEC.md) ·
 [Approval Path Scoping](../Approval_Path_Scoping/Approval_Path_Scoping_v1.SPEC.md) ·
@@ -35,15 +36,24 @@ Make the ask a **reviewable unit**, not a fragment:
    the focused command rather than at the top.
 3. **Redirects are file effects.** `>`/`>>`/`2>`/`&>` become a `file:write`
    ask and `<` a `file:read` ask, with the **same option shapes as the file
-   tools** (exact / dir / ext / dir+ext / any / never). A `file_write` grant
-   therefore covers the shell, and an operator can say "always .log files in
-   build/".
+   tools** (exact / dir / ext / dir+ext / any). A `file_write` grant therefore
+   covers the shell, and an operator can say "always .log files in build/".
+   There is no `never` option: a deny is a policy decision (the deny rule the
+   store already models), not a per-prompt choice — denying the prompt is the
+   answer, and a persistent deny belongs to the rules, not the dialog.
 4. **The command's own file effects are known where the tier knows them.**
    `sed -i`, `tee`, `rm`, `mv`, `cp`, `mkdir`, `touch` name their targets; the
    tier raises the same file asks before running, from the AST. The process
    tier cannot know, so it keeps the splitter's analysis (the redirects and the
    outside-path asks).
-5. **Buckets.** When a call's file effects are known, group them: one option
+5. **Pure commands are not gated.** `echo`, `printf`, `true`, `false`,
+   `basename` and `dirname` produce text from their own arguments: no
+   filesystem, no stdin, no information about the machine. They ask nothing.
+   Their **redirects are still asked** (`echo x > f` asks for `file:write f`),
+   and anything that reads, writes, or lists a directory remains gated —
+   extraction into the context and writes back to the system are exactly what
+   approval is for.
+6. **Buckets.** When a call's file effects are known, group them: one option
    can grant a directory, an extension, or the pair, across several effects —
    the granularity the file tools already expose, applied to a batch.
 
@@ -60,11 +70,13 @@ Make the ask a **reviewable unit**, not a fragment:
 
 ## Acceptance
 
-- `echo x > out.txt` shows `echo x > out.txt` and asks for `file:write out.txt`
-  with exact/dir/ext/dir+ext/any/never.
+- `echo x > out.txt` asks for `file:write out.txt` with
+  exact/dir/ext/dir+ext/any (and no command ask: `echo` is pure).
 - `cat < in.txt` asks for `file:read in.txt`.
 - `2>&1` and `<&` raise no file ask.
 - An outside redirect keeps the `path:` ask and raises no `file:` ask.
+- `echo x`, `printf …`, `basename /a/b` ask nothing; `ls`, `cat`, `test -f`,
+  `sed -i` still ask.
 - A long compound script opens the dialog scrolled to the highlighted command
   (phase 2).
 - `sed -i` and friends raise their file asks (phase 3).

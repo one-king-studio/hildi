@@ -47,6 +47,8 @@ type
     procedure TestGrepRegexRuns;
     procedure TestParseErrorDeclines;
     procedure TestGateAskedPerCommand;
+    procedure TestPureCommandsAreNotAsked;
+    procedure TestRedirectIsAFileAskInTheTier;
     procedure TestAskShapeMatchesRunCommand;
     procedure TestGateDenial;
     procedure TestOutsidePathRefused;
@@ -210,27 +212,49 @@ procedure TShellTierTest.TestGateAskedPerCommand;
 var
   OutText: string;
 begin
-  AssertTrue('ran', RunTier('echo a; echo b', OutText));
+  AssertTrue('ran', RunTier('cat a.txt; cat b.txt', OutText));
   AssertEquals('two asks', 2, Length(FApproval.Asked));
-  AssertEquals('first ref', 'run_command:echo', FApproval.Asked[0].Subject.Ref);
-  AssertEquals('first arg', 'a', FApproval.Asked[0].Subject.Params[0]);
-  AssertEquals('second arg', 'b', FApproval.Asked[1].Subject.Params[0]);
+  AssertEquals('first ref', 'run_command:cat', FApproval.Asked[0].Subject.Ref);
+  AssertEquals('first arg', 'a.txt', FApproval.Asked[0].Subject.Params[0]);
+  AssertEquals('second arg', 'b.txt', FApproval.Asked[1].Subject.Params[0]);
   AssertEquals('reason inherited', 'the model reason', FApproval.Asked[0].Reason);
+end;
+
+procedure TShellTierTest.TestPureCommandsAreNotAsked;
+var
+  OutText: string;
+begin
+  AssertTrue('ran', RunTier('echo hi', OutText));
+  AssertEquals('no ask for a pure command', 0, Length(FApproval.Asked));
+  AssertEquals('output', 'hi' + #10 + '#0', OutText);
+end;
+
+procedure TShellTierTest.TestRedirectIsAFileAskInTheTier;
+var
+  OutText: string;
+begin
+  { echo is pure, but its redirect is a write: one file ask, no command ask. }
+  AssertTrue('ran', RunTier('echo hi > out.txt', OutText));
+  AssertEquals('one ask', 1, Length(FApproval.Asked));
+  AssertEquals('file:write', 'file:write', FApproval.Asked[0].Subject.Ref);
+  AssertEquals('path', 'out.txt', FApproval.Asked[0].Subject.Path);
+  AssertTrue('written', FileExists(P('out.txt')));
 end;
 
 procedure TShellTierTest.TestAskShapeMatchesRunCommand;
 var
   OutText: string;
 begin
-  AssertTrue('ran', RunTier('echo a', OutText));
+  AssertTrue('ran', RunTier('cat a.txt', OutText));
   AssertEquals('one ask', 1, Length(FApproval.Asked));
-  AssertEquals('ref', 'run_command:echo', FApproval.Asked[0].Subject.Ref);
+  AssertEquals('ref', 'run_command:cat', FApproval.Asked[0].Subject.Ref);
   AssertEquals('four options', 4, Length(FApproval.Asked[0].Options));
   AssertEquals('once', 'once', FApproval.Asked[0].Options[0].Key);
   AssertEquals('exact', 'exact', FApproval.Asked[0].Options[1].Key);
   AssertEquals('exact persists', True, FApproval.Asked[0].Options[1].Persists);
-  AssertEquals('exact params', 'a', FApproval.Asked[0].Options[1].Rule.Params[0]);
-  AssertEquals('exact rule ref', 'run_command:echo',
+  AssertEquals('exact params', 'a.txt',
+    FApproval.Asked[0].Options[1].Rule.Params[0]);
+  AssertEquals('exact rule ref', 'run_command:cat',
     FApproval.Asked[0].Options[1].Rule.Ref);
   AssertEquals('any', 'any', FApproval.Asked[0].Options[2].Key);
   AssertEquals('prefix', 'prefix', FApproval.Asked[0].Options[3].Key);
@@ -241,9 +265,9 @@ var
   OutText: string;
 begin
   FApproval.Allow := False;
-  AssertTrue('the script ran (denials are results)', RunTier('echo hidden', OutText));
+  AssertTrue('the script ran (denials are results)', RunTier('cat a.txt', OutText));
   AssertTrue('denied status', Pos('#126', OutText) > 0);
-  AssertFalse('no stdout from the command', Pos('hidden', OutText) > 0);
+  AssertFalse('no stdout from the command', Pos('alpha', OutText) > 0);
   AssertEquals('asked once', 1, Length(FApproval.Asked));
 end;
 

@@ -725,7 +725,7 @@ begin
   Fake := TFakeTransport.Create;
   try
     Fake.AddResponse([ToolNameFrame(0, 'call_1', 'run_command'),
-      ToolArgsFrame(0, '{"command":"echo hi","reason":"test"}'),
+      ToolArgsFrame(0, '{"command":"ls","reason":"test"}'),
       FinishFrame('tool_calls'), DoneFrame]);
     Fake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
 
@@ -755,7 +755,7 @@ begin
             AskEvent := Sink.EventAt(I);
           end;
         AssertTrue('ask id present', AskId <> '');
-        AssertEquals('ask summary carries the command', 'echo hi',
+        AssertEquals('ask summary carries the command', 'ls',
           AskEvent.Ask.Summary);
 
         Deny := Default(TSessionCommand);

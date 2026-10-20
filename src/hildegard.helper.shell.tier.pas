@@ -21,7 +21,8 @@ uses
   shell.types, shell.ast, shell.fs, shell.parser, shell.registry,
   shell.interpreter,
   hildegard.helper.approval, hildegard.helper.shell.fs,
-  hildegard.helper.shell.commands, hildegard.helper.shell.pattern;
+  hildegard.helper.shell.commands, hildegard.helper.shell.pattern,
+  hildegard.helper.command.pure;
 
 type
   TBuiltinShellConfig = record
@@ -47,6 +48,9 @@ type
     FLastError: string;
     function Gate(const ACall: TShellCall): Boolean;
     function BuildAsk(const ACall: TShellCall): TApprovalAsk;
+    function BuildAsks(const ACall: TShellCall): TApprovalAskArray;
+    function FileAsk(const ACall: TShellCall; const ATarget: string;
+      AWrite: Boolean): TApprovalAsk;
     function Preflight(const AScript: TScript): Boolean;
   public
     { Not thread-safe: the executor creates one per run_command call. }
@@ -146,14 +150,17 @@ end;
 
 function TBuiltinShell.Gate(const ACall: TShellCall): Boolean;
 var
-  Ask: TApprovalAsk;
+  Asks: TApprovalAskArray;
   Batch: TApprovalBatchResult;
 begin
   if not Assigned(FApproval) then
     Exit(True);
-  Ask := BuildAsk(ACall);
+  { A pure command with no file effects needs no approval at all. }
+  Asks := BuildAsks(ACall);
+  if Length(Asks) = 0 then
+    Exit(True);
   Batch := Default(TApprovalBatchResult);
-  if not FApproval.Resolve([Ask], Batch) then
+  if not FApproval.Resolve(Asks, Batch) then
   begin
     FLastError := Batch.Reason;
     Exit(False);
@@ -165,6 +172,120 @@ begin
     Exit(False);
   end;
   Result := True;
+end;
+
+function RelativeToRoot(const ARoot, APath: string): string;
+begin
+  if ARoot = '/' then
+    Result := System.Copy(APath, 2, MaxInt)
+  else if System.Copy(APath, 1, Length(ARoot) + 1) = ARoot + '/' then
+    Result := System.Copy(APath, Length(ARoot) + 2, MaxInt)
+  else
+    Result := '';
+end;
+
+function DirOfRelative(const ARel: string): string;
+var
+  P: Integer;
+begin
+  P := Length(ARel);
+  while (P >= 1) and (ARel[P] <> '/') do
+    Dec(P);
+  if P <= 1 then
+    Result := ''
+  else
+    Result := System.Copy(ARel, 1, P - 1);
+end;
+
+function ExtOfRelative(const ARel: string): string;
+var
+  Slash, Dot: Integer;
+begin
+  Slash := LastDelimiter('/', ARel);
+  Dot := LastDelimiter('.', ARel);
+  if (Dot > Slash) and (Dot > 0) and (Dot < Length(ARel)) then
+    Result := LowerCase(System.Copy(ARel, Dot + 1, MaxInt))
+  else
+    Result := '';
+end;
+
+function TBuiltinShell.FileAsk(const ACall: TShellCall; const ATarget: string;
+  AWrite: Boolean): TApprovalAsk;
+var
+  Rel, Ref, Dir, Ext, Caption: string;
+  Params: TApprovalParams;
+begin
+  Rel := RelativeToRoot(FConfig.Root, FFs.Resolve(ACall.Cwd, ATarget));
+  if AWrite then
+    Ref := 'file:write'
+  else
+    Ref := 'file:read';
+  Result := Default(TApprovalAsk);
+  if AWrite then
+    Result.Summary := 'write ' + Rel
+  else
+    Result.Summary := 'read ' + Rel;
+  Result.Subject.Ref := Ref;
+  Result.Subject.Path := Rel;
+  Params := nil;
+  SetLength(Params, 1);
+  Params[0] := Rel;
+  Result.Subject.Params := Params;
+  SetLength(Result.Options, 1);
+  Result.Options[0] := MakeOption(Ref, 'once', 'allow once', False, nil, False);
+  SetLength(Result.Options, Length(Result.Options) + 1);
+  Result.Options[High(Result.Options)] := MakeOption(Ref, 'exact',
+    'always this exact operation', True, Params, False);
+  Dir := DirOfRelative(Rel);
+  if Dir = '' then
+    Caption := 'always in the workspace'
+  else
+    Caption := 'always in ' + Dir + '/';
+  SetLength(Result.Options, Length(Result.Options) + 1);
+  Result.Options[High(Result.Options)] := MakeOption(Ref, 'dir', Caption, True,
+    nil, True);
+  Result.Options[High(Result.Options)].Rule.Directory := Dir;
+  if AWrite and (ExtOfRelative(Rel) <> '') then
+  begin
+    Ext := ExtOfRelative(Rel);
+    SetLength(Result.Options, Length(Result.Options) + 1);
+    Result.Options[High(Result.Options)] := MakeOption(Ref, 'ext',
+      'always .' + Ext + ' files', True, nil, True);
+    Result.Options[High(Result.Options)].Rule.Extension := Ext;
+    SetLength(Result.Options, Length(Result.Options) + 1);
+    Result.Options[High(Result.Options)] := MakeOption(Ref, 'dir_ext',
+      'always .' + Ext + ' files in ' + Dir + '/', True, nil, True);
+    Result.Options[High(Result.Options)].Rule.Directory := Dir;
+    Result.Options[High(Result.Options)].Rule.Extension := Ext;
+  end;
+  SetLength(Result.Options, Length(Result.Options) + 1);
+  Result.Options[High(Result.Options)] := MakeOption(Ref, 'any',
+    'always ' + Ref, True, nil, True);
+end;
+
+function TBuiltinShell.BuildAsks(const ACall: TShellCall): TApprovalAskArray;
+var
+  I: Integer;
+begin
+  Result := nil;
+  { A pure command produces text from its own arguments; it needs no approval.
+    Everything else is gated per command, as before. }
+  if not IsPureCommand(ACall.Name) then
+  begin
+    SetLength(Result, 1);
+    Result[0] := BuildAsk(ACall);
+  end;
+  { Redirects are file effects, asked in the file tools' vocabulary. }
+  for I := 0 to High(ACall.Writes) do
+  begin
+    SetLength(Result, Length(Result) + 1);
+    Result[High(Result)] := FileAsk(ACall, ACall.Writes[I], True);
+  end;
+  for I := 0 to High(ACall.Reads) do
+  begin
+    SetLength(Result, Length(Result) + 1);
+    Result[High(Result)] := FileAsk(ACall, ACall.Reads[I], False);
+  end;
 end;
 
 function TBuiltinShell.BuildAsk(const ACall: TShellCall): TApprovalAsk;

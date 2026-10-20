@@ -412,7 +412,7 @@ begin
     finish. }
   Fake := TFakeTransport.Create;
   Fake.AddResponse([ToolNameFrame(0, 'call_1', 'run_command'),
-    ToolArgsFrame(0, '{"command":"echo hi","reason":"say hi"}'),
+    ToolArgsFrame(0, '{"command":"ls","reason":"say hi"}'),
     FinishFrame('tool_calls'), DoneFrame]);
   Fake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
   FChildTransport := Fake;
@@ -448,7 +448,7 @@ begin
     window and the child continues (the denial is answered, not left hanging). }
   Fake := TFakeTransport.Create;
   Fake.AddResponse([ToolNameFrame(0, 'call_1', 'run_command'),
-    ToolArgsFrame(0, '{"command":"echo hi","reason":"say hi"}'),
+    ToolArgsFrame(0, '{"command":"ls","reason":"say hi"}'),
     FinishFrame('tool_calls'), DoneFrame]);
   Fake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
   FChildTransport := Fake;

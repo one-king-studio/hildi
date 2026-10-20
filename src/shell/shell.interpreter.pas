@@ -880,6 +880,7 @@ var
   CallEnv: TShellEnv;
   FnIdx: Integer;
   Path, Data, E, WErr: string;
+  Target: string;
 
   procedure ApplyAssignments(AEnv: TShellEnv);
   var
@@ -918,6 +919,7 @@ begin
   end;
 
   { Redirects, left to right. }
+  Call := Default(TShellCall);
   EffStdin := AStdin;
   OutT.Kind := tkOut;
   OutT.Path := '';
@@ -930,7 +932,11 @@ begin
     case AC.Redirects[I].Op of
       roRead, roReadWrite:
         begin
-          Path := FFs.Resolve(FCwd, ExpandWordSingle(AC.Redirects[I].Target));
+          Target := ExpandWordSingle(AC.Redirects[I].Target);
+          Call.Reads := Call.Reads + [Target];
+          if AC.Redirects[I].Op = roReadWrite then
+            Call.Writes := Call.Writes + [Target];
+          Path := FFs.Resolve(FCwd, Target);
           if not FFs.ReadFile(Path, Data, E) then
             Exit(ShellResultErr('cannot read ' +
               ExpandWordSingle(AC.Redirects[I].Target) + ': ' + E + #10, 1));
@@ -956,7 +962,9 @@ begin
         ;   // v1: <& is accepted and ignored
       roWrite, roAppend:
         begin
-          Path := FFs.Resolve(FCwd, ExpandWordSingle(AC.Redirects[I].Target));
+          Target := ExpandWordSingle(AC.Redirects[I].Target);
+          Call.Writes := Call.Writes + [Target];
+          Path := FFs.Resolve(FCwd, Target);
           NewT.Kind := tkFile;
           NewT.Path := Path;
           NewT.Append := AC.Redirects[I].Op = roAppend;
@@ -991,7 +999,7 @@ begin
           CallEnv := FEnv.Clone;
           try
             ApplyAssignments(CallEnv);
-            Call := Default(TShellCall);
+            { Keep the redirects already recorded in Call. }
             Call.Name := Name;
             Call.Args := Args;
             Call.Stdin := EffStdin;

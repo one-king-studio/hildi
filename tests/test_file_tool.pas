@@ -591,7 +591,6 @@ begin
   AssertTrue('ext', FApproval.HasOption('ext'));
   AssertTrue('dir_ext', FApproval.HasOption('dir_ext'));
   AssertTrue('any', FApproval.HasOption('any'));
-  AssertTrue('never', FApproval.HasOption('never'));
 end;
 
 procedure TFileToolTest.TestReadAskOmitsExtensionScoping;
@@ -605,7 +604,6 @@ begin
   AssertTrue('dir', FApproval.HasOption('dir'));
   AssertFalse('no ext', FApproval.HasOption('ext'));
   AssertFalse('no dir_ext', FApproval.HasOption('dir_ext'));
-  AssertTrue('never', FApproval.HasOption('never'));
 end;
 
 procedure TFileToolTest.TestGlobAskScopesOnTheDirectoryNotThePattern;

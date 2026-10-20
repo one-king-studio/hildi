@@ -30,13 +30,18 @@ type
     function Clone: TShellEnv;
   end;
 
-  { One command invocation. Args are the expanded words after the command name. }
+  { One command invocation. Args are the expanded words after the command name;
+    Reads/Writes are its redirects, expanded (here-docs and fd duplications are
+    not files and are absent). The gate uses them to know the command's file
+    effects even when they are not in its arguments. }
   TShellCall = record
     Name: string;
     Args: TStringArray;
     Stdin: string;
     Cwd: string;
     Env: TShellEnv;
+    Reads: TStringArray;
+    Writes: TStringArray;
   end;
 
   TShellResult = record

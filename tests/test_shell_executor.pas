@@ -316,7 +316,7 @@ var
   Exec: TCommandExecution;
 begin
   FApproval.Allow := False;
-  AssertTrue('ran', RunExec('echo hidden', Exec));
+  AssertTrue('ran', RunExec('cat a.txt', Exec));
   AssertEquals('denied status', 126, Exec.ExitCode);
   AssertEquals('fallback untouched', 0, FFallback.Calls);
   AssertTrue('names the denial', Pos('denied', Exec.Output) > 0);

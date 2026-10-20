@@ -832,17 +832,13 @@ var
   Asks: TApprovalAskArray;
   I, FileAsk: Integer;
 begin
-  { A redirect is part of the command the operator must see, and it is a file
-    write in the file tools' vocabulary. }
   Tool := BuildToolWithRoot('/tmp/nowhere');
   try
+    { echo is pure: its command ask is gone, but the redirect is still asked. }
     Asks := Tool.ApprovalAsks('{"command":"echo x > out.txt","reason":"r"}');
-    AssertTrue('summary keeps the redirect', Pos('> out.txt', Asks[0].Summary) > 0);
-    FileAsk := -1;
-    for I := 0 to High(Asks) do
-      if Asks[I].Subject.Ref = 'file:write' then
-        FileAsk := I;
-    AssertTrue('a file:write ask is present', FileAsk >= 0);
+    AssertEquals('only the file ask', 1, Length(Asks));
+    FileAsk := 0;
+    AssertEquals('file:write', 'file:write', Asks[FileAsk].Subject.Ref);
     AssertEquals('workspace-relative path', 'out.txt',
       Asks[FileAsk].Subject.Path);
     AssertEquals('once', 'once', Asks[FileAsk].Options[0].Key);
@@ -854,7 +850,12 @@ begin
     AssertEquals('ext value', 'txt', Asks[FileAsk].Options[3].Rule.Extension);
     AssertEquals('dir_ext', 'dir_ext', Asks[FileAsk].Options[4].Key);
     AssertEquals('any', 'any', Asks[FileAsk].Options[5].Key);
-    AssertEquals('never', 'never', Asks[FileAsk].Options[6].Key);
+    AssertEquals('no never option', 6, Length(Asks[FileAsk].Options));
+    { A non-pure command keeps its own ask, and the summary names the redirect. }
+    Asks := Tool.ApprovalAsks(
+      '{"command":"grep x out.txt > log.txt","reason":"r"}');
+    AssertTrue('summary keeps the redirect',
+      Pos('> log.txt', Asks[0].Summary) > 0);
   finally
     Tool.Free;
   end;

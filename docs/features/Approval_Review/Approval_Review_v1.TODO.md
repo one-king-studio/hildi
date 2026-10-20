@@ -12,6 +12,12 @@
 - [x] The file-tool option shapes: once / exact / dir / ext / dir+ext / any /
       never.
 - [x] Tests for each of the above.
+- [x] The interpreter records the command's expanded `Reads`/`Writes` in
+      `TShellCall`; the tier's gate raises the same file asks (so a redirect is
+      gated on both executors).
+- [x] Pure commands (`echo`, `printf`, `true`, `false`, `basename`, `dirname`)
+      raise no command ask; their redirects still ask. The `never` option is
+      removed — a persistent deny is a rule, not a prompt choice.
 
 ### Phase 2: the full-script review
 

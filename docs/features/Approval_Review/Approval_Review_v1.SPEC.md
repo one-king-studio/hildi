@@ -44,9 +44,30 @@ end;
 - Options, mirroring `TFileTool.Approve`:
   `once`, `exact` (`Params = [rel]`), `dir` (`Directory`), `ext`
   (`Extension`, writes only), `dir_ext` (`Directory` + `Extension`, writes
-  only), `any`, `never` (deny).
+  only), `any`. There is no `never`: a persistent deny is a rule in the store
+  (the `aeDeny` effect), not an option the dialog offers; denying the prompt is
+  the per-call answer.
 - The segment's `Summary` includes its redirects (`echo x > out.txt`), because
   the operator must see the effect.
+
+## 2a. Pure commands (shipped)
+
+`hildegard.helper.command.pure.IsPureCommand` names the commands that produce
+text from their own arguments and nothing else:
+
+`echo`, `printf`, `true`, `false`, `basename`, `dirname`.
+
+- They raise **no command ask**, on both executors (`BuildAsks` skips the
+  segment; the tier's gate skips the command ask).
+- Their **redirects are still asked**: the interpreter records the command's
+  expanded `Reads`/`Writes` in `TShellCall`, and the gate raises the file asks.
+- `test`/`[` is not pure (it inspects the filesystem); neither is anything that
+  reads, lists, or writes. The rule is "no filesystem, no stdin, no information
+  about the machine", not "harmless name".
+
+The tier's gate asks, in one batch: the command (unless pure) + `file:write`
+for every write redirect + `file:read` for every read redirect. An empty batch
+allows without a prompt.
 
 ## 3. The dialog (phase 2)
 
@@ -72,7 +93,11 @@ make before running it:
 | `mv` | write for both operands |
 | `cp` | write for the destination |
 | `mkdir`, `touch` | write for each operand |
-| `cat`, `grep`, `rg`, `find`, `jq`, `wc`, `head`, `tail`, `sort`, `uniq` | reads only (no ask) |
+| `cat`, `grep`, `rg`, `find`, `jq`, `wc`, `head`, `tail`, `sort`, `uniq` | reads only (the command ask covers them; no extra ask) |
+
+Redirects are already asked this way on both executors (`TShellCall.Writes` /
+`Reads`, filled by the interpreter). The table above is for effects that are
+not redirects.
 
 These asks are raised in the same gate call as the command ask, before the
 command runs. Anything the table does not know falls back to the command ask
@@ -100,3 +125,5 @@ grant, but hides the specific files.
 - Phase 2: the splitter span and the modal's scroll/focus rendering.
 - Phase 3: `sed -i`, `tee`, `rm`, `mv`, `cp`, `mkdir`, `touch` ask for their
   targets before running; a denied file ask stops the command before it runs.
+- Pure commands raise nothing (both executors); `echo x > f` raises only the
+  file ask.

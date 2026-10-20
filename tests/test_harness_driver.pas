@@ -502,7 +502,7 @@ begin
   Fake := TFakeTransport.Create;
   try
     Fake.AddResponse([ToolNameFrame(0, 'call_1', 'run_command'),
-      ToolArgsFrame(0, '{"command":"echo hi","reason":"test"}'),
+      ToolArgsFrame(0, '{"command":"ls","reason":"test"}'),
       FinishFrame('tool_calls'), DoneFrame]);
     Fake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
     Rt := MakeRuntime(Id, Fake);
