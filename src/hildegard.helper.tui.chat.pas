@@ -343,8 +343,8 @@ const
   { A collapsed ambient (a checkpoint document) shows this many body rows: a
     compact preview of the top of the markdown, expandable to the full body. }
   AmbientCompactRows = 3;
-  { A live (streaming) block shows this many tail lines, plus a '...' when the
-    body is longer. }
+  { A live (streaming) block shows at most this many tail lines; a shorter body
+    shows only what it has, so the block grows with the stream. }
   LiveTailLines = 6;
   { Blocks beyond the viewport that keep their rendered layout, so a short
     scroll does not rebuild one. }
@@ -808,7 +808,7 @@ end;
 procedure TChatItem.ApplyDisplay(AWidth: Integer);
 var
   Rows: TWrappedRows;
-  I, J, Start, Pad: Integer;
+  I, Start, Last: Integer;
   Res: UnicodeString;
   One: TSpan;
 begin
@@ -846,23 +846,22 @@ begin
       Res := ''
     else if FLive then
     begin
-      { The last LiveTailLines wrapped rows, at a stable row count while
-        streaming. When the body wraps to fewer rows than that, pad with blank
-        rows at the top — otherwise a tail that ends in a blank row renders one
-        row short and the block shifts as a paragraph break streams in. }
+      { The tail, at most LiveTailLines. A short body takes only the rows it
+        has — a live thought or tool block grows as content arrives instead of
+        reserving a fixed six rows — and trailing blank rows are dropped so a
+        paragraph break does not add an empty line. }
       Start := Length(Rows) - LiveTailLines;
       if Start < 0 then
         Start := 0;
-      Pad := LiveTailLines - (Length(Rows) - Start);
+      Last := High(Rows);
+      while (Last > Start) and (Rows[Last] = '') do
+        Dec(Last);
       Res := '';
-      for I := 0 to LiveTailLines - 1 do
+      for I := Start to Last do
       begin
-        if I > 0 then
+        if I > Start then
           Res := Res + #10;
-        J := Start + I - Pad;
-        if J >= Start then
-          Res := Res + Rows[J];
-        { else: a pad row, contributing an empty line }
+        Res := Res + Rows[I];
       end;
     end
     else if (not FExpanded) and (Length(Rows) > CondenseThreshold) then

@@ -58,7 +58,7 @@ type
     procedure TestThinkingAnimates;
     { Activity spinner. }
     procedure TestActivityFrameAdvances;
-    procedure TestLiveThoughtKeepsAStableHeight;
+    procedure TestLiveThoughtShrinksToItsContent;
     procedure TestLiveBoxDrawsTheSpinner;
     procedure TestIdleBoxShowsTheCaret;
     procedure TestThinkingRowDrawsTheSpinner;
@@ -648,22 +648,43 @@ begin
   AssertEquals('the frames cycle', A, C);
 end;
 
-procedure TTuiChatTest.TestLiveThoughtKeepsAStableHeight;
+procedure TTuiChatTest.TestLiveThoughtShrinksToItsContent;
 var
-  A, B: TChatItem;
+  Short, Three, ThreeTrailing, Six, Ten: TChatItem;
+
+  function H(AItem: TChatItem): Integer;
+  begin
+    Result := AItem.Measure(Avail(30, 40)).H;
+  end;
+
 begin
-  { Two live thoughts whose tails differ only in a trailing blank row must
-    measure the same height: the tail is padded to a constant row count. }
-  A := TChatItem.Create(ckThought, 'T', 'aaa'#10'bbb'#10'ccc', FTheme);
-  B := TChatItem.Create(ckThought, 'T', 'aaa'#10'bbb'#10'ccc'#10, FTheme);
+  { A live block shows at most six body rows and otherwise only what it has,
+    so it grows with the stream instead of reserving blank rows. }
+  Short := TChatItem.Create(ckThought, 'T', 'one', FTheme);
+  Three := TChatItem.Create(ckThought, 'T', 'aaa'#10'bbb'#10'ccc', FTheme);
+  ThreeTrailing := TChatItem.Create(ckThought, 'T', 'aaa'#10'bbb'#10'ccc'#10,
+    FTheme);
+  Six := TChatItem.Create(ckThought, 'T',
+    '1'#10'2'#10'3'#10'4'#10'5'#10'6', FTheme);
+  Ten := TChatItem.Create(ckThought, 'T',
+    '1'#10'2'#10'3'#10'4'#10'5'#10'6'#10'7'#10'8'#10'9'#10'10', FTheme);
   try
-    A.Live := True;
-    B.Live := True;
-    AssertEquals('a trailing blank row does not shrink the block',
-      A.Measure(Avail(30, 40)).H, B.Measure(Avail(30, 40)).H);
+    Short.Live := True;
+    Three.Live := True;
+    ThreeTrailing.Live := True;
+    Six.Live := True;
+    Ten.Live := True;
+    AssertTrue('a one-line live block is not padded to six rows',
+      H(Short) < H(Six));
+    AssertEquals('the tail caps at six rows', H(Six), H(Ten));
+    AssertEquals('a trailing blank row adds nothing', H(Three),
+      H(ThreeTrailing));
   finally
-    A.Free;
-    B.Free;
+    Short.Free;
+    Three.Free;
+    ThreeTrailing.Free;
+    Six.Free;
+    Ten.Free;
   end;
 end;
 

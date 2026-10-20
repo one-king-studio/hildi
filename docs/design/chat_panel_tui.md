@@ -65,9 +65,11 @@ Use the following character sequence: `∙ • ● ◉ ❂ ✴ ✵ ✶ ✷ ✸ �
 of sparkles in a bright color.
 
 While the model reasons, a live block titled `Thinking...` shows the tail of the
-reasoning: the last up to six lines, prefixed with a `...` line when there is
-more above. It is not clickable. When the reasoning is done and persisted, it
-settles into a collapsed `Thought` block that expands like any other.
+reasoning: at most the last six lines, and only the lines it actually has while
+the body is shorter (so the block grows with the stream instead of reserving
+blank rows; trailing blank rows are dropped). It is not clickable. The same
+rule applies to a running tool block. When the reasoning is done and persisted,
+the block settles into a collapsed `Thought` block that expands like any other.
 
 ## Modals
 
