@@ -1,5 +1,9 @@
 # Shell Library
 
+**Status:** Implemented (v1, 2026-10-19) — `Shell_Library_v1.DONE.md`. A
+standalone, publishable library that depends on no harness unit; the harness is
+its first consumer, through the [Builtin Shell Tier](../Builtin_Shell_Tier/FEATURE.md).
+
 ## Overview
 
 A **standalone, publishable shell library** written in Free Pascal: its own

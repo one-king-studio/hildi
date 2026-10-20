@@ -1,10 +1,13 @@
 # Feature: Per-call File Changes
 
-**Status:** Phases 1-3 shipped. The builtin tier records every write exactly
-(content included) through its filesystem seam; the process tier takes an
-ignore-aware before/after snapshot of the tree; and `run_command`'s result ends
-with `[changed: ...]`, so the model and the operator see what the call touched.
-A TUI diff pane and a checkpoint store are open, fed by the same set.
+**Status:** Implemented (phases 1-3 of 4; the plan is closed). The builtin tier
+records every write exactly (content included) through its filesystem seam; the
+process tier takes an ignore-aware before/after snapshot of the tree; and
+`run_command`'s result ends with `[changed: ...]`, so the model and the operator
+see what the call touched.
+Two surfaces were deliberately deferred and are **not** part of this feature's
+delivered scope: a TUI diff pane and a checkpoint store, both to be fed by the
+same `OnChanges` set.
 
 **Related:** [Builtin Shell Tier](../Builtin_Shell_Tier/FEATURE.md) ·
 [Command & Flag Coverage](../Builtin_Shell_Tier/COMMAND_COVERAGE.md) ·

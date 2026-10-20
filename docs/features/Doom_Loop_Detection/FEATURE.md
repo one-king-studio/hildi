@@ -1,8 +1,9 @@
 # Reasoning Doom Loop Detection
 
 **Status: Parked** (ideated 2026-10-03 with the operator; recorded before the
-spark faded). No SPEC, no TODO. To pick up: promote to Proposed, write the
-SPEC from the design sketch below, then TDD.
+spark faded). No SPEC, no TODO. To pick up: write the SPEC from the design sketch
+below, then TDD. (The index lists this as *Proposed*; parked is the accurate
+state, and this line is the one to trust.)
 
 ## Overview
 

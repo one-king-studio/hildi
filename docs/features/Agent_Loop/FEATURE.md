@@ -1,5 +1,9 @@
 # Agent Loop
 
+**Status:** In Progress — code complete; the `text` scenario of
+[Live Smoke](../Live_Smoke/FEATURE.md) verifies it end to end. What remains is a
+live model-provider check, which needs a key and so cannot be committed.
+
 ## Overview
 
 This feature gives hildegard-helper its brain: a single-threaded agent loop that

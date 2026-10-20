@@ -1,5 +1,10 @@
 # Implementation Plan: Per-call File Changes v1
 
+**Status: DONE (phases 1-3).** The capture is complete on both tiers and the
+result line surfaces it. Two surfaces were deliberately deferred and are recorded
+in `FEATURE.md`: a TUI diff pane and a checkpoint store, both fed by the same
+`OnChanges` set.
+
 **Related:** [FEATURE.md](FEATURE.md) · [File_Changes_v1.SPEC.md](File_Changes_v1.SPEC.md)
 
 ## Implementation Tasks
@@ -39,7 +44,10 @@
 
 ### Phase 4: docs
 
-- [ ] Update `FEATURES.md`; rename this TODO to `File_Changes_v1.DONE.md`.
+- [x] Update `FEATURES.md`; rename this TODO to `File_Changes_v1.DONE.md`.
+      The deliberately deferred surfaces (a TUI diff pane, a checkpoint store)
+      are recorded in `FEATURE.md` and stay open there, fed by the same
+      `OnChanges` set; they are not part of this plan.
 
 ## Success Criteria
 

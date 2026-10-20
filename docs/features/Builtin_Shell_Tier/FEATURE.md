@@ -1,6 +1,11 @@
 # Feature: Builtin Shell Tier
 
-**Status:** Specified (2026-10-19)
+**Status:** Implemented (v1, 2026-10-19). See `Builtin_Tier_v1.DONE.md` for the
+plan and deviations, `COMMAND_COVERAGE.md` for exactly what is supported and what
+declines to `/bin/bash`, and `PORTABILITY.md` for the Windows strategy. The
+follow-on work — more commands, more flags, and the port — is tracked by
+[Text & Data Commands](../Text_Data_Commands/FEATURE.md) and
+[Windows Port](../Windows_Port/FEATURE.md), not here.
 
 **Related:** [Shell Library](../Shell_Library/FEATURE.md) (`Shell_Library_v1.DONE.md`),
 [Approval Path Scoping](../Approval_Path_Scoping/Approval_Path_Scoping_v1.SPEC.md),

@@ -1,5 +1,8 @@
 # Live Smoke
 
+**Status:** Implemented (v1) — `Live_Smoke_v1.DONE.md`. `make smoke` runs five
+scenarios in ~3 s; `make smoke-list` names them.
+
 ## Overview
 
 One scripted, hermetic end-to-end check that proves the harness works **as a
