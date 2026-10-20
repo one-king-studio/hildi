@@ -100,6 +100,24 @@ implementation
 uses
   shell.parser;
 
+{ The longest prefix that is at most AMax bytes and ends on a complete UTF-8
+  sequence. A split sequence would reach the caller as a replacement character
+  (a boxed question mark on screen). The library stays dependency-free, so this
+  is its own copy of the harness helper. }
+function Utf8Prefix(const AText: string; AMaxBytes: Integer): string;
+var
+  N: Integer;
+begin
+  if AMaxBytes <= 0 then
+    Exit('');
+  if Length(AText) <= AMaxBytes then
+    Exit(AText);
+  N := AMaxBytes;
+  while (N > 0) and ((Ord(AText[N + 1]) and $C0) = $80) do
+    Dec(N);
+  Result := Copy(AText, 1, N);
+end;
+
 function JoinPath(const ADir, AName: string): string;
 begin
   if ADir = '' then
@@ -1297,10 +1315,10 @@ begin
     FRunStatus := R.ExitCode;
   Result := FRunStatus;
   if (FLimits.MaxOutputBytes > 0) and (Length(AOutput) > FLimits.MaxOutputBytes) then
-    AOutput := Copy(AOutput, 1, FLimits.MaxOutputBytes) +
+    AOutput := Utf8Prefix(AOutput, FLimits.MaxOutputBytes) +
       #10 + '[output truncated]' + #10;
   if (FLimits.MaxOutputBytes > 0) and (Length(AError) > FLimits.MaxOutputBytes) then
-    AError := Copy(AError, 1, FLimits.MaxOutputBytes) +
+    AError := Utf8Prefix(AError, FLimits.MaxOutputBytes) +
       #10 + '[output truncated]' + #10;
 end;
 

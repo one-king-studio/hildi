@@ -29,7 +29,8 @@ uses
   hildegard.helper.tui.actions,
   hildegard.helper.harness.subagent, hildegard.helper.harness.subagent.spy,
   hildegard.helper.tui.sidebar, hildegard.helper.tui.list,
-  hildegard.helper.session.protocol, hildegard.helper.session.client;
+  hildegard.helper.session.protocol, hildegard.helper.session.client,
+  hildegard.helper.utf8;
 
 type
   { Where the app is in the startup sequence. csIdle waits for the first prompt
@@ -1817,7 +1818,7 @@ begin
     begin
       Excess := Length(Text) - MaxLiveChars;
       Block.SetText('[' + IntToStr(Excess) + ' earlier chars trimmed]' + #10 +
-        Copy(Text, Excess + 1, MaxLiveChars));
+        Utf8From(Text, Excess));
     end;
   end;
   FToolPending.Clear;

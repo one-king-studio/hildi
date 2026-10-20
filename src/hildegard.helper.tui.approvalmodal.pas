@@ -744,7 +744,7 @@ begin
           Break;
         S.FillRect(Rc(InnerL, Row, InnerR - InnerL + 1, 1), DetailAttr);
         if RowIdx = FFocusRow then
-          Text(InnerL + 1, Row, '▸', FocusAttr);
+          Text(InnerL + 1, Row, '→', FocusAttr);
         SRow := FScriptRows[RowIdx];
         if SRow.HiLen > 0 then
         begin

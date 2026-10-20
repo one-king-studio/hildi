@@ -430,7 +430,7 @@ begin
     AssertTrue('the script is shown',
       Pos(UnicodeString('echo hi; rm -rf build/'), Row) > 0);
     AssertTrue('the focus row is marked',
-      Pos(UnicodeString(WideChar($25B8)), Row) > 0);
+      Pos(UnicodeString(WideChar($2192)), Row) > 0);
     { Only the focus span is bold: the segment is, the command before it is
       not. (Cells, not string offsets: an erased cell takes no string index.) }
     ColR := -1;

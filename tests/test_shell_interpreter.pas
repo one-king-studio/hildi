@@ -59,6 +59,7 @@ type
     procedure TestCommandNotFound;
     procedure TestStatusPropagation;
     procedure TestCommandLimit;
+    procedure TestOutputCapDoesNotSplitUtf8;
     procedure TestParseError;
   end;
 
@@ -376,6 +377,26 @@ begin
     Sh.Free;
     Reg.Free;
     Env.Free;
+  end;
+end;
+
+procedure TShellInterpreterTest.TestOutputCapDoesNotSplitUtf8;
+var
+  Shell: TShell;
+  Limits: TShellLimits;
+  OutText, ErrText: string;
+begin
+  { 'echo <éé>' writes four bytes plus a newline; a three-byte cap lands inside
+    the second character. The cut must back up to the boundary. }
+  Limits := DefaultShellLimits;
+  Limits.MaxOutputBytes := 3;
+  Shell := TShell.Create(FReg, FMem, '/work', Gate, Limits, FEnv);
+  try
+    Shell.RunSource('echo ' + #$C3#$A9#$C3#$A9, OutText, ErrText);
+    AssertEquals('cut on a boundary',
+      #$C3#$A9 + #10 + '[output truncated]' + #10, OutText);
+  finally
+    Shell.Free;
   end;
 end;
 

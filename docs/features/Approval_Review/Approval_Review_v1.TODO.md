@@ -26,7 +26,7 @@
 - [x] AST spans for the tier's asks: the lexer's `EndOffset`, the parser's
       simple-command span, `TShellCall.Start/Len`.
 - [x] The modal renders the script (8-row band), scrolls to the focus, and
-      draws the focus span in bold with a `▸` marker; PageUp/PageDown and the
+      draws the focus span in bold with a `→` marker; PageUp/PageDown and the
       wheel scroll.
 - [x] An effect ask keeps its summary line above the script (the path is what
       is approved).
