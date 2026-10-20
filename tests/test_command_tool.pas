@@ -11,7 +11,7 @@ uses
   Classes, SysUtils, fpcunit, testregistry,
   hildegard.helper.agent, hildegard.helper.llm,
   hildegard.helper.command.policy, hildegard.helper.approval,
-  hildegard.helper.command.tool;
+  hildegard.helper.command.tool, hildegard.helper.workspace.changes;
 
 type
   TFakeExecutor = class(TNoRefCountObject, ICommandExecutor)
@@ -30,7 +30,7 @@ type
       out AWhy: string): Boolean;
     function Execute(const AProfile: TShellProfile; const ACommand,
       AWorkDir: string; ATimeoutMs: QWord; AObserver: TToolObserver;
-      const AReason: string; AMode: TCommandMode;
+      const AReason: string; AMode: TCommandMode; AChanges: TFileChangeSet;
       out AExecution: TCommandExecution): Boolean;
   end;
 
@@ -55,6 +55,7 @@ type
   private
     FExecutor: TFakeExecutor;
     FApprovalStore: IApprovalStore;
+  FChangeCount: Integer;
     function MakeConfig(AMaxBytes: Integer): TCommandToolConfig;
     function BuildTool(APrompt: TApprovalPrompt;
       AMaxBytes: Integer): TCommandTool;
@@ -62,6 +63,7 @@ type
     function AddRule(AEffect: TApprovalEffect; const ARef: string;
       const AParams: array of string; AAny: Boolean): TApprovalRule;
     function ServiceWith(APrompt: TApprovalPrompt): IApprovalService;
+    procedure OnChanges(const AChanges: TFileChangeSet);
   protected
     procedure SetUp; override;
     procedure TearDown; override;
@@ -95,6 +97,7 @@ type
     procedure TestCommandTimeoutIsClampedToMax;
     procedure TestTimeoutIsHonouredWithoutACap;
     procedure TestHtmlEntitiesAreDecoded;
+    procedure TestRunDeliversFileChanges;
     procedure TestModeBashIsPassedThrough;
     procedure TestModeDefaultsToAuto;
     procedure TestInvalidModeIsRejected;
@@ -122,10 +125,11 @@ end;
 
 function TFakeExecutor.Execute(const AProfile: TShellProfile;
   const ACommand, AWorkDir: string; ATimeoutMs: QWord; AObserver: TToolObserver;
-  const AReason: string; AMode: TCommandMode;
+  const AReason: string; AMode: TCommandMode; AChanges: TFileChangeSet;
   out AExecution: TCommandExecution): Boolean;
 var
   I: Integer;
+  Change: TFileChange;
 begin
   if RaiseOnExecute then
     raise Exception.Create('executor boom');
@@ -134,6 +138,14 @@ begin
   LastCwd := AWorkDir;
   LastTimeoutMs := ATimeoutMs;
   LastMode := AMode;
+  if AChanges <> nil then
+  begin
+    Change := Default(TFileChange);
+    Change.Path := 'fake.txt';
+    Change.Kind := fcCreated;
+    Change.After := 'x';
+    AChanges.Add(Change);
+  end;
   for I := 0 to High(Chunks) do
     if AObserver <> nil then
       AObserver.Next(Chunks[I]);
@@ -160,6 +172,12 @@ procedure TCommandToolTest.SetUp;
 begin
   FExecutor := TFakeExecutor.Create;
   FApprovalStore := TMemoryApprovalStore.Create;
+  FChangeCount := 0;
+end;
+
+procedure TCommandToolTest.OnChanges(const AChanges: TFileChangeSet);
+begin
+  FChangeCount := FChangeCount + AChanges.Count;
 end;
 
 procedure TCommandToolTest.TearDown;
@@ -191,6 +209,7 @@ begin
   Result.Shell := DefaultShellProfile;
   Result.DefaultTimeoutMs := 1234;
   Result.MaxOutputBytes := AMaxBytes;
+  Result.OnChanges := OnChanges;
 end;
 
 function TCommandToolTest.ServiceWith(
@@ -739,7 +758,7 @@ var
 begin
   Exec := TProcessCommandExecutor.Create;
   AssertTrue('ok', Exec.Execute(DefaultShellProfile, 'printf hello', '', 5000,
-    nil, 'test reason', cmAuto, ExecResult));
+    nil, 'test reason', cmAuto, nil, ExecResult));
   AssertEquals('exit code', 0, ExecResult.ExitCode);
   AssertTrue('output captured', Pos('hello', ExecResult.Output) > 0);
   AssertFalse('not timed out', ExecResult.TimedOut);
@@ -828,6 +847,21 @@ begin
       '{"command":"grep ''\\&lt;'' f","reason":"r"}', R, E));
     AssertEquals('escaped entity kept', 'grep ''\&lt;'' f',
       FExecutor.LastCommand);
+  finally
+    Tool.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestRunDeliversFileChanges;
+var
+  Tool: TCommandTool;
+  R, E: string;
+begin
+  AddRule(aeAllow, 'run_command:echo', [], True);
+  Tool := BuildTool(nil, 0);
+  try
+    AssertTrue('ok', Tool.Run('{"command":"echo hi","reason":"r"}', R, E));
+    AssertEquals('one change delivered', 1, FChangeCount);
   finally
     Tool.Free;
   end;

@@ -14,17 +14,27 @@ interface
 uses
   SysUtils, Classes, shell.fs,
   {$ifdef unix}BaseUnix,{$endif}
-  hildegard.helper.workspace;
+  hildegard.helper.workspace, hildegard.helper.workspace.changes;
 
 type
+  { One write, reported after it happened. }
+  TShellFsChangeEvent = procedure(const AChange: TFileChange) of object;
+
   TWorkspaceShellFs = class(TInterfacedObject, IShellFileSystem)
   private
     FRoot: string;
     FMaxFileBytes: Int64;
+    FOnChange: TShellFsChangeEvent;
     function Normalize(const APath: string): string;
     function EnsureInside(const APath: string; out AError: string): Boolean;
     function ReadAll(const APath: string; out AData, AError: string): Boolean;
     function DeleteTree(const APath: string; out AError: string): Boolean;
+    function WorkspaceRelative(const APath: string): string;
+    function CaptureText(const APath: string; out AData: string;
+      out ASize: Int64): Boolean;
+    procedure Report(const APath: string; AKind: TFileChangeKind;
+      AIsDir: Boolean; const ABefore, AAfter: string; ACaptured: Boolean;
+      ABeforeSize, AAfterSize: Int64);
   public
     constructor Create(const ARoot: string);
     { IShellFileSystem }
@@ -38,6 +48,9 @@ type
       out AError: string): Boolean;
     function Info(const APath: string; out AInfo: TShellFileInfo;
       out AError: string): Boolean;
+    { Called once per write the shell makes (redirect, sed -i, tee, rm, mv,
+      cp, mkdir, touch). Nil when nobody is tracking. }
+    property OnChange: TShellFsChangeEvent read FOnChange write FOnChange;
     { The operations the command set needs beyond the shell interface. }
     function Delete(const APath: string; ARecursive: Boolean;
       out AError: string): Boolean;
@@ -121,6 +134,64 @@ begin
     Result := Normalize(ACwd + '/' + APath);
 end;
 
+function TWorkspaceShellFs.WorkspaceRelative(const APath: string): string;
+begin
+  if FRoot = '/' then
+    Result := System.Copy(APath, 2, MaxInt)
+  else if System.Copy(APath, 1, Length(FRoot) + 1) = FRoot + '/' then
+    Result := System.Copy(APath, Length(FRoot) + 2, MaxInt)
+  else
+    Result := APath;
+end;
+
+function TWorkspaceShellFs.CaptureText(const APath: string; out AData: string;
+  out ASize: Int64): Boolean;
+var
+  Fs: TFileStream;
+begin
+  AData := '';
+  ASize := 0;
+  Result := False;
+  if not FileExists(APath) then
+    Exit;
+  try
+    Fs := TFileStream.Create(APath, fmOpenRead or fmShareDenyNone);
+    try
+      ASize := Fs.Size;
+      if ASize > MaxCapturedChangeBytes then
+        Exit;
+      SetLength(AData, ASize);
+      if ASize > 0 then
+        Fs.ReadBuffer(AData[1], ASize);
+      Result := True;
+    finally
+      Fs.Free;
+    end;
+  except
+    Result := False;
+  end;
+end;
+
+procedure TWorkspaceShellFs.Report(const APath: string; AKind: TFileChangeKind;
+  AIsDir: Boolean; const ABefore, AAfter: string; ACaptured: Boolean;
+  ABeforeSize, AAfterSize: Int64);
+var
+  Change: TFileChange;
+begin
+  if not Assigned(FOnChange) then
+    Exit;
+  Change := Default(TFileChange);
+  Change.Path := WorkspaceRelative(APath);
+  Change.Kind := AKind;
+  Change.IsDir := AIsDir;
+  Change.Before := ABefore;
+  Change.After := AAfter;
+  Change.BeforeSize := ABeforeSize;
+  Change.AfterSize := AAfterSize;
+  Change.Captured := ACaptured;
+  FOnChange(Change);
+end;
+
 function TWorkspaceShellFs.ReadAll(const APath: string;
   out AData, AError: string): Boolean;
 var
@@ -178,10 +249,19 @@ function TWorkspaceShellFs.WriteFile(const APath, AData: string;
   AAppend: Boolean; out AError: string): Boolean;
 var
   Fs: TFileStream;
+  Before, After: string;
+  BeforeSize, AfterSize: Int64;
+  Captured, Existed: Boolean;
 begin
   AError := '';
   if not EnsureInside(APath, AError) then
     Exit(False);
+  Existed := FileExists(APath);
+  Captured := True;
+  Before := '';
+  BeforeSize := 0;
+  if Existed then
+    Captured := CaptureText(APath, Before, BeforeSize);
   try
     if AAppend then
       Fs := TFileStream.Create(APath, fmOpenReadWrite or fmShareDenyNone)
@@ -200,9 +280,22 @@ begin
     on E: Exception do
     begin
       AError := E.Message;
-      Result := False;
+      Exit(False);
     end;
   end;
+  if AAppend and Captured then
+    After := Before + AData
+  else
+    After := AData;
+  if not Captured then
+    AfterSize := Length(AData)
+  else
+    AfterSize := Length(After);
+  if not Existed then
+    Report(APath, fcCreated, False, '', After, Captured, 0, AfterSize)
+  else if (not Captured) or (Before <> After) then
+    Report(APath, fcModified, False, Before, After, Captured, BeforeSize,
+      AfterSize);
 end;
 
 function TWorkspaceShellFs.ListDir(const APath: string;
@@ -361,6 +454,10 @@ end;
 
 function TWorkspaceShellFs.Delete(const APath: string; ARecursive: Boolean;
   out AError: string): Boolean;
+var
+  Before: string;
+  BeforeSize: Int64;
+  Captured: Boolean;
 begin
   AError := '';
   if not EnsureInside(APath, AError) then
@@ -381,8 +478,14 @@ begin
   end;
   if FileExists(APath) then
   begin
+    Before := '';
+    BeforeSize := 0;
+    Captured := CaptureText(APath, Before, BeforeSize);
     if DeleteFile(APath) then
+    begin
+      Report(APath, fcDeleted, False, Before, '', Captured, BeforeSize, 0);
       Exit(True);
+    end;
     AError := 'cannot delete ' + APath;
     Exit(False);
   end;
@@ -392,8 +495,13 @@ end;
 
 function TWorkspaceShellFs.Move(const AFrom, ATo: string;
   out AError: string): Boolean;
+var
+  Before, After: string;
+  BeforeSize, AfterSize: Int64;
+  Captured: Boolean;
 begin
   AError := '';
+  Captured := CaptureText(AFrom, Before, BeforeSize);
   if (not EnsureInside(AFrom, AError)) or (not EnsureInside(ATo, AError)) then
     Exit(False);
   if not FileExists(AFrom) and not DirectoryExists(AFrom) then
@@ -416,7 +524,13 @@ begin
     end;
     Result := RenameFile(AFrom, ATo);
     if not Result then
-      AError := 'cannot move ' + AFrom + ' to ' + ATo;
+      AError := 'cannot move ' + AFrom + ' to ' + ATo
+    else
+    begin
+      Report(AFrom, fcDeleted, False, Before, '', Captured, BeforeSize, 0);
+      Captured := CaptureText(ATo, After, AfterSize);
+      Report(ATo, fcCreated, False, '', After, Captured, 0, AfterSize);
+    end;
   except
     on E: Exception do
     begin
@@ -430,8 +544,17 @@ function TWorkspaceShellFs.Copy(const AFrom, ATo: string;
   out AError: string): Boolean;
 var
   Src, Dst: TFileStream;
+  Before, After: string;
+  BeforeSize, AfterSize: Int64;
+  Captured, Existed: Boolean;
 begin
   AError := '';
+  Existed := FileExists(ATo);
+  Captured := False;
+  Before := '';
+  BeforeSize := 0;
+  if Existed then
+    Captured := CaptureText(ATo, Before, BeforeSize);
   if (not EnsureInside(AFrom, AError)) or (not EnsureInside(ATo, AError)) then
     Exit(False);
   if DirectoryExists(AFrom) then
@@ -457,6 +580,12 @@ begin
       Src.Free;
     end;
     Result := True;
+    Captured := CaptureText(ATo, After, AfterSize);
+    if not Existed then
+      Report(ATo, fcCreated, False, '', After, Captured, 0, AfterSize)
+    else if (not Captured) or (Before <> After) then
+      Report(ATo, fcModified, False, Before, After, Captured, BeforeSize,
+        AfterSize);
   except
     on E: Exception do
     begin
@@ -468,6 +597,8 @@ end;
 
 function TWorkspaceShellFs.MakeDir(const APath: string; AParents: Boolean;
   out AError: string): Boolean;
+var
+  Existed: Boolean;
 begin
   AError := '';
   if not EnsureInside(APath, AError) then
@@ -479,6 +610,7 @@ begin
     AError := 'file exists: ' + APath;
     Exit(False);
   end;
+  Existed := DirectoryExists(APath);
   try
     if AParents then
     begin
@@ -493,6 +625,8 @@ begin
       if not Result then
         AError := 'cannot create directory ' + APath;
     end;
+    if Result and (not Existed) then
+      Report(APath, fcCreated, True, '', '', True, 0, 0);
   except
     on E: Exception do
     begin
@@ -514,6 +648,7 @@ begin
   try
     Fs := TFileStream.Create(APath, fmCreate);
     Fs.Free;
+    Report(APath, fcCreated, False, '', '', True, 0, 0);
     Result := True;
   except
     on E: Exception do

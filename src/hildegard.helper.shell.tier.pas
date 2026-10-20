@@ -51,7 +51,8 @@ type
   public
     { Not thread-safe: the executor creates one per run_command call. }
     constructor Create(const AConfig: TBuiltinShellConfig;
-      AApproval: IApprovalService; AInvoke: TShellToolInvoke = nil);
+      AApproval: IApprovalService; AInvoke: TShellToolInvoke = nil;
+      AOnChange: TShellFsChangeEvent = nil);
     destructor Destroy; override;
     { True when the whole script ran here; False = decline (LastError says
       why). On True, AOutput is stdout followed by stderr. }
@@ -88,7 +89,8 @@ begin
 end;
 
 constructor TBuiltinShell.Create(const AConfig: TBuiltinShellConfig;
-  AApproval: IApprovalService; AInvoke: TShellToolInvoke);
+  AApproval: IApprovalService; AInvoke: TShellToolInvoke;
+  AOnChange: TShellFsChangeEvent);
 var
   WFs: TWorkspaceShellFs;
 begin
@@ -97,6 +99,7 @@ begin
   FApproval := AApproval;
   FInvoke := AInvoke;
   WFs := TWorkspaceShellFs.Create(AConfig.Root);
+  WFs.OnChange := AOnChange;
   FFs := WFs;
   FCmd := TBuiltinCommands.Create(WFs, AInvoke, AConfig.AllowedTools);
   FRegistry := TShellRegistry.Create;

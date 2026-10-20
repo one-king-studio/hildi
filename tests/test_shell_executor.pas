@@ -11,7 +11,8 @@ uses
   hildegard.helper.agent, hildegard.helper.approval,
   hildegard.helper.command.tool,
   hildegard.helper.shell.commands, hildegard.helper.shell.tier,
-  hildegard.helper.shell.executor, hildegard.helper.shell.fs;
+  hildegard.helper.shell.executor, hildegard.helper.shell.fs,
+  hildegard.helper.workspace.changes;
 
 type
   TFakeFallback = class(TNoRefCountObject, ICommandExecutor)
@@ -24,7 +25,7 @@ type
       out AWhy: string): Boolean;
     function Execute(const AProfile: TShellProfile; const ACommand,
       AWorkDir: string; ATimeoutMs: QWord; AObserver: TToolObserver;
-      const AReason: string; AMode: TCommandMode;
+      const AReason: string; AMode: TCommandMode; AChanges: TFileChangeSet;
       out AExecution: TCommandExecution): Boolean;
   end;
 
@@ -63,6 +64,7 @@ type
     procedure TestFallsBackOnParseError;
     procedure TestFallbackReceivesTheReason;
     procedure TestObserverReceivesTierOutput;
+    procedure TestRecordsFileChanges;
     procedure TestOwnsApprovalOnlyForTierScripts;
     procedure TestModeBashUsesTheFallback;
     procedure TestModeBuiltinRunsSupported;
@@ -82,7 +84,7 @@ end;
 function TFakeFallback.Execute(const AProfile: TShellProfile;
   const ACommand, AWorkDir: string; ATimeoutMs: QWord;
   AObserver: TToolObserver; const AReason: string; AMode: TCommandMode;
-  out AExecution: TCommandExecution): Boolean;
+  AChanges: TFileChangeSet; out AExecution: TCommandExecution): Boolean;
 begin
   Inc(Calls);
   LastReason := AReason;
@@ -166,7 +168,7 @@ function TShellExecutorTest.RunExec(const ACommand: string;
   AMode: TCommandMode): Boolean;
 begin
   Result := FExecutor.Execute(DefaultShellProfile, ACommand, FRoot, 5000,
-    AObserver, 'the reason', AMode, AExecution);
+    AObserver, 'the reason', AMode, nil, AExecution);
 end;
 
 procedure TShellExecutorTest.TestUsesTierWhenSupported;
@@ -205,6 +207,49 @@ var
 begin
   RunExec('git status', Exec);
   AssertEquals('reason', 'the reason', FFallback.LastReason);
+end;
+
+procedure TShellExecutorTest.TestRecordsFileChanges;
+var
+  Exec: TCommandExecution;
+  Changes: TFileChangeSet;
+  E: string;
+  I: Integer;
+
+  function Has(const APath: string; AKind: TFileChangeKind): Boolean;
+  var
+    K: Integer;
+  begin
+    Result := False;
+    for K := 0 to Changes.Count - 1 do
+      if (Changes[K].Path = APath) and (Changes[K].Kind = AKind) then
+        Exit(True);
+  end;
+
+begin
+  Changes := TFileChangeSet.Create;
+  try
+    AssertTrue('ran', FExecutor.Execute(DefaultShellProfile,
+      'echo one > n.txt; echo two >> n.txt; sed -i s/one/ONE/ n.txt; ' +
+      'cp n.txt copy.txt; mv copy.txt moved.txt; rm n.txt; mkdir newdir',
+      FRoot, 5000, nil, 'the reason', cmAuto, Changes, Exec));
+    AssertTrue('multi-change call: ' + Changes.Summary, Changes.Count >= 5);
+    AssertTrue('created n.txt', Has('n.txt', fcCreated));
+    AssertTrue('modified by append', Has('n.txt', fcModified));
+    AssertTrue('copied', Has('copy.txt', fcCreated));
+    AssertTrue('moved away', Has('copy.txt', fcDeleted));
+    AssertTrue('moved to', Has('moved.txt', fcCreated));
+    AssertTrue('removed', Has('n.txt', fcDeleted));
+    AssertTrue('directory created', Has('newdir', fcCreated));
+    { The before text rides along, so a consumer can diff. }
+    for I := 0 to Changes.Count - 1 do
+      if (Changes[I].Path = 'moved.txt') and (Changes[I].Kind = fcCreated) then
+        AssertEquals('content captured', 'ONE' + #10 + 'two' + #10,
+          Changes[I].After);
+    AssertTrue('summary names a change', Pos('moved.txt', Changes.Summary) > 0);
+  finally
+    Changes.Free;
+  end;
 end;
 
 procedure TShellExecutorTest.TestObserverReceivesTierOutput;

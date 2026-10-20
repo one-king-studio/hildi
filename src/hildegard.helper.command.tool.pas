@@ -20,7 +20,7 @@ uses
   hildegard.helper.agent, hildegard.helper.llm,
   hildegard.helper.command.policy, hildegard.helper.approval,
   hildegard.helper.command.paths,
-  hildegard.helper.process;
+  hildegard.helper.process, hildegard.helper.workspace.changes;
 
 type
   TShellProfile = record
@@ -29,12 +29,16 @@ type
     Syntax: TShellSyntax; // ssPosix
   end;
 
+  { The files a call changed, delivered once per successful run. }
+  TCommandChangesEvent = procedure(const AChanges: TFileChangeSet) of object;
+
   TCommandToolConfig = record
     Shell: TShellProfile;
     DefaultCwd: string;        // '' => process cwd
     DefaultTimeoutMs: QWord;   // 0 => ProfileDefaultTimeoutMs
     MaxTimeoutMs: QWord;       // 0 => no cap; >0 caps the model's timeout_ms
     MaxOutputBytes: Integer;   // 0 => DefaultMaxOutputBytes
+    OnChanges: TCommandChangesEvent;  // nil => nobody tracks writes
   end;
 
   TCommandExecution = record
@@ -63,10 +67,11 @@ type
     function OwnsApproval(const ACommand: string; AMode: TCommandMode;
       out AWhy: string): Boolean;
     { AReason is the model's reason for the call; the builtin tier inherits it
-      into every approval ask. A process executor may ignore it. }
+      into every approval ask. A process executor may ignore it. AChanges
+      (may be nil) collects every filesystem write the call makes. }
     function Execute(const AProfile: TShellProfile; const ACommand,
       AWorkDir: string; ATimeoutMs: QWord; AObserver: TToolObserver;
-      const AReason: string; AMode: TCommandMode;
+      const AReason: string; AMode: TCommandMode; AChanges: TFileChangeSet;
       out AExecution: TCommandExecution): Boolean;
   end;
 
@@ -76,9 +81,10 @@ type
   public
     function OwnsApproval(const ACommand: string; AMode: TCommandMode;
       out AWhy: string): Boolean;
+    { AChanges (may be nil) collects every filesystem write the call makes. }
     function Execute(const AProfile: TShellProfile; const ACommand,
       AWorkDir: string; ATimeoutMs: QWord; AObserver: TToolObserver;
-      const AReason: string; AMode: TCommandMode;
+      const AReason: string; AMode: TCommandMode; AChanges: TFileChangeSet;
       out AExecution: TCommandExecution): Boolean;
   end;
 
@@ -403,7 +409,7 @@ end;
 
 function TProcessCommandExecutor.Execute(const AProfile: TShellProfile;
   const ACommand, AWorkDir: string; ATimeoutMs: QWord; AObserver: TToolObserver;
-  const AReason: string; AMode: TCommandMode;
+  const AReason: string; AMode: TCommandMode; AChanges: TFileChangeSet;
   out AExecution: TCommandExecution): Boolean;
 var
   Collector: TOutputCollector;
@@ -551,6 +557,7 @@ var
   Execution: TCommandExecution;
   Truncated: Boolean;
   Stream: TCappedObserver;
+  Changes: TFileChangeSet;
 begin
   AResult := '';
   AError := '';
@@ -666,11 +673,18 @@ begin
           observer directly so it is never dropped by the output cap. }
         if AObserver <> nil then
           AObserver.Next('$ ' + Command + LineEnding + LineEnding);
-        if not FExecutor.Execute(FConfig.Shell, Command, EffectiveCwd,
-          TimeoutMs, Stream, Reason, Mode, Execution) then
-        begin
-          AError := 'failed to execute: ' + Execution.Error;
-          Exit(False);
+        Changes := TFileChangeSet.Create;
+        try
+          if not FExecutor.Execute(FConfig.Shell, Command, EffectiveCwd,
+            TimeoutMs, Stream, Reason, Mode, Changes, Execution) then
+          begin
+            AError := 'failed to execute: ' + Execution.Error;
+            Exit(False);
+          end;
+          if (Changes.Count > 0) and Assigned(FConfig.OnChanges) then
+            FConfig.OnChanges(Changes);
+        finally
+          Changes.Free;
         end;
       finally
         Stream.Free;

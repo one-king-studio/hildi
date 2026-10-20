@@ -15,9 +15,19 @@ uses
   SysUtils, Classes,
   hildegard.helper.agent,
   hildegard.helper.command.tool, hildegard.helper.approval,
-  hildegard.helper.shell.commands, hildegard.helper.shell.tier;
+  hildegard.helper.shell.commands, hildegard.helper.shell.tier,
+  hildegard.helper.workspace.changes;
 
 type
+  { Bridges the FS observer to the call's change set. }
+  TChangeCollector = class
+  private
+    FSet: TFileChangeSet;
+  public
+    constructor Create(ASet: TFileChangeSet);
+    procedure Add(const AChange: TFileChange);
+  end;
+
   TBuiltinCommandExecutor = class(TInterfacedObject, ICommandExecutor)
   private
     FConfig: TBuiltinShellConfig;
@@ -32,11 +42,23 @@ type
       out AWhy: string): Boolean;
     function Execute(const AProfile: TShellProfile; const ACommand,
       AWorkDir: string; ATimeoutMs: QWord; AObserver: TToolObserver;
-      const AReason: string; AMode: TCommandMode;
+      const AReason: string; AMode: TCommandMode; AChanges: TFileChangeSet;
       out AExecution: TCommandExecution): Boolean;
   end;
 
 implementation
+
+constructor TChangeCollector.Create(ASet: TFileChangeSet);
+begin
+  inherited Create;
+  FSet := ASet;
+end;
+
+procedure TChangeCollector.Add(const AChange: TFileChange);
+begin
+  if FSet <> nil then
+    FSet.Add(AChange);
+end;
 
 constructor TBuiltinCommandExecutor.Create(const AConfig: TBuiltinShellConfig;
   AApproval: IApprovalService; AFallback: ICommandExecutor;
@@ -61,9 +83,10 @@ end;
 function TBuiltinCommandExecutor.Execute(const AProfile: TShellProfile;
   const ACommand, AWorkDir: string; ATimeoutMs: QWord;
   AObserver: TToolObserver; const AReason: string; AMode: TCommandMode;
-  out AExecution: TCommandExecution): Boolean;
+  AChanges: TFileChangeSet; out AExecution: TCommandExecution): Boolean;
 var
   Tier: TBuiltinShell;
+  Collector: TChangeCollector;
   Output, TierError, Why: string;
   ExitCode: Integer;
   Owned: Boolean;
@@ -72,12 +95,13 @@ begin
   { mode=bash is the explicit escalation: the process tier, with its asks. }
   if AMode = cmBash then
     Exit(FFallback.Execute(AProfile, ACommand, AWorkDir, ATimeoutMs,
-      AObserver, AReason, AMode, AExecution));
+      AObserver, AReason, AMode, AChanges, AExecution));
   Owned := OwnsApproval(ACommand, AMode, Why);
   TierError := '';
+  Collector := TChangeCollector.Create(AChanges);
   try
     try
-      Tier := TBuiltinShell.Create(FConfig, FApproval, FInvoke);
+      Tier := TBuiltinShell.Create(FConfig, FApproval, FInvoke, Collector.Add);
       try
         if Tier.TryRun(ACommand, AWorkDir, AReason, ATimeoutMs, Output,
           ExitCode) then
@@ -101,7 +125,7 @@ begin
         TierError := E.Message;
     end;
   finally
-    { Fall through to the decision below. }
+    Collector.Free;
   end;
   { mode=builtin is a requirement: declining is an error, never a fallback. }
   if AMode = cmBuiltin then
@@ -117,7 +141,7 @@ begin
     Exit(False);
   end;
   Result := FFallback.Execute(AProfile, ACommand, AWorkDir, ATimeoutMs,
-    AObserver, AReason, AMode, AExecution);
+    AObserver, AReason, AMode, AChanges, AExecution);
 end;
 
 end.
