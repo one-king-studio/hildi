@@ -1,6 +1,6 @@
 # Feature: Text & Data Commands
 
-**Status:** Partially implemented — `sed`, `awk` shipped; `jq` shipped (this feature's list); `yq`, `rg` planned.
+**Status:** Implemented for `sed`, `awk`, `jq`, `rg`; `yq` deliberately not planned.
 
 **Related:** [Builtin Shell Tier](../Builtin_Shell_Tier/FEATURE.md) ·
 [Command & Flag Coverage](../Builtin_Shell_Tier/COMMAND_COVERAGE.md) ·
@@ -45,11 +45,13 @@ still handles the long tail:
    `select`, `map`, `keys`/`length` and variables decline.
 4. **`yq`** (planned, last): the same path queries over YAML, since the harness
    already has `yaml_read`/`yaml_edit`; add it only when a workload asks.
-5. **`rg`** (planned, last): recursive search over the same engine as `grep`,
-   with `-n`, `-i`, `-l`, `-c`, `-F`, `-E`, `-g`. The open question is
-   `.gitignore` fidelity: ripgrep's defining behaviour is skipping ignored
-   files, so a version that does not must decline rather than return a
-   different set of hits.
+5. **`rg`** (shipped): recursive search over the same engine as `grep`, with
+   `-n`, `-i`, `-l`, `-c`, `-F`, `-E`, `-g`, `--hidden`, `--no-ignore`. It
+   respects `.gitignore` inside a repository through the **reusable**
+   `hildegard.helper.gitignore` parser (root and nested files, `!` negation,
+   anchoring, `**`, classes) — the same unit the file-diff tracker will use to
+   avoid recording edits to ignored files. ripgrep's stdin heuristic is
+   deliberately dropped: `rg` always searches paths.
 
 ## Boundaries
 

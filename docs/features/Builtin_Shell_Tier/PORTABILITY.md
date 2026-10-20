@@ -75,7 +75,7 @@ write a workspace, on any OS:
 | files | `cat`, `head`, `tail`, `wc`, `ls`, `mkdir`, `rm`, `mv`, `cp`, `touch` | done |
 | text | `grep`, `sed`, `sort`, `uniq`, `basename`, `dirname`, `test`, `[` | done |
 | transforms | `awk` (fields), `cut`, `tr`, `tee`, `printf` | done |
-| search | `grep -r`, `find`, `rg` (alias with rg's defaults) | `grep -r` and `find` done; `rg` small |
+| search | `grep -r`, `find`, `rg` | done |
 | data | `jq` (paths), `yq` (paths) | `jq` done; `yq` if asked |
 | programs | `git`, `make`, `fpc`, `python3`, `curl`, `sqlite3` | **not** implementable; process tier only |
 

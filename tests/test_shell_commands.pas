@@ -55,6 +55,7 @@ type
     procedure TestFind;
     procedure TestJq;
     procedure TestCutTrPrintfTee;
+    procedure TestRg;
     procedure TestToolDispatch;
     procedure TestToolGatewayRefusals;
     procedure TestMcpMapping;
@@ -174,6 +175,8 @@ begin
     Result := FCmd.Tee(Call)
   else if AName = 'printf' then
     Result := FCmd.Printf(Call)
+  else if AName = 'rg' then
+    Result := FCmd.Rg(Call)
   else if AName = 'tool' then
     Result := FCmd.Tool(Call)
   else if AName = 'mcp' then
@@ -644,6 +647,40 @@ begin
   AssertEquals('tee echoes', 'data', R.Stdout);
   AssertTrue('tee writes', FFs.ReadFile(P('t.txt'), Data, E));
   AssertEquals('tee content', 'data', Data);
+end;
+
+procedure TShellCommandsTest.TestRg;
+var
+  R: TShellResult;
+  E: string;
+begin
+  FFs.MakeDir(P('.git'), False, E);
+  FFs.WriteFile(P('.gitignore'), 'ignored/' + #10 + '*.log' + #10, False, E);
+  FFs.MakeDir(P('ignored'), False, E);
+  FFs.WriteFile(P('ignored/c.txt'), 'beta' + #10, False, E);
+  FFs.WriteFile(P('d.log'), 'beta' + #10, False, E);
+  FFs.WriteFile(P('.hidden'), 'beta' + #10, False, E);
+  R := RunCmd('rg', ['beta']);
+  AssertEquals('gitignore and hidden honoured', 'a.txt:beta' + #10 + 'b.txt:beta' + #10,
+    R.Stdout);
+  R := RunCmd('rg', ['-n', 'beta']);
+  AssertEquals('line numbers', 'a.txt:2:beta' + #10 + 'b.txt:1:beta' + #10,
+    R.Stdout);
+  R := RunCmd('rg', ['-l', 'beta']);
+  AssertEquals('files', 'a.txt' + #10 + 'b.txt' + #10, R.Stdout);
+  R := RunCmd('rg', ['-c', 'beta']);
+  AssertEquals('counts only for matches', 'a.txt:1' + #10 + 'b.txt:1' + #10,
+    R.Stdout);
+  R := RunCmd('rg', ['--hidden', 'beta']);
+  AssertTrue('hidden included', Pos('.hidden:beta', R.Stdout) > 0);
+  R := RunCmd('rg', ['-g', '*.log', 'beta']);
+  AssertEquals('the ignore file still excludes logs', '', R.Stdout);
+  R := RunCmd('rg', ['nothing-here']);
+  AssertEquals('no match status', 1, R.ExitCode);
+  { Without .git, ripgrep does not consult .gitignore either. }
+  FFs.Delete(P('.git'), True, E);
+  R := RunCmd('rg', ['beta']);
+  AssertTrue('no repo means no ignore rules', Pos('d.log:beta', R.Stdout) > 0);
 end;
 
 procedure TShellCommandsTest.TestToolDispatch;

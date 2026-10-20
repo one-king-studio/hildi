@@ -67,6 +67,7 @@ type
     function Tr(const ACall: TShellCall): TShellResult;
     function Tee(const ACall: TShellCall): TShellResult;
     function Printf(const ACall: TShellCall): TShellResult;
+    function Rg(const ACall: TShellCall): TShellResult;
     function Tool(const ACall: TShellCall): TShellResult;
     function Mcp(const ACall: TShellCall): TShellResult;
   end;
@@ -93,6 +94,7 @@ uses
   StrUtils, fpjson, jsonparser, hildegard.helper.shell.pattern,
   hildegard.helper.shell.sed, hildegard.helper.shell.awk,
   hildegard.helper.shell.jq, hildegard.helper.shell.textcmd,
+  hildegard.helper.gitignore,
   shell.interpreter, hildegard.helper.mcp.client
   {$ifdef unix}, BaseUnix{$endif};
 
@@ -106,7 +108,7 @@ type
   end;
 
 const
-  CommandSpecs: array[0..29] of TCommandSpec = (
+  CommandSpecs: array[0..30] of TCommandSpec = (
     (Name: 'echo'; Options: '-n'),
     (Name: 'head'; Options: '-nN'),
     (Name: 'tail'; Options: '-nN'),
@@ -120,6 +122,7 @@ const
     (Name: 'tr'; Options: '-ds'),
     (Name: 'tee'; Options: '-a'),
     (Name: 'printf'; Options: ''),
+    (Name: 'rg'; Options: '-nilcFErg'),
     (Name: 'ls'; Options: '-ad'),
     (Name: 'mkdir'; Options: '-p'),
     (Name: 'rm'; Options: '-rf'),
@@ -2040,6 +2043,335 @@ begin
   if not PrintfText(Format, Args, OutText, Err) then
     Exit(Failure('printf: ' + Err, 1));
   Result := ShellResultOk(OutText);
+end;
+
+function TBuiltinCommands.Rg(const ACall: TShellCall): TShellResult;
+{ ripgrep's shape over the shared engine: recursive by default, gitignore-aware
+  inside a repository, hidden entries skipped by default, `path:match` output. }
+var
+  I, J: Integer;
+  A, Pattern, E, OutText, ErrText, RootAbs, RepoRoot, OperandRel: string;
+  ShowN, IgnoreCase, ListOnly, CountOnly, Fixed, Extended, Hidden,
+    NoIgnore, ImplicitRoot: Boolean;
+  Globs, Roots: TStringArray;
+  Matcher: TPatternMatcher;
+  Ignore: TIgnoreRules;
+  Status: Integer;
+  RootKind: TShellFileKind;
+
+  function JoinIgnore(const ABase, AName: string): string;
+  begin
+    if ABase = '' then
+      Result := AName
+    else
+      Result := ABase + '/' + AName;
+  end;
+
+  function BaseNameOfPath(const APath: string): string;
+  var
+    P: Integer;
+  begin
+    P := Length(APath);
+    while (P >= 1) and (APath[P] <> '/') do
+      Dec(P);
+    Result := Copy(APath, P + 1, MaxInt);
+  end;
+
+  function GlobMatches(const ARel, AName: string): Boolean;
+  var
+    K: Integer;
+    Use: string;
+  begin
+    if Length(Globs) = 0 then
+      Exit(True);
+    for K := 0 to High(Globs) do
+    begin
+      if Pos('/', Globs[K]) > 0 then
+        Use := ARel
+      else
+        Use := AName;
+      if MatchGlob(Globs[K], Use) then
+        Exit(True);
+    end;
+    Result := False;
+  end;
+
+  procedure ScanFile(const AFull, ADisplay, ARel: string; AShowName: Boolean);
+  var
+    D, FileErr: string;
+    Ls: TStringArray;
+    K, Count: Integer;
+    HasMatch: Boolean;
+  begin
+    if not GlobMatches(ARel, BaseNameOfPath(ADisplay)) then
+      Exit;
+    if not FFs.ReadFile(AFull, D, FileErr) then
+    begin
+      ErrText := ErrText + 'rg: ' + ADisplay + ': ' + FileErr + #10;
+      Status := 2;
+      Exit;
+    end;
+    if Pos(#0, D) > 0 then
+      Exit;   // rg skips binary files by default
+    Ls := LinesOf(D);
+    Count := 0;
+    HasMatch := False;
+    for K := 0 to High(Ls) do
+      if Matcher.Matches(Ls[K]) then
+      begin
+        Inc(Count);
+        HasMatch := True;
+        if ListOnly or CountOnly then
+          Continue;
+        if AShowName then
+          OutText := OutText + ADisplay + ':';
+        if ShowN then
+          OutText := OutText + IntToStr(K + 1) + ':';
+        OutText := OutText + Ls[K] + #10;
+      end;
+    if HasMatch then
+      Status := 0;
+    if ListOnly and HasMatch then
+      OutText := OutText + ADisplay + #10;
+    { rg's -c lists only files that matched. }
+    if CountOnly and HasMatch then
+    begin
+      if AShowName then
+        OutText := OutText + ADisplay + ':';
+      OutText := OutText + IntToStr(Count) + #10;
+    end;
+  end;
+
+  procedure Walk(const AAbs, ADisplay, ARel, AIgnoreRel: string);
+  var
+    Entries: TStringArray;
+    FileErr, Child, ChildDisplay, ChildRel, ChildIgnore, Gitignore: string;
+    K: Integer;
+    Kind: TShellFileKind;
+    {$ifdef unix}
+    LSt: Stat;
+    {$endif}
+  begin
+    if not FFs.ListDir(AAbs, Entries, FileErr) then
+      Exit;
+    { This directory's ignore file applies to its entries (and deeper). }
+    if Ignore <> nil then
+      for K := 0 to High(Entries) do
+        if Entries[K] = '.gitignore' then
+        begin
+          if FFs.ReadFile(AAbs + '/.gitignore', Gitignore, FileErr) then
+            Ignore.AddFile(AIgnoreRel, Gitignore);
+          Break;
+        end;
+    for K := 0 to High(Entries) do
+    begin
+      if Entries[K] = '.git' then
+        Continue;
+      if (not Hidden) and (Entries[K] <> '') and (Entries[K][1] = '.') then
+        Continue;
+      Child := AAbs + '/' + Entries[K];
+      if ADisplay = '' then
+        ChildDisplay := Entries[K]
+      else if ADisplay = '/' then
+        ChildDisplay := '/' + Entries[K]
+      else
+        ChildDisplay := ADisplay + '/' + Entries[K];
+      ChildRel := JoinIgnore(ARel, Entries[K]);
+      ChildIgnore := JoinIgnore(AIgnoreRel, Entries[K]);
+      if not FFs.Stat(Child, Kind, FileErr) then
+        Continue;
+      if (Ignore <> nil) and Ignore.IsIgnored(ChildIgnore, Kind = sfkDirectory) then
+        Continue;
+      if Kind = sfkDirectory then
+      begin
+        {$ifdef unix}
+        if (fpLstat(PChar(Child), LSt) = 0) and
+          ((LSt.st_mode and S_IFMT) = S_IFLNK) then
+          Continue;
+        {$endif}
+        Walk(Child, ChildDisplay, ChildRel, ChildIgnore);
+      end
+      else
+        ScanFile(Child, ChildDisplay, ChildRel, True);
+    end;
+  end;
+
+  function FindRepoRoot(const AStartAbs: string; out ARel: string): string;
+  var
+    Dir, Parent: string;
+    Kind: TShellFileKind;
+    FileErr: string;
+  begin
+    Result := '';
+    ARel := '';
+    Dir := AStartAbs;
+    while True do
+    begin
+      if FFs.Stat(Dir + '/.git', Kind, FileErr) then
+      begin
+        if Dir = AStartAbs then
+          ARel := ''
+        else if Copy(AStartAbs, 1, Length(Dir) + 1) = Dir + '/' then
+          ARel := Copy(AStartAbs, Length(Dir) + 2, MaxInt)
+        else
+          Exit;
+        Exit(Dir);
+      end;
+      Parent := ExtractFileDir(Dir);
+      if (Parent = '') or (Parent = Dir) then
+        Exit;
+      if not FFs.Stat(Parent, Kind, FileErr) then
+        Exit;
+      Dir := Parent;
+    end;
+  end;
+
+  { Load the ignore files from the repository root down to (but not including)
+    the search root; Walk loads the search root's own. }
+  procedure LoadIgnoreChain(const ARepoRoot, AOperandRel: string);
+  var
+    Base, Part, Text, FileErr: string;
+    P, Q: Integer;
+  begin
+    if FFs.ReadFile(ARepoRoot + '/.gitignore', Text, FileErr) then
+      Ignore.AddFile('', Text);
+    Base := '';
+    P := 1;
+    while P <= Length(AOperandRel) do
+    begin
+      Q := P;
+      while (Q <= Length(AOperandRel)) and (AOperandRel[Q] <> '/') do
+        Inc(Q);
+      Part := Copy(AOperandRel, P, Q - P);
+      if Base = '' then
+        Base := Part
+      else
+        Base := Base + '/' + Part;
+      if Q > Length(AOperandRel) then
+        Break;   // the operand directory itself is loaded by Walk
+      if FFs.ReadFile(ARepoRoot + '/' + Base + '/.gitignore', Text, FileErr) then
+        Ignore.AddFile(Base, Text);
+      P := Q + 1;
+    end;
+  end;
+
+begin
+  ShowN := False;
+  IgnoreCase := False;
+  ListOnly := False;
+  CountOnly := False;
+  Fixed := False;
+  Extended := False;
+  Hidden := False;
+  NoIgnore := False;
+  Globs := nil;
+  I := 0;
+  while I <= High(ACall.Args) do
+  begin
+    A := ACall.Args[I];
+    if A = '--' then
+    begin
+      Inc(I);
+      Break;
+    end;
+    if (A = '') or (A[1] <> '-') or (A = '-') then
+      Break;
+    if A = '--hidden' then
+      Hidden := True
+    else if A = '--no-ignore' then
+      NoIgnore := True
+    else if A = '-g' then
+    begin
+      if I = High(ACall.Args) then
+        Exit(Usage('rg: -g requires an argument'));
+      Inc(I);
+      SetLength(Globs, Length(Globs) + 1);
+      Globs[High(Globs)] := ACall.Args[I];
+    end
+    else if Copy(A, 1, 2) = '-g' then
+    begin
+      SetLength(Globs, Length(Globs) + 1);
+      Globs[High(Globs)] := Copy(A, 3, MaxInt);
+    end
+    else
+    begin
+      for J := 2 to Length(A) do
+        case A[J] of
+          'n': ShowN := True;
+          'i': IgnoreCase := True;
+          'l': ListOnly := True;
+          'c': CountOnly := True;
+          'F': Fixed := True;
+          'E': Extended := True;
+        else
+          Exit(Usage('rg: unsupported option -' + A[J]));
+        end;
+    end;
+    Inc(I);
+  end;
+  if I > High(ACall.Args) then
+    Exit(Usage('rg: missing pattern'));
+  Pattern := ACall.Args[I];
+  Inc(I);
+  SetLength(Roots, Length(ACall.Args) - I);
+  J := I;
+  while I <= High(ACall.Args) do
+  begin
+    Roots[I - J] := ACall.Args[I];
+    Inc(I);
+  end;
+  ImplicitRoot := Length(Roots) = 0;
+  if ImplicitRoot then
+  begin
+    SetLength(Roots, 1);
+    Roots[0] := '.';
+  end;
+  Matcher := TPatternMatcher.Create(Pattern, Fixed, Extended, IgnoreCase, False);
+  Ignore := nil;
+  try
+    if Matcher.Invalid <> '' then
+      Exit(Failure('rg: invalid regular expression: ' + Matcher.Invalid, 2));
+    OutText := '';
+    ErrText := '';
+    Status := 1;
+    for I := 0 to High(Roots) do
+    begin
+      RootAbs := FFs.Resolve(ACall.Cwd, Roots[I]);
+      if not FFs.Stat(RootAbs, RootKind, E) then
+      begin
+        ErrText := ErrText + 'rg: ' + Roots[I] + ': ' + E + #10;
+        Status := 2;
+        Continue;
+      end;
+      if NoIgnore then
+        RepoRoot := ''
+      else
+        RepoRoot := FindRepoRoot(RootAbs, OperandRel);
+      FreeAndNil(Ignore);
+      if RepoRoot <> '' then
+      begin
+        Ignore := TIgnoreRules.Create(True);
+        LoadIgnoreChain(RepoRoot, OperandRel);
+      end;
+      if RootKind = sfkDirectory then
+      begin
+        { No operand means `.` silently: rg prints `name`, not `./name`. }
+        if ImplicitRoot then
+          Walk(RootAbs, '', '', OperandRel)
+        else
+          Walk(RootAbs, Roots[I], '', OperandRel);
+      end
+      else
+        { One explicit file prints bare lines; several print the name. }
+        ScanFile(RootAbs, Roots[I], Roots[I], Length(Roots) > 1);
+    end;
+    Result.Stdout := OutText;
+    Result.Stderr := ErrText;
+    Result.ExitCode := Status;
+  finally
+    Ignore.Free;
+    Matcher.Free;
+  end;
 end;
 
 function TBuiltinCommands.Tool(const ACall: TShellCall): TShellResult;

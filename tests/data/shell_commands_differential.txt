@@ -94,3 +94,13 @@ echo hello | tr -d l	heo\n		0
 echo 'a   b' | tr -s ' '	a b\n		0
 echo hello | tee t.txt; cat t.txt	hello\nhello\n		0
 printf '%s\\n' one two | tr a-z A-Z	ONE\nTWO\n		0
+rg beta .	./a.txt:beta\n		0
+rg -n beta .	./a.txt:2:beta\n		0
+rg -l beta .	./a.txt\n		0
+rg -c beta .	./a.txt:1\n		0
+rg -g '*.log' note .	./c.log:note\n		0
+mkdir -p .git; echo 'c.log' > .gitignore; rg note .			1
+mkdir -p .git; echo 'a.txt' > .gitignore; rg alpha .			1
+mkdir -p .git; echo 'c.log' > .gitignore; rg -n note .			1
+rg alpha a.txt	alpha\n		0
+rg -i ALPHA a.txt	alpha\n		0

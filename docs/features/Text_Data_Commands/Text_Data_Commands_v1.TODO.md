@@ -57,14 +57,15 @@ Evidence first: the corpus says `sed` (1,245 uses) is the whole story today;
 - [x] `find [PATH...] [-name GLOB] [-iname GLOB] [-type f|d] [-maxdepth N]`,
       over the same walk as `grep -r`; 7 differential fixtures.
 
-### Phase 5: rg
+### Phase 5: rg (shipped)
 
-- [ ] **Decide** the `.gitignore` question: ripgrep's defining behaviour is
-      skipping ignored files. Either implement `.gitignore` (root + nested,
-      with negation) or decline any traversal and support only explicit paths.
-- [ ] **Implement** `rg` over the shared engine: `-n`, `-i`, `-l`, `-c`, `-F`,
-      `-E`, `-g/--glob`; recursive by default.
-- [ ] **Test** + differential fixtures; measure.
+- [x] **Implement** the reusable `hildegard.helper.gitignore` parser (root and
+      nested files, `!` negation, anchoring, `**`, classes, `.git` opt-in) and
+      verify it against `git check-ignore`.
+- [x] **Implement** `rg` over the shared engine: `-n`, `-i`, `-l`, `-c`, `-F`,
+      `-E`, `-g`, `--hidden`, `--no-ignore`; recursive by default; gitignore
+      honoured when the search root is in a repository.
+- [x] **Test** + 10 differential fixtures recorded from ripgrep 15.1.
 
 ### Phase 6: validation and docs
 

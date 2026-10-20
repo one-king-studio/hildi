@@ -50,6 +50,7 @@ parser the tier uses; re-run `make shell-flags` to reproduce the tallies.
 | `tr` | `-d -s` | map/delete/squeeze over character sets with ranges (`a-z`) and escapes (`\t`) |
 | `tee` | `-a` | stdin to stdout and to each file, through the workspace FS |
 | `printf` | — | `%s`/`%d`/`%i`/`%%` and `\n \t \r`; the format recycles |
+| `rg` | `-n -i -l -c -F -E -g --hidden --no-ignore` | recursive by default; respects `.gitignore` inside a repo (root + nested, `!` negation); hidden entries and `.git` skipped; binary files skipped; no stdin heuristic |
 | `ls` | `-a -d` | bare names, one path; `-d` prints the path |
 | `mkdir` | `-p` | |
 | `rm` | `-r -f` | directories only with `-r`; `-f` suppresses missing |
@@ -65,9 +66,9 @@ parser the tier uses; re-run `make shell-flags` to reproduce the tallies.
 | `tool` | — | `tool <name> [json]`; allow-list; `run_command` refused |
 | `mcp` | — | `mcp <server>:<tool> [json]`; maps to `mcp_<s>_<t>` |
 
-Anything not listed — `git`, `make`, `curl`, `fpc`, `python3`, `rg` — is **not**
-in the tier and always falls back. (`sed`, `awk`, `find` and `jq` joined the
-set; `yq`/`rg` are [planned](../Text_Data_Commands/FEATURE.md).)
+Anything not listed — `git`, `make`, `curl`, `fpc`, `python3` — is **not** in
+the tier and always falls back. (`sed`, `awk`, `find`, `jq`, `rg` and the
+pipeline glue joined the set; `yq` is deliberately not planned.)
 
 ## The evidence
 

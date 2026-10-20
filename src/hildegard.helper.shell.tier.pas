@@ -130,6 +130,7 @@ begin
   FRegistry.Register('tr', FCmd.Tr);
   FRegistry.Register('tee', FCmd.Tee);
   FRegistry.Register('printf', FCmd.Printf);
+  FRegistry.Register('rg', FCmd.Rg);
 end;
 
 destructor TBuiltinShell.Destroy;
@@ -371,6 +372,8 @@ begin
               Continue;
             if (Name = 'cut') and ((Copy(Arg, 1, 2) = '-d') or
               (Copy(Arg, 1, 2) = '-f') or (Copy(Arg, 1, 2) = '-c')) then
+              Continue;
+            if (Name = 'rg') and ((Arg = '--hidden') or (Arg = '--no-ignore')) then
               Continue;
             if IsUnsupportedOption(Arg, Options) then
             begin
