@@ -51,6 +51,7 @@ type
     procedure TestTrueFalse;
     procedure TestOptionTable;
     procedure TestSed;
+    procedure TestAwk;
     procedure TestToolDispatch;
     procedure TestToolGatewayRefusals;
     procedure TestMcpMapping;
@@ -156,6 +157,8 @@ begin
     Result := FCmd.FalseCmd(Call)
   else if AName = 'sed' then
     Result := FCmd.Sed(Call)
+  else if AName = 'awk' then
+    Result := FCmd.Awk(Call)
   else if AName = 'tool' then
     Result := FCmd.Tool(Call)
   else if AName = 'mcp' then
@@ -498,6 +501,41 @@ begin
   AssertEquals('rewritten content', 'ALPHA' + #10 + 'beta' + #10, Data);
   AssertTrue('backup kept', FFs.ReadFile(P('a.txt.bak'), Data, E));
   AssertEquals('backup content', 'alpha' + #10 + 'beta' + #10, Data);
+end;
+
+procedure TShellCommandsTest.TestAwk;
+var
+  R: TShellResult;
+  E: string;
+begin
+  FFs.WriteFile(P('cols.txt'), 'a:1:one' + #10 + 'b:2:two' + #10, False, E);
+  R := RunCmd('awk', ['{print $1}', 'a.txt']);
+  AssertEquals('first field', 'alpha' + #10 + 'beta' + #10, R.Stdout);
+  R := RunCmd('awk', ['-F:', '{print $2}', 'cols.txt']);
+  AssertEquals('-F field', '1' + #10 + '2' + #10, R.Stdout);
+  R := RunCmd('awk', ['-F:', '{print $1, $3}', 'cols.txt']);
+  AssertEquals('two fields', 'a one' + #10 + 'b two' + #10, R.Stdout);
+  R := RunCmd('awk', ['/beta/', 'a.txt']);
+  AssertEquals('regex on $0', 'beta' + #10, R.Stdout);
+  R := RunCmd('awk', ['NR == 2 {print $1}', 'a.txt']);
+  AssertEquals('NR', 'beta' + #10, R.Stdout);
+  R := RunCmd('awk', ['{print NF}', 'cols.txt']);
+  AssertEquals('NF', '1' + #10 + '1' + #10, R.Stdout);
+  R := RunCmd('awk', ['-F:', '$2 > 1 {print $1}', 'cols.txt']);
+  AssertEquals('numeric condition', 'b' + #10, R.Stdout);
+  R := RunCmd('awk', ['$1 ~ /^a/ {print $1}', 'a.txt']);
+  AssertEquals('match condition', 'alpha' + #10, R.Stdout);
+  R := RunCmd('awk', ['$1 != "beta" {print $1}', 'b.txt']);
+  AssertEquals('not equal', 'gamma' + #10, R.Stdout);
+  R := RunCmd('awk', ['{print "x:", $1}', 'b.txt']);
+  AssertEquals('string literal', 'x: beta' + #10 + 'x: gamma' + #10, R.Stdout);
+  R := RunCmd('awk', ['{print}', 'b.txt']);
+  AssertEquals('print alone', 'beta' + #10 + 'gamma' + #10, R.Stdout);
+  R := RunCmd('awk', ['{print $1, $2}', 'c.log']);
+  AssertEquals('missing field is empty', 'note ' + #10, R.Stdout);
+  R := RunCmd('awk', ['BEGIN {print 1}', 'a.txt']);
+  AssertEquals('BEGIN is unsupported', 1, R.ExitCode);
+  AssertTrue('names it', Pos('unsupported', R.Stderr) > 0);
 end;
 
 procedure TShellCommandsTest.TestToolDispatch;

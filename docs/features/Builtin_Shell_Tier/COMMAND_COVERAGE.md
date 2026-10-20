@@ -43,6 +43,7 @@ parser the tier uses; re-run `make shell-flags` to reproduce the tallies.
 | `wc` | `-l -w -c` | default all three; `N name` per file plus a `total` |
 | `grep` | `-n -i -v -l -c -F -E -G -r` | **BRE** by default, **ERE** with `-E`, fixed with `-F`; POSIX classes mapped; `-r` walks directories (sorted; symlinked dirs skipped) and prefixes every hit |
 | `sed` | `-n -E -r -e -i[SUFFIX]` | paging/ranges (`N`, `$`, `/re/`, ranges), `p`/`d`/`q`, `s///` with `g`/`p`/`i`, `&` and groups; `-i` rewrites through the workspace FS |
+| `awk` | `-F` | `[condition] { print ... }`: `$N`/`$0`/`NF`/`NR`, comparisons, `~`/`!~`, `&&`/`||`, string and number literals |
 | `ls` | `-a -d` | bare names, one path; `-d` prints the path |
 | `mkdir` | `-p` | |
 | `rm` | `-r -f` | directories only with `-r`; `-f` suppresses missing |
@@ -58,9 +59,9 @@ parser the tier uses; re-run `make shell-flags` to reproduce the tallies.
 | `tool` | — | `tool <name> [json]`; allow-list; `run_command` refused |
 | `mcp` | — | `mcp <server>:<tool> [json]`; maps to `mcp_<s>_<t>` |
 
-Anything not listed — `git`, `make`, `curl`, `fpc`, `python3`, `find`, `awk`,
-`jq`, `rg` — is **not** in the tier and always falls back. (`sed` joined the
-set; `awk`/`jq`/`yq`/`rg` are [planned](../Text_Data_Commands/FEATURE.md).)
+Anything not listed — `git`, `make`, `curl`, `fpc`, `python3`, `find`, `jq`,
+`rg` — is **not** in the tier and always falls back. (`sed` and `awk` joined the
+set; `jq`/`yq`/`rg` are [planned](../Text_Data_Commands/FEATURE.md).)
 
 ## The evidence
 
@@ -85,7 +86,7 @@ set; `awk`/`jq`/`yq`/`rg` are [planned](../Text_Data_Commands/FEATURE.md).)
 | 15 | `find` | 36 | no |
 | 16 | `sort` | 35 | yes |
 | 17 | `wc` | 35 | yes |
-| 18 | `awk` | 34 | no |
+| 18 | `awk` | 34 | yes |
 | 19 | `cat` | 31 | yes |
 | 20 | `curl` | 31 | no |
 
@@ -107,7 +108,7 @@ set; `awk`/`jq`/`yq`/`rg` are [planned](../Text_Data_Commands/FEATURE.md).)
 
 ### Whole-script coverage
 
-Of the 3.255 corpus entries, the tier runs **1,670 (51%)** today (76 before
+Of the 3.255 corpus entries, the tier runs **1,686 (51%)** today (76 before
 `head -N`/`tail -N`, 105 before grep regex, 585 before `grep -r`, 751 before
 `sed`). The rest decline, and the **first** blocker per script is:
 
@@ -141,6 +142,9 @@ the corpus actually writes.
 **P1.5 — done:** `sed` (1,245 uses, 964 first-blockers). The subset in
 [sed v1](../Text_Data_Commands/Sed_v1.SPEC.md) covers paging, ranges,
 substitution and in-place edits. Coverage 751 → 1,670 (23% → 51%).
+
+**P1.6 — done:** `awk` fields (15 uses). `-F`, `[condition] { print ... }`
+over `$N`/`NF`/`NR`, comparisons, `~`/`!~`, `&&`/`||`. Coverage 1,670 → 1,686.
 
 **P2 — done:** grep regex. `grep` is BRE by default, ERE with `-E`, fixed with
 `-F`, using FPC's `regexpr` behind a translation layer: BRE metacharacters,

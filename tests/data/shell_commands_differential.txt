@@ -56,3 +56,13 @@ sed -n '/beta/q' a.txt			0
 sed -n '/beta/,$p' a.txt	beta\ngamma\n		0
 sed -i.bak 's/alpha/ALPHA/' a.txt; cat a.txt	ALPHA\nbeta\ngamma\n		0
 sed 's/^/  /' a.txt	  alpha\n  beta\n  gamma\n		0
+awk '{print $1}' a.txt	alpha\nbeta\ngamma\n		0
+awk '{print NF}' a.txt	1\n1\n1\n		0
+awk 'NR == 2 {print $1}' a.txt	beta\n		0
+awk '/beta/ {print NR}' a.txt	2\n		0
+awk '{print $1, $2}' c.log	note \n		0
+awk -F 'a' '{print NF}' a.txt	3\n2\n3\n		0
+awk '$1 != "a"' b.txt	b\n		0
+awk '{print "x", $1}' b.txt	x a\nx a\nx b\n		0
+awk '$1 ~ /^a/ {print $1}' b.txt	a\na\n		0
+awk '{print NR, NF, $0}' b.txt	1 1 a\n2 1 a\n3 1 b\n		0

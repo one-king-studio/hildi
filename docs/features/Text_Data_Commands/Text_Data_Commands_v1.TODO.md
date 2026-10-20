@@ -30,14 +30,14 @@ Evidence first: the corpus says `sed` (1,245 uses) is the whole story today;
 - [x] **Differential**: 13 scripts recorded from `/bin/bash`.
 - [x] **Measure**: whole-script coverage 23% → 51% (751 → 1,670 of 3,255).
 
-### Phase 2: awk fields
+### Phase 2: awk fields (shipped)
 
-- [ ] **Implement** `awk`: `-F`, `{print ...}` with `$0`/`$N`/`NR`/`NF`,
+- [x] **Implement** `awk`: `-F`, `{print ...}` with `$0`/`$N`/`NR`/`NF`,
       conditions (`$N <op> value`, `$N ~ /re/`, `&&`, `||`), one pattern-action
       form (`/re/ { ... }`), string literals in `print`.
-- [ ] **Decline**: functions, arrays, `getline`, `printf` formats, variables
+- [x] **Decline**: functions, arrays, `getline`, `printf` formats, variables
       assigned in the program, multiple rules beyond the supported shape.
-- [ ] **Test** + differential fixtures; measure.
+- [x] **Test** + 10 differential fixtures; coverage 1,670 → 1,686.
 
 ### Phase 3: jq paths
 

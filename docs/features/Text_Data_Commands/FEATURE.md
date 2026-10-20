@@ -1,6 +1,6 @@
 # Feature: Text & Data Commands
 
-**Status:** Partially implemented — `sed` shipped; `awk`, `jq`, `yq`, `rg` planned.
+**Status:** Partially implemented — `sed` and `awk` shipped; `jq`, `yq`, `rg` planned.
 
 **Related:** [Builtin Shell Tier](../Builtin_Shell_Tier/FEATURE.md) ·
 [Command & Flag Coverage](../Builtin_Shell_Tier/COMMAND_COVERAGE.md) ·
@@ -37,7 +37,7 @@ still handles the long tail:
 1. **`sed`** (shipped): `-n`, `-E`/`-r`, `-e`, `-i[SUFFIX]`; addresses `N`, `$`,
    `/re/`, and ranges (numeric, regex, to end); `p`, `d`, `q`, `s///` with
    `g`/`p`/`i`. The covered set is [the corpus's actual sed usage](Sed_v1.SPEC.md).
-2. **`awk`** (planned): `-F`, `{print $1, $2, …}`, `$N` comparisons and
+2. **`awk`** (shipped): `-F`, `{print $1, $2, …}`, `$N` comparisons and
    `$N ~ /re/` with `&&`/`||`, `NR`/`NF`, and one pattern-action form. Not a
    general awk: no functions, arrays, getline, printf formats beyond `print`.
 3. **`jq`** (planned): identity, `.foo`, `.foo.bar`, `.foo[]`, `.[N]`,
@@ -75,8 +75,8 @@ grow one command at a time without touching the tier's core.
 
 ## Acceptance
 
-- `sed` programs in the shipped subset run in the tier and match `/bin/bash`
-  byte for byte (13 recorded differential fixtures).
+- `sed` and `awk` programs in the shipped subsets run in the tier and match
+  `/bin/bash` byte for byte (13 + 10 recorded differential fixtures).
 - A `sed` program outside the subset fails with a message naming the construct;
   a *literal* unsupported construct declines the script (so `auto` falls back).
 - `sed -i` rewrites through the workspace filesystem and keeps a backup when a

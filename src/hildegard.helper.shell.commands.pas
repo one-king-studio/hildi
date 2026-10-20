@@ -60,6 +60,7 @@ type
     function TrueCmd(const ACall: TShellCall): TShellResult;
     function FalseCmd(const ACall: TShellCall): TShellResult;
     function Sed(const ACall: TShellCall): TShellResult;
+    function Awk(const ACall: TShellCall): TShellResult;
     function Tool(const ACall: TShellCall): TShellResult;
     function Mcp(const ACall: TShellCall): TShellResult;
   end;
@@ -83,9 +84,10 @@ function IsNumericOption(const AArg, AOptions: string): Boolean;
 implementation
 
 uses
-  BaseUnix, fpjson, jsonparser, hildegard.helper.shell.pattern,
-  hildegard.helper.shell.sed,
-  shell.interpreter, hildegard.helper.mcp.client;
+  fpjson, jsonparser, hildegard.helper.shell.pattern,
+  hildegard.helper.shell.sed, hildegard.helper.shell.awk,
+  shell.interpreter, hildegard.helper.mcp.client
+  {$ifdef unix}, BaseUnix{$endif};
 
 const
   DefaultLines = 10;
@@ -97,13 +99,14 @@ type
   end;
 
 const
-  CommandSpecs: array[0..22] of TCommandSpec = (
+  CommandSpecs: array[0..23] of TCommandSpec = (
     (Name: 'echo'; Options: '-n'),
     (Name: 'head'; Options: '-nN'),
     (Name: 'tail'; Options: '-nN'),
     (Name: 'wc'; Options: '-lwc'),
     (Name: 'grep'; Options: '-nivlcFEGr'),
     (Name: 'sed'; Options: '-nErei'),
+    (Name: 'awk'; Options: '-F'),
     (Name: 'ls'; Options: '-ad'),
     (Name: 'mkdir'; Options: '-p'),
     (Name: 'rm'; Options: '-rf'),
@@ -633,7 +636,9 @@ var
     Entries: TStringArray;
     Err, Child, Display: string;
     I: Integer;
+    {$ifdef unix}
     LSt: Stat;
+    {$endif}
   begin
     if ADepth > 64 then
     begin
@@ -661,10 +666,13 @@ var
         Continue;
       if Kind = sfkDirectory then
       begin
-        { -r does not follow symlinked directories (that is -R, unsupported). }
+        { -r does not follow symlinked directories (that is -R, unsupported).
+          Windows has no lstat; the depth limit bounds a junction loop. }
+        {$ifdef unix}
         if (fpLstat(PChar(Child), LSt) = 0) and
           ((LSt.st_mode and S_IFMT) = S_IFLNK) then
           Continue;
+        {$endif}
         WalkDir(Child, Display, ADepth + 1);
       end
       else
@@ -1247,17 +1255,29 @@ begin
       end;
       if Op = '-r' then
       begin
+        {$ifdef unix}
         if fpAccess(PChar(FFs.Resolve(ACall.Cwd, Left)), R_OK) = 0 then
+        {$else}
+        if FileExists(FFs.Resolve(ACall.Cwd, Left)) then
+        {$endif}
           Exit(ShellResultOk('', 0)) else Exit(ShellResultOk('', 1));
       end;
       if Op = '-w' then
       begin
+        {$ifdef unix}
         if fpAccess(PChar(FFs.Resolve(ACall.Cwd, Left)), W_OK) = 0 then
+        {$else}
+        if FileExists(FFs.Resolve(ACall.Cwd, Left)) then
+        {$endif}
           Exit(ShellResultOk('', 0)) else Exit(ShellResultOk('', 1));
       end;
       if Op = '-x' then
       begin
+        {$ifdef unix}
         if fpAccess(PChar(FFs.Resolve(ACall.Cwd, Left)), X_OK) = 0 then
+        {$else}
+        if FileExists(FFs.Resolve(ACall.Cwd, Left)) then
+        {$endif}
           Exit(ShellResultOk('', 0)) else Exit(ShellResultOk('', 1));
       end;
       Exit(ShellResultOk('', 0));   // -e
@@ -1496,6 +1516,75 @@ begin
     else
       Result.Stdout := Result.Stdout + OutText;
   end;
+end;
+
+function TBuiltinCommands.Awk(const ACall: TShellCall): TShellResult;
+var
+  I, J: Integer;
+  A, FieldSep, ProgramText, OutText, Err, Data, E, Combined: string;
+  Files: TStringArray;
+begin
+  FieldSep := '';
+  I := 0;
+  while I <= High(ACall.Args) do
+  begin
+    A := ACall.Args[I];
+    if A = '--' then
+    begin
+      Inc(I);
+      Break;
+    end;
+    if (A = '') or (A[1] <> '-') or (A = '-') then
+      Break;
+    if A = '-F' then
+    begin
+      if I = High(ACall.Args) then
+        Exit(Usage('awk: option -F requires an argument'));
+      Inc(I);
+      FieldSep := ACall.Args[I];
+    end
+    else if Copy(A, 1, 2) = '-F' then
+      FieldSep := Copy(A, 3, MaxInt)
+    else
+      Exit(Usage('awk: unsupported option ' + A));
+    Inc(I);
+  end;
+  if I > High(ACall.Args) then
+    Exit(Usage('awk: missing program'));
+  ProgramText := ACall.Args[I];
+  Inc(I);
+  SetLength(Files, Length(ACall.Args) - I);
+  J := I;
+  while I <= High(ACall.Args) do
+  begin
+    Files[I - J] := ACall.Args[I];
+    Inc(I);
+  end;
+  if FieldSep = '\t' then
+    FieldSep := #9
+  else if (FieldSep <> '') and (Length(FieldSep) > 1) then
+    Exit(Usage('awk: only a single-character -F is supported'));
+  if Length(Files) = 0 then
+    Combined := ACall.Stdin
+  else
+  begin
+    Combined := '';
+    for I := 0 to High(Files) do
+    begin
+      if Files[I] = '-' then
+        Combined := Combined + ACall.Stdin
+      else if not FFs.ReadFile(FFs.Resolve(ACall.Cwd, Files[I]), Data, E) then
+      begin
+        Result := Failure('awk: ' + Files[I] + ': ' + E, 2);
+        Exit;
+      end
+      else
+        Combined := Combined + Data;
+    end;
+  end;
+  if not RunAwk(ProgramText, Combined, FieldSep, OutText, Err) then
+    Exit(Failure('awk: ' + Err, 1));
+  Result := ShellResultOk(OutText);
 end;
 
 function TBuiltinCommands.Tool(const ACall: TShellCall): TShellResult;

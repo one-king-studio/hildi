@@ -123,6 +123,7 @@ begin
   FRegistry.Register('tool', FCmd.Tool);
   FRegistry.Register('mcp', FCmd.Mcp);
   FRegistry.Register('sed', FCmd.Sed);
+  FRegistry.Register('awk', FCmd.Awk);
 end;
 
 destructor TBuiltinShell.Destroy;
@@ -358,8 +359,10 @@ begin
           begin
             if not LiteralTextOf(AC.Words[I], Arg) then
               Continue;
-            { sed -i[SUFFIX] carries its suffix on the same token. }
+            { sed -i[SUFFIX] and awk -FSEP carry their argument on the token. }
             if (Name = 'sed') and (Copy(Arg, 1, 2) = '-i') then
+              Continue;
+            if (Name = 'awk') and (Copy(Arg, 1, 2) = '-F') then
               Continue;
             if IsUnsupportedOption(Arg, Options) then
             begin
