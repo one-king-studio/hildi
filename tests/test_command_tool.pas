@@ -94,6 +94,7 @@ type
     procedure TestRunCommandStreamsOutput;
     procedure TestCommandTimeoutIsClampedToMax;
     procedure TestTimeoutIsHonouredWithoutACap;
+    procedure TestHtmlEntitiesAreDecoded;
     procedure TestModeBashIsPassedThrough;
     procedure TestModeDefaultsToAuto;
     procedure TestInvalidModeIsRejected;
@@ -797,6 +798,36 @@ begin
     AssertTrue('below cap', Tool.Run(
       '{"command":"echo hi","reason":"r","timeout_ms":2000}', R, E));
     AssertEquals('requested kept', 2000, FExecutor.LastTimeoutMs);
+  finally
+    Tool.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestHtmlEntitiesAreDecoded;
+var
+  Tool: TCommandTool;
+  R, E: string;
+begin
+  AddRule(aeAllow, 'run_command:echo', [], True);
+  AddRule(aeAllow, 'run_command:grep', [], True);
+  Tool := BuildTool(nil, 0);
+  try
+    AssertTrue('lt', Tool.Run(
+      '{"command":"echo a &lt; b","reason":"r"}', R, E));
+    AssertEquals('lt decoded', 'echo a < b', FExecutor.LastCommand);
+    AssertTrue('amp', Tool.Run(
+      '{"command":"echo a &amp;&amp; echo b","reason":"r"}', R, E));
+    AssertEquals('amp decoded', 'echo a && echo b', FExecutor.LastCommand);
+    AssertTrue('numeric', Tool.Run(
+      '{"command":"echo &#65;","reason":"r"}', R, E));
+    AssertEquals('numeric decoded', 'echo A', FExecutor.LastCommand);
+    AssertTrue('quoted', Tool.Run(
+      '{"command":"echo &quot;hi&quot;","reason":"r"}', R, E));
+    AssertEquals('quotes decoded', 'echo "hi"', FExecutor.LastCommand);
+    AssertTrue('escaped entity', Tool.Run(
+      '{"command":"grep ''\\&lt;'' f","reason":"r"}', R, E));
+    AssertEquals('escaped entity kept', 'grep ''\&lt;'' f',
+      FExecutor.LastCommand);
   finally
     Tool.Free;
   end;

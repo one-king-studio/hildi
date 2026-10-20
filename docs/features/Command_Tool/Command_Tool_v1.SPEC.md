@@ -318,6 +318,14 @@ tool itself is single-threaded on the loop's thread.
 
 - `command` must be a non-empty string; `cwd` must be a string if present;
   `timeout_ms` must be a non-negative integer if present.
+- **HTML entities in `command` are decoded before parsing.** Models write
+  `&lt;`, `&gt;`, `&amp;`, `&quot;`, `&apos;` (and numeric `&#NN;`/`&#xHH;`)
+  assuming markdown rendering; the shell would see literal text. The common set
+  is decoded once, so `echo a &lt; b` runs `echo a < b` and
+  `cat f &gt;&gt; log` appends. An entity preceded by a backslash is left
+  alone (`grep '\&lt;' f` searches the literal text `&lt;`), and the decode is
+  single-pass (`&amp;lt;` becomes `&lt;`, not `<`). The decoded command is what
+  the splitter, the tier, the approval asks and the transcript all see.
 - Invalid JSON, missing `command`, or wrong types -> `False` with a clear error;
   never a crash, never execution.
 

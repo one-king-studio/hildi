@@ -116,7 +116,7 @@ const
 implementation
 
 uses
-  fpjson, jsonparser;
+  fpjson, jsonparser, hildegard.helper.htmlentities;
 
 { --- helpers ------------------------------------------------------------ }
 
@@ -517,6 +517,7 @@ begin
       Root := TJSONObject(Data);
       if not ReadStringArg(Root, 'command', Command) or (Trim(Command) = '') then
         Exit;
+      Command := DecodeHtmlEntities(Command);
       Cwd := '';
       ReadStringArg(Root, 'cwd', Cwd);
       Result := BuildAsks(Command, FConfig.Shell.Syntax, FConfig.DefaultCwd, Cwd);
@@ -575,6 +576,9 @@ begin
         AError := 'missing required "command"';
         Exit(False);
       end;
+      { The model may have written markdown-escaped text (&lt;, &gt;, &amp;);
+        the shell must see the characters. }
+      Command := DecodeHtmlEntities(Command);
       if not ReadStringArg(Root, 'reason', Reason) or (Trim(Reason) = '') then
       begin
         AError := 'missing required "reason"';
