@@ -36,24 +36,8 @@ function ExpandSet(const ASet: string): string;
 
 implementation
 
-function LinesOf(const S: string): TStringArray;
-var
-  I, N, K: Integer;
-begin
-  Result := nil;
-  K := 0;
-  I := 1;
-  while I <= Length(S) do
-  begin
-    N := I;
-    while (N <= Length(S)) and (S[N] <> #10) do
-      Inc(N);
-    SetLength(Result, K + 1);
-    Result[K] := Copy(S, I, N - I);
-    Inc(K);
-    I := N + 1;
-  end;
-end;
+uses
+  hildegard.helper.shell.textlines;
 
 function ExpandSet(const ASet: string): string;
 var

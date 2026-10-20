@@ -407,6 +407,13 @@ begin
     Exit(False);
   end;
   try
+    { mv overwrites a file. Unix rename() does; Windows MoveFile does not, so
+      remove the target first (the same semantics on both). }
+    if FileExists(ATo) and (not DeleteFile(ATo)) then
+    begin
+      AError := 'cannot replace ' + ATo;
+      Exit(False);
+    end;
     Result := RenameFile(AFrom, ATo);
     if not Result then
       AError := 'cannot move ' + AFrom + ' to ' + ATo;

@@ -24,7 +24,7 @@ function RunSed(const AProgram, AInput: string; ASuppress, AExtended: Boolean;
 implementation
 
 uses
-  regexpr;
+  regexpr, hildegard.helper.shell.textlines;
 
 type
   TAddrKind = (akNone, akLine, akLast, akRegex);
@@ -57,24 +57,6 @@ type
       out AError: string): Boolean;
   end;
 
-function LinesOf(const S: string): TStringArray;
-var
-  I, N, K: Integer;
-begin
-  Result := nil;
-  K := 0;
-  I := 1;
-  while I <= Length(S) do
-  begin
-    N := I;
-    while (N <= Length(S)) and (S[N] <> #10) do
-      Inc(N);
-    SetLength(Result, K + 1);
-    Result[K] := Copy(S, I, N - I);
-    Inc(K);
-    I := N + 1;
-  end;
-end;
 
 destructor TSedProgram.Destroy;
 var

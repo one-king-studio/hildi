@@ -177,6 +177,11 @@ begin
   AssertTrue('move', FFs.Move(P('b.txt'), P('c.txt'), E));
   AssertFalse('source gone', FileExists(P('b.txt')));
   AssertTrue('target exists', FileExists(P('c.txt')));
+  { mv overwrites an existing file (Windows needs the explicit delete). }
+  FFs.WriteFile(P('dest.txt'), 'old', False, E);
+  AssertTrue('move over an existing file', FFs.Move(P('c.txt'), P('dest.txt'), E));
+  AssertTrue('overwritten content', FFs.ReadFile(P('dest.txt'), Data, E));
+  AssertEquals('new content', 'alpha', Data);
   AssertFalse('move missing', FFs.Move(P('nope'), P('d.txt'), E));
   FFs.MakeDir(P('dir'), False, E);
   AssertFalse('copy a directory', FFs.Copy(P('dir'), P('e'), E));

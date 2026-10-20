@@ -27,7 +27,7 @@ function RunAwk(const AProgram, AInput, AFieldSep: string;
 implementation
 
 uses
-  regexpr;
+  regexpr, hildegard.helper.shell.textlines;
 
 type
   TOperandKind = (okField, okNF, okNR, okString, okNumber);
@@ -66,24 +66,6 @@ type
     function Parse(const AProgram: string; out AError: string): Boolean;
   end;
 
-function LinesOf(const S: string): TStringArray;
-var
-  I, N, K: Integer;
-begin
-  Result := nil;
-  K := 0;
-  I := 1;
-  while I <= Length(S) do
-  begin
-    N := I;
-    while (N <= Length(S)) and (S[N] <> #10) do
-      Inc(N);
-    SetLength(Result, K + 1);
-    Result[K] := Copy(S, I, N - I);
-    Inc(K);
-    I := N + 1;
-  end;
-end;
 
 function Compile(const APattern: string; out AError: string): TRegExpr;
 begin

@@ -94,6 +94,7 @@ uses
   StrUtils, DateUtils, fpjson, jsonparser, hildegard.helper.shell.pattern,
   hildegard.helper.shell.sed, hildegard.helper.shell.awk,
   hildegard.helper.shell.jq, hildegard.helper.shell.textcmd,
+  hildegard.helper.shell.textlines,
   hildegard.helper.gitignore,
   shell.interpreter, hildegard.helper.mcp.client
   {$ifdef unix}, BaseUnix{$endif};
@@ -203,24 +204,6 @@ begin
   Result := False;
 end;
 
-function LinesOf(const S: string): TStringArray;
-var
-  I, N, K: Integer;
-begin
-  Result := nil;
-  K := 0;
-  I := 1;
-  while I <= Length(S) do
-  begin
-    N := I;
-    while (N <= Length(S)) and (S[N] <> #10) do
-      Inc(N);
-    SetLength(Result, K + 1);
-    Result[K] := Copy(S, I, N - I);
-    Inc(K);
-    I := N + 1;
-  end;
-end;
 
 function JoinLines(const ALines: TStringArray; AStart, ACount: Integer): string;
 var
