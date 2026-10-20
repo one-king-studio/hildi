@@ -73,6 +73,7 @@ type
     procedure TearDown; override;
   published
     procedure TestRegisterAddsRunCommandSpec;
+    procedure TestRegisteredSpecIsParallelSafe;
     procedure TestDescriptionNamesTheShellStartDirectory;
     procedure TestDefaultShellProfileIsPosixBash;
     procedure TestMissingCommandArgumentFails;
@@ -263,6 +264,36 @@ begin
     AssertTrue('registered', Tools.Find(CommandToolName, Registered));
   finally
     Tool.Free;
+    Tools.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestRegisteredSpecIsParallelSafe;
+var
+  Tools: TToolRegistry;
+  Tool: TCommandTool;
+  Specs: TToolSpecArray;
+  I: Integer;
+  Found: Boolean;
+begin
+  { SerialOnly is opt-in. Register used to leave the field uninitialized, so a
+    shell call could be treated as serial and a batch of commands ran one at a
+    time - which the panel showed as a permanently empty second block. }
+  Tools := TToolRegistry.Create;
+  try
+    Tool := BuildTool(nil, 0);
+    try
+      Tool.Register(Tools);
+    finally
+      Tool.Free;
+    end;
+    Specs := Tools.Specs;
+    Found := False;
+    for I := 0 to High(Tools.Specs) do
+      if Specs[I].Name = 'run_command' then
+        Found := not Specs[I].SerialOnly;
+    AssertTrue('run_command is parallel-safe', Found);
+  finally
     Tools.Free;
   end;
 end;

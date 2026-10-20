@@ -81,6 +81,7 @@ procedure TRecallTool.Register(ATools: TToolRegistry);
 var
   Spec: TToolSpec;
 begin
+  Spec := Default(TToolSpec);
   Spec.Name := RecallToolName;
   Spec.Description :=
     'Recall from this session. Either read a window of a truncated tool ' +

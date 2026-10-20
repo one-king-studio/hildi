@@ -647,6 +647,8 @@ procedure TCommandTool.Register(ATools: TToolRegistry);
 var
   Spec: TToolSpec;
 begin
+  { SerialOnly is opt-in; a fresh spec starts false. }
+  Spec := Default(TToolSpec);
   Spec.Name := CommandToolName;
   Spec.Description :=
     'Run a shell command on the host and return its output. Requires a short ' +

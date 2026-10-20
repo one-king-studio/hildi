@@ -599,6 +599,7 @@ procedure RegisterDefaultTools(ATools: TToolRegistry);
 var
   Spec: TToolSpec;
 begin
+  Spec := Default(TToolSpec);
   Spec.Name := BuiltinGetSystemTimeName;
   Spec.Description := 'Return the current UTC time as an ISO 8601 timestamp.';
   Spec.ParametersJson := '{"type":"object","properties":{},"required":[]}';

@@ -2038,6 +2038,10 @@ procedure TFileTool.Register(ATools: TToolRegistry);
 var
   Spec: TToolSpec;
 begin
+  { SerialOnly is opt-in: start from a fresh spec so a tool that does not set
+    it (the read-only ones below) is parallel-safe instead of inheriting stack
+    garbage - a file read marked serial would hold up a whole batch. }
+  Spec := Default(TToolSpec);
   Spec.Name := 'file_read';
   Spec.Description := 'Read a text file inside the workspace (with an optional line range). ' +
     'Prefer this over the shell: cat, head, tail, sed -n. ' +
