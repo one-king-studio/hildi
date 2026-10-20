@@ -126,6 +126,10 @@ begin
   FRegistry.Register('awk', FCmd.Awk);
   FRegistry.Register('find', FCmd.Find);
   FRegistry.Register('jq', FCmd.Jq);
+  FRegistry.Register('cut', FCmd.Cut);
+  FRegistry.Register('tr', FCmd.Tr);
+  FRegistry.Register('tee', FCmd.Tee);
+  FRegistry.Register('printf', FCmd.Printf);
 end;
 
 destructor TBuiltinShell.Destroy;
@@ -364,6 +368,9 @@ begin
             if (Name = 'sed') and (Copy(Arg, 1, 2) = '-i') then
               Continue;
             if (Name = 'awk') and (Copy(Arg, 1, 2) = '-F') then
+              Continue;
+            if (Name = 'cut') and ((Copy(Arg, 1, 2) = '-d') or
+              (Copy(Arg, 1, 2) = '-f') or (Copy(Arg, 1, 2) = '-c')) then
               Continue;
             if IsUnsupportedOption(Arg, Options) then
             begin

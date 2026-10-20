@@ -46,6 +46,10 @@ parser the tier uses; re-run `make shell-flags` to reproduce the tallies.
 | `awk` | `-F` | `[condition] { print ... }`: `$N`/`$0`/`NF`/`NR`, comparisons, `~`/`!~`, `&&`/`||`, string and number literals |
 | `find` | — | `-name`/`-iname`/`-type`/`-maxdepth`; symlinked directories are reported, not followed |
 | `jq` | `-r -c` | path filters, `.[N]` (negative too), `.[]`, `.["k"]`; jq's pretty/compact output |
+| `cut` | `-d -f -c -s` | fields (default TAB) or character positions; `-s` skips lines without the delimiter |
+| `tr` | `-d -s` | map/delete/squeeze over character sets with ranges (`a-z`) and escapes (`\t`) |
+| `tee` | `-a` | stdin to stdout and to each file, through the workspace FS |
+| `printf` | — | `%s`/`%d`/`%i`/`%%` and `\n \t \r`; the format recycles |
 | `ls` | `-a -d` | bare names, one path; `-d` prints the path |
 | `mkdir` | `-p` | |
 | `rm` | `-r -f` | directories only with `-r`; `-f` suppresses missing |
@@ -110,7 +114,7 @@ set; `yq`/`rg` are [planned](../Text_Data_Commands/FEATURE.md).)
 
 ### Whole-script coverage
 
-Of the 3.255 corpus entries, the tier runs **1,699 (52%)** today (76 before
+Of the 3.255 corpus entries, the tier runs **1,717 (52%)** today (76 before
 `head -N`/`tail -N`, 105 before grep regex, 585 before `grep -r`, 751 before
 `sed`). The rest decline, and the **first** blocker per script is:
 

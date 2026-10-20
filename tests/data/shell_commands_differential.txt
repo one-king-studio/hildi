@@ -83,3 +83,14 @@ echo '{"a":{"b":"x"}}' > d.json; jq -r .a.b d.json	x\n		0
 echo '{"a":1}' > d.json; jq .missing d.json	null\n		0
 echo '{"a":1}' > d.json; jq -r .s d.json	null\n		0
 echo '{"a":1}' > d.json; jq -c '.a' d.json	1\n		0
+printf '%s\\n' one two	one\ntwo\n		0
+printf '%d-%s\\n' 3 x	3-x\n		0
+printf 'a\\tb\\n'	a\tb\n		0
+echo 'a:1:one' > c.txt; echo 'b:2:two' >> c.txt; cut -d: -f2 c.txt	1\n2\n		0
+cut -c1-3 a.txt	alp\nbet\ngam\n		0
+echo 'x:1' > c.txt; echo 'nocolon' >> c.txt; cut -s -d: -f2 c.txt	1\n		0
+cat a.txt | tr a-z A-Z	ALPHA\nBETA\nGAMMA\n		0
+echo hello | tr -d l	heo\n		0
+echo 'a   b' | tr -s ' '	a b\n		0
+echo hello | tee t.txt; cat t.txt	hello\nhello\n		0
+printf '%s\\n' one two | tr a-z A-Z	ONE\nTWO\n		0

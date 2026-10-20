@@ -462,7 +462,8 @@ begin
   Spec.Description :=
     'Run a shell command on the host and return its output. Requires a short ' +
     'reason. Two executors: the builtin shell runs in-process over the ' +
-    'workspace (echo, cat, head, tail, wc, grep, sed, awk, find, jq, ls, mkdir, rm, mv, cp, touch, ' +
+    'workspace (echo, cat, head, tail, wc, grep, sed, awk, find, jq, cut, tr, tee, ' +
+    'printf, ls, mkdir, rm, mv, cp, touch, ' +
     'sort, uniq, basename, dirname, test, [, true, false, tool, mcp) and asks ' +
     'approval once per command; /bin/bash runs everything else. Prefer ' +
     'mode="builtin" for composed file work - loops, pipelines, redirects, ' +

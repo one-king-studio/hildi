@@ -63,6 +63,10 @@ type
     function Awk(const ACall: TShellCall): TShellResult;
     function Find(const ACall: TShellCall): TShellResult;
     function Jq(const ACall: TShellCall): TShellResult;
+    function Cut(const ACall: TShellCall): TShellResult;
+    function Tr(const ACall: TShellCall): TShellResult;
+    function Tee(const ACall: TShellCall): TShellResult;
+    function Printf(const ACall: TShellCall): TShellResult;
     function Tool(const ACall: TShellCall): TShellResult;
     function Mcp(const ACall: TShellCall): TShellResult;
   end;
@@ -86,9 +90,9 @@ function IsNumericOption(const AArg, AOptions: string): Boolean;
 implementation
 
 uses
-  fpjson, jsonparser, hildegard.helper.shell.pattern,
+  StrUtils, fpjson, jsonparser, hildegard.helper.shell.pattern,
   hildegard.helper.shell.sed, hildegard.helper.shell.awk,
-  hildegard.helper.shell.jq,
+  hildegard.helper.shell.jq, hildegard.helper.shell.textcmd,
   shell.interpreter, hildegard.helper.mcp.client
   {$ifdef unix}, BaseUnix{$endif};
 
@@ -102,7 +106,7 @@ type
   end;
 
 const
-  CommandSpecs: array[0..25] of TCommandSpec = (
+  CommandSpecs: array[0..29] of TCommandSpec = (
     (Name: 'echo'; Options: '-n'),
     (Name: 'head'; Options: '-nN'),
     (Name: 'tail'; Options: '-nN'),
@@ -112,6 +116,10 @@ const
     (Name: 'awk'; Options: '-F'),
     (Name: 'find'; Options: ''),
     (Name: 'jq'; Options: '-rc'),
+    (Name: 'cut'; Options: '-dfcs'),
+    (Name: 'tr'; Options: '-ds'),
+    (Name: 'tee'; Options: '-a'),
+    (Name: 'printf'; Options: ''),
     (Name: 'ls'; Options: '-ad'),
     (Name: 'mkdir'; Options: '-p'),
     (Name: 'rm'; Options: '-rf'),
@@ -1842,6 +1850,196 @@ begin
     end;
     Result.Stdout := Result.Stdout + OutText;
   end;
+end;
+
+function TBuiltinCommands.Cut(const ACall: TShellCall): TShellResult;
+var
+  I, J: Integer;
+  A, Sep, Fields: string;
+  HasSep, Chars, Suppress: Boolean;
+  Files: TStringArray;
+  Data, E, OutText, Err, Combined: string;
+  Code: Integer;
+begin
+  HasSep := False;
+  Sep := #9;
+  Fields := '';
+  Chars := False;
+  Suppress := False;
+  I := 0;
+  while I <= High(ACall.Args) do
+  begin
+    A := ACall.Args[I];
+    if A = '--' then
+    begin
+      Inc(I);
+      Break;
+    end;
+    if (A = '') or (A[1] <> '-') or (A = '-') then
+      Break;
+    if A = '-d' then
+    begin
+      if I = High(ACall.Args) then
+        Exit(Usage('cut: -d requires an argument'));
+      Inc(I);
+      Sep := ACall.Args[I];
+      HasSep := True;
+    end
+    else if Copy(A, 1, 2) = '-d' then
+    begin
+      Sep := Copy(A, 3, MaxInt);
+      HasSep := True;
+    end
+    else if A = '-f' then
+    begin
+      if I = High(ACall.Args) then
+        Exit(Usage('cut: -f requires an argument'));
+      Inc(I);
+      Fields := ACall.Args[I];
+    end
+    else if Copy(A, 1, 2) = '-f' then
+      Fields := Copy(A, 3, MaxInt)
+    else if A = '-c' then
+    begin
+      if I = High(ACall.Args) then
+        Exit(Usage('cut: -c requires an argument'));
+      Inc(I);
+      Fields := ACall.Args[I];
+      Chars := True;
+    end
+    else if Copy(A, 1, 2) = '-c' then
+    begin
+      Fields := Copy(A, 3, MaxInt);
+      Chars := True;
+    end
+    else if A = '-s' then
+      Suppress := True
+    else
+      Exit(Usage('cut: unsupported option ' + A));
+    Inc(I);
+  end;
+  if Fields = '' then
+    Exit(Usage('cut: one of -f or -c is required'));
+  SetLength(Files, Length(ACall.Args) - I);
+  J := I;
+  while I <= High(ACall.Args) do
+  begin
+    Files[I - J] := ACall.Args[I];
+    Inc(I);
+  end;
+  if Length(Files) = 0 then
+    Combined := ACall.Stdin
+  else
+  begin
+    Combined := '';
+    for I := 0 to High(Files) do
+      if Files[I] = '-' then
+        Combined := Combined + ACall.Stdin
+      else if not FFs.ReadFile(FFs.Resolve(ACall.Cwd, Files[I]), Data, E) then
+        Exit(Failure('cut: ' + Files[I] + ': ' + E, 2))
+      else
+        Combined := Combined + Data;
+  end;
+  if not CutText(Combined, Sep, Fields, HasSep, Chars, Suppress, OutText, Err) then
+  begin
+    if Pos('no positions', Err) > 0 then
+      Code := 2
+    else
+      Code := 1;
+    Exit(Failure('cut: ' + Err, Code));
+  end;
+  Result := ShellResultOk(OutText);
+end;
+
+function TBuiltinCommands.Tr(const ACall: TShellCall): TShellResult;
+var
+  I, J: Integer;
+  Delete, Squeeze: Boolean;
+  Args: TStringArray;
+  Second: string;
+  Data, E, OutText, Err, Combined: string;
+begin
+  Delete := False;
+  Squeeze := False;
+  I := 0;
+  while I <= High(ACall.Args) do
+  begin
+    if ACall.Args[I] = '--' then
+    begin
+      Inc(I);
+      Break;
+    end;
+    if (ACall.Args[I] = '-d') or (ACall.Args[I] = '-s') or
+      (ACall.Args[I] = '-ds') or (ACall.Args[I] = '-sd') then
+    begin
+      if Pos('d', ACall.Args[I]) > 0 then
+        Delete := True;
+      if Pos('s', ACall.Args[I]) > 0 then
+        Squeeze := True;
+      Inc(I);
+    end
+    else
+      Break;
+  end;
+  SetLength(Args, Length(ACall.Args) - I);
+  J := I;
+  while I <= High(ACall.Args) do
+  begin
+    Args[I - J] := ACall.Args[I];
+    Inc(I);
+  end;
+  if Length(Args) = 0 then
+    Exit(Usage('tr: missing operand'));
+  Combined := ACall.Stdin;
+  if Length(Args) > 1 then
+    Second := Args[1]
+  else
+    Second := '';
+  if not TrText(Combined, Args[0], Second, Delete, Squeeze, OutText, Err) then
+    Exit(Failure('tr: ' + Err, 1));
+  Result := ShellResultOk(OutText);
+end;
+
+function TBuiltinCommands.Tee(const ACall: TShellCall): TShellResult;
+var
+  I, Start: Integer;
+  Append: Boolean;
+  E: string;
+begin
+  Append := False;
+  Start := 0;
+  if (Length(ACall.Args) > 0) and (ACall.Args[0] = '-a') then
+  begin
+    Append := True;
+    Start := 1;
+  end;
+  Result := Default(TShellResult);
+  Result.Stdout := ACall.Stdin;
+  for I := Start to High(ACall.Args) do
+    if not FFs.WriteFile(FFs.Resolve(ACall.Cwd, ACall.Args[I]), ACall.Stdin,
+      Append, E) then
+    begin
+      Result.Stderr := Result.Stderr + 'tee: ' + ACall.Args[I] + ': ' + E + #10;
+      Result.ExitCode := 1;
+    end;
+end;
+
+function TBuiltinCommands.Printf(const ACall: TShellCall): TShellResult;
+var
+  Format: string;
+  Args: TStringArray;
+  I, J: Integer;
+  OutText, Err: string;
+begin
+  if Length(ACall.Args) = 0 then
+    Exit(Usage('printf: missing format'));
+  Format := ACall.Args[0];
+  SetLength(Args, Length(ACall.Args) - 1);
+  for I := 1 to High(ACall.Args) do
+    Args[I - 1] := ACall.Args[I];
+  if not PrintfText(Format, Args, OutText, Err) then
+    Exit(Failure('printf: ' + Err, 1));
+  Result := ShellResultOk(OutText);
 end;
 
 function TBuiltinCommands.Tool(const ACall: TShellCall): TShellResult;

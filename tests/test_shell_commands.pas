@@ -54,6 +54,7 @@ type
     procedure TestAwk;
     procedure TestFind;
     procedure TestJq;
+    procedure TestCutTrPrintfTee;
     procedure TestToolDispatch;
     procedure TestToolGatewayRefusals;
     procedure TestMcpMapping;
@@ -165,6 +166,14 @@ begin
     Result := FCmd.Find(Call)
   else if AName = 'jq' then
     Result := FCmd.Jq(Call)
+  else if AName = 'cut' then
+    Result := FCmd.Cut(Call)
+  else if AName = 'tr' then
+    Result := FCmd.Tr(Call)
+  else if AName = 'tee' then
+    Result := FCmd.Tee(Call)
+  else if AName = 'printf' then
+    Result := FCmd.Printf(Call)
   else if AName = 'tool' then
     Result := FCmd.Tool(Call)
   else if AName = 'mcp' then
@@ -600,6 +609,41 @@ begin
   AssertEquals('parse error status', 5, R.ExitCode);
   R := RunCmd('jq', ['.a | .b', 'd.json']);
   AssertEquals('unsupported filter status', 3, R.ExitCode);
+end;
+
+procedure TShellCommandsTest.TestCutTrPrintfTee;
+var
+  R: TShellResult;
+  E, Data: string;
+begin
+  FFs.WriteFile(P('cols.txt'), 'a:1:one' + #10 + 'b:2:two' + #10, False, E);
+  R := RunCmd('cut', ['-d:', '-f2', 'cols.txt']);
+  AssertEquals('field', '1' + #10 + '2' + #10, R.Stdout);
+  R := RunCmd('cut', ['-d:', '-f1,3', 'cols.txt']);
+  AssertEquals('two fields', 'a:one' + #10 + 'b:two' + #10, R.Stdout);
+  R := RunCmd('cut', ['-c1-3', 'a.txt']);
+  AssertEquals('chars', 'alp' + #10 + 'bet' + #10, R.Stdout);
+  FFs.WriteFile(P('mixed.txt'), 'x:1' + #10 + 'nocolon' + #10, False, E);
+  R := RunCmd('cut', ['-s', '-d:', '-f2', 'mixed.txt']);
+  AssertEquals('suppress', '1' + #10, R.Stdout);
+  R := RunCmd('cut', ['-f2'], 'a' + #9 + 'b' + #9 + 'c' + #10);
+  AssertEquals('tab is the default delimiter', 'b' + #10, R.Stdout);
+  R := RunCmd('tr', ['a-z', 'A-Z'], 'abc');
+  AssertEquals('tr maps', 'ABC', R.Stdout);
+  R := RunCmd('tr', ['-d', 'a'], 'banana');
+  AssertEquals('tr deletes', 'bnn', R.Stdout);
+  R := RunCmd('tr', ['-s', ' '], 'a   b');
+  AssertEquals('tr squeezes', 'a b', R.Stdout);
+  R := RunCmd('printf', ['%s\n', 'one', 'two']);
+  AssertEquals('printf recycles', 'one' + #10 + 'two' + #10, R.Stdout);
+  R := RunCmd('printf', ['%d-%s\n', '3', 'x']);
+  AssertEquals('printf directives', '3-x' + #10, R.Stdout);
+  R := RunCmd('printf', ['a\tb\n']);
+  AssertEquals('printf escapes', 'a' + #9 + 'b' + #10, R.Stdout);
+  R := RunCmd('tee', ['t.txt'], 'data');
+  AssertEquals('tee echoes', 'data', R.Stdout);
+  AssertTrue('tee writes', FFs.ReadFile(P('t.txt'), Data, E));
+  AssertEquals('tee content', 'data', Data);
 end;
 
 procedure TShellCommandsTest.TestToolDispatch;
