@@ -97,6 +97,10 @@ type
     procedure TestCommandTimeoutIsClampedToMax;
     procedure TestTimeoutIsHonouredWithoutACap;
     procedure TestHtmlEntitiesAreDecoded;
+    procedure TestRedirectSummaryAndFileAsk;
+    procedure TestRedirectReadAsk;
+    procedure TestFdDuplicateIsNotAFileAsk;
+    procedure TestOutsideRedirectKeepsThePathAsk;
     procedure TestRunDeliversFileChanges;
     procedure TestModeBashIsPassedThrough;
     procedure TestModeDefaultsToAuto;
@@ -817,6 +821,106 @@ begin
     AssertTrue('below cap', Tool.Run(
       '{"command":"echo hi","reason":"r","timeout_ms":2000}', R, E));
     AssertEquals('requested kept', 2000, FExecutor.LastTimeoutMs);
+  finally
+    Tool.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestRedirectSummaryAndFileAsk;
+var
+  Tool: TCommandTool;
+  Asks: TApprovalAskArray;
+  I, FileAsk: Integer;
+begin
+  { A redirect is part of the command the operator must see, and it is a file
+    write in the file tools' vocabulary. }
+  Tool := BuildToolWithRoot('/tmp/nowhere');
+  try
+    Asks := Tool.ApprovalAsks('{"command":"echo x > out.txt","reason":"r"}');
+    AssertTrue('summary keeps the redirect', Pos('> out.txt', Asks[0].Summary) > 0);
+    FileAsk := -1;
+    for I := 0 to High(Asks) do
+      if Asks[I].Subject.Ref = 'file:write' then
+        FileAsk := I;
+    AssertTrue('a file:write ask is present', FileAsk >= 0);
+    AssertEquals('workspace-relative path', 'out.txt',
+      Asks[FileAsk].Subject.Path);
+    AssertEquals('once', 'once', Asks[FileAsk].Options[0].Key);
+    AssertEquals('exact', 'exact', Asks[FileAsk].Options[1].Key);
+    AssertEquals('exact names the path', 'out.txt',
+      Asks[FileAsk].Options[1].Rule.Params[0]);
+    AssertEquals('dir', 'dir', Asks[FileAsk].Options[2].Key);
+    AssertEquals('ext', 'ext', Asks[FileAsk].Options[3].Key);
+    AssertEquals('ext value', 'txt', Asks[FileAsk].Options[3].Rule.Extension);
+    AssertEquals('dir_ext', 'dir_ext', Asks[FileAsk].Options[4].Key);
+    AssertEquals('any', 'any', Asks[FileAsk].Options[5].Key);
+    AssertEquals('never', 'never', Asks[FileAsk].Options[6].Key);
+  finally
+    Tool.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestRedirectReadAsk;
+var
+  Tool: TCommandTool;
+  Asks: TApprovalAskArray;
+  I, FileAsk: Integer;
+begin
+  Tool := BuildToolWithRoot('/tmp/nowhere');
+  try
+    Asks := Tool.ApprovalAsks('{"command":"cat < in.txt","reason":"r"}');
+    FileAsk := -1;
+    for I := 0 to High(Asks) do
+      if Asks[I].Subject.Ref = 'file:read' then
+        FileAsk := I;
+    AssertTrue('a file:read ask', FileAsk >= 0);
+    AssertEquals('path', 'in.txt', Asks[FileAsk].Subject.Path);
+    { Reads do not offer extension scoping (as the file tools do not). }
+    for I := 0 to High(Asks[FileAsk].Options) do
+      AssertFalse('no ext option on a read', Asks[FileAsk].Options[I].Key = 'ext');
+  finally
+    Tool.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestFdDuplicateIsNotAFileAsk;
+var
+  Tool: TCommandTool;
+  Asks: TApprovalAskArray;
+  I: Integer;
+begin
+  Tool := BuildToolWithRoot('/tmp/nowhere');
+  try
+    Asks := Tool.ApprovalAsks('{"command":"echo x 2>&1","reason":"r"}');
+    for I := 0 to High(Asks) do
+      AssertFalse('no file ask for an fd duplication',
+        Copy(Asks[I].Subject.Ref, 1, 5) = 'file:');
+  finally
+    Tool.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestOutsideRedirectKeepsThePathAsk;
+var
+  Tool: TCommandTool;
+  Asks: TApprovalAskArray;
+  I: Integer;
+  SawFileWrite, SawPath: Boolean;
+begin
+  Tool := BuildToolWithRoot('/tmp/nowhere');
+  try
+    Asks := Tool.ApprovalAsks('{"command":"echo x > /tmp/outside.txt","reason":"r"}');
+    SawFileWrite := False;
+    SawPath := False;
+    for I := 0 to High(Asks) do
+    begin
+      if Asks[I].Subject.Ref = 'file:write' then
+        SawFileWrite := True;
+      if Asks[I].Subject.Ref = 'path:' then
+        SawPath := True;
+    end;
+    AssertFalse('no file:write for an outside target', SawFileWrite);
+    AssertTrue('the outside path ask remains', SawPath);
   finally
     Tool.Free;
   end;

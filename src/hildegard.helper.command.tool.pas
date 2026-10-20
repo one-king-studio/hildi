@@ -158,13 +158,71 @@ begin
 end;
 
 { Builds the approval ask for each parsed segment. Pure; nil on parse error. }
+{ The redirect operator that produced this access, matched by target text. }
+function RedirectOpOf(const APlan: TCommandPlan; ASegment: Integer;
+  const AToken: string): string;
+var
+  I: Integer;
+begin
+  Result := '';
+  if (ASegment < 0) or (ASegment > High(APlan.Segments)) then
+    Exit;
+  for I := 0 to High(APlan.Segments[ASegment].Redirects) do
+    if APlan.Segments[ASegment].Redirects[I].Target = AToken then
+      Exit(APlan.Segments[ASegment].Redirects[I].Operator);
+end;
+
+{ True when the operator reads or writes a file. Here-docs and here-strings
+  carry a delimiter, not a path; fd duplications (`2>&1`) name an fd. }
+function RedirectEffectsFile(const AOp: string): Boolean;
+begin
+  Result := (AOp = '<') or (AOp = '>') or (AOp = '>>') or (AOp = '>|') or
+    (AOp = '2>') or (AOp = '2>>') or (AOp = '1>') or (AOp = '1>>') or
+    (AOp = '&>') or (AOp = '&>>');
+end;
+
+function WorkspaceRelative(const ARoot, AResolved: string): string;
+begin
+  if ARoot = '/' then
+    Result := Copy(AResolved, 2, MaxInt)
+  else if Copy(AResolved, 1, Length(ARoot) + 1) = ARoot + '/' then
+    Result := Copy(AResolved, Length(ARoot) + 2, MaxInt)
+  else
+    Result := '';
+end;
+
+function DirOfRelative(const ARel: string): string;
+var
+  P: Integer;
+begin
+  P := Length(ARel);
+  while (P >= 1) and (ARel[P] <> '/') do
+    Dec(P);
+  if P <= 1 then
+    Result := ''
+  else
+    Result := Copy(ARel, 1, P - 1);
+end;
+
+function ExtOfRelative(const ARel: string): string;
+var
+  Slash, Dot: Integer;
+begin
+  Slash := LastDelimiter('/', ARel);
+  Dot := LastDelimiter('.', ARel);
+  if (Dot > Slash) and (Dot > 0) and (Dot < Length(ARel)) then
+    Result := LowerCase(Copy(ARel, Dot + 1, MaxInt))
+  else
+    Result := '';
+end;
+
 function BuildAsks(const ACommand: string;
   ASyntax: TShellSyntax; const ARoot, ACwd: string): TApprovalAskArray;
 var
   Plan: TCommandPlan;
   I, J: Integer;
   Seg: TCommandSegment;
-  Bin, Ref, PathRef: string;
+  Bin, Ref, PathRef, Op, Rel, FileRef: string;
   Access: TPathAccessArray;
 
   function OneParam(const AValue: string): TApprovalParams;
@@ -187,6 +245,26 @@ var
     Opt.Rule.Ref := Ref;
     Opt.Rule.Params := AParams;
     Opt.Rule.AnyParams := AAny;
+    SetLength(AAsk.Options, Length(AAsk.Options) + 1);
+    AAsk.Options[High(AAsk.Options)] := Opt;
+  end;
+
+  { A file-scope option: a Directory and/or Extension rule, matching how the
+    file tools grant "always in dir/" and "always .ext files". }
+  procedure AddFileScope(var AAsk: TApprovalAsk; const AKey, ACaption,
+    ADir, AExt: string);
+  var
+    Opt: TApprovalOption;
+  begin
+    Opt := Default(TApprovalOption);
+    Opt.Key := AKey;
+    Opt.Caption := ACaption;
+    Opt.Persists := True;
+    Opt.Rule := DefaultApprovalRule(aeAllow);
+    Opt.Rule.Ref := Ref;
+    Opt.Rule.AnyParams := True;
+    Opt.Rule.Directory := ADir;
+    Opt.Rule.Extension := AExt;
     SetLength(AAsk.Options, Length(AAsk.Options) + 1);
     AAsk.Options[High(AAsk.Options)] := Opt;
   end;
@@ -226,7 +304,11 @@ begin
     Ref := 'run_command:' + Bin;
     SetLength(Result, Length(Result) + 1);
     Result[High(Result)] := Default(TApprovalAsk);
+    { The segment text omits redirects; the operator needs to see them. }
     Result[High(Result)].Summary := Seg.Text;
+    for J := 0 to High(Seg.Redirects) do
+      Result[High(Result)].Summary := Result[High(Result)].Summary + ' ' +
+        Seg.Redirects[J].Operator + ' ' + Seg.Redirects[J].Target;
     Result[High(Result)].Subject.Ref := Ref;
     Result[High(Result)].Subject.Params :=
       Copy(Seg.Arguments, 0, Length(Seg.Arguments));
@@ -241,6 +323,73 @@ begin
       AddOption(Result[High(Result)], 'prefix',
         'always ' + Bin + ' ' + Seg.Arguments[0] + ' ...', True,
         OneParam(Seg.Arguments[0]), True);
+  end;
+  { A shell redirect is a file effect: bind it to the file tools' refs and
+    option shapes (exact / dir / ext / dir+ext / any / never), so a grant given
+    for file_write or file_read covers the shell too. Here-docs and fd
+    duplications are not file effects and are skipped. }
+  if ARoot <> '' then
+  begin
+    Access := PathAccesses(Plan, ARoot, ACwd);
+    for J := 0 to High(Access) do
+    begin
+      if (not Access[J].IsRedirect) or (not Access[J].Inside) then
+        Continue;
+      Op := RedirectOpOf(Plan, Access[J].Segment, Access[J].Token);
+      if not RedirectEffectsFile(Op) then
+        Continue;
+      Rel := WorkspaceRelative(ARoot, Access[J].Resolved);
+      if Rel = '' then
+        Continue;
+      if Op = '<' then
+        FileRef := 'file:read'
+      else
+        FileRef := 'file:write';
+      Ref := FileRef;
+      SetLength(Result, Length(Result) + 1);
+      Result[High(Result)] := Default(TApprovalAsk);
+      if FileRef = 'file:read' then
+        Result[High(Result)].Summary := 'read ' + Rel
+      else
+        Result[High(Result)].Summary := 'write ' + Rel;
+      Result[High(Result)].Subject.Ref := FileRef;
+      Result[High(Result)].Subject.Path := Rel;
+      SetLength(Result[High(Result)].Subject.Params, 1);
+      Result[High(Result)].Subject.Params[0] := Rel;
+      AddOption(Result[High(Result)], 'once', 'allow once', False, nil, False);
+      AddOption(Result[High(Result)], 'exact',
+        'always this exact operation', True,
+        Result[High(Result)].Subject.Params, False);
+      if DirOfRelative(Rel) = '' then
+        AddFileScope(Result[High(Result)], 'dir', 'always in the workspace',
+          '', '')
+      else
+        AddFileScope(Result[High(Result)], 'dir',
+          'always in ' + DirOfRelative(Rel) + '/', DirOfRelative(Rel), '');
+      if (FileRef = 'file:write') and (ExtOfRelative(Rel) <> '') then
+      begin
+        AddFileScope(Result[High(Result)], 'ext',
+          'always .' + ExtOfRelative(Rel) + ' files', '',
+          ExtOfRelative(Rel));
+        AddFileScope(Result[High(Result)], 'dir_ext',
+          'always .' + ExtOfRelative(Rel) + ' files in ' +
+          DirOfRelative(Rel) + '/', DirOfRelative(Rel), ExtOfRelative(Rel));
+      end;
+      AddOption(Result[High(Result)], 'any', 'always ' + FileRef, True, nil,
+        True);
+      { A deny option, as the file tools offer. }
+      SetLength(Result[High(Result)].Options,
+        Length(Result[High(Result)].Options) + 1);
+      with Result[High(Result)].Options[High(Result[High(Result)].Options)] do
+      begin
+        Key := 'never';
+        Caption := 'never allow ' + FileRef;
+        Persists := True;
+        Rule := DefaultApprovalRule(aeDeny);
+        Rule.Ref := FileRef;
+        Rule.AnyParams := True;
+      end;
+    end;
   end;
   { Path asks: for each access that leaves the workspace, one ask whose subject
     is the absolute path (a distinct coordinate space from a file tool's

@@ -30,6 +30,7 @@ type
     Resolved: string;    // the absolute path it names (lexical)
     Inside: Boolean;     // physically under the workspace root
     Segment: Integer;    // index into the plan's segments
+    IsRedirect: Boolean; // the token is a redirection target
   end;
   TPathAccessArray = array of TPathAccess;
 
@@ -70,7 +71,7 @@ begin
 end;
 
 procedure AddAccess(var AList: TPathAccessArray; const AToken, AResolved: string;
-  AInside: Boolean; ASegment: Integer);
+  AInside: Boolean; ASegment: Integer; AIsRedirect: Boolean);
 var
   I: Integer;
 begin
@@ -83,6 +84,7 @@ begin
   AList[High(AList)].Resolved := AResolved;
   AList[High(AList)].Inside := AInside;
   AList[High(AList)].Segment := ASegment;
+  AList[High(AList)].IsRedirect := AIsRedirect;
 end;
 
 function PathAccesses(const APlan: TCommandPlan; const ARoot, ACwd: string):
@@ -93,14 +95,16 @@ var
   Seg: TCommandSegment;
   IsCd, TopLevel: Boolean;
 
-  procedure AddToken(const AToken: string; ASegment: Integer);
+  procedure AddToken(const AToken: string; ASegment: Integer;
+    AIsRedirect: Boolean = False);
   var
     R: string;
   begin
     if Trim(AToken) = '' then
       Exit;
     R := ResolveToken(AToken, Base);
-    AddAccess(Result, AToken, R, PhysicalContains(ARoot, R), ASegment);
+    AddAccess(Result, AToken, R, PhysicalContains(ARoot, R), ASegment,
+      AIsRedirect);
   end;
 
 begin
@@ -121,7 +125,7 @@ begin
       segment text being wrapped in parentheses. }
     TopLevel := (Trim(Seg.Text) = '') or (Trim(Seg.Text)[1] <> '(');
     for J := 0 to High(Seg.Paths) do
-      AddToken(Seg.Paths[J].Text, I);
+      AddToken(Seg.Paths[J].Text, I, Seg.Paths[J].IsRedirect);
     { A `cd`/`pushd` target moves the base for LATER segments. }
     if IsCd and (Length(Seg.Arguments) > 0) then
     begin
