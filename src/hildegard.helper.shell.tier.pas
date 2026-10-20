@@ -448,24 +448,34 @@ function CheckGrepPatternOf(const AC: TCommand; out AWhy: string): Boolean;
 var
   I: Integer;
   Arg, Pattern: string;
-  Fixed, Extended, Seen: Boolean;
+  Fixed, Extended, Seen, SkipNext: Boolean;
 begin
   Result := True;
   AWhy := '';
   Fixed := False;
   Extended := False;
   Seen := False;
+  SkipNext := False;
   Pattern := '';
   for I := 1 to High(AC.Words) do
   begin
     if not LiteralTextOf(AC.Words[I], Arg) then
       Continue;
+    { -m takes a value, attached (-m1) or separate (-m 1); the separate value
+      is not the pattern. }
+    if SkipNext then
+    begin
+      SkipNext := False;
+      Continue;
+    end;
     if (not Seen) and (Arg <> '') and (Arg[1] = '-') and (Arg <> '-') then
     begin
       if Pos('F', Arg) > 0 then
         Fixed := True;
       if Pos('E', Arg) > 0 then
         Extended := True;
+      if Arg = '-m' then
+        SkipNext := True;
       Continue;
     end;
     if not Seen then

@@ -97,10 +97,19 @@ begin
 
   if AName = 'grep' then
   begin
-    { Flags, then the pattern, then the files. }
-    I := NextNonOption(0);
+    { Flags, then the pattern, then the files. -m takes a value, attached
+      (-m1) or separate (-m 1); a separate value must not be mistaken for the
+      pattern, or the real pattern would be asked as a file. }
+    I := 0;
+    while (I <= High(AArgs)) and IsOption(AArgs[I]) do
+    begin
+      if AArgs[I] = '-m' then
+        Inc(I, 2)
+      else
+        Inc(I);
+    end;
     if I <= High(AArgs) then
-      Inc(I);
+      Inc(I);   // the pattern
     AddFiles(AReads, AArgs, I);
     Exit;
   end;

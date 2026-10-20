@@ -111,6 +111,11 @@ procedure TShellEffectsTest.TestPatternCommands;
 begin
   AssertEquals('grep', 'f,g', Reads('grep', ['-n', 'pat', 'f', 'g']));
   AssertEquals('grep no file', '', Reads('grep', ['pat']));
+  { -m's count is a value, not the pattern, attached or separate. }
+  AssertEquals('grep -m1', 'a.txt',
+    Reads('grep', ['-m1', 'pat', 'a.txt']));
+  AssertEquals('grep -m 1', 'a.txt',
+    Reads('grep', ['-m', '1', 'pat', 'a.txt']));
   AssertEquals('rg default', '.', Reads('rg', ['pat']));
   AssertEquals('rg paths', 'src', Reads('rg', ['-n', 'pat', 'src']));
   AssertEquals('jq', 'd.json', Reads('jq', ['-r', '.a', 'd.json']));

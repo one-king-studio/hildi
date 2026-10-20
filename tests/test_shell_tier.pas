@@ -44,6 +44,7 @@ type
     procedure TestFunctionsAreKnown;
     procedure TestUnknownCommandDeclines;
     procedure TestGrepMaxCountStaysInTheTier;
+    procedure TestGrepCountDoesNotMoveTheOperands;
     procedure TestCompoundScriptsRunInTheTier;
     procedure TestUnmatchedStructureDeclines;
     procedure TestUnsupportedOptionDeclines;
@@ -373,6 +374,28 @@ begin
     Copy(Src, FApproval.Asked[0].FocusStart, FApproval.Asked[0].FocusLen));
   AssertEquals('second focus', 'cat b.txt',
     Copy(Src, FApproval.Asked[1].FocusStart, FApproval.Asked[1].FocusLen));
+end;
+
+procedure TShellTierTest.TestGrepCountDoesNotMoveTheOperands;
+const
+  Forms: array[0..1] of string = ('grep -m1 alpha a.txt',
+    'grep -m 1 alpha a.txt');
+var
+  OutText: string;
+  I: Integer;
+begin
+  { -m's count is a value, not the pattern: with the separate form the pattern
+    was asked as a file (`read alpha`). }
+  FFs.WriteFile(P('a.txt'), 'alpha' + #10 + 'beta' + #10, False, EmptyStr);
+  for I := 0 to High(Forms) do
+  begin
+    AssertTrue('ran: ' + Forms[I], RunTier(Forms[I], OutText));
+    AssertTrue('found: ' + Forms[I], Pos('alpha', OutText) > 0);
+    AssertEquals('one ask: ' + Forms[I], 1, Length(FApproval.Asked));
+    AssertEquals('the file, not the pattern: ' + Forms[I], 'a.txt',
+      FApproval.Asked[0].Subject.Path);
+    SetLength(FApproval.Asked, 0);
+  end;
 end;
 
 procedure TShellTierTest.TestCdOutsideIsRefused;
