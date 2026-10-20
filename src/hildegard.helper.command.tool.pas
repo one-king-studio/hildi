@@ -21,7 +21,8 @@ uses
   hildegard.helper.command.policy, hildegard.helper.approval,
   hildegard.helper.command.paths,
   hildegard.helper.process, hildegard.helper.workspace.changes,
-  hildegard.helper.workspace.snapshot, hildegard.helper.command.pure;
+  hildegard.helper.workspace.snapshot, hildegard.helper.command.pure,
+  hildegard.helper.utf8;
 
 type
   TShellProfile = record
@@ -547,10 +548,9 @@ var
 begin
   if (FInner = nil) or (FRemaining <= 0) or (AText = '') then
     Exit;
-  if Length(AText) <= FRemaining then
-    Chunk := AText
-  else
-    Chunk := Copy(AText, 1, FRemaining);
+  { Cut on a UTF-8 boundary: a split sequence would render as a replacement
+    character at the end of the live block. }
+  Chunk := Utf8Prefix(AText, FRemaining);
   Dec(FRemaining, Length(Chunk));
   FInner.Next(Chunk);
 end;
@@ -790,6 +790,12 @@ begin
       { The model may have written markdown-escaped text (&lt;, &gt;, &amp;);
         the shell must see the characters. }
       Command := DecodeHtmlEntities(Command);
+      { Show the command immediately - before any approval is asked - so the
+        panel's block is never an empty box, whether the call is waiting for an
+        answer, queued behind a sibling, or already running. Emitted to the
+        observer directly so it is never dropped by the output cap. }
+      if AObserver <> nil then
+        AObserver.Next('$ ' + Command + LineEnding + LineEnding);
       if not ReadStringArg(Root, 'reason', Reason) or (Trim(Reason) = '') then
       begin
         AError := 'missing required "reason"';
@@ -875,11 +881,6 @@ begin
         the live block without end. }
       Stream := TCappedObserver.Create(AObserver, FConfig.MaxOutputBytes);
       try
-        { Print the command first, before its output, so the operator sees what
-          is about to run - especially for a long-running command. Emitted to the
-          observer directly so it is never dropped by the output cap. }
-        if AObserver <> nil then
-          AObserver.Next('$ ' + Command + LineEnding + LineEnding);
         { The set feeds the transcript note as well as OnChanges, so it is
           always collected; for the process tier that means one metadata-only
           walk of the tree before and after the call. }
@@ -910,7 +911,8 @@ begin
       Truncated := Length(Execution.Output) > FConfig.MaxOutputBytes;
       AResult := '$ ' + Command + LineEnding + LineEnding;
       if Truncated then
-        AResult := AResult + Copy(Execution.Output, 1, FConfig.MaxOutputBytes)
+        AResult := AResult + Utf8Prefix(Execution.Output,
+          FConfig.MaxOutputBytes)
       else
         AResult := AResult + Execution.Output;
       if Truncated then

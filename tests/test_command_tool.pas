@@ -35,6 +35,13 @@ type
       out AExecution: TCommandExecution): Boolean;
   end;
 
+  { Collects streamed chunks into one string. }
+  TChunkLog = class
+  public
+    Text: string;
+    procedure OnChunk(const AId, AName, AText: string);
+  end;
+
   TFakePrompt = class
   public
     Allowed: Boolean;
@@ -42,14 +49,10 @@ type
     Scope: TApprovalScope;
     Calls: Integer;
     LastAsk: TApprovalAsk;
+    { What the panel had been told when the dialog was raised. }
+    Probe: TChunkLog;
+    SeenAtPrompt: string;
     function Prompt(const AAsk: TApprovalAsk): TApprovalChoice;
-  end;
-
-  { Collects streamed chunks into one string. }
-  TChunkLog = class
-  public
-    Text: string;
-    procedure OnChunk(const AId, AName, AText: string);
   end;
 
   TCommandToolTest = class(TTestCase)
@@ -91,11 +94,13 @@ type
     procedure TestApprovalAsksCarryTheReason;
     procedure TestRunCarriesTheReasonIntoTheAsk;
     procedure TestOutputIsTruncatedWithMarker;
+    procedure TestOutputTruncationKeepsUtf8Whole;
     procedure TestTimeoutReports124;
     procedure TestHandlerNeverRaises;
     procedure TestCommandPreservesUtf8;
     procedure TestProcessExecutorRunsCommand;
     procedure TestRunCommandStreamsOutput;
+    procedure TestCommandIsShownBeforeApproval;
     procedure TestCommandTimeoutIsClampedToMax;
     procedure TestTimeoutIsHonouredWithoutACap;
     procedure TestHtmlEntitiesAreDecoded;
@@ -169,6 +174,8 @@ end;
 
 function TFakePrompt.Prompt(const AAsk: TApprovalAsk): TApprovalChoice;
 begin
+  if Probe <> nil then
+    SeenAtPrompt := Probe.Text;
   Inc(Calls);
   LastAsk := AAsk;
   Result := Default(TApprovalChoice);
@@ -779,6 +786,26 @@ begin
   end;
 end;
 
+procedure TCommandToolTest.TestOutputTruncationKeepsUtf8Whole;
+var
+  Tool: TCommandTool;
+  R, E, EAcute: string;
+begin
+  { The cap is in bytes; a cut mid-character would show a replacement glyph. }
+  AddRule(aeAllow, 'run_command:echo', [], True);
+  EAcute := #$C3#$A9;
+  FExecutor.ResultExec.Output := EAcute + EAcute;
+  Tool := BuildTool(nil, 3);
+  try
+    AssertTrue('ok', Tool.Run('{"command":"echo hi","reason":"r"}', R, E));
+    AssertTrue('one whole character', Pos(EAcute, R) > 0);
+    AssertFalse('never half a character',
+      Pos(EAcute + EAcute, R) > 0);
+  finally
+    Tool.Free;
+  end;
+end;
+
 procedure TCommandToolTest.TestTimeoutReports124;
 var
   Tool: TCommandTool;
@@ -877,6 +904,44 @@ begin
     AssertEquals('streamed chunks',
       '$ echo hi' + LineEnding + LineEnding + 'one two ', Log.Text);
   finally
+    Log.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestCommandIsShownBeforeApproval;
+var
+  Tool: TCommandTool;
+  R, E: string;
+  Log: TChunkLog;
+  Prompt: TFakePrompt;
+  Observer: TToolForwardObserver;
+begin
+  { A tool block must never be an empty box while the ask is up: the command is
+    forwarded first, then the operator is prompted. }
+  Log := TChunkLog.Create;
+  Prompt := TFakePrompt.Create;
+  Prompt.Allowed := True;
+  Prompt.OptionKey := 'once';
+  Prompt.Probe := Log;
+  try
+    Observer := TToolForwardObserver.Create('call_1', 'run_command',
+      Log.OnChunk);
+    try
+      Tool := BuildTool(Prompt.Prompt, 0);
+      try
+        AssertTrue('ok', Tool.Run(
+          '{"command":"cat a.txt","reason":"because"}', R, E, Observer));
+      finally
+        Tool.Free;
+      end;
+    finally
+      Observer.Free;
+    end;
+    AssertEquals('prompted once', 1, Prompt.Calls);
+    AssertTrue('the command reached the panel before the ask',
+      Pos('$ cat a.txt', Prompt.SeenAtPrompt) > 0);
+  finally
+    Prompt.Free;
     Log.Free;
   end;
 end;
