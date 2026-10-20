@@ -43,6 +43,7 @@ type
     procedure TestLoopAndPipeline;
     procedure TestFunctionsAreKnown;
     procedure TestUnknownCommandDeclines;
+    procedure TestGrepMaxCountStaysInTheTier;
     procedure TestUnsupportedOptionDeclines;
     procedure TestGrepRegexRuns;
     procedure TestParseErrorDeclines;
@@ -178,6 +179,17 @@ begin
   AssertFalse('nothing ran', FileExists(P('out.txt')));
 end;
 
+procedure TShellTierTest.TestGrepMaxCountStaysInTheTier;
+var
+  OutText: string;
+begin
+  AssertTrue('grep -m1 runs in the tier',
+    RunTier('grep -m1 alpha a.txt', OutText));
+  AssertTrue('found', Pos('alpha', OutText) > 0);
+  AssertTrue('grep -m 1 runs too',
+    RunTier('grep -m 1 alpha a.txt', OutText));
+end;
+
 procedure TShellTierTest.TestUnsupportedOptionDeclines;
 var
   OutText: string;
@@ -214,9 +226,9 @@ var
 begin
   AssertTrue('ran', RunTier('cat a.txt; cat b.txt', OutText));
   AssertEquals('two asks', 2, Length(FApproval.Asked));
-  AssertEquals('first ref', 'run_command:cat', FApproval.Asked[0].Subject.Ref);
-  AssertEquals('first arg', 'a.txt', FApproval.Asked[0].Subject.Params[0]);
-  AssertEquals('second arg', 'b.txt', FApproval.Asked[1].Subject.Params[0]);
+  AssertEquals('first is a read', 'file:read', FApproval.Asked[0].Subject.Ref);
+  AssertEquals('first path', 'a.txt', FApproval.Asked[0].Subject.Path);
+  AssertEquals('second path', 'b.txt', FApproval.Asked[1].Subject.Path);
   AssertEquals('reason inherited', 'the model reason', FApproval.Asked[0].Reason);
 end;
 
@@ -247,17 +259,19 @@ var
 begin
   AssertTrue('ran', RunTier('cat a.txt', OutText));
   AssertEquals('one ask', 1, Length(FApproval.Asked));
-  AssertEquals('ref', 'run_command:cat', FApproval.Asked[0].Subject.Ref);
-  AssertEquals('four options', 4, Length(FApproval.Asked[0].Options));
+  AssertEquals('ref', 'file:read', FApproval.Asked[0].Subject.Ref);
+  AssertEquals('path', 'a.txt', FApproval.Asked[0].Subject.Path);
+  AssertEquals('a read offers no ext scope', 4,
+    Length(FApproval.Asked[0].Options));
   AssertEquals('once', 'once', FApproval.Asked[0].Options[0].Key);
   AssertEquals('exact', 'exact', FApproval.Asked[0].Options[1].Key);
   AssertEquals('exact persists', True, FApproval.Asked[0].Options[1].Persists);
   AssertEquals('exact params', 'a.txt',
     FApproval.Asked[0].Options[1].Rule.Params[0]);
-  AssertEquals('exact rule ref', 'run_command:cat',
+  AssertEquals('exact rule ref', 'file:read',
     FApproval.Asked[0].Options[1].Rule.Ref);
-  AssertEquals('any', 'any', FApproval.Asked[0].Options[2].Key);
-  AssertEquals('prefix', 'prefix', FApproval.Asked[0].Options[3].Key);
+  AssertEquals('dir', 'dir', FApproval.Asked[0].Options[2].Key);
+  AssertEquals('any', 'any', FApproval.Asked[0].Options[3].Key);
 end;
 
 procedure TShellTierTest.TestGateDenial;

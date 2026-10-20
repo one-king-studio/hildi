@@ -1,9 +1,9 @@
 # Feature: Approval Review
 
-**Status:** Phase 1 shipped (redirects are named in the ask and bound to the
-file tools on both executors; pure commands are ungated). The full-script
-review, focus highlighting, scrolling and the per-command file effects are
-specified here.
+**Status:** Phase 1 shipped (redirects are named and bound to the file tools;
+pure commands are ungated) and the **effect-scoped gate** is live on the
+builtin tier: a granted `file:read`/`file:write` scope is the approval. The
+full-script review and the process-tier effects are specified here.
 
 **Related:** [Command Tool](../Command_Tool/Command_Tool_v1.SPEC.md) ·
 [Approval Path Scoping](../Approval_Path_Scoping/Approval_Path_Scoping_v1.SPEC.md) ·
@@ -41,11 +41,15 @@ Make the ask a **reviewable unit**, not a fragment:
    There is no `never` option: a deny is a policy decision (the deny rule the
    store already models), not a per-prompt choice — denying the prompt is the
    answer, and a persistent deny belongs to the rules, not the dialog.
-4. **The command's own file effects are known where the tier knows them.**
-   `sed -i`, `tee`, `rm`, `mv`, `cp`, `mkdir`, `touch` name their targets; the
-   tier raises the same file asks before running, from the AST. The process
-   tier cannot know, so it keeps the splitter's analysis (the redirects and the
-   outside-path asks).
+4. **The grant is the scope.** On the builtin tier the gate asks about
+   **effects**, not programs: every read and write a command will make (its
+   operands *and* its redirects) is checked as `file:read`/`file:write`. A
+   granted scope — a path, a directory, an extension, or a directory *and* an
+   extension — silently covers any command whose effect falls inside it; an
+   effect outside the grant is asked. So granting "read `*.pas` in `src/`"
+   covers `cat`, `head`, `grep`, `rg` and `jq` there alike, and `rm`/`sed -i`
+   are covered by the write scopes. Commands whose effects cannot be named
+   (`tool`, `mcp`, unknown names) keep the command-level ask.
 5. **Pure commands are not gated.** `echo`, `printf`, `true`, `false`,
    `basename` and `dirname` produce text from their own arguments: no
    filesystem, no stdin, no information about the machine. They ask nothing.
@@ -76,7 +80,9 @@ Make the ask a **reviewable unit**, not a fragment:
 - `2>&1` and `<&` raise no file ask.
 - An outside redirect keeps the `path:` ask and raises no `file:` ask.
 - `echo x`, `printf …`, `basename /a/b` ask nothing; `ls`, `cat`, `test -f`,
-  `sed -i` still ask.
+  `sed -i` ask as file effects (`file:read` / `file:write`).
+- With a `file:read` grant for `src/*.pas`, `cat`, `head`, `grep` and `rg` on
+  those files prompt nothing; a read outside that scope still does.
 - A long compound script opens the dialog scrolled to the highlighted command
   (phase 2).
 - `sed -i` and friends raise their file asks (phase 3).

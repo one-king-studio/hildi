@@ -755,7 +755,7 @@ begin
             AskEvent := Sink.EventAt(I);
           end;
         AssertTrue('ask id present', AskId <> '');
-        AssertEquals('ask summary carries the command', 'ls',
+        AssertEquals('ask summary names the effect', 'read .',
           AskEvent.Ask.Summary);
 
         Deny := Default(TSessionCommand);

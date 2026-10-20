@@ -250,6 +250,10 @@ procedure TShellCommandsTest.TestGrep;
 var
   R: TShellResult;
 begin
+  R := RunCmd('grep', ['-m', '1', 'a', 'a.txt']);
+  AssertEquals('max count', 'alpha' + #10, R.Stdout);
+  R := RunCmd('grep', ['-m1', 'a', 'a.txt']);
+  AssertEquals('attached -m1', 'alpha' + #10, R.Stdout);
   R := RunCmd('grep', ['beta', 'a.txt']);
   AssertEquals('match status', 0, R.ExitCode);
   AssertEquals('match', 'beta' + #10, R.Stdout);

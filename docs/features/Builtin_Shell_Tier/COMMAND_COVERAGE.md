@@ -41,7 +41,7 @@ parser the tier uses; re-run `make shell-flags` to reproduce the tallies.
 | `tail` | `-n N`, `-N` | last N lines (default 10); 0 or 1 file, or stdin |
 | `cat` | — | many files, `-` for stdin |
 | `wc` | `-l -w -c` | default all three; `N name` per file plus a `total` |
-| `grep` | `-n -i -v -l -c -F -E -G -r` | **BRE** by default, **ERE** with `-E`, fixed with `-F`; POSIX classes mapped; `-r` walks directories (sorted; symlinked dirs skipped) and prefixes every hit |
+| `grep` | `-n -i -v -l -c -F -E -G -r -m` | **BRE** by default, **ERE** with `-E`, fixed with `-F`; POSIX classes mapped; `-r` walks directories (sorted; symlinked dirs skipped) and prefixes every hit; `-m N` caps matches per file |
 | `sed` | `-n -E -r -e -i[SUFFIX]` | paging/ranges (`N`, `$`, `/re/`, ranges), `p`/`d`/`q`, `s///` with `g`/`p`/`i`, `&` and groups; `-i` rewrites through the workspace FS |
 | `awk` | `-F` | `[condition] { print ... }`: `$N`/`$0`/`NF`/`NR`, comparisons, `~`/`!~`, `&&`/`||`, string and number literals |
 | `find` | — | `-name`/`-iname`/`-type`/`-maxdepth`; symlinked directories are reported, not followed |

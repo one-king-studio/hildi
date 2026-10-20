@@ -114,7 +114,7 @@ const
     (Name: 'head'; Options: '-nN'),
     (Name: 'tail'; Options: '-nN'),
     (Name: 'wc'; Options: '-lwc'),
-    (Name: 'grep'; Options: '-nivlcFEGr'),
+    (Name: 'grep'; Options: '-nivlcFEGrm'),
     (Name: 'sed'; Options: '-nErei'),
     (Name: 'awk'; Options: '-F'),
     (Name: 'find'; Options: ''),
@@ -545,6 +545,7 @@ var
   I, J, P: Integer;
   ShowN, IgnoreCase, Invert, ListOnly, CountOnly, Fixed, Extended,
     Recursive: Boolean;
+  MaxCount, MatchSoFar: Integer;
   Args: TStringArray;
   Pattern, Data, E, Text, Full: string;
   Lines: TStringArray;
@@ -562,7 +563,9 @@ var
     Ls := LinesOf(AText);
     Count := 0;
     for K := 0 to High(Ls) do
-      if Matcher.Matches(Ls[K]) then
+      if (MaxCount > 0) and (Count >= MaxCount) then
+        Break
+      else if Matcher.Matches(Ls[K]) then
       begin
         Inc(Count);
         if ListOnly or CountOnly then
@@ -688,6 +691,7 @@ begin
   Fixed := False;
   Extended := False;
   Recursive := False;
+  MaxCount := 0;
   I := 0;
   while I <= High(ACall.Args) do
   begin
@@ -696,10 +700,23 @@ begin
       Inc(I);
       Break;
     end;
+    if ACall.Args[I] = '-m' then
+    begin
+      if I = High(ACall.Args) then
+        Exit(Usage('grep: option requires an argument -- m'));
+      Inc(I);
+      MaxCount := StrToIntDef(ACall.Args[I], 0);
+      if MaxCount < 0 then
+        Exit(Usage('grep: invalid max count: ' + ACall.Args[I]));
+      Inc(I);
+      Continue;
+    end;
     if (ACall.Args[I] <> '') and (ACall.Args[I][1] = '-') and
       (ACall.Args[I] <> '-') then
     begin
-      for J := 2 to Length(ACall.Args[I]) do
+      J := 2;
+      while J <= Length(ACall.Args[I]) do
+      begin
         case ACall.Args[I][J] of
           'n': ShowN := True;
           'i': IgnoreCase := True;
@@ -710,7 +727,24 @@ begin
           'E': Extended := True;
           'G': Extended := False;
           'r': Recursive := True;
+          'm':
+            begin
+              if J < Length(ACall.Args[I]) then
+              begin
+                MaxCount := StrToIntDef(Copy(ACall.Args[I], J + 1, MaxInt), 0);
+                J := Length(ACall.Args[I]);
+              end
+              else
+              begin
+                if I = High(ACall.Args) then
+                  Exit(Usage('grep: option requires an argument -- m'));
+                Inc(I);
+                MaxCount := StrToIntDef(ACall.Args[I], 0);
+              end;
+            end;
         end;
+        Inc(J);
+      end;
       Inc(I);
     end
     else

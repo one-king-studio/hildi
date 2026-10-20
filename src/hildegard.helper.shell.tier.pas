@@ -22,7 +22,7 @@ uses
   shell.interpreter,
   hildegard.helper.approval, hildegard.helper.shell.fs,
   hildegard.helper.shell.commands, hildegard.helper.shell.pattern,
-  hildegard.helper.command.pure;
+  hildegard.helper.command.pure, hildegard.helper.shell.effects;
 
 type
   TBuiltinShellConfig = record
@@ -212,7 +212,7 @@ end;
 function TBuiltinShell.FileAsk(const ACall: TShellCall; const ATarget: string;
   AWrite: Boolean): TApprovalAsk;
 var
-  Rel, Ref, Dir, Ext, Caption: string;
+  Rel, Ref, Dir, Ext, Caption, Display: string;
   Params: TApprovalParams;
 begin
   Rel := RelativeToRoot(FConfig.Root, FFs.Resolve(ACall.Cwd, ATarget));
@@ -221,10 +221,15 @@ begin
   else
     Ref := 'file:read';
   Result := Default(TApprovalAsk);
-  if AWrite then
-    Result.Summary := 'write ' + Rel
+  Result.Reason := FReason;
+  if Rel = '' then
+    Display := '.'   // the workspace root itself
   else
-    Result.Summary := 'read ' + Rel;
+    Display := Rel;
+  if AWrite then
+    Result.Summary := 'write ' + Display
+  else
+    Result.Summary := 'read ' + Display;
   Result.Subject.Ref := Ref;
   Result.Subject.Path := Rel;
   Params := nil;
@@ -266,26 +271,43 @@ end;
 function TBuiltinShell.BuildAsks(const ACall: TShellCall): TApprovalAskArray;
 var
   I: Integer;
+  Reads, Writes: TStringArray;
+  Known: Boolean;
+
+  procedure AddUnique(var AList: TStringArray; const AValue: string);
+  var
+    K: Integer;
+  begin
+    for K := 0 to High(AList) do
+      if AList[K] = AValue then
+        Exit;
+    SetLength(AList, Length(AList) + 1);
+    AList[High(AList)] := AValue;
+  end;
+
+  procedure AppendAsk(const AAsk: TApprovalAsk);
+  begin
+    SetLength(Result, Length(Result) + 1);
+    Result[High(Result)] := AAsk;
+  end;
+
 begin
   Result := nil;
-  { A pure command produces text from its own arguments; it needs no approval.
-    Everything else is gated per command, as before. }
-  if not IsPureCommand(ACall.Name) then
-  begin
-    SetLength(Result, 1);
-    Result[0] := BuildAsk(ACall);
-  end;
-  { Redirects are file effects, asked in the file tools' vocabulary. }
+  ComputeEffects(ACall.Name, ACall.Args, Reads, Writes, Known);
+  { Redirects are effects too. }
   for I := 0 to High(ACall.Writes) do
-  begin
-    SetLength(Result, Length(Result) + 1);
-    Result[High(Result)] := FileAsk(ACall, ACall.Writes[I], True);
-  end;
+    AddUnique(Writes, ACall.Writes[I]);
   for I := 0 to High(ACall.Reads) do
-  begin
-    SetLength(Result, Length(Result) + 1);
-    Result[High(Result)] := FileAsk(ACall, ACall.Reads[I], False);
-  end;
+    AddUnique(Reads, ACall.Reads[I]);
+  { Ask about effects, in the file tools' vocabulary: a granted scope covers
+    the command. }
+  for I := 0 to High(Writes) do
+    AppendAsk(FileAsk(ACall, Writes[I], True));
+  for I := 0 to High(Reads) do
+    AppendAsk(FileAsk(ACall, Reads[I], False));
+  { An effect we cannot name (tool/mcp/unknown) still needs the capability ask. }
+  if not Known then
+    AppendAsk(BuildAsk(ACall));
 end;
 
 function TBuiltinShell.BuildAsk(const ACall: TShellCall): TApprovalAsk;
@@ -498,6 +520,10 @@ begin
               (Copy(Arg, 1, 2) = '-f') or (Copy(Arg, 1, 2) = '-c')) then
               Continue;
             if (Name = 'rg') and ((Arg = '--hidden') or (Arg = '--no-ignore')) then
+              Continue;
+            { grep -mN carries its count on the token. }
+            if (Name = 'grep') and (Copy(Arg, 1, 2) = '-m') and
+              (Length(Arg) > 2) then
               Continue;
             if IsUnsupportedOption(Arg, Options) then
             begin

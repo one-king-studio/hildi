@@ -69,6 +69,33 @@ The tier's gate asks, in one batch: the command (unless pure) + `file:write`
 for every write redirect + `file:read` for every read redirect. An empty batch
 allows without a prompt.
 
+## 2b. The effect-scoped gate (tier, shipped)
+
+`hildegard.helper.shell.effects.ComputeEffects(Name, Args, out Reads, out
+Writes, out Known)` maps a builtin command to the files it will read and write,
+positionally (grep's first operand is a pattern, `cp`'s second is the
+destination) and without touching the filesystem:
+
+| Effects | Commands |
+|---|---|
+| reads | `cat`, `head`, `tail`, `wc`, `grep`, `rg`, `sed` (without `-i`), `awk`, `jq`, `sort`, `uniq`, `cut`, `ls`, `find`, `test`/`[` (file tests), `cp`'s source |
+| writes | `sed -i`, `tee`, `rm`, `mv`, `cp`'s destination, `mkdir`, `touch` |
+| none | `echo`, `printf`, `true`, `false`, `basename`, `dirname`, `tr` (stdin only) |
+| unknown | `tool`, `mcp`, and anything not in the table |
+
+The tier's gate then asks, in one batch:
+
+- one `file:write` / `file:read` ask per distinct effect (argument effects and
+  redirect effects), with the file tools' options;
+- the **command ask only when `Known = False`** (the effect cannot be named);
+- nothing at all when the effect list is empty.
+
+A previous grant is matched by the approval service, so a covered effect never
+prompts: **the grant is the scope**.
+
+The process path keeps the command-level asks for now (a spawned program's
+effects are not knowable); bringing it to the same model is phase 3.
+
 ## 3. The dialog (phase 2)
 
 - When `Script <> ''`, the body renders the script instead of `Summary`,

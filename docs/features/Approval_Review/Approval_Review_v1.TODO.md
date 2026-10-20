@@ -28,12 +28,14 @@
       span in bold.
 - [ ] Tests: spans, the modal's scroll offset, the fallback to `Summary`.
 
-### Phase 3: known per-command effects
+### Phase 3: the effect-scoped gate (tier shipped)
 
-- [ ] The tier raises file asks for `sed -i`, `tee`, `rm`, `mv`, `cp`, `mkdir`,
-      `touch` before running.
-- [ ] A denied file ask stops the command before any effect.
-- [ ] Tests per command, including `mv` (two targets) and `tee -a`.
+- [x] `shell.effects`: per-command reads/writes from the expanded arguments.
+- [x] The tier asks effects as `file:read`/`file:write`; the command ask only
+      when the effects are unknown.
+- [x] Tests in `test_shell_effects`; the tier's asks assert file refs.
+- [ ] The process path adopts the same model (its command-ask tests move to
+      file refs).
 
 ### Phase 4: bucketing
 

@@ -270,6 +270,50 @@ var
     AAsk.Options[High(AAsk.Options)] := Opt;
   end;
 
+  { One file-effect ask, in the file tools' shape and option vocabulary. An
+    effect outside the workspace is not a file ask (the path ask covers it). }
+  procedure AppendFileAsk(const AResolved: string; AWrite: Boolean);
+  var
+    LRel, LRef: string;
+  begin
+    LRel := WorkspaceRelative(ARoot, AResolved);
+    if LRel = '' then
+      Exit;
+    if AWrite then
+      LRef := 'file:write'
+    else
+      LRef := 'file:read';
+    Ref := LRef;
+    SetLength(Result, Length(Result) + 1);
+    Result[High(Result)] := Default(TApprovalAsk);
+    if AWrite then
+      Result[High(Result)].Summary := 'write ' + LRel
+    else
+      Result[High(Result)].Summary := 'read ' + LRel;
+    Result[High(Result)].Subject.Ref := LRef;
+    Result[High(Result)].Subject.Path := LRel;
+    SetLength(Result[High(Result)].Subject.Params, 1);
+    Result[High(Result)].Subject.Params[0] := LRel;
+    AddOption(Result[High(Result)], 'once', 'allow once', False, nil, False);
+    AddOption(Result[High(Result)], 'exact', 'always this exact operation',
+      True, Result[High(Result)].Subject.Params, False);
+    if DirOfRelative(LRel) = '' then
+      AddFileScope(Result[High(Result)], 'dir', 'always in the workspace', '',
+        '')
+    else
+      AddFileScope(Result[High(Result)], 'dir',
+        'always in ' + DirOfRelative(LRel) + '/', DirOfRelative(LRel), '');
+    if AWrite and (ExtOfRelative(LRel) <> '') then
+    begin
+      AddFileScope(Result[High(Result)], 'ext',
+        'always .' + ExtOfRelative(LRel) + ' files', '', ExtOfRelative(LRel));
+      AddFileScope(Result[High(Result)], 'dir_ext',
+        'always .' + ExtOfRelative(LRel) + ' files in ' +
+        DirOfRelative(LRel) + '/', DirOfRelative(LRel), ExtOfRelative(LRel));
+    end;
+    AddOption(Result[High(Result)], 'any', 'always ' + LRef, True, nil, True);
+  end;
+
   { A path-grant option: a Directory rule (subtree-inclusive), empty params
     with AnyParams set, so the directory is what matches. }
   procedure AddDirOption(var AAsk: TApprovalAsk; const AKey, ACaption,
@@ -316,7 +360,6 @@ begin
     Result[High(Result)].Subject.Ref := Ref;
     Result[High(Result)].Subject.Params :=
       Copy(Seg.Arguments, 0, Length(Seg.Arguments));
-
     AddOption(Result[High(Result)], 'once', 'allow once', False, nil, False);
     AddOption(Result[High(Result)], 'exact', 'always this exact command', True,
       Copy(Seg.Arguments, 0, Length(Seg.Arguments)), False);
@@ -328,10 +371,8 @@ begin
         'always ' + Bin + ' ' + Seg.Arguments[0] + ' ...', True,
         OneParam(Seg.Arguments[0]), True);
   end;
-  { A shell redirect is a file effect: bind it to the file tools' refs and
-    option shapes (exact / dir / ext / dir+ext / any / never), so a grant given
-    for file_write or file_read covers the shell too. Here-docs and fd
-    duplications are not file effects and are skipped. }
+  { A shell redirect is a file effect: here-docs and fd duplications are not
+    files and are skipped; an outside target is not a file ask. }
   if ARoot <> '' then
   begin
     Access := PathAccesses(Plan, ARoot, ACwd);
@@ -342,45 +383,7 @@ begin
       Op := RedirectOpOf(Plan, Access[J].Segment, Access[J].Token);
       if not RedirectEffectsFile(Op) then
         Continue;
-      Rel := WorkspaceRelative(ARoot, Access[J].Resolved);
-      if Rel = '' then
-        Continue;
-      if Op = '<' then
-        FileRef := 'file:read'
-      else
-        FileRef := 'file:write';
-      Ref := FileRef;
-      SetLength(Result, Length(Result) + 1);
-      Result[High(Result)] := Default(TApprovalAsk);
-      if FileRef = 'file:read' then
-        Result[High(Result)].Summary := 'read ' + Rel
-      else
-        Result[High(Result)].Summary := 'write ' + Rel;
-      Result[High(Result)].Subject.Ref := FileRef;
-      Result[High(Result)].Subject.Path := Rel;
-      SetLength(Result[High(Result)].Subject.Params, 1);
-      Result[High(Result)].Subject.Params[0] := Rel;
-      AddOption(Result[High(Result)], 'once', 'allow once', False, nil, False);
-      AddOption(Result[High(Result)], 'exact',
-        'always this exact operation', True,
-        Result[High(Result)].Subject.Params, False);
-      if DirOfRelative(Rel) = '' then
-        AddFileScope(Result[High(Result)], 'dir', 'always in the workspace',
-          '', '')
-      else
-        AddFileScope(Result[High(Result)], 'dir',
-          'always in ' + DirOfRelative(Rel) + '/', DirOfRelative(Rel), '');
-      if (FileRef = 'file:write') and (ExtOfRelative(Rel) <> '') then
-      begin
-        AddFileScope(Result[High(Result)], 'ext',
-          'always .' + ExtOfRelative(Rel) + ' files', '',
-          ExtOfRelative(Rel));
-        AddFileScope(Result[High(Result)], 'dir_ext',
-          'always .' + ExtOfRelative(Rel) + ' files in ' +
-          DirOfRelative(Rel) + '/', DirOfRelative(Rel), ExtOfRelative(Rel));
-      end;
-      AddOption(Result[High(Result)], 'any', 'always ' + FileRef, True, nil,
-        True);
+      AppendFileAsk(Access[J].Resolved, Op <> '<');
     end;
   end;
   { Path asks: for each access that leaves the workspace, one ask whose subject
