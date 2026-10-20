@@ -29,6 +29,7 @@ type
     procedure TestWordTilde;
     { Parser }
     procedure TestSimpleCommand;
+    procedure TestCommandSpan;
     procedure TestAssignmentPrefix;
     procedure TestPipeline;
     procedure TestPrecedence;
@@ -215,6 +216,33 @@ begin
     AssertEquals('words', 3, Length(C.Words));
     AssertEquals('arg 1', 'hello', C.Words[1].Parts[0].Text);
     AssertEquals('arg 2', 'world', C.Words[2].Parts[0].Text);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TShellParserTest.TestCommandSpan;
+const
+  Src = 'echo one > out.txt; cd sub; cat "a b"';
+var
+  S: TScript;
+  function Span(const AIndex: Integer): string;
+  var
+    C: TCommand;
+  begin
+    C := S.Root.Items[AIndex].Pipelines[0].Commands[0];
+    Result := Copy(Src, C.Start, C.Len);
+  end;
+begin
+  S := ParseOk(Src);
+  try
+    { A simple command's span covers its words and redirects, not the operator. }
+    AssertEquals('first', 'echo one > out.txt', Span(0));
+    AssertEquals('second', 'cd sub', Span(1));
+    AssertEquals('third keeps quotes', 'cat "a b"', Span(2));
+    { A compound command stays unspanned; its body's simple commands do not. }
+    AssertEquals('unspanned by default', 0,
+      S.Root.Items[0].Pipelines[0].Commands[0].Start - 1);
   finally
     S.Free;
   end;

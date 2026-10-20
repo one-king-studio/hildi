@@ -111,13 +111,40 @@ effects are not knowable); bringing it to the same model is phase 3.
   Outside access remains the process tier's business, where `PathAccesses`
   tracks a top-level `cd` for the path asks.
 
-## 3. The dialog (phase 2)
+## 3. The dialog (shipped)
 
-- When `Script <> ''`, the body renders the script instead of `Summary`,
-  wrapped to the content width, **scrolled** so the focus span is visible.
-  PageUp/PageDown (or the scroll keys the modal already uses) move it.
-- The focus span is drawn with the bold/active attribute; everything else
-  normal. A marker (e.g. `▸`) sits in the gutter on the focus line.
+`TApprovalModal` renders the ask's `Script` (the whole command), so the
+operator reads the command in context rather than a reconstructed segment:
+
+- The script is wrapped to the details band (honouring newlines, hard-breaking
+  a long word), and the band shows at most **8 rows**; the rest scrolls.
+- The band **opens on the focus**: when the focus row is past the eighth, the
+  view starts at `focus - 4` (clamped).
+- The focus span is drawn in bold (the soft accent on the sunken band);
+  everything else is normal text. A `▸` sits in the band's left pad on the
+  focus row.
+- PageUp/PageDown scroll a page; the wheel scrolls three rows.
+- For an **effect** ask (one with `Subject.Path`, e.g. `file:read`), the
+  summary line is shown *above* the script — the path is what is approved,
+  the script is its context. For a command ask the script alone is shown.
+- With no `Script` (an older producer) the summary is wrapped and compacted
+  exactly as before.
+
+`LayoutScript` (modal-internal) converts the ask's 1-based **byte** span into
+characters once (a span ends on a token boundary, hence a character boundary),
+then maps each wrapped row's character range against the span, producing the
+per-row highlight window. The layout is cached per band width.
+
+## 3a. Offsets on the wire
+
+- The splitter records `TCommandSegment.Start/Len` from its token spans
+  (words and redirects, not the operator that introduced the segment).
+- The tier's parser records the same span on a simple `TCommand`
+  (`shell.ast` + `shell.lexer` `EndOffset`), and the interpreter copies it
+  onto `TShellCall.Start/Len`; the gate stamps every ask with the script and
+  the call's span.
+- `session.protocol` sends `script`, `focus_start`, `focus_len` additively
+  (absent = no focus), so an older client keeps rendering `Summary`.
 - The modal's height is capped by the terminal; the scroll offset starts at the
   focus line's block.
 - `Summary` remains the fallback when `Script` is empty.

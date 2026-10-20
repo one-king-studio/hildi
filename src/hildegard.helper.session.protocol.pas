@@ -517,6 +517,15 @@ begin
         PutStr(O, 'ask_id', E.AskId);
         PutStr(O, 'summary', E.Ask.Summary);
         PutStr(O, 'reason', E.Ask.Reason);
+        { Additive: an older client still renders Summary when the script is
+          absent. }
+        if E.Ask.Script <> '' then
+          PutStr(O, 'script', E.Ask.Script);
+        if E.Ask.FocusLen > 0 then
+        begin
+          PutInt(O, 'focus_start', E.Ask.FocusStart);
+          PutInt(O, 'focus_len', E.Ask.FocusLen);
+        end;
         O.Add('options', EncodeOptions(E.Ask.Options));
       end;
     ekApprovalResolved:
@@ -572,6 +581,15 @@ begin
         PutStr(O, 'ask_id', E.AskId);
         PutStr(O, 'summary', E.Ask.Summary);
         PutStr(O, 'reason', E.Ask.Reason);
+        { Additive: an older client still renders Summary when the script is
+          absent. }
+        if E.Ask.Script <> '' then
+          PutStr(O, 'script', E.Ask.Script);
+        if E.Ask.FocusLen > 0 then
+        begin
+          PutInt(O, 'focus_start', E.Ask.FocusStart);
+          PutInt(O, 'focus_len', E.Ask.FocusLen);
+        end;
         O.Add('options', EncodeOptions(E.Ask.Options));
       end;
     ekCheckpointCommitted:
@@ -622,6 +640,9 @@ begin
         E.Ask := Default(TApprovalAsk);
         E.Ask.Summary := OptStr(O, 'summary');
         E.Ask.Reason := OptStr(O, 'reason');
+        E.Ask.Script := OptStr(O, 'script');
+        E.Ask.FocusStart := OptInt64(O, 'focus_start', 0);
+        E.Ask.FocusLen := OptInt64(O, 'focus_len', 0);
         DecodeOptions(O, E.Ask);
       end;
     ekApprovalResolved:
@@ -684,6 +705,9 @@ begin
         E.Ask := Default(TApprovalAsk);
         E.Ask.Summary := OptStr(O, 'summary');
         E.Ask.Reason := OptStr(O, 'reason');
+        E.Ask.Script := OptStr(O, 'script');
+        E.Ask.FocusStart := OptInt64(O, 'focus_start', 0);
+        E.Ask.FocusLen := OptInt64(O, 'focus_len', 0);
         DecodeOptions(O, E.Ask);
       end;
     ekCheckpointCommitted:

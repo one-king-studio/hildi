@@ -72,6 +72,10 @@ type
   TCommand = class
   public
     Kind: TCommandKind;
+    { The construct's span in the source, 1-based bytes, Len 0 when unknown.
+      A simple command covers its words and redirects (not the operator that
+      introduced it); a compound command is not spanned. }
+    Start, Len: Integer;
     { simple }
     Assignments: array of TAssignment;
     Words: array of TWord;

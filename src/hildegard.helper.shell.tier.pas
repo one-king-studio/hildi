@@ -7,10 +7,10 @@ unit hildegard.helper.shell.tier;
   otherwise it declines and the process executor runs the command exactly as
   before, before any side effect.
 
-  The gate reuses run_command's refs (`run_command:<bin>`) and option shapes,
-  so existing grants apply unchanged, and it inherits the model's reason into
-  every ask. `tool`/`mcp` reach the same gate, and the dispatched tool still
-  passes its own. }
+  The gate asks about effects, in the file tools' vocabulary, so a file grant
+  covers the command; an effect it cannot name (`tool`/`mcp`, unknown names)
+  keeps the command-level ask. It inherits the model's reason into every ask,
+  and names the whole script plus the span being approved. }
 
 {$mode delphi}{$H+}
 
@@ -44,6 +44,8 @@ type
     FCmd: TBuiltinCommands;
     FRegistry: TShellRegistry;
     FReason: string;
+    { The script being run, for the asks' Script field. }
+    FScript: string;
     FDeny: string;
     FLastError: string;
     function Gate(const ACall: TShellCall): Boolean;
@@ -300,10 +302,15 @@ var
     AList[High(AList)] := AValue;
   end;
 
+  { Every ask names the whole script and the span it is about, so the dialog
+    can show the operator the command in context. }
   procedure AppendAsk(const AAsk: TApprovalAsk);
   begin
     SetLength(Result, Length(Result) + 1);
     Result[High(Result)] := AAsk;
+    Result[High(Result)].Script := FScript;
+    Result[High(Result)].FocusStart := ACall.Start;
+    Result[High(Result)].FocusLen := ACall.Len;
   end;
 
 begin
@@ -636,6 +643,7 @@ begin
   AExitCode := 0;
   FLastError := '';
   FReason := AReason;
+  FScript := ACommand;
   Result := False;
   if not ParseShellScript(ACommand, S, E) then
   begin

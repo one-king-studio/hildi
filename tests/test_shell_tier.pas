@@ -57,6 +57,7 @@ type
     procedure TestToolRefusals;
     procedure TestCdPersists;
     procedure TestFileAskNamesTheWorkingDirectory;
+    procedure TestAskNamesTheScriptAndItsSpan;
     procedure TestCdOutsideIsRefused;
   end;
 
@@ -331,6 +332,21 @@ begin
     FApproval.Asked[0].Subject.Path);
   AssertTrue('the ask names the cwd',
     Pos('cwd sub', FApproval.Asked[0].Summary) > 0);
+end;
+
+procedure TShellTierTest.TestAskNamesTheScriptAndItsSpan;
+const
+  Src = 'cat a.txt; cat b.txt';
+var
+  OutText: string;
+begin
+  AssertTrue('ran', RunTier(Src, OutText));
+  AssertEquals('two asks', 2, Length(FApproval.Asked));
+  AssertEquals('script', Src, FApproval.Asked[0].Script);
+  AssertEquals('first focus', 'cat a.txt',
+    Copy(Src, FApproval.Asked[0].FocusStart, FApproval.Asked[0].FocusLen));
+  AssertEquals('second focus', 'cat b.txt',
+    Copy(Src, FApproval.Asked[1].FocusStart, FApproval.Asked[1].FocusLen));
 end;
 
 procedure TShellTierTest.TestCdOutsideIsRefused;

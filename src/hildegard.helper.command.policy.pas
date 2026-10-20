@@ -48,6 +48,11 @@ type
 
   TCommandSegment = record
     Text: string;                  // reconstructed segment text
+    { The segment's span in the raw command: 1-based bytes, Len 0 when the
+      tokenizer could not place it. Covers the words and redirects, not the
+      operator that introduced it. }
+    Start: Integer;
+    Len: Integer;
     Op: TCommandOp;                // operator that introduced the segment
     Executable: string;            // argv[0] token as written, '' if none
     Arguments: TCommandArgArray;   // argv[1..], quotes removed
@@ -76,6 +81,7 @@ type
   TTokenKind = (tkWord, tkOp, tkRedirect);
   TToken = record
     Kind: TTokenKind;
+    StartPos, EndPos: Integer;   // 1-based byte span in the raw command; 0 = none
     Text: string;          // word text for tkWord; operator text otherwise
     Op: TCommandOp;        // for tkOp
     Unresolvable: Boolean; // tkWord had $ or ` outside single quotes
@@ -128,9 +134,10 @@ function ParseCommand(const ACommand: string;
   ASyntax: TShellSyntax): TCommandPlan;
 var
   S: string;
-  N, I, J, K: Integer;
+  N, I, J, K, TokStart, TokCount: Integer;
   C: Char;
   Tokens: TTokenArray;
+  SegStart, SegEnd: Integer;
 
   procedure Push(const T: TToken);
   begin
@@ -293,6 +300,8 @@ begin
   while I <= N do
   begin
     C := S[I];
+    TokStart := I;
+    TokCount := Length(Tokens);
     if (C = ' ') or (C = #9) then
       Inc(I)
     else if (C = #10) or (C = ';') then
@@ -356,6 +365,13 @@ begin
       if not ReadWord(Tokens[High(Tokens)], Result.ParseError) then
         Exit;
     end;
+    { Every branch above consumes at most one token, so the span is the bytes
+      this iteration covered. }
+    if Length(Tokens) > TokCount then
+    begin
+      Tokens[High(Tokens)].StartPos := TokStart;
+      Tokens[High(Tokens)].EndPos := I - 1;
+    end;
   end;
 
   { Build segments. }
@@ -374,8 +390,16 @@ begin
     end;
 
     { Consume words and redirects until the next operator. }
+    SegStart := 0;
+    SegEnd := 0;
     while (J <= High(Tokens)) and (Tokens[J].Kind <> tkOp) do
     begin
+      if Tokens[J].StartPos > 0 then
+      begin
+        if SegStart = 0 then
+          SegStart := Tokens[J].StartPos;
+        SegEnd := Tokens[J].EndPos;
+      end;
       if Tokens[J].Kind = tkRedirect then
       begin
         if Tokens[J].InlineTarget <> '' then
@@ -399,6 +423,8 @@ begin
             Exit;
           end;
           Inc(J);
+          if Tokens[J].StartPos > 0 then
+            SegEnd := Tokens[J].EndPos;
           SetLength(Result.Segments[K].Redirects,
             Length(Result.Segments[K].Redirects) + 1);
           with Result.Segments[K].Redirects[
@@ -447,6 +473,11 @@ begin
         end;
       end;
       Inc(J);
+    end;
+    if SegStart > 0 then
+    begin
+      Result.Segments[K].Start := SegStart;
+      Result.Segments[K].Len := SegEnd - SegStart + 1;
     end;
   end;
 

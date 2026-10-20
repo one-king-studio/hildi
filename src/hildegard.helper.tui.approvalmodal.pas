@@ -39,11 +39,19 @@ interface
 uses
   hildegard.helper.tui.base, hildegard.helper.tui.input,
   hildegard.helper.tui.surface, hildegard.helper.tui.widget,
-  hildegard.helper.tui.theme,
+  hildegard.helper.tui.theme, hildegard.helper.tui.compact,
   hildegard.helper.approval;
 
 type
   TApprovalChoiceEvent = procedure(const AChoice: TApprovalChoice) of object;
+
+  { One display row of the ask's script: the wrapped text and the part of it
+    that falls inside the focus span (1-based within Text; HiLen 0 = outside). }
+  TScriptRow = record
+    Text: UnicodeString;
+    HiStart, HiLen: Integer;
+  end;
+  TScriptRowArray = array of TScriptRow;
 
   TApprovalModal = class(TWidget)
   private
@@ -55,6 +63,20 @@ type
     FChoice: TApprovalChoice;
     FOnChoose: TApprovalChoiceEvent;
     FHover: Integer;
+    { The script laid out for the current width, the row holding the focus, and
+      the first row shown. Empty when the ask has no script (older producer). }
+    FScriptRows: TScriptRowArray;
+    FFocusRow: Integer;
+    FScroll: Integer;
+    FScriptWidth: Integer;
+    procedure EnsureLayout(AWidth: Integer);
+    function ScriptBandRows: Integer;
+    procedure ScrollBy(ADelta: Integer);
+    function SummaryLines(AWidth: Integer): TUnicodeLines;
+    { The summary is shown when there is no script (an older producer), and
+      beside one for an effect ask (`file:read` and friends), where the path is
+      the thing being approved and the script is its context. }
+    function ShowSummary: Boolean;
     function RightCol(const AText: UnicodeString): Integer;
     function RowOptionBase: Integer;
     function HitTest(AX, AY: Integer): Integer;
@@ -74,6 +96,8 @@ type
     { The option the arrow is on; accepting is a separate action. }
     property Selected: Integer read FSelected;
     property Answered: Boolean read FAnswered;
+    { The first script row the details band shows. }
+    property Scroll: Integer read FScroll;
     property Choice: TApprovalChoice read FChoice;
     property OnChoose: TApprovalChoiceEvent read FOnChoose write FOnChoose;
   end;
@@ -81,8 +105,7 @@ type
 implementation
 
 uses
-  SysUtils,
-  hildegard.helper.tui.grapheme, hildegard.helper.tui.compact;
+  SysUtils, hildegard.helper.tui.grapheme;
 
 const
   { Rows after the last option: a blank, the scope line, the separator, the
@@ -99,10 +122,211 @@ const
   ReasonLabelW = 8;
   { Inline padding inside the sunken details band, on each side. }
   DetailPad = 2;
+  { The script band never shows more rows than this; PageUp/PageDown (or the
+    wheel) scroll the rest. }
+  MaxScriptRows = 8;
   { What the pointer is over. }
   HoverNone = -1;
   HitAccept = -2;
   HitDeny = -3;
+
+function WrapPlain(const AText: UnicodeString; AWidth: Integer): TUnicodeLines; forward;
+
+{ Word-wrap the script to AWidth columns, honouring explicit newlines and
+  hard-breaking a word longer than the line, marking the characters inside the
+  ask's focus span. The span is 1-based bytes into the UTF-8 script and the
+  layout is in characters, so it is converted once: a span always ends on a
+  token boundary, hence on a character boundary. AFocusRow = the row holding
+  the span's first character, -1 when there is no focus. }
+procedure LayoutScript(const AScript: string; AFocusStart, AFocusLen,
+  AWidth: Integer; out ARows: TScriptRowArray; out AFocusRow: Integer);
+var
+  U: UnicodeString;
+  F0, F1, RowCount, ParaStart, I: Integer;
+
+  procedure Push(const AText: UnicodeString; AFrom, ATo: Integer);
+  var
+    Row: TScriptRow;
+    HS, HE: Integer;
+  begin
+    Row := Default(TScriptRow);
+    Row.Text := AText;
+    if (F1 >= F0) and (ATo >= AFrom) then
+    begin
+      HS := F0;
+      if HS < AFrom then
+        HS := AFrom;
+      HE := F1;
+      if HE > ATo then
+        HE := ATo;
+      if HS <= HE then
+      begin
+        Row.HiStart := HS - AFrom + 1;
+        Row.HiLen := HE - HS + 1;
+      end;
+      if (AFocusRow < 0) and (F0 >= AFrom) and (F0 <= ATo) then
+        AFocusRow := RowCount;
+    end;
+    SetLength(ARows, RowCount + 1);
+    ARows[RowCount] := Row;
+    Inc(RowCount);
+  end;
+
+  procedure EmitPara(const APara: UnicodeString; const AParaStart: Integer);
+  var
+    C: TClusterArray;
+    Prefix: array of Integer;
+    K, J, Q, W, CurW, LastSpace, Start: Integer;
+
+    function Slice(AFrom, ATo: Integer): UnicodeString;
+    var
+      X: Integer;
+    begin
+      Result := '';
+      for X := AFrom to ATo do
+        Result := Result + C[X];
+    end;
+
+    procedure Emit(AFrom, ATo: Integer);
+    begin
+      if AFrom > ATo then
+        Push('', AParaStart, AParaStart - 1)
+      else
+        Push(Slice(AFrom, ATo), AParaStart + Prefix[AFrom],
+          AParaStart + Prefix[ATo + 1] - 1);
+    end;
+
+  begin
+    C := Clusters(APara);
+    if Length(C) = 0 then
+    begin
+      Push('', AParaStart, AParaStart - 1);
+      Exit;
+    end;
+    SetLength(Prefix, Length(C) + 1);
+    Prefix[0] := 0;
+    for Q := 0 to High(C) do
+      Prefix[Q + 1] := Prefix[Q] + Length(C[Q]);
+    Start := 0;
+    CurW := 0;
+    LastSpace := -1;
+    K := 0;
+    while K <= High(C) do
+    begin
+      W := ClusterWidth(C[K]);
+      if (CurW + W > AWidth) and (K > Start) then
+      begin
+        if LastSpace > Start then
+        begin
+          Emit(Start, LastSpace - 1);
+          Start := LastSpace + 1;
+        end
+        else
+        begin
+          Emit(Start, K - 1);
+          Start := K;
+        end;
+        CurW := 0;
+        LastSpace := -1;
+        for J := Start to K - 1 do
+        begin
+          Inc(CurW, ClusterWidth(C[J]));
+          if C[J] = ' ' then
+            LastSpace := J;
+        end;
+        Continue;
+      end;
+      if C[K] = ' ' then
+        LastSpace := K;
+      Inc(CurW, W);
+      Inc(K);
+    end;
+    Emit(Start, High(C));
+  end;
+
+begin
+  ARows := nil;
+  AFocusRow := -1;
+  RowCount := 0;
+  U := UnicodeString(AScript);
+  F0 := 1;
+  if AFocusStart > 1 then
+    F0 := Length(UnicodeString(Copy(AScript, 1, AFocusStart - 1))) + 1;
+  if (AFocusLen > 0) and (AFocusStart > 0) then
+    F1 := F0 + Length(UnicodeString(Copy(AScript, AFocusStart, AFocusLen))) - 1
+  else
+    F1 := F0 - 1;
+
+  ParaStart := 1;
+  I := 1;
+  while I <= Length(U) do
+  begin
+    if (U[I] = #13) or (U[I] = #10) then
+    begin
+      EmitPara(Copy(U, ParaStart, I - ParaStart), ParaStart);
+      if (U[I] = #13) and (I < Length(U)) and (U[I + 1] = #10) then
+        Inc(I);
+      ParaStart := I + 1;
+    end;
+    Inc(I);
+  end;
+  EmitPara(Copy(U, ParaStart, Length(U) - ParaStart + 1), ParaStart);
+end;
+
+procedure TApprovalModal.EnsureLayout(AWidth: Integer);
+begin
+  if (FAsk.Script = '') or (AWidth < 1) then
+  begin
+    FScriptRows := nil;
+    FFocusRow := -1;
+    FScroll := 0;
+    FScriptWidth := 0;
+    Exit;
+  end;
+  if (FScriptWidth > 0) and (AWidth = FScriptWidth) then
+    Exit;
+  LayoutScript(FAsk.Script, FAsk.FocusStart, FAsk.FocusLen, AWidth,
+    FScriptRows, FFocusRow);
+  FScriptWidth := AWidth;
+  FScroll := 0;
+  { Open on the command being approved, when the script is longer than the
+    band. }
+  if FFocusRow >= MaxScriptRows then
+    FScroll := FFocusRow - (MaxScriptRows div 2);
+  ScrollBy(0);
+end;
+
+function TApprovalModal.SummaryLines(AWidth: Integer): TUnicodeLines;
+begin
+  Result := WrapPlain(CompactLines(UnicodeString(FAsk.Summary),
+    DefaultCompactOptions), AWidth);
+end;
+
+function TApprovalModal.ShowSummary: Boolean;
+begin
+  Result := (FAsk.Script = '') or (FAsk.Subject.Path <> '');
+end;
+
+function TApprovalModal.ScriptBandRows: Integer;
+begin
+  Result := Length(FScriptRows);
+  if Result > MaxScriptRows then
+    Result := MaxScriptRows;
+end;
+
+procedure TApprovalModal.ScrollBy(ADelta: Integer);
+var
+  Max: Integer;
+begin
+  Inc(FScroll, ADelta);
+  Max := Length(FScriptRows) - MaxScriptRows;
+  if Max < 0 then
+    Max := 0;
+  if FScroll > Max then
+    FScroll := Max;
+  if FScroll < 0 then
+    FScroll := 0;
+end;
 
 function ScopeName(AScope: TApprovalScope): string;
 begin
@@ -296,8 +520,14 @@ begin
   ContentWidths(FBounds.W, ReasonW, DetailW);
   R := Length(WrapPlain(CompactLines(UnicodeString(FAsk.Reason),
     DefaultCompactOptions), ReasonW));
-  D := Length(WrapPlain(CompactLines(UnicodeString(FAsk.Summary),
-    DefaultCompactOptions), DetailW));
+  D := 0;
+  if ShowSummary then
+    Inc(D, Length(SummaryLines(DetailW)));
+  if FAsk.Script <> '' then
+  begin
+    EnsureLayout(DetailW);
+    Inc(D, ScriptBandRows);
+  end;
   if R < 1 then
     R := 1;
   if D < 1 then
@@ -377,8 +607,14 @@ begin
   ContentWidths(W, ReasonW, DetailW);
   R := Length(WrapPlain(CompactLines(UnicodeString(FAsk.Reason),
     DefaultCompactOptions), ReasonW));
-  D := Length(WrapPlain(CompactLines(UnicodeString(FAsk.Summary),
-    DefaultCompactOptions), DetailW));
+  D := 0;
+  if ShowSummary then
+    Inc(D, Length(SummaryLines(DetailW)));
+  if FAsk.Script <> '' then
+  begin
+    EnsureLayout(DetailW);
+    Inc(D, ScriptBandRows);
+  end;
   if R < 1 then
     R := 1;
   if D < 1 then
@@ -394,9 +630,12 @@ end;
 procedure TApprovalModal.Render(const S: ISurface);
 var
   L, R, T, B, N, I, X, Row, InnerL, InnerR, Option0: Integer;
+  D, Col, RowIdx: Integer;
   ReasonW, DetailW: Integer;
   Bg, BorderAttr, MutedAttr, ActiveAttr, NormalAttr, DetailAttr: TAttr;
+  FocusAttr: TAttr;
   Key: UnicodeString;
+  SRow: TScriptRow;
   ReasonLines, DetailLines: TUnicodeLines;
 
   procedure Text(ACol, ARow: Integer; const AText: UnicodeString;
@@ -471,19 +710,56 @@ begin
     Inc(Row);
   end;
 
-  { A blank line, then the tool details on the sunken background, wrapped and
-    compacted, with an inline pad on each side. }
+  { A blank line, then the details on the sunken background, with an inline
+    pad on each side. With a script, the whole command is shown, scrolled to
+    the focus and with the focus span in bold; without one (an older producer)
+    the summary is wrapped and compacted. }
   Inc(Row);
   if Row < B then
   begin
     DetailAttr := OnBg(FTheme.Text, FTheme.SunkenBg);
-    for I := 0 to High(DetailLines) do
+    if ShowSummary then
+      for I := 0 to High(DetailLines) do
+      begin
+        if Row >= B then
+          Break;
+        S.FillRect(Rc(InnerL, Row, InnerR - InnerL + 1, 1), DetailAttr);
+        Text(InnerL + DetailPad, Row, DetailLines[I], DetailAttr);
+        Inc(Row);
+      end;
+    if FAsk.Script <> '' then
     begin
-      if Row >= B then
-        Break;
-      S.FillRect(Rc(InnerL, Row, InnerR - InnerL + 1, 1), DetailAttr);
-      Text(InnerL + DetailPad, Row, DetailLines[I], DetailAttr);
-      Inc(Row);
+      EnsureLayout(DetailW);
+      FocusAttr := OnBg(WithStyle(FTheme.AccentSoft, [sfBold]), FTheme.SunkenBg);
+      D := ScriptBandRows;
+      for I := 0 to D - 1 do
+      begin
+        if Row >= B then
+          Break;
+        RowIdx := FScroll + I;
+        if RowIdx > High(FScriptRows) then
+          Break;
+        S.FillRect(Rc(InnerL, Row, InnerR - InnerL + 1, 1), DetailAttr);
+        if RowIdx = FFocusRow then
+          Text(InnerL + 1, Row, '▸', MutedAttr);
+        SRow := FScriptRows[RowIdx];
+        if SRow.HiLen > 0 then
+        begin
+          Col := InnerL + DetailPad;
+          if SRow.HiStart > 1 then
+          begin
+            Text(Col, Row, Copy(SRow.Text, 1, SRow.HiStart - 1), DetailAttr);
+            Inc(Col, StringWidth(Copy(SRow.Text, 1, SRow.HiStart - 1)));
+          end;
+          Text(Col, Row, Copy(SRow.Text, SRow.HiStart, SRow.HiLen), FocusAttr);
+          Inc(Col, StringWidth(Copy(SRow.Text, SRow.HiStart, SRow.HiLen)));
+          Text(Col, Row, Copy(SRow.Text, SRow.HiStart + SRow.HiLen, MaxInt),
+            DetailAttr);
+        end
+        else
+          Text(InnerL + DetailPad, Row, SRow.Text, DetailAttr);
+        Inc(Row);
+      end;
     end;
   end;
 
@@ -598,6 +874,17 @@ begin
       FHover := Hit;
       Exit(True);
     end;
+    if (E.Mouse.Button = mbWheelUp) or (E.Mouse.Button = mbWheelDown) then
+    begin
+      if FAsk.Script = '' then
+        Exit(False);
+      EnsureLayout(FBounds.W - 2 - 2 * DetailPad);
+      if E.Mouse.Button = mbWheelUp then
+        ScrollBy(-3)
+      else
+        ScrollBy(3);
+      Exit(True);
+    end;
     if E.Mouse.Button = mbLeft then
     begin
       if Hit = HitAccept then
@@ -636,6 +923,18 @@ begin
       begin
         if FSelected < Length(FAsk.Options) - 1 then
           Inc(FSelected);
+        Exit(True);
+      end;
+    kkPageUp:
+      begin
+        EnsureLayout(FBounds.W - 2 - 2 * DetailPad);
+        ScrollBy(-(MaxScriptRows - 1));
+        Exit(True);
+      end;
+    kkPageDown:
+      begin
+        EnsureLayout(FBounds.W - 2 - 2 * DetailPad);
+        ScrollBy(MaxScriptRows - 1);
         Exit(True);
       end;
     kkEnter:

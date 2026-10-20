@@ -1004,6 +1004,8 @@ begin
             Call.Args := Args;
             Call.Stdin := EffStdin;
             Call.Cwd := FCwd;
+            Call.Start := AC.Start;
+            Call.Len := AC.Len;
             Call.Env := CallEnv;
             if Assigned(FGate) and (not FGate(Call)) then
               Result := ShellResultErr(Name + ': denied' + #10, 126)

@@ -270,6 +270,17 @@ var
     AAsk.Options[High(AAsk.Options)] := Opt;
   end;
 
+  { The dialog shows the whole command and the span this ask is about. }
+  procedure StampFocus(var AAsk: TApprovalAsk; ASegIndex: Integer);
+  begin
+    AAsk.Script := ACommand;
+    if (ASegIndex >= 0) and (ASegIndex <= High(Plan.Segments)) then
+    begin
+      AAsk.FocusStart := Plan.Segments[ASegIndex].Start;
+      AAsk.FocusLen := Plan.Segments[ASegIndex].Len;
+    end;
+  end;
+
   { One file-effect ask, in the file tools' shape and option vocabulary. An
     effect outside the workspace is not a file ask (the path ask covers it). }
   procedure AppendFileAsk(const AResolved: string; AWrite: Boolean);
@@ -370,6 +381,7 @@ begin
       AddOption(Result[High(Result)], 'prefix',
         'always ' + Bin + ' ' + Seg.Arguments[0] + ' ...', True,
         OneParam(Seg.Arguments[0]), True);
+    StampFocus(Result[High(Result)], I);
   end;
   { A shell redirect is a file effect: here-docs and fd duplications are not
     files and are skipped; an outside target is not a file ask. }
@@ -384,6 +396,7 @@ begin
       if not RedirectEffectsFile(Op) then
         Continue;
       AppendFileAsk(Access[J].Resolved, Op <> '<');
+      StampFocus(Result[High(Result)], Access[J].Segment);
     end;
   end;
   { Path asks: for each access that leaves the workspace, one ask whose subject
@@ -402,6 +415,7 @@ begin
         Access[J].Resolved;
       Result[High(Result)].Subject.Ref := PathRef;
       Result[High(Result)].Subject.Path := Access[J].Resolved;
+      StampFocus(Result[High(Result)], Access[J].Segment);
       { The path also rides Params, so an `exact` rule (ParamsEqual) can name
         this precise path. }
       SetLength(Result[High(Result)].Subject.Params, 1);

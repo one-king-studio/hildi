@@ -42,6 +42,10 @@ type
     Env: TShellEnv;
     Reads: TStringArray;
     Writes: TStringArray;
+    { The simple command's span in the script, 1-based bytes, Len 0 when
+      unknown, so a gate can show the operator which part it is approving. }
+    Start: Integer;
+    Len: Integer;
   end;
 
   TShellResult = record

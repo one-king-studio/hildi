@@ -19,14 +19,20 @@
       raise no command ask; their redirects still ask. The `never` option is
       removed — a persistent deny is a rule, not a prompt choice.
 
-### Phase 2: the full-script review
+### Phase 2: the full-script review (shipped)
 
-- [ ] Splitter token spans; `TCommandSegment.Start/Len`; `TApprovalAsk.Script`
+- [x] Splitter token spans; `TCommandSegment.Start/Len`; `TApprovalAsk.Script`
       and `FocusStart/FocusLen`; protocol encode/decode (additive).
-- [ ] AST spans for the tier's asks.
-- [ ] The modal renders the script, scrolls to the focus, and draws the focus
-      span in bold.
-- [ ] Tests: spans, the modal's scroll offset, the fallback to `Summary`.
+- [x] AST spans for the tier's asks: the lexer's `EndOffset`, the parser's
+      simple-command span, `TShellCall.Start/Len`.
+- [x] The modal renders the script (8-row band), scrolls to the focus, and
+      draws the focus span in bold with a `▸` marker; PageUp/PageDown and the
+      wheel scroll.
+- [x] An effect ask keeps its summary line above the script (the path is what
+      is approved).
+- [x] Tests: spans (splitter, parser, tier, protocol), the modal's focus
+      highlight, the scroll offset and the scroll keys, the fallback to
+      `Summary`.
 
 ### Phase 3: the effect-scoped gate (tier shipped)
 

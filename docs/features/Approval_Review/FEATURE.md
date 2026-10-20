@@ -1,9 +1,10 @@
 # Feature: Approval Review
 
-**Status:** Phase 1 shipped (redirects are named and bound to the file tools;
-pure commands are ungated) and the **effect-scoped gate** is live on the
-builtin tier: a granted `file:read`/`file:write` scope is the approval. The
-full-script review and the process-tier effects are specified here.
+**Status:** Phases 1 and 2 shipped: redirects are named and bound to the file
+tools, pure commands are ungated, the **effect-scoped gate** is live on the
+builtin tier (a granted `file:read`/`file:write` scope is the approval), and
+the dialog shows the **whole command**, scrolled to the span being approved
+and bolding it. The process-tier effects and bucketing remain.
 
 **Related:** [Command Tool](../Command_Tool/Command_Tool_v1.SPEC.md) ·
 [Approval Path Scoping](../Approval_Path_Scoping/Approval_Path_Scoping_v1.SPEC.md) ·

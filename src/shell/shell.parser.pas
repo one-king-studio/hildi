@@ -23,6 +23,8 @@ type
     FPendingHere: array of TRedirect;
     FError: TShellParseError;
     FHasError: Boolean;
+    { The source end of the most recently consumed token. }
+    FLastEnd: Integer;
     procedure Advance;
     procedure Fail(const AMsg: string; const ATok: TToken);
     procedure FailWord(const AMsg: string);
@@ -99,6 +101,8 @@ end;
 
 procedure TShellParser.Advance;
 begin
+  if (FCur.Offset > 0) and (FCur.EndOffset >= FCur.Offset) then
+    FLastEnd := FCur.EndOffset;
   FCur := FNext;
   FNext := FLexer.Next;
   ConsumeHereDocs(FCur);
@@ -409,6 +413,7 @@ var
   Name, RawValue: string;
   InAssignment: Boolean;
   N: Integer;
+  StartOff: Integer;
 
   procedure AppendWord(AW: TWord);
   var
@@ -439,6 +444,7 @@ var
 
 begin
   Result := FScript.NewCommand(ckSimple);
+  StartOff := FCur.Offset;
   InAssignment := True;
   while not FHasError do
   begin
@@ -484,6 +490,11 @@ begin
   N := Length(Result.Words) + Length(Result.Assignments) + Length(Result.Redirects);
   if N = 0 then
     FailWord('expected a command');
+  Result.Start := StartOff;
+  if FLastEnd >= StartOff then
+    Result.Len := FLastEnd - StartOff + 1
+  else
+    Result.Len := 0;
 end;
 
 function TShellParser.ParseRedirect(out ARedirect: TRedirect): Boolean;

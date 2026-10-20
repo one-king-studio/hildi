@@ -65,6 +65,13 @@ type
 
   TApprovalAsk = record
     Summary: string;
+    { The whole command the ask came from, and the span within it that this ask
+      is about (1-based bytes; FocusLen 0 = no focus). The dialog renders the
+      script, scrolled to the focus, and marks it. '' = an older producer, so
+      the dialog falls back to Summary. }
+    Script: string;
+    FocusStart: Integer;
+    FocusLen: Integer;
     { The model's stated reason for the call, shown in the dialog. '' when the
       tool could not read one; the dialog then shows a placeholder. }
     Reason: string;

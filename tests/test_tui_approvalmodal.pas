@@ -48,6 +48,10 @@ type
     procedure TestModalKeybindingsAreRightAlignedAndDim;
     procedure TestModalShowsTheScopeAndFooter;
     procedure TestModalDetailsUseTheSunkenBackground;
+    procedure TestModalShowsTheScriptAndBoldsTheFocus;
+    procedure TestModalEffectAskShowsThePathAndTheScript;
+    procedure TestModalScrollsToTheFocus;
+    procedure TestModalScrollKeysAndWheel;
     procedure TestModalShowsTheReason;
     procedure TestModalReasonPlaceholder;
     procedure TestModalReasonWraps;
@@ -388,6 +392,151 @@ begin
     { The modal is drawn after the dim, so its own cells are not dimmed. }
     AssertFalse('the modal is not dimmed',
       sfDim in Surface.CellAt(5, 3).Attr.Style);
+  finally
+    Modal.Free;
+    Surface.Free;
+  end;
+end;
+
+function ScriptAsk(const AScript: string; const AFocus: string): TApprovalAsk;
+begin
+  Result := Default(TApprovalAsk);
+  Result.Summary := AFocus;
+  Result.Script := AScript;
+  Result.FocusStart := Pos(AFocus, AScript);
+  Result.FocusLen := Length(AFocus);
+  SetLength(Result.Options, 2);
+  Result.Options[0].Key := 'once';
+  Result.Options[0].Caption := 'allow once';
+  Result.Options[1].Key := 'any';
+  Result.Options[1].Caption := 'always';
+end;
+
+procedure TApprovalModalTest.TestModalShowsTheScriptAndBoldsTheFocus;
+var
+  Modal: TApprovalModal;
+  Surface: TSurfaceMemory;
+  Row, Ch: UnicodeString;
+  X, ColR, ColE: Integer;
+begin
+  Modal := TApprovalModal.Create(ScriptAsk('echo hi; rm -rf build/',
+    'rm -rf build/'));
+  Surface := TSurfaceMemory.Create(60, 20);
+  try
+    Modal.Arrange(Rc(60, MeasuredHeight(Modal)));
+    Modal.Render(Surface);
+    Row := Surface.RowText(3, 0, 60);
+    { The whole command, not just the segment. }
+    AssertTrue('the script is shown',
+      Pos(UnicodeString('echo hi; rm -rf build/'), Row) > 0);
+    AssertTrue('the focus row is marked',
+      Pos(UnicodeString(WideChar($25B8)), Row) > 0);
+    { Only the focus span is bold: the segment is, the command before it is
+      not. (Cells, not string offsets: an erased cell takes no string index.) }
+    ColR := -1;
+    ColE := -1;
+    for X := 0 to 59 do
+    begin
+      Ch := Surface.CellAt(X, 3).Ch;
+      if (ColE < 0) and (Ch = 'e') then
+        ColE := X;
+      if (ColR < 0) and (Ch = 'r') then
+        ColR := X;
+    end;
+    AssertTrue('found the focus text', ColR > 0);
+    AssertTrue('focus start is bold',
+      sfBold in Surface.CellAt(ColR, 3).Attr.Style);
+    AssertTrue('found the leading text', ColE > 0);
+    AssertFalse('text before the focus is not bold',
+      sfBold in Surface.CellAt(ColE, 3).Attr.Style);
+  finally
+    Modal.Free;
+    Surface.Free;
+  end;
+end;
+
+procedure TApprovalModalTest.TestModalEffectAskShowsThePathAndTheScript;
+var
+  Modal: TApprovalModal;
+  Surface: TSurfaceMemory;
+  Ask: TApprovalAsk;
+begin
+  { A file effect ask: the path is what is approved; the script is context. }
+  Ask := ScriptAsk('cd sub; cat a.txt', 'cat a.txt');
+  Ask.Summary := 'read sub/a.txt (cwd sub)';
+  Ask.Subject.Ref := 'file:read';
+  Ask.Subject.Path := 'sub/a.txt';
+  Modal := TApprovalModal.Create(Ask);
+  Surface := TSurfaceMemory.Create(60, 20);
+  try
+    Modal.Arrange(Rc(60, MeasuredHeight(Modal)));
+    Modal.Render(Surface);
+    AssertTrue('the effect', Pos(UnicodeString('read sub/a.txt'),
+      Surface.RowText(3, 0, 60)) > 0);
+    AssertTrue('the command', Pos(UnicodeString('cd sub; cat a.txt'),
+      Surface.RowText(4, 0, 60)) > 0);
+  finally
+    Modal.Free;
+    Surface.Free;
+  end;
+end;
+
+procedure TApprovalModalTest.TestModalScrollsToTheFocus;
+var
+  Modal: TApprovalModal;
+  Surface: TSurfaceMemory;
+  Script: string;
+  I: Integer;
+  Found: Boolean;
+begin
+  Script := '';
+  for I := 0 to 19 do
+    Script := Script + 'cmd' + IntToStr(I) + ' here' + #10;
+  Script := Script + 'target command';
+  Modal := TApprovalModal.Create(ScriptAsk(Script, 'target command'));
+  Surface := TSurfaceMemory.Create(60, 40);
+  try
+    Modal.Arrange(Rc(60, MeasuredHeight(Modal)));
+    Modal.Render(Surface);
+    { The band opens on the focus, not on the first line. }
+    Found := False;
+    for I := 3 to 12 do
+      if Pos('target command', Surface.RowText(I, 0, 60)) > 0 then
+        Found := True;
+    AssertTrue('the focus is visible', Found);
+    AssertTrue('scroll offset moved', Modal.Scroll > 0);
+    AssertTrue('the head is scrolled away',
+      Pos('cmd0 here', Surface.RowText(3, 0, 60)) = 0);
+  finally
+    Modal.Free;
+    Surface.Free;
+  end;
+end;
+
+procedure TApprovalModalTest.TestModalScrollKeysAndWheel;
+var
+  Modal: TApprovalModal;
+  Surface: TSurfaceMemory;
+  Script: string;
+  I, Before: Integer;
+begin
+  Script := '';
+  for I := 0 to 19 do
+    Script := Script + 'cmd' + IntToStr(I) + ' here' + #10;
+  Modal := TApprovalModal.Create(ScriptAsk(Script, 'cmd19 here'));
+  Surface := TSurfaceMemory.Create(60, 40);
+  try
+    Modal.Arrange(Rc(60, MeasuredHeight(Modal)));
+    Modal.Render(Surface);
+    Before := Modal.Scroll;
+    AssertTrue('page up handled', Modal.HandleEvent(Key(kkPageUp)));
+    AssertTrue('scrolled up', Modal.Scroll < Before);
+    Surface.Free;
+    Surface := TSurfaceMemory.Create(60, 40);
+    Modal.Render(Surface);
+    AssertTrue('page down handled', Modal.HandleEvent(Key(kkPageDown)));
+    AssertTrue('scrolled further than the page-up position',
+      Modal.Scroll >= Before);
   finally
     Modal.Free;
     Surface.Free;

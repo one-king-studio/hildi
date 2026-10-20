@@ -82,6 +82,7 @@ type
     procedure TestPromptExactPersistsAndAllowsSame;
     procedure TestPromptAnyAllowsOtherArgs;
     procedure TestPromptPrefixScopesSubtree;
+    procedure TestAsksNameTheScriptAndItsSpan;
     procedure TestApprovalAsksPerSegment;
     procedure TestWildcardAllowedCatStillAsksAboutThePath;
     procedure TestExactlyApprovedCatDoesNotAskAboutThePath;
@@ -498,6 +499,27 @@ begin
     end;
   finally
     Prompt.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestAsksNameTheScriptAndItsSpan;
+const
+  Src = 'cat a.txt && uname -a';
+var
+  Tool: TCommandTool;
+  Asks: TApprovalAskArray;
+begin
+  Tool := BuildTool(nil, 0);
+  try
+    Asks := Tool.ApprovalAsks('{"command":"' + Src + '","reason":"r"}');
+    AssertEquals('two asks', 2, Length(Asks));
+    AssertEquals('script', Src, Asks[0].Script);
+    AssertEquals('first focus', 'cat a.txt',
+      Copy(Src, Asks[0].FocusStart, Asks[0].FocusLen));
+    AssertEquals('second focus', 'uname -a',
+      Copy(Src, Asks[1].FocusStart, Asks[1].FocusLen));
+  finally
+    Tool.Free;
   end;
 end;
 

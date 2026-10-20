@@ -37,6 +37,9 @@ type
     FD: Integer;               // a redirect's fd prefix; -1 = none
     HasSpaceBefore: Boolean;
     Offset, Line, Column: Integer;
+    { The last byte of the token (Offset..EndOffset inclusive), so a caller can
+      name a construct's exact span in the source. }
+    EndOffset: Integer;
     HereDocs: array of string; // bodies for the newline that closes the line
   end;
 
@@ -558,6 +561,7 @@ begin
   begin
     Result.Kind := tkEOF;
     Result.Offset := StartPos;
+    Result.EndOffset := StartPos - 1;
     Result.Line := StartLine;
     Result.Column := StartCol;
     Exit;
@@ -568,6 +572,7 @@ begin
     Advance;
     Result.Kind := tkNewline;
     Result.Offset := StartPos;
+    Result.EndOffset := FPos - 1;
     Result.Line := StartLine;
     Result.Column := StartCol;
     CollectHereDocs(Result);
@@ -587,6 +592,7 @@ begin
     Result.Op := Op;
     Result.FD := FD;
     Result.Offset := StartPos;
+    Result.EndOffset := FPos - 1;
     Result.Line := StartLine;
     Result.Column := StartCol;
     if (Op = opDLess) or (Op = opDLessDash) then
@@ -614,6 +620,7 @@ begin
   end;
   Result.Kind := tkWord;
   Result.Offset := StartPos;
+  Result.EndOffset := FPos - 1;
   Result.Line := StartLine;
   Result.Column := StartCol;
   if FHereNext then

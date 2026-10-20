@@ -21,6 +21,7 @@ type
     procedure TestRoundTripHello;
     procedure TestRoundTripAttachedCarriesStoreHwm;
     procedure TestRoundTripEveryEventKind;
+    procedure TestApprovalScriptIsAdditive;
     procedure TestReasoningDoneRoundTrip;
     procedure TestRoundTripReply;
     procedure TestRoundTripReplyError;
@@ -92,6 +93,9 @@ begin
         AEvent.AskId := 'ask_1';
         AEvent.Ask.Summary := 'rm -rf /tmp/x';
         AEvent.Ask.Reason := 'cleanup';
+        AEvent.Ask.Script := 'echo hi; rm -rf /tmp/x';
+        AEvent.Ask.FocusStart := 10;
+        AEvent.Ask.FocusLen := 12;
         SetLength(AEvent.Ask.Options, 2);
         AEvent.Ask.Options[0].Key := 'once';
         AEvent.Ask.Options[0].Caption := 'Allow once';
@@ -370,6 +374,28 @@ begin
   AssertTrue('approve allowed', D.Command.Choice.Allowed);
   AssertEquals('approve option', 'always', D.Command.Choice.OptionKey);
   AssertEquals('approve scope', Ord(asWorkspace), Ord(D.Command.Choice.Scope));
+end;
+
+procedure TSessionProtocolTest.TestApprovalScriptIsAdditive;
+var
+  M, D: TSessionMessage;
+  Line: string;
+begin
+  { The script and its focus survive the wire. }
+  M := Default(TSessionMessage);
+  M.Kind := mkEvent;
+  FillEvent(ekApprovalRequest, M.Event);
+  AssertTrue(TSessionCodec.Decode(TSessionCodec.Encode(M), D));
+  AssertEquals('script', 'echo hi; rm -rf /tmp/x', D.Event.Ask.Script);
+  AssertEquals('focus start', 10, D.Event.Ask.FocusStart);
+  AssertEquals('focus len', 12, D.Event.Ask.FocusLen);
+
+  { An older producer has no script; the fields stay empty, not an error. }
+  Line := '{"v":1,"type":"event","seq":1,"ts":2,' +
+    '"kind":"approval_request","ask_id":"a","summary":"ls","options":[]}';
+  AssertTrue('decodes without a script', TSessionCodec.Decode(Line, D));
+  AssertEquals('no script', '', D.Event.Ask.Script);
+  AssertEquals('no focus', 0, D.Event.Ask.FocusLen);
 end;
 
 procedure TSessionProtocolTest.TestRoundTripPingPong;
