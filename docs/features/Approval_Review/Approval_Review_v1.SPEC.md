@@ -93,8 +93,21 @@ The tier's gate then asks, in one batch:
 A previous grant is matched by the approval service, so a covered effect never
 prompts: **the grant is the scope**.
 
-The process path keeps the command-level asks for now (a spawned program's
-effects are not knowable); bringing it to the same model is phase 3.
+The process path **keeps the command-level asks**, and deliberately: in bash a
+name is not the program. The same script may define `cat() { … }`, an alias may
+shadow it, and `PATH` may resolve to something else entirely, so the effect
+table (which describes *our* builtins) cannot be applied to a spawned command
+without under-gating. Its asks still carry the script, the focus span, the
+redirect file asks and the outside-path asks; supporting a missing flag in the
+tier is how a command moves to effect asks.
+
+**Why not one ask per bucket?** Matching is per subject: a granted scope
+suppresses an ask whose `Subject` it covers. A bucket ask with several paths
+has no single subject a directory grant can cover, so it would re-prompt
+despite the grant — the opposite of "the grant is the scope". Each effect
+therefore keeps its own ask (already offering exact / dir / ext / dir+ext /
+any), and one grant silences the rest of the call. A batched ask with
+per-subject matching is a possible later feature, not a simplification.
 
 ## 2c. The working directory (shipped)
 

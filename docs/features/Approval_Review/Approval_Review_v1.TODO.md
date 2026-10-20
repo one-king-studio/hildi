@@ -34,20 +34,35 @@
       highlight, the scroll offset and the scroll keys, the fallback to
       `Summary`.
 
-### Phase 3: the effect-scoped gate (tier shipped)
+### Phase 3: the effect-scoped gate (tier shipped; process path decided)
 
 - [x] `shell.effects`: per-command reads/writes from the expanded arguments.
 - [x] The tier asks effects as `file:read`/`file:write`; the command ask only
       when the effects are unknown.
 - [x] Tests in `test_shell_effects`; the tier's asks assert file refs.
-- [ ] The process path adopts the same model (its command-ask tests move to
-      file refs).
+- [x] **Decision: the process path keeps its command asks.** In bash a name is
+      not the program: the same script may define `cat() { … }`, an alias may
+      shadow it, and `PATH` may point elsewhere. The effect table describes
+      *our* builtins, so applying it to a spawned command would under-gate.
+      The process asks still name the script, its focus span and its redirects
+      (and an outside path keeps its own ask). When a script is declined only
+      for an unsupported flag, the fix is to support the flag in the tier —
+      then the effects are asked — not to guess on the bash side.
 
-### Phase 4: bucketing
+### Phase 4: bucketing (deliberately per effect)
 
-- [ ] Group a call's effects by ref/directory/extension; one ask per bucket
-      with shared options.
-- [ ] Tests for a read bucket, a write bucket, and a mixed batch.
+- [x] **Decision: one ask per effect, not per bucket.** The approval service
+      matches rules against one subject per ask, so an effect a grant already
+      covers is silent. A single ask for a bucket of paths would have no single
+      subject to match: a directory grant could no longer suppress it without a
+      batch concept in the service, the protocol and the dialog — the opposite
+      of "the grant is the scope".
+- [x] Each effect's ask already offers the batch-granular choices
+      (exact / dir / ext / dir+ext / any), so one grant covers the rest of the
+      call's effects, and later asks never appear.
+- [ ] _(Future)_ a batched ask — several subjects with per-subject matching —
+      only if the prompt count itself becomes the problem. It needs the
+      service, protocol and dialog to carry a subject list.
 
 ## Success Criteria
 
