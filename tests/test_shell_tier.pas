@@ -56,6 +56,8 @@ type
     procedure TestToolDispatch;
     procedure TestToolRefusals;
     procedure TestCdPersists;
+    procedure TestFileAskNamesTheWorkingDirectory;
+    procedure TestCdOutsideIsRefused;
   end;
 
 implementation
@@ -315,6 +317,31 @@ begin
   AssertTrue('names it', Pos('run_command is not available', OutText) > 0);
   AssertTrue('disallowed runs', RunTier('tool file_write {}', OutText));
   AssertTrue('not allowed', Pos('not allowed', OutText) > 0);
+end;
+
+procedure TShellTierTest.TestFileAskNamesTheWorkingDirectory;
+var
+  OutText: string;
+  E: string;
+begin
+  FFs.WriteFile(P('sub/a.txt'), 'deep' + #10, False, E);
+  AssertTrue('ran', RunTier('cd sub; cat a.txt', OutText));
+  AssertEquals('one ask', 1, Length(FApproval.Asked));
+  AssertEquals('resolved against the cwd', 'sub/a.txt',
+    FApproval.Asked[0].Subject.Path);
+  AssertTrue('the ask names the cwd',
+    Pos('cwd sub', FApproval.Asked[0].Summary) > 0);
+end;
+
+procedure TShellTierTest.TestCdOutsideIsRefused;
+var
+  OutText: string;
+begin
+  { The tier's filesystem is the workspace: cd cannot leave it. The command
+    fails, and (with ;) the rest runs in the old directory. }
+  AssertTrue('ran', RunTier('cd /tmp; pwd', OutText));
+  AssertTrue('the cd is refused', Pos('escapes the workspace', OutText) > 0);
+  AssertTrue('still in the workspace', Pos(FRoot, OutText) > 0);
 end;
 
 procedure TShellTierTest.TestCdPersists;

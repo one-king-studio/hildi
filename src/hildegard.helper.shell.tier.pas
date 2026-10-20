@@ -51,6 +51,7 @@ type
     function BuildAsks(const ACall: TShellCall): TApprovalAskArray;
     function FileAsk(const ACall: TShellCall; const ATarget: string;
       AWrite: Boolean): TApprovalAsk;
+    function CwdSuffix(const ACall: TShellCall): string;
     function Preflight(const AScript: TScript): Boolean;
   public
     { Not thread-safe: the executor creates one per run_command call. }
@@ -209,6 +210,20 @@ begin
     Result := '';
 end;
 
+{ The directory the command runs in, when it is not the workspace root: a
+  relative argument means something different after a cd, and the operator
+  should see where the operation lands. }
+function TBuiltinShell.CwdSuffix(const ACall: TShellCall): string;
+var
+  Rel: string;
+begin
+  Rel := RelativeToRoot(FConfig.Root, ACall.Cwd);
+  if Rel = '' then
+    Result := ''
+  else
+    Result := ' (cwd ' + Rel + ')';
+end;
+
 function TBuiltinShell.FileAsk(const ACall: TShellCall; const ATarget: string;
   AWrite: Boolean): TApprovalAsk;
 var
@@ -227,9 +242,9 @@ begin
   else
     Display := Rel;
   if AWrite then
-    Result.Summary := 'write ' + Display
+    Result.Summary := 'write ' + Display + CwdSuffix(ACall)
   else
-    Result.Summary := 'read ' + Display;
+    Result.Summary := 'read ' + Display + CwdSuffix(ACall);
   Result.Subject.Ref := Ref;
   Result.Subject.Path := Rel;
   Params := nil;
@@ -323,7 +338,7 @@ begin
     Summary := Summary + ' ' + ACall.Args[I];
   Args := ACall.Args;
   Result := Default(TApprovalAsk);
-  Result.Summary := Summary;
+  Result.Summary := Summary + CwdSuffix(ACall);
   Result.Reason := FReason;
   Result.Subject.Ref := Ref;
   Result.Subject.Params := Args;

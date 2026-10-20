@@ -57,7 +57,17 @@ Make the ask a **reviewable unit**, not a fragment:
    and anything that reads, writes, or lists a directory remains gated —
    extraction into the context and writes back to the system are exactly what
    approval is for.
-6. **Buckets.** When a call's file effects are known, group them: one option
+6. **The working directory is part of the ask.** A relative argument means
+   something different after a `cd`, so every file ask (and the command ask)
+   names the effective cwd when it is not the workspace root
+   (`read sub/a.txt (cwd sub)`). Effects are resolved against the cwd, so the
+   ask is unambiguous even when the script changed directory.
+7. **`cd` cannot leave the workspace in the tier.** The tier's filesystem is
+   the workspace, so `cd /outside` is refused (`path escapes the workspace`),
+   not approved: with `&&` the rest does not run, with `;` the rest runs in the
+   old directory. Outside work is the process tier's job, where the splitter's
+   path asks (which track a `cd`) cover it.
+8. **Buckets.** When a call's file effects are known, group them: one option
    can grant a directory, an extension, or the pair, across several effects —
    the granularity the file tools already expose, applied to a batch.
 
@@ -83,6 +93,8 @@ Make the ask a **reviewable unit**, not a fragment:
   `sed -i` ask as file effects (`file:read` / `file:write`).
 - With a `file:read` grant for `src/*.pas`, `cat`, `head`, `grep` and `rg` on
   those files prompt nothing; a read outside that scope still does.
+- `cd sub; cat a.txt` asks for `read sub/a.txt (cwd sub)`; `cd /tmp` inside the
+  tier is refused and changes nothing.
 - A long compound script opens the dialog scrolled to the highlighted command
   (phase 2).
 - `sed -i` and friends raise their file asks (phase 3).

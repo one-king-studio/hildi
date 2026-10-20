@@ -96,6 +96,21 @@ prompts: **the grant is the scope**.
 The process path keeps the command-level asks for now (a spawned program's
 effects are not knowable); bringing it to the same model is phase 3.
 
+## 2c. The working directory (shipped)
+
+- The interpreter's `cd` sets the shell's cwd; every command's `TShellCall.Cwd`
+  is the cwd at that point, so effects and redirects resolve against it
+  (`cd sub; cat a.txt` asks for `read sub/a.txt`).
+- The file ask (and the command ask) appends ` (cwd <root-relative dir>)` when
+  the cwd is not the workspace root, so a relative argument is never
+  ambiguous.
+- `cd` is a library builtin and does not reach the gate. Its target is checked
+  through `IShellFileSystem.Stat`, which enforces the workspace: an outside
+  directory fails with `path escapes the workspace`, status 1. The script's
+  later commands therefore keep the old cwd (or, under `&&`, do not run).
+  Outside access remains the process tier's business, where `PathAccesses`
+  tracks a top-level `cd` for the path asks.
+
 ## 3. The dialog (phase 2)
 
 - When `Script <> ''`, the body renders the script instead of `Summary`,
