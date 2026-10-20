@@ -14,13 +14,18 @@
       passes it to the tier; `TCommandToolConfig.OnChanges` fires once.
 - [x] Tests: the compound script's changes; the callback.
 
-### Phase 2: the process tier
+### Phase 2: the process tier (shipped)
 
-- [ ] Snapshot (path, size, mtime) before/after a spawned command when a set is
+- [x] Snapshot (path, size, mtime) before/after a spawned command when a set is
       supplied; ignore-aware via `hildegard.helper.gitignore`.
-- [ ] Report created/modified/deleted into the same set; read content for
-      modified files up to the cap.
-- [ ] Test with a real `sed -i` through `mode=bash` and with `git`-like writes.
+- [x] Report created/modified/deleted into the same set; read content for
+      created and modified files up to the cap (a deleted file keeps its size
+      only — its bytes are gone by the time we diff).
+- [x] Snapshot only when somebody listens: the tool passes a set only when
+      `OnChanges` is assigned.
+- [x] Tests: the snapshot/diff unit suite (ignored paths, a nested
+      `.gitignore`, `.git`, created/modified/deleted, large files, directories)
+      and a real `/bin/bash` write through the process executor.
 
 ### Phase 3: surfacing (decision)
 

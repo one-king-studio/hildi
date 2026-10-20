@@ -1,8 +1,9 @@
 # Feature: Per-call File Changes
 
-**Status:** Phase 1 shipped (the builtin tier records every write it makes and
-delivers the set once per tool call). The process-tier snapshot and the
-surfacing decisions are pending.
+**Status:** Phases 1 and 2 shipped. The builtin tier records every write
+exactly (content included) through its filesystem seam; the process tier takes
+an ignore-aware before/after snapshot of the tree and reports created, modified
+and deleted paths. Surfacing the set (phase 3) is still a decision.
 
 **Related:** [Builtin Shell Tier](../Builtin_Shell_Tier/FEATURE.md) ·
 [Command & Flag Coverage](../Builtin_Shell_Tier/COMMAND_COVERAGE.md) ·

@@ -103,6 +103,7 @@ type
     procedure TestFdDuplicateIsNotAFileAsk;
     procedure TestOutsideRedirectKeepsThePathAsk;
     procedure TestRunDeliversFileChanges;
+    procedure TestProcessExecutorRecordsRealWrites;
     procedure TestModeBashIsPassedThrough;
     procedure TestModeDefaultsToAuto;
     procedure TestInvalidModeIsRejected;
@@ -540,6 +541,52 @@ begin
     AssertTrue('has once option', Asks[0].Options[0].Key = 'once');
   finally
     Tool.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestProcessExecutorRecordsRealWrites;
+var
+  Exec: TProcessCommandExecutor;
+  Profile: TShellProfile;
+  Changes: TFileChangeSet;
+  Execution: TCommandExecution;
+  Root: string;
+  I: Integer;
+  SawA, SawB: Boolean;
+begin
+  Root := IncludeTrailingPathDelimiter(GetTempDir) + 'hhproc_' +
+    IntToStr(GetTickCount64);
+  ForceDirectories(Root);
+  ForceDirectories(IncludeTrailingPathDelimiter(Root) + 'sub');
+  Changes := TFileChangeSet.Create;
+  try
+    Profile := DefaultShellProfile;
+    Exec := TProcessCommandExecutor.Create;
+    try
+      AssertTrue('ran', Exec.Execute(Profile,
+        'printf "one\n" > a.txt; printf "two\n" > sub/b.txt',
+        Root, 20000, nil, '', cmBash, Changes, Execution));
+    finally
+      Exec.Free;
+    end;
+    AssertEquals('exit', 0, Execution.ExitCode);
+    SawA := False;
+    SawB := False;
+    for I := 0 to Changes.Count - 1 do
+    begin
+      if (Changes[I].Path = 'a.txt') and (Changes[I].Kind = fcCreated) then
+        SawA := Changes[I].After = 'one' + #10;
+      if Changes[I].Path = 'sub/b.txt' then
+        SawB := True;
+    end;
+    AssertTrue('a.txt was recorded with its content', SawA);
+    AssertTrue('sub/b.txt was recorded', SawB);
+  finally
+    Changes.Free;
+    DeleteFile(IncludeTrailingPathDelimiter(Root) + 'sub/b.txt');
+    RemoveDir(IncludeTrailingPathDelimiter(Root) + 'sub');
+    DeleteFile(IncludeTrailingPathDelimiter(Root) + 'a.txt');
+    RemoveDir(Root);
   end;
 end;
 

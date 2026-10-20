@@ -65,18 +65,33 @@ A write that leaves the content unchanged reports nothing (no diff to show).
   `Run`, after the executor returns, only when the set is non-empty. The set is
   freed after the callback.
 
-## Phase 2: the process-tier snapshot
+## Phase 2: the process-tier snapshot (shipped)
 
 A spawned command writes outside the seam. Before `TProcessCommandExecutor`
-runs, the executor (when a change set was supplied) walks the workspace and
-records `(path, size, mtime)`; after, it walks again and reports created,
-modified (size/mtime differs) and deleted paths through the same set. The walk
-is ignore-aware (`hildegard.helper.gitignore`) and bounded (a file cap, like
-`file_glob`). Content is read for modified files up to the capture cap.
+runs, the executor (when a change set was supplied) walks the workspace into a
+`TWorkspaceSnapshot` of `(size, mtime, is-dir)` per path
+(`hildegard.helper.workspace.snapshot`); after the run — including a failed or
+timed-out one — it walks again and `DiffSnapshots` reports created, modified
+(size or mtime differs) and deleted paths through the same `TFileChangeSet`.
 
-Open questions for phase 2: the cost on a large tree (stat-only vs hash), and
-whether to snapshot only when the command is not known-read-only (there is no
-such classification yet — default: always snapshot).
+- **Ignore-aware.** Every `.gitignore` in the tree applies to its own
+  directory (the reusable parser), and an ignored path — or anything under an
+  ignored directory — is never walked, so an edit to an ignored file is not
+  reported. `.git` is always skipped; symlinks are skipped (a directory link
+  can loop).
+- **Directories are entries**, so a created or deleted directory is reported
+  (`IsDir`); a directory's mtime moving with its children is not a change.
+- **Contents** are read for created and modified files up to
+  `MaxCapturedChangeBytes` (`Captured = False` with sizes beyond that). A
+  deleted file's bytes are already gone: its size is recorded, `Captured`
+  stays False, and `Before` is empty.
+- **Cost.** Metadata only, so a large tree costs one walk before and one after
+  per call. The tool passes a set **only when `OnChanges` is assigned**; with
+  no listener the process tier does not snapshot at all.
+- **Limits.** mtime has one-second resolution on Unix, so a same-size rewrite
+  within one second is not seen — the caveat git's own index has. The snapshot
+  root is the call's working directory; a script that `cd`s elsewhere is not
+  tracked.
 
 ## Phase 3: surfacing (decision)
 

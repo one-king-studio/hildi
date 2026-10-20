@@ -21,7 +21,7 @@ uses
   hildegard.helper.command.policy, hildegard.helper.approval,
   hildegard.helper.command.paths,
   hildegard.helper.process, hildegard.helper.workspace.changes,
-  hildegard.helper.command.pure;
+  hildegard.helper.workspace.snapshot, hildegard.helper.command.pure;
 
 type
   TShellProfile = record
@@ -572,10 +572,17 @@ function TProcessCommandExecutor.Execute(const AProfile: TShellProfile;
 var
   Collector: TOutputCollector;
   Runner: TCommandRunner;
+  Before, After: TWorkspaceSnapshot;
   ExitCode: Integer;
   TimedOut: Boolean;
 begin
   AExecution := Default(TCommandExecution);
+  { A spawned command writes behind our back, so the only record is a
+    before/after picture of the tree (ignore-aware). Only taken when somebody
+    listens. }
+  Before := nil;
+  if (AChanges <> nil) and DirectoryExists(AWorkDir) then
+    Before := TakeSnapshot(AWorkDir);
   Collector := TOutputCollector.Create(AObserver);
   try
     Runner := TCommandRunner.Create('cmd', ACommand, ATimeoutMs, AWorkDir,
@@ -594,6 +601,21 @@ begin
       Runner.Free;
     end;
   finally
+    if Before <> nil then
+    begin
+      try
+        { Even a failed or timed-out run may have written; record what it
+          managed. }
+        After := TakeSnapshot(AWorkDir);
+        try
+          DiffSnapshots(Before, After, AChanges);
+        finally
+          After.Free;
+        end;
+      finally
+        Before.Free;
+      end;
+    end;
     Collector.Free;
   end;
 end;
@@ -834,7 +856,12 @@ begin
           observer directly so it is never dropped by the output cap. }
         if AObserver <> nil then
           AObserver.Next('$ ' + Command + LineEnding + LineEnding);
-        Changes := TFileChangeSet.Create;
+        { A set is only needed when somebody listens: for the process tier it
+          means snapshotting the whole tree, so do not pay for it otherwise. }
+        if Assigned(FConfig.OnChanges) then
+          Changes := TFileChangeSet.Create
+        else
+          Changes := nil;
         try
           if not FExecutor.Execute(FConfig.Shell, Command, EffectiveCwd,
             TimeoutMs, Stream, Reason, Mode, Changes, Execution) then
@@ -842,7 +869,7 @@ begin
             AError := 'failed to execute: ' + Execution.Error;
             Exit(False);
           end;
-          if (Changes.Count > 0) and Assigned(FConfig.OnChanges) then
+          if (Changes <> nil) and (Changes.Count > 0) then
             FConfig.OnChanges(Changes);
         finally
           Changes.Free;
