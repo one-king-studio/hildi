@@ -25,6 +25,7 @@ type
     ResultExec: TCommandExecution;
     Chunks: array of string;   // forwarded to the observer, in order
     LastMode: TCommandMode;
+    ChangeCount: Integer;      // fake writes the executor reports (default 1)
     constructor Create;
     function OwnsApproval(const ACommand: string; AMode: TCommandMode;
       out AWhy: string): Boolean;
@@ -103,6 +104,8 @@ type
     procedure TestFdDuplicateIsNotAFileAsk;
     procedure TestOutsideRedirectKeepsThePathAsk;
     procedure TestRunDeliversFileChanges;
+    procedure TestNoChangeNoteWithoutChanges;
+    procedure TestChangeNoteIsCapped;
     procedure TestProcessExecutorRecordsRealWrites;
     procedure TestModeBashIsPassedThrough;
     procedure TestModeDefaultsToAuto;
@@ -116,6 +119,7 @@ constructor TFakeExecutor.Create;
 begin
   inherited Create;
   ReturnOk := True;
+  ChangeCount := 1;
   ResultExec := Default(TCommandExecution);
   ResultExec.Started := True;
   ResultExec.Output := 'out';
@@ -145,13 +149,17 @@ begin
   LastTimeoutMs := ATimeoutMs;
   LastMode := AMode;
   if AChanges <> nil then
-  begin
-    Change := Default(TFileChange);
-    Change.Path := 'fake.txt';
-    Change.Kind := fcCreated;
-    Change.After := 'x';
-    AChanges.Add(Change);
-  end;
+    for I := 0 to ChangeCount - 1 do
+    begin
+      Change := Default(TFileChange);
+      if ChangeCount = 1 then
+        Change.Path := 'fake.txt'
+      else
+        Change.Path := 'fake' + IntToStr(I) + '.txt';
+      Change.Kind := fcCreated;
+      Change.After := 'x';
+      AChanges.Add(Change);
+    end;
   for I := 0 to High(Chunks) do
     if AObserver <> nil then
       AObserver.Next(Chunks[I]);
@@ -1036,6 +1044,43 @@ begin
   try
     AssertTrue('ok', Tool.Run('{"command":"echo hi","reason":"r"}', R, E));
     AssertEquals('one change delivered', 1, FChangeCount);
+    { The set is also visible in the transcript, for the model and the panel. }
+    AssertTrue('the result names the change',
+      Pos('[changed: A fake.txt]', R) > 0);
+  finally
+    Tool.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestNoChangeNoteWithoutChanges;
+var
+  Tool: TCommandTool;
+  R, E: string;
+begin
+  AddRule(aeAllow, 'run_command:echo', [], True);
+  FExecutor.ChangeCount := 0;
+  Tool := BuildTool(nil, 0);
+  try
+    AssertTrue('ok', Tool.Run('{"command":"echo hi","reason":"r"}', R, E));
+    AssertFalse('no note', Pos('[changed:', R) > 0);
+  finally
+    Tool.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestChangeNoteIsCapped;
+var
+  Tool: TCommandTool;
+  R, E: string;
+begin
+  AddRule(aeAllow, 'run_command:echo', [], True);
+  FExecutor.ChangeCount := 40;
+  Tool := BuildTool(nil, 0);
+  try
+    AssertTrue('ok', Tool.Run('{"command":"echo hi","reason":"r"}', R, E));
+    AssertTrue('a note', Pos('[changed:', R) > 0);
+    AssertTrue('truncated', Pos(', ...]', R) > 0);
+    AssertTrue('bounded', Length(R) < 600);
   finally
     Tool.Free;
   end;

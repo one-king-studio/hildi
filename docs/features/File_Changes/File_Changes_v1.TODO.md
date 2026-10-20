@@ -27,11 +27,15 @@
       `.gitignore`, `.git`, created/modified/deleted, large files, directories)
       and a real `/bin/bash` write through the process executor.
 
-### Phase 3: surfacing (decision)
+### Phase 3: surfacing (shipped: the tool result line)
 
-- [ ] Choose where the set goes: tool-result line, TUI diff pane, checkpoint
-      store — or a combination (see the SPEC's recommendation).
-- [ ] Wire it; test the chosen path end to end.
+- [x] Decide: the tool result line first — visible to the model and the panel
+      in one place, no protocol or view change. A TUI diff pane and a
+      checkpoint store stay open, fed by the same `OnChanges` set.
+- [x] `run_command` appends `[changed: A new.txt, M src/a.pas (+3 -1), ...]`
+      when the set is non-empty, capped at 400 bytes on a UTF-8 boundary.
+- [x] Tests: the note names the change; no note without changes; a large set is
+      capped.
 
 ### Phase 4: docs
 

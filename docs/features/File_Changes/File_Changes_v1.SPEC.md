@@ -86,26 +86,34 @@ timed-out one — it walks again and `DiffSnapshots` reports created, modified
   deleted file's bytes are already gone: its size is recorded, `Captured`
   stays False, and `Before` is empty.
 - **Cost.** Metadata only, so a large tree costs one walk before and one after
-  per call. The tool passes a set **only when `OnChanges` is assigned**; with
-  no listener the process tier does not snapshot at all.
+  per `mode=bash` call. The tool always passes a set, because the set feeds the
+  transcript note (phase 3) as well as `OnChanges`; the builtin tier's set is
+  free (it reports through its filesystem seam).
 - **Limits.** mtime has one-second resolution on Unix, so a same-size rewrite
   within one second is not seen — the caveat git's own index has. The snapshot
   root is the call's working directory; a script that `cd`s elsewhere is not
   tracked.
 
-## Phase 3: surfacing (decision)
+## Phase 3: surfacing (decided: the tool result line, shipped)
 
-The recorder is a producer; nothing consumes it yet. The options:
+The options were the tool result line, a TUI diff pane, or a checkpoint store.
+**Decision: the tool result line first.**
 
-- **tool result line** — append `[changed: M a.txt (+3 -1), A b.txt]` to the
-  `run_command` transcript (model-visible, cheap, changes the format);
-- **TUI diff pane** — the session forwards `OnChanges` to a turn event and the
-  view renders a diff;
-- **checkpoint store** — persist the set with the turn for a later revert.
+`run_command`'s result gains a final line when the call wrote anything:
 
-Recommendation: start with the TUI/checkpoint (the operator's question), and
-add the model-visible line only if the model needs it to reason about its own
-work.
+```
+[changed: A new.txt, M src/a.pas (+3 -1), D old.txt]
+```
+
+- It is **model-visible and operator-visible at once** — the panel renders the
+  same text — so one line serves both questions ("what did that call touch?"
+  and "what did I just do?"), with no protocol or view changes.
+- `TFileChangeSet.Summary` supplies it: `A`/`M`/`D`, and `(+n -m)` for a
+  captured modification (sizes when it was not captured).
+- It is **capped** at 400 bytes, cut on a UTF-8 boundary and ended with
+  `, ...`, so rewriting a whole tree cannot flood the transcript.
+- `OnChanges` still fires with the full set for a future TUI diff pane or
+  checkpoint store; those remain open, and this line does not preclude them.
 
 ## Testing
 

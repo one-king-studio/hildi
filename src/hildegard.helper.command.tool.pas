@@ -119,6 +119,9 @@ const
     is a nudge for the loop (docs/features/Tool_Limits), never a failure. }
   AbsoluteTimeoutMs = 3600000;
   DefaultMaxOutputBytes = 32768;
+  { The change note in the tool result is capped here (bytes) so a call that
+    rewrites a whole tree cannot flood the transcript. }
+  MaxChangeNoteChars = 400;
 
 implementation
 
@@ -738,9 +741,30 @@ var
   Truncated: Boolean;
   Stream: TCappedObserver;
   Changes: TFileChangeSet;
+  ChangeNote: string;
+
+  { A one-line record of what the call wrote, for the transcript: the model
+    sees what it changed, and so does the operator. }
+  function NoteOf(const ASet: TFileChangeSet): string;
+  var
+    Text: string;
+  begin
+    Text := ASet.Summary;
+    if Length(Text) > MaxChangeNoteChars then
+    begin
+      Text := Copy(Text, 1, MaxChangeNoteChars);
+      { Do not split a UTF-8 sequence (paths are not always ASCII). }
+      while (Text <> '') and (Ord(Text[Length(Text)]) and $C0 = $80) do
+        SetLength(Text, Length(Text) - 1);
+      Text := Text + ', ...';
+    end;
+    Result := '[changed: ' + Text + ']';
+  end;
+
 begin
   AResult := '';
   AError := '';
+  ChangeNote := '';
   Result := False;
   Data := nil;
   try
@@ -856,12 +880,10 @@ begin
           observer directly so it is never dropped by the output cap. }
         if AObserver <> nil then
           AObserver.Next('$ ' + Command + LineEnding + LineEnding);
-        { A set is only needed when somebody listens: for the process tier it
-          means snapshotting the whole tree, so do not pay for it otherwise. }
-        if Assigned(FConfig.OnChanges) then
-          Changes := TFileChangeSet.Create
-        else
-          Changes := nil;
+        { The set feeds the transcript note as well as OnChanges, so it is
+          always collected; for the process tier that means one metadata-only
+          walk of the tree before and after the call. }
+        Changes := TFileChangeSet.Create;
         try
           if not FExecutor.Execute(FConfig.Shell, Command, EffectiveCwd,
             TimeoutMs, Stream, Reason, Mode, Changes, Execution) then
@@ -870,7 +892,11 @@ begin
             Exit(False);
           end;
           if (Changes <> nil) and (Changes.Count > 0) then
-            FConfig.OnChanges(Changes);
+          begin
+            ChangeNote := NoteOf(Changes);
+            if Assigned(FConfig.OnChanges) then
+              FConfig.OnChanges(Changes);
+          end;
         finally
           Changes.Free;
         end;
@@ -893,6 +919,8 @@ begin
       if Execution.ExitCode <> 0 then
         AResult := AResult + LineEnding + '[exit ' +
           IntToStr(Execution.ExitCode) + ']';
+      if ChangeNote <> '' then
+        AResult := AResult + LineEnding + ChangeNote;
       Result := True;
     finally
       Data.Free;
