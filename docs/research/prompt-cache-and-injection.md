@@ -90,6 +90,13 @@ because the stored and sent forms diverge permanently.
 Per round: **O(1) instead of O(round)**. Across turns: one message instead of the
 whole conversation.
 
+> **But read the correction section at the end before quoting a saving.** The
+> O(round) term above is real, yet the decorated message sits near the *end* of a
+> long history, so in a mature session the absolute cost was small (measured:
+> 97–99% cache hit with the defect live). The saving is large in a *short*
+> session, where turns 1–3 measured 0%. Do not repeat the O(round) claim as a
+> bill.
+
 ## The shape
 
 | Region | Content | Lifetime |
@@ -142,21 +149,60 @@ behavioural guidance, and on the tail it would be re-billed every round.
 
 ## What is still open
 
-- **The measurement.** Not yet taken as a cache-ratio number. What IS proven, by
-  test: a superseded message is byte-identical across every later request of the
-  turn, exactly one message per request carries the tail, and the tail converges
-  across turns (turn 1's user message is sent wrapped, turn 2's plain). Those
-  three assertions failed when the old per-message decoration was re-injected,
-  so they are real guards rather than tautologies. Turning them into a token
-  figure needs the provider's `usage` frames, which the fake transport does not
-  currently synthesize per request.
-- **Whether `<now>` should be turn-start or per-request.** Per-request is honest
-  and costs one message; turn-start is cheaper but shows a stale clock in a long
-  turn. Leaning per-request, since the tail is where volatility belongs.
 - **`UserInstructions` is now exported but unused.** It should move into the
   system prompt (`DefaultSystemPrompt`), which is a separate change: the wrapper
   no longer carries it, so a session whose system prompt lacks it has lost the
-  frontmatter guidance. Do not ship without that.
+  frontmatter guidance. Do not ship without that. **Since done**: it is appended
+  to `DefaultSystemPrompt`.
+
+## CORRECTION (2026-10-21): the measured cost is far smaller than claimed
+
+The analysis above says a rewrite "at index *i* invalidates *i* and everything
+after it", and implies the wrap sits near the head. In a real session it does
+not: **the decorated message is the newest user message, which after a hundred
+turns is near the END of a 1,500-message history.** So the break costs the
+messages *after* it, not the conversation *before* it.
+
+Measured from the live store (`requests.prompt_tokens` /
+`requests.cached_tokens`, which the provider fills in directly — no fake needed):
+
+| Session stage | Prompt | Cache hit |
+| --- | --- | --- |
+| Turn 1–3 (2–14 messages) | 1.1k–1.4k | **0%** |
+| Turn 3, third request | 5.0k | **0%** |
+| Turn 2 (10–23 messages) | 12k–18k | 82–96% |
+| Turns 559–562 (~1,510 messages) | 454k–465k | **97–99%** |
+
+So the defect is **real and total in a short session** — turn 1 request 2 has
+1,153 cacheable prompt tokens and gets zero cache, because the rewrite breaks the
+prefix at index 1 — and **proportionally negligible in a long one**, where the
+break is a handful of messages off the end of 460k.
+
+Claims in the section above that should be discounted: "a ten-round turn
+re-bills rounds 2–10 nearly in full" and "a long session re-bills from its first
+user message on every new turn" are both **wrong**, and the measurement above is
+the authority. What remains true: a short session caches nothing across requests,
+and the two decoration sites mutate already-sent bytes, which is wrong on the
+merits regardless of the bill.
+
+The fix was worth making — it is simpler (one site instead of two), it makes a
+short session cache correctly, and the tail block is the delivery slot the
+message board needs. But it is **not** a 10× saving on a long session. Letting a
+memory of the request body stand in for a measurement was the error.
+
+**Two things the numbers show that the design did not anticipate:**
+
+1. **Cache expiry, not layout, dominates the misses.** Every ~0%-cached request
+   with a large prompt has `finish_reason = tool_calls` — a turn resumed after a
+   gap long enough for the provider's cache to lapse. No injection scheme fixes
+   that; only a shorter gap does.
+2. **A declining percentage is normal.** Turn 560 goes 99% → 93% across 50
+   requests: the cached prefix is fixed while each round appends new tool
+   results. Reading that as a defect would be a misdiagnosis.
+
+- **`<now>` is per-request, as intended.** `NowUtcMs` is evaluated inside
+  `FormatTail`'s call site in `BuildRequest`, so each request carries its own
+  clock. Confirmed, not inferred.
 
 ## What was built (2026-10-21)
 
