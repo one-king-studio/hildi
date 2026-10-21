@@ -1,35 +1,67 @@
 # Workspace Snapshots
 
+**Status:** Proposed (design revised 2026-10-21 after Phases 1–3 of
+[Per-call File Changes](../File_Changes/FEATURE.md) shipped). The capture and
+surfacing described here are **partly built**: the builtin shell tier and the
+process tier both record changes per call, and `run_command`'s result ends with
+`[changed: …]`. What remains is the **store** (nothing is persisted yet — the set
+is built and freed inside one call), the TUI surface, and undo/redo.
+
+**Related:** [File Changes](../File_Changes/FEATURE.md) ·
+[Workspace Board](../Message_Board/FEATURE.md) ·
+[Task List](../Task_List/FEATURE.md) ·
+[workspace-changes-and-board](../../research/workspace-changes-and-board.md) ·
+[tool-result-shape](../../research/tool-result-shape.md)
+
 ## Overview
 
-Give the operator **git-like visibility and control over the workspace between
-turns**, without depending on git (or on git being installed):
+Give the operator **git-like visibility and control over the workspace**, without
+depending on git (or on git being installed):
 
-1. **See what changed.** After a turn, list the files the agent added, modified,
-   or deleted, and open a **diff view** of each.
-2. **Undo / redo.** Walk the workspace's history backwards and forwards, bringing
-   the files along with it — revert a turn's changes, or re-apply them.
+1. **See what changed.** Which files a tool call or a turn added, modified or
+   deleted, with a diff of each.
+2. **Undo / redo** a turn's changes, safely.
 
-The snapshot is taken **at the turn boundary**, because a turn is the unit of
-agent work: it is when the agent's tool calls (write/edit/command) have landed and
-before the next one starts. The store is self-contained and local, and it keeps
-storage bounded by **storing each turn as a bidirectional diff from the previous
-one** (SynProject's `TVersions` model), on the SQLite we already vendor. A diff
-carries the **before and after hash** of the file it applies to, so a restore can
-verify the file is what the diff expects *before* it writes — and tell the operator
-when it is not. History is retained for a bounded number of turns and pruned
-beyond it, so a long session plateaus instead of growing without limit.
+The record is a **workspace change log**: an append-only table of transitions,
+each carrying the file's before and after hash and a bounded patch. It is written
+by whoever sees the write — the builtin shell tier for in-process commands, the
+file tools for their own edits, a before/after tree walk for a spawned program.
+Storage is bounded by **patches anchored to periodic full copies (keyframes)**,
+not by keeping every version whole.
+
+Two things that make it more than a diff viewer, and were the reason to design it
+properly rather than bolt a viewer on:
+
+- **The hashes are compare-and-swap anchors.** A write can verify the file is
+  still what it expects before touching it, so an out-of-band edit is a **visible
+  conflict** rather than a silent clobber.
+- **The log is an index for coordination.** It answers "who touched this, when",
+  which is what makes [claims](../Task_List/FEATURE.md) and
+  [board staleness](../Message_Board/FEATURE.md) possible.
+
+```
+TFileChange = record
+  Path: string;              // workspace-relative, '/'-separated
+  Kind: TFileChangeKind;     // fcCreated, fcModified, fcDeleted
+  IsDir: Boolean;
+  Before, After: string;     // capped text; '' when not captured
+  BeforeSize, AfterSize: Int64;
+  Captured: Boolean;         // the after side is readable text
+  BeforeCaptured: Boolean;   // the before side is readable text
+end;
+```
+
+Two independent flags, because the two sides are captured independently: a
+spawned command's modification has the after text (the file exists when the
+post-run walk happens) but not the before. A line delta needs **both**; without
+them the honest rendering is a size pair.
 
 ## Granularity: the tool call is the *review* point, the turn is the *storage* unit
 
-The snapshot is taken at the turn boundary (above) because that is the unit that
-is bounded, atomic, and safe to undo — no writer in flight, one chain per turn,
-pruned as a whole. But **the operator reviews work where it happens**: a turn can
-be twenty tool calls, and "what did *that* `file_search_replace` do?" is a
-different question from "what did the turn do?". A turn-end summary alone answers
-only the second.
-
-So there are **two levels**, and they are not redundant:
+The turn boundary is where history is **stored**: bounded, atomic, safe to undo,
+no writer in flight, pruned as a whole. But **the operator reviews work where it
+happens** — a turn can be twenty tool calls, and "what did *that*
+`file_search_replace` do?" is a different question from "what did the turn do?".
 
 | level | unit | purpose | context cost |
 | --- | --- | --- | --- |
@@ -38,24 +70,18 @@ So there are **two levels**, and they are not redundant:
 
 ### The tool-change record
 
-Captured where every file write already funnels — `WriteAtomic` in
-`hildegard.helper.files` (all 8 write sites share it) — and stored **beside** the
-tool result, never inside it:
+Three producers, with very different confidence, and the record says which:
 
-```pascal
-TFileChange = record
-  Path: string;              // workspace-relative
-  Kind: TChangeKind;         // ckCreated, ckModified, ckDeleted, ckMoved
-  Added, Removed: Integer;
-  Diff: string;              // unified, bounded (e.g. 8 KiB)
-end;
-```
+| Source | Who writes | What we know | `source` |
+| --- | --- | --- | --- |
+| File tools (`file_write`, `patch_apply`, …) | us, via `WriteAtomic` | exact before/after | `file-tool` |
+| Builtin shell tier (`sed -i`, `tee`, `rm`, `>`) | us, via `TWorkspaceShellFs.OnChange` | exact before/after | `tier` |
+| Process tier (`git`, `make`, `mode=bash`) | a subprocess | only a before/after walk | `process` |
+| Watchdog | a periodic walk | same, later | `watcher` |
 
-Keyed by the **tool-result message id** (`messages.id` for the `mrTool` row), so
-the live view and a resumed session render the same block from the same rows —
-the invariant the streaming work already holds. A tool that touches several files
-(glob-driven `file_search_replace`, `patch_apply` across files) yields several
-rows for one message.
+Keyed by the **tool-result message id**, so the live view and a resumed session
+render the same block from the same rows — the invariant the streaming work
+already holds. A call touching several files yields several rows for one message.
 
 ### Attribution, including parallel batches
 
@@ -66,27 +92,54 @@ batch's tool results arrive in **call order**, so the rendered blocks keep their
 attribution. The diff view can group a batch ("3 calls, 5 files") or list per
 call — the rows support both.
 
-### The honest limit: the shell
+### The shell is covered now, by two mechanisms
 
-`run_command` can write files with no `WriteAtomic` in sight — `sed -i`, a build,
-a `git checkout`. The tool level **cannot see those**; only the turn snapshot
-does, by scanning the tree. So:
+This section previously said the tool level is "blind to the shell". **That is no
+longer true**, and the correction matters because the old text argued against a
+limitation that has since been closed:
 
-- a **tool-level** diff is complete for the first-class edit tools and **blind to
-  the shell**;
-- a **turn-level** diff is complete for both, because it is a tree scan.
+- **The builtin shell tier writes in-process**, so every write goes through
+  `TWorkspaceShellFs` — the same observer as an edit tool, with exact before and
+  after text. `sed -i`, `tee`, `rm`, `mv`, `cp`, `mkdir` and redirects are all
+  exact.
+- **The process tier** (`git`, `make`, `mode=bash`) writes behind our back, so the
+  executor takes an **ignore-aware before/after tree walk** and diffs it. Every
+  `.gitignore` applies to its own directory; `.git` and symlinks are skipped.
 
-The UI should say so rather than imply a shell call changed nothing: a turn whose
-snapshot differs from the sum of its tool changes has *unattributed* changes, and
-that difference is itself worth surfacing ("3 files changed outside a file tool —
-likely `run_command`").
+What remains genuinely unknowable, and should be surfaced rather than implied:
+
+| Case | State |
+| --- | --- |
+| Builtin tier write | exact content, both sides |
+| File tool write | exact content, both sides |
+| Process-tier create/modify | after text only — **size-only delta** (see `BeforeCaptured`) |
+| Process-tier **delete** | size only; **the bytes are gone** before we look |
+| A write between two snapshots of the same call window | attributed to the window, not the call |
+| Two concurrent calls with overlapping windows | attributed to the **batch**, not the call |
+
+So the UI must still distinguish *inferred* from *exact* — a `source` column on
+every row, and the diff view naming it. The one case that cannot be undone is a
+process-tier deletion: there is no patch to write, because the content no longer
+exists. A **watchdog** that catches the delete event while the bytes are still
+there is the only fix, and it is future work.
+
+### Attribution, including parallel calls
+
+A call's changes are the writes that land inside its window, and a parallel batch
+makes that window shared. File-tool and tier writes stay exact under parallelism
+because each knows its own path; **two concurrent subprocess calls do not**, since
+each sees the other's writes. So the attribution floor for a subprocess call is
+the **batch**, and the record says so rather than claiming per-call precision it
+does not have.
 
 ### Why this is not duplicated work
 
-The tool-change record is the **input** to the turn snapshot, not a rival to it:
-the scan at the boundary can start from the paths the tool changes already named
-and fall back to a full scan for the rest. Building the capture now is
-groundwork for the snapshot, and the display value is immediate.
+The per-call record is the **input** to the turn view, not a rival to it: the
+boundary scan can start from the paths the changes already named and fall back to
+a full walk for the rest. The same rows serve three other consumers — the
+staleness check in [the board](../Message_Board/FEATURE.md), the write CAS, and
+"who touched this" for an orchestrator — which is why this is a log rather than a
+viewer's cache.
 
 ## Problem Statement
 
@@ -105,10 +158,11 @@ to try a turn, see it, and take it back.
 
 Ponytail check first: do we need this at all? Yes — the agent's whole job is
 changing the workspace, and there is currently no way to see or reverse that. Can
-we reuse? We already vendor **SQLite** (content-addressed blobs + a manifest is a
-few tables) and we already have the **turn boundary** (`harness.turn`) and the
-**workspace** trust boundary. The genuine gap is the snapshot store, a line diff,
-and the TUI surface.
+we reuse? We already vendor **SQLite** (a patch log plus periodic keyframes is a
+few tables), the **builtin shell tier** already observes every write it makes, the
+**snapshot walk** already exists for the process tier, and we already have the
+**turn boundary** (`harness.turn`) and the **workspace** trust boundary. The
+genuine gaps are the store, a diff generator, and the TUI surface.
 
 ## Goals
 
@@ -162,50 +216,43 @@ and the TUI surface.
 
 ### Functional Requirements
 
-- [ ] A **snapshot** of the workspace is recorded at each turn boundary, capturing
-      the file set (paths + contents + mode) with content deduplication.
-- [ ] Each **edit tool call** records the files it changed — path, change kind,
-      added/removed line counts, and a bounded unified diff — keyed by the tool
-      result's message id, so the live view and a resumed session render it
-      identically.
-- [ ] A **parallel batch** attributes each call's changes to that call (results
-      arrive in call order), and the view can group the batch or list per call.
-- [ ] The tool-change record is **never part of the prompt**: it is stored beside
-      the tool result, not inside its content.
+- [ ] Each change row records path, kind, **both hashes**, a bounded patch,
+      `source` (file-tool / tier / process / watcher) and its `captured` flags;
+      keyed by the tool result's message id, so live and resumed render identically.
+- [ ] A **parallel batch** attributes file-tool and tier changes per call; two
+      concurrent subprocess calls are attributed to the **batch**, and the record
+      says so rather than claiming precision it lacks.
+- [ ] The change record is **never part of the prompt**: it is stored beside the
+      tool result, not inside its content.
 - [ ] A call's changes are shown **at the call**, as it completes — not only in a
       turn-end summary.
-- [ ] A turn whose snapshot differs from the sum of its tool changes surfaces the
-      difference as **unattributed** changes (e.g. made by `run_command`), rather
-      than implying no change.
 - [ ] The diff is **bounded** when captured (a byte cap), so a huge edit cannot
       bloat the store or the view; the view says it was truncated.
+- [ ] A **patch is applied as a compare-and-swap**: the file's current hash must
+      match `before_hash` first, and the result must hash to `after_hash` after.
+- [ ] On a **hash mismatch** — the file changed outside the record — the write is
+      **refused** by default and the operator is told which file and which other
+      session last touched it. This is also the stale-read warning an agent gets
+      when it is about to overwrite a peer's edit.
 - [ ] The operator can **list the changes of a turn**: added / modified / deleted
-      files, with a line count each, and a summary total.
-- [ ] The operator can open a **per-file diff** between two snapshots (the turn's
-      before and after), as a unified (or side-by-side) view.
-- [ ] **Undo** restores the workspace to the previous snapshot's file states;
-      **redo** re-applies forward. Both update the changed-files view.
-- [ ] Undo/redo are **atomic per snapshot**: a failure leaves the workspace in the
-      pre-undo state (or a clearly recoverable one), never half-applied.
-- [ ] **Ignore rules** exclude configured paths (e.g. `.git/`, `build/`,
-      `node_modules/`) and are configurable.
-- [ ] **Binary and oversized files** are handled: a binary is not diffed as text,
-      and a file over the cap is recorded by hash/size only (or skipped), with the
-      view saying so.
-- [ ] An unchanged turn records **no new content** (only a manifest that shares the
-      previous blobs), so an idle turn is cheap.
-- [ ] The history is **listable**: turn id, time, change count, and label.
-- [ ] A **diff is bidirectional**: the same stored delta applies forward (redo)
-      and backward (undo).
-- [ ] A diff carries the **before and after hash** of the file; applying it
-      verifies the file's current hash against the expected one **before** writing.
-- [ ] On a **hash mismatch** — the file changed outside the snapshot system — the
-      operator is told which file, that the restore may not be correct, and that
-      approving it is their responsibility; the default is to refuse.
-- [ ] History is retained for a **bounded window** (N turns, configurable) and
-      older turns are **pruned** — on a schedule or on demand via a slash command —
-      leaving a full base at the horizon so the chain stays replayable.
-- [ ] **Snapshotting never changes the workspace** (read-only capture).
+      files, with per-file and total counts.
+- [ ] The operator can open a **per-file diff** between two points in the log.
+- [ ] **Undo** restores the workspace to a prior state; **redo** re-applies
+      forward. Undo is **single-agent only**: it is refused unless exactly one
+      live runtime holds the workspace, because reverting a peer's write has no
+      correct resolution.
+- [ ] Undo/redo are **atomic per turn**: a failure leaves the workspace in the
+      pre-undo state, never half-applied.
+- [ ] **Ignore rules** apply (`.git/`, `build/`, `node_modules/`, every
+      `.gitignore` in its own directory).
+- [ ] **Binary and oversized files** record hash and size only; the view says so.
+- [ ] An unchanged turn records **no rows at all**, so an idle turn is free.
+- [ ] **Keyframes** bound replay: a full copy per path is stored when its
+      accumulated patches exceed 2× its size or every 50 changes, so
+      reconstructing state at any point never walks the whole history.
+- [ ] History is **pruned** past a retention window, keeping the newest keyframe
+      at the horizon so the remainder stays replayable.
+- [ ] **Recording never changes the workspace** (the walk is read-only).
 
 ### Non-Functional Requirements
 
@@ -261,7 +308,8 @@ and the TUI surface.
 
 ### Internal
 
-- `hildegard.helper.store` (SQLite) — the snapshot tables (blobs, snapshots,
+- `hildegard.helper.store` (SQLite) — the change-log tables (`file_changes`,
+  `file_keyframes`) and their migration.
   entries) and their migration.
 - `hildegard.helper.workspace` — the root and the trust boundary to confine to.
 - `hildegard.helper.harness.turn` / `session.runtime` — the turn boundary where a
@@ -282,8 +330,9 @@ and the TUI surface.
 
 - **Scan cost.** A naive full-tree hash every turn is expensive. Mitigation:
   incremental capture by `(mtime, size)`; hash only changed files.
-- **Storage blow-up.** Mitigation: content-addressed blobs (dedup) + an ignore
-  list + a size cap; a binary or oversized file is recorded by hash/size.
+- **Storage blow-up.** Mitigation: patches rather than whole copies, keyframes only
+  when a path's patches exceed 2× its size, an ignore list, and a size cap; a
+  binary or oversized file is recorded by hash and size only.
 - **Undo mid-turn.** Undoing while the agent is writing would race. Mitigation:
   undo/redo are refused (or queued) while a turn is in flight; the boundary is the
   sync point.
@@ -328,7 +377,7 @@ and the TUI surface.
 ## Future Considerations
 
 - **Named snapshots / pins** (keep a turn forever) and **GC** of unreferenced
-  blobs.
+  keyframes.
 - **Snapshot the operator's manual edits too** (not just the agent's turns), so the
   history is the workspace's, not only the agent's.
 - **Cross-session history** (a workspace's snapshots across sessions).
@@ -350,9 +399,11 @@ and the TUI surface.
   transactional atomicity and crash-safety for free — which the zip model would
   have to build. The *model* is `TVersions`': a linear chain of diffs, bounded by a
   retention window.
-- **Why a bidirectional diff with hashes.** One delta that applies both ways keeps
-  undo and redo symmetric; the before/after hashes make the apply **verifiable**, so
-  an out-of-band edit is detected before a write rather than after.
+- **Why patches, anchored by hashes.** A patch plus the before/after hash is
+  stateless: applying it verifies the file is still what the patch expects, so an
+  out-of-band edit is refused rather than silently overwritten. Undo re-applies
+  the reverse patch under the same check, so redo is symmetric without storing two
+  forms.
 - **Why the turn is the unit.** A turn is when the agent's edits land and before the
   next one; it is the natural review point, it matches the ledger, and it is where
   undo/redo is safe (no writer in flight).
