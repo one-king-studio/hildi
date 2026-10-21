@@ -217,6 +217,7 @@ type
       AMaxIters, AMaxAttempts: Integer): TAgentLoop;
     function MessageCount(const ABody: string): Integer;
     function RoleAt(const ABody: string; AIndex: Integer): string;
+    function ContentAt(const ABody: string; AIndex: Integer): string;
     function ToolCallIdAt(const ABody: string; AIndex: Integer): string;
   protected
     procedure TearDown; override;
@@ -278,6 +279,11 @@ type
     procedure TestQueuedAmbientDrainsAsAmbient;
     procedure TestSendAmbientStartsWithoutUserMessage;
     procedure TestPrewrappedUserMessagesAreNotWrappedAgain;
+    { The prompt-cache invariant: a superseded message is byte-identical across
+      requests, and the volatile tail only ever rides the newest message. }
+    procedure TestSupersededMessageIsByteIdenticalAcrossRequests;
+    procedure TestTailRidesOnlyTheNewestMessage;
+    procedure TestTailConvergesAcrossTurns;
     procedure TestRetryBackoffIsExponentialAndCapped;
     procedure TestRetryOnNetworkThenSucceed;
     procedure TestRetryExhaustionReportsAttempts;
@@ -894,6 +900,20 @@ begin
   end;
 end;
 
+function TAgentLoopTest.ContentAt(const ABody: string; AIndex: Integer): string;
+var
+  Root: TJSONObject;
+  Msgs: TJSONArray;
+begin
+  Root := TJSONObject(GetJSON(ABody));
+  try
+    Msgs := TJSONArray(Root.Find('messages'));
+    Result := TJSONObject(Msgs.Items[AIndex]).Get('content', '');
+  finally
+    Root.Free;
+  end;
+end;
+
 function TAgentLoopTest.ToolCallIdAt(const ABody: string;
   AIndex: Integer): string;
 var
@@ -1406,6 +1426,109 @@ begin
   AssertFalse('a plain turn', IsPrewrappedUserMessage('fix the modal'));
   AssertFalse('a mid-text mention',
     IsPrewrappedUserMessage('see the <handoff> docs'));
+end;
+
+procedure TAgentLoopTest.TestSupersededMessageIsByteIdenticalAcrossRequests;
+{ THE prompt-cache invariant. In a multi-round turn the user message stops being
+  the newest message once tool results arrive; from that request onward it must
+  be byte-identical, or the provider's prefix cache is invalidated at that index
+  and everything after it is re-billed at full price.
+
+  Note what is NOT asserted: that call 1's user message equals call 2's. Call 1
+  had it as the TAIL, so it carried the context block; call 2 superseded it and
+  it reverted to its stable form. That reversion is the design - it is what makes
+  the history converge on the stored form. The invariant starts at the moment of
+  supersession: from then on the bytes never move.
+
+  This failed before the tail rewrite: the user message carried <now> and
+  <usage>, both of which change per request, so it differed on EVERY call,
+  including the ones after it was superseded. }
+var
+  Answer: string;
+  Err: TLLMError;
+  AtCall2, AtCall3: string;
+begin
+  BuildLoop('', 8);
+  RegisterDefaultTools(FTools);
+  { Three requests: round 1 (the user message is the tail), round 2 after the
+    first tool result (the user message is now superseded), round 3 after the
+    second. Compare the last two. }
+  FFake.AddResponse([ToolNameFrame(0, 'call_1', 'get_system_time'),
+    ToolArgsFrame(0, '{"reason":"test"}'), FinishFrame('tool_calls'), DoneFrame]);
+  FFake.AddResponse([ToolNameFrame(0, 'call_2', 'get_system_time'),
+    ToolArgsFrame(0, '{"reason":"test"}'), FinishFrame('tool_calls'), DoneFrame]);
+  FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
+
+  AssertTrue('send ok', FLoop.Send('what time is it?', nil, Answer, Err));
+  AssertTrue('three requests', FFake.Bodies.Count >= 3);
+
+  AtCall2 := ContentAt(FFake.Bodies[1], 0);
+  AtCall3 := ContentAt(FFake.Bodies[2], 0);
+  AssertEquals('the superseded user message never moves again', AtCall2, AtCall3);
+  { And once superseded it is in its stable form: no tail of its own. }
+  AssertTrue('it carries no tail', Pos('<guard>', AtCall2) = 0);
+  AssertEquals('it is the stored text exactly',
+    '<message>what time is it?</message>', AtCall2);
+end;
+
+procedure TAgentLoopTest.TestTailRidesOnlyTheNewestMessage;
+{ The volatile tail - clock, usage, guard - must appear on exactly one message
+  per request: the last. Every earlier message is in its stable form. }
+var
+  Answer: string;
+  Err: TLLMError;
+  Body: string;
+  Count, I, WithTail: Integer;
+begin
+  BuildLoop('', 8);
+  RegisterDefaultTools(FTools);
+  FFake.AddResponse([ToolNameFrame(0, 'call_1', 'get_system_time'),
+    ToolArgsFrame(0, '{"reason":"test"}'), FinishFrame('tool_calls'), DoneFrame]);
+  FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
+
+  AssertTrue('send ok', FLoop.Send('hello', nil, Answer, Err));
+
+  { Inspect the SECOND request: it has a user message, an assistant tool call and
+    a tool result, so the tail belongs to the tool result only. }
+  Body := FFake.Bodies[1];
+  Count := MessageCount(Body);
+  AssertTrue('the second request has several messages', Count >= 3);
+  WithTail := 0;
+  for I := 0 to Count - 1 do
+    if Pos('<guard>', ContentAt(Body, I)) > 0 then
+      Inc(WithTail);
+  AssertEquals('exactly one message carries the tail', 1, WithTail);
+  AssertTrue('and it is the last one',
+    Pos('<guard>', ContentAt(Body, Count - 1)) > 0);
+end;
+
+procedure TAgentLoopTest.TestTailConvergesAcrossTurns;
+{ Across turns the sent history must converge on the stored history: turn 1's
+  user message is sent WRAPPED as the tail during turn 1, and PLAIN during turn
+  2 (because a newer message is then the tail). That reversion is what makes the
+  conversation cacheable; it is the opposite of freezing the wrapper in place. }
+var
+  Answer: string;
+  Err: TLLMError;
+  Turn1User, Turn2User: string;
+begin
+  BuildLoop('', 8);
+  RegisterDefaultTools(FTools);
+  FFake.AddResponse([TextDelta('one'), FinishFrame('stop'), DoneFrame]);
+  FFake.AddResponse([TextDelta('two'), FinishFrame('stop'), DoneFrame]);
+
+  AssertTrue('turn 1', FLoop.Send('first question', nil, Answer, Err));
+  AssertTrue('turn 2', FLoop.Send('second question', nil, Answer, Err));
+  AssertTrue('two calls at least', FFake.Bodies.Count >= 2);
+
+  { In turn 1's request the user message is the tail, so it carries the guard.
+    In turn 2's request it is superseded and must be plain. }
+  Turn1User := ContentAt(FFake.Bodies[0], 0);
+  Turn2User := ContentAt(FFake.Bodies[1], 0);
+  AssertTrue('turn 1: the user message carries the tail',
+    Pos('<guard>', Turn1User) > 0);
+  AssertEquals('turn 2: it is superseded and plain',
+    '<message>first question</message>', Turn2User);
 end;
 
 procedure TAgentLoopTest.TestRetryBackoffIsExponentialAndCapped;

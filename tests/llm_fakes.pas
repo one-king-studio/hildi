@@ -26,6 +26,10 @@ type
     LastURL: string;
     LastBody: string;
     LastHeaders: TStringList;
+    { Every request body, in call order: lets a test compare what was sent on
+      one call against what was sent on the next, which is how the prompt-cache
+      invariant is asserted (a superseded message must be byte-identical). }
+    Bodies: TStringList;
     AfterChunk: TNotifyEvent;
     constructor Create;
     destructor Destroy; override;
@@ -64,6 +68,7 @@ begin
   FChunks := TStringList.Create;
   FResponses := TObjectList<TStringList>.Create(True);
   LastHeaders := TStringList.Create;
+  Bodies := TStringList.Create;
   StatusCode := 200;
   FailNetwork := False;
   NetworkFailuresLeft := 0;
@@ -72,6 +77,7 @@ end;
 
 destructor TFakeTransport.Destroy;
 begin
+  Bodies.Free;
   LastHeaders.Free;
   FResponses.Free;
   FChunks.Free;
@@ -106,6 +112,7 @@ begin
   LastURL := AURL;
   LastBody := ABody;
   LastHeaders.Assign(AHeaders);
+  Bodies.Add(ABody);
   AError := '';
   ACancelled := False;
   if FailNetwork or (NetworkFailuresLeft > 0) then

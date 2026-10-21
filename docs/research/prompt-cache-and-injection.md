@@ -142,16 +142,35 @@ behavioural guidance, and on the tail it would be re-billed every round.
 
 ## What is still open
 
-- **Cross-turn hit rate.** Converging to the stored history should make turn
-  boundaries cheap, but the first request of a turn still differs from the last
-  request of the previous turn (a new user message is appended, and the previous
-  tail reverts). The gain is "one message re-billed" rather than "none"; whether
-  that is the dominant cost is unmeasured.
-- **The measurement.** Not yet taken. A fake-transport test driving three rounds
-  across two turns, capturing request bodies, asserting that a superseded message
-  is byte-identical across requests, and reporting the `usage` cache ratio before
-  and after. That test is also the regression guard: it fails if anyone
-  reintroduces a per-request rewrite.
+- **The measurement.** Not yet taken as a cache-ratio number. What IS proven, by
+  test: a superseded message is byte-identical across every later request of the
+  turn, exactly one message per request carries the tail, and the tail converges
+  across turns (turn 1's user message is sent wrapped, turn 2's plain). Those
+  three assertions failed when the old per-message decoration was re-injected,
+  so they are real guards rather than tautologies. Turning them into a token
+  figure needs the provider's `usage` frames, which the fake transport does not
+  currently synthesize per request.
 - **Whether `<now>` should be turn-start or per-request.** Per-request is honest
   and costs one message; turn-start is cheaper but shows a stale clock in a long
   turn. Leaning per-request, since the tail is where volatility belongs.
+- **`UserInstructions` is now exported but unused.** It should move into the
+  system prompt (`DefaultSystemPrompt`), which is a separate change: the wrapper
+  no longer carries it, so a session whose system prompt lacks it has lost the
+  frontmatter guidance. Do not ship without that.
+
+## What was built (2026-10-21)
+
+`wrap.pas` split into `FormatUserMessage(content)` — the stable form, escaping
+and nothing else — and `FormatTail(...)`, which carries the clock, workspace,
+usage, advisory, provider context and guard. `BuildRequest` appends
+`FormatTail` to `Result.Messages[High]` and nowhere else, after the continuation
+messages are appended so a cut-off notice is the tail when it is newest. Both
+old decoration sites are gone (the backward search for `crUser` and the separate
+advisory prepend to the last `crTool`).
+
+Pre-wrapped ambient and handoff messages get no tail, so they stay
+byte-identical and cache-safe.
+
+Verified: `test_wrap` (11 tests) and three invariant tests in `test_agent`
+(superseded bytes frozen, one tail per request on the last message, convergence
+across turns); `make check` 1,624 tests, leak-clean.

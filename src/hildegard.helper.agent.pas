@@ -414,7 +414,8 @@ const
   ToolReasonMaxLength = 120;
   DefaultSystemPrompt =
     'You are a helpful assistant running inside hildegard-helper. ' +
-    'Use the provided tools when they help answer the user.';
+    'Use the provided tools when they help answer the user.' + LineEnding +
+    LineEnding + UserInstructions;
 
 implementation
 
@@ -1109,32 +1110,19 @@ begin
       Context := Context + LineEnding;
     Context := Context + Fragment;
   end;
-  { Wrap the current user turn: the last user message. An ambient notification
-    and a checkpoint handoff are delivered as user messages but are already
-    wrapped - wrapping them again would escape their tags - so only the user's
-    own turn is wrapped. }
-  for I := High(Result.Messages) downto 0 do
-    if Result.Messages[I].Role = crUser then
-    begin
-      if not IsPrewrappedUserMessage(Result.Messages[I].Content) then
-        Result.Messages[I].Content := FormatUserMessage(
-          Result.Messages[I].Content, NowUtcMs, Context,
-          FLastPromptTokens, FConfig.MaxContextTokens, FConfig.WorkspaceRoot);
-      Break;
-    end;
-  { A soft-limit nudge rides the last tool response's <context> - loop-only, not
-    persisted - so the model sees it with the result, not instead of it. }
-  if FPendingAdvisory <> '' then
-  begin
-    for I := High(Result.Messages) downto 0 do
-      if Result.Messages[I].Role = crTool then
-      begin
-        Result.Messages[I].Content :=
-          FormatAdvisory(FPendingAdvisory) + Result.Messages[I].Content;
-        Break;
-      end;
-    FPendingAdvisory := '';
-  end;
+  { STABLE FORM: every message's bytes are a deterministic function of its
+    stored content. No clock, no usage, no context - that is what keeps the
+    provider's prefix cache alive across the requests of a turn. A message
+    already sent is never rewritten. }
+  for I := 0 to High(Result.Messages) do
+    if (Result.Messages[I].Role = crUser) and
+      (not IsPrewrappedUserMessage(Result.Messages[I].Content)) then
+      Result.Messages[I].Content := FormatUserMessage(
+        Result.Messages[I].Content);
+
+  { The VOLATILE TAIL goes on the last message, whatever its role, and that is
+    decided AFTER the continuation block below has appended its messages - so
+    a cut-off notice is the tail when it is the newest thing. }
   if AContinuing then
   begin
     { The pending fragment and the instruction are request-only: neither is
@@ -1156,6 +1144,26 @@ begin
     SetLength(Result.Messages, N + 1);
     Result.Messages[N] := Msg;
   end;
+
+  { The VOLATILE TAIL: appended to the LAST message of the request, whatever
+    its role - the user turn at the start of a turn, each new tool result as
+    the turn proceeds, and a queued prompt or continuation notice when those
+    become the newest message. The previous tail reverts to its stable form for
+    free, because the store never held it, so the sent history converges to the
+    stored history and the prefix stays byte-stable. See
+    docs/research/prompt-cache-and-injection.md. }
+  if Length(Result.Messages) > 0 then
+  begin
+    N := High(Result.Messages);
+    { A pre-wrapped ambient/handoff message carries its own static wrapper; give
+      it no tail, so it stays byte-identical and cache-safe. }
+    if not IsPrewrappedUserMessage(Result.Messages[N].Content) then
+      Result.Messages[N].Content := Result.Messages[N].Content +
+        LineEnding + FormatTail(Context, NowUtcMs, FLastPromptTokens,
+          FConfig.MaxContextTokens, FConfig.WorkspaceRoot, FPendingAdvisory);
+  end;
+  { The advisory rode the tail it was just given, so it is delivered once. }
+  FPendingAdvisory := '';
   if FTools <> nil then
     Result.Tools := FTools.Specs;
   { Append provider tools (registration order). }
