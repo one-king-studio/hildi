@@ -89,6 +89,7 @@ endif
 LIB_SRCS  := $(wildcard $(SRC)/*.pas)
 ASYNC_SRCS := $(wildcard $(SRC)/async/*.pas)
 SHELL_SRCS := $(wildcard $(SRC)/shell/*.pas)
+CHANGES_SRCS := $(wildcard $(SRC)/changes/*.pas)
 TEST_SRCS := $(wildcard $(TESTS)/*.pas)
 
 .PHONY: all test test-leak watch check release clean help libsqlite libmbedtls \
@@ -245,6 +246,13 @@ shell-standalone: $(SHELL_SRCS)
 	$(FPC) $(DEBUG) -Fu$(SRC)/shell -FU$(DBGUNITS) -FE$(BIN) -o$(BIN)/shell-standalone $(EXAMPLES)/shell_standalone.pas
 	$(BIN)/shell-standalone
 
+# The same gate for the Changes library: compile and run a program that uses ONLY
+# src/changes, with no harness unit on the search path.
+changes-standalone: $(CHANGES_SRCS)
+	@mkdir -p $(BIN) $(DBGUNITS)
+	$(FPC) $(DEBUG) -Fu$(SRC)/changes -FU$(DBGUNITS) -FE$(BIN) -o$(BIN)/changes-standalone $(EXAMPLES)/changes_standalone.pas
+	$(BIN)/changes-standalone
+
 # A developer demo: parse sample scripts and print the AST the library built.
 # Pass a script to dump just that one: make shell-ast SCRIPT='echo hi | cat'
 shell-ast: $(SHELL_SRCS)
@@ -278,9 +286,9 @@ async-examples: $(ASYNC_SRCS)
 	$(FPC) $(DEBUG) -Fu$(SRC)/async -FU$(DBGUNITS) -FE$(BIN) -o$(BIN)/async-examples $(EXAMPLES)/async_examples.pas
 	$(BIN)/async-examples
 
-$(BIN)/hildegard-helper-tests: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(ASYNC_SRCS) $(SHELL_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
+$(BIN)/hildegard-helper-tests: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(ASYNC_SRCS) $(SHELL_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 test-leak: libsqlite libmbedtls $(BIN)/hildegard-helper-tests-leak
 	HEAPTRC=$(HEAPTRC) $(BIN)/hildegard-helper-tests-leak $(TESTARGS)
@@ -289,9 +297,9 @@ test-leak: libsqlite libmbedtls $(BIN)/hildegard-helper-tests-leak
 watch:
 	@scripts/watch.sh $(TARGET)
 
-$(BIN)/hildegard-helper-tests-leak: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(ASYNC_SRCS) $(SHELL_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
+$(BIN)/hildegard-helper-tests-leak: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(ASYNC_SRCS) $(SHELL_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
 	@mkdir -p $(BIN) $(LEAKUNITS)
-	$(FPC) $(LEAKFLAGS) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(TESTS) -FU$(LEAKUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(LEAKFLAGS) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(TESTS) -FU$(LEAKUNITS) -FE$(BIN) -o$@ $<
 
 # Live smoke: drive the REAL headless runtime through a scripted turn against a
 # loopback fake provider. Hermetic (loopback only, ephemeral port, temp store);
