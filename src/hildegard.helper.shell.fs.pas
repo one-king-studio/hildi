@@ -189,6 +189,10 @@ begin
   Change.BeforeSize := ABeforeSize;
   Change.AfterSize := AAfterSize;
   Change.Captured := ACaptured;
+  { The builtin tier reads the prior text itself, so a capture means Before is
+    the real prior content. (A creation has no before side; its kind makes the
+    delta moot.) }
+  Change.BeforeCaptured := ACaptured;
   FOnChange(Change);
 end;
 

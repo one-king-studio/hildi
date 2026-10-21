@@ -33,6 +33,10 @@ type
     procedure TestNestedGitignoreAppliesToItsDirectory;
     procedure TestGitDirectoryIsSkipped;
     procedure TestDirectoryCreation;
+    { The summary must never fabricate a line delta: a process-tier modification
+      captures the AFTER text but not the BEFORE, so a delta computed against an
+      empty Before would report the whole file as added. }
+    procedure TestProcessTierModifiedReportsSizesNotLineDelta;
   end;
 
 implementation
@@ -399,6 +403,47 @@ begin
         AssertTrue('a directory', C.IsDir);
         AssertTrue('captured (nothing to read)', C.Captured);
         AssertTrue('the nested one too', Find(Changes, 'new/sub').Path <> '');
+      finally
+        Changes.Free;
+      end;
+    finally
+      After.Free;
+    end;
+  finally
+    Before.Free;
+  end;
+end;
+
+procedure TWorkspaceSnapshotTest.TestProcessTierModifiedReportsSizesNotLineDelta;
+{ A process-tier modification captures the AFTER text but not the BEFORE - the
+  old bytes are gone by the time the post-run walk happens. The summary must
+  therefore report sizes, not a line delta: computing one against an empty
+  Before reported the WHOLE file as added, which is a fabricated number in a
+  line the model reads. }
+var
+  Before, After: TWorkspaceSnapshot;
+  Changes: TFileChangeSet;
+  C: TFileChange;
+begin
+  WriteText('edit.txt', 'one' + #10 + 'two' + #10);
+  Before := TakeSnapshot(FRoot);
+  try
+    WriteText('edit.txt', 'one' + #10 + 'two' + #10 + 'three' + #10);
+    After := TakeSnapshot(FRoot);
+    try
+      Changes := TFileChangeSet.Create;
+      try
+        DiffSnapshots(Before, After, Changes);
+        C := Find(Changes, 'edit.txt');
+        AssertEquals('modified', Ord(fcModified), Ord(C.Kind));
+        AssertTrue('the after side is captured', C.Captured);
+        AssertFalse('the before side is not', C.BeforeCaptured);
+        AssertEquals('before size', 8, C.BeforeSize);
+        AssertEquals('after size', 14, C.AfterSize);
+        { The defect: this used to read ' (+4 -0)' - the whole file counted as
+          added. It must now be a size pair. }
+        AssertEquals('summary reports sizes',
+          'M edit.txt (8 -> 14 bytes)', Changes.Summary);
       finally
         Changes.Free;
       end;

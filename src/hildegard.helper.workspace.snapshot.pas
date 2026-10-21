@@ -256,8 +256,10 @@ var
     C.Kind := fcDeleted;
     C.IsDir := AEntry.IsDir;
     C.BeforeSize := AEntry.Size;
-    { The bytes are gone by the time we diff; a directory never had any. }
+    { The bytes are gone by the time we diff; a directory never had any. A
+      deletion renders no line delta either way. }
     C.Captured := AEntry.IsDir;
+    C.BeforeCaptured := AEntry.IsDir;
     AChanges.Add(C);
   end;
 
@@ -275,6 +277,8 @@ var
       C.Captured := CaptureText(Full(AAfter, ARel), Data, Size);
     C.After := Data;
     C.AfterSize := AEntry.Size;
+    { A creation has no before side; the kind makes a delta moot. }
+    C.BeforeCaptured := False;
     AChanges.Add(C);
   end;
 
@@ -290,7 +294,10 @@ var
     C.AfterSize := AEntry.Size;
     C.Captured := CaptureText(Full(AAfter, ARel), Data, Size);
     C.After := Data;
-    { Best effort: the old bytes are gone, but the size delta is honest. }
+    { The old bytes are gone by the time the post-run walk happens, so Before is
+      NOT captured. Without this flag Summary would compute a line delta against
+      an empty Before and report the whole file as added. }
+    C.BeforeCaptured := False;
     AChanges.Add(C);
   end;
 

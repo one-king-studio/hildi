@@ -31,7 +31,15 @@ type
     IsDir: Boolean;
     Before, After: string;
     BeforeSize, AfterSize: Int64;
+    { True when the text on both sides of the change is in Before/After, so a
+      real diff can be computed. A process-tier modification has the AFTER text
+      but not the BEFORE (the old bytes are gone by the time the post-run walk
+      runs), so it records sizes only - a line count computed against an empty
+      Before would report the whole file as added. }
     Captured: Boolean;
+    { True when Before holds the real prior text. Separate from Captured because
+      the two sides can be captured independently. }
+    BeforeCaptured: Boolean;
   end;
 
   TFileChangeSet = class
@@ -145,7 +153,10 @@ begin
     Result := Result + ChangeKindCode(C.Kind) + ' ' + C.Path;
     if C.Kind = fcModified then
     begin
-      if C.Captured then
+      { A real diff needs BOTH sides. Without the before text a line delta would
+        read as "the whole file was added", which is a fabricated number - so a
+        half-captured change reports sizes instead. }
+      if C.Captured and C.BeforeCaptured then
         Delta := ' (+' + IntToStr(AddedLines(C.Before, C.After)) + ' -' +
           IntToStr(RemovedLines(C.Before, C.After)) + ')'
       else
