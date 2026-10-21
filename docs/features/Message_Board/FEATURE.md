@@ -236,6 +236,14 @@ The knowledge base is the operator's too, not only the agents':
 - **Not a file store.** Artifacts stay files (see the rule).
 - **Not a scheduler.** The board makes work *visible*; it does not divide it.
   Ten agents told "fix the tests" still all fix the same test.
+- **Not a task tracker.** There is no ownership on the board: no `claimed_by`, no
+  `status`, no assignment. Work that needs a lifecycle — claimed, blocked, done —
+  belongs to [Task List](../Task_List/FEATURE.md), a separate feature with its own
+  tables. The reason is a conflict of disciplines: a board entry is an
+  append-only *fact* (supersede, never edit), while a card's status is *mutable
+  state* by definition. One table cannot hold both without losing one of them.
+  The boundary in practice: the board answers "what do we know and what was
+  said?"; the task list answers "who is doing what, and what is left?".
 - **Not a merge tool.** Two agents editing one file still produce a conflict; the
   board may warn, the change log detects, nothing reconciles.
 - **Not a place to put authority.** A board entry can never approve a tool call,
