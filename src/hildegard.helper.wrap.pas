@@ -8,6 +8,17 @@ unit hildegard.helper.wrap;
   - the wrapper is built on the way out, entirely by the agent loop, and nothing
   else in the system knows it exists.
 
+  (One exception, recorded rather than fixed: an ambient notification and a
+  checkpoint handoff ARE persisted wrapped, because their wrapper is static, so
+  they are cache-safe and are never re-wrapped. See
+  docs/research/prompt-cache-and-injection.md.)
+
+  WHERE THE WRAP LIVES: on the LAST message of the request, whatever its role -
+  the user turn at the start of a turn, then each new tool result as the turn
+  proceeds. A message already sent is never rewritten; the previous tail reverts
+  to its stored form simply because the store never held the wrapper. This keeps
+  the prefix byte-stable so the provider's prompt cache survives the turn.
+
   Ported from hildegard/main's message formatter
   (src-backend/lib/main-agent/message-formatter.ts, formatCurrentMessage), with a
   tail prompt-injection guard and the context usage/limit. }
