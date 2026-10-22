@@ -277,7 +277,9 @@ begin
     E.Supersedes := Root.Get('supersedes', 0);
     E.FromSession := FSessionId;
     E.FromLabel := FLabel;
-    E.CreatedAt := 0;
+    { Epoch seconds. A zero here would make the entry look like an empty board to
+      the TOC and make every change look newer than it to the staleness check. }
+    E.CreatedAt := Round((Now - EncodeDate(1970, 1, 1)) * 86400);
     if E.Topic = '' then
     begin
       AError := 'topic is required (the page this entry belongs to)';
@@ -599,6 +601,22 @@ var
   LastAt, AgeSec: Int64;
   Cursor: Integer;
   Err, Age: string;
+  Body: string;
+
+  function Build(AWithF, AWithD, AWithQ: Boolean): string;
+  var
+    Fields: string;
+  begin
+    Fields := 'unread="' + IntToStr(Unread) + '"';
+    if AWithQ then
+      Fields := Fields + ' q="' + IntToStr(Q) + '"';
+    if AWithD then
+      Fields := Fields + ' d="' + IntToStr(D) + '"';
+    if AWithF then
+      Fields := Fields + ' f="' + IntToStr(F) + '"';
+    Result := '<board ' + Fields + '>last ' + Age + '</board>';
+  end;
+
 begin
   Result := '';
   AError := '';
@@ -624,12 +642,17 @@ begin
     Age := IntToStr(AgeSec div 60) + 'm'
   else
     Age := IntToStr(AgeSec div 3600) + 'h';
-  Result := '<board unread="' + IntToStr(Unread) + '" q="' + IntToStr(Q) +
-    '" d="' + IntToStr(D) + '" f="' + IntToStr(F) + '">last ' + Age + '</board>';
-  { The element is data only and bounded; the prose explaining the board lives in
-    the system prompt with the skill descriptions. }
-  if Length(Result) > MaxBoardTocBytes then
-    Result := Copy(Result, 1, MaxBoardTocBytes);
+  { Drop whole FIELDS in a stated order - f, then d, then q - never truncating
+    mid-field and never dropping unread or the age. A TOC that says only "2
+    unread" is actionable; one cut mid-attribute is not. }
+  Body := Build(True, True, True);
+  if Length(Body) > MaxBoardTocBytes then
+    Body := Build(False, True, True);
+  if Length(Body) > MaxBoardTocBytes then
+    Body := Build(False, False, True);
+  if Length(Body) > MaxBoardTocBytes then
+    Body := Build(False, False, False);
+  Result := Body;
 end;
 
 end.

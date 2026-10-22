@@ -564,6 +564,11 @@ begin
     otherwise lose its description entirely, since the fragment now carries only
     state. }
   FLoop.StablePrompt := FSkills.StableText;
+  { The board's explanation rides the stable half too: the TOC element is data
+    only, so a model that has never seen a board needs to be told what one is. }
+  if FBoardStore <> nil then
+    FLoop.StablePrompt := FLoop.StablePrompt + LineEnding + LineEnding +
+      BoardStableText;
   { The change log attributes each change to the turn it happened in. }
   FLoop.OnTurnOpened := NoteTurnOpened;
   if FMcp <> nil then

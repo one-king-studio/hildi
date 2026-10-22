@@ -69,6 +69,16 @@ const
     'delete', 'restore', 'lock', 'unlock', 'pin', 'unpin');
 
   DefaultBoardReadLimit = 20;
+  { The explanation of what the board is. STABLE, so it belongs in the system
+    prompt with the skill descriptions rather than riding every request. The TOC
+    element in the tail is pure data. }
+  BoardStableText =
+    'This workspace has a board: durable knowledge shared with any other agent '
+    + 'working here, and with your future self after a context reset. Use '
+    + 'board_post to record a decision, a finding, an open question or a status; '
+    + 'use board_read to see what is there. Entries are never edited - post again '
+    + 'with supersedes to correct one, so the history survives. The <board> '
+    + 'element counts what you have not read.';
   { Retention for the noise classes. Knowledge - decision, finding, question,
     answer - is never pruned. }
   DefaultBoardKeepNotes = 200;

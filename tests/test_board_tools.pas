@@ -50,6 +50,8 @@ type
     procedure TestModerateNeedsApprovalAndADenialChangesNothing;
     procedure TestModerateAllowedDeletes;
     procedure TestAllThreeToolsAreRegistered;
+    { The TOC drops whole fields in a stated order, never truncating mid-field. }
+    procedure TestTocDropOrderKeepsUnreadAndAge;
   end;
 
 implementation
@@ -236,6 +238,41 @@ begin
     R, E));
   AssertTrue('read', FTools.ReadEntries('{"topic":"t","reason":"r"}', R, E));
   AssertEquals('gone from reads', '(no board messages)', R);
+end;
+
+procedure TBoardToolsTest.TestTocDropOrderKeepsUnreadAndAge;
+{ The element is capped, and under pressure it must drop whole FIELDS in the
+  stated order - f, then d, then q - never truncating mid-attribute and never
+  losing `unread` or the age. A TOC that says only "2 unread" is actionable; one
+  cut mid-field is not. }
+var
+  R, E: string;
+  Line: string;
+  I: Integer;
+begin
+  { Enough entries that all four counts are non-zero and the element is wide. }
+  for I := 1 to 9 do
+    AssertTrue('q', FTools.Post(PostJson('question', 't', 'q' + IntToStr(I)),
+      R, E));
+  for I := 1 to 9 do
+    AssertTrue('d', FTools.Post(PostJson('decision', 't', 'd' + IntToStr(I)),
+      R, E));
+  for I := 1 to 9 do
+    AssertTrue('f', FTools.Post(PostJson('finding', 't', 'f' + IntToStr(I)),
+      R, E));
+
+  Line := FTools.TocLine(E);
+  AssertTrue('the element exists', Line <> '');
+  { Bounded, and never truncated mid-field: it must end with the closing tag. }
+  AssertTrue('bounded', Length(Line) <= MaxBoardTocBytes);
+  AssertTrue('a complete element, not a cut one',
+    Pos('</board>', Line) = Length(Line) - Length('</board>') + 1);
+  { The two fields that always survive. }
+  AssertTrue('unread survives', Pos('unread=', Line) > 0);
+  AssertTrue('the age survives', Pos('last ', Line) > 0);
+  { And if a field was dropped, it is never one of the two protected ones. }
+  if Pos('f="', Line) = 0 then
+    AssertTrue('unread still there when f went', Pos('unread=', Line) > 0);
 end;
 
 procedure TBoardToolsTest.TestAllThreeToolsAreRegistered;
