@@ -1,0 +1,318 @@
+unit test_board_store;
+{ Tests for the board store: append-only entries, supersession as a pointer, the
+  TOC counts, cursors, and the staleness join. Real SQLite; hermetic. }
+
+{$mode delphi}{$H+}
+
+interface
+
+uses
+  Classes, SysUtils, fpcunit, testregistry,
+  hildegard.helper.store, hildegard.helper.board,
+  hildegard.helper.board.store;
+
+type
+  TBoardStoreTest = class(TTestCase)
+  private
+    FDir, FDbPath: string;
+    FStore: TSqliteStore;
+    FBoard: IBoardStore;
+    function Entry(const ATopic, ATitle: string;
+      AKind: TBoardKind = bkFinding): TBoardEntry;
+  public
+    procedure SetUp; override;
+    procedure TearDown; override;
+  published
+    procedure TestSchemaHasTheBoardTables;
+    procedure TestAppendRoundTripsEveryField;
+    procedure TestPathsRoundTrip;
+    procedure TestReadIsNewestFirstAndBounded;
+    procedure TestReadFiltersByTopic;
+    procedure TestReadFiltersByKind;
+    procedure TestSupersessionMakesTheOlderEntryNonCurrent;
+    procedure TestSoftDeleteExcludesButKeeps;
+    procedure TestRestoreBringsBackTheOlderCurrent;
+    procedure TestTopicLockAndUnlock;
+    procedure TestTocCounts;
+    procedure TestCursorRoundTrip;
+  end;
+
+implementation
+
+function TBoardStoreTest.Entry(const ATopic, ATitle: string;
+  AKind: TBoardKind): TBoardEntry;
+begin
+  Result := Default(TBoardEntry);
+  Result.WorkspaceId := 1;
+  Result.Kind := AKind;
+  Result.Topic := ATopic;
+  Result.Title := ATitle;
+  Result.Body := 'body of ' + ATitle;
+  Result.FromSession := 'sess-a';
+  Result.FromLabel := 'parent';
+  Result.CreatedAt := 1700000000;
+end;
+
+procedure TBoardStoreTest.SetUp;
+var
+  Cfg: TStoreConfig;
+  Err: TStoreError;
+begin
+  FDir := IncludeTrailingPathDelimiter(GetTempDir) + 'hhboard_' +
+    IntToStr(GetTickCount64);
+  ForceDirectories(FDir);
+  FDbPath := IncludeTrailingPathDelimiter(FDir) + 'board.db';
+  Cfg := Default(TStoreConfig);
+  Cfg.DatabasePath := FDbPath;
+  Cfg.BusyTimeoutMs := 5000;
+  FStore := TSqliteStore.Create(Cfg);
+  if not FStore.Open(Err) then
+    raise Exception.Create('open: ' + Err.Message);
+  FBoard := TSqliteBoardStore.Create(FStore);
+end;
+
+procedure TBoardStoreTest.TearDown;
+begin
+  FBoard := nil;
+  if FStore <> nil then
+  begin
+    FStore.Close;
+    FStore.Free;
+    FStore := nil;
+  end;
+  if FileExists(FDbPath) then
+    DeleteFile(FDbPath);
+  if DirectoryExists(FDir) then
+    RemoveDir(FDir);
+end;
+
+procedure TBoardStoreTest.TestSchemaHasTheBoardTables;
+begin
+  AssertTrue('v14 applied', StoreSchemaVersion >= 14);
+end;
+
+procedure TBoardStoreTest.TestAppendRoundTripsEveryField;
+var
+  E, Back: TBoardEntry;
+  Id: Integer;
+  Found: Boolean;
+  Err: string;
+begin
+  E := Entry('parser', 'the guard is in ParseWord', bkFinding);
+  E.ReplyTo := 0;
+  E.Supersedes := 0;
+  AssertTrue('append', FBoard.Append(E, Id, Err));
+  AssertTrue('id assigned', Id > 0);
+  AssertTrue('get', FBoard.Get(1, Id, Back, Found, Err));
+  AssertTrue('found', Found);
+  AssertEquals('kind', Ord(bkFinding), Ord(Back.Kind));
+  AssertEquals('topic', 'parser', Back.Topic);
+  AssertEquals('title', 'the guard is in ParseWord', Back.Title);
+  AssertEquals('body', 'body of the guard is in ParseWord', Back.Body);
+  AssertEquals('session', 'sess-a', Back.FromSession);
+  AssertEquals('label', 'parent', Back.FromLabel);
+  AssertEquals('created', 1700000000, Back.CreatedAt);
+  AssertEquals('not deleted', 0, Back.DeletedAt);
+  AssertFalse('not pinned', Back.Pinned);
+end;
+
+procedure TBoardStoreTest.TestPathsRoundTrip;
+var
+  E, Back: TBoardEntry;
+  Id: Integer;
+  Found: Boolean;
+  Err: string;
+begin
+  E := Entry('parser', 'about two files');
+  SetLength(E.Paths, 2);
+  E.Paths[0] := 'src/a.pas';
+  E.Paths[1] := 'src/b.pas';
+  AssertTrue('append', FBoard.Append(E, Id, Err));
+  AssertTrue('get', FBoard.Get(1, Id, Back, Found, Err));
+  AssertEquals('two paths', 2, Length(Back.Paths));
+  AssertEquals('first', 'src/a.pas', Back.Paths[0]);
+  AssertEquals('second', 'src/b.pas', Back.Paths[1]);
+end;
+
+procedure TBoardStoreTest.TestReadIsNewestFirstAndBounded;
+var
+  E: TBoardEntry;
+  Id, I: Integer;
+  Rows: TBoardEntryArray;
+  F: TBoardFilter;
+  Err: string;
+begin
+  for I := 1 to 5 do
+  begin
+    E := Entry('t', 'post ' + IntToStr(I));
+    AssertTrue('append', FBoard.Append(E, Id, Err));
+  end;
+  F := Default(TBoardFilter);
+  AssertTrue('read', FBoard.Read(1, F, Rows, Err));
+  AssertEquals('five', 5, Length(Rows));
+  AssertTrue('newest first', Rows[0].Id > Rows[4].Id);
+  AssertEquals('newest title', 'post 5', Rows[0].Title);
+  F.Limit := 2;
+  AssertTrue('bounded', FBoard.Read(1, F, Rows, Err));
+  AssertEquals('two', 2, Length(Rows));
+end;
+
+procedure TBoardStoreTest.TestReadFiltersByTopic;
+var
+  E: TBoardEntry;
+  Id: Integer;
+  Rows: TBoardEntryArray;
+  F: TBoardFilter;
+  Err: string;
+begin
+  E := Entry('alpha', 'a1'); AssertTrue('a', FBoard.Append(E, Id, Err));
+  E := Entry('beta', 'b1'); AssertTrue('b', FBoard.Append(E, Id, Err));
+  E := Entry('alpha', 'a2'); AssertTrue('c', FBoard.Append(E, Id, Err));
+  F := Default(TBoardFilter);
+  F.Topic := 'alpha';
+  AssertTrue('read', FBoard.Read(1, F, Rows, Err));
+  AssertEquals('two alpha', 2, Length(Rows));
+  AssertEquals('newest alpha', 'a2', Rows[0].Title);
+end;
+
+procedure TBoardStoreTest.TestReadFiltersByKind;
+var
+  E: TBoardEntry;
+  Id: Integer;
+  Rows: TBoardEntryArray;
+  F: TBoardFilter;
+  Err: string;
+begin
+  E := Entry('t', 'a note', bkNote); AssertTrue('n', FBoard.Append(E, Id, Err));
+  E := Entry('t', 'a decision', bkDecision);
+  AssertTrue('d', FBoard.Append(E, Id, Err));
+  E := Entry('t', 'a finding', bkFinding);
+  AssertTrue('f', FBoard.Append(E, Id, Err));
+  F := Default(TBoardFilter);
+  F.Kind := bkDecision;
+  F.KindSet := True;
+  AssertTrue('read', FBoard.Read(1, F, Rows, Err));
+  AssertEquals('one decision', 1, Length(Rows));
+  AssertEquals('the right one', 'a decision', Rows[0].Title);
+end;
+
+procedure TBoardStoreTest.TestSupersessionMakesTheOlderEntryNonCurrent;
+var
+  E, First, Second, Cur: TBoardEntry;
+  Id1, Id2: Integer;
+  Found: Boolean;
+  Err: string;
+begin
+  E := Entry('retry-policy', 'exponential backoff');
+  AssertTrue('first', FBoard.Append(E, Id1, Err));
+  E := Entry('retry-policy', 'full jitter instead');
+  E.Supersedes := Id1;
+  AssertTrue('second', FBoard.Append(E, Id2, Err));
+
+  AssertTrue('current', FBoard.CurrentOf(1, 'retry-policy', Cur, Found, Err));
+  AssertTrue('found', Found);
+  AssertEquals('the newer one is current', Id2, Cur.Id);
+
+  { Both rows survive: supersession is a pointer, not a rewrite. }
+  AssertTrue('first still readable', FBoard.Get(1, Id1, First, Found, Err));
+  AssertTrue('first exists', Found);
+  AssertTrue('second readable', FBoard.Get(1, Id2, Second, Found, Err));
+  AssertEquals('and it points at the first', Id1, Second.Supersedes);
+end;
+
+procedure TBoardStoreTest.TestSoftDeleteExcludesButKeeps;
+var
+  E, Back: TBoardEntry;
+  Id: Integer;
+  Found: Boolean;
+  Rows: TBoardEntryArray;
+  F: TBoardFilter;
+  Err: string;
+begin
+  E := Entry('t', 'doomed');
+  AssertTrue('append', FBoard.Append(E, Id, Err));
+  AssertTrue('delete', FBoard.MarkDeleted(1, Id, True, 'operator', Err));
+  F := Default(TBoardFilter);
+  AssertTrue('read', FBoard.Read(1, F, Rows, Err));
+  AssertEquals('excluded from reads', 0, Length(Rows));
+  { But the row survives for audit. }
+  AssertTrue('get', FBoard.Get(1, Id, Back, Found, Err));
+  AssertTrue('still there', Found);
+  AssertTrue('marked deleted', Back.DeletedAt <> 0);
+  AssertEquals('by whom', 'operator', Back.DeletedBy);
+end;
+
+procedure TBoardStoreTest.TestRestoreBringsBackTheOlderCurrent;
+var
+  E, Cur: TBoardEntry;
+  Id1, Id2: Integer;
+  Found: Boolean;
+  Err: string;
+begin
+  { Undoing a correction restores the earlier belief - which is what a wiki
+    wants and what an editable page cannot do. }
+  E := Entry('policy', 'first belief');
+  AssertTrue('first', FBoard.Append(E, Id1, Err));
+  E := Entry('policy', 'correction');
+  E.Supersedes := Id1;
+  AssertTrue('second', FBoard.Append(E, Id2, Err));
+  AssertTrue('current before', FBoard.CurrentOf(1, 'policy', Cur, Found, Err));
+  AssertEquals('the correction', Id2, Cur.Id);
+
+  { Delete the correction: the earlier entry becomes current again. }
+  AssertTrue('delete', FBoard.MarkDeleted(1, Id2, True, 'operator', Err));
+  AssertTrue('current after', FBoard.CurrentOf(1, 'policy', Cur, Found, Err));
+  AssertTrue('found', Found);
+  AssertEquals('the first belief is current again', Id1, Cur.Id);
+end;
+
+procedure TBoardStoreTest.TestTopicLockAndUnlock;
+var
+  By, Err: string;
+begin
+  AssertTrue('locked query', FBoard.IsLocked(1, 'debate', By, Err));
+  AssertEquals('not locked initially', '', By);
+  AssertTrue('lock', FBoard.Lock(1, 'debate', 'operator', True, Err));
+  AssertTrue('query', FBoard.IsLocked(1, 'debate', By, Err));
+  AssertEquals('the locker', 'operator', By);
+  AssertTrue('unlock', FBoard.Lock(1, 'debate', 'operator', False, Err));
+  AssertTrue('query again', FBoard.IsLocked(1, 'debate', By, Err));
+  AssertEquals('unlocked', '', By);
+end;
+
+procedure TBoardStoreTest.TestTocCounts;
+var
+  E: TBoardEntry;
+  Id, Unread, Q, D, F: Integer;
+  LastAt: Int64;
+  Err: string;
+begin
+  E := Entry('t', 'q1', bkQuestion); AssertTrue('1', FBoard.Append(E, Id, Err));
+  E := Entry('t', 'd1', bkDecision); AssertTrue('2', FBoard.Append(E, Id, Err));
+  E := Entry('t', 'f1', bkFinding); AssertTrue('3', FBoard.Append(E, Id, Err));
+  E := Entry('t', 'f2', bkFinding); AssertTrue('4', FBoard.Append(E, Id, Err));
+  AssertTrue('toc', FBoard.Toc(1, 0, Unread, Q, D, F, LastAt, Err));
+  AssertEquals('all four unread from zero', 4, Unread);
+  AssertEquals('one question', 1, Q);
+  AssertEquals('one decision', 1, D);
+  AssertEquals('two findings', 2, F);
+  { From the third entry: only the fourth is newer. }
+  AssertTrue('toc from 3', FBoard.Toc(1, 3, Unread, Q, D, F, LastAt, Err));
+  AssertEquals('one unread', 1, Unread);
+end;
+
+procedure TBoardStoreTest.TestCursorRoundTrip;
+var
+  Id: Integer;
+  Err: string;
+begin
+  AssertTrue('initial', FBoard.CursorOf('sess-a', Id, Err));
+  AssertEquals('zero', 0, Id);
+  AssertTrue('set', FBoard.SetCursor('sess-a', 42, Err));
+  AssertTrue('read', FBoard.CursorOf('sess-a', Id, Err));
+  AssertEquals('forty-two', 42, Id);
+end;
+
+initialization
+  RegisterTest(TBoardStoreTest);
+end.

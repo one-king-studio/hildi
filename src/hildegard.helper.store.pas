@@ -349,7 +349,7 @@ end;
 function DefaultMigrations: TMigrationArray;
 begin
   Result := nil;
-  SetLength(Result, 13);
+  SetLength(Result, 14);
   Result[0].Version := 1;
   Result[0].Name := 'session history';
   Result[0].Statements := [
@@ -644,6 +644,44 @@ begin
       'created_at INTEGER NOT NULL)',
     'CREATE UNIQUE INDEX idx_keyframe_at ON file_keyframes ' +
       '(workspace_id, path, through_change_id)'
+  ];
+  { v14: the workspace board (src/hildegard.helper.board). Additive. Append-only
+    by design: a correction supersedes via a pointer, never an update, so a topic
+    keeps both a current truth and its history. }
+  Result[13].Version := 14;
+  Result[13].Name := 'workspace board';
+  Result[13].Statements := [
+    'CREATE TABLE board_entries (' +
+      'id INTEGER PRIMARY KEY AUTOINCREMENT, ' +
+      'workspace_id INTEGER NOT NULL, ' +
+      'from_session TEXT NOT NULL DEFAULT '''', ' +
+      'from_label TEXT NOT NULL DEFAULT '''', ' +
+      'kind INTEGER NOT NULL, ' +
+      'topic TEXT NOT NULL, ' +
+      'title TEXT NOT NULL, ' +
+      'body TEXT NOT NULL DEFAULT '''', ' +
+      'reply_to INTEGER NOT NULL DEFAULT 0, ' +
+      'supersedes INTEGER NOT NULL DEFAULT 0, ' +
+      'paths TEXT NOT NULL DEFAULT '''', ' +
+      'deleted_at INTEGER NOT NULL DEFAULT 0, ' +
+      'deleted_by TEXT NOT NULL DEFAULT '''', ' +
+      'pinned INTEGER NOT NULL DEFAULT 0, ' +
+      'created_at INTEGER NOT NULL)',
+    'CREATE INDEX idx_board_ws_topic ON board_entries (workspace_id, topic, id)',
+    'CREATE INDEX idx_board_ws_kind ON board_entries (workspace_id, kind, id)',
+    'CREATE TABLE board_reads (' +
+      'session_id TEXT PRIMARY KEY, ' +
+      'last_id INTEGER NOT NULL DEFAULT 0)',
+    'CREATE TABLE board_lock (' +
+      'workspace_id INTEGER NOT NULL, ' +
+      'topic TEXT NOT NULL, ' +
+      'locked_by TEXT NOT NULL, ' +
+      'locked_at INTEGER NOT NULL, ' +
+      'PRIMARY KEY (workspace_id, topic))',
+    { Search spans messages and the board with one vocabulary, the same way the
+      messages index does. }
+    'CREATE VIRTUAL TABLE board_fts USING fts5(' +
+      'title, body, topic, session_id UNINDEXED, entry_id UNINDEXED)'
   ];
 end;
 
