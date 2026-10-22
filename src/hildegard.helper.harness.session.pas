@@ -217,6 +217,7 @@ end;
 procedure THarnessSession.NoteTurnOpened(ATurnId: Int64);
 var
   ErrIgnored: string;
+  Ignored: Integer;
 begin
   if FRecorder <> nil then
     FRecorder.SetTurn(ATurnId);
@@ -226,6 +227,11 @@ begin
     not a broken session. }
   if FChangeStore <> nil then
     FChangeStore.PruneByTurns(FView.WorkspaceId, DefaultRetentionTurns, ErrIgnored);
+  { The board prunes its noise classes at the same boundary, and never its
+    knowledge. Swallowed for the same reason. }
+  if FBoardStore <> nil then
+    FBoardStore.Prune(FView.WorkspaceId, DefaultBoardKeepNotes,
+      DefaultBoardNoteMaxAgeSec, Ignored, ErrIgnored);
 end;
 
 procedure THarnessSession.RecordChanges(const AChanges: TFileChangeSet);

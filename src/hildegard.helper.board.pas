@@ -69,6 +69,10 @@ const
     'delete', 'restore', 'lock', 'unlock', 'pin', 'unpin');
 
   DefaultBoardReadLimit = 20;
+  { Retention for the noise classes. Knowledge - decision, finding, question,
+    answer - is never pruned. }
+  DefaultBoardKeepNotes = 200;
+  DefaultBoardNoteMaxAgeSec = 30 * 24 * 60 * 60;   // 30 days
   { The tail element is data only; the prose lives in the system prompt. }
   MaxBoardTocBytes = 120;
 
