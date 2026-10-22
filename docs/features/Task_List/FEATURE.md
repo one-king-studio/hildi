@@ -1,6 +1,6 @@
 # Feature: Task List
 
-**Status:** Proposed.
+**Status:** Specified — `Task_List_v1.SPEC.md` and `_v1.TODO.md`.
 
 **Related:** [Workspace Board](../Message_Board/FEATURE.md) ·
 [Subagents](../Subagents/FEATURE.md) ·
