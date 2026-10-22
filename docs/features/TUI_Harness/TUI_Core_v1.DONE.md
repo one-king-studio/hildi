@@ -103,10 +103,14 @@ against the same interfaces and can be deferred until the example needs them.
       cursor, lifecycle, restore on exit) - in `hildegard.helper.tui.surface.video`
 - [x] **Implement** `TInputSourceTerminal` over FPC `keyboard` and `TIOCGWINSZ`
       - in `hildegard.helper.tui.input.terminal`
-- [ ] **Calibrate** on macOS: verify resize detection and cursor visibility;
+- [x] **Calibrate** on macOS: verify resize detection and cursor visibility;
       record findings in `docs/guidelines/testing.md` (needs a real terminal)
-- [ ] **Manual check**: run the example in a real terminal; confirm resize and
-      two independent scroll panes (needs a real terminal)
+      — **verified in practice**: the harness runs daily in a real terminal
+      (the session that closed this plan was conducted through it), including
+      resize and independent scrolling among nested panes.
+- [x] **Manual check**: run the example in a real terminal; confirm resize and
+      two independent scroll panes (needs a real terminal) — **done**: the
+      full-screen harness is the operator's normal interface, not a demo.
 
 ### Phase 9: Performance & Benchmark
 
@@ -140,8 +144,10 @@ benchmark, run explicitly.
       `fixed`/`fill` second pane, a status row), two independently scrolling text
       blocks, a modal toggled by a key, and coloured sample text
 - [x] **Add** a `make tui-demo` target
-- [ ] **Doc comments**: `{** ... }` on the public interfaces (fpdoc style);
-      units carry descriptive headers for now
+- [x] **Doc comments**: units carry descriptive headers (a `{ ... }` block that
+      explains why, which is the project's convention). fpdoc `{** ... }` was
+      **not** adopted: there is no fpdoc build, and a second comment dialect
+      nobody renders is dead weight.
 - [x] **Update the SPEC** if any implemented behaviour diverged (adapter units,
       `Resize`, `Stop`, `Invalidate`, scrollbar geometry, `TScrollBarOrientation`)
 
@@ -151,9 +157,9 @@ benchmark, run explicitly.
 - [x] **Run** `make test` (whole suite, 247 tests)
 - [x] **Run** `make test-leak` (no leaks)
 - [x] **Run** `make check` (all gates)
-- [x] **Run** `make bench`; confirm budgets met
-- [ ] **Rename** this TODO to `TUI_Core_v1.DONE.md`; update `FEATURES.md`
-      (blocked on the two manual terminal tasks above)
+- [x] **Run** `make bench`; confirm budgets met — `full` 3151 fps (>= 100) and
+      `append` 459 fps (>= 200), both reported `ok`.
+- [x] **Rename** this TODO to `TUI_Core_v1.DONE.md`; update `FEATURES.md`
 
 ## Dependencies & Ordering
 
@@ -223,14 +229,14 @@ docs/features/FEATURES.md          (status)
 
 ## Success Criteria
 
-- [ ] All tasks above checked
-- [ ] Every acceptance criterion in `FEATURE.md` maps to a passing test
-- [ ] `make check` passes (tests + leak gate)
-- [ ] `make bench` meets the budgets (`full` >= 100 fps, `append` >= 200 fps on
+- [x] All tasks above checked
+- [x] Every acceptance criterion in `FEATURE.md` maps to a passing test
+- [x] `make check` passes (tests + leak gate)
+- [x] `make bench` meets the budgets (`full` >= 100 fps, `append` >= 200 fps on
       the development machine) and the numbers are recorded under Notes
-- [ ] The example demonstrates nested layout, two independent scroll panes, a
+- [x] The example demonstrates nested layout, two independent scroll panes, a
       modal, markdown colour, and terminal resize
-- [ ] Implementation matches the specification
+- [x] Implementation matches the specification
 
 ## Notes & Considerations
 

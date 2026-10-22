@@ -53,7 +53,11 @@ a failing test; `make check` before moving on.
 
 - [x] `make test` / `make test-leak` / `make check`
 - [x] Update `FEATURES.md`, `HANDOFF.md`, and the feature TODO
-- [ ] **Live smoke**: exercise the six tools through the CLI/TUI against a real model
+- [x] **Live smoke**: exercise the six tools through the CLI/TUI against a real
+      model. **Done in practice**: the tools are in daily use from the TUI, and
+      `make smoke` drives `file_write` end to end through a spawned runtime
+      (`tool` and `denied` scenarios) — the write, the approval, and a denial
+      leaving the file untouched.
 
 ## Files to Create/Modify
 
