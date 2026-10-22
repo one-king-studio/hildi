@@ -1,0 +1,118 @@
+unit hildegard.helper.changes.recorder;
+{ The first real consumer of the change log: it hears what a tool call changed and
+  writes it down.
+
+  Before this, TFileChangeSet was built, summarised into the tool result, and
+  freed. Nothing was persisted, so "what did this call do?" was answerable only
+  from the one-line note and "who touched this file last?" not at all.
+
+  The recorder is deliberately thin: it converts the in-memory set into records
+  with hashes and appends them. It does not decide policy, does not prune, and
+  does not block a write - the CAS check belongs to the writer, not to the
+  observer. }
+
+{$mode delphi}{$H+}
+
+interface
+
+uses
+  SysUtils,
+  hildegard.helper.hash, hildegard.helper.workspace.changes,
+  changes.types, changes.store;
+
+type
+  TChangeRecorder = class
+  private
+    FStore: IChangeStore;
+    FWorkspaceId: Integer;
+    FSessionId: string;
+    FTurns: Integer;
+    FRecords: Integer;
+  public
+    { AStore may be nil, in which case every call is a no-op: a session with no
+      database records nothing, which is the honest behaviour rather than a
+      failure. }
+    constructor Create(const AStore: IChangeStore; AWorkspaceId: Integer;
+      const ASessionId: string);
+    { Matches TCommandChangesEvent: one call's set, one turn's context. }
+    procedure Observe(const AChanges: TFileChangeSet; ATurnId,
+      AMessageId: Integer);
+    { True when a set would produce at least one record - a caller can use this
+      to skip the work of building one. }
+    function Wants: Boolean;
+    property RecordsWritten: Integer read FRecords;
+    property TurnsSeen: Integer read FTurns;
+  end;
+
+implementation
+
+constructor TChangeRecorder.Create(const AStore: IChangeStore;
+  AWorkspaceId: Integer; const ASessionId: string);
+begin
+  inherited Create;
+  FStore := AStore;
+  FWorkspaceId := AWorkspaceId;
+  FSessionId := ASessionId;
+  FRecords := 0;
+  FTurns := 0;
+end;
+
+function TChangeRecorder.Wants: Boolean;
+begin
+  Result := FStore <> nil;
+end;
+
+procedure TChangeRecorder.Observe(const AChanges: TFileChangeSet;
+  ATurnId, AMessageId: Integer);
+var
+  I: Integer;
+  C: TFileChange;
+  R: TChangeRecord;
+  Id: Integer;
+  Err: string;
+  Kind: TChangeKind;
+begin
+  if (FStore = nil) or (AChanges = nil) then
+    Exit;
+  Inc(FTurns);
+  for I := 0 to AChanges.Count - 1 do
+  begin
+    C := AChanges[I];
+    R := Default(TChangeRecord);
+    R.WorkspaceId := FWorkspaceId;
+    R.SessionId := FSessionId;
+    R.TurnId := ATurnId;
+    R.MessageId := AMessageId;
+    R.Path := C.Path;
+    case C.Kind of
+      fcCreated: Kind := ckCreated;
+      fcDeleted: Kind := ckDeleted;
+    else
+      Kind := ckModified;
+    end;
+    R.Kind := Kind;
+    { Both hashes, because they are what makes the record usable: the CAS check
+      needs before, and a replay verifies against after. A side that was not
+      captured still has a size, and the hash is left empty rather than faked. }
+    if C.BeforeCaptured then
+      R.BeforeHash := Sha256Hex(C.Before);
+    if C.Captured then
+      R.AfterHash := Sha256Hex(C.After);
+    R.BeforeSize := C.BeforeSize;
+    R.AfterSize := C.AfterSize;
+    R.PatchBytes := 0;
+    R.Capped := False;
+    { The recorder's job is the record, not the diff: the summary line already
+      gives the operator the counts, and storing a rendered diff is what
+      tool-result-shape.md argues against. A later phase adds the patch when a
+      consumer needs to display it. }
+    R.Patch := '';
+    R.Source := csTier;
+    R.CreatedAt := 0;
+    if not FStore.Append(R, Id, Err) then
+      Continue;   // a failed append must not fail the tool call
+    Inc(FRecords);
+  end;
+end;
+
+end.

@@ -20,6 +20,9 @@ uses
   hildegard.helper.files,
   hildegard.helper.session, hildegard.helper.session.store,
   hildegard.helper.store,
+  changes.types, changes.store, hildegard.helper.changes.store,
+  hildegard.helper.changes.recorder,
+  hildegard.helper.workspace.changes,
   hildegard.helper.recall.tool, hildegard.helper.harness.turn,
   hildegard.helper.harness.view,
   hildegard.helper.mcp.config, hildegard.helper.mcp.client,
@@ -48,6 +51,11 @@ type
       by refcount, never by a raw Free. }
     FSkills: TSkillRegistry;
     FSkillsKeep: IToolProvider;
+    { The change-log recorder: hears what a tool call changed and writes it down.
+      Nil when the session has no store, so a database-less session records
+      nothing rather than failing. }
+    FRecorder: TChangeRecorder;
+    FChangeStore: IChangeStore;
     FLoop: TAgentLoop;
     FQueue: TTurnQueue;
     FGate: TApprovalGate;
@@ -65,6 +73,9 @@ type
       passes its own gate. }
     function InvokeShellTool(const AName, AArgumentsJson, AReason: string;
       out AResult, AError: string): Boolean;
+    { The change-log sink: what a run_command call changed, handed to the
+      recorder. Matches TCommandChangesEvent. }
+    procedure RecordChanges(const AChanges: TFileChangeSet);
     { At each turn boundary, re-declare the MCP skills from the current config so
       a server added/enabled/removed is picked up without a restart. Lazy: it
       declares, it does not connect. }
@@ -144,6 +155,8 @@ begin
   FSkills := nil;
   FSkillsKeep := nil;
   FCommandTool.Free;
+  FRecorder.Free;
+  FChangeStore := nil;
   FCommandTool := nil;
   FFileTool.Free;
   FFileTool := nil;
@@ -187,6 +200,15 @@ begin
     end;
   end;
   Result := Session;
+end;
+
+procedure THarnessSession.RecordChanges(const AChanges: TFileChangeSet);
+begin
+  { OnChanges carries only the set, so TurnId/MessageId stay 0. Attributing a
+    change to a specific tool call needs the handler's call id, which the
+    callback does not see - a separate change. }
+  if FRecorder <> nil then
+    FRecorder.Observe(AChanges, 0, 0);
 end;
 
 function THarnessSession.InvokeShellTool(const AName, AArgumentsJson,
@@ -366,6 +388,16 @@ begin
   EnvValue := GetEnvironmentVariable('HILDEGARD_COMMAND_TIMEOUT_MS');
   if EnvValue <> '' then
     ToolConfig.MaxTimeoutMs := StrToInt64Def(EnvValue, 0);
+  { The change log: created BEFORE the tool, because the tool reads its config
+    once at construction and holds no setter. A session with no store records
+    nothing, which is the honest behaviour rather than a failure. }
+  if FView.Store <> nil then
+  begin
+    FChangeStore := TSqliteChangeStore.Create(FView.Store);
+    FRecorder := TChangeRecorder.Create(FChangeStore, FView.WorkspaceId,
+      FView.SessionId);
+    ToolConfig.OnChanges := RecordChanges;
+  end;
   { The builtin shell tier runs supported scripts in-process; anything else
     falls through to the process executor. HILDEGARD_BUILTIN_SHELL=0 disables it
     for a session (the process tier is then used exactly as before). }
