@@ -45,6 +45,11 @@ type
     registry per request, so a boundary mutation is race-free. }
   TAgentBoundaryEvent = procedure of object;
 
+  { Fires once per turn, right after the turn row is opened, with its id. The
+    change log needs it: a change is attributed to a turn, and the turn's id is
+    only known here. }
+  TAgentTurnEvent = procedure(ATurnId: Int64) of object;
+
   { The loop's persistence seam: the conversation it replays, the display-only
     blocks it produces, and the turn/request audit. An implementation that does
     not persist (in-memory) ignores the audit calls and returns 0 for the ids. }
@@ -273,6 +278,7 @@ type
     FStablePrompt: string;
     FCancel: TAgentCancelCheck;
     FOnTurnStart: TAgentBoundaryEvent;
+    FOnTurnOpened: TAgentTurnEvent;
     FProviders: array of IToolProvider;
     FPromptQueue: TPromptQueue;
     FLastTurnDropped: Boolean;
@@ -347,6 +353,11 @@ type
     { Invoked once at the start of each turn, on the loop's thread, before the
       first request. Nil = no-op. The owner may mutate the tool registry here. }
     property OnTurnStart: TAgentBoundaryEvent read FOnTurnStart write FOnTurnStart;
+    { Fires once per turn with the turn's id, right after its row opens. The
+      change log attributes each change to a turn, and this is where the id is
+      known. }
+    property OnTurnOpened: TAgentTurnEvent read FOnTurnOpened
+      write FOnTurnOpened;
     { Register a per-turn tool/prompt contributor. Prepare fires at each turn
       start; its Specs join the request's tool list; its Find resolves calls. }
     procedure AddProvider(const AProvider: IToolProvider);
@@ -1613,6 +1624,10 @@ begin
 
   { Open the loop before appending the prompt, so the prompt is linked to it. }
   TurnId := FStore.BeginTurn;
+  { Announce the turn id: the change log attributes every change to a turn, and
+    this is the only place that id is known. }
+  if Assigned(FOnTurnOpened) then
+    FOnTurnOpened(TurnId);
 
   { An ambient turn's opening content is the queued ambient notification, so no
     user message is appended; the first boundary drains it. }

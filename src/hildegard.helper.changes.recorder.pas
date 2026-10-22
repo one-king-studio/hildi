@@ -26,6 +26,7 @@ type
     FStore: IChangeStore;
     FWorkspaceId: Integer;
     FSessionId: string;
+    FTurnId: Integer;
     FTurns: Integer;
     FRecords: Integer;
   public
@@ -34,14 +35,18 @@ type
       failure. }
     constructor Create(const AStore: IChangeStore; AWorkspaceId: Integer;
       const ASessionId: string);
-    { Matches TCommandChangesEvent: one call's set, one turn's context. }
-    procedure Observe(const AChanges: TFileChangeSet; ATurnId,
-      AMessageId: Integer);
+    { The loop reports each turn's id here, so a change is attributed to the turn
+      it happened in - which is what the retention window and the changed-files
+      view group by. }
+    procedure SetTurn(ATurnId: Int64);
+    { Matches TCommandChangesEvent: one call's set. }
+    procedure Observe(const AChanges: TFileChangeSet);
     { True when a set would produce at least one record - a caller can use this
       to skip the work of building one. }
     function Wants: Boolean;
     property RecordsWritten: Integer read FRecords;
     property TurnsSeen: Integer read FTurns;
+    property TurnId: Integer read FTurnId;
   end;
 
 implementation
@@ -55,6 +60,12 @@ begin
   FSessionId := ASessionId;
   FRecords := 0;
   FTurns := 0;
+  FTurnId := 0;
+end;
+
+procedure TChangeRecorder.SetTurn(ATurnId: Int64);
+begin
+  FTurnId := Integer(ATurnId);
 end;
 
 function TChangeRecorder.Wants: Boolean;
@@ -62,8 +73,7 @@ begin
   Result := FStore <> nil;
 end;
 
-procedure TChangeRecorder.Observe(const AChanges: TFileChangeSet;
-  ATurnId, AMessageId: Integer);
+procedure TChangeRecorder.Observe(const AChanges: TFileChangeSet);
 var
   I: Integer;
   C: TFileChange;
@@ -81,8 +91,8 @@ begin
     R := Default(TChangeRecord);
     R.WorkspaceId := FWorkspaceId;
     R.SessionId := FSessionId;
-    R.TurnId := ATurnId;
-    R.MessageId := AMessageId;
+    R.TurnId := FTurnId;
+    R.MessageId := 0;
     R.Path := C.Path;
     case C.Kind of
       fcCreated: Kind := ckCreated;

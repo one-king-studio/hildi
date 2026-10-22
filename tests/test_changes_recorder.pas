@@ -73,7 +73,7 @@ var
 begin
   R := TChangeRecorder.Create(FStore, 1, 's');
   try
-    R.Observe(nil, 1, 1);          // must not raise
+    R.Observe(nil);                // must not raise
     AssertEquals('nothing written', 0, R.RecordsWritten);
   finally
     R.Free;
@@ -92,7 +92,8 @@ begin
   try
     Set_.Add(Change('a.txt', fcCreated, '', 'one', False, True));
     Set_.Add(Change('b.txt', fcModified, 'old', 'new', True, True));
-    R.Observe(Set_, 7, 99);
+    R.SetTurn(7);
+    R.Observe(Set_);
     AssertEquals('two records', 2, R.RecordsWritten);
     AssertTrue('read back', FStore.ForPath(1, 'a.txt', 0, 0, Rows, Err));
     AssertEquals('one for a.txt', 1, Length(Rows));
@@ -114,7 +115,8 @@ begin
   Set_ := TFileChangeSet.Create;
   try
     Set_.Add(Change('a.txt', fcModified, 'old', 'new', True, True));
-    R.Observe(Set_, 1, 1);
+    R.SetTurn(7);
+    R.Observe(Set_);
   finally
     Set_.Free;
     R.Free;
@@ -141,7 +143,8 @@ begin
   Set_ := TFileChangeSet.Create;
   try
     Set_.Add(Change('a.txt', fcModified, '', 'newcontent', False, True));
-    R.Observe(Set_, 1, 1);
+    R.SetTurn(7);
+    R.Observe(Set_);
   finally
     Set_.Free;
     R.Free;
@@ -165,7 +168,8 @@ begin
   try
     Set_.Add(Change('new.txt', fcCreated, '', 'x', False, True));
     Set_.Add(Change('gone.txt', fcDeleted, 'x', '', True, False));
-    R.Observe(Set_, 1, 1);
+    R.SetTurn(7);
+    R.Observe(Set_);
   finally
     Set_.Free;
     R.Free;
@@ -188,14 +192,18 @@ begin
   Set_ := TFileChangeSet.Create;
   try
     Set_.Add(Change('a.txt', fcModified, 'a', 'b', True, True));
-    R.Observe(Set_, 42, 1234);
+    R.SetTurn(7);
+    R.Observe(Set_);
   finally
     Set_.Free;
     R.Free;
   end;
   AssertTrue('latest', FStore.Latest(1, 'a.txt', Row, Found, Err));
-  AssertEquals('turn', 42, Row.TurnId);
-  AssertEquals('message', 1234, Row.MessageId);
+  AssertEquals('turn', 7, Row.TurnId);
+  AssertEquals('the message id is not knowable in the callback', 0,
+    Row.MessageId);
+  AssertEquals('the message id is not knowable in the callback', 0,
+    Row.MessageId);
 end;
 
 procedure TChangesRecorderTest.TestASessionIdIsStamped;
@@ -210,7 +218,8 @@ begin
   Set_ := TFileChangeSet.Create;
   try
     Set_.Add(Change('a.txt', fcModified, 'a', 'b', True, True));
-    R.Observe(Set_, 1, 1);
+    R.SetTurn(7);
+    R.Observe(Set_);
   finally
     Set_.Free;
     R.Free;

@@ -76,6 +76,8 @@ type
     { The change-log sink: what a run_command call changed, handed to the
       recorder. Matches TCommandChangesEvent. }
     procedure RecordChanges(const AChanges: TFileChangeSet);
+    { The loop reports its turn id here, so changes are attributed to a turn. }
+    procedure NoteTurnOpened(ATurnId: Int64);
     { At each turn boundary, re-declare the MCP skills from the current config so
       a server added/enabled/removed is picked up without a restart. Lazy: it
       declares, it does not connect. }
@@ -202,13 +204,20 @@ begin
   Result := Session;
 end;
 
+procedure THarnessSession.NoteTurnOpened(ATurnId: Int64);
+begin
+  if FRecorder <> nil then
+    FRecorder.SetTurn(ATurnId);
+end;
+
 procedure THarnessSession.RecordChanges(const AChanges: TFileChangeSet);
 begin
-  { OnChanges carries only the set, so TurnId/MessageId stay 0. Attributing a
-    change to a specific tool call needs the handler's call id, which the
-    callback does not see - a separate change. }
+  { The turn is known (the loop reports it); the message id is not, because the
+    tool result row does not exist yet when the handler runs. A change is
+    attributed to its turn, which is what the retention window and the
+    changed-files view need. }
   if FRecorder <> nil then
-    FRecorder.Observe(AChanges, 0, 0);
+    FRecorder.Observe(AChanges);
 end;
 
 function THarnessSession.InvokeShellTool(const AName, AArgumentsJson,
@@ -474,6 +483,8 @@ begin
     otherwise lose its description entirely, since the fragment now carries only
     state. }
   FLoop.StablePrompt := FSkills.StableText;
+  { The change log attributes each change to the turn it happened in. }
+  FLoop.OnTurnOpened := NoteTurnOpened;
   if FMcp <> nil then
   begin
     ReconcileMcpSkills;
