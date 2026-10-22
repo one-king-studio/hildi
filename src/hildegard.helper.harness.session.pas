@@ -22,6 +22,8 @@ uses
   hildegard.helper.store,
   changes.types, changes.store, hildegard.helper.changes.store,
   hildegard.helper.changes.recorder,
+  hildegard.helper.board, hildegard.helper.board.store,
+  hildegard.helper.board.tools,
   hildegard.helper.workspace.changes,
   hildegard.helper.recall.tool, hildegard.helper.harness.turn,
   hildegard.helper.harness.view,
@@ -55,6 +57,9 @@ type
       Nil when the session has no store, so a database-less session records
       nothing rather than failing. }
     FRecorder: TChangeRecorder;
+    { The board: durable knowledge. Nil without a store. }
+    FBoardStore: IBoardStore;
+    FBoardTools: TBoardTools;
     FChangeStore: IChangeStore;
     FLoop: TAgentLoop;
     FQueue: TTurnQueue;
@@ -158,6 +163,8 @@ begin
   FSkillsKeep := nil;
   FCommandTool.Free;
   FRecorder.Free;
+  FBoardTools.Free;
+  FBoardStore := nil;
   FChangeStore := nil;
   FCommandTool := nil;
   FFileTool.Free;
@@ -437,6 +444,18 @@ begin
   FileConfig.Root := FView.WorkspaceRoot;
   FFileTool := TFileTool.Create(FileConfig, ApprovalService);
   FFileTool.Register(FTools);
+
+  { The board: durable knowledge shared with peers and with this session's
+    future self. Only with a store - there is nowhere to put entries otherwise. }
+  FBoardStore := nil;
+  FBoardTools := nil;
+  if FView.Store <> nil then
+  begin
+    FBoardStore := TSqliteBoardStore.Create(FView.Store);
+    FBoardTools := TBoardTools.Create(FBoardStore, FView.WorkspaceId,
+      FView.SessionId, 'parent', ApprovalService);
+    FBoardTools.Register(FTools);
+  end;
 
   { The recall tool reads stored artifacts; without a store there are none. }
   if FView.Store <> nil then

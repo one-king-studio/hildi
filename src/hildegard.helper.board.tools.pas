@@ -36,6 +36,10 @@ type
     function ReadEntries(const AArgumentsJson: string;
       out AResult, AError: string;
       AObserver: TToolObserver = nil): Boolean;
+    { The tail element: counts and ages only, never bodies. '' when the board is
+      empty or the store fails - a tail that cannot be built must not fail a
+      turn. Capped at MaxBoardTocBytes. }
+    function TocLine(out AError: string): string;
     function Moderate(const AArgumentsJson: string;
       out AResult, AError: string;
       AObserver: TToolObserver = nil): Boolean;
@@ -546,6 +550,45 @@ begin
   finally
     D.Free;
   end;
+end;
+
+function TBoardTools.TocLine(out AError: string): string;
+var
+  Unread, Q, D, F: Integer;
+  LastAt, AgeSec: Int64;
+  Cursor: Integer;
+  Err, Age: string;
+begin
+  Result := '';
+  AError := '';
+  if (FStore = nil) then
+    Exit;
+  Cursor := 0;
+  if not FStore.CursorOf(FSessionId, Cursor, Err) then
+    Cursor := 0;
+  if not FStore.Toc(FWorkspaceId, Cursor, Unread, Q, D, F, LastAt, Err) then
+  begin
+    { A tail that cannot be built must not fail a turn. }
+    AError := Err;
+    Exit;
+  end;
+  if LastAt = 0 then
+    Exit;                       // an empty board contributes nothing
+  { Age, not a timestamp: "2m" is what a model can act on. LastAt is epoch
+    seconds, so compare against the same clock. }
+  AgeSec := Round((Now - EncodeDate(1970, 1, 1)) * 86400) - LastAt;
+  if AgeSec < 0 then
+    AgeSec := 0;
+  if AgeSec < 3600 then
+    Age := IntToStr(AgeSec div 60) + 'm'
+  else
+    Age := IntToStr(AgeSec div 3600) + 'h';
+  Result := '<board unread="' + IntToStr(Unread) + '" q="' + IntToStr(Q) +
+    '" d="' + IntToStr(D) + '" f="' + IntToStr(F) + '">last ' + Age + '</board>';
+  { The element is data only and bounded; the prose explaining the board lives in
+    the system prompt with the skill descriptions. }
+  if Length(Result) > MaxBoardTocBytes then
+    Result := Copy(Result, 1, MaxBoardTocBytes);
 end;
 
 end.
