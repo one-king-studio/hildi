@@ -1,0 +1,266 @@
+unit test_board_tools;
+{ Tests for the board's three tools. The interesting behaviours are the refusals:
+  an unknown kind, a cross-topic supersede, a locked topic, and a denied
+  moderation. All against a real store. }
+
+{$mode delphi}{$H+}
+
+interface
+
+uses
+  Classes, SysUtils, StrUtils, fpcunit, testregistry,
+  hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.approval,
+  hildegard.helper.store, hildegard.helper.board, hildegard.helper.board.store,
+  hildegard.helper.board.tools;
+
+type
+  { Records the ask and answers however the test wants. }
+  TFakeBoardApproval = class(TInterfacedObject, IApprovalService)
+  public
+    Allow: Boolean;
+    Asks: Integer;
+    LastSummary: string;
+    function Resolve(const AAsks: TApprovalAskArray;
+      out AResult: TApprovalBatchResult): Boolean;
+  end;
+
+  TBoardToolsTest = class(TTestCase)
+  private
+    FDir, FDbPath: string;
+    FStore: TSqliteStore;
+    FBoard: IBoardStore;
+    FTools: TBoardTools;
+    FToolsNoGate: TBoardTools;
+    FApproval: TFakeBoardApproval;
+    ApprovalRef: IApprovalService;
+    FReg: TToolRegistry;
+    function PostJson(const AKind, ATopic, ATitle: string;
+      ASupersedes: Integer = 0): string;
+  public
+    procedure SetUp; override;
+    procedure TearDown; override;
+  published
+    procedure TestPostAndReadRoundTrip;
+    procedure TestReasonIsRequired;
+    procedure TestUnknownKindListsTheValidOnes;
+    procedure TestBodyRequiredExceptForANote;
+    procedure TestSupersedeAcrossTopicsIsRefused;
+    procedure TestPostToALockedTopicIsRefused;
+    procedure TestReadOnAnEmptyBoardSaysSo;
+    procedure TestModerateNeedsApprovalAndADenialChangesNothing;
+    procedure TestModerateAllowedDeletes;
+    procedure TestAllThreeToolsAreRegistered;
+  end;
+
+implementation
+
+function TFakeBoardApproval.Resolve(const AAsks: TApprovalAskArray;
+  out AResult: TApprovalBatchResult): Boolean;
+begin
+  Inc(Asks);
+  if Length(AAsks) > 0 then
+    LastSummary := AAsks[0].Summary;
+  AResult := Default(TApprovalBatchResult);
+  if Allow then
+    AResult.Allowed := True
+  else
+  begin
+    AResult.Denied := True;
+    AResult.Reason := 'operator said no';
+  end;
+  Result := True;
+end;
+
+function TBoardToolsTest.PostJson(const AKind, ATopic, ATitle: string;
+  ASupersedes: Integer): string;
+begin
+  Result := '{"kind":"' + AKind + '","topic":"' + ATopic + '","title":"' +
+    ATitle + '","body":"detail","reason":"test"' +
+    IfThen(ASupersedes <> 0, ',"supersedes":' + IntToStr(ASupersedes)) + '}';
+end;
+
+procedure TBoardToolsTest.SetUp;
+var
+  Cfg: TStoreConfig;
+  Err: TStoreError;
+  RStore: TSqliteStore;
+begin
+  FDir := IncludeTrailingPathDelimiter(GetTempDir) + 'hhbt_' +
+    IntToStr(GetTickCount64);
+  ForceDirectories(FDir);
+  FDbPath := IncludeTrailingPathDelimiter(FDir) + 'bt.db';
+  Cfg := Default(TStoreConfig);
+  Cfg.DatabasePath := FDbPath;
+  Cfg.BusyTimeoutMs := 5000;
+  RStore := TSqliteStore.Create(Cfg);
+  if not RStore.Open(Err) then
+    raise Exception.Create('open: ' + Err.Message);
+  FStore := RStore;
+  FBoard := TSqliteBoardStore.Create(FStore);
+  FApproval := TFakeBoardApproval.Create;
+  { Hold the interface in a typed variable: `as` casting needs a GUID this
+    interface does not declare. }
+  ApprovalRef := FApproval;
+  FTools := TBoardTools.Create(FBoard, 1, 'sess-a', 'parent', ApprovalRef);
+  { A second instance with no gate at all, to prove ungated verbs are ungated
+    rather than merely unasked. }
+  FToolsNoGate := TBoardTools.Create(FBoard, 1, 'sess-a', 'parent', nil);
+  FReg := TToolRegistry.Create;
+  FToolsNoGate.Register(FReg);
+end;
+
+procedure TBoardToolsTest.TearDown;
+begin
+  FReg.Free;
+  FToolsNoGate.Free;
+  FTools.Free;
+  FApproval := nil;
+  FBoard := nil;
+  if FStore <> nil then
+  begin
+    FStore.Close;
+    FStore.Free;
+    FStore := nil;
+  end;
+  if FileExists(FDbPath) then
+    DeleteFile(FDbPath);
+  if DirectoryExists(FDir) then
+    RemoveDir(FDir);
+end;
+
+procedure TBoardToolsTest.TestPostAndReadRoundTrip;
+var
+  R, E: string;
+  Ok: Boolean;
+begin
+  Ok := FTools.Post('{"kind":"finding","topic":"parser","title":"guard is in ' +
+    'ParseWord","body":"not the lexer","reason":"test"}', R, E);
+  AssertTrue('post ok: ' + E, Ok);
+  AssertTrue('says posted', Pos('#1', R) > 0);
+  Ok := FTools.ReadEntries('{"topic":"parser","reason":"test"}', R, E);
+  AssertTrue('read ok: ' + E, Ok);
+  AssertTrue('the title', Pos('guard is in ParseWord', R) > 0);
+  AssertTrue('the body', Pos('not the lexer', R) > 0);
+  { The newest live entry in its topic is marked current. }
+  AssertTrue('marked current', Pos('current', R) > 0);
+end;
+
+procedure TBoardToolsTest.TestReasonIsRequired;
+var
+  R, E: string;
+begin
+  AssertFalse('refused', FTools.Post('{"kind":"note","topic":"t","title":"x"}',
+    R, E));
+  AssertTrue('names the reason', Pos('reason', E) > 0);
+end;
+
+procedure TBoardToolsTest.TestUnknownKindListsTheValidOnes;
+var
+  R, E: string;
+begin
+  AssertFalse('refused', FTools.Post('{"kind":"memo","topic":"t","title":"x",' +
+    '"reason":"r"}', R, E));
+  AssertTrue('names the valid kinds', Pos('finding', E) > 0);
+  AssertTrue('all six', Pos('status', E) > 0);
+end;
+
+procedure TBoardToolsTest.TestBodyRequiredExceptForANote;
+var
+  R, E: string;
+begin
+  AssertFalse('a finding needs a body',
+    FTools.Post('{"kind":"finding","topic":"t","title":"x","reason":"r"}',
+      R, E));
+  AssertTrue('says so', Pos('body', E) > 0);
+  { A note may be empty. }
+  AssertTrue('a note may be empty',
+    FTools.Post('{"kind":"note","topic":"t","title":"x","reason":"r"}', R, E));
+end;
+
+procedure TBoardToolsTest.TestSupersedeAcrossTopicsIsRefused;
+var
+  R, E: string;
+begin
+  AssertTrue('first', FTools.Post(PostJson('finding', 'alpha', 'one'), R, E));
+  { Entry 1 is in alpha; superseding it from beta would silently retire another
+    page. }
+  AssertFalse('refused', FTools.Post(PostJson('finding', 'beta', 'two', 1), R,
+    E));
+  AssertTrue('names the topic', Pos('alpha', E) > 0);
+end;
+
+procedure TBoardToolsTest.TestPostToALockedTopicIsRefused;
+var
+  R, E: string;
+begin
+  FApproval.Allow := True;
+  AssertTrue('lock', FTools.Moderate('{"op":"lock","topic":"debate",' +
+    '"reason":"cool off"}', R, E));
+  AssertFalse('post refused',
+    FTools.Post(PostJson('note', 'debate', 'my view'), R, E));
+  AssertTrue('names the locker', Pos('locked by', E) > 0);
+end;
+
+procedure TBoardToolsTest.TestReadOnAnEmptyBoardSaysSo;
+var
+  R, E: string;
+begin
+  AssertTrue('read', FTools.ReadEntries('{"topic":"nothing","reason":"r"}', R,
+    E));
+  AssertEquals('absence is stated, not empty', '(no board messages)', R);
+end;
+
+procedure TBoardToolsTest.TestModerateNeedsApprovalAndADenialChangesNothing;
+var
+  R, E: string;
+begin
+  AssertTrue('post', FTools.Post(PostJson('note', 't', 'keep me'), R, E));
+  FApproval.Allow := False;
+  AssertFalse('denied', FTools.Moderate('{"op":"delete","id":1,"reason":"r"}',
+    R, E));
+  AssertTrue('an ask was raised', FApproval.Asks = 1);
+  AssertTrue('the summary names the entry', Pos('keep me',
+    FApproval.LastSummary) > 0);
+  { The entry is still readable. }
+  AssertTrue('read', FTools.ReadEntries('{"topic":"t","reason":"r"}', R, E));
+  AssertTrue('still there', Pos('keep me', R) > 0);
+end;
+
+procedure TBoardToolsTest.TestModerateAllowedDeletes;
+var
+  R, E: string;
+begin
+  AssertTrue('post', FTools.Post(PostJson('note', 't', 'doomed'), R, E));
+  FApproval.Allow := True;
+  AssertTrue('allowed', FTools.Moderate('{"op":"delete","id":1,"reason":"r"}',
+    R, E));
+  AssertTrue('read', FTools.ReadEntries('{"topic":"t","reason":"r"}', R, E));
+  AssertEquals('gone from reads', '(no board messages)', R);
+end;
+
+procedure TBoardToolsTest.TestAllThreeToolsAreRegistered;
+var
+  Tool: TRegisteredTool;
+  Specs: TToolSpecArray;
+  I: Integer;
+  SawPost, SawRead, SawMod: Boolean;
+begin
+  Specs := FReg.Specs;
+  SawPost := False;
+  SawRead := False;
+  SawMod := False;
+  for I := 0 to High(Specs) do
+  begin
+    if Specs[I].Name = BoardPostTool then SawPost := True;
+    if Specs[I].Name = BoardReadTool then SawRead := True;
+    if Specs[I].Name = BoardModerateTool then SawMod := True;
+  end;
+  AssertTrue('board_post', SawPost);
+  AssertTrue('board_read', SawRead);
+  AssertTrue('board_moderate', SawMod);
+  AssertTrue('findable', FReg.Find(BoardReadTool, Tool));
+end;
+
+initialization
+  RegisterTest(TBoardToolsTest);
+end.

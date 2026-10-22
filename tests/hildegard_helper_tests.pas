@@ -48,6 +48,7 @@ uses
   test_changes_isolation, fileignore.rules, test_fileignore,
   hildegard.helper.changes.store, test_changes_store,
   hildegard.helper.board, hildegard.helper.board.store, test_board_store,
+  hildegard.helper.board.tools, test_board_tools,
   hildegard.helper.changes.recorder, test_changes_recorder;
 
 var
