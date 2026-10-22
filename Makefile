@@ -387,4 +387,5 @@ help:
 	@echo "  make shell-ast [SCRIPT=...]   dump the shell parser's AST for a script"
 	@echo "  make shell-flags              corpus tallies for the builtin tier's coverage"
 	@echo "  make shell-standalone         build & run the shell library with no harness unit"
+	@echo "  make changes-standalone       build & run the changes library with no harness unit"
 	@echo "  make clean                    remove build artifacts"
