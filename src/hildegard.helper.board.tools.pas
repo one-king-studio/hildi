@@ -16,7 +16,7 @@ uses
   hildegard.helper.board, hildegard.helper.board.store;
 
 type
-  TBoardTools = class(TInterfacedObject)
+  TBoardTools = class(TInterfacedObject, IToolProvider)
   private
     FStore: IBoardStore;
     FWorkspaceId: Integer;
@@ -30,6 +30,13 @@ type
     constructor Create(const AStore: IBoardStore; AWorkspaceId: Integer;
       const ASessionId, ALabel: string; AService: IApprovalService);
     procedure Register(ATools: TToolRegistry);
+    { IToolProvider: the board contributes no tools through the provider seam
+      (Register does that), only the TOC element. Prepare and Specs are therefore
+      empty deliberately - the loop already holds the registry. }
+    procedure Prepare;
+    function Specs: TToolSpecArray;
+    function PromptFragment: string;
+    function Find(const AName: string; out ATool: TRegisteredTool): Boolean;
     { Public for direct testing, matching TToolHandler. }
     function Post(const AArgumentsJson: string; out AResult, AError: string;
       AObserver: TToolObserver = nil): Boolean;
@@ -550,6 +557,33 @@ begin
   finally
     D.Free;
   end;
+end;
+
+procedure TBoardTools.Prepare;
+begin
+  { Nothing to reconcile: the board's store is fixed at construction. }
+end;
+
+function TBoardTools.Specs: TToolSpecArray;
+begin
+  { The board's tools are registered directly (Register), not contributed per
+    request, so the provider seam carries only the TOC. }
+  Result := nil;
+end;
+
+function TBoardTools.PromptFragment: string;
+var
+  Err: string;
+begin
+  Result := TocLine(Err);
+end;
+
+function TBoardTools.Find(const AName: string;
+  out ATool: TRegisteredTool): Boolean;
+begin
+  { Dispatch goes through the registry, which already holds these tools. }
+  ATool := Default(TRegisteredTool);
+  Result := False;
 end;
 
 function TBoardTools.TocLine(out AError: string): string;

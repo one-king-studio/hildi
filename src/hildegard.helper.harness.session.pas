@@ -163,7 +163,10 @@ begin
   FSkillsKeep := nil;
   FCommandTool.Free;
   FRecorder.Free;
-  FBoardTools.Free;
+  { The loop holds the board as an interface (AddProvider), so its reference is
+    the owner. Dropping ours is the only correct release - a Free here would
+    double-free, the same rule the skill registry follows. }
+  FBoardTools := nil;
   FBoardStore := nil;
   FChangeStore := nil;
   FCommandTool := nil;
@@ -502,6 +505,10 @@ begin
   FSkills := TSkillRegistry.Create;
   FSkillsKeep := FSkills;   // owning interface ref
   FLoop.AddProvider(FSkillsKeep);
+  { The board contributes its TOC through the same seam the skills manifest uses.
+    Its tools are registered directly; the provider exists for the tail. }
+  if FBoardTools <> nil then
+    FLoop.AddProvider(FBoardTools);
   { Lazy MCP: each configured server is a skill (declared, not connected). A
     load_skill connects it. Re-declared at each turn boundary so an add/enable/
     remove is picked up without a restart. }
