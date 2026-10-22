@@ -49,6 +49,10 @@ type
       never touched. A memory system that forgets its decisions is not one. }
     function Prune(AWorkspaceId, AKeepNotes: Integer;
       AMaxAgeSec: Int64; out APruned: Integer; out AError: string): Boolean;
+    { Full-text search over titles, bodies and topics. An empty result is a
+      success, not a miss - the caller decides what "nothing found" means. }
+    function Search(AWorkspaceId: Integer; const AQuery: string; ALimit: Integer;
+      out AEntries: TBoardEntryArray; out AError: string): Boolean;
     { Changes to APaths since ASinceEpochSec: the staleness annotation. }
     function ChangedSince(AWorkspaceId: Integer; ASinceEpochSec: Int64;
       const APaths: TStringArrayLite; out ACount: Integer;
@@ -89,6 +93,9 @@ type
       out AError: string): Boolean;
     function Prune(AWorkspaceId, AKeepNotes: Integer;
       AMaxAgeSec: Int64; out APruned: Integer; out AError: string): Boolean;
+    function Search(AWorkspaceId: Integer; const AQuery: string;
+      ALimit: Integer; out AEntries: TBoardEntryArray;
+      out AError: string): Boolean;
     function ChangedSince(AWorkspaceId: Integer; ASinceEpochSec: Int64;
       const APaths: TStringArrayLite; out ACount: Integer;
       out AError: string): Boolean;
@@ -190,6 +197,26 @@ begin
         AError := 'board store: could not append';
     finally
       sqlite3_finalize(Stmt);
+    end;
+    { Index the entry in the same critical section, so a search never sees a row
+      the board does not (the same discipline messages_fts follows). A failure
+      here does not fail the append: an unindexed entry is still readable. }
+    if Result then
+    begin
+      Stmt := nil;
+      if Prepare('INSERT INTO board_fts (title, body, topic, session_id, ' +
+        'entry_id) VALUES (?, ?, ?, ?, ?)', Stmt, AError) then
+      try
+        sqlite3_bind_text(Stmt, 1, PAnsiChar(Title), -1, nil);
+        sqlite3_bind_text(Stmt, 2, PAnsiChar(Body), -1, nil);
+        sqlite3_bind_text(Stmt, 3, PAnsiChar(Topic), -1, nil);
+        sqlite3_bind_text(Stmt, 4, PAnsiChar(FromSession), -1, nil);
+        sqlite3_bind_int(Stmt, 5, AId);
+        sqlite3_step(Stmt);
+      finally
+        sqlite3_finalize(Stmt);
+      end;
+      AError := '';          { a search-index miss is not an append failure }
     end;
     if DeletedBy = '' then ;   // keeps the unused local honest under -Sew
   finally
@@ -554,6 +581,56 @@ begin
       sqlite3_bind_text(Stmt, 1, PAnsiChar(Sid), -1, nil);
       sqlite3_bind_int(Stmt, 2, AId);
       Result := sqlite3_step(Stmt) = SQLITE_DONE;
+    finally
+      sqlite3_finalize(Stmt);
+    end;
+  finally
+    FStore.Lock.Release;
+  end;
+end;
+
+function TSqliteBoardStore.Search(AWorkspaceId: Integer;
+  const AQuery: string; ALimit: Integer; out AEntries: TBoardEntryArray;
+  out AError: string): Boolean;
+var
+  Stmt: Psqlite3_stmt;
+  Q: AnsiString;
+  N, Lim: Integer;
+begin
+  { An empty query is a success with no rows: "search for nothing" is not an
+    error, and the caller decides what an empty result means. }
+  Result := False;
+  AEntries := nil;
+  AError := '';
+  if Trim(AQuery) = '' then
+  begin
+    Result := True;
+    Exit;
+  end;
+  Lim := ALimit;
+  if Lim <= 0 then
+    Lim := DefaultBoardReadLimit;
+  Q := AnsiString(AQuery);
+  N := 0;
+  FStore.Lock.Acquire;
+  try
+    { Join back to the row so a hit returns a real entry, not just a snippet.
+      Deleted entries stay out of results. }
+    if not Prepare('SELECT ' + BoardColumns + ' FROM board_entries b ' +
+      'WHERE b.workspace_id = ? AND b.deleted_at = 0 AND b.id IN (' +
+      'SELECT entry_id FROM board_fts WHERE board_fts MATCH ?) ' +
+      'ORDER BY b.id DESC LIMIT ' + IntToStr(Lim), Stmt, AError) then
+      Exit;
+    try
+      sqlite3_bind_int(Stmt, 1, AWorkspaceId);
+      sqlite3_bind_text(Stmt, 2, PAnsiChar(Q), -1, nil);
+      while sqlite3_step(Stmt) = SQLITE_ROW do
+      begin
+        SetLength(AEntries, N + 1);
+        Fill(Stmt, AEntries[N]);
+        Inc(N);
+      end;
+      Result := True;
     finally
       sqlite3_finalize(Stmt);
     end;

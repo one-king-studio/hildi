@@ -139,6 +139,9 @@ begin
     '"kind":{"type":"string","enum":["note","question","answer","decision",' +
     '"finding","status"]},' +
     '"since":{"type":"integer","description":"Only entries newer than this id."},' +
+    '"query":{"type":"string","description":"Full-text search over titles, ' +
+    'bodies and topics. Searching ignores the read cursor and looks at the ' +
+    'whole board."},' +
     '"limit":{"type":"integer"},' +
     '"reason":{"type":"string"}' +
     '},"required":["reason"]}';
@@ -363,7 +366,7 @@ var
   Found: Boolean;
   Err: string;
   Cursor: Integer;
-  Text: string;
+  Text, Query: string;
 begin
   Result := False;
   AResult := '';
@@ -397,23 +400,43 @@ begin
     end;
     F.SinceId := Root.Get('since', 0);
     F.Limit := Root.Get('limit', 0);
-    if (F.Topic = '') and (not F.KindSet) and (F.SinceId = 0) then
+    { A query searches the whole board rather than advancing from the cursor:
+      looking something up is not the same question as "what is new". }
+    Query := Trim(Root.Get('query', ''));
+    if Query <> '' then
     begin
-      { A bare read: advance from this session's cursor so it sees what is new
-        rather than the whole board every time. }
-      if FStore.CursorOf(FSessionId, Cursor, Err) then
-        F.SinceId := Cursor;
-    end;
-    if not FStore.Read(FWorkspaceId, F, Rows, Err) then
+      if not FStore.Search(FWorkspaceId, Query, F.Limit, Rows, Err) then
+      begin
+        AError := Err;
+        Exit;
+      end;
+      if Length(Rows) = 0 then
+      begin
+        AResult := '(nothing matched "' + Query + '")';
+        Result := True;
+        Exit;
+      end;
+    end
+    else
     begin
-      AError := Err;
-      Exit;
-    end;
-    if Length(Rows) = 0 then
-    begin
-      AResult := '(no board messages)';
-      Result := True;
-      Exit;
+      if (F.Topic = '') and (not F.KindSet) and (F.SinceId = 0) then
+      begin
+        { A bare read: advance from this session's cursor so it sees what is new
+          rather than the whole board every time. }
+        if FStore.CursorOf(FSessionId, Cursor, Err) then
+          F.SinceId := Cursor;
+      end;
+      if not FStore.Read(FWorkspaceId, F, Rows, Err) then
+      begin
+        AError := Err;
+        Exit;
+      end;
+      if Length(Rows) = 0 then
+      begin
+        AResult := '(no board messages)';
+        Result := True;
+        Exit;
+      end;
     end;
     Text := '';
     for I := 0 to High(Rows) do

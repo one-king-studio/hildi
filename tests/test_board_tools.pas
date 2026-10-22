@@ -52,6 +52,8 @@ type
     procedure TestAllThreeToolsAreRegistered;
     { The TOC drops whole fields in a stated order, never truncating mid-field. }
     procedure TestTocDropOrderKeepsUnreadAndAge;
+    { Full-text search spans titles, bodies and topics, and skips deleted. }
+    procedure TestSearchFindsAnEntryByBodyTerm;
   end;
 
 implementation
@@ -238,6 +240,35 @@ begin
     R, E));
   AssertTrue('read', FTools.ReadEntries('{"topic":"t","reason":"r"}', R, E));
   AssertEquals('gone from reads', '(no board messages)', R);
+end;
+
+procedure TBoardToolsTest.TestSearchFindsAnEntryByBodyTerm;
+{ Search spans titles, bodies and topics, and an empty result is stated rather
+  than returned blank - the same treatment a bare read gets. }
+var
+  R, E: string;
+begin
+  AssertTrue('one', FTools.Post('{"kind":"finding","topic":"parser",' +
+    '"title":"the guard","body":"the guard lives in ParseWord not the lexer",' +
+    '"reason":"r"}', R, E));
+  AssertTrue('two', FTools.Post('{"kind":"finding","topic":"retry",' +
+    '"title":"backoff","body":"full jitter with a cap","reason":"r"}', R, E));
+
+  { A term that appears only in one body. }
+  AssertTrue('search', FTools.ReadEntries('{"query":"ParseWord","reason":"r"}',
+    R, E));
+  AssertTrue('found it', Pos('the guard', R) > 0);
+  AssertTrue('and not the other', Pos('full jitter', R) = 0);
+
+  { A term in a topic. }
+  AssertTrue('by topic', FTools.ReadEntries('{"query":"retry","reason":"r"}',
+    R, E));
+  AssertTrue('found the retry entry', Pos('backoff', R) > 0);
+
+  { Nothing matches: stated, not blank. }
+  AssertTrue('no match', FTools.ReadEntries('{"query":"zzzznothing","reason":"r"}',
+    R, E));
+  AssertTrue('says so', Pos('nothing matched', R) > 0);
 end;
 
 procedure TBoardToolsTest.TestTocDropOrderKeepsUnreadAndAge;
