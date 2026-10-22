@@ -117,6 +117,13 @@ const
   LoadSkillToolName = 'load_skill';
   { The manifest header: explains the model's contract (load on demand, decay by
     idle time, and that the state shown is honest). }
+  { The per-request fragment is STATE ONLY and carries no prose: the explanation
+    of what skills are and how to load them lives in the stable text (the system
+    prompt), where it is sent once and cached. This header exists only so a bare
+    list of states is not mistaken for something else. }
+  SkillStateHeader = 'Skills (state; see the system prompt):';
+
+  { The explanation, once per session, alongside the descriptions. }
   SkillManifestHeader =
     'Skills you can load on demand with load_skill. A skill is unloaded when it ' +
     'has been idle, so check the state here before relying on its tools:';
@@ -225,7 +232,7 @@ var
   E: TSkillEntry;
   State: string;
 begin
-  Result := SkillManifestHeader + LineEnding;
+  Result := SkillStateHeader + LineEnding;
   for I := 0 to FEntries.Count - 1 do
   begin
     E := TSkillEntry(FEntries[I]);
