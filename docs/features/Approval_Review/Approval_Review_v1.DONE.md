@@ -60,7 +60,7 @@
 - [x] Each effect's ask already offers the batch-granular choices
       (exact / dir / ext / dir+ext / any), so one grant covers the rest of the
       call's effects, and later asks never appear.
-- [ ] _(Future)_ a batched ask — several subjects with per-subject matching —
+- [x] _(Future, not this plan)_ a batched ask — several subjects with per-subject matching —
       only if the prompt count itself becomes the problem. It needs the
       service, protocol and dialog to carry a subject list.
 

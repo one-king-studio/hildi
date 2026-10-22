@@ -1,6 +1,6 @@
 # Feature: Approval Review
 
-**Status:** In Progress (phases 1 and 2 shipped): redirects are named and bound to the file
+**Status:** Implemented (phases 1–2 shipped): redirects are named and bound to the file
 tools, pure commands are ungated, the **effect-scoped gate** is live on the
 builtin tier (a granted `file:read`/`file:write` scope is the approval), and
 the dialog shows the **whole command**, scrolled to the span being approved
