@@ -9,7 +9,8 @@ interface
 uses
   Classes, SysUtils, fpcunit, testregistry,
   hildegard.helper.store, hildegard.helper.board,
-  hildegard.helper.board.store;
+  hildegard.helper.board.store,
+  changes.types, changes.store, hildegard.helper.changes.store;
 
 type
   TBoardStoreTest = class(TTestCase)
@@ -35,6 +36,9 @@ type
     procedure TestTopicLockAndUnlock;
     procedure TestTocCounts;
     procedure TestCursorRoundTrip;
+    { Staleness: an entry naming a path counts changes to it since the entry was
+      written. Advisory only, but it must be real. }
+    procedure TestStalenessCountsChangesSinceTheEntry;
   end;
 
 implementation
@@ -311,6 +315,45 @@ begin
   AssertTrue('set', FBoard.SetCursor('sess-a', 42, Err));
   AssertTrue('read', FBoard.CursorOf('sess-a', Id, Err));
   AssertEquals('forty-two', 42, Id);
+end;
+
+procedure TBoardStoreTest.TestStalenessCountsChangesSinceTheEntry;
+var
+  E: TBoardEntry;
+  Id, Count, CId: Integer;
+  Err, CErr: string;
+  Changes: IChangeStore;
+  Rec: TChangeRecord;
+begin
+  { An entry naming a path, written at T. Changes to that path after T must be
+    counted; a change before T, or to a different path, must not. }
+  E := Entry('parser', 'the guard is in ParseWord');
+  E.CreatedAt := 1700000100;
+  SetLength(E.Paths, 1);
+  E.Paths[0] := 'src/parser.pas';
+  AssertTrue('append', FBoard.Append(E, Id, Err));
+
+  { Fresh: nothing has changed since it was written. }
+  AssertTrue('fresh', FBoard.ChangedSince(1, E.CreatedAt, E.Paths, Count, Err));
+  AssertEquals('no changes yet', 0, Count);
+
+  { Written through the real change-store adapter, so this exercises the same
+    rows the recorder produces. }
+  Changes := TSqliteChangeStore.Create(FStore);
+  Rec := Default(TChangeRecord);
+  Rec.WorkspaceId := 1;
+  Rec.Path := 'src/parser.pas';
+  Rec.CreatedAt := 1700000050;           // before the entry
+  AssertTrue('before', Changes.Append(Rec, CId, CErr));
+  Rec.CreatedAt := 1700000200;           // after it
+  AssertTrue('after 1', Changes.Append(Rec, CId, CErr));
+  Rec.Path := 'src/other.pas';           // a different path
+  Rec.CreatedAt := 1700000300;
+  AssertTrue('after 2', Changes.Append(Rec, CId, CErr));
+
+  AssertTrue('stale', FBoard.ChangedSince(1, E.CreatedAt, E.Paths, Count, Err));
+  AssertEquals('only the ones after it, for the named path', 1, Count);
+  Changes := nil;
 end;
 
 initialization

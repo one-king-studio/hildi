@@ -45,7 +45,7 @@ type
     function SetCursor(const ASessionId: string; AId: Integer;
       out AError: string): Boolean;
     { Changes to APaths since AChangeId: the staleness annotation. }
-    function ChangedSince(AWorkspaceId, AChangeId: Integer;
+    function ChangedSince(AWorkspaceId: Integer; ASinceEpochSec: Int64;
       const APaths: TStringArrayLite; out ACount: Integer;
       out AError: string): Boolean;
   end;
@@ -82,7 +82,7 @@ type
       out AError: string): Boolean;
     function SetCursor(const ASessionId: string; AId: Integer;
       out AError: string): Boolean;
-    function ChangedSince(AWorkspaceId, AChangeId: Integer;
+    function ChangedSince(AWorkspaceId: Integer; ASinceEpochSec: Int64;
       const APaths: TStringArrayLite; out ACount: Integer;
       out AError: string): Boolean;
   end;
@@ -555,9 +555,9 @@ begin
   end;
 end;
 
-function TSqliteBoardStore.ChangedSince(AWorkspaceId, AChangeId: Integer;
-  const APaths: TStringArrayLite; out ACount: Integer;
-  out AError: string): Boolean;
+function TSqliteBoardStore.ChangedSince(AWorkspaceId: Integer;
+  ASinceEpochSec: Int64; const APaths: TStringArrayLite;
+  out ACount: Integer; out AError: string): Boolean;
 var
   Stmt: Psqlite3_stmt;
   SQL, List: string;
@@ -580,15 +580,15 @@ begin
     List := List + '?';
     Bound[I] := AnsiString(APaths[I]);
   end;
-  SQL := 'SELECT COUNT(*) FROM file_changes WHERE workspace_id = ? AND id > ? ' +
-    'AND path IN (' + List + ')';
+  SQL := 'SELECT COUNT(*) FROM file_changes WHERE workspace_id = ? ' +
+    'AND created_at > ? AND path IN (' + List + ')';
   FStore.Lock.Acquire;
   try
     if not Prepare(SQL, Stmt, AError) then
       Exit;
     try
       sqlite3_bind_int(Stmt, 1, AWorkspaceId);
-      sqlite3_bind_int(Stmt, 2, AChangeId);
+      sqlite3_bind_int64(Stmt, 2, ASinceEpochSec);
       for I := 0 to High(Bound) do
         sqlite3_bind_text(Stmt, 3 + I, PAnsiChar(Bound[I]), -1, nil);
       if sqlite3_step(Stmt) = SQLITE_ROW then

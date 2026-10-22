@@ -421,6 +421,13 @@ begin
         if FStore.CurrentOf(FWorkspaceId, Rows[I].Topic, Cur, Found, Err) then
           if Found then
             Rows[I].Current := (Cur.Id = Rows[I].Id);
+      { Staleness: how many changes have touched the files this entry names since
+        it was written. Advisory only - a stale entry is still the best record of
+        what was believed, and the annotation says exactly that. }
+      if Length(Rows[I].Paths) > 0 then
+        if not FStore.ChangedSince(FWorkspaceId, Rows[I].CreatedAt,
+          Rows[I].Paths, Rows[I].StaleCount, Err) then
+          Rows[I].StaleCount := 0;
       if Text <> '' then
         Text := Text + LineEnding + LineEnding;
       Text := Text + RenderEntry(Rows[I], 0);
