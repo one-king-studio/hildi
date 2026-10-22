@@ -307,6 +307,12 @@ type
     { Every runtime row, oldest session first. }
     function ListRuntimes(out ARows: TSessionRuntimeRowArray;
       out AError: TStoreError): Boolean;
+
+    { The raw handle, for an adapter that owns its own tables (the change log).
+      Narrow on purpose: it is for units that need a SQL statement the store does
+      not model, not for general use. The caller must hold Lock around it. }
+    property Db: Psqlite3 read FDb;
+    property Lock: TCriticalSection read FLock;
   end;
 
 function StoreSchemaVersion: Integer;
