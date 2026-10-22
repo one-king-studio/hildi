@@ -43,6 +43,12 @@ type
       before that point so the oldest surviving change is still reconstructable. }
     function Prune(AWorkspaceId, AKeepFromId: Integer;
       out AError: string): Boolean;
+    { Retention in the unit the operator reasons about: keep the newest
+      AKeepTurns distinct turns and drop everything older. Done in the store
+      because the answer is a MIN(turn_id) the store can compute, not an array
+      the caller has to read first. }
+    function PruneByTurns(AWorkspaceId, AKeepTurns: Integer;
+      out AError: string): Boolean;
     { Ids are per-workspace-monotonic; a consumer that stores globally can ignore
       this and use its own. }
     function NextId: Integer;
@@ -75,6 +81,8 @@ type
       out AError: string): Boolean;
     function PutKeyframe(const AFrame: TKeyframe; out AError: string): Boolean;
     function Prune(AWorkspaceId, AKeepFromId: Integer;
+      out AError: string): Boolean;
+    function PruneByTurns(AWorkspaceId, AKeepTurns: Integer;
       out AError: string): Boolean;
     function NextId: Integer;
     property Count: Integer read GetCount;
@@ -226,6 +234,71 @@ begin
   SetLength(FKeyframes, Length(FKeyframes) + 1);
   FKeyframes[High(FKeyframes)] := F;
   Result := True;
+end;
+
+function TMemoryChangeStore.PruneByTurns(AWorkspaceId, AKeepTurns: Integer;
+  out AError: string): Boolean;
+var
+  Turns: array of Integer;
+  I, J, N, KeepFrom: Integer;
+  Sorted: Boolean;
+  Tmp: Integer;
+begin
+  AError := '';
+  Turns := nil;
+  N := 0;
+  { The distinct turn ids for this workspace, newest first. }
+  for I := High(FRecords) downto 0 do
+  begin
+    if FRecords[I].WorkspaceId <> AWorkspaceId then
+      Continue;
+    Sorted := False;
+    for J := 0 to N - 1 do
+      if Turns[J] = FRecords[I].TurnId then
+      begin
+        Sorted := True;
+        Break;
+      end;
+    if Sorted then
+      Continue;
+    SetLength(Turns, N + 1);
+    Turns[N] := FRecords[I].TurnId;
+    Inc(N);
+  end;
+  if (AKeepTurns <= 0) or (N <= AKeepTurns) then
+  begin
+    Result := True;
+    Exit;
+  end;
+  { Descending by construction (iterated newest first), but sort defensively:
+    a caller may insert records out of turn order. }
+  for I := 1 to N - 1 do
+  begin
+    J := I;
+    while (J > 0) and (Turns[J] > Turns[J - 1]) do
+    begin
+      Tmp := Turns[J];
+      Turns[J] := Turns[J - 1];
+      Turns[J - 1] := Tmp;
+      Dec(J);
+    end;
+  end;
+  { Everything older than the AKeepTurns-th newest turn is dropped. Ids are
+    per-workspace monotonic, so the boundary is "turn id < this one". }
+  KeepFrom := 0;
+  for I := 0 to High(FRecords) do
+    if (FRecords[I].WorkspaceId = AWorkspaceId) and
+      (FRecords[I].TurnId = Turns[AKeepTurns]) then
+    begin
+      KeepFrom := FRecords[I].Id;
+      Break;
+    end;
+  if KeepFrom = 0 then
+  begin
+    Result := True;
+    Exit;
+  end;
+  Result := Prune(AWorkspaceId, KeepFrom, AError);
 end;
 
 function TMemoryChangeStore.Prune(AWorkspaceId, AKeepFromId: Integer;

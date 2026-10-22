@@ -33,6 +33,9 @@ type
     procedure TestTouchingFiltersByPath;
     procedure TestKeyframeRoundTripAndHorizon;
     procedure TestPruneKeepsTheHorizonKeyframe;
+    { Retention in turns: past the window, the oldest turn's changes go. }
+    procedure TestPruneByTurnsDropsTheOldestTurn;
+    procedure TestPruneByTurnsIsANoOpWithinTheWindow;
   end;
 
 implementation
@@ -271,6 +274,45 @@ begin
     Back, Found, Err));
   AssertTrue('it is there', Found);
   AssertEquals('and it is the one', 'H5', Back.Hash);
+end;
+
+procedure TChangesStoreTest.TestPruneByTurnsDropsTheOldestTurn;
+var
+  Id, I: Integer;
+  R: TChangeRecord;
+  Err: string;
+  Rows: TChangeRecordArray;
+begin
+  { Twenty turns, one change each: past a sixteen-turn window, the oldest go. }
+  for I := 1 to 20 do
+  begin
+    R := Rec('a.txt', ckModified, '', 'v' + IntToStr(I), I);
+    AssertTrue('append turn ' + IntToStr(I), FChanges.Append(R, Id, Err));
+  end;
+  AssertTrue('prune', FChanges.PruneByTurns(1, DefaultRetentionTurns, Err));
+  AssertTrue('remaining', FChanges.ForPath(1, 'a.txt', 0, 0, Rows, Err));
+  AssertEquals('sixteen turns survive', DefaultRetentionTurns, Length(Rows));
+  { The oldest surviving turn is 5: turns 1..4 are gone. }
+  AssertEquals('turn 5 is the oldest kept', 5, Rows[0].TurnId);
+  AssertEquals('turn 20 is the newest', 20, Rows[High(Rows)].TurnId);
+end;
+
+procedure TChangesStoreTest.TestPruneByTurnsIsANoOpWithinTheWindow;
+var
+  Id, I: Integer;
+  R: TChangeRecord;
+  Err: string;
+  Rows: TChangeRecordArray;
+begin
+  { Three turns against a sixteen-turn window: nothing may be dropped. }
+  for I := 1 to 3 do
+  begin
+    R := Rec('a.txt', ckModified, '', 'v' + IntToStr(I), I);
+    AssertTrue('append', FChanges.Append(R, Id, Err));
+  end;
+  AssertTrue('prune', FChanges.PruneByTurns(1, DefaultRetentionTurns, Err));
+  AssertTrue('remaining', FChanges.ForPath(1, 'a.txt', 0, 0, Rows, Err));
+  AssertEquals('all three survive', 3, Length(Rows));
 end;
 
 initialization

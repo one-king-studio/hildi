@@ -205,9 +205,17 @@ begin
 end;
 
 procedure THarnessSession.NoteTurnOpened(ATurnId: Int64);
+var
+  ErrIgnored: string;
 begin
   if FRecorder <> nil then
     FRecorder.SetTurn(ATurnId);
+  { Retention runs at the boundary, which is the only place it can: a turn just
+    closed, so nothing is writing into the window that is about to be trimmed.
+    A failure here must not fail the turn - a growing change log is a nuisance,
+    not a broken session. }
+  if FChangeStore <> nil then
+    FChangeStore.PruneByTurns(FView.WorkspaceId, DefaultRetentionTurns, ErrIgnored);
 end;
 
 procedure THarnessSession.RecordChanges(const AChanges: TFileChangeSet);

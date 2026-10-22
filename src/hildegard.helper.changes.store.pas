@@ -42,6 +42,8 @@ type
     function PutKeyframe(const AFrame: TKeyframe; out AError: string): Boolean;
     function Prune(AWorkspaceId, AKeepFromId: Integer;
       out AError: string): Boolean;
+    function PruneByTurns(AWorkspaceId, AKeepTurns: Integer;
+      out AError: string): Boolean;
     function NextId: Integer;
   end;
 
@@ -473,6 +475,61 @@ begin
       Exit;
     end;
     Result := True;
+  finally
+    FStore.Lock.Release;
+  end;
+end;
+
+function TSqliteChangeStore.PruneByTurns(AWorkspaceId, AKeepTurns: Integer;
+  out AError: string): Boolean;
+var
+  Stmt: Psqlite3_stmt;
+  KeepFrom: Integer;
+begin
+  { Retention in turns. The boundary is the id of the oldest surviving turn:
+    TurnIds are per-workspace monotonic, so "the AKeepTurns-th newest distinct
+    turn" is a MIN(id) over a descending distinct scan. }
+  Result := False;
+  AError := '';
+  KeepFrom := 0;
+  if (FStore = nil) or (FStore.Db = nil) then
+    Exit;
+  if AKeepTurns <= 0 then
+  begin
+    Result := True;
+    Exit;
+  end;
+  FStore.Lock.Acquire;
+  try
+    Stmt := nil;
+    if sqlite3_prepare_v2(FStore.Db, PAnsiChar(AnsiString(
+      'SELECT MIN(id) FROM file_changes WHERE workspace_id = ? AND turn_id IN ' +
+      '(SELECT DISTINCT turn_id FROM file_changes WHERE workspace_id = ? ' +
+      'ORDER BY turn_id DESC LIMIT ? OFFSET ?)')), -1, @Stmt, nil) <> 0 then
+    begin
+      AError := 'could not prepare the retention query';
+      Exit;
+    end;
+    try
+      sqlite3_bind_int(Stmt, 1, AWorkspaceId);
+      sqlite3_bind_int(Stmt, 2, AWorkspaceId);
+      { LIMIT = how many surviving turns we want; OFFSET = how many newer ones
+        to skip. We want the OLDEST surviving turn, so offset by the turns we
+        intend to keep minus one. }
+      sqlite3_bind_int(Stmt, 3, 1);
+      sqlite3_bind_int(Stmt, 4, AKeepTurns - 1);
+      if sqlite3_step(Stmt) = SQLITE_ROW then
+        KeepFrom := sqlite3_column_int(Stmt, 0);
+    finally
+      sqlite3_finalize(Stmt);
+    end;
+    if KeepFrom = 0 then
+    begin
+      { Fewer turns than the window: nothing to do. }
+      Result := True;
+      Exit;
+    end;
+    Result := Prune(AWorkspaceId, KeepFrom, AError);
   finally
     FStore.Lock.Release;
   end;
