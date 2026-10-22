@@ -1,9 +1,9 @@
 # Component Specification: Changes Library v1
 
-**Related Feature:** [Workspace Snapshots](../../Workspace_Snapshots/FEATURE.md) ·
-[File Changes](../../File_Changes/FEATURE.md)
+**Related Feature:** [Workspace Snapshots](../Workspace_Snapshots/FEATURE.md) ·
+[File Changes](../File_Changes/FEATURE.md)
 **Depends on:** nothing. A **standalone, publishable library** in the shape of
-[Async Core](../../Async_Core/FEATURE.md) and [Shell Library](../../Shell_Library/FEATURE.md):
+[Async Core](../Async_Core/FEATURE.md) and [Shell Library](../Shell_Library/FEATURE.md):
 its own diff engine, its own log model, and a **store seam the consumer
 implements**. No harness unit, no SQLite, no TUI.
 **Depended on by:** the harness change recorder, the board's staleness rule, the
@@ -224,16 +224,46 @@ are one library with one test suite, and the harness units are adapters.
 
 ### Migration path (so nothing breaks)
 
-1. Create `src/changes/` with the three units and the memory store; no consumer.
-2. Move the diff applier from `hildegard.helper.patch` into `changes.text`;
-   `hildegard.helper.patch` keeps its public functions and delegates. Its tests
-   keep passing unchanged, which is the proof the move was faithful.
-3. Move the ignore matcher the same way from `hildegard.helper.gitignore`.
-4. Add `changes-standalone` and the closure test.
-5. Only then implement `IChangeStore` over SQLite in the harness, and wire
-   `OnChanges` (which today has **no consumer at all**).
+**Correction (2026-10-21, after building the library).** This section previously
+said the diff applier would "move in and the harness unit delegates". Reading both
+implementations shows that is **not a move** — they solve different problems:
 
-Steps 1–4 touch no behaviour. Step 5 is where the feature starts.
+| | `hildegard.helper.patch` (shipped, trusted) | `changes.text` (library) |
+| --- | --- | --- |
+| Scope | **one patch, many files** | one text, one file |
+| Failure | **tolerant**: a bad hunk is counted `Rejected` and the rest are attempted | **strict**: the first mismatch fails with a line number |
+| I/O | injected `ARead`/`AWrite` callbacks | plain strings in, string out |
+| Callers | `patch_apply`, which must report `applied`/`rejected` and keep going | replay, which must stop rather than produce a wrong file |
+
+Both behaviours are correct for their caller. A tolerant replay would silently
+reconstruct a *wrong* file; a strict `patch_apply` would refuse a patch where one
+hunk of five was fine. So the library does **not** absorb the harness applier, and
+the earlier "one implementation instead of three" claim is retired for this unit.
+
+The honest position:
+
+- `changes.text.ApplyUnifiedDiff` is the **replay-grade** applier: exact, strict,
+  and its refusal is what makes a reconstructed file trustworthy.
+- `hildegard.helper.patch` keeps the **patch-grade** applier: multi-file,
+  tolerant, callback-driven, and its `Rejected` count is what `patch_apply`
+  reports.
+- There is genuine duplication in the *hunk matcher* between them. Unifying that
+  is a real, small task — and it needs the library to gain a tolerant multi-file
+  mode first, which is a design change, not a move.
+
+The `gitignore` matcher is a **true** move: it is pure, does no I/O, and both
+callers want identical semantics. That one can be delegated.
+
+1. Create `src/changes/` with the three units and the memory store; no consumer.
+   *Done.*
+2. `changes-standalone` and the closure test. *Done.*
+3. Move the `gitignore` pattern matcher into the library; the harness unit
+   delegates. Its existing tests passing unchanged is the proof.
+4. **Not** a move: give `changes.text` an optional tolerant multi-file mode, then
+   have `hildegard.helper.patch` delegate. Only if the duplication of the
+   hunk matcher proves costly — otherwise leave both, and record why.
+5. Then implement `IChangeStore` over SQLite in the harness, and wire
+   `OnChanges` (which today has **no consumer at all**).
 
 ## Validation and error handling
 
