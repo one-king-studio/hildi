@@ -279,6 +279,8 @@ type
     procedure TestQueuedAmbientDrainsAsAmbient;
     procedure TestSendAmbientStartsWithoutUserMessage;
     procedure TestPrewrappedUserMessagesAreNotWrappedAgain;
+    { A board notice is transient: it must not become a conversation row. }
+    procedure TestABoardNoticeIsNotPersisted;
     { The stable prompt reaches the system message, request-only. Without it the
       skill descriptions would be in no prompt at all, because the per-request
       fragment now carries state only. }
@@ -1459,6 +1461,32 @@ begin
     RoleAt(FFake.Bodies[0], 0));
   AssertTrue('no stray separator',
     Pos(#10#10#10, ContentAt(FFake.Bodies[0], 0)) = 0);
+end;
+
+procedure TAgentLoopTest.TestABoardNoticeIsNotPersisted;
+{ A board notice is TRANSIENT. It rides the tail and is forgotten: if it were
+  persisted as an ambient row, ten agents posting on a busy board would leave
+  ninety permanent conversation rows riding every later prompt - the cheap signal
+  would become the expensive part. }
+var
+  Answer: string;
+  Err: TLLMError;
+  Before, After: Integer;
+begin
+  BuildLoop('', 8);
+  Before := Length(FStore.Messages);
+  FLoop.PromptQueue.PushBoard('2 new board messages', 2);
+  FFake.AddResponse([TextDelta('ok'), FinishFrame('stop'), DoneFrame]);
+  AssertTrue('send ok', FLoop.Send('hi', nil, Answer, Err));
+  After := Length(FStore.Messages);
+  { The turn appends the user message and the assistant reply: two rows, and
+    nothing for the board notice. }
+  AssertEquals('only the user turn and the reply were stored', Before + 2,
+    After);
+  { And no stored row carries the notice text. }
+  AssertTrue('the notice is not in the history',
+    Pos('2 new board messages', FStore.Messages[High(FStore.Messages)].Content)
+      = 0);
 end;
 
 procedure TAgentLoopTest.TestPrewrappedUserMessagesAreNotWrappedAgain;

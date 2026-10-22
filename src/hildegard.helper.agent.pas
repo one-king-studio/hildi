@@ -164,8 +164,11 @@ type
 
   TPromptArray = array of string;
 
-  { A queued prompt is either operator text or an ambient subagent result. }
-  TPromptKind = (pkUser, pkAmbient);
+  { A queued prompt is either operator text, an ambient subagent result, or a
+    board notice. A board notice is TRANSIENT: it is delivered in the tail and
+    never persisted, because ten agents posting would otherwise leave 90
+    permanent conversation rows that ride every later prompt. }
+  TPromptKind = (pkUser, pkAmbient, pkBoard);
 
   TPromptItem = record
     Kind: TPromptKind;
@@ -175,6 +178,7 @@ type
     Source: string;         // pkAmbient: the producing tool
     Status: string;         // pkAmbient: completed/failed/aborted/gone
     ElapsedMs: Int64;       // pkAmbient: the task duration
+    Count: Integer;         // pkBoard: how many entries the notice coalesces
   end;
 
   TPromptItemArray = array of TPromptItem;
@@ -192,6 +196,10 @@ type
     { Queue an ambient (async task result) notification. }
     procedure PushAmbient(const AText, ARefSessionId, ALabel, ASource,
       AStatus: string; AElapsedMs: Int64);
+    { Queue a board notice. Transient: delivered in the tail, never persisted.
+      ACount coalesces several entries into one notice so ten agents posting is
+      O(agents x ticks), not O(agents x entries). }
+    procedure PushBoard(const AText: string; ACount: Integer);
     { Remove and return every queued item, in order. }
     function DrainItems: TPromptItemArray;
     { The queued operator prompts only, in order (ambients excluded). }
@@ -859,6 +867,25 @@ begin
   end;
 end;
 
+procedure TPromptQueue.PushBoard(const AText: string; ACount: Integer);
+var
+  Item: TPromptItem;
+begin
+  if AText = '' then
+    Exit;
+  Item := Default(TPromptItem);
+  Item.Kind := pkBoard;
+  Item.Text := AText;
+  Item.Count := ACount;
+  FLock.Acquire;
+  try
+    SetLength(FItems, Length(FItems) + 1);
+    FItems[High(FItems)] := Item;
+  finally
+    FLock.Release;
+  end;
+end;
+
 procedure TPromptQueue.PushAmbient(const AText, ARefSessionId, ALabel, ASource,
   AStatus: string; AElapsedMs: Int64);
 var
@@ -1509,6 +1536,13 @@ begin
   Items := FPromptQueue.DrainItems;
   for I := 0 to High(Items) do
   begin
+    if Items[I].Kind = pkBoard then
+    begin
+      { TRANSIENT by design: nothing is persisted and no message is appended. The
+        notice rides the tail and is forgotten, so ten agents posting do not
+        leave ninety permanent conversation rows. }
+      Continue;
+    end;
     if Items[I].Kind = pkAmbient then
     begin
       FStore.AppendAmbient(Items[I].Text, Items[I].RefSessionId,
