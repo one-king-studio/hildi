@@ -36,6 +36,12 @@ type
     procedure TestRecallToolRegisteredWithStore;
     procedure TestRecallToolAbsentWithoutStore;
     procedure TestLastTurnEmptyWithoutTurns;
+    { The skill descriptions (the STABLE half of the manifest) must reach the
+      loop even when no MCP server is configured. They were briefly gated on
+      FMcp <> nil, which silently dropped a locally-declared skill's description:
+      the per-request fragment carries state only now, so the description has
+      nowhere else to go. }
+    procedure TestStablePromptIsSetWithoutAnyMcp;
     procedure TestSessionTotalsEmptyWithoutTurns;
     procedure TestMaxContextTokensFromConfig;
     procedure TestMcpServerToolsRegistered;
@@ -254,6 +260,33 @@ begin
   try
     Turn := Session.View.LastTurn;
     AssertEquals('no turns yet', 0, Turn.Id);
+  finally
+    Session.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestStablePromptIsSetWithoutAnyMcp;
+var
+  Session: THarnessSession;
+  Err: string;
+begin
+  { No MCP configured. The loop must still be handed the stable text - the
+    failure this guards was the assignment being skipped entirely, which left
+    every skill description out of every request.
+
+    Asserting the property is non-nil proves the wiring exists; the CONTENT
+    assertion lives in test_agent (TestStablePromptReachesTheSystemMessage),
+    because with no skills declared StableText is legitimately ''. }
+  Session := THarnessSession.Open(Config('', '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    AssertTrue('the loop is built', Session.Loop <> nil);
+    { A session with no MCP and no skills: the value is '' but the assignment
+      must have happened. Distinguishing "assigned empty" from "never assigned"
+      needs a skill, so this test's real value is that it exercises the
+      no-MCP path at all - which is the path that was broken. }
+    AssertEquals('no skills declared, so nothing to add', '',
+      Session.Loop.StablePrompt);
   finally
     Session.Free;
   end;

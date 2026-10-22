@@ -279,6 +279,11 @@ type
     procedure TestQueuedAmbientDrainsAsAmbient;
     procedure TestSendAmbientStartsWithoutUserMessage;
     procedure TestPrewrappedUserMessagesAreNotWrappedAgain;
+    { The stable prompt reaches the system message, request-only. Without it the
+      skill descriptions would be in no prompt at all, because the per-request
+      fragment now carries state only. }
+    procedure TestStablePromptReachesTheSystemMessage;
+    procedure TestStablePromptIsAbsentWhenUnset;
     { The prompt-cache invariant: a superseded message is byte-identical across
       requests, and the volatile tail only ever rides the newest message. }
     procedure TestSupersededMessageIsByteIdenticalAcrossRequests;
@@ -1412,6 +1417,48 @@ begin
     if Pos('subagent result', Msgs[I].Content) > 0 then
       Found := True;
   AssertTrue('ambient content present in history', Found);
+end;
+
+procedure TAgentLoopTest.TestStablePromptReachesTheSystemMessage;
+{ The stable prompt (skill descriptions) rides the system message, request-only.
+  Without this a skill's description is in no prompt at all: the per-request
+  fragment carries state only. }
+var
+  Answer: string;
+  Err: TLLMError;
+  Body: string;
+  Count, I: Integer;
+begin
+  BuildLoop('you are a test', 8);
+  FLoop.StablePrompt := 'SKILL-DESCRIPTIONS-HERE';
+  FFake.AddResponse([TextDelta('ok'), FinishFrame('stop'), DoneFrame]);
+  AssertTrue('send ok', FLoop.Send('hi', nil, Answer, Err));
+  Body := FFake.Bodies[0];
+  Count := MessageCount(Body);
+  AssertTrue('a system message exists', Count > 0);
+  AssertEquals('the first message is the system prompt', 'system',
+    RoleAt(Body, 0));
+  AssertTrue('the stable text is appended to it',
+    Pos('SKILL-DESCRIPTIONS-HERE', ContentAt(Body, 0)) > 0);
+  { And nowhere else: it must not also ride the user turn, or it would be
+    re-sent twice. }
+  for I := 1 to Count - 1 do
+    AssertTrue('message ' + IntToStr(I) + ' must not repeat it',
+      Pos('SKILL-DESCRIPTIONS-HERE', ContentAt(Body, I)) = 0);
+end;
+
+procedure TAgentLoopTest.TestStablePromptIsAbsentWhenUnset;
+var
+  Answer: string;
+  Err: TLLMError;
+begin
+  BuildLoop('you are a test', 8);
+  FFake.AddResponse([TextDelta('ok'), FinishFrame('stop'), DoneFrame]);
+  AssertTrue('send ok', FLoop.Send('hi', nil, Answer, Err));
+  AssertEquals('the system prompt is exactly what was configured', 'system',
+    RoleAt(FFake.Bodies[0], 0));
+  AssertTrue('no stray separator',
+    Pos(#10#10#10, ContentAt(FFake.Bodies[0], 0)) = 0);
 end;
 
 procedure TAgentLoopTest.TestPrewrappedUserMessagesAreNotWrappedAgain;

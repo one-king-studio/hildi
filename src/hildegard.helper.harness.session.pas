@@ -437,6 +437,11 @@ begin
   { Lazy MCP: each configured server is a skill (declared, not connected). A
     load_skill connects it. Re-declared at each turn boundary so an add/enable/
     remove is picked up without a restart. }
+  { The stable half of the manifest (descriptions) goes to the system prompt. It
+    must be set even with no MCP configured: a locally-declared skill would
+    otherwise lose its description entirely, since the fragment now carries only
+    state. }
+  FLoop.StablePrompt := FSkills.StableText;
   if FMcp <> nil then
   begin
     ReconcileMcpSkills;
