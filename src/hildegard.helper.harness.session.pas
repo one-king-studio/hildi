@@ -60,6 +60,10 @@ type
     { The board: durable knowledge. Nil without a store. }
     FBoardStore: IBoardStore;
     FBoardTools: TBoardTools;
+    { The last unread count this session was notified of. The read cursor only
+      advances on an actual board_read, so without this every tick would
+      re-announce the same post forever. }
+    FLastBoardNotice: Integer;
     FChangeStore: IChangeStore;
     FLoop: TAgentLoop;
     FQueue: TTurnQueue;
@@ -103,6 +107,10 @@ type
     { The client-side view: identity, store, history, and metrics. }
     property View: TSessionView read FView;
     property Loop: TAgentLoop read FLoop;
+    { Notice any board entries this session has not seen, coalesced into ONE
+      transient prompt item so ten agents posting is O(ticks), not O(entries).
+      Called by the runtime on its tick. Returns the count noticed. }
+    function NoticeBoard: Integer;
     property Tools: TToolRegistry read FTools;
     property Queue: TTurnQueue read FQueue;
     property Gate: TApprovalGate read FGate;
@@ -212,6 +220,39 @@ begin
     end;
   end;
   Result := Session;
+end;
+
+function THarnessSession.NoticeBoard: Integer;
+var
+  Cursor: Integer;
+  Unread, Q, D, F: Integer;
+  LastAt: Int64;
+  Err: string;
+begin
+  Result := 0;
+  if (FBoardStore = nil) or (FLoop = nil) then
+    Exit;
+  { Coalesce: ONE notice naming the total, not one per entry. A busy board with
+    ten agents must cost O(ticks), not O(entries). }
+  if not FBoardStore.CursorOf(FView.SessionId, Cursor, Err) then
+    Exit;
+  if not FBoardStore.Toc(FView.WorkspaceId, Cursor, Unread, Q, D, F, LastAt,
+    Err) then
+    Exit;
+  if Unread <= 0 then
+  begin
+    FLastBoardNotice := 0;
+    Exit;
+  end;
+  { Announce only when the count has CHANGED. The read cursor advances on
+    board_read, not on being noticed, so re-notifying on every tick would
+    announce the same post forever. }
+  if Unread = FLastBoardNotice then
+    Exit;
+  FLastBoardNotice := Unread;
+  FLoop.PromptQueue.PushBoard(IntToStr(Unread) + ' new board message(s)',
+    Unread);
+  Result := Unread;
 end;
 
 procedure THarnessSession.NoteTurnOpened(ATurnId: Int64);

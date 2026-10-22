@@ -14,6 +14,7 @@ uses
   hildegard.helper.recall.tool,
   hildegard.helper.harness.session, hildegard.helper.harness.view,
   hildegard.helper.mcp.config,
+  hildegard.helper.board, hildegard.helper.board.store,
   llm_fakes;
 
 type
@@ -42,6 +43,9 @@ type
       the per-request fragment carries state only now, so the description has
       nowhere else to go. }
     procedure TestStablePromptIsSetWithoutAnyMcp;
+    { A peer's board post becomes ONE coalesced transient notice, and the same
+      entry is not noticed twice. }
+    procedure TestAPeerPostBecomesOneNotice;
     procedure TestSessionTotalsEmptyWithoutTurns;
     procedure TestMaxContextTokensFromConfig;
     procedure TestMcpServerToolsRegistered;
@@ -260,6 +264,46 @@ begin
   try
     Turn := Session.View.LastTurn;
     AssertEquals('no turns yet', 0, Turn.Id);
+  finally
+    Session.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestAPeerPostBecomesOneNotice;
+var
+  Session: THarnessSession;
+  Err: string;
+  Board: IBoardStore;
+  E: TBoardEntry;
+  Id, Noticed: Integer;
+begin
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    { Nothing on the board yet: no notice, and no crash from a nil cursor. }
+    AssertEquals('nothing to notice', 0, Session.NoticeBoard);
+
+    { A peer posts - a different session id, so it is genuinely someone else. }
+    Board := TSqliteBoardStore.Create(Session.View.Store);
+    E := Default(TBoardEntry);
+    E.WorkspaceId := Session.View.WorkspaceId;
+    E.Kind := bkFinding;
+    E.Topic := 'parser';
+    E.Title := 'the guard is in ParseWord';
+    E.Body := 'not the lexer';
+    E.FromSession := 'some-peer';
+    E.FromLabel := 'peer';
+    AssertTrue('peer posts', Board.Append(E, Id, Err));
+
+    { One tick, one notice. }
+    Noticed := Session.NoticeBoard;
+    AssertTrue('the post was noticed', Noticed > 0);
+    { The notice is transient: it is queued, not stored. }
+    AssertTrue('queued for delivery', Session.Loop.PromptQueue.Pending);
+    { Draining clears it, so a second tick with no new entry notices nothing. }
+    Session.Loop.PromptQueue.DrainItems;
+    AssertEquals('already seen', 0, Session.NoticeBoard);
+    Board := nil;
   finally
     Session.Free;
   end;

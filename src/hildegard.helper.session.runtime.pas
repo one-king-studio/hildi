@@ -1597,6 +1597,10 @@ begin
         HandleClients;
       end;
       DrainTurn;
+      { A peer's board post becomes ONE transient notice. Coalesced per tick, so
+        a busy board costs O(ticks) rather than O(entries). }
+      if FSession <> nil then
+        FSession.NoticeBoard;
       if FSubagents <> nil then
       begin
         { Auto-deny applies only when no interactive client is attached. }
