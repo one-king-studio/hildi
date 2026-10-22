@@ -39,6 +39,8 @@ type
     { Staleness: an entry naming a path counts changes to it since the entry was
       written. Advisory only, but it must be real. }
     procedure TestStalenessCountsChangesSinceTheEntry;
+    { Retention drops the noise classes and NEVER the knowledge. }
+    procedure TestPruneDropsNotesButNeverDecisions;
   end;
 
 implementation
@@ -354,6 +356,48 @@ begin
   AssertTrue('stale', FBoard.ChangedSince(1, E.CreatedAt, E.Paths, Count, Err));
   AssertEquals('only the ones after it, for the named path', 1, Count);
   Changes := nil;
+end;
+
+procedure TBoardStoreTest.TestPruneDropsNotesButNeverDecisions;
+var
+  E: TBoardEntry;
+  Id, Pruned, I: Integer;
+  Err: string;
+  Rows: TBoardEntryArray;
+  F: TBoardFilter;
+begin
+  { Five notes and two decisions, all old. A tight window must drop the notes and
+    keep every decision: knowledge is not noise. }
+  for I := 1 to 5 do
+  begin
+    E := Entry('scratch', 'note ' + IntToStr(I), bkNote);
+    E.CreatedAt := 1700000000;
+    AssertTrue('note', FBoard.Append(E, Id, Err));
+  end;
+  E := Entry('policy', 'we chose jitter', bkDecision);
+  E.CreatedAt := 1700000000;
+  AssertTrue('decision 1', FBoard.Append(E, Id, Err));
+  E := Entry('policy', 'we chose 8 attempts', bkDecision);
+  E.CreatedAt := 1700000000;
+  AssertTrue('decision 2', FBoard.Append(E, Id, Err));
+
+  { Keep two notes, and prune anything older than a cutoff in the far future.
+    The AGE rule fires first and takes all five notes; the count rule then has
+    nothing left to do. Both are exercised, and the assertion is on the outcome
+    that matters: every note is gone and neither decision is. }
+  AssertTrue('prune', FBoard.Prune(1, 2, 1900000000, Pruned, Err));
+  AssertEquals('all five notes were older than the cutoff', 5, Pruned);
+
+  F := Default(TBoardFilter);
+  F.IncludeDeleted := True;
+  AssertTrue('read', FBoard.Read(1, F, Rows, Err));
+  { Only the two decisions survive - the kind rule protected them. }
+  AssertEquals('both decisions, no notes', 2, Length(Rows));
+  { And no decision was touched. }
+  F.Topic := 'policy';
+  F.Limit := 10;
+  AssertTrue('policy read', FBoard.Read(1, F, Rows, Err));
+  AssertEquals('both decisions survive', 2, Length(Rows));
 end;
 
 initialization

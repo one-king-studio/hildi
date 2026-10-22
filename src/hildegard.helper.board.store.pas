@@ -44,7 +44,12 @@ type
       out AError: string): Boolean;
     function SetCursor(const ASessionId: string; AId: Integer;
       out AError: string): Boolean;
-    { Changes to APaths since AChangeId: the staleness annotation. }
+    { Retention: drop finished noise, never knowledge. `note` and `status` are
+      pruned by count and age; `decision`, `finding`, `question` and `answer` are
+      never touched. A memory system that forgets its decisions is not one. }
+    function Prune(AWorkspaceId, AKeepNotes: Integer;
+      AMaxAgeSec: Int64; out APruned: Integer; out AError: string): Boolean;
+    { Changes to APaths since ASinceEpochSec: the staleness annotation. }
     function ChangedSince(AWorkspaceId: Integer; ASinceEpochSec: Int64;
       const APaths: TStringArrayLite; out ACount: Integer;
       out AError: string): Boolean;
@@ -82,6 +87,8 @@ type
       out AError: string): Boolean;
     function SetCursor(const ASessionId: string; AId: Integer;
       out AError: string): Boolean;
+    function Prune(AWorkspaceId, AKeepNotes: Integer;
+      AMaxAgeSec: Int64; out APruned: Integer; out AError: string): Boolean;
     function ChangedSince(AWorkspaceId: Integer; ASinceEpochSec: Int64;
       const APaths: TStringArrayLite; out ACount: Integer;
       out AError: string): Boolean;
@@ -550,6 +557,68 @@ begin
     finally
       sqlite3_finalize(Stmt);
     end;
+  finally
+    FStore.Lock.Release;
+  end;
+end;
+
+function TSqliteBoardStore.Prune(AWorkspaceId, AKeepNotes: Integer;
+  AMaxAgeSec: Int64; out APruned: Integer; out AError: string): Boolean;
+var
+  Stmt: Psqlite3_stmt;
+  Cutoff: Int64;
+begin
+  { Only the noise classes: note and status. Knowledge - decision, finding,
+    question, answer - is never pruned, however old. A memory system that forgets
+    its decisions is not one. }
+  Result := False;
+  APruned := 0;
+  AError := '';
+  FStore.Lock.Acquire;
+  try
+    { Age first: anything older than the window, whatever the count. }
+    if AMaxAgeSec > 0 then
+    begin
+      Cutoff := AMaxAgeSec;
+      if not Prepare('DELETE FROM board_entries WHERE workspace_id = ? ' +
+        'AND deleted_at = 0 AND kind IN (?, ?) AND created_at < ?', Stmt,
+        AError) then
+        Exit;
+      try
+        sqlite3_bind_int(Stmt, 1, AWorkspaceId);
+        sqlite3_bind_int(Stmt, 2, Ord(bkNote));
+        sqlite3_bind_int(Stmt, 3, Ord(bkStatus));
+        sqlite3_bind_int64(Stmt, 4, Cutoff);
+        if sqlite3_step(Stmt) = SQLITE_DONE then
+          APruned := sqlite3_changes(FStore.Db);
+      finally
+        sqlite3_finalize(Stmt);
+      end;
+    end;
+    { Then the count: keep the newest AKeepNotes of the noise classes. }
+    if AKeepNotes > 0 then
+    begin
+      if not Prepare('DELETE FROM board_entries WHERE workspace_id = ? ' +
+        'AND deleted_at = 0 AND kind IN (?, ?) AND id NOT IN (' +
+        'SELECT id FROM board_entries WHERE workspace_id = ? ' +
+        'AND deleted_at = 0 AND kind IN (?, ?) ORDER BY id DESC LIMIT ?)',
+        Stmt, AError) then
+        Exit;
+      try
+        sqlite3_bind_int(Stmt, 1, AWorkspaceId);
+        sqlite3_bind_int(Stmt, 2, Ord(bkNote));
+        sqlite3_bind_int(Stmt, 3, Ord(bkStatus));
+        sqlite3_bind_int(Stmt, 4, AWorkspaceId);
+        sqlite3_bind_int(Stmt, 5, Ord(bkNote));
+        sqlite3_bind_int(Stmt, 6, Ord(bkStatus));
+        sqlite3_bind_int(Stmt, 7, AKeepNotes);
+        if sqlite3_step(Stmt) = SQLITE_DONE then
+          APruned := APruned + sqlite3_changes(FStore.Db);
+      finally
+        sqlite3_finalize(Stmt);
+      end;
+    end;
+    Result := True;
   finally
     FStore.Lock.Release;
   end;
