@@ -532,10 +532,15 @@ begin
     Mgr.Reconcile(McpCfg('playwright', StandardScript));
     RegisterMcpSkills(Reg, McpCfg('playwright', StandardScript), Mgr);
     Manifest := Reg.Manifest;
+    AssertTrue('the per-request fragment carries state only',
+      Pos('- mcp_playwright (unloaded)', Manifest) > 0);
+    { Curated metadata is STABLE text and lives in the system prompt now. }
     AssertTrue('curated description for a known service',
-      Pos('Browser automation', Manifest) > 0);
+      Pos('Browser automation', Reg.StableText) > 0);
     AssertFalse('not the generic placeholder',
-      Pos('MCP server playwright.', Manifest) > 0);
+      Pos('MCP server playwright.', Reg.StableText) > 0);
+    AssertTrue('and the fragment does not repeat it',
+      Pos('Browser automation', Manifest) = 0);
   finally
     Reg.Free;
     Mgr.Free;

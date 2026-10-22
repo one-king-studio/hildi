@@ -103,6 +103,11 @@ type
     function Specs: TToolSpecArray;
     function PromptFragment: string;
     function Find(const AName: string; out ATool: TRegisteredTool): Boolean;
+    { The STABLE half of the manifest: each skill's description and when-to-use,
+      with no activation state. It goes in the system prompt, where stable text
+      belongs, rather than riding every request in the prompt fragment. }
+
+    function StableText: string;
   end;
 
 const
@@ -228,8 +233,26 @@ begin
       State := 'loaded'
     else
       State := 'unloaded';
-    Result := Result + '- ' + E.Skill.Key + ' (' + State + '): ' +
-      E.Skill.Description;
+    { The STATE only. Descriptions live in the system prompt (StableText), so
+      this fragment is small and changes only when activation does. }
+    Result := Result + '- ' + E.Skill.Key + ' (' + State + ')' + LineEnding;
+  end;
+end;
+
+function TSkillRegistry.StableText: string;
+var
+  I: Integer;
+  E: TSkillEntry;
+begin
+  { The description and when-to-use per skill: stable across a session, so it
+    belongs in the system prompt rather than being re-sent on every request. }
+  Result := '';
+  for I := 0 to FEntries.Count - 1 do
+  begin
+    E := TSkillEntry(FEntries[I]);
+    if Result = '' then
+      Result := SkillManifestHeader + LineEnding;
+    Result := Result + '- ' + E.Skill.Key + ': ' + E.Skill.Description;
     if E.Skill.WhenToUse <> '' then
       Result := Result + ' ' + E.Skill.WhenToUse;
     Result := Result + LineEnding;

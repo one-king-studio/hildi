@@ -267,6 +267,10 @@ type
     { A loop-only advisory to ride the next tool response (a soft-limit nudge).
       Never persisted. }
     FPendingAdvisory: string;
+    { STABLE prompt text from providers (the skill descriptions). Appended to the
+      system message on the way out - request-only, never persisted - so it is
+      byte-stable across requests and the prefix cache survives. }
+    FStablePrompt: string;
     FCancel: TAgentCancelCheck;
     FOnTurnStart: TAgentBoundaryEvent;
     FProviders: array of IToolProvider;
@@ -352,6 +356,9 @@ type
     procedure PrepareProviders;
     { Prompts the operator injects into a running turn. }
     property PromptQueue: TPromptQueue read FPromptQueue;
+    { STABLE prompt text appended to the system message on the way out. Set once
+      per session from the providers' stable fragments; never persisted. }
+    property StablePrompt: string read FStablePrompt write FStablePrompt;
     { The executor for parallel tool calls. Nil => serial. Set by the session to
       a pool separate from the turn pool (the turn occupies a turn-pool worker
       while its tools run). }
@@ -1119,6 +1126,17 @@ begin
       (not IsPrewrappedUserMessage(Result.Messages[I].Content)) then
       Result.Messages[I].Content := FormatUserMessage(
         Result.Messages[I].Content);
+  { The providers' STABLE text (skill descriptions) rides the system message:
+    request-only, never persisted, and byte-identical across requests so it is
+    cached. The volatile activation state stays in the tail below. }
+  if FStablePrompt <> '' then
+    for I := 0 to High(Result.Messages) do
+      if Result.Messages[I].Role = crSystem then
+      begin
+        Result.Messages[I].Content := Result.Messages[I].Content + LineEnding +
+          LineEnding + FStablePrompt;
+        Break;
+      end;
 
   { The VOLATILE TAIL goes on the last message, whatever its role, and that is
     decided AFTER the continuation block below has appended its messages - so

@@ -250,8 +250,7 @@ procedure THarnessSession.ReconcileMcpSkills;
 var
   Cfg: TMcpConfig;
   I, J: Integer;
-  Key: string;
-  Present: Boolean;
+  Key: string;  Present: Boolean;
   Keys: TStringArray;
 begin
   if (FSkills = nil) or (FMcp = nil) then
@@ -280,6 +279,12 @@ begin
   end;
   { Declare/replace a skill per configured server (no connect). }
   RegisterMcpSkills(FSkills, Cfg, FMcp);
+  { The STABLE half - each skill's description and when-to-use - goes to the
+    system prompt, where stable text belongs. Only the activation state stays in
+    the per-request fragment, so the manifest stops costing ~105 tokens on every
+    request and a load only changes a few short lines. }
+  if FLoop <> nil then
+    FLoop.StablePrompt := FSkills.StableText;
 end;
 
 function THarnessSession.Init(const AConfig: THarnessSessionConfig;

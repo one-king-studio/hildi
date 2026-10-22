@@ -158,8 +158,9 @@ begin
     S := MakeSkill('alpha');
     S.Description := 'replaced';
     R.Add(S);
-    AssertTrue('one entry', Pos('replaced', R.Manifest) > 0);
-    AssertTrue('no duplicate', Pos('does alpha things', R.Manifest) = 0);
+    { The description is stable text now, not part of the per-request fragment. }
+    AssertTrue('one entry', Pos('replaced', R.StableText) > 0);
+    AssertTrue('no duplicate', Pos('does alpha things', R.StableText) = 0);
   finally
     R.Free;
   end;
@@ -168,17 +169,28 @@ end;
 procedure TSkillsTest.TestManifestListsAllUnloaded;
 var
   R: TSkillRegistry;
-  M: string;
+  M, S: string;
 begin
   R := TSkillRegistry.Create;
   try
     R.Add(MakeSkill('alpha'));
     R.Add(MakeSkill('beta'));
+    { The per-request fragment carries STATE only: descriptions moved to the
+      system prompt so they are not re-sent on every request. }
     M := R.Manifest;
-    AssertTrue('alpha listed', Pos('- alpha (unloaded): does alpha things', M) > 0);
-    AssertTrue('beta listed', Pos('- beta (unloaded): does beta things', M) > 0);
-    AssertTrue('when-to-use', Pos('use when alpha', M) > 0);
+    AssertTrue('alpha listed with state', Pos('- alpha (unloaded)', M) > 0);
+    AssertTrue('beta listed with state', Pos('- beta (unloaded)', M) > 0);
     AssertTrue('alpha before beta', Pos('alpha', M) < Pos('beta', M));
+    { The stable text carries the descriptions and when-to-use. }
+    S := R.StableText;
+    AssertTrue('alpha description is stable text',
+      Pos('does alpha things', S) > 0);
+    AssertTrue('beta description is stable text',
+      Pos('does beta things', S) > 0);
+    AssertTrue('when-to-use', Pos('use when alpha', S) > 0);
+    { And the fragment does NOT repeat them. }
+    AssertTrue('the fragment carries no description',
+      Pos('does alpha things', M) = 0);
   finally
     R.Free;
   end;
