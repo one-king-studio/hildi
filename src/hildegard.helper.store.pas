@@ -343,7 +343,7 @@ end;
 function DefaultMigrations: TMigrationArray;
 begin
   Result := nil;
-  SetLength(Result, 12);
+  SetLength(Result, 13);
   Result[0].Version := 1;
   Result[0].Name := 'session history';
   Result[0].Statements := [
@@ -599,6 +599,45 @@ begin
     'ALTER TABLE approvals_new RENAME TO approvals',
     'CREATE INDEX idx_approvals_scope ON approvals (scope, workspace_id, ' +
       'session_id)'
+  ];
+  { v13: the workspace change log (src/changes). Additive: two new tables.
+    Two hashes per transition is what makes a stored patch stateless - it
+    applies or it refuses - and keyframes bound replay so a restore never walks
+    the whole history. }
+  Result[12].Version := 13;
+  Result[12].Name := 'workspace change log';
+  Result[12].Statements := [
+    'CREATE TABLE file_changes (' +
+      'id INTEGER PRIMARY KEY AUTOINCREMENT, ' +
+      'workspace_id INTEGER NOT NULL, ' +
+      'session_id TEXT NOT NULL DEFAULT '''', ' +
+      'turn_id INTEGER NOT NULL DEFAULT 0, ' +
+      'message_id INTEGER NOT NULL DEFAULT 0, ' +
+      'path TEXT NOT NULL, ' +
+      'kind INTEGER NOT NULL, ' +
+      'before_hash TEXT NOT NULL DEFAULT '''', ' +
+      'after_hash TEXT NOT NULL DEFAULT '''', ' +
+      'patch TEXT NOT NULL DEFAULT '''', ' +
+      'patch_bytes INTEGER NOT NULL DEFAULT 0, ' +
+      'capped INTEGER NOT NULL DEFAULT 0, ' +
+      'before_size INTEGER NOT NULL DEFAULT 0, ' +
+      'after_size INTEGER NOT NULL DEFAULT 0, ' +
+      'source INTEGER NOT NULL DEFAULT 0, ' +
+      'external_session TEXT NOT NULL DEFAULT '''', ' +
+      'created_at INTEGER NOT NULL)',
+    'CREATE INDEX idx_changes_ws_path ON file_changes (workspace_id, path, id)',
+    'CREATE INDEX idx_changes_session ON file_changes (session_id, id)',
+    'CREATE INDEX idx_changes_message ON file_changes (message_id)',
+    'CREATE TABLE file_keyframes (' +
+      'id INTEGER PRIMARY KEY AUTOINCREMENT, ' +
+      'workspace_id INTEGER NOT NULL, ' +
+      'path TEXT NOT NULL, ' +
+      'hash TEXT NOT NULL, ' +
+      'content TEXT NOT NULL, ' +
+      'through_change_id INTEGER NOT NULL, ' +
+      'created_at INTEGER NOT NULL)',
+    'CREATE UNIQUE INDEX idx_keyframe_at ON file_keyframes ' +
+      '(workspace_id, path, through_change_id)'
   ];
 end;
 
