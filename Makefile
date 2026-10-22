@@ -90,6 +90,7 @@ LIB_SRCS  := $(wildcard $(SRC)/*.pas)
 ASYNC_SRCS := $(wildcard $(SRC)/async/*.pas)
 SHELL_SRCS := $(wildcard $(SRC)/shell/*.pas)
 CHANGES_SRCS := $(wildcard $(SRC)/changes/*.pas)
+FILEIGNORE_SRCS := $(wildcard $(SRC)/fileignore/*.pas)
 TEST_SRCS := $(wildcard $(TESTS)/*.pas)
 
 .PHONY: all test test-leak watch check release clean help libsqlite libmbedtls \
@@ -288,7 +289,7 @@ async-examples: $(ASYNC_SRCS)
 
 $(BIN)/hildegard-helper-tests: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(ASYNC_SRCS) $(SHELL_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/fileignore -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 test-leak: libsqlite libmbedtls $(BIN)/hildegard-helper-tests-leak
 	HEAPTRC=$(HEAPTRC) $(BIN)/hildegard-helper-tests-leak $(TESTARGS)
@@ -299,7 +300,7 @@ watch:
 
 $(BIN)/hildegard-helper-tests-leak: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(ASYNC_SRCS) $(SHELL_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
 	@mkdir -p $(BIN) $(LEAKUNITS)
-	$(FPC) $(LEAKFLAGS) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(TESTS) -FU$(LEAKUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(LEAKFLAGS) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/fileignore -Fu$(TESTS) -FU$(LEAKUNITS) -FE$(BIN) -o$@ $<
 
 # Live smoke: drive the REAL headless runtime through a scripted turn against a
 # loopback fake provider. Hermetic (loopback only, ephemeral port, temp store);

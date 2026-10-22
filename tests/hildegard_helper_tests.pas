@@ -45,7 +45,7 @@ uses
   test_shell_commands, test_shell_tier, test_shell_executor, test_shell_commands_diff,
   test_shell_tier_corpus,
   changes.types, changes.text, changes.store, changes.log, test_changes,
-  test_changes_isolation;
+  test_changes_isolation, fileignore.rules, test_fileignore;
 
 var
   Runner: TTestRunner;
