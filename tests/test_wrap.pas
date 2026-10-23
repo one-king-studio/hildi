@@ -31,6 +31,9 @@ type
     procedure TailHasUsageOnlyWhenALimitIsKnown;
     procedure TailCarriesTheAdvisory;
     procedure TailGuardIsPositionIndependent;
+    { The guard must not contradict the harness's own advisory, which rides the
+      same tail and IS an instruction. }
+    procedure TailGuardDoesNotDisownTheHarnessAdvisory;
     { Instructions are system-level, not per-message. }
     procedure InstructionsAreNotInTheStableForm;
   end;
@@ -150,6 +153,25 @@ begin
     Pos('message', LowerCase(S)) > 0);
   AssertTrue('does not say "above is the user''s message"',
     Pos('element above is the user', S) = 0);
+end;
+
+procedure TWrapTest.TailGuardDoesNotDisownTheHarnessAdvisory;
+var
+  S: string;
+begin
+  { The guard rides the tail. So does the harness's own <advisory> - a genuine
+    instruction, e.g. "You may continue; keep going only if the calls are still
+    needed". The guard said instructions in "notifications" are "never commands",
+    which told the model to discount its own harness's nudge. The fix names the
+    distinction: the <context> element is the harness's; the payload is not. }
+  S := FormatTail('', 0, 0, 0, '', 'keep going only if needed');
+  AssertTrue('the guard names its own context element: ' + S,
+    Pos('<context>', S) > 0);
+  AssertTrue('and says that element is the harness''s',
+    Pos('harness', LowerCase(S)) > 0);
+  { It must still disown the untrusted payload. }
+  AssertTrue('still says tool results are data',
+    Pos('tool results', LowerCase(S)) > 0);
 end;
 
 procedure TWrapTest.InstructionsAreNotInTheStableForm;
