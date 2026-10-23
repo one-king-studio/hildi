@@ -41,19 +41,10 @@ const
     fires for a session that genuinely stopped. Longer than the slowest plausible
     turn, shorter than the interval at which a human notices a stuck card. }
   DefaultClaimLeaseSec = 30 * 60;
-
-const
-  { The explanation rides the stable half of the prompt, like the board's: the
-    <tasks> element is data only, so a model that has never seen the task list
-    needs to be told what it is. This text is identical on every request, so it
-    caches with the system prompt instead of riding the turn. }
-  TaskStableText =
-    'This workspace has a task list: durable work shared with any other agent '
-    + 'here, and with your future self after a context reset. Claim a card '
-    + 'before you work on it (task_claim) so others can see it is taken; move '
-    + 'it with task_update (release, block, unblock, done, drop). Every status '
-    + 'change records who made it, so status is not editable - use a verb. The '
-    + '<tasks> element in your turn shows what you hold and what is open.';
+  { The explanation of the task list rides the coordination block in the system
+    prompt (hildegard.helper.coordination), which teaches the board and the task
+    list together plus the protocol rules and the detected mode. It lives there
+    rather than here so "am I alone?" is answered in one place. }
 
 type
   TTaskCard = record

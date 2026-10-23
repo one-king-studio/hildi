@@ -39,7 +39,7 @@ type
     procedure TestRecallToolRegisteredWithStore;
     { The task list's tools and its stable prose, in a real session. }
     procedure TestTaskToolsRegisteredWithStore;
-    procedure TestTaskStableTextRidesTheSystemPrompt;
+    procedure TestTheCoordinationTextRidesTheSystemPrompt;
     { Claim recovery runs at the turn boundary: a working session renews, and a
       claim whose holder stopped is released. }
     procedure TestTheTurnBoundaryRenewsAThisSessionsClaim;
@@ -358,7 +358,7 @@ begin
   end;
 end;
 
-procedure THarnessSessionTest.TestTaskStableTextRidesTheSystemPrompt;
+procedure THarnessSessionTest.TestTheCoordinationTextRidesTheSystemPrompt;
 var
   Session: THarnessSession;
   Err, P: string;
@@ -370,8 +370,11 @@ begin
   try
     AssertTrue('the loop is built', Session.Loop <> nil);
     P := Session.Loop.StablePrompt;
-    AssertTrue('the task list is explained: ' + P, Pos(TaskStableText, P) > 0);
-    AssertTrue('and the board still is', Pos(BoardStableText, P) > 0);
+    AssertTrue('the task list is explained: ' + P, Pos('task_claim', P) > 0);
+    AssertTrue('and the board too', Pos('board_post', P) > 0);
+    { One block carries both plus the protocol rules and the detected mode, so
+      the answer to "am I alone?" is stated once, not twice. }
+    AssertTrue('the protocol is stated', Pos('Claim before you change', P) > 0);
   finally
     Session.Free;
   end;

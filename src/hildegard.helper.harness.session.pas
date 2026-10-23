@@ -26,6 +26,7 @@ uses
   hildegard.helper.board.tools,
   hildegard.helper.tasks, hildegard.helper.tasks.store,
   hildegard.helper.tasks.tools,
+  hildegard.helper.coordination,
   hildegard.helper.workspace.changes,
   hildegard.helper.recall.tool, hildegard.helper.harness.turn,
   hildegard.helper.harness.view,
@@ -400,18 +401,28 @@ begin
 end;
 
 procedure THarnessSession.ComposeStablePrompt;
+var
+  Mode: TCoordinationMode;
+  Reason: TCoordinationReason;
+  Peers: Integer;
 begin
   if FLoop = nil then
     Exit;
   FLoop.StablePrompt := FSkills.StableText;
   { The tail elements are data; their explanations belong here, where they cache
-    with the system prompt instead of costing every request. }
-  if FBoardStore <> nil then
+    with the system prompt instead of costing every request.
+
+    One block, not three: the coordination text teaches the board, the task list,
+    the four protocol rules, and - when there is a peer - how to agree protocols
+    before starting. Splitting it per-surface duplicated the shared rules and made
+    "am I alone?" a fact stated in two places that could disagree. }
+  if (FBoardStore <> nil) or (FTaskStore <> nil) then
+  begin
+    Mode := DetectCoordinationMode(FView.Store, FView.WorkspaceId,
+      FView.SessionId, Peers, Reason);
     FLoop.StablePrompt := FLoop.StablePrompt + LineEnding + LineEnding +
-      BoardStableText;
-  if FTaskStore <> nil then
-    FLoop.StablePrompt := FLoop.StablePrompt + LineEnding + LineEnding +
-      TaskStableText;
+      CoordinationPromptFor(Mode, Reason);
+  end;
 end;
 
 function THarnessSession.McpTokenSourceFor(
