@@ -16,7 +16,7 @@ uses
   hildegard.helper.mcp.config,
   hildegard.helper.board, hildegard.helper.board.store,
   hildegard.helper.tasks, hildegard.helper.tasks.store,
-  hildegard.helper.tasks.tools,
+  hildegard.helper.tasks.tools, hildegard.helper.sqlite,
   llm_fakes;
 
 type
@@ -40,6 +40,10 @@ type
     { The task list's tools and its stable prose, in a real session. }
     procedure TestTaskToolsRegisteredWithStore;
     procedure TestTaskStableTextRidesTheSystemPrompt;
+    { Claim recovery runs at the turn boundary: a working session renews, and a
+      claim whose holder stopped is released. }
+    procedure TestTheTurnBoundaryRenewsAThisSessionsClaim;
+    procedure TestTheTurnBoundaryReclaimsADeadSessionsClaim;
     procedure TestRecallToolAbsentWithoutStore;
     procedure TestLastTurnEmptyWithoutTurns;
     { The skill descriptions (the STABLE half of the manifest) must reach the
@@ -256,6 +260,100 @@ begin
       Result2, Err, nil));
     AssertTrue('and says what it made: ' + Result2, Pos('wired up', Result2) > 0);
   finally
+    Session.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestTheTurnBoundaryRenewsAThisSessionsClaim;
+var
+  Session: THarnessSession;
+  Tasks: ITaskStore;
+  Card: TTaskCard;
+  Prev: TTaskCard;
+  Found, Claimed: Boolean;
+  Err: string;
+  Id, Renewed: Integer;
+  Now2: Int64;
+begin
+  { The wiring test, and it has to go through the BOUNDARY rather than the store:
+    RenewClaims is tested directly in test_tasks_store, so calling it here would
+    prove nothing about whether NoteTurnOpened invokes it. }
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    Tasks := TSqliteTaskStore.Create(Session.View.Store);
+    Card := Default(TTaskCard);
+    Card.WorkspaceId := Session.View.WorkspaceId;
+    Card.Title := 'held by the live session';
+    Card.CreatedAt := Round((Now - EncodeDate(1970, 1, 1)) * 86400);
+    AssertTrue('add', Tasks.Add(Card, Id, Err));
+    Prev := Default(TTaskCard);
+    AssertTrue('claim', Tasks.Claim(Session.View.WorkspaceId, Id,
+      Session.View.SessionId, Prev, Claimed, Found, Err));
+    AssertTrue('claimed', Claimed);
+    { Backdate past any plausible lease, so only a renewal can save it. }
+    AssertEquals('backdate', SQLITE_OK, sqlite3_exec(Session.View.Store.Db,
+      PAnsiChar(AnsiString('UPDATE task_cards SET claimed_at = claimed_at - ' +
+        '86400 WHERE id = ' + IntToStr(Id))), nil, nil, nil));
+
+    { Fire the turn boundary the way the loop does. }
+    AssertTrue('the loop hooks the boundary',
+      Assigned(Session.Loop.OnTurnOpened));
+    Session.Loop.OnTurnOpened(1);
+
+    AssertTrue('get', Tasks.Get(Session.View.WorkspaceId, Id, Card, Found, Err));
+    AssertTrue('found', Found);
+    AssertEquals('still ours - a working agent must not look dead',
+      Ord(tsClaimed), Ord(Card.Status));
+    Now2 := Round((Now - EncodeDate(1970, 1, 1)) * 86400);
+    AssertTrue('and the clock moved: ' + IntToStr(Now2 - Card.ClaimedAt),
+      (Now2 - Card.ClaimedAt) <= 60);
+  finally
+    Tasks := nil;
+    Session.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestTheTurnBoundaryReclaimsADeadSessionsClaim;
+var
+  Session: THarnessSession;
+  Tasks: ITaskStore;
+  Card: TTaskCard;
+  Prev: TTaskCard;
+  Found, Claimed: Boolean;
+  Err: string;
+  Id: Integer;
+begin
+  { The other half, and the one that closes the original gap: a session that
+    stopped holding a card must not keep it past the lease. }
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    Tasks := TSqliteTaskStore.Create(Session.View.Store);
+    Card := Default(TTaskCard);
+    Card.WorkspaceId := Session.View.WorkspaceId;
+    Card.Title := 'held by a session that stopped';
+    Card.CreatedAt := Round((Now - EncodeDate(1970, 1, 1)) * 86400);
+    AssertTrue('add', Tasks.Add(Card, Id, Err));
+    Prev := Default(TTaskCard);
+    AssertTrue('claim as a dead session', Tasks.Claim(
+      Session.View.WorkspaceId, Id, 'sess-dead', Prev, Claimed, Found, Err));
+    AssertTrue('claimed', Claimed);
+    AssertEquals('backdate past the lease', SQLITE_OK,
+      sqlite3_exec(Session.View.Store.Db, PAnsiChar(AnsiString(
+        'UPDATE task_cards SET claimed_at = claimed_at - 86400 WHERE id = ' +
+        IntToStr(Id))), nil, nil, nil));
+
+    Session.Loop.OnTurnOpened(1);
+
+    AssertTrue('get', Tasks.Get(Session.View.WorkspaceId, Id, Card, Found, Err));
+    AssertTrue('found', Found);
+    AssertEquals('released back to open', Ord(tsOpen), Ord(Card.Status));
+    AssertEquals('and unheld', '', Card.ClaimedBy);
+    AssertTrue('the note says who had it: ' + Card.DoneNote,
+      Pos('sess-dead', Card.DoneNote) > 0);
+  finally
+    Tasks := nil;
     Session.Free;
   end;
 end;

@@ -36,6 +36,12 @@ const
   { A blocked card is worth surfacing in the tail after this long. }
   StaleBlockMinutes = 30;
 
+  { How long a claim may go unrenewed before another turn boundary reclaims it.
+    Deliberately generous: a claim is renewed at every turn boundary, so this only
+    fires for a session that genuinely stopped. Longer than the slowest plausible
+    turn, shorter than the interval at which a human notices a stuck card. }
+  DefaultClaimLeaseSec = 30 * 60;
+
 const
   { The explanation rides the stable half of the prompt, like the board's: the
     <tasks> element is data only, so a model that has never seen the task list

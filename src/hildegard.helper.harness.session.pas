@@ -327,8 +327,19 @@ begin
   { The task list prunes finished cards by count and age, never live ones and
     never one another card names. Swallowed for the same reason. }
   if FTaskStore <> nil then
+  begin
     FTaskStore.Prune(FView.WorkspaceId, DefaultTaskKeepDone,
       DefaultTaskDoneMaxAgeSec, Ignored, ErrIgnored);
+    { Claim recovery has two halves and both belong here. Renewing says this
+      session is alive - opening a turn IS the heartbeat, so no background timer
+      is needed. Reclaiming releases cards whose holders stopped. Without this
+      pair the store's recovery is dead code, which is how the gap opened in the
+      first place. }
+    FTaskStore.RenewClaims(FView.WorkspaceId, FView.SessionId, Ignored,
+      ErrIgnored);
+    FTaskStore.ReclaimStale(FView.WorkspaceId, DefaultClaimLeaseSec, Ignored,
+      ErrIgnored);
+  end;
 end;
 
 function THarnessSession.TaskQuestionExists(AWorkspaceId, AId: Integer;
