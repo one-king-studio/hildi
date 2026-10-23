@@ -228,6 +228,12 @@ var
   Unread, Q, D, F: Integer;
   LastAt: Int64;
   Err: string;
+  F2: TBoardFilter;
+  Answers: TBoardEntryArray;
+  Q1: TBoardEntry;
+  Found: Boolean;
+  I: Integer;
+  Title, Text: string;
 begin
   Result := 0;
   if (FBoardStore = nil) or (FLoop = nil) then
@@ -250,8 +256,34 @@ begin
   if Unread = FLastBoardNotice then
     Exit;
   FLastBoardNotice := Unread;
-  FLoop.PromptQueue.PushBoard(IntToStr(Unread) + ' new board message(s)',
-    Unread);
+
+  { One exception to the bare count: an ANSWER to a question THIS session asked
+    is the agent's own business, so it carries the question's title. A peer
+    answering your question is not the same as traffic. }
+  Title := '';
+  F2 := Default(TBoardFilter);
+  F2.Kind := bkAnswer;
+  F2.KindSet := True;
+  F2.SinceId := Cursor;
+  F2.Limit := 5;
+  if FBoardStore.Read(FView.WorkspaceId, F2, Answers, Err) then
+    for I := 0 to High(Answers) do
+      if Answers[I].ReplyTo <> 0 then
+        if FBoardStore.Get(FView.WorkspaceId, Answers[I].ReplyTo, Q1, Found,
+          Err) then
+          if Found and (Q1.FromSession = FView.SessionId) and
+            (Q1.Kind = bkQuestion) then
+          begin
+            Title := Q1.Title;
+            Break;
+          end;
+
+  if Title <> '' then
+    Text := 'an answer to your question "' + Title + '" (' + IntToStr(Unread) +
+      ' new board message(s))'
+  else
+    Text := IntToStr(Unread) + ' new board message(s)';
+  FLoop.PromptQueue.PushBoard(Text, Unread);
   Result := Unread;
 end;
 
