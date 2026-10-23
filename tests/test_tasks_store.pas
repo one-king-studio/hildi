@@ -40,6 +40,14 @@ type
     procedure TestAParentDoesNotAutoClose;
     procedure TestPruneDropsFinishedButNeverLive;
     procedure TestPruneNeverDropsACardsParent;
+    { The spec's transition table is enforced, not merely documented. }
+    procedure TestATransitionOutsideTheTableIsRefused;
+    { An unknown id is an error naming it, never a silent no-op. }
+    procedure TestAnEditOfAMissingCardFailsNamingIt;
+    procedure TestADeleteOfAMissingCardFailsNamingIt;
+    { Workspace scoping, for the two verbs the CAS does not guard. }
+    procedure TestAnEditCannotReachAnotherWorkspace;
+    procedure TestADeleteCannotReachAnotherWorkspace;
   end;
 
 implementation
@@ -356,6 +364,71 @@ begin
   AssertTrue('prune', FTasks.Prune(1, 200, 1, Pruned, Err));
   AssertTrue('the parent survives', FTasks.Get(1, PId, Back, Found, Err));
   AssertTrue('because its child names it', Found);
+end;
+
+procedure TTaskStoreTest.TestATransitionOutsideTheTableIsRefused;
+var
+  Id: Integer;
+  Err: string;
+begin
+  { The spec's table is the contract, and the store's guards are not the same
+    thing. An OPERATOR action (ABy = '') drops the claimed_by guard, so the
+    status guard is all that is left - and it permits any status change to any
+    other. done -> claimed passes it. Without an explicit table check an
+    operator action could reopen a finished card. }
+  AssertTrue('add', AddCard('finish me', Id));
+  ClaimOk(Id, 'sess-a');
+  AssertTrue('finish', FTasks.Transition(1, Id, tsClaimed, tsDone, 'sess-a',
+    0, tbkNone, 'x', Err));
+  AssertFalse('done -> claimed is refused even for an operator',
+    FTasks.Transition(1, Id, tsDone, tsClaimed, '', 0, tbkNone, '', Err));
+  AssertTrue('and names the actual state', Pos('done', Err) > 0);
+end;
+
+procedure TTaskStoreTest.TestAnEditOfAMissingCardFailsNamingIt;
+var
+  Err: string;
+begin
+  AssertFalse('editing a card that is not there fails',
+    FTasks.Edit(1, 999, 'new title', 'new body', Err));
+  AssertTrue('naming the id', Pos('999', Err) > 0);
+end;
+
+procedure TTaskStoreTest.TestADeleteOfAMissingCardFailsNamingIt;
+var
+  Err: string;
+begin
+  AssertFalse('deleting a card that is not there fails',
+    FTasks.Delete(1, 999, Err));
+  AssertTrue('naming the id', Pos('999', Err) > 0);
+end;
+
+procedure TTaskStoreTest.TestAnEditCannotReachAnotherWorkspace;
+var
+  Id: Integer;
+  Err: string;
+  Back: TTaskCard;
+  Found: Boolean;
+begin
+  AssertTrue('add', AddCard('mine', Id));
+  AssertFalse('another workspace cannot edit it',
+    FTasks.Edit(2, Id, 'hijacked', 'x', Err));
+  AssertTrue('read back', FTasks.Get(1, Id, Back, Found, Err));
+  AssertTrue('found', Found);
+  AssertEquals('title is untouched', 'mine', Back.Title);
+end;
+
+procedure TTaskStoreTest.TestADeleteCannotReachAnotherWorkspace;
+var
+  Id: Integer;
+  Err: string;
+  Back: TTaskCard;
+  Found: Boolean;
+begin
+  AssertTrue('add', AddCard('mine', Id));
+  AssertFalse('another workspace cannot delete it', FTasks.Delete(2, Id, Err));
+  AssertTrue('read back', FTasks.Get(1, Id, Back, Found, Err));
+  AssertTrue('still there', Found);
 end;
 
 initialization

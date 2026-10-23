@@ -331,12 +331,32 @@ var
   By, Note: AnsiString;
   Now2: Int64;
   SQL: string;
+  Cur: TTaskCard;
+  Found: Boolean;
+  ReadErr: string;
 begin
   { The same guard shape as Claim: AND status = AFrom, and - unless this is an
     operator action, marked by an empty ABy - AND claimed_by = ABy, so a stale
     actor cannot drive a card it no longer owns. }
   Result := False;
   AError := '';
+  { The status guard is not the transition table. It says the row is in AFrom;
+    it does not say ATo is reachable from it. An operator action (ABy = '')
+    drops the claimed_by half entirely, leaving only that guard - which would
+    let done -> claimed reopen a finished card. The table is the contract, so it
+    is checked here rather than trusted to the WHERE clause. }
+  if not IsLegalTransition(AFrom, ATo) then
+  begin
+    if Get(AWorkspaceId, AId, Cur, Found, ReadErr) and Found then
+      AError := 'a ' + TaskStatusToName(Cur.Status) + ' card cannot become ' +
+        TaskStatusToName(ATo) + '; from ' + TaskStatusToName(Cur.Status) +
+        ' the verbs are: ' + LegalTransitionsFrom(Cur.Status)
+    else
+      AError := 'a ' + TaskStatusToName(AFrom) + ' card cannot become ' +
+        TaskStatusToName(ATo) + '; from ' + TaskStatusToName(AFrom) +
+        ' the verbs are: ' + LegalTransitionsFrom(AFrom);
+    Exit;
+  end;
   By := AnsiString(ABy);
   Note := AnsiString(ADoneNote);
   Now2 := Round((Now - EncodeDate(1970, 1, 1)) * 86400);
@@ -372,7 +392,19 @@ begin
       end;
       Result := sqlite3_changes(FStore.Db) = 1;
       if not Result then
-        AError := 'the card is not in the expected state, or is not yours';
+      begin
+        { Name what is actually true. "Wrong state" and "not yours" are the two
+          ways this fails, and an agent can act on the difference. }
+        if Get(AWorkspaceId, AId, Cur, Found, ReadErr) and Found then
+        begin
+          AError := 'the card is not in the expected state, or is not yours: ' +
+            'it is ' + TaskStatusToName(Cur.Status);
+          if Cur.ClaimedBy <> '' then
+            AError := AError + ', held by ' + Cur.ClaimedBy;
+        end
+        else
+          AError := 'no task card ' + IntToStr(AId) + ' in this workspace';
+      end;
     finally
       sqlite3_finalize(Stmt);
     end;
@@ -405,7 +437,17 @@ begin
         Round((Now - EncodeDate(1970, 1, 1)) * 86400));
       sqlite3_bind_int(Stmt, 4, AWorkspaceId);
       sqlite3_bind_int(Stmt, 5, AId);
-      Result := sqlite3_step(Stmt) = SQLITE_DONE;
+      if sqlite3_step(Stmt) <> SQLITE_DONE then
+      begin
+        AError := 'task store: could not edit';
+        Exit;
+      end;
+      { An UPDATE that matched nothing is a silent no-op, and the spec says an
+        unknown id is an error naming the id. sqlite3_changes is the only way to
+        tell "edited" from "there was nothing there". }
+      Result := sqlite3_changes(FStore.Db) = 1;
+      if not Result then
+        AError := 'no task card ' + IntToStr(AId) + ' in this workspace';
     finally
       sqlite3_finalize(Stmt);
     end;
@@ -429,7 +471,14 @@ begin
     try
       sqlite3_bind_int(Stmt, 1, AWorkspaceId);
       sqlite3_bind_int(Stmt, 2, AId);
-      Result := sqlite3_step(Stmt) = SQLITE_DONE;
+      if sqlite3_step(Stmt) <> SQLITE_DONE then
+      begin
+        AError := 'task store: could not delete';
+        Exit;
+      end;
+      Result := sqlite3_changes(FStore.Db) = 1;
+      if not Result then
+        AError := 'no task card ' + IntToStr(AId) + ' in this workspace';
     finally
       sqlite3_finalize(Stmt);
     end;
