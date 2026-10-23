@@ -48,6 +48,11 @@ type
     { Workspace scoping, for the two verbs the CAS does not guard. }
     procedure TestAnEditCannotReachAnotherWorkspace;
     procedure TestADeleteCannotReachAnotherWorkspace;
+    { The spec's drop guard is "claimed by me, or unclaimed". }
+    procedure TestAnUnclaimedCardCanBeDroppedBySession;
+    procedure TestADropCannotDriveAnotherSessionsClaim;
+    { Claiming is the CAS's job; Transition must not forge a holderless claim. }
+    procedure TestTransitionCannotForgeAClaim;
     { Retention by COUNT, not only by age. }
     procedure TestPruneKeepsOnlyTheNewestDoneCards;
     procedure TestTheCountRuleNeverTouchesLiveCards;
@@ -523,6 +528,66 @@ begin
   AssertEquals('nothing pruned', 0, Pruned);
   AssertTrue('get', FTasks.Get(1, BlockerId, Back, Found, Err));
   AssertTrue('the blocker survives', Found);
+end;
+
+procedure TTaskStoreTest.TestAnUnclaimedCardCanBeDroppedBySession;
+var
+  Id: Integer;
+  Err: string;
+  Back: TTaskCard;
+  Found: Boolean;
+begin
+  { The spec's table says drop is guarded by "claimed by me, or unclaimed": an
+    agent abandoning work nobody picked up is a normal thing to do. A guard of
+    `claimed_by = ?` alone refuses it, because an unclaimed card's holder is ''. }
+  AssertTrue('add', AddCard('never picked up', Id));
+  AssertTrue('an unclaimed card can be dropped',
+    FTasks.Transition(1, Id, tsOpen, tsDropped, 'sess-a', 0, tbkNone,
+      'no longer needed', Err));
+  AssertTrue('get', FTasks.Get(1, Id, Back, Found, Err));
+  AssertTrue('found', Found);
+  AssertEquals('dropped', Ord(tsDropped), Ord(Back.Status));
+  AssertEquals('with the reason', 'no longer needed', Back.DoneNote);
+end;
+
+procedure TTaskStoreTest.TestADropCannotDriveAnotherSessionsClaim;
+var
+  Id: Integer;
+  Err: string;
+  Back: TTaskCard;
+  Found: Boolean;
+begin
+  { "Or unclaimed" is for nobody's card. It is not permission to drop a card
+    another agent is working on. }
+  AssertTrue('add', AddCard('sess-a is on it', Id));
+  ClaimOk(Id, 'sess-a');
+  AssertFalse('sess-b cannot drop it',
+    FTasks.Transition(1, Id, tsClaimed, tsDropped, 'sess-b', 0, tbkNone,
+      'not mine to drop', Err));
+  AssertTrue('get', FTasks.Get(1, Id, Back, Found, Err));
+  AssertTrue('found', Found);
+  AssertEquals('still claimed', Ord(tsClaimed), Ord(Back.Status));
+  AssertEquals('still sess-a', 'sess-a', Back.ClaimedBy);
+end;
+
+procedure TTaskStoreTest.TestTransitionCannotForgeAClaim;
+var
+  Id: Integer;
+  Err: string;
+  Back: TTaskCard;
+  Found: Boolean;
+begin
+  { Claiming is the CAS's job: only it stamps claimed_by/claimed_at. If
+    Transition could move open -> claimed, it would produce a claimed card with
+    no holder - a card that counts as taken and that nobody can release. }
+  AssertTrue('add', AddCard('claim me properly', Id));
+  AssertFalse('transition refuses open -> claimed',
+    FTasks.Transition(1, Id, tsOpen, tsClaimed, 'sess-a', 0, tbkNone, '', Err));
+  AssertTrue('and says to use the claim', Pos('task_claim', Err) > 0);
+  AssertTrue('get', FTasks.Get(1, Id, Back, Found, Err));
+  AssertTrue('found', Found);
+  AssertEquals('still open', Ord(tsOpen), Ord(Back.Status));
+  AssertEquals('and nobody holds it', '', Back.ClaimedBy);
 end;
 
 initialization

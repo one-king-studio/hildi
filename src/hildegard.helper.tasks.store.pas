@@ -49,6 +49,10 @@ type
     { Open cards, most recently updated first - the tail's work queue. }
     function OpenCards(AWorkspaceId, ALimit: Integer;
       out ACards: TTaskCardArray; out AError: string): Boolean;
+    { The TRUE number of open cards, for the tail's count. OpenCards is capped,
+      so its length is how many are named, never how many exist. }
+    function OpenCount(AWorkspaceId: Integer; out ACount: Integer;
+      out AError: string): Boolean;
   end;
 
 type
@@ -81,6 +85,8 @@ type
       out ACards: TTaskCardArray; out AError: string): Boolean;
     function OpenCards(AWorkspaceId, ALimit: Integer;
       out ACards: TTaskCardArray; out AError: string): Boolean;
+    function OpenCount(AWorkspaceId: Integer; out ACount: Integer;
+      out AError: string): Boolean;
   end;
 
 const
@@ -234,7 +240,7 @@ begin
   if AFilter.Parent > 0 then
     Where := Where + ' AND parent = ?';
   SQL := 'SELECT ' + TaskColumns + ' FROM task_cards' + Where +
-    ' ORDER BY position, updated_at DESC';
+    ' ORDER BY position, updated_at DESC, id DESC';
   Lim := AFilter.Limit;
   if Lim <= 0 then
     Lim := 50;
@@ -357,6 +363,14 @@ begin
         ' the verbs are: ' + LegalTransitionsFrom(AFrom);
     Exit;
   end;
+  { Claiming is the CAS's job: only Claim stamps claimed_by and claimed_at. A
+    transition here would set the status without the holder, leaving a card that
+    counts as taken and that nobody can release. }
+  if (AFrom = tsOpen) and (ATo = tsClaimed) then
+  begin
+    AError := 'use task_claim to claim a card: it records who holds it and when';
+    Exit;
+  end;
   By := AnsiString(ABy);
   Note := AnsiString(ADoneNote);
   Now2 := Round((Now - EncodeDate(1970, 1, 1)) * 86400);
@@ -370,7 +384,16 @@ begin
       SQL := SQL + ', claimed_by = '''', claimed_at = 0';
     SQL := SQL + ' WHERE workspace_id = ? AND id = ? AND status = ?';
     if ABy <> '' then
-      SQL := SQL + ' AND claimed_by = ?';
+    begin
+      { The spec's drop guard is "claimed by me, OR unclaimed": an agent
+        abandoning work nobody picked up is normal. Every other verb is
+        claim-only. Without the OR, an unclaimed card could never be dropped,
+        because its holder is ''. }
+      if ATo = tsDropped then
+        SQL := SQL + ' AND (claimed_by = ? OR claimed_by = '''')'
+      else
+        SQL := SQL + ' AND claimed_by = ?';
+    end;
     if not Prepare(SQL, Stmt, AError) then
       Exit;
     try
@@ -595,6 +618,33 @@ begin
   F.StatusSet := True;
   F.Limit := ALimit;
   Result := List(AWorkspaceId, F, ACards, AError);
+end;
+
+function TSqliteTaskStore.OpenCount(AWorkspaceId: Integer; out ACount: Integer;
+  out AError: string): Boolean;
+var
+  Stmt: Psqlite3_stmt;
+begin
+  Result := False;
+  ACount := 0;
+  AError := '';
+  FStore.Lock.Acquire;
+  try
+    if not Prepare('SELECT COUNT(*) FROM task_cards WHERE workspace_id = ? ' +
+      'AND status = ?', Stmt, AError) then
+      Exit;
+    try
+      sqlite3_bind_int(Stmt, 1, AWorkspaceId);
+      sqlite3_bind_int(Stmt, 2, Ord(tsOpen));
+      if sqlite3_step(Stmt) = SQLITE_ROW then
+        ACount := sqlite3_column_int(Stmt, 0);
+      Result := True;
+    finally
+      sqlite3_finalize(Stmt);
+    end;
+  finally
+    FStore.Lock.Release;
+  end;
 end;
 
 end.

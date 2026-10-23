@@ -50,6 +50,7 @@ uses
   hildegard.helper.board, hildegard.helper.board.store, test_board_store,
   hildegard.helper.board.tools, test_board_tools,
   hildegard.helper.tasks, hildegard.helper.tasks.store, test_tasks_store,
+  hildegard.helper.tasks.tools, test_tasks_tools,
   hildegard.helper.changes.recorder, test_changes_recorder;
 
 var
