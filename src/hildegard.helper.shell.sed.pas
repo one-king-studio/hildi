@@ -370,7 +370,22 @@ begin
       end
       else
       begin
-        Result := Result + C;
+        { Recognised escapes. Anything else stays literal, which is what sed
+          does -- but the escapes that DO exist must actually work. Emitting the
+          character verbatim for every non-digit made `\n` produce the letter n,
+          which is what a caller reported seeing where a line break belonged. }
+        if C = 'n' then
+          Result := Result + #10
+        else if C = 't' then
+          Result := Result + #9
+        else if C = 'r' then
+          Result := Result + #13
+        else if C = '\' then
+          Result := Result + '\'
+        else if C = '&' then
+          Result := Result + '&'   { escaped & is a literal ampersand }
+        else
+          Result := Result + C;
         Inc(I);
       end;
     end

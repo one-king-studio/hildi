@@ -563,6 +563,20 @@ begin
   AssertEquals('rewritten content', 'ALPHA' + #10 + 'beta' + #10, Data);
   AssertTrue('backup kept', FFs.ReadFile(P('a.txt.bak'), Data, E));
   AssertEquals('backup content', 'alpha' + #10 + 'beta' + #10, Data);
+  { `\n` in a replacement is a newline, not the letter n. This was reported from
+    another project: the agent kept seeing a literal 'n' where a line break
+    belonged, because the escape handler emitted the escaped character verbatim
+    for anything it did not recognise. }
+  FFs.WriteFile(P('n.txt'), 'a-b' + #10, False, E);
+  R := RunCmd('sed', ['s/-/\n/', 'n.txt']);
+  AssertEquals('backslash-n is a newline', 'a' + #10 + 'b' + #10, R.Stdout);
+  AssertTrue('and never a literal n', Pos('anb', R.Stdout) = 0);
+  { `\t` likewise, and a real tab is what lands. }
+  R := RunCmd('sed', ['s/-/\t/', 'n.txt']);
+  AssertEquals('backslash-t is a tab', 'a' + #9 + 'b' + #10, R.Stdout);
+  { An unknown escape stays literal, which is what sed does: `\q` is `q`. }
+  R := RunCmd('sed', ['s/-/\q/', 'n.txt']);
+  AssertEquals('unknown escape keeps the char', 'aqb' + #10, R.Stdout);
 end;
 
 procedure TShellCommandsTest.TestAwk;
