@@ -143,6 +143,8 @@ begin
     'bodies and topics. Searching ignores the read cursor and looks at the ' +
     'whole board."},' +
     '"limit":{"type":"integer"},' +
+    '"pinned":{"type":"boolean","description":"Only entries that are pinned - ' +
+    'the ones marked to come back to. Pinning does not change read order."},' +
     '"reason":{"type":"string"}' +
     '},"required":["reason"]}';
   ATools.Add(Spec, ReadEntries);
@@ -367,6 +369,7 @@ var
   Err: string;
   Cursor: Integer;
   Text, Query: string;
+  PinnedOnly: Boolean;
 begin
   Result := False;
   AResult := '';
@@ -400,6 +403,10 @@ begin
     end;
     F.SinceId := Root.Get('since', 0);
     F.Limit := Root.Get('limit', 0);
+    { Recall pinned: a lookup, like a query, not a "what is new" read - so it
+      ignores the cursor entirely. }
+    F.PinnedOnly := Root.Get('pinned', False);
+    PinnedOnly := F.PinnedOnly;
     { A query searches the whole board rather than advancing from the cursor:
       looking something up is not the same question as "what is new". }
     Query := Trim(Root.Get('query', ''));
@@ -419,10 +426,13 @@ begin
     end
     else
     begin
-      if (F.Topic = '') and (not F.KindSet) and (F.SinceId = 0) then
+      if (F.Topic = '') and (not F.KindSet) and (F.SinceId = 0) and
+         (not PinnedOnly) then
       begin
         { A bare read: advance from this session's cursor so it sees what is new
-          rather than the whole board every time. }
+          rather than the whole board every time. A pinned recall is a lookup,
+          not a "what is new": it must not be narrowed by the cursor, and must
+          not move it. }
         if FStore.CursorOf(FSessionId, Cursor, Err) then
           F.SinceId := Cursor;
       end;
@@ -433,7 +443,10 @@ begin
       end;
       if Length(Rows) = 0 then
       begin
-        AResult := '(no board messages)';
+        if PinnedOnly then
+          AResult := '(no pinned entries)'
+        else
+          AResult := '(no board messages)';
         Result := True;
         Exit;
       end;

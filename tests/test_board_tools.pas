@@ -54,6 +54,12 @@ type
     procedure TestTocDropOrderKeepsUnreadAndAge;
     { Full-text search spans titles, bodies and topics, and skips deleted. }
     procedure TestSearchFindsAnEntryByBodyTerm;
+    { Pin is a MARKER, not a read-order. Pinned entries are recallable as a set;
+      unpinning removes them from it. }
+    procedure TestPinMarksAndPinnedRecallReturnsThemNewestFirst;
+    procedure TestPinnedRecallIsEmptyWhenNothingIsPinned;
+    procedure TestUnpinRemovesAnEntryFromThePinnedSet;
+    procedure TestPinDoesNotChangeTheNormalReadOrder;
   end;
 
 implementation
@@ -327,6 +333,102 @@ begin
   AssertTrue('board_read', SawRead);
   AssertTrue('board_moderate', SawMod);
   AssertTrue('findable', FReg.Find(BoardReadTool, Tool));
+end;
+
+procedure TBoardToolsTest.TestPinMarksAndPinnedRecallReturnsThemNewestFirst;
+var
+  A, B, C: Integer;
+  Res, Err: string;
+begin
+  { Pin is a marker: "keep this one, I will want it again". Recall is the new
+    half - before this, Pinned was stored and rendered but nothing could ask for
+    the set. }
+  AssertTrue('post A', FTools.Post(PostJson('decision', 'retry', 'first'), Res,
+    Err));
+  A := StrToInt(Copy(Res, Pos('#', Res) + 1, 1));
+  AssertTrue('post B', FTools.Post(PostJson('decision', 'retry', 'second'), Res,
+    Err));
+  B := StrToInt(Copy(Res, Pos('#', Res) + 1, 1));
+  AssertTrue('post C', FTools.Post(PostJson('finding', 'drain', 'third'), Res,
+    Err));
+  C := StrToInt(Copy(Res, Pos('#', Res) + 1, 1));
+
+  FApproval.Allow := True;
+  AssertTrue('pin A', FTools.Moderate('{"op":"pin","id":' + IntToStr(A) +
+    ',"reason":"keep"}', Res, Err));
+  AssertTrue('pin C', FTools.Moderate('{"op":"pin","id":' + IntToStr(C) +
+    ',"reason":"keep"}', Res, Err));
+
+  AssertTrue('recall pinned', FTools.ReadEntries('{"pinned":true,' +
+    '"reason":"t"}', Res, Err));
+  { Newest first, so the freshest pin is the first thing read. }
+  AssertTrue('A is there: ' + Res, Pos('#' + IntToStr(A), Res) > 0);
+  AssertTrue('C is there: ' + Res, Pos('#' + IntToStr(C), Res) > 0);
+  AssertTrue('C comes before A: ' + Res, Pos('#' + IntToStr(C), Res) <
+    Pos('#' + IntToStr(A), Res));
+  { B was never pinned. }
+  AssertTrue('B is not pinned and not shown: ' + Res,
+    Pos('#' + IntToStr(B) + ' ', Res) = 0);
+end;
+
+procedure TBoardToolsTest.TestPinnedRecallIsEmptyWhenNothingIsPinned;
+var
+  Res, Err: string;
+begin
+  AssertTrue('post', FTools.Post(PostJson('note', 'scratch', 'an unpinned note'),
+    Res, Err));
+  { An empty result is a success with a message, not a miss. }
+  AssertTrue('recall', FTools.ReadEntries('{"pinned":true,"reason":"t"}', Res,
+    Err));
+  AssertTrue('says there are none: ' + Res, Pos('pinned', LowerCase(Res)) > 0);
+end;
+
+procedure TBoardToolsTest.TestUnpinRemovesAnEntryFromThePinnedSet;
+var
+  A: Integer;
+  Res, Err: string;
+begin
+  AssertTrue('post', FTools.Post(PostJson('decision', 'retry', 'to unpin'), Res,
+    Err));
+  A := StrToInt(Copy(Res, Pos('#', Res) + 1, 1));
+  FApproval.Allow := True;
+  AssertTrue('pin', FTools.Moderate('{"op":"pin","id":' + IntToStr(A) +
+    ',"reason":"keep"}', Res, Err));
+  AssertTrue('recall shows it', FTools.ReadEntries('{"pinned":true,"reason":"t"}',
+    Res, Err));
+  AssertTrue('present: ' + Res, Pos('#' + IntToStr(A), Res) > 0);
+
+  AssertTrue('unpin', FTools.Moderate('{"op":"unpin","id":' + IntToStr(A) +
+    ',"reason":"done with it"}', Res, Err));
+  AssertTrue('recall again', FTools.ReadEntries('{"pinned":true,"reason":"t"}',
+    Res, Err));
+  AssertTrue('gone from the pinned set: ' + Res,
+    Pos('#' + IntToStr(A), Res) = 0);
+end;
+
+procedure TBoardToolsTest.TestPinDoesNotChangeTheNormalReadOrder;
+var
+  A, B: Integer;
+  Res, Err: string;
+begin
+  { The design decision this locks in: pin means "marked", not "first". Reading
+    without `pinned` returns newest-first whether or not anything is pinned, so a
+    pin can never reorder what a peer reads. Oldest-first or pinned-first would
+    be a different feature, and this test exists so nobody drifts into it. }
+  AssertTrue('post A', FTools.Post(PostJson('decision', 'retry', 'older'), Res,
+    Err));
+  A := StrToInt(Copy(Res, Pos('#', Res) + 1, 1));
+  AssertTrue('post B', FTools.Post(PostJson('decision', 'retry', 'newer'), Res,
+    Err));
+  B := StrToInt(Copy(Res, Pos('#', Res) + 1, 1));
+  FApproval.Allow := True;
+  AssertTrue('pin the OLDER one', FTools.Moderate('{"op":"pin","id":' +
+    IntToStr(A) + ',"reason":"keep"}', Res, Err));
+
+  AssertTrue('normal read', FTools.ReadEntries('{"topic":"retry","limit":10,' +
+    '"reason":"t"}', Res, Err));
+  AssertTrue('the newer is still first: ' + Res,
+    Pos('#' + IntToStr(B), Res) < Pos('#' + IntToStr(A), Res));
 end;
 
 initialization

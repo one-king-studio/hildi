@@ -249,6 +249,8 @@ begin
     Where := Where + ' AND kind = ?';
   if AFilter.SinceId > 0 then
     Where := Where + ' AND id > ?';
+  if AFilter.PinnedOnly then
+    Where := Where + ' AND pinned <> 0';
   SQL := 'SELECT ' + BoardColumns + ' FROM board_entries' + Where +
     ' ORDER BY id DESC';
   Lim := AFilter.Limit;

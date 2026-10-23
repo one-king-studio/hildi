@@ -60,6 +60,9 @@ type
     SinceId: Integer;         // 0 => from the beginning
     Limit: Integer;           // 0 => default
     IncludeDeleted: Boolean;
+    { Pin is a MARKER, not a sort key: asking for Pinned returns exactly the
+      pinned entries, and nothing else changes their order. }
+    PinnedOnly: Boolean;
   end;
 
   TBoardModOp = (bmDelete, bmRestore, bmLock, bmUnlock, bmPin, bmUnpin, bmMove);
