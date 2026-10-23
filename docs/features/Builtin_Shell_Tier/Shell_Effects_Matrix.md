@@ -35,7 +35,7 @@ is a safety hole in one direction and unusable friction in the other.
 | `awk` | | ● | | `-F`, `-v` take values |
 | `jq` | | ● | | `--arg`, `--argjson`, `--slurpfile`, `--rawfile` take values |
 | `cut` | | ● | | `-d`, `-f`, `-c` take values |
-| `sort` | | ● | | `-k`, `-t`, `-o`, `-S` take values |
+| `sort` | | ● | **`-o`** | **`-o` writes** (read+write); `-n` numeric, `-k` field, `-t` separator, `-f` fold, `-r`, `-u` |
 | `uniq` | | ● | | `-f`, `-s`, `-w` take values |
 | `tr` | | | | *(stdin/stdout only — no paths)* |
 | `tee` | | | ● | `-a` |
