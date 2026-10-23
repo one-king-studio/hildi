@@ -479,6 +479,8 @@ var
   Found: Boolean;
   Verb: string;
   Locked: Boolean;
+  { move: the destination topic, checked for a lock the way a post is. }
+  MoveTopic, LockedBy: string;
 begin
   Result := False;
   AResult := '';
@@ -532,10 +534,11 @@ begin
     end;
 
     if Op <> 'delete' then
-      if (Op <> 'restore') and (Op <> 'pin') and (Op <> 'unpin') then
+      if (Op <> 'restore') and (Op <> 'pin') and (Op <> 'unpin') and
+        (Op <> 'move') then
       begin
         AError := 'unknown op "' + Op + '"; use delete, restore, pin, unpin, ' +
-          'lock or unlock';
+          'move, lock or unlock';
         Exit;
       end;
     if Id <= 0 then
@@ -556,6 +559,36 @@ begin
     if not Allow(Op, '#' + IntToStr(Id) + ' ' + E.Title, Reason, Err) then
     begin
       AError := Err;
+      Exit;
+    end;
+    if Op = 'move' then
+    begin
+      MoveTopic := Trim(Root.Get('move_to', ''));
+      if MoveTopic = '' then
+      begin
+        AError := 'move needs move_to (the topic to move the entry to)';
+        Exit;
+      end;
+      { A locked destination refuses the move, the same way a locked topic
+        refuses a post. }
+      if not FStore.IsLocked(FWorkspaceId, MoveTopic, LockedBy, Err) then
+      begin
+        AError := 'could not check the destination lock';
+        Exit;
+      end;
+      if LockedBy <> '' then
+      begin
+        AError := 'destination topic "' + MoveTopic + '" is locked by ' +
+          LockedBy;
+        Exit;
+      end;
+      if not FStore.Move(FWorkspaceId, Id, MoveTopic, Err) then
+      begin
+        AError := Err;
+        Exit;
+      end;
+      AResult := 'moved #' + IntToStr(Id) + ' to "' + MoveTopic + '"';
+      Result := True;
       Exit;
     end;
     if (Op = 'pin') or (Op = 'unpin') then

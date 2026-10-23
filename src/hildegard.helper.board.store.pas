@@ -31,6 +31,8 @@ type
       const ABy: string; out AError: string): Boolean;
     function SetPinned(AWorkspaceId, AId: Integer; APinned: Boolean;
       out AError: string): Boolean;
+    function Move(AWorkspaceId, AId: Integer; const ATopic: string;
+      out AError: string): Boolean;
     { Topic locks: moderation, and the reason a post can be refused. }
     function Lock(AWorkspaceId: Integer; const ATopic, ABy: string;
       ALocked: Boolean; out AError: string): Boolean;
@@ -79,6 +81,8 @@ type
     function MarkDeleted(AWorkspaceId, AId: Integer; ADeleted: Boolean;
       const ABy: string; out AError: string): Boolean;
     function SetPinned(AWorkspaceId, AId: Integer; APinned: Boolean;
+      out AError: string): Boolean;
+    function Move(AWorkspaceId, AId: Integer; const ATopic: string;
       out AError: string): Boolean;
     function Lock(AWorkspaceId: Integer; const ATopic, ABy: string;
       ALocked: Boolean; out AError: string): Boolean;
@@ -405,6 +409,43 @@ begin
       sqlite3_bind_int(Stmt, 2, AWorkspaceId);
       sqlite3_bind_int(Stmt, 3, AId);
       Result := sqlite3_step(Stmt) = SQLITE_DONE;
+    finally
+      sqlite3_finalize(Stmt);
+    end;
+  finally
+    FStore.Lock.Release;
+  end;
+end;
+
+function TSqliteBoardStore.Move(AWorkspaceId, AId: Integer;
+  const ATopic: string; out AError: string): Boolean;
+var
+  Stmt: Psqlite3_stmt;
+  Topic: AnsiString;
+begin
+  { Re-topics an entry. Append-only is not violated: the entry's text, author and
+    timestamp are untouched, only which page it belongs to. The caller decides
+    whether that is allowed (a locked topic refuses it). }
+  Result := False;
+  AError := '';
+  if Trim(ATopic) = '' then
+  begin
+    AError := 'move needs a topic';
+    Exit;
+  end;
+  Topic := AnsiString(ATopic);
+  FStore.Lock.Acquire;
+  try
+    if not Prepare('UPDATE board_entries SET topic = ? WHERE workspace_id = ? ' +
+      'AND id = ?', Stmt, AError) then
+      Exit;
+    try
+      sqlite3_bind_text(Stmt, 1, PAnsiChar(Topic), -1, nil);
+      sqlite3_bind_int(Stmt, 2, AWorkspaceId);
+      sqlite3_bind_int(Stmt, 3, AId);
+      Result := sqlite3_step(Stmt) = SQLITE_DONE;
+      if not Result then
+        AError := 'board store: could not move';
     finally
       sqlite3_finalize(Stmt);
     end;

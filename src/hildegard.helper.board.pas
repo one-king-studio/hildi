@@ -62,11 +62,11 @@ type
     IncludeDeleted: Boolean;
   end;
 
-  TBoardModOp = (bmDelete, bmRestore, bmLock, bmUnlock, bmPin, bmUnpin);
+  TBoardModOp = (bmDelete, bmRestore, bmLock, bmUnlock, bmPin, bmUnpin, bmMove);
 
 const
   BoardModOpNames: array[TBoardModOp] of string = (
-    'delete', 'restore', 'lock', 'unlock', 'pin', 'unpin');
+    'delete', 'restore', 'lock', 'unlock', 'pin', 'unpin', 'move');
 
   DefaultBoardReadLimit = 20;
   { The explanation of what the board is. STABLE, so it belongs in the system
