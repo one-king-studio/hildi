@@ -1,11 +1,33 @@
 # Workspace Snapshots
 
-**Status:** Proposed (design revised 2026-10-21 after Phases 1–3 of
-[Per-call File Changes](../File_Changes/FEATURE.md) shipped). The capture and
-surfacing described here are **partly built**: the builtin shell tier and the
-process tier both record changes per call, and `run_command`'s result ends with
-`[changed: …]`. What remains is the **store** (nothing is persisted yet — the set
-is built and freed inside one call), the TUI surface, and undo/redo.
+**Status: Implemented — capture and storage; deferred — the TUI surface and
+undo/redo.**
+
+What is **built**:
+
+- **Capture**, at every write path. The builtin shell tier writes in-process
+  through `TWorkspaceShellFs`, so `sed -i`, `tee`, `rm`, `mv`, `cp` and redirects
+  are exact. The process tier (`git`, `make`, `mode=bash`) does an ignore-aware
+  before/after tree walk. The file tools pass through `WriteAtomic`. `run_command`
+  results end with `[changed: …]`.
+- **Storage.** `TChangeRecorder` writes `file_changes` at the turn boundary
+  (`hildegard.helper.changes.store`, migration v13), with **16-turn retention**
+  enforced at the same boundary. A change is a patch anchored by its before/after
+  hash, which is what makes it replayable and what makes a write a compare-and-swap.
+- **One consumer.** The board's staleness check reads the log
+  (`ChangedSince`), which is what makes a board entry call itself stale.
+
+What is **not built**, and is the remaining work:
+
+- **The TUI surface** that shows a call's or a turn's changes to the operator, and
+  **undo/redo**. Nothing yet reads the log for the operator — a change is recorded
+  and retained, but only the board asks about it.
+- **Keyframes are not written.** `KeyframeDue`, `PutKeyframe` and `Replay` exist in
+  `src/changes` and are tested there, but the recorder never calls them, so nothing
+  in the live path writes a keyframe and nothing replays. Replay is therefore
+  *unbounded in principle* today — the retention window (16 turns) is what actually
+  bounds the table. Wiring the keyframe interval is a prerequisite for undo/redo,
+  not an optimisation to defer.
 
 **Related:** [File Changes](../File_Changes/FEATURE.md) ·
 [Workspace Board](../Message_Board/FEATURE.md) ·
@@ -143,15 +165,22 @@ viewer's cache.
 
 ## Problem Statement
 
-The agent edits the operator's files and runs commands that edit them, and today
-there is **no record of what it did to the tree**. The ledger records *messages*
-and *tool calls*, but not the *file states* they produced. So:
+The agent edits the operator's files and runs commands that edit them. The ledger
+records *messages* and *tool calls* — and now, since the change log shipped, the
+*file states* those calls produced are recorded too. So the original complaint is
+partly answered and partly not, and the distinction is the point:
 
-- The operator cannot answer "what did that turn change?" without `git status` —
-  and the project deliberately does not assume git.
-- A bad turn cannot be reverted except by hand.
-- The parity table lists **undo / checkpoint / rollback** as table stakes (OpenCode
-  `/undo`, Claude checkpoints, Codex git checkpoints); this is our equivalent.
+- **Recorded:** every observed write is in `file_changes`, anchored by hashes,
+  retained for 16 turns. "Who touched this, and when" is answerable.
+- **Not visible:** nothing shows it to the operator. The log is written and pruned,
+  and only the board's staleness check reads it. So *"what did that turn change?"*
+  still cannot be answered from the UI, and a bad turn still cannot be reverted
+  except by hand.
+
+That is the remaining work, and it is why this feature is still open while its
+storage half is done. The parity table lists **undo / checkpoint / rollback** as
+table stakes (OpenCode `/undo`, Claude checkpoints, Codex git checkpoints); this is
+our equivalent, and it needs the surface before it needs more capture.
 
 Who feels it: the operator reviewing an agent's work, and the operator who wants
 to try a turn, see it, and take it back.
@@ -343,12 +372,15 @@ genuine gaps are the store, a diff generator, and the TUI surface.
   Mitigation: ignores are explicit, configurable, and shown in the UI.
 - **Symlinks and special files.** Mitigation: do not follow symlinks out of the
   workspace; record a symlink as a link, not its target.
-- **The shell is invisible at the tool level.** `run_command` writes files with no
-  `WriteAtomic` in sight (`sed -i`, a build, `git checkout`), so a per-call diff
-  is complete for the first-class edit tools and **blind to the shell**. Only the
-  turn snapshot (a tree scan) sees it. Mitigation: the UI names the difference —
-  files in the snapshot that no tool call claimed are shown as unattributed —
-  rather than implying a shell call changed nothing.
+- **A write nobody observed.** A *builtin-tier* or *file-tool* write is exact,
+  because it goes through the one choke point. The gap that used to be here — "the
+  shell is invisible at the tool level" — is **closed** for the builtin tier and
+  covered by a tree walk for the process tier; see *The shell is covered now*
+  above. What remains is a write made by something we never see at all: a
+  subprocess that edits and exits between two walks of the same tool call, or an
+  operator editing out of band mid-turn. Mitigation: the record carries a `source`
+  per row so *inferred* never reads as *exact*, and a file the snapshot sees but no
+  call claimed is shown as **unattributed** rather than implied unchanged.
 - **Capture cost at the write.** Reading the old text to diff requires the file
   contents the write was about to replace. Mitigation: `WriteAtomic` is the single
   choke point, so it is one place; the read is bounded by the file size cap, and a
