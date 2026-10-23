@@ -58,6 +58,23 @@ type
       another session never appears in Mine. }
     function BlockedCards(AWorkspaceId, ALimit: Integer;
       out ACards: TTaskCardArray; out AError: string): Boolean;
+
+    { A LIVE CLAIM IS NOT A LOCK, so nothing else would stop a session that dies
+      from holding its cards forever. Two halves close that, and they belong
+      together: Renew moves the clock for a session that is working, Reclaim takes
+      cards from sessions that stopped. }
+
+    { Move claimed_at to now for every card this session holds. Called at the turn
+      boundary: opening a turn IS the heartbeat, so an agent that is working never
+      looks dead and needs no background timer. }
+    function RenewClaims(AWorkspaceId: Integer; const ABy: string;
+      out ARenewed: Integer; out AError: string): Boolean;
+    { Release claims older than AMaxAgeSec back to open, recording who held them.
+      A reclaimed card is work nobody is doing, which is better than work that is
+      silently taken. Never touches a fresh claim, an unclaimed card, or a
+      finished one. }
+    function ReclaimStale(AWorkspaceId: Integer; AMaxAgeSec: Integer;
+      out AReclaimed: Integer; out AError: string): Boolean;
   end;
 
 type
@@ -94,6 +111,10 @@ type
       out AError: string): Boolean;
     function BlockedCards(AWorkspaceId, ALimit: Integer;
       out ACards: TTaskCardArray; out AError: string): Boolean;
+    function RenewClaims(AWorkspaceId: Integer; const ABy: string;
+      out ARenewed: Integer; out AError: string): Boolean;
+    function ReclaimStale(AWorkspaceId: Integer; AMaxAgeSec: Integer;
+      out AReclaimed: Integer; out AError: string): Boolean;
   end;
 
 const
@@ -684,6 +705,102 @@ begin
         Fill(Stmt, ACards[N]);
         Inc(N);
       end;
+      Result := True;
+    finally
+      sqlite3_finalize(Stmt);
+    end;
+  finally
+    FStore.Lock.Release;
+  end;
+end;
+
+function TSqliteTaskStore.RenewClaims(AWorkspaceId: Integer;
+  const ABy: string; out ARenewed: Integer; out AError: string): Boolean;
+var
+  Stmt: Psqlite3_stmt;
+  By: AnsiString;
+  Now2: Int64;
+begin
+  { Renewal is what makes "is this claim alive?" answerable without a background
+    heartbeat: an agent that is working opens turns, and the turn boundary calls
+    this. Only claimed cards are touched - a blocked card is still yours, but its
+    claimed_at is not what the recovery rule reads. }
+  Result := False;
+  ARenewed := 0;
+  AError := '';
+  By := AnsiString(ABy);
+  Now2 := Round((Now - EncodeDate(1970, 1, 1)) * 86400);
+  FStore.Lock.Acquire;
+  try
+    if not Prepare('UPDATE task_cards SET claimed_at = ? WHERE workspace_id = ? ' +
+      'AND claimed_by = ? AND status = ?', Stmt, AError) then
+      Exit;
+    try
+      sqlite3_bind_int64(Stmt, 1, Now2);
+      sqlite3_bind_int(Stmt, 2, AWorkspaceId);
+      sqlite3_bind_text(Stmt, 3, PAnsiChar(By), -1, nil);
+      sqlite3_bind_int(Stmt, 4, Ord(tsClaimed));
+      if sqlite3_step(Stmt) <> SQLITE_DONE then
+      begin
+        AError := 'task store: could not renew claims';
+        Exit;
+      end;
+      ARenewed := sqlite3_changes(FStore.Db);
+      Result := True;
+    finally
+      sqlite3_finalize(Stmt);
+    end;
+  finally
+    FStore.Lock.Release;
+  end;
+end;
+
+function TSqliteTaskStore.ReclaimStale(AWorkspaceId: Integer;
+  AMaxAgeSec: Integer; out AReclaimed: Integer; out AError: string): Boolean;
+var
+  Stmt: Psqlite3_stmt;
+  Cutoff: Int64;
+begin
+  { The recovery half. A claim is a statement, not a lock, so a session that dies
+    mid-card holds it indefinitely - and task_reassign needs the operator, who may
+    not be there. This releases such a claim back to open and records who held it,
+    so the next agent sees abandoned work rather than a card that looks taken.
+
+    Never a fresh claim (someone is working), never an unclaimed card, never a
+    finished one. The note names the holder because a card silently reappearing as
+    open loses the fact that anyone had it. }
+  Result := False;
+  AReclaimed := 0;
+  AError := '';
+  if AMaxAgeSec <= 0 then
+  begin
+    AError := 'a reclaim threshold must be positive';
+    Exit;
+  end;
+  Cutoff := Round((Now - EncodeDate(1970, 1, 1)) * 86400) - AMaxAgeSec;
+  FStore.Lock.Acquire;
+  try
+    if not Prepare('UPDATE task_cards SET status = ?, claimed_by = '''', ' +
+      'claimed_at = 0, status_at = ?, updated_at = ?, ' +
+      'done_note = ''claim recovered from '' || claimed_by || ' +
+      ''' after it went stale'' WHERE workspace_id = ? AND status = ? ' +
+      'AND claimed_at < ?', Stmt, AError) then
+      Exit;
+    try
+      sqlite3_bind_int(Stmt, 1, Ord(tsOpen));
+      sqlite3_bind_int64(Stmt, 2,
+        Round((Now - EncodeDate(1970, 1, 1)) * 86400));
+      sqlite3_bind_int64(Stmt, 3,
+        Round((Now - EncodeDate(1970, 1, 1)) * 86400));
+      sqlite3_bind_int(Stmt, 4, AWorkspaceId);
+      sqlite3_bind_int(Stmt, 5, Ord(tsClaimed));
+      sqlite3_bind_int64(Stmt, 6, Cutoff);
+      if sqlite3_step(Stmt) <> SQLITE_DONE then
+      begin
+        AError := 'task store: could not reclaim';
+        Exit;
+      end;
+      AReclaimed := sqlite3_changes(FStore.Db);
       Result := True;
     finally
       sqlite3_finalize(Stmt);

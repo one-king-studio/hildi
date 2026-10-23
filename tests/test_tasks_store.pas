@@ -9,7 +9,7 @@ interface
 uses
   Classes, SysUtils, fpcunit, testregistry,
   hildegard.helper.store, hildegard.helper.tasks,
-  hildegard.helper.tasks.store;
+  hildegard.helper.tasks.store, hildegard.helper.sqlite;
 
 type
   TTaskStoreTest = class(TTestCase)
@@ -22,6 +22,11 @@ type
       AParent: Integer = 0): Boolean;
     { Claim and assert it won; the shared setup for the transition tests. }
     procedure ClaimOk(AId: Integer; const ABy: string);
+    { Raw SQL, because the seam offers no way to backdate a claim and a test
+      cannot wait an hour. }
+    function ExecSql(const ASql: string): Integer;
+    { True when the card's claim looks recent - the renewal actually moved it. }
+    function WithinSeconds(AId: Integer; AMaxAge: Integer): Boolean;
   public
     procedure SetUp; override;
     procedure TearDown; override;
@@ -56,7 +61,14 @@ type
     { Retention by COUNT, not only by age. }
     procedure TestPruneKeepsOnlyTheNewestDoneCards;
     procedure TestTheCountRuleNeverTouchesLiveCards;
+    { The count rule never drops a card's blocker. }
     procedure TestTheCountRuleNeverDropsACardsBlocker;
+    { Claim recovery: a session that dies must not hold a card forever. }
+    procedure TestRenewClaimsMovesTheClockSoALiveClaimIsNotStale;
+    procedure TestReclaimReleasesAClaimNobodyHasTouched;
+    procedure TestReclaimLeavesAFreshClaimAlone;
+    procedure TestReclaimRecordsWhyInTheDoneNote;
+    procedure TestReclaimNeverTouchesLiveOrFinishedCards;
     { List's filters and ordering: the plan's Phase 1, exercised directly. }
     procedure TestListFiltersByStatus;
     procedure TestListFiltersByMine;
@@ -96,6 +108,27 @@ begin
   AssertTrue('claim ' + IntToStr(AId),
     FTasks.Claim(1, AId, ABy, Prev, Claimed, Found, Err));
   AssertTrue('claimed by ' + ABy, Claimed);
+end;
+
+function TTaskStoreTest.ExecSql(const ASql: string): Integer;
+begin
+  Result := sqlite3_exec(FStore.Db, PAnsiChar(AnsiString(ASql)), nil, nil, nil);
+end;
+
+function TTaskStoreTest.WithinSeconds(AId: Integer; AMaxAge: Integer): Boolean;
+var
+  Back: TTaskCard;
+  Found: Boolean;
+  Err: string;
+  Now2: Int64;
+begin
+  Result := False;
+  if not FTasks.Get(1, AId, Back, Found, Err) then
+    Exit;
+  if not Found then
+    Exit;
+  Now2 := Round((Now - EncodeDate(1970, 1, 1)) * 86400);
+  Result := (Now2 - Back.ClaimedAt) <= AMaxAge;
 end;
 
 procedure TTaskStoreTest.SetUp;
@@ -677,6 +710,119 @@ begin
   AssertEquals('two cards', 2, Length(Rows));
   AssertEquals('the newer id comes first', BId, Rows[0].Id);
   AssertEquals('then the older', AId, Rows[1].Id);
+end;
+
+procedure TTaskStoreTest.TestRenewClaimsMovesTheClockSoALiveClaimIsNotStale;
+var
+  Id: Integer;
+  Err: string;
+  Renewed: Integer;
+begin
+  { An agent that is working opens turns, so the turn boundary renews whatever it
+    holds. This is what lets a live claim be told apart from an abandoned one
+    without a background heartbeat: turn activity IS the heartbeat. }
+  AssertTrue('add', AddCard('being worked on', Id));
+  ClaimOk(Id, 'sess-a');
+  { Backdate the claim well past any sane threshold. }
+  AssertEquals('backdate', SQLITE_OK, ExecSql('UPDATE task_cards SET ' +
+    'claimed_at = claimed_at - 86400 WHERE id = ' + IntToStr(Id)));
+  AssertTrue('renew', FTasks.RenewClaims(1, 'sess-a', Renewed, Err));
+  AssertEquals('one renewed', 1, Renewed);
+  { The renewal must be a real clock move, not a no-op. }
+  AssertTrue('renewed recently', WithinSeconds(Id, 60));
+end;
+
+procedure TTaskStoreTest.TestReclaimReleasesAClaimNobodyHasTouched;
+var
+  Id: Integer;
+  Err: string;
+  Reclaimed: Integer;
+  Back: TTaskCard;
+  Found: Boolean;
+begin
+  { The gap this closes: the CAS is deliberately not a lock, so a session that
+    dies leaves its card claimed forever. Nothing recovered it before. }
+  AssertTrue('add', AddCard('orphaned work', Id));
+  ClaimOk(Id, 'sess-dead');
+  AssertEquals('backdate past the threshold', SQLITE_OK, ExecSql('UPDATE ' +
+    'task_cards SET claimed_at = claimed_at - 86400 WHERE id = ' +
+    IntToStr(Id)));
+
+  AssertTrue('reclaim', FTasks.ReclaimStale(1, 3600, Reclaimed, Err));
+  AssertEquals('one reclaimed', 1, Reclaimed);
+
+  AssertTrue('get', FTasks.Get(1, Id, Back, Found, Err));
+  AssertTrue('found', Found);
+  { Back to open and unheld, so anyone can claim it again. }
+  AssertEquals('open again', Ord(tsOpen), Ord(Back.Status));
+  AssertEquals('and nobody holds it', '', Back.ClaimedBy);
+  AssertEquals('claim time cleared', 0, Back.ClaimedAt);
+end;
+
+procedure TTaskStoreTest.TestReclaimLeavesAFreshClaimAlone;
+var
+  Id: Integer;
+  Err: string;
+  Reclaimed: Integer;
+  Back: TTaskCard;
+  Found: Boolean;
+begin
+  { The half that makes the threshold mean something. A running agent's claim is
+    untouched, or two agents would fight over every card. }
+  AssertTrue('add', AddCard('freshly claimed', Id));
+  ClaimOk(Id, 'sess-live');
+  AssertTrue('reclaim', FTasks.ReclaimStale(1, 3600, Reclaimed, Err));
+  AssertEquals('nothing reclaimed', 0, Reclaimed);
+  AssertTrue('get', FTasks.Get(1, Id, Back, Found, Err));
+  AssertTrue('found', Found);
+  AssertEquals('still claimed', Ord(tsClaimed), Ord(Back.Status));
+  AssertEquals('still held', 'sess-live', Back.ClaimedBy);
+end;
+
+procedure TTaskStoreTest.TestReclaimRecordsWhyInTheDoneNote;
+var
+  Id: Integer;
+  Err: string;
+  Reclaimed: Integer;
+  Back: TTaskCard;
+  Found: Boolean;
+begin
+  { A card that silently reappears as open loses the fact that someone had it.
+    The note is the record: who held it, and that the claim was recovered. }
+  AssertTrue('add', AddCard('was held by a ghost', Id));
+  ClaimOk(Id, 'sess-dead');
+  AssertEquals('backdate', SQLITE_OK, ExecSql('UPDATE task_cards SET ' +
+    'claimed_at = claimed_at - 86400 WHERE id = ' + IntToStr(Id)));
+  AssertTrue('reclaim', FTasks.ReclaimStale(1, 3600, Reclaimed, Err));
+  AssertTrue('get', FTasks.Get(1, Id, Back, Found, Err));
+  AssertTrue('found', Found);
+  AssertTrue('names the holder it took it from: ' + Back.DoneNote,
+    Pos('sess-dead', Back.DoneNote) > 0);
+end;
+
+procedure TTaskStoreTest.TestReclaimNeverTouchesLiveOrFinishedCards;
+var
+  OpenId, DoneId: Integer;
+  Err: string;
+  Reclaimed: Integer;
+  Back: TTaskCard;
+  Found: Boolean;
+begin
+  AssertTrue('open', AddCard('nobody claimed this', OpenId));
+  AssertTrue('done', AddCard('finished long ago', DoneId));
+  ClaimOk(DoneId, 'sess-dead');
+  AssertTrue('finish', FTasks.Transition(1, DoneId, tsClaimed, tsDone,
+    'sess-dead', 0, tbkNone, 'x', Err));
+  { Finished cards have no claim to recover, and an unclaimed card has none
+    either. Aging both must change neither. }
+  AssertEquals('backdate', SQLITE_OK, ExecSql('UPDATE task_cards SET ' +
+    'claimed_at = claimed_at - 86400, status_at = status_at - 86400'));
+  AssertTrue('reclaim', FTasks.ReclaimStale(1, 3600, Reclaimed, Err));
+  AssertEquals('nothing to reclaim', 0, Reclaimed);
+  AssertTrue('get open', FTasks.Get(1, OpenId, Back, Found, Err));
+  AssertEquals('still open', Ord(tsOpen), Ord(Back.Status));
+  AssertTrue('get done', FTasks.Get(1, DoneId, Back, Found, Err));
+  AssertEquals('still done', Ord(tsDone), Ord(Back.Status));
 end;
 
 initialization
