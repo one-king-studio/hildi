@@ -48,6 +48,10 @@ type
     { Workspace scoping, for the two verbs the CAS does not guard. }
     procedure TestAnEditCannotReachAnotherWorkspace;
     procedure TestADeleteCannotReachAnotherWorkspace;
+    { Retention by COUNT, not only by age. }
+    procedure TestPruneKeepsOnlyTheNewestDoneCards;
+    procedure TestTheCountRuleNeverTouchesLiveCards;
+    procedure TestTheCountRuleNeverDropsACardsBlocker;
   end;
 
 implementation
@@ -429,6 +433,96 @@ begin
   AssertFalse('another workspace cannot delete it', FTasks.Delete(2, Id, Err));
   AssertTrue('read back', FTasks.Get(1, Id, Back, Found, Err));
   AssertTrue('still there', Found);
+end;
+
+procedure TTaskStoreTest.TestPruneKeepsOnlyTheNewestDoneCards;
+var
+  Ids: array[0..4] of Integer;
+  I: Integer;
+  Pruned: Integer;
+  Err: string;
+  Back: TTaskCard;
+  Found: Boolean;
+begin
+  { The count rule bounds the table the way the age rule bounds the clock: a
+    burst of finished cards in one afternoon is exactly the case age cannot
+    catch. Five done cards, keep two -> the oldest three go. }
+  for I := 0 to 4 do
+    AssertTrue('add ' + IntToStr(I), AddCard('card ' + IntToStr(I), Ids[I]));
+  for I := 0 to 4 do
+  begin
+    ClaimOk(Ids[I], 'sess-a');
+    AssertTrue('finish ' + IntToStr(I),
+      FTasks.Transition(1, Ids[I], tsClaimed, tsDone, 'sess-a', 0, tbkNone,
+        'x', Err));
+  end;
+
+  { A zero age window: nothing is old, so only the count rule can prune. }
+  AssertTrue('prune', FTasks.Prune(1, 2, 0, Pruned, Err));
+  AssertEquals('three pruned by count', 3, Pruned);
+
+  for I := 0 to 2 do
+  begin
+    AssertTrue('get ' + IntToStr(I), FTasks.Get(1, Ids[I], Back, Found, Err));
+    AssertFalse('the oldest are gone: ' + IntToStr(I), Found);
+  end;
+  for I := 3 to 4 do
+  begin
+    AssertTrue('get ' + IntToStr(I), FTasks.Get(1, Ids[I], Back, Found, Err));
+    AssertTrue('the newest two survive: ' + IntToStr(I), Found);
+  end;
+end;
+
+procedure TTaskStoreTest.TestTheCountRuleNeverTouchesLiveCards;
+var
+  DoneId, OpenId, ClaimedId: Integer;
+  Pruned: Integer;
+  Err: string;
+  Back: TTaskCard;
+  Found: Boolean;
+begin
+  AssertTrue('done', AddCard('done card', DoneId));
+  ClaimOk(DoneId, 'sess-a');
+  AssertTrue('finish', FTasks.Transition(1, DoneId, tsClaimed, tsDone,
+    'sess-a', 0, tbkNone, 'x', Err));
+  AssertTrue('open', AddCard('live open', OpenId));
+  AssertTrue('claimed', AddCard('live claimed', ClaimedId));
+  ClaimOk(ClaimedId, 'sess-b');
+
+  { Keep ZERO: the count rule would delete every finished card if it could see
+    live ones. It must not. }
+  AssertTrue('prune', FTasks.Prune(1, 0, 0, Pruned, Err));
+  AssertEquals('only the finished card goes', 1, Pruned);
+  AssertTrue('get open', FTasks.Get(1, OpenId, Back, Found, Err));
+  AssertTrue('open survives', Found);
+  AssertTrue('get claimed', FTasks.Get(1, ClaimedId, Back, Found, Err));
+  AssertTrue('claimed survives', Found);
+end;
+
+procedure TTaskStoreTest.TestTheCountRuleNeverDropsACardsBlocker;
+var
+  BlockedId, BlockerId: Integer;
+  Pruned: Integer;
+  Err: string;
+  Back: TTaskCard;
+  Found: Boolean;
+begin
+  { A finished card that another card names as its blocker must survive, for the
+    same reason a parent must: the reference would dangle and the blocked card
+    would point at nothing. }
+  AssertTrue('blocker', AddCard('the blocker', BlockerId));
+  ClaimOk(BlockerId, 'sess-a');
+  AssertTrue('finish the blocker', FTasks.Transition(1, BlockerId, tsClaimed,
+    tsDone, 'sess-a', 0, tbkNone, 'x', Err));
+  AssertTrue('blocked card', AddCard('waiting', BlockedId));
+  ClaimOk(BlockedId, 'sess-b');
+  AssertTrue('block it', FTasks.Transition(1, BlockedId, tsClaimed, tsBlocked,
+    'sess-b', BlockerId, tbkCard, '', Err));
+
+  AssertTrue('prune keeping none', FTasks.Prune(1, 0, 0, Pruned, Err));
+  AssertEquals('nothing pruned', 0, Pruned);
+  AssertTrue('get', FTasks.Get(1, BlockerId, Back, Found, Err));
+  AssertTrue('the blocker survives', Found);
 end;
 
 initialization

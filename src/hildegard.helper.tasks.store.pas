@@ -492,10 +492,31 @@ function TSqliteTaskStore.Prune(AWorkspaceId, AKeepDone: Integer;
 var
   Stmt: Psqlite3_stmt;
   Cutoff: Int64;
+
+  { Both rules share the same two exclusions. A card another card names as its
+    parent or its blocker is never pruned, however finished it is: the reference
+    would dangle, and the blocked card would point at nothing. }
+  function Exclusions: string;
+  begin
+    Result :=
+      ' AND id NOT IN (SELECT parent FROM task_cards WHERE workspace_id = ? ' +
+      'AND parent <> 0)' +
+      ' AND id NOT IN (SELECT blocked_on_id FROM task_cards ' +
+      'WHERE workspace_id = ? AND blocked_on_kind = ?)';
+  end;
+
+  function BindExclusions(const AStmt: Psqlite3_stmt; AFirst: Integer): Integer;
+  begin
+    sqlite3_bind_int(AStmt, AFirst, AWorkspaceId);
+    sqlite3_bind_int(AStmt, AFirst + 1, AWorkspaceId);
+    sqlite3_bind_int(AStmt, AFirst + 2, Ord(tbkCard));
+    Result := AFirst + 3;
+  end;
+
 begin
-  { Finished cards only. A live card is never pruned, and neither is one that
-    another card names as its parent or its blocker - the reference would
-    dangle. }
+  { Finished cards only, by age AND by count. The two catch different things: age
+    bounds the clock, count bounds the table - a burst of cards finished in one
+    afternoon is exactly the case age cannot see. }
   Result := False;
   APruned := 0;
   AError := '';
@@ -505,21 +526,43 @@ begin
     begin
       Cutoff := Round((Now - EncodeDate(1970, 1, 1)) * 86400) - AMaxAgeSec;
       if not Prepare('DELETE FROM task_cards WHERE workspace_id = ? ' +
-        'AND status IN (?, ?) AND updated_at < ? AND id NOT IN ' +
-        '(SELECT parent FROM task_cards WHERE workspace_id = ? AND parent <> 0) ' +
-        'AND id NOT IN (SELECT blocked_on_id FROM task_cards ' +
-        'WHERE workspace_id = ? AND blocked_on_kind = ?)', Stmt, AError) then
+        'AND status IN (?, ?) AND updated_at < ?' + Exclusions, Stmt,
+        AError) then
         Exit;
       try
         sqlite3_bind_int(Stmt, 1, AWorkspaceId);
         sqlite3_bind_int(Stmt, 2, Ord(tsDone));
         sqlite3_bind_int(Stmt, 3, Ord(tsDropped));
         sqlite3_bind_int64(Stmt, 4, Cutoff);
-        sqlite3_bind_int(Stmt, 5, AWorkspaceId);
-        sqlite3_bind_int(Stmt, 6, AWorkspaceId);
-        sqlite3_bind_int(Stmt, 7, Ord(tbkCard));
+        BindExclusions(Stmt, 5);
         if sqlite3_step(Stmt) = SQLITE_DONE then
           APruned := sqlite3_changes(FStore.Db);
+      finally
+        sqlite3_finalize(Stmt);
+      end;
+    end;
+    { AKeepDone <= 0 keeps none, which is what a test asks for to prove the rule
+      can see a card at all. The newest survive: a card finished five minutes ago
+      is still the context someone needs to pick the thread back up. }
+    if AKeepDone >= 0 then
+    begin
+      if not Prepare('DELETE FROM task_cards WHERE workspace_id = ? ' +
+        'AND status IN (?, ?)' +
+        ' AND id NOT IN (SELECT id FROM task_cards WHERE workspace_id = ? ' +
+        'AND status IN (?, ?) ORDER BY updated_at DESC, id DESC LIMIT ?)' +
+        Exclusions, Stmt, AError) then
+        Exit;
+      try
+        sqlite3_bind_int(Stmt, 1, AWorkspaceId);
+        sqlite3_bind_int(Stmt, 2, Ord(tsDone));
+        sqlite3_bind_int(Stmt, 3, Ord(tsDropped));
+        sqlite3_bind_int(Stmt, 4, AWorkspaceId);
+        sqlite3_bind_int(Stmt, 5, Ord(tsDone));
+        sqlite3_bind_int(Stmt, 6, Ord(tsDropped));
+        sqlite3_bind_int(Stmt, 7, AKeepDone);
+        BindExclusions(Stmt, 8);
+        if sqlite3_step(Stmt) = SQLITE_DONE then
+          APruned := APruned + sqlite3_changes(FStore.Db);
       finally
         sqlite3_finalize(Stmt);
       end;
