@@ -189,6 +189,16 @@ $(BIN)/hildegard-helper-tui-widgets-demo: $(EXAMPLES)/tui_widgets_demo.pas $(LIB
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
+# Mock of the Board Dashboard: three zones over static data, so the operator can
+# judge the layout before the feature is specified. Reads no store, writes none.
+# See docs/features/Board_Dashboard/FEATURE.md.
+dashboard-mock: $(BIN)/hildegard-helper-dashboard-mock
+	$(BIN)/hildegard-helper-dashboard-mock
+
+$(BIN)/hildegard-helper-dashboard-mock: $(EXAMPLES)/dashboard_mock.pas $(LIB_SRCS)
+	@mkdir -p $(BIN) $(DBGUNITS)
+	$(FPC) $(DEBUG) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+
 # Layout exploration: a responsive two-column harness layout (files + editor |
 # chat column). The chat column has an optional side panel and a persistent
 # bottom input panel. The split appears only when the terminal is wider than 180
