@@ -23,6 +23,14 @@ type
     procedure TestWriteCommands;
     procedure TestMixed;
     procedure TestUnknownIsNotKnown;
+    { An option's SEPARATE value is not a path. `grep -A 1 pat file` must read
+      `file`, not the regex and not the number. }
+    procedure TestSeparateOptionValuesAreNotPaths;
+    { /dev/null is a sink, not a file to be read or written. }
+    procedure TestDevNullIsNotAReadOrAWrite;
+    { The matrix: every supported command's effect class, so a new command cannot
+      arrive without a decision about what it does. }
+    procedure TestEverySupportedCommandHasAClass;
   end;
 
 implementation
@@ -150,6 +158,81 @@ begin
   AssertFalse('tool', Known('tool', ['file_read']));
   AssertFalse('mcp', Known('mcp', ['s:t']));
   AssertFalse('unknown', Known('git', ['status']));
+end;
+
+procedure TShellEffectsTest.TestSeparateOptionValuesAreNotPaths;
+begin
+  { The reported bug: an option's value was read as a path, so a regular
+    expression got asked about as if it were a directory. }
+  AssertEquals('grep -A 1', 'f', Reads('grep', ['-A', '1', 'pat', 'f']));
+  AssertEquals('grep -B 2', 'f', Reads('grep', ['-B', '2', 'pat', 'f']));
+  AssertEquals('grep -C 3', 'f', Reads('grep', ['-C', '3', 'pat', 'f']));
+  AssertEquals('grep -e', 'f', Reads('grep', ['-e', 'a.*b', 'f']));
+  AssertEquals('grep -m', '', Reads('grep', ['-m', '5', 'pat']));
+  { A regex that looks like a path is still a pattern, not a file. }
+  AssertEquals('regex operand', 'f', Reads('grep', ['^/var/log/', 'f']));
+  { sort/uniq/cut values. }
+  AssertEquals('sort -k', 'f', Reads('sort', ['-k', '2', 'f']));
+  AssertEquals('sort -t', 'f', Reads('sort', ['-t', ':', 'f']));
+  AssertEquals('cut -d', 'f', Reads('cut', ['-d', ':', '-f', '1', 'f']));
+  { awk -v is a variable assignment, not a file. }
+  AssertEquals('awk -v', 'f', Reads('awk', ['-v', 'n=1', '{print}', 'f']));
+  { sed -e takes the script, so no positional script is consumed. }
+  AssertEquals('sed -e', 'f', Reads('sed', ['-e', 's/a/b/', 'f']));
+end;
+
+procedure TShellEffectsTest.TestDevNullIsNotAReadOrAWrite;
+begin
+  { /dev/null is a sink and a source of nothing. Asking the operator to approve
+    writing to it is pure noise, and reading it names no file. }
+  AssertEquals('cat /dev/null read', '', Reads('cat', ['/dev/null']));
+  AssertEquals('tee /dev/null write', '', Writes('tee', ['/dev/null']));
+  AssertEquals('> style: cp to /dev/null', '', Writes('cp', ['a.txt',
+    '/dev/null']));
+  AssertEquals('rm /dev/null', '', Writes('rm', ['/dev/null']));
+  { A real file alongside it is still counted. }
+  AssertEquals('cat f /dev/null', 'f', Reads('cat', ['f', '/dev/null']));
+  AssertEquals('tee f /dev/null', 'f', Writes('tee', ['f', '/dev/null']));
+end;
+
+procedure TShellEffectsTest.TestEverySupportedCommandHasAClass;
+begin
+  { The matrix, asserted: every command the tier admits must either be known to
+    this table or deliberately unknown. A new command that forgets to declare its
+    effects would otherwise fall through to "not known" and be asked about as an
+    opaque command - safe, but it would hide a missing decision. }
+  AssertTrue('echo', Known('echo', []));
+  AssertTrue('printf', Known('printf', []));
+  AssertTrue('cat', Known('cat', []));
+  AssertTrue('head', Known('head', []));
+  AssertTrue('tail', Known('tail', []));
+  AssertTrue('wc', Known('wc', []));
+  AssertTrue('grep', Known('grep', []));
+  AssertTrue('sed', Known('sed', []));
+  AssertTrue('awk', Known('awk', []));
+  AssertTrue('find', Known('find', []));
+  AssertTrue('jq', Known('jq', []));
+  AssertTrue('cut', Known('cut', []));
+  AssertTrue('tr', Known('tr', []));
+  AssertTrue('tee', Known('tee', []));
+  AssertTrue('rg', Known('rg', []));
+  AssertTrue('ls', Known('ls', []));
+  AssertTrue('mkdir', Known('mkdir', []));
+  AssertTrue('rm', Known('rm', []));
+  AssertTrue('sort', Known('sort', []));
+  AssertTrue('uniq', Known('uniq', []));
+  AssertTrue('mv', Known('mv', []));
+  AssertTrue('cp', Known('cp', []));
+  AssertTrue('touch', Known('touch', []));
+  AssertTrue('basename', Known('basename', []));
+  AssertTrue('dirname', Known('dirname', []));
+  AssertTrue('test', Known('test', []));
+  AssertTrue('[', Known('[', []));
+  AssertTrue('true', Known('true', []));
+  AssertTrue('false', Known('false', []));
+  { These two are deliberately opaque: they call other tools, whose gates apply. }
+  AssertFalse('tool is opaque', Known('tool', []));
+  AssertFalse('mcp is opaque', Known('mcp', []));
 end;
 
 initialization

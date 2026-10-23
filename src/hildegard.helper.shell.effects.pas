@@ -23,29 +23,114 @@ procedure ComputeEffects(const AName: string; const AArgs: TStringArray;
 
 implementation
 
-procedure Add(var AList: TStringArray; const AValue: string);
-begin
-  if AValue = '' then
-    Exit;
-  SetLength(AList, Length(AList) + 1);
-  AList[High(AList)] := AValue;
-end;
-
 function IsOption(const AArg: string): Boolean;
 begin
   Result := (AArg <> '') and (AArg[1] = '-') and (AArg <> '-');
 end;
 
-{ Copy the arguments from AStart on, skipping options (and their values where
-  the command takes them) and the lone '-' (stdin). }
-procedure AddFiles(var AList: TStringArray; const AArgs: TStringArray;
-  AStart: Integer);
+{ /dev/null is a sink that holds nothing and a source that yields nothing. Asking
+  the operator to approve a write to it is pure noise, and naming it as a read
+  claims we looked at a file that does not exist. It is dropped from both sides.
+
+  Deliberately ONLY /dev/null: /dev/zero, /dev/random and /dev/std* are not
+  equivalents, and a blanket /dev/ exemption would cover block devices. }
+function IsNullSink(const AArg: string): Boolean;
+begin
+  Result := (AArg = '/dev/null') or (AArg = '-/dev/null');
+end;
+
+procedure Add(var AList: TStringArray; const AValue: string);
+begin
+  if AValue = '' then
+    Exit;
+  if IsNullSink(AValue) then
+    Exit;
+  SetLength(AList, Length(AList) + 1);
+  AList[High(AList)] := AValue;
+end;
+
+{ Options whose VALUE is a separate argument, per command. Getting this wrong is
+  how a regular expression gets asked about as if it were a directory: with
+  `grep -A 1 pat file`, a table that did not know `-A` takes a value consumed
+  only `-A`, leaving `1` as the pattern and `pat` as a path.
+
+  Attached forms (`-A1`, `-k2`, `-t:`) need no entry - the value is inside the
+  same argument and IsOption still sees an option. }
+function OptionTakesValue(const AName, AOpt: string): Boolean;
+begin
+  Result := False;
+  if AName = 'grep' then
+    { -A/-B/-C context, -m max-count, -e pattern, -f file-of-patterns. }
+    Result := (AOpt = '-A') or (AOpt = '-B') or (AOpt = '-C') or
+      (AOpt = '-m') or (AOpt = '-e') or (AOpt = '-f')
+  else if AName = 'rg' then
+    Result := (AOpt = '-g') or (AOpt = '--glob') or (AOpt = '-e') or
+      (AOpt = '-f') or (AOpt = '-A') or (AOpt = '-B') or (AOpt = '-C') or
+      (AOpt = '-m') or (AOpt = '-t') or (AOpt = '--type')
+  else if AName = 'sort' then
+    Result := (AOpt = '-k') or (AOpt = '-t') or (AOpt = '-o') or
+      (AOpt = '-S')
+  else if AName = 'cut' then
+    Result := (AOpt = '-d') or (AOpt = '-f') or (AOpt = '-c') or
+      (AOpt = '-b')
+  else if AName = 'awk' then
+    Result := (AOpt = '-v') or (AOpt = '-F')
+  else if AName = 'sed' then
+    Result := (AOpt = '-e') or (AOpt = '-f')
+  else if AName = 'head' then
+    Result := (AOpt = '-n') or (AOpt = '-c')
+  else if AName = 'tail' then
+    Result := (AOpt = '-n') or (AOpt = '-c')
+  else if AName = 'jq' then
+    Result := (AOpt = '--arg') or (AOpt = '--argjson') or (AOpt = '--slurpfile')
+      or (AOpt = '--rawfile')
+  else if AName = 'uniq' then
+    Result := (AOpt = '-f') or (AOpt = '-s') or (AOpt = '-w');
+end;
+
+{ Skip options from AStart, consuming the value of any that takes one.
+  Returns the index of the first non-option argument. }
+function SkipOptions(const AName: string; const AArgs: TStringArray;
+  AStart: Integer): Integer;
 var
   I: Integer;
 begin
-  for I := AStart to High(AArgs) do
-    if (AArgs[I] <> '-') and (not IsOption(AArgs[I])) then
+  I := AStart;
+  while (I <= High(AArgs)) and IsOption(AArgs[I]) do
+  begin
+    if OptionTakesValue(AName, AArgs[I]) then
+      Inc(I, 2)
+    else
+      Inc(I);
+  end;
+  Result := I;
+end;
+
+{ Copy the arguments from AStart on, skipping options (and their values where
+  the command takes them) and the lone '-' (stdin). }
+procedure AddFiles(var AList: TStringArray; const AName: string;
+  const AArgs: TStringArray; AStart: Integer);
+var
+  I: Integer;
+begin
+  I := AStart;
+  while I <= High(AArgs) do
+  begin
+    if AArgs[I] = '-' then
+      Inc(I)
+    else if IsOption(AArgs[I]) then
+    begin
+      if OptionTakesValue(AName, AArgs[I]) then
+        Inc(I, 2)
+      else
+        Inc(I);
+    end
+    else
+    begin
       Add(AList, AArgs[I]);
+      Inc(I);
+    end;
+  end;
 end;
 
 procedure ComputeEffects(const AName: string; const AArgs: TStringArray;
@@ -53,6 +138,7 @@ procedure ComputeEffects(const AName: string; const AArgs: TStringArray;
 var
   I, N: Integer;
   InPlace: Boolean;
+  HasPattern: Boolean;
 
   function NextNonOption(AFrom: Integer): Integer;
   var
@@ -75,42 +161,36 @@ begin
 
   if (AName = 'cat') or (AName = 'wc') then
   begin
-    AddFiles(AReads, AArgs, 0);
+    AddFiles(AReads, AName, AArgs, 0);
     Exit;
   end;
 
   if (AName = 'head') or (AName = 'tail') then
   begin
-    I := 0;
-    while I <= High(AArgs) do
-    begin
-      if AArgs[I] = '-n' then
-        Inc(I, 2)
-      else if IsOption(AArgs[I]) then
-        Inc(I)
-      else
-        Break;
-    end;
-    AddFiles(AReads, AArgs, I);
+    { -n/-c take a separate value; the bare numeric form (-5) is an option with
+      none. SkipOptions knows both from the table, so no local loop is needed. }
+    I := SkipOptions(AName, AArgs, 0);
+    AddFiles(AReads, AName, AArgs, I);
     Exit;
   end;
 
   if AName = 'grep' then
   begin
-    { Flags, then the pattern, then the files. -m takes a value, attached
-      (-m1) or separate (-m 1); a separate value must not be mistaken for the
-      pattern, or the real pattern would be asked as a file. }
-    I := 0;
-    while (I <= High(AArgs)) and IsOption(AArgs[I]) do
-    begin
-      if AArgs[I] = '-m' then
-        Inc(I, 2)
-      else
-        Inc(I);
-    end;
-    if I <= High(AArgs) then
-      Inc(I);   // the pattern
-    AddFiles(AReads, AArgs, I);
+    { Flags, then the pattern, then the files. The option/value table decides
+      which flags consume the next argument, so a separate value (-A 1) is never
+      mistaken for the pattern and the pattern is never asked as a file. }
+    I := SkipOptions(AName, AArgs, 0);
+    { With -e or -f the pattern comes from the option, so there is no positional
+      pattern to skip - treating the first file as one would drop a real read. }
+    HasPattern := False;
+    for N := 0 to I - 1 do
+      if (AArgs[N] = '-e') or (AArgs[N] = '-f') or
+         (Copy(AArgs[N], 1, 2) = '-e') or (Copy(AArgs[N], 1, 2) = '-f') or
+         (Copy(AArgs[N], 1, 2) = '--') then
+        HasPattern := True;
+    if (not HasPattern) and (I <= High(AArgs)) then
+      Inc(I);   // the positional pattern
+    AddFiles(AReads, AName, AArgs, I);
     Exit;
   end;
 
@@ -133,7 +213,7 @@ begin
     if I > High(AArgs) then
       Add(AReads, '.')   // no path: the working directory
     else
-      AddFiles(AReads, AArgs, I);
+      AddFiles(AReads, AName, AArgs, I);
     Exit;
   end;
 
@@ -169,70 +249,49 @@ begin
     if N = 0 then
       Inc(I);   // the script
     if InPlace then
-      AddFiles(AWrites, AArgs, I)
+      AddFiles(AWrites, AName, AArgs, I)
     else
-      AddFiles(AReads, AArgs, I);
+      AddFiles(AReads, AName, AArgs, I);
     Exit;
   end;
 
   if AName = 'awk' then
   begin
-    I := 0;
-    while I <= High(AArgs) do
-    begin
-      if AArgs[I] = '-F' then
-        Inc(I, 2)
-      else if (Length(AArgs[I]) > 2) and (Copy(AArgs[I], 1, 2) = '-F') then
-        Inc(I)
-      else
-        Break;
-    end;
-    Inc(I);   // the program
-    AddFiles(AReads, AArgs, I);
+    { -F and -v take values; the program follows the options. }
+    I := SkipOptions(AName, AArgs, 0);
+    if I <= High(AArgs) then
+      Inc(I);   // the program
+    AddFiles(AReads, AName, AArgs, I);
     Exit;
   end;
 
   if AName = 'jq' then
   begin
-    I := 0;
-    while (I <= High(AArgs)) and (IsOption(AArgs[I])) do
-      Inc(I);
-    Inc(I);   // the filter
-    AddFiles(AReads, AArgs, I);
+    I := SkipOptions(AName, AArgs, 0);
+    if I <= High(AArgs) then
+      Inc(I);   // the filter
+    AddFiles(AReads, AName, AArgs, I);
     Exit;
   end;
 
   if AName = 'sort' then
   begin
-    I := 0;
-    while (I <= High(AArgs)) and IsOption(AArgs[I]) do
-      Inc(I);
-    AddFiles(AReads, AArgs, I);
+    { AddFiles skips options AND their separate values, so `sort -k 2 f` reads
+      f rather than 2. No pre-loop is needed. }
+    AddFiles(AReads, AName, AArgs, 0);
     Exit;
   end;
 
   if AName = 'uniq' then
   begin
-    I := 0;
-    while (I <= High(AArgs)) and IsOption(AArgs[I]) do
-      Inc(I);
-    AddFiles(AReads, AArgs, I);
+    AddFiles(AReads, AName, AArgs, 0);
     Exit;
   end;
 
   if AName = 'cut' then
   begin
-    I := 0;
-    while I <= High(AArgs) do
-    begin
-      if (AArgs[I] = '-d') or (AArgs[I] = '-f') or (AArgs[I] = '-c') then
-        Inc(I, 2)
-      else if IsOption(AArgs[I]) then
-        Inc(I)
-      else
-        Break;
-    end;
-    AddFiles(AReads, AArgs, I);
+    I := SkipOptions(AName, AArgs, 0);
+    AddFiles(AReads, AName, AArgs, I);
     Exit;
   end;
 
@@ -241,13 +300,11 @@ begin
 
   if AName = 'ls' then
   begin
-    I := 0;
-    while (I <= High(AArgs)) and IsOption(AArgs[I]) do
-      Inc(I);
+    I := SkipOptions(AName, AArgs, 0);
     if I > High(AArgs) then
       Add(AReads, '.')
     else
-      AddFiles(AReads, AArgs, I);
+      AddFiles(AReads, AName, AArgs, I);
     Exit;
   end;
 
@@ -289,7 +346,7 @@ begin
     I := 0;
     if (I <= High(AArgs)) and (AArgs[I] = '-a') then
       Inc(I);
-    AddFiles(AWrites, AArgs, I);
+    AddFiles(AWrites, AName, AArgs, I);
     Exit;
   end;
 
@@ -298,7 +355,7 @@ begin
     I := 0;
     while (I <= High(AArgs)) and IsOption(AArgs[I]) do
       Inc(I);
-    AddFiles(AWrites, AArgs, I);
+    AddFiles(AWrites, AName, AArgs, I);
     Exit;
   end;
 
@@ -307,7 +364,7 @@ begin
     I := 0;
     while (I <= High(AArgs)) and IsOption(AArgs[I]) do
       Inc(I);
-    AddFiles(AWrites, AArgs, I);
+    AddFiles(AWrites, AName, AArgs, I);
     Exit;
   end;
 
@@ -319,7 +376,7 @@ begin
     if I <= High(AArgs) then
       Add(AReads, AArgs[I]);
     Inc(I);
-    AddFiles(AWrites, AArgs, I);
+    AddFiles(AWrites, AName, AArgs, I);
     Exit;
   end;
 
@@ -328,7 +385,7 @@ begin
     I := 0;
     while (I <= High(AArgs)) and IsOption(AArgs[I]) do
       Inc(I);
-    AddFiles(AWrites, AArgs, I);
+    AddFiles(AWrites, AName, AArgs, I);
     Exit;
   end;
 
