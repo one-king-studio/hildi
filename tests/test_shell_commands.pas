@@ -443,6 +443,23 @@ begin
     RunCmd('sort', ['-u'], 'b' + #10 + 'a' + #10 + 'b' + #10).Stdout);
   AssertEquals('sort file', 'beta' + #10 + 'gamma' + #10,
     RunCmd('sort', ['b.txt']).Stdout);
+  { -n is the consequential one: without it "10" sorts before "9", so a numeric
+    sort silently produces a WRONG ANSWER rather than an error. }
+  AssertEquals('sort -n', '9' + #10 + '10' + #10 + '100' + #10,
+    RunCmd('sort', ['-n'], '100' + #10 + '9' + #10 + '10' + #10).Stdout);
+  AssertEquals('sort -nr', '100' + #10 + '10' + #10 + '9' + #10,
+    RunCmd('sort', ['-nr'], '9' + #10 + '100' + #10 + '10' + #10).Stdout);
+  { Negative and decimal numbers, which a lexical compare also gets wrong. }
+  AssertEquals('sort -n handles signs', '-5' + #10 + '2' + #10 + '10' + #10,
+    RunCmd('sort', ['-n'], '10' + #10 + '-5' + #10 + '2' + #10).Stdout);
+  { -k picks a field, -t sets the separator. }
+  AssertEquals('sort -t: -k2', 'x:1' + #10 + 'y:2' + #10,
+    RunCmd('sort', ['-t:', '-k2'], 'y:2' + #10 + 'x:1' + #10).Stdout);
+  AssertEquals('sort -k2 default blanks', 'b 1' + #10 + 'a 2' + #10,
+    RunCmd('sort', ['-k2'], 'a 2' + #10 + 'b 1' + #10).Stdout);
+  { -f folds case; without it upper-case sorts first. }
+  AssertEquals('sort -f', 'apple' + #10 + 'Banana' + #10,
+    RunCmd('sort', ['-f'], 'Banana' + #10 + 'apple' + #10).Stdout);
 end;
 
 procedure TShellCommandsTest.TestUniq;

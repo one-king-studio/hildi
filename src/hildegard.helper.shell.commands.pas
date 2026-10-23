@@ -127,7 +127,9 @@ const
     (Name: 'ls'; Options: '-adl'),
     (Name: 'mkdir'; Options: '-p'),
     (Name: 'rm'; Options: '-rf'),
-    (Name: 'sort'; Options: '-ru'),
+    { -k, -t and -o take a value, attached (-k2, -t:) or separate. The letters
+      cover the attached form; the separate form is admitted by the same list. }
+    (Name: 'sort'; Options: '-rufnhMkbtsco'),
     (Name: 'uniq'; Options: '-cdu'),
     (Name: 'cat'; Options: ''),
     (Name: 'mv'; Options: ''),
@@ -1054,31 +1056,166 @@ end;
 
 function TBuiltinCommands.SortCmd(const ACall: TShellCall): TShellResult;
 var
-  I, J: Integer;
-  Reverse, Unique: Boolean;
+  I, J, K: Integer;
+  Reverse, Unique, Numeric, FoldCase: Boolean;
+  FieldNum: Integer;
+  Sep, OutFile, Arg: string;
   Args: TStringArray;
-  Data, E, Text: string;
-  Lines: TStringArray;
-  List: TStringList;
-  OutText: string;
+  Data, E, Text, OutText: string;
+  Lines, Tmp: TStringArray;
+
+  { The comparison key: field N when -k was given, else the whole line. }
+  function KeyOf(const S: string): string;
+  var
+    P, Start, F: Integer;
+    SepCh: Char;
+  begin
+    Result := S;
+    if FieldNum <= 1 then
+      Exit;
+    if Sep <> '' then
+      SepCh := Sep[1]
+    else
+      SepCh := ' ';
+    F := 1;
+    Start := 1;
+    for P := 1 to Length(S) do
+      if S[P] = SepCh then
+      begin
+        Inc(F);
+        if F = FieldNum then
+        begin
+          Start := P + 1;
+          Break;
+        end;
+      end;
+    if F < FieldNum then
+      Exit('');
+    Result := Copy(S, Start, MaxInt);
+  end;
+
+  function NumOf(const S: string): Double;
+  begin
+    Result := StrToFloatDef(Trim(KeyOf(S)), 0);
+  end;
+
+  function Cmp(const A, B: string): Integer;
+  begin
+    if Numeric then
+    begin
+      if NumOf(A) < NumOf(B) then
+        Exit(-1);
+      if NumOf(A) > NumOf(B) then
+        Exit(1);
+      Exit(0);
+    end;
+    if FoldCase then
+      Result := AnsiCompareText(KeyOf(A), KeyOf(B))
+    else
+      Result := AnsiCompareStr(KeyOf(A), KeyOf(B));
+  end;
+
+  { Merge sort: stable, so equal keys keep input order the way sort(1) does.
+    TStringList.Sort cannot be used - it is lexical only, which is exactly why
+    -n used to order "10" before "9" instead of refusing. }
+  procedure MSort(var A, ABuf: TStringArray; ALo, AHi: Integer);
+  var
+    Mid, Li, Ri, Ti, M: Integer;
+  begin
+    if ALo >= AHi then
+      Exit;
+    Mid := (ALo + AHi) div 2;
+    MSort(A, ABuf, ALo, Mid);
+    MSort(A, ABuf, Mid + 1, AHi);
+    Li := ALo;
+    Ri := Mid + 1;
+    Ti := ALo;
+    while (Li <= Mid) and (Ri <= AHi) do
+    begin
+      if Cmp(A[Li], A[Ri]) <= 0 then
+      begin
+        ABuf[Ti] := A[Li];
+        Inc(Li);
+      end
+      else
+      begin
+        ABuf[Ti] := A[Ri];
+        Inc(Ri);
+      end;
+      Inc(Ti);
+    end;
+    while Li <= Mid do
+    begin
+      ABuf[Ti] := A[Li];
+      Inc(Li);
+      Inc(Ti);
+    end;
+    while Ri <= AHi do
+    begin
+      ABuf[Ti] := A[Ri];
+      Inc(Ri);
+      Inc(Ti);
+    end;
+    for M := ALo to AHi do
+      A[M] := ABuf[M];
+  end;
+
 begin
   Reverse := False;
   Unique := False;
+  Numeric := False;
+  FoldCase := False;
+  FieldNum := 0;
+  Sep := '';
+  OutFile := '';
   I := 0;
   while I <= High(ACall.Args) do
   begin
-    if (ACall.Args[I] <> '') and (ACall.Args[I][1] = '-') and
-      (ACall.Args[I] <> '-') then
-    begin
-      for J := 2 to Length(ACall.Args[I]) do
-        case ACall.Args[I][J] of
-          'r': Reverse := True;
-          'u': Unique := True;
-        end;
-      Inc(I);
-    end
-    else
+    Arg := ACall.Args[I];
+    if (Arg = '') or (Arg[1] <> '-') or (Arg = '-') then
       Break;
+    { Options that take a value, attached (-k2, -t:) or separate (-k 2). }
+    if (Arg = '-k') or (Arg = '-t') or (Arg = '-o') then
+    begin
+      if I >= High(ACall.Args) then
+        Exit(Usage('sort: ' + Arg + ' requires an argument'));
+      if Arg = '-k' then
+        FieldNum := StrToIntDef(ACall.Args[I + 1], 0)
+      else if Arg = '-t' then
+        Sep := ACall.Args[I + 1]
+      else
+        OutFile := ACall.Args[I + 1];
+      Inc(I, 2);
+      Continue;
+    end;
+    if (Length(Arg) > 2) and (Copy(Arg, 1, 2) = '-k') then
+    begin
+      FieldNum := StrToIntDef(Copy(Arg, 3, MaxInt), 0);
+      Inc(I);
+      Continue;
+    end;
+    if (Length(Arg) > 2) and (Copy(Arg, 1, 2) = '-t') then
+    begin
+      Sep := Copy(Arg, 3, 1);
+      Inc(I);
+      Continue;
+    end;
+    if (Length(Arg) > 2) and (Copy(Arg, 1, 2) = '-o') then
+    begin
+      OutFile := Copy(Arg, 3, MaxInt);
+      Inc(I);
+      Continue;
+    end;
+    for J := 2 to Length(Arg) do
+      case Arg[J] of
+        'r': Reverse := True;
+        'u': Unique := True;
+        'n': Numeric := True;
+        'f': FoldCase := True;
+      else
+        Exit(Usage('sort: unsupported option -' + Arg[J]));
+      end;
+    Inc(I);
   end;
   SetLength(Args, Length(ACall.Args) - I);
   J := I;
@@ -1095,34 +1232,37 @@ begin
     Exit(Failure('sort: ' + Args[0] + ': ' + E, 2))
   else
     Text := Data;
-  List := TStringList.Create;
-  try
-    List.CaseSensitive := True;
-    Lines := LinesOf(Text);
-    for I := 0 to High(Lines) do
-      List.Add(Lines[I]);
-    List.Sort;
-    OutText := '';
-    if Reverse then
+
+  Lines := LinesOf(Text);
+  SetLength(Tmp, Length(Lines));
+  if Length(Lines) > 1 then
+    MSort(Lines, Tmp, 0, High(Lines));
+  OutText := '';
+  if Reverse then
+  begin
+    for I := High(Lines) downto 0 do
     begin
-      for I := List.Count - 1 downto 0 do
-      begin
-        if Unique and (I < List.Count - 1) and (List[I] = List[I + 1]) then
-          Continue;
-        OutText := OutText + List[I] + #10;
-      end;
-    end
-    else
-      for I := 0 to List.Count - 1 do
-      begin
-        if Unique and (I > 0) and (List[I] = List[I - 1]) then
-          Continue;
-        OutText := OutText + List[I] + #10;
-      end;
-    Result := ShellResultOk(OutText);
-  finally
-    List.Free;
+      if Unique and (I < High(Lines)) and (Lines[I] = Lines[I + 1]) then
+        Continue;
+      OutText := OutText + Lines[I] + #10;
+    end;
+  end
+  else
+    for I := 0 to High(Lines) do
+    begin
+      if Unique and (I > 0) and (Lines[I] = Lines[I - 1]) then
+        Continue;
+      OutText := OutText + Lines[I] + #10;
+    end;
+  { -o writes to a file and prints nothing, which is why the effect table names
+    it as a write. }
+  if OutFile <> '' then
+  begin
+    if not FFs.WriteFile(FFs.Resolve(ACall.Cwd, OutFile), OutText, False, E) then
+      Exit(Failure('sort: ' + OutFile + ': ' + E, 2));
+    Exit(ShellResultOk(''));
   end;
+  Result := ShellResultOk(OutText);
 end;
 
 function TBuiltinCommands.Uniq(const ACall: TShellCall): TShellResult;
