@@ -18,7 +18,7 @@ interface
 uses
   SysUtils,
   hildegard.helper.hash, hildegard.helper.workspace.changes,
-  changes.types, changes.store;
+  changes.types, changes.store, changes.text, changes.log;
 
 type
   TChangeRecorder = class
@@ -81,6 +81,8 @@ var
   Id: Integer;
   Err: string;
   Kind: TChangeKind;
+  Patch: string;
+  Capped: Boolean;
 begin
   if (FStore = nil) or (AChanges = nil) then
     Exit;
@@ -110,13 +112,32 @@ begin
       R.AfterHash := Sha256Hex(C.After);
     R.BeforeSize := C.BeforeSize;
     R.AfterSize := C.AfterSize;
+    { The patch is what makes the record a change rather than a label: replay
+      applies these in order, so an empty patch stops Reconstruct at that hop.
+      It is built here, at the only moment both texts are in hand - the tool
+      already had them, and nothing downstream can reconstruct the before-side
+      from a hash. A side that was never captured has no patch, honestly. }
+    R.Patch := '';
     R.PatchBytes := 0;
     R.Capped := False;
-    { The recorder's job is the record, not the diff: the summary line already
-      gives the operator the counts, and storing a rendered diff is what
-      tool-result-shape.md argues against. A later phase adds the patch when a
-      consumer needs to display it. }
-    R.Patch := '';
+    { Initialised because the no-patch branch below never passes it as an out
+      parameter, and an uninitialised local here would mark a record capped at
+      random. }
+    Capped := False;
+    Patch := '';
+    if C.Captured and (C.Kind = fcCreated) then
+      { A creation's before-text is empty by definition. }
+      Patch := DiffText('', C.After, DefaultPatchCapBytes, Capped)
+    else if C.BeforeCaptured and (C.Kind = fcDeleted) then
+      { A deletion's after-text is empty by definition. }
+      Patch := DiffText(C.Before, '', DefaultPatchCapBytes, Capped)
+    else if C.BeforeCaptured and C.Captured then
+      Patch := DiffText(C.Before, C.After, DefaultPatchCapBytes, Capped)
+    else
+      Patch := '';
+    R.Patch := Patch;
+    R.PatchBytes := Length(Patch);
+    R.Capped := Capped;
     R.Source := csTier;
     R.CreatedAt := 0;
     if not FStore.Append(R, Id, Err) then
