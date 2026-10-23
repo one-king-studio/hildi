@@ -550,7 +550,14 @@ begin
   try
     if not Prepare('SELECT ' +
       'SUM(CASE WHEN id > ? THEN 1 ELSE 0 END), ' +
-      'SUM(CASE WHEN kind = ? THEN 1 ELSE 0 END), ' +
+      { An answered question is not an open one. Counting it forever tells every
+        agent that someone is waiting when nobody is - the count is what drives
+        whether a model thinks it owes an answer, so it has to mean "still open".
+        A DELETED answer does not count, so retracting one reopens the question. }
+      'SUM(CASE WHEN kind = ? AND id NOT IN (' +
+      '  SELECT reply_to FROM board_entries WHERE workspace_id = ? ' +
+      '  AND reply_to <> 0 AND kind = ? AND deleted_at = 0' +
+      ') THEN 1 ELSE 0 END), ' +
       'SUM(CASE WHEN kind = ? THEN 1 ELSE 0 END), ' +
       'SUM(CASE WHEN kind = ? THEN 1 ELSE 0 END), ' +
       'MAX(created_at) ' +
@@ -560,9 +567,11 @@ begin
     try
       sqlite3_bind_int(Stmt, 1, ASinceId);
       sqlite3_bind_int(Stmt, 2, Ord(bkQuestion));
-      sqlite3_bind_int(Stmt, 3, Ord(bkDecision));
-      sqlite3_bind_int(Stmt, 4, Ord(bkFinding));
-      sqlite3_bind_int(Stmt, 5, AWorkspaceId);
+      sqlite3_bind_int(Stmt, 3, AWorkspaceId);
+      sqlite3_bind_int(Stmt, 4, Ord(bkAnswer));
+      sqlite3_bind_int(Stmt, 5, Ord(bkDecision));
+      sqlite3_bind_int(Stmt, 6, Ord(bkFinding));
+      sqlite3_bind_int(Stmt, 7, AWorkspaceId);
       if sqlite3_step(Stmt) = SQLITE_ROW then
       begin
         AUnread := sqlite3_column_int(Stmt, 0);

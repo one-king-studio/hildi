@@ -35,6 +35,11 @@ type
     procedure TestRestoreBringsBackTheOlderCurrent;
     procedure TestTopicLockAndUnlock;
     procedure TestTocCounts;
+    { An answered question is not an open one. The count drives whether an agent
+      thinks someone needs it, so a question that has been answered must not keep
+      counting - which is what q=1 forever meant before this. }
+    procedure TestTocStopsCountingAnAnsweredQuestion;
+    procedure TestTocStillCountsAQuestionWithOnlyADeletedAnswer;
     procedure TestCursorRoundTrip;
     { Staleness: an entry naming a path counts changes to it since the entry was
       written. Advisory only, but it must be real. }
@@ -398,6 +403,55 @@ begin
   F.Limit := 10;
   AssertTrue('policy read', FBoard.Read(1, F, Rows, Err));
   AssertEquals('both decisions survive', 2, Length(Rows));
+end;
+
+procedure TBoardStoreTest.TestTocStopsCountingAnAnsweredQuestion;
+var
+  E: TBoardEntry;
+  Id, QId, AId, Unread, Q, D, F: Integer;
+  LastAt: Int64;
+  Err: string;
+begin
+  { This is the defect the coordination entries exposed: I answered question #1
+    in entry #2, and the tail kept reporting q="1" forever. An agent reading that
+    thinks someone is waiting, and nobody is. }
+  E := Entry('t', 'the question', bkQuestion);
+  AssertTrue('q', FBoard.Append(E, Id, Err));
+  QId := Id;
+  AssertTrue('toc', FBoard.Toc(1, 0, Unread, Q, D, F, LastAt, Err));
+  AssertEquals('one open question', 1, Q);
+
+  E := Entry('t', 'the answer', bkAnswer);
+  E.ReplyTo := QId;
+  AssertTrue('a', FBoard.Append(E, Id, Err));
+  AId := Id;
+
+  AssertTrue('toc after the answer', FBoard.Toc(1, 0, Unread, Q, D, F, LastAt,
+    Err));
+  AssertEquals('answered, so no longer open', 0, Q);
+  { The answer is still an entry: the count changed, the record did not. }
+  AssertEquals('both entries are unread', 2, Unread);
+end;
+
+procedure TBoardStoreTest.TestTocStillCountsAQuestionWithOnlyADeletedAnswer;
+var
+  E: TBoardEntry;
+  Id, QId, Unread, Q, D, F: Integer;
+  LastAt: Int64;
+  Err: string;
+begin
+  { A retracted answer leaves the question open again - a moderation that hides
+    the answer must not silently make the question disappear from the count. }
+  E := Entry('t', 'the question', bkQuestion);
+  AssertTrue('q', FBoard.Append(E, Id, Err));
+  QId := Id;
+  E := Entry('t', 'an answer that gets retracted', bkAnswer);
+  E.ReplyTo := QId;
+  AssertTrue('a', FBoard.Append(E, Id, Err));
+  AssertTrue('mark deleted', FBoard.MarkDeleted(1, Id, True, 'sess-a', Err));
+
+  AssertTrue('toc', FBoard.Toc(1, 0, Unread, Q, D, F, LastAt, Err));
+  AssertEquals('open again', 1, Q);
 end;
 
 initialization
