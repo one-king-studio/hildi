@@ -31,6 +31,9 @@ type
     { The matrix: every supported command's effect class, so a new command cannot
       arrive without a decision about what it does. }
     procedure TestEverySupportedCommandHasAClass;
+    { sort -o NAMES A FILE IT WRITES. Consuming the value silently swallowed the
+      output path, so the gate never saw the write. }
+    procedure TestSortOutputFileIsAWrite;
   end;
 
 implementation
@@ -233,6 +236,19 @@ begin
   { These two are deliberately opaque: they call other tools, whose gates apply. }
   AssertFalse('tool is opaque', Known('tool', []));
   AssertFalse('mcp is opaque', Known('mcp', []));
+end;
+
+procedure TShellEffectsTest.TestSortOutputFileIsAWrite;
+begin
+  { Found while writing the effects matrix: -o names an output FILE, but it was
+    only treated as "an option that takes a value", so the value was consumed and
+    the path never reached either side. A write the gate cannot see. }
+  AssertEquals('sort -o writes the output file', 'out.txt',
+    Writes('sort', ['-o', 'out.txt', 'in.txt']));
+  AssertEquals('and still reads the input', 'in.txt',
+    Reads('sort', ['-o', 'out.txt', 'in.txt']));
+  { Without -o it stays read-only. }
+  AssertEquals('sort alone writes nothing', '', Writes('sort', ['in.txt']));
 end;
 
 initialization

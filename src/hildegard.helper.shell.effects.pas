@@ -277,7 +277,20 @@ begin
   if AName = 'sort' then
   begin
     { AddFiles skips options AND their separate values, so `sort -k 2 f` reads
-      f rather than 2. No pre-loop is needed. }
+      f rather than 2. No pre-loop is needed for the read side.
+
+      But -o names a file to WRITE, and skipping it as "an option with a value"
+      swallowed the path entirely: the gate never saw the write. It is scanned
+      separately here. }
+    for I := 0 to High(AArgs) do
+      if AArgs[I] = '-o' then
+      begin
+        if I < High(AArgs) then
+          Add(AWrites, AArgs[I + 1]);
+      end
+      else if (Length(AArgs[I]) > 2) and (Copy(AArgs[I], 1, 2) = '-o') then
+        { The attached form -oout.txt. }
+        Add(AWrites, Copy(AArgs[I], 3, MaxInt));
     AddFiles(AReads, AName, AArgs, 0);
     Exit;
   end;
