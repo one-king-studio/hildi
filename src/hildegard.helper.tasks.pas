@@ -36,6 +36,19 @@ const
   { A blocked card is worth surfacing in the tail after this long. }
   StaleBlockMinutes = 30;
 
+const
+  { The explanation rides the stable half of the prompt, like the board's: the
+    <tasks> element is data only, so a model that has never seen the task list
+    needs to be told what it is. This text is identical on every request, so it
+    caches with the system prompt instead of riding the turn. }
+  TaskStableText =
+    'This workspace has a task list: durable work shared with any other agent '
+    + 'here, and with your future self after a context reset. Claim a card '
+    + 'before you work on it (task_claim) so others can see it is taken; move '
+    + 'it with task_update (release, block, unblock, done, drop). Every status '
+    + 'change records who made it, so status is not editable - use a verb. The '
+    + '<tasks> element in your turn shows what you hold and what is open.';
+
 type
   TTaskCard = record
     Id: Integer;

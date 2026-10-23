@@ -15,6 +15,8 @@ uses
   hildegard.helper.harness.session, hildegard.helper.harness.view,
   hildegard.helper.mcp.config,
   hildegard.helper.board, hildegard.helper.board.store,
+  hildegard.helper.tasks, hildegard.helper.tasks.store,
+  hildegard.helper.tasks.tools,
   llm_fakes;
 
 type
@@ -35,6 +37,9 @@ type
     procedure TestResumeUnknownSessionFails;
     procedure TestMissingWorkspaceFails;
     procedure TestRecallToolRegisteredWithStore;
+    { The task list's tools and its stable prose, in a real session. }
+    procedure TestTaskToolsRegisteredWithStore;
+    procedure TestTaskStableTextRidesTheSystemPrompt;
     procedure TestRecallToolAbsentWithoutStore;
     procedure TestLastTurnEmptyWithoutTurns;
     { The skill descriptions (the STABLE half of the manifest) must reach the
@@ -219,6 +224,59 @@ begin
   Session := THarnessSession.Open(Cfg, Err);
   AssertTrue('not opened', Session = nil);
   AssertTrue('error set', Err <> '');
+end;
+
+procedure THarnessSessionTest.TestTaskToolsRegisteredWithStore;
+var
+  Session: THarnessSession;
+  Err, Result2: string;
+  Tool: TRegisteredTool;
+begin
+  { The task list is wired beside the file tools, so a real session advertises
+    it. Without this the store layer is dead code - the exact failure mode this
+    repo keeps finding. }
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    AssertTrue('task_list registered',
+      Session.Tools.Find(TaskListTool, Tool));
+    AssertTrue('task_add registered', Session.Tools.Find(TaskAddTool, Tool));
+    AssertTrue('task_claim registered',
+      Session.Tools.Find(TaskClaimTool, Tool));
+    AssertTrue('task_update registered',
+      Session.Tools.Find(TaskUpdateTool, Tool));
+    AssertTrue('task_edit registered', Session.Tools.Find(TaskEditTool, Tool));
+    AssertTrue('task_moderate registered',
+      Session.Tools.Find(TaskModerateTool, Tool));
+    { Registered AND runnable: a handler that exists but cannot reach a store is
+      the failure the registration check alone would miss. Re-fetch the ADD tool:
+      `Tool` currently holds the last Find. }
+    AssertTrue('find add', Session.Tools.Find(TaskAddTool, Tool));
+    AssertTrue('add runs', Tool.Handler('{"title":"wired up","reason":"t"}',
+      Result2, Err, nil));
+    AssertTrue('and says what it made: ' + Result2, Pos('wired up', Result2) > 0);
+  finally
+    Session.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestTaskStableTextRidesTheSystemPrompt;
+var
+  Session: THarnessSession;
+  Err, P: string;
+begin
+  { The <tasks> element is data only, so the explanation must reach the system
+    prompt - the stable half, where it caches - exactly as the board's does. }
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    AssertTrue('the loop is built', Session.Loop <> nil);
+    P := Session.Loop.StablePrompt;
+    AssertTrue('the task list is explained: ' + P, Pos(TaskStableText, P) > 0);
+    AssertTrue('and the board still is', Pos(BoardStableText, P) > 0);
+  finally
+    Session.Free;
+  end;
 end;
 
 procedure THarnessSessionTest.TestRecallToolRegisteredWithStore;

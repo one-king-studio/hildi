@@ -24,6 +24,8 @@ uses
   hildegard.helper.changes.recorder,
   hildegard.helper.board, hildegard.helper.board.store,
   hildegard.helper.board.tools,
+  hildegard.helper.tasks, hildegard.helper.tasks.store,
+  hildegard.helper.tasks.tools,
   hildegard.helper.workspace.changes,
   hildegard.helper.recall.tool, hildegard.helper.harness.turn,
   hildegard.helper.harness.view,
@@ -60,6 +62,10 @@ type
     { The board: durable knowledge. Nil without a store. }
     FBoardStore: IBoardStore;
     FBoardTools: TBoardTools;
+    { The task list: mutable shared work. Nil without a store. Needs the board
+      too, because a card may be blocked on a board question. }
+    FTaskStore: ITaskStore;
+    FTaskTools: TTaskTool;
     { The last unread count this session was notified of. The read cursor only
       advances on an actual board_read, so without this every tick would
       re-announce the same post forever. }
@@ -77,6 +83,17 @@ type
     FApprovalService: IApprovalService;
     { MCP events (server failure etc.) are recorded as session errors. }
     procedure McpEvent(const AMessage, ADetail: string);
+    { Rebuild the STABLE half of the system prompt: skill descriptions, then the
+      board's and the task list's explanations. One function because two callers
+      - Init and every MCP reconcile - must agree; when the reconcile assigned
+      StableText alone it silently dropped the board prose on every session that
+      had a store. }
+    procedure ComposeStablePrompt;
+    { Resolves a board question for a `blocked_on` that names one. The task list
+      must not depend on the board unit, so the check is injected; only a live
+      `question` entry counts, never a note or a decision. }
+    function TaskQuestionExists(AWorkspaceId, AId: Integer;
+      out ATitle: string): Boolean;
     { The builtin shell tier's `tool`/`mcp` dispatch: the normal resolution
       (the base registry, then the MCP manager), so every dispatched tool still
       passes its own gate. }
@@ -176,6 +193,8 @@ begin
     double-free, the same rule the skill registry follows. }
   FBoardTools := nil;
   FBoardStore := nil;
+  FTaskTools := nil;
+  FTaskStore := nil;
   FChangeStore := nil;
   FCommandTool := nil;
   FFileTool.Free;
@@ -305,6 +324,37 @@ begin
   if FBoardStore <> nil then
     FBoardStore.Prune(FView.WorkspaceId, DefaultBoardKeepNotes,
       DefaultBoardNoteMaxAgeSec, Ignored, ErrIgnored);
+  { The task list prunes finished cards by count and age, never live ones and
+    never one another card names. Swallowed for the same reason. }
+  if FTaskStore <> nil then
+    FTaskStore.Prune(FView.WorkspaceId, DefaultTaskKeepDone,
+      DefaultTaskDoneMaxAgeSec, Ignored, ErrIgnored);
+end;
+
+function THarnessSession.TaskQuestionExists(AWorkspaceId, AId: Integer;
+  out ATitle: string): Boolean;
+var
+  E: TBoardEntry;
+  Found: Boolean;
+  Err: string;
+begin
+  { Only a live `question` counts. A note or a decision is not an answer someone
+    owes, so it cannot be something work waits on. A deleted entry is likewise
+    not a question any more. }
+  Result := False;
+  ATitle := '';
+  if FBoardStore = nil then
+    Exit;
+  if not FBoardStore.Get(AWorkspaceId, AId, E, Found, Err) then
+    Exit;
+  if not Found then
+    Exit;
+  if E.DeletedAt <> 0 then
+    Exit;
+  if E.Kind <> bkQuestion then
+    Exit;
+  ATitle := E.Title;
+  Result := True;
 end;
 
 procedure THarnessSession.RecordChanges(const AChanges: TFileChangeSet);
@@ -336,6 +386,21 @@ procedure THarnessSession.McpEvent(const AMessage, ADetail: string);
 begin
   if FConversation <> nil then
     FConversation.AppendError(AMessage, ADetail);
+end;
+
+procedure THarnessSession.ComposeStablePrompt;
+begin
+  if FLoop = nil then
+    Exit;
+  FLoop.StablePrompt := FSkills.StableText;
+  { The tail elements are data; their explanations belong here, where they cache
+    with the system prompt instead of costing every request. }
+  if FBoardStore <> nil then
+    FLoop.StablePrompt := FLoop.StablePrompt + LineEnding + LineEnding +
+      BoardStableText;
+  if FTaskStore <> nil then
+    FLoop.StablePrompt := FLoop.StablePrompt + LineEnding + LineEnding +
+      TaskStableText;
 end;
 
 function THarnessSession.McpTokenSourceFor(
@@ -411,8 +476,7 @@ begin
     system prompt, where stable text belongs. Only the activation state stays in
     the per-request fragment, so the manifest stops costing ~105 tokens on every
     request and a load only changes a few short lines. }
-  if FLoop <> nil then
-    FLoop.StablePrompt := FSkills.StableText;
+  ComposeStablePrompt;
 end;
 
 function THarnessSession.Init(const AConfig: THarnessSessionConfig;
@@ -539,6 +603,23 @@ begin
     FBoardTools.Register(FTools);
   end;
 
+  { The task list: mutable shared work. Same rule - no store, nowhere to put a
+    card. The board hook is passed only when a board exists, so a question
+    blocker is refused by name rather than recorded pointing at nothing. }
+  FTaskStore := nil;
+  FTaskTools := nil;
+  if FView.Store <> nil then
+  begin
+    FTaskStore := TSqliteTaskStore.Create(FView.Store);
+    if FBoardStore <> nil then
+      FTaskTools := TTaskTool.Create(FTaskStore, FView.WorkspaceId,
+        FView.SessionId, 'parent', ApprovalService, TaskQuestionExists)
+    else
+      FTaskTools := TTaskTool.Create(FTaskStore, FView.WorkspaceId,
+        FView.SessionId, 'parent', ApprovalService, nil);
+    FTaskTools.Register(FTools);
+  end;
+
   { The recall tool reads stored artifacts; without a store there are none. }
   if FView.Store <> nil then
   begin
@@ -588,6 +669,9 @@ begin
     Its tools are registered directly; the provider exists for the tail. }
   if FBoardTools <> nil then
     FLoop.AddProvider(FBoardTools);
+  { The task list contributes its work queue the same way. }
+  if FTaskTools <> nil then
+    FLoop.AddProvider(FTaskTools);
   { Lazy MCP: each configured server is a skill (declared, not connected). A
     load_skill connects it. Re-declared at each turn boundary so an add/enable/
     remove is picked up without a restart. }
@@ -596,11 +680,11 @@ begin
     otherwise lose its description entirely, since the fragment now carries only
     state. }
   FLoop.StablePrompt := FSkills.StableText;
-  { The board's explanation rides the stable half too: the TOC element is data
-    only, so a model that has never seen a board needs to be told what one is. }
-  if FBoardStore <> nil then
-    FLoop.StablePrompt := FLoop.StablePrompt + LineEnding + LineEnding +
-      BoardStableText;
+  { The board's and the task list's explanations ride the stable half too: those
+    tail elements are data only, so a model that has never seen either needs to
+    be told what it is. Composed in one place so an MCP reconcile cannot drop
+    them. }
+  ComposeStablePrompt;
   { The change log attributes each change to the turn it happened in. }
   FLoop.OnTurnOpened := NoteTurnOpened;
   if FMcp <> nil then
