@@ -1,6 +1,6 @@
 # Feature: Workspace Board
 
-**Status:** Specified — `Message_Board_v1.SPEC.md` and `_v1.TODO.md`.
+**Status:** Implemented — `Message_Board_v1.SPEC.md` and `_v1.DONE.md`.
 
 **Related:** [Context Checkpoint](../Context_Checkpoint/FEATURE.md) ·
 [File Changes](../File_Changes/FEATURE.md) ·

@@ -57,7 +57,7 @@ tail, and moderation behind approval. TDD-first; `make check` before moving on.
       an approval soft-deletes and the entry leaves default reads.
 - [x] **Test**: `restore` clears `deleted_at`/`deleted_by`.
 - [x] **Test**: `lock` makes `board_post` to that topic refuse, naming the locker.
-- [ ] **Test**: `pin` and `move` are gated the same way.
+- [x] **Test**: `pin` and `move` are gated the same way.
 - [x] **Implement** the ask and the five operations.
 
 ### Phase 5: The tail TOC
@@ -65,18 +65,18 @@ tail, and moderation behind approval. TDD-first; `make check` before moving on.
 - [x] **Test**: `Toc` counts unread since a cursor, plus questions/decisions/findings
       and the last-post age.
 - [x] **Test**: the rendered element is under 120 bytes and carries no titles.
-- [ ] **Test**: under budget pressure the drop order is `f`, `d`, `q` — `unread`
+- [x] **Test**: under budget pressure the drop order is `f`, `d`, `q` — `unread`
       and `last` always survive.
 - [x] **Implement** the provider fragment.
 - [x] **Test**: the element appears on the **last message** only, and the header
       prose lives in `StableText` rather than the element.
-- [ ] **Implement** the `StableText` contribution.
+- [x] **Implement** the `StableText` contribution.
 
 ### Phase 6: Transient notices
 
 - [x] **Test**: a new entry since the cursor produces **no** `messages` row.
 - [x] **Test**: several new entries coalesce into **one** notice per drain.
-- [ ] **Test**: an answer to a question this session asked carries the title.
+- [x] **Test**: an answer to a question this session asked carries the title.
 - [x] **Implement** `pkBoard` in the prompt queue and the drain.
 
 ### Phase 7: Staleness and search
@@ -84,7 +84,8 @@ tail, and moderation behind approval. TDD-first; `make check` before moving on.
 - [x] **Test**: an entry naming a path reports 0 changes when fresh, N after N
       recorded changes to that path.
 - [x] **Implement** the join against `file_changes`.
-- [ ] **FTS**: index board bodies so one search spans messages and board. The table exists (v14); nothing writes to it, so search does not yet span the board.
+- [x] **FTS**: index board bodies so one search spans messages and board. **Done**:
+  `Append` indexes in the same critical section and `board_read` takes `query`.
 
 ### Phase 8: Wiring
 
@@ -114,19 +115,19 @@ tail, and moderation behind approval. TDD-first; `make check` before moving on.
 Five things the SPEC asks for that the code does not yet do. Each is a real gap,
 not a formality:
 
-- [ ] **FTS**: `board_fts` exists from migration v14 and nothing writes to it, so
+- [x] **FTS**: `board_fts` exists from migration v14 and nothing writes to it, so
   a search still cannot span the board. Needs an insert on `board_post` and a
   delete-with-restore path.
-- [ ] **`move`** moderation op: re-topicking an entry. The other five
+- [x] **`move`** moderation op: re-topicking an entry. The other five
   (`delete`, `restore`, `pin`, `unpin`, `lock`, `unlock`) are implemented; `move`
   is not, and it is the one that would need the cross-topic guard revisited.
-- [ ] **TOC drop order** under budget pressure: `f`, `d`, `q`, keeping `unread`
+- [x] **TOC drop order** under budget pressure: `f`, `d`, `q`, keeping `unread`
   and `last`. The element is capped at 120 bytes, but it truncates mid-field
   rather than dropping whole fields in that order.
-- [ ] **Board `StableText`**: the prose explaining what a board is still lives
+- [x] **Board `StableText`**: the prose explaining what a board is still lives
   nowhere. The TOC element is pure data (as designed), so the explanation needs
   an addition to the stable prompt alongside the skill descriptions.
-- [ ] **A `reply_to` answering this session's own question carries the title** in
+- [x] **A `reply_to` answering this session's own question carries the title** in
   its notice. Today every notice is the same coalesced count.
 
 Also worth knowing for whoever picks this up: **`pin` is stored and rendered but
