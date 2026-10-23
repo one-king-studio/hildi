@@ -349,7 +349,7 @@ end;
 function DefaultMigrations: TMigrationArray;
 begin
   Result := nil;
-  SetLength(Result, 14);
+  SetLength(Result, 15);
   Result[0].Version := 1;
   Result[0].Name := 'session history';
   Result[0].Statements := [
@@ -682,6 +682,36 @@ begin
       messages index does. }
     'CREATE VIRTUAL TABLE board_fts USING fts5(' +
       'title, body, topic, session_id UNINDEXED, entry_id UNINDEXED)'
+  ];
+  { v15: the task list (src/hildegard.helper.tasks). Additive. Mutable state, by
+    contrast with the board: a card's status changes and the change is the point.
+    One level of nesting is enforced in code, not by the schema, because the
+    refusal needs a message. }
+  Result[14].Version := 15;
+  Result[14].Name := 'task list';
+  Result[14].Statements := [
+    'CREATE TABLE task_cards (' +
+      'id INTEGER PRIMARY KEY AUTOINCREMENT, ' +
+      'workspace_id INTEGER NOT NULL, ' +
+      'title TEXT NOT NULL, ' +
+      'body TEXT NOT NULL DEFAULT '''', ' +
+      'status INTEGER NOT NULL DEFAULT 0, ' +
+      'claimed_by TEXT NOT NULL DEFAULT '''', ' +
+      'claimed_at INTEGER NOT NULL DEFAULT 0, ' +
+      'status_at INTEGER NOT NULL DEFAULT 0, ' +
+      'blocked_on_id INTEGER NOT NULL DEFAULT 0, ' +
+      'blocked_on_kind INTEGER NOT NULL DEFAULT 0, ' +
+      'parent INTEGER NOT NULL DEFAULT 0, ' +
+      'position INTEGER NOT NULL DEFAULT 0, ' +
+      'from_session TEXT NOT NULL DEFAULT '''', ' +
+      'from_label TEXT NOT NULL DEFAULT '''', ' +
+      'done_note TEXT NOT NULL DEFAULT '''', ' +
+      'created_at INTEGER NOT NULL, ' +
+      'updated_at INTEGER NOT NULL)',
+    'CREATE INDEX idx_tasks_ws_status ON task_cards (workspace_id, status, ' +
+      'position)',
+    'CREATE INDEX idx_tasks_ws_parent ON task_cards (workspace_id, parent)',
+    'CREATE INDEX idx_tasks_ws_claim ON task_cards (workspace_id, claimed_by)'
   ];
 end;
 
