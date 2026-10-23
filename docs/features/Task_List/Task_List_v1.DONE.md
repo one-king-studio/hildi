@@ -146,6 +146,36 @@ Shipped. Six commits, 1,767 tests, leak-clean.
 6. **`TBlockerKind` gained `tbkNone`** as its first ordinal, so a zeroed record is
    "not blocked" rather than "blocked on a card with id 0".
 
+7. **A stale claim is now *recovered*, not only *detectable*.** The SPEC, and the
+   risk table in `FEATURE.md` ("Claim-and-vanish"), settled for mitigation by
+   visibility: `ClaimedAt` shows, so a stale claim is detectable, and
+   `task_reassign` (gated) can take it back. That is a mitigation that needs the
+   operator to be present and watching, which is the case least likely to hold on
+   a remote device. The claim is deliberately **not a lock** — the CAS guards a
+   single transition, it does not hold anything between turns — so a session that
+   dies mid-card held it forever.
+
+   Two halves close it, and they belong together (`ITaskStore`, after the tools
+   were written):
+
+   - **`RenewClaims`** moves `claimed_at` to now for every card this session
+     holds. It is called at the **turn boundary**, because opening a turn *is*
+     the heartbeat: an agent that is working never looks dead, and no background
+     timer is needed. This is why the lease is a duration rather than a
+     liveness probe.
+   - **`ReclaimStale`** returns a claim older than the lease to `open`, unheld,
+     recording who held it in `done_note`. A card silently reappearing as open
+     loses the fact that anyone had it; the note keeps it.
+
+   It never touches a fresh claim (someone is working), an unclaimed card, or a
+   finished one. Wired in `THarnessSession` beside `Prune`, both failures
+   swallowed — nothing in the tail may fail a turn.
+
+   **Cost:** a session older than the lease that is *not* opening turns is
+   indistinguishable from a dead one, so its card can be reclaimed. That is the
+   intended trade — a live claim that is silently stale is the bug being fixed —
+   but it does mean the lease is a real setting, not a formality.
+
 ## Bugs found during implementation
 
 - **`Transition` never called `IsLegalTransition`** — dead code with passing tests.

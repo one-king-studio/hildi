@@ -313,6 +313,10 @@ They compose rather than overlap:
   hatch from the current card.
 - **Claim-and-vanish.** An agent claims a card and dies. Mitigation: `ClaimedAt`
   is visible, so a stale claim is detectable; reassignment exists and is gated.
+  Recovery no longer depends on an operator noticing: the turn boundary renews a
+  working session's claims, and a claim older than the lease is returned to
+  `open` with the holder recorded in `done_note` (see Deviation 7 in
+  `Task_List_v1.DONE.md`).
 - **Decomposition thrash.** Agents split work endlessly. Mitigation: one level of
   nesting, hard.
 - **Duplicated cards.** Two agents create the same task. Mitigation: none
