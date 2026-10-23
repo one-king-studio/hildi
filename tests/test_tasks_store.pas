@@ -57,6 +57,11 @@ type
     procedure TestPruneKeepsOnlyTheNewestDoneCards;
     procedure TestTheCountRuleNeverTouchesLiveCards;
     procedure TestTheCountRuleNeverDropsACardsBlocker;
+    { List's filters and ordering: the plan's Phase 1, exercised directly. }
+    procedure TestListFiltersByStatus;
+    procedure TestListFiltersByMine;
+    procedure TestListFiltersByParent;
+    procedure TestListOrdersByUpdatedAtThenId;
   end;
 
 implementation
@@ -588,6 +593,90 @@ begin
   AssertTrue('found', Found);
   AssertEquals('still open', Ord(tsOpen), Ord(Back.Status));
   AssertEquals('and nobody holds it', '', Back.ClaimedBy);
+end;
+
+procedure TTaskStoreTest.TestListFiltersByStatus;
+var
+  OpenId, DoneId: Integer;
+  F: TTaskFilter;
+  Rows: TTaskCardArray;
+  Err: string;
+begin
+  AssertTrue('open card', AddCard('still open', OpenId));
+  AssertTrue('done card', AddCard('finished', DoneId));
+  ClaimOk(DoneId, 'sess-a');
+  AssertTrue('finish', FTasks.Transition(1, DoneId, tsClaimed, tsDone, 'sess-a',
+    0, tbkNone, 'x', Err));
+
+  F := Default(TTaskFilter);
+  F.Status := tsDone;
+  F.StatusSet := True;
+  AssertTrue('list done', FTasks.List(1, F, Rows, Err));
+  AssertEquals('only the done one', 1, Length(Rows));
+  AssertEquals('and it is the right card', DoneId, Rows[0].Id);
+
+  F := Default(TTaskFilter);
+  F.Status := tsOpen;
+  F.StatusSet := True;
+  AssertTrue('list open', FTasks.List(1, F, Rows, Err));
+  AssertEquals('only the open one', 1, Length(Rows));
+  AssertEquals('and it is the right card', OpenId, Rows[0].Id);
+end;
+
+procedure TTaskStoreTest.TestListFiltersByMine;
+var
+  MineId, TheirsId: Integer;
+  F: TTaskFilter;
+  Rows: TTaskCardArray;
+  Err: string;
+begin
+  AssertTrue('mine', AddCard('mine', MineId));
+  AssertTrue('theirs', AddCard('theirs', TheirsId));
+  ClaimOk(MineId, 'sess-a');
+  ClaimOk(TheirsId, 'sess-b');
+
+  F := Default(TTaskFilter);
+  F.Mine := True;
+  F.MineSession := 'sess-a';
+  AssertTrue('list mine', FTasks.List(1, F, Rows, Err));
+  AssertEquals('only sess-a''s', 1, Length(Rows));
+  AssertEquals('and it is mine', MineId, Rows[0].Id);
+end;
+
+procedure TTaskStoreTest.TestListFiltersByParent;
+var
+  ParentId, AId, BId: Integer;
+  F: TTaskFilter;
+  Rows: TTaskCardArray;
+  Err: string;
+begin
+  AssertTrue('parent', AddCard('parent', ParentId));
+  AssertTrue('child a', AddCard('child a', AId, ParentId));
+  AssertTrue('child b', AddCard('child b', BId, ParentId));
+
+  F := Default(TTaskFilter);
+  F.Parent := ParentId;
+  AssertTrue('list subtasks', FTasks.List(1, F, Rows, Err));
+  AssertEquals('both children, not the parent', 2, Length(Rows));
+end;
+
+procedure TTaskStoreTest.TestListOrdersByUpdatedAtThenId;
+var
+  AId, BId: Integer;
+  F: TTaskFilter;
+  Rows: TTaskCardArray;
+  Err: string;
+begin
+  { Cards added in the same second share updated_at, so id DESC is the
+    tiebreaker. Without it the order is arbitrary and the tail names the wrong
+    three - a bug this suite caught once already. }
+  AssertTrue('a', AddCard('first added', AId));
+  AssertTrue('b', AddCard('second added', BId));
+  F := Default(TTaskFilter);
+  AssertTrue('list', FTasks.List(1, F, Rows, Err));
+  AssertEquals('two cards', 2, Length(Rows));
+  AssertEquals('the newer id comes first', BId, Rows[0].Id);
+  AssertEquals('then the older', AId, Rows[1].Id);
 end;
 
 initialization
