@@ -14,7 +14,7 @@ uses
   Classes, SysUtils, StrUtils, fpcunit, testregistry,
   hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.approval,
   hildegard.helper.store, hildegard.helper.tasks, hildegard.helper.tasks.store,
-  hildegard.helper.tasks.tools;
+  hildegard.helper.tasks.tools, hildegard.helper.sqlite;
 
 type
   TFakeTaskApproval = class(TInterfacedObject, IApprovalService)
@@ -42,6 +42,7 @@ type
     function QuestionHook(AWorkspaceId, AId: Integer;
       out ATitle: string): Boolean;
     function IdFromResult(const AText: string): Integer;
+    procedure AgeCard(AId: Integer; ASecondsAgo: Integer);
     function AddOne(const ATitle: string; AParent: Integer = 0): Integer;
     function ClaimOne(AId: Integer): Boolean;
     function Call(AHandler: TToolHandler; const AJson: string;
@@ -76,6 +77,10 @@ type
     procedure TestTheQueueIsEmptyWithNoWork;
     procedure TestTheQueueStaysInsideItsBudgetWithAHundredCards;
     procedure TestTheQueueDropOrderNeverLosesMine;
+    { A block is shown when it is yours OR has gone stale, and not otherwise. }
+    procedure TestTheQueueShowsYourOwnBlockImmediately;
+    procedure TestTheQueueShowsAStaleBlockHeldByAnotherSession;
+    procedure TestTheQueueHidesAFreshBlockHeldByAnotherSession;
   end;
 
 implementation
@@ -691,6 +696,95 @@ begin
     because the count still tells you it is there. }
   AssertTrue('and the open list gave way: ' + Line,
     Pos('an unclaimed backlog item', Line) = 0);
+end;
+
+procedure TTaskToolsTest.AgeCard(AId: Integer; ASecondsAgo: Integer);
+var
+  Sql: string;
+begin
+  { The store's seam offers no way to backdate a card, and the staleness rule is
+    a pure function of status_at. Reaching for the db directly is the honest way
+    to test a clock-dependent rule without sleeping for thirty minutes. }
+  Sql := 'UPDATE task_cards SET status_at = status_at - ' +
+    IntToStr(ASecondsAgo) + ' WHERE id = ' + IntToStr(AId);
+  AssertEquals('aged card ' + IntToStr(AId), SQLITE_OK,
+    sqlite3_exec(FStore.Db, PAnsiChar(AnsiString(Sql)), nil, nil, nil));
+end;
+
+procedure TTaskToolsTest.TestTheQueueShowsYourOwnBlockImmediately;
+var
+  BlockedId, BlockerId: Integer;
+  Res, Err, Line: string;
+begin
+  { Yours is shown at once: you are the one who needs to know you are stuck. }
+  BlockerId := AddOne('the blocker');
+  BlockedId := AddOne('mine and blocked');
+  AssertTrue('claim', ClaimOne(BlockedId));
+  AssertTrue('block', Call(FTools.TransitionCard, '{"op":"block","id":' +
+    IntToStr(BlockedId) + ',"blocked_on":"' + IntToStr(BlockerId) +
+    '","reason":"t"}', Res, Err));
+  Line := FTools.QueueLine(Err);
+  AssertTrue('a fresh block of your own is shown: ' + Line,
+    Pos('blocked="', Line) > 0);
+end;
+
+procedure TTaskToolsTest.TestTheQueueShowsAStaleBlockHeldByAnotherSession;
+var
+  BlockedId, BlockerId: Integer;
+  Res, Err, Line: string;
+  Other: TTaskTool;
+begin
+  { A block nobody is moving is the orchestrator's problem - but only once it has
+    sat. Past the threshold it becomes every agent's problem, and it must appear
+    even though it is not in Mine. }
+  BlockerId := AddOne('the blocker');
+  BlockedId := AddOne('someone else is stuck on this');
+  Other := TTaskTool.Create(FTasks, 1, 'sess-b', 'parent', nil, nil);
+  try
+    AssertTrue('sess-b claims', Call(Other.ClaimCard,
+      '{"id":' + IntToStr(BlockedId) + ',"reason":"t"}', Res, Err));
+    AssertTrue('and blocks', Call(Other.TransitionCard, '{"op":"block","id":' +
+      IntToStr(BlockedId) + ',"blocked_on":"' + IntToStr(BlockerId) +
+      '","reason":"t"}', Res, Err));
+  finally
+    Other.Free;
+  end;
+  { Fresh: not this session's, not yet stale, so it stays out of the tail. }
+  Line := FTools.QueueLine(Err);
+  AssertTrue('a fresh block of someone else''s is hidden: ' + Line,
+    Pos('blocked="', Line) = 0);
+  { Now let it sit past the threshold. }
+  AgeCard(BlockedId, (StaleBlockMinutes + 5) * 60);
+  Line := FTools.QueueLine(Err);
+  AssertTrue('a stale block of someone else''s is shown: ' + Line,
+    Pos('blocked="', Line) > 0);
+  AssertTrue('naming it: ' + Line, Pos('#' + IntToStr(BlockedId), Line) > 0);
+end;
+
+procedure TTaskToolsTest.TestTheQueueHidesAFreshBlockHeldByAnotherSession;
+var
+  BlockedId, BlockerId: Integer;
+  Res, Err, Line: string;
+  Other: TTaskTool;
+begin
+  { The same card, one second short of the threshold: still hidden. This is the
+    half that makes the threshold mean something rather than "always show". }
+  BlockerId := AddOne('the blocker');
+  BlockedId := AddOne('recently blocked elsewhere');
+  Other := TTaskTool.Create(FTasks, 1, 'sess-b', 'parent', nil, nil);
+  try
+    AssertTrue('sess-b claims', Call(Other.ClaimCard,
+      '{"id":' + IntToStr(BlockedId) + ',"reason":"t"}', Res, Err));
+    AssertTrue('and blocks', Call(Other.TransitionCard, '{"op":"block","id":' +
+      IntToStr(BlockedId) + ',"blocked_on":"' + IntToStr(BlockerId) +
+      '","reason":"t"}', Res, Err));
+  finally
+    Other.Free;
+  end;
+  AgeCard(BlockedId, (StaleBlockMinutes * 60) - 60);
+  Line := FTools.QueueLine(Err);
+  AssertTrue('one minute short of stale is still hidden: ' + Line,
+    Pos('blocked="', Line) = 0);
 end;
 
 initialization

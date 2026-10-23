@@ -53,6 +53,11 @@ type
       so its length is how many are named, never how many exist. }
     function OpenCount(AWorkspaceId: Integer; out ACount: Integer;
       out AError: string): Boolean;
+    { Blocked cards, oldest first. The tail needs these because a block is only
+      worth surfacing when it is yours OR has gone stale - and a card held by
+      another session never appears in Mine. }
+    function BlockedCards(AWorkspaceId, ALimit: Integer;
+      out ACards: TTaskCardArray; out AError: string): Boolean;
   end;
 
 type
@@ -87,6 +92,8 @@ type
       out ACards: TTaskCardArray; out AError: string): Boolean;
     function OpenCount(AWorkspaceId: Integer; out ACount: Integer;
       out AError: string): Boolean;
+    function BlockedCards(AWorkspaceId, ALimit: Integer;
+      out ACards: TTaskCardArray; out AError: string): Boolean;
   end;
 
 const
@@ -638,6 +645,45 @@ begin
       sqlite3_bind_int(Stmt, 2, Ord(tsOpen));
       if sqlite3_step(Stmt) = SQLITE_ROW then
         ACount := sqlite3_column_int(Stmt, 0);
+      Result := True;
+    finally
+      sqlite3_finalize(Stmt);
+    end;
+  finally
+    FStore.Lock.Release;
+  end;
+end;
+
+function TSqliteTaskStore.BlockedCards(AWorkspaceId, ALimit: Integer;
+  out ACards: TTaskCardArray; out AError: string): Boolean;
+var
+  Stmt: Psqlite3_stmt;
+  N, Lim: Integer;
+begin
+  { Oldest first: the tail shows a block because it has sat too long, so the
+    longest-waiting is the one worth naming. }
+  Result := False;
+  ACards := nil;
+  AError := '';
+  N := 0;
+  Lim := ALimit;
+  if Lim <= 0 then
+    Lim := 3;
+  FStore.Lock.Acquire;
+  try
+    if not Prepare('SELECT ' + TaskColumns + ' FROM task_cards ' +
+      'WHERE workspace_id = ? AND status = ? ORDER BY status_at, id LIMIT ' +
+      IntToStr(Lim), Stmt, AError) then
+      Exit;
+    try
+      sqlite3_bind_int(Stmt, 1, AWorkspaceId);
+      sqlite3_bind_int(Stmt, 2, Ord(tsBlocked));
+      while sqlite3_step(Stmt) = SQLITE_ROW do
+      begin
+        SetLength(ACards, N + 1);
+        Fill(Stmt, ACards[N]);
+        Inc(N);
+      end;
       Result := True;
     finally
       sqlite3_finalize(Stmt);

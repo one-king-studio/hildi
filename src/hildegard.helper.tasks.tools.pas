@@ -946,6 +946,8 @@ var
   I, OpenTotal: Integer;
   Now2: Int64;
   First: Boolean;
+  Blocks: TTaskCardArray;
+  ShowBlock: Boolean;
 
   { Three parts, deliberately asymmetric: `mine` is the agent's own commitment
     and is always shown; `open` names at most three; `blocked` is shown only when
@@ -987,14 +989,29 @@ begin
     MinePart := MinePart + '#' + IntToStr(Mine[I].Id) + ' ' +
       OneLine(Mine[I].Title) + ' (' +
       AgeLabel(Mine[I].ClaimedAt, Now2) + ')';
-    { A blocked card is worth surfacing only when it is THIS session's, or has
-      sat longer than the threshold. A blocked card nobody owns is the
-      orchestrator's problem, not every agent's. }
-    if (Mine[I].Status = tsBlocked) and
-       (AgeLabel(Mine[I].StatusAt, Now2) <> '') then
-      BlockedPart := '#' + IntToStr(Mine[I].Id) + ' on ' +
-        BlockerKindToName(Mine[I].BlockedOnKind) + ' #' +
-        IntToStr(Mine[I].BlockedOnId);
+  end;
+  { A block is worth surfacing when it is THIS session's, or has sat longer than
+    the threshold. A block nobody owns - not yours, and not yet stale - is the
+    orchestrator's problem, not every agent's. Both halves need real data: the
+    first from Mine, the second from every blocked card in the workspace, which
+    Mine can never show. }
+  BlockedPart := '';
+  if FStore.BlockedCards(FWorkspaceId, 3, Blocks, Err) then
+  begin
+    for I := 0 to High(Blocks) do
+    begin
+      ShowBlock := Blocks[I].ClaimedBy = FSessionId;
+      { status_at, not claimed_at: how long it has been BLOCKED is the question. }
+      if not ShowBlock then
+        ShowBlock := (Now2 - Blocks[I].StatusAt) >= (StaleBlockMinutes * 60);
+      if not ShowBlock then
+        Continue;
+      if BlockedPart <> '' then
+        BlockedPart := BlockedPart + ' · ';
+      BlockedPart := BlockedPart + '#' + IntToStr(Blocks[I].Id) + ' on ' +
+        BlockerKindToName(Blocks[I].BlockedOnKind) + ' #' +
+        IntToStr(Blocks[I].BlockedOnId);
+    end;
   end;
   if FStore.OpenCards(FWorkspaceId, 3, Open, Err) then
   begin
