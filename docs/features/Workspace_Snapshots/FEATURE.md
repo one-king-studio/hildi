@@ -14,6 +14,9 @@ What is **built**:
   (`hildegard.helper.changes.store`, migration v13), with **16-turn retention**
   enforced at the same boundary. A change is a patch anchored by its before/after
   hash, which is what makes it replayable and what makes a write a compare-and-swap.
+  The patch is built from the two texts the recorder already holds, so a captured
+  call replays; a side that was never captured (a process-tier modification whose
+  before-text nobody read) stores no patch and says so rather than inventing one.
 - **One consumer.** The board's staleness check reads the log
   (`ChangedSince`), which is what makes a board entry call itself stale.
 
@@ -27,7 +30,9 @@ What is **not built**, and is the remaining work:
   in the live path writes a keyframe and nothing replays. Replay is therefore
   *unbounded in principle* today — the retention window (16 turns) is what actually
   bounds the table. Wiring the keyframe interval is a prerequisite for undo/redo,
-  not an optimisation to defer.
+  not an optimisation to defer. The patches themselves are now recorded, so replay
+  has something to apply; what is still missing is the keyframe that bounds how far
+  back it must start.
 
 **Related:** [File Changes](../File_Changes/FEATURE.md) ·
 [Workspace Board](../Message_Board/FEATURE.md) ·
