@@ -863,7 +863,7 @@ function TBuiltinCommands.Grep(const ACall: TShellCall): TShellResult;
 var
   I, J, P: Integer;
   ShowN, IgnoreCase, Invert, ListOnly, CountOnly, Fixed, Extended,
-    Recursive: Boolean;
+    Recursive, Quiet, NoFilename: Boolean;
   MaxCount, MatchSoFar: Integer;
   Args: TStringArray;
   Pattern, Data, E, Text, Full: string;
@@ -887,9 +887,10 @@ var
       else if Matcher.Matches(Ls[K]) then
       begin
         Inc(Count);
-        if ListOnly or CountOnly then
+        if ListOnly or CountOnly or Quiet then
           Continue;
-        if AShowName then
+        { -h drops the filename a multi-file search would print. }
+        if AShowName and (not NoFilename) then
           OutText := OutText + AName + ':';
         if ShowN then
           OutText := OutText + IntToStr(K + 1) + ':';
@@ -901,7 +902,7 @@ var
       OutText := OutText + AName + #10;
     if CountOnly then
     begin
-      if AShowName then
+      if AShowName and (not NoFilename) then
         OutText := OutText + AName + ':';
       OutText := OutText + IntToStr(Count) + #10;
     end;
@@ -1010,6 +1011,8 @@ begin
   Fixed := False;
   Extended := False;
   Recursive := False;
+  Quiet := False;
+  NoFilename := False;
   MaxCount := 0;
   I := 0;
   while I <= High(ACall.Args) do
@@ -1046,6 +1049,8 @@ begin
           'E': Extended := True;
           'G': Extended := False;
           'r': Recursive := True;
+          'q': Quiet := True;
+          'h': NoFilename := True;
           'm':
             begin
               if J < Length(ACall.Args[I]) then

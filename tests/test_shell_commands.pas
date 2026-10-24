@@ -387,6 +387,18 @@ begin
   AssertEquals('list', 'a.txt' + #10 + 'b.txt' + #10, R.Stdout);
   R := RunCmd('grep', ['beta'], 'beta' + #10 + 'no' + #10);
   AssertEquals('stdin', 'beta' + #10, R.Stdout);
+  { -q says nothing and sets the status - what a script branches on. }
+  R := RunCmd('grep', ['-q', 'beta', 'a.txt']);
+  AssertEquals('quiet hit status', 0, R.ExitCode);
+  AssertEquals('quiet says nothing', '', R.Stdout);
+  R := RunCmd('grep', ['-q', 'nomatch', 'a.txt']);
+  AssertEquals('quiet miss status', 1, R.ExitCode);
+  { -h drops the filename a multi-file search would otherwise print. }
+  R := RunCmd('grep', ['beta', 'a.txt', 'b.txt']);
+  AssertEquals('multi-file names', 'a.txt:beta' + #10 + 'b.txt:beta' + #10,
+    R.Stdout);
+  R := RunCmd('grep', ['-h', 'beta', 'a.txt', 'b.txt']);
+  AssertEquals('no names', 'beta' + #10 + 'beta' + #10, R.Stdout);
 end;
 
 procedure TShellCommandsTest.TestGrepRegex;
