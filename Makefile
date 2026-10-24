@@ -329,6 +329,16 @@ $(BIN)/hildegard-smoke: $(EXAMPLES)/smoke.pas $(TESTS)/smoke_runner.pas $(TESTS)
 # All quality gates, for CI: functional tests + leak check + library isolation.
 check: test test-leak shell-standalone
 
+# The same functional suite, one process per suite, in parallel. Measured on a
+# 10-core machine: ~169 s and 36 spurious failures as one process, ~22 s and 0
+# failures this way. The isolation matters more than the speed - those 36 were
+# intra-process state pollution, and they pass when a suite gets its own process.
+# Not a replacement for `check`: the leak gate needs one process per suite too
+# before it can be split. See scripts/test-parallel.sh.
+test-parallel: libsqlite libmbedtls $(BIN)/hildegard-helper-tests \
+    $(BIN)/hildegard-helper-agent
+	scripts/test-parallel.sh $(SUITE)
+
 release: $(BIN)/hildegard-helper-demo-release
 
 $(BIN)/hildegard-helper-demo-release: $(EXAMPLES)/demo_harness.pas $(LIB_SRCS)

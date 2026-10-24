@@ -77,6 +77,10 @@ type
     function StoreConfig: TStoreConfig;
     function MakeRuntime(const ASessionId: string;
       ATransport: TLLMTransport; AIdleMs: Integer = 60000): TSessionRuntime;
+    { With an explicit client-exit grace, so a test about the shutdown mechanism
+      does not have to live through the production default to prove it works. }
+    function MakeRuntimeGrace(const ASessionId: string;
+      ATransport: TLLMTransport; AIdleMs, AGraceMs: Integer): TSessionRuntime;
     function MakeRuntimeCapped(const ASessionId: string;
       ATransport: TLLMTransport; AMaxReplayEvents: Integer): TSessionRuntime;
     function MakeClientConfig(const ASessionId: string; ARole: TSessionRole;
@@ -94,6 +98,9 @@ type
   published
     procedure TestSocketPathFitsUnixLimit;
     procedure TestIdleExitConfigDefault;
+    { The shutdown grace's default is a CONFIG value, not a behaviour to live
+      through: asserting it here keeps the mechanism test free to use a fast one. }
+    procedure TestClientExitGraceConfigDefault;
     procedure TestIdleTimeoutBlocksWithAClient;
     procedure TestStaleSocketRecovered;
     procedure TestSecondRuntimeExits;
@@ -124,6 +131,12 @@ implementation
 
 uses
   DateUtils;
+
+const
+  { A client-exit grace short enough that a test about the shutdown mechanism
+    does not spend the production default (2000 ms) proving it fires. The
+    default itself is asserted by TestClientExitGraceConfigDefault. }
+  FastGraceMs = 150;
 
 { TRecordingSink }
 
@@ -360,6 +373,24 @@ begin
     raise Exception.Create('runtime: ' + Err);
 end;
 
+function TSessionRuntimeTest.MakeRuntimeGrace(const ASessionId: string;
+  ATransport: TLLMTransport; AIdleMs, AGraceMs: Integer): TSessionRuntime;
+var
+  Cfg: TSessionRuntimeConfig;
+  Err: string;
+begin
+  Cfg := Default(TSessionRuntimeConfig);
+  Cfg.SessionId := ASessionId;
+  Cfg.WorkspacePath := FWs;
+  Cfg.StorePath := FDbPath;
+  Cfg.IdleExitMs := AIdleMs;
+  Cfg.ClientExitGraceMs := AGraceMs;
+  Cfg.Transport := ATransport;
+  Result := TSessionRuntime.Open(Cfg, Err);
+  if Result = nil then
+    raise Exception.Create('runtime: ' + Err);
+end;
+
 function TSessionRuntimeTest.MakeRuntimeCapped(const ASessionId: string;
   ATransport: TLLMTransport; AMaxReplayEvents: Integer): TSessionRuntime;
 var
@@ -462,6 +493,16 @@ procedure TSessionRuntimeTest.TestIdleExitConfigDefault;
 begin
   AssertEquals('idle exit default', 300000, DefaultIdleExitMs);
   AssertEquals('spawn timeout default', 5000, DefaultSpawnTimeoutMs);
+end;
+
+procedure TSessionRuntimeTest.TestClientExitGraceConfigDefault;
+begin
+  { Short enough that a closed TUI does not strand a runtime, long enough to
+    cancel on a quick reattach. Asserting the constant is what lets the shutdown
+    test use a fast grace without losing coverage of the production value.
+    (No `FastGraceMs < DefaultClientExitGraceMs` assertion: both are constants,
+    so it is a tautology the compiler rejects under -Sew.) }
+  AssertEquals('client exit grace default', 2000, DefaultClientExitGraceMs);
 end;
 
 procedure TSessionRuntimeTest.TestStaleSocketRecovered;
@@ -1208,7 +1249,11 @@ var
   Err: string;
 begin
   Id := NewSession;
-  Rt := MakeRuntime(Id, nil, 300000);
+  { A SHORT grace, because this test is about the MECHANISM, not the default. The
+    default is asserted separately (TestClientExitGraceDefault) and does not need
+    to be lived through: waiting the full 2000 ms made this the suite's
+    second-slowest test for no added coverage. }
+  Rt := MakeRuntimeGrace(Id, nil, 300000, FastGraceMs);
   Th := TRuntimeThread.Create(Rt);
   try
     Th.Start;
@@ -1218,8 +1263,7 @@ begin
     AssertNotNull('driver attaches: ' + Err, Client);
     Client.Free;   { disconnect the last client }
     Sink := nil;
-    { The runtime exits within the no-clients grace (default 2000ms), well under
-      the 300s idle timeout. }
+    { The runtime exits once the grace elapses, well under the 300s idle timeout. }
     AssertTrue('exits after the last client leaves', WaitFinished(Th, 6000));
     AssertEquals('clean exit', 0, Th.ExitCode);
   finally
