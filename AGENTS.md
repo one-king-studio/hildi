@@ -57,11 +57,54 @@ All artifacts land under `build/`.
 - `make test` - build & run the whole fpcunit suite
 - `make test SUITE=<name>` - run one suite or a single test method
   (comma-separated lists allowed)
+- `make test-parallel [SUITE="<names>"]` - the same suite, one process per
+  suite, in parallel (see below)
 - `make test-leak` - run the suite under heaptrc; fails (exit 203) on leaks
 - `make check` - all gates: `test` + `test-leak` (run before considering work done)
 - `make watch [TARGET=test-leak]` - auto-rerun on source changes
 - `make release` - optimized example build
 - `make clean` - remove build artifacts
+
+### Parallel testing
+
+`make test` runs all ~1,800 tests in **one process**. `make test-parallel` runs
+each suite in **its own process**, `$(cores)` at a time:
+
+```
+make test-parallel                        # every suite, auto-discovered
+make test-parallel SUITE="TSessionRuntimeTest TBoardStoreTest"
+HILDEGARD_TEST_JOBS=4 make test-parallel  # cap the workers
+```
+
+Measured on a 10-core machine, 1,826 tests:
+
+| Mode | Time | Failures |
+| --- | --- | --- |
+| `make test` (one process, `--all`) | ~169 s | see below |
+| one process per suite, serial | ~100 s | 0 |
+| one process per suite, 10-way | **~22 s** | 0 |
+
+Two reasons to prefer it while iterating, and the second is not about speed:
+
+1. **The heavy suites are I/O-bound**, not CPU-bound - they spawn subprocesses
+   and wait on Unix sockets - so they overlap almost perfectly. The five
+   heaviest (`TSessionRuntimeTest`, `THarnessDriverTest`, `TMcpClientTest`,
+   `TSubagentSupervisorTest`, `THarnessAppTest`) go from 64 s serial to 21 s
+   with all five in flight.
+
+2. **Process isolation removes a class of failure.** Running every suite in one
+   process produces failures in the TUI/harness suites that disappear when each
+   suite gets its own process - serial or parallel, same tests, same order. That
+   is intra-process state pollution, not a real defect. Until the shared state is
+   found, one-process-per-suite is the trustworthy reading.
+
+`test-parallel` refuses to start without `build/bin/hildegard-helper-agent`: the
+integration suites spawn it, and its absence alone produces ~36 spurious
+failures. `make headless-agent` builds it.
+
+It is **not a replacement for `make check`** - the leak gate (`test-leak`) still
+runs as one process and is not parallelized yet.
+
 
 ## Development Workflow
 
