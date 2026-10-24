@@ -130,7 +130,7 @@ type
 const
   { Box drawing, from the design language's light family. }
   ChTL = '╭'; ChTR = '╮'; ChBL = '╰'; ChBR = '╯';
-  ChH = '─'; ChV = '│'; ChDotted = '┈';
+  ChH = '─'; ChV = '│'; ChDotted = '┈'; ChDouble = '═';
   ChCursor = '❯'; ChIdle = '○'; ChOk = '✓'; ChDot = '·';
   ChUp = '▲'; ChDown = '▼'; ChHash = '#';
 
@@ -519,10 +519,13 @@ begin
   VisTop := ARect.Y + 3;                    // first row a card may occupy
   VisBot := ARect.Y + ARect.H - 2;          // last row a card may occupy
 
-  { Every lane shares the board's own background, so the kanban reads as one
-    surface rather than five tinted columns. The FOCUSED lane is the exception:
-    it takes the one-shade-darker background, which is the only highlight. Cards
-    stay one shade lighter than everything, so they sit raised on either. }
+  { Every lane shares the board's own background. Focus no longer tints the
+    lane at all - the focused CARD carries the accent border, and that is the
+    only thing that moves. A lane that changed colour as well made the whole
+    column flicker as the cursor passed through it.
+    The lane HEADER band is one step brighter still (RaisedBg + 1), so the
+    header reads as a bar sitting above the lane rather than a line of text on
+    it. }
   CardFill := OnBg(FTheme.Panel, FTheme.RaisedBg);
 
   for K := 0 to VisCount - 1 do
@@ -532,29 +535,32 @@ begin
     InnerW := LaneW - 1;
     Total := Length(Lanes[L]);
 
-    if (L = FLane) and (FZone = zTasks) then
-    begin
-      LaneFill := OnBg(FTheme.Panel, FTheme.SunkenBg);
-      LaneHead := OnBg(FTheme.Accent, FTheme.SunkenBg);
-    end
-    else
-    begin
-      LaneFill := FTheme.Panel;
-      LaneHead := FTheme.Title;
-    end;
+    LaneFill := FTheme.Panel;
+    LaneHead := OnBg(FTheme.Title, FTheme.RaisedBg + 1);
 
     { The lane track: fill the column first, so cards sit on it. }
     for Y := ARect.Y + 1 to ARect.Y + ARect.H - 2 do
       S.FillRect(R(LaneX, Y, InnerW, 1), LaneFill);
 
-    { The lane header: name and count, then a dotted rule. }
-    Text(S, LaneX, ARect.Y + 1, UnicodeString(LaneTitles[L] + ' ' +
-      IntToStr(Total)), LaneHead, InnerW);
+    { The header band: the full lane width on the header row, so the title and
+      the scroll arrows sit ON a bar rather than floating. }
+    S.FillRect(R(LaneX, ARect.Y + 1, InnerW, 1),
+      OnBg(FTheme.Panel, FTheme.RaisedBg + 1));
+
+    { The lane header: padded off the lane's left edge, name and count. }
+    Text(S, LaneX + 1, ARect.Y + 1, UnicodeString(LaneTitles[L] + ' ' +
+      IntToStr(Total)), LaneHead, InnerW - 2);
+
+    { A double rule under the header. It is drawn in the same +2 colour as the
+      header text, so the header reads as one banded unit; the single hairline
+      it replaced was too quiet to separate a header from a stack of cards. }
+    for I := LaneX to LaneX + InnerW - 1 do
+      Text(S, I, ARect.Y + 2, ChDouble, LaneHead, 1);
 
     { Scroll affordance, in the header's right edge, so a clipped lane says so
       rather than looking complete. }
     if FScroll[L] > 0 then
-      Text(S, LaneX + InnerW - 2, ARect.Y + 1, ChUp, FTheme.Muted, 1);
+      Text(S, LaneX + InnerW - 2, ARect.Y + 1, ChUp, LaneHead, 1);
     if Total > 0 then
     begin
       Y := VisTop;
@@ -565,12 +571,8 @@ begin
         Inc(I);
       end;
       if I < Total then
-        Text(S, LaneX + InnerW - 1, ARect.Y + 1, ChDown, FTheme.Muted, 1);
+        Text(S, LaneX + InnerW - 1, ARect.Y + 1, ChDown, LaneHead, 1);
     end;
-
-    for I := LaneX to LaneX + InnerW - 1 do
-      Text(S, I, ARect.Y + 2, ChDotted,
-        OnBg(FTheme.Border, FTheme.SunkenBg), 1);
 
     { Cards, from the lane's scroll offset. Height is computed from the wrapped
       title, so every card is exactly as tall as its content. }
