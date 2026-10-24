@@ -222,6 +222,9 @@ begin
   AssertTrue('du', Known('du', []));
   AssertTrue('tree', Known('tree', []));
   AssertTrue('mktemp', Known('mktemp', []));
+  AssertTrue('ln', Known('ln', []));
+  AssertTrue('readlink', Known('readlink', []));
+  AssertTrue('chmod', Known('chmod', []));
   { xargs runs ANOTHER command whose own effects we cannot see from here, so it
     must stay opaque rather than claim to be a harmless read. }
   AssertFalse('xargs is opaque', Known('xargs', []));

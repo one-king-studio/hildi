@@ -81,6 +81,9 @@ type
     function Strings(const ACall: TShellCall): TShellResult;
     function Base64Cmd(const ACall: TShellCall): TShellResult;
     function Rmdir(const ACall: TShellCall): TShellResult;
+    function Ln(const ACall: TShellCall): TShellResult;
+    function Readlink(const ACall: TShellCall): TShellResult;
+    function Chmod(const ACall: TShellCall): TShellResult;
     function Nl(const ACall: TShellCall): TShellResult;
     function Du(const ACall: TShellCall): TShellResult;
     function Tree(const ACall: TShellCall): TShellResult;
@@ -156,7 +159,7 @@ type
   end;
 
 const
-  CommandSpecs: array[0..47] of TCommandSpec = (
+  CommandSpecs: array[0..50] of TCommandSpec = (
     (Name: 'echo'; Options: '-n'),
     (Name: 'head'; Options: '-nNc'),
     (Name: 'tail'; Options: '-nNc'),
@@ -178,6 +181,9 @@ const
     (Name: 'tree'; Options: '-aL'),
     (Name: 'mktemp'; Options: '-dtu'),
     (Name: 'xargs'; Options: '-nN0I'),
+    (Name: 'ln'; Options: '-sf'),
+    (Name: 'readlink'; Options: '-fe'),
+    (Name: 'chmod'; Options: ''),
     (Name: 'grep'; Options: '-nivlcFEGrm'),
     (Name: 'sed'; Options: '-nErei'),
     (Name: 'awk'; Options: '-F'),
@@ -1198,6 +1204,116 @@ begin
   else if N = 2 then
     OutText := OutText + Chr((V shr 4) and $FF);
   Result := ShellResultOk(OutText);
+end;
+
+function TBuiltinCommands.Ln(const ACall: TShellCall): TShellResult;
+var
+  I: Integer;
+  Symbolic: Boolean;
+  Target, Link, E: string;
+begin
+  { -s is the only form worth having: a hard link needs a primitive the seam does
+    not have, and an agent almost always wants a symlink. Refused by name rather
+    than silently treated as -s. }
+  Symbolic := False;
+  I := 0;
+  while (I <= High(ACall.Args)) and (ACall.Args[I] <> '') and
+    (ACall.Args[I][1] = '-') do
+  begin
+    if ACall.Args[I] = '-s' then
+      Symbolic := True
+    else if ACall.Args[I] = '-f' then
+      { Accepted; the link is created or fails, we do not unlink first. }
+    else
+      Exit(Usage('ln: unsupported option ' + ACall.Args[I]));
+    Inc(I);
+  end;
+  if not Symbolic then
+    Exit(Usage('ln: only -s (symbolic) links are supported'));
+  if I + 1 > High(ACall.Args) then
+    Exit(Usage('ln: expected TARGET LINK'));
+  Target := ACall.Args[I];
+  Link := ACall.Args[I + 1];
+  if not FFs.Symlink(Target, FFs.Resolve(ACall.Cwd, Link), E) then
+    Exit(Failure('ln: ' + Link + ': ' + E, 1));
+  Result := ShellResultOk('');
+end;
+
+function TBuiltinCommands.Readlink(const ACall: TShellCall): TShellResult;
+var
+  I: Integer;
+  Target, E, OutText: string;
+begin
+  I := 0;
+  while (I <= High(ACall.Args)) and (ACall.Args[I] <> '') and
+    (ACall.Args[I][1] = '-') do
+  begin
+    if (ACall.Args[I] = '-f') or (ACall.Args[I] = '-e') then
+      { Accepted for compatibility; we always print the stored text, never a
+        resolved path. }
+    else
+      Exit(Usage('readlink: unsupported option ' + ACall.Args[I]));
+    Inc(I);
+  end;
+  if I > High(ACall.Args) then
+    Exit(Usage('readlink: missing operand'));
+  OutText := '';
+  while I <= High(ACall.Args) do
+  begin
+    if not FFs.ReadLink(FFs.Resolve(ACall.Cwd, ACall.Args[I]), Target, E) then
+      Exit(Failure('readlink: ' + ACall.Args[I] + ': ' + E, 1));
+    OutText := OutText + Target + #10;
+    Inc(I);
+  end;
+  Result := ShellResultOk(OutText);
+end;
+
+function TBuiltinCommands.Chmod(const ACall: TShellCall): TShellResult;
+var
+  I: Integer;
+  Spec, E: string;
+  Mode: LongWord;
+  K, Digit: Integer;
+  Res: TShellResult;
+
+  function OctalOf(const S: string; out AV: LongWord): Boolean;
+  var
+    Q: Integer;
+    Acc: LongWord;
+  begin
+    Result := False;
+    AV := 0;
+    Acc := 0;
+    if S = '' then
+      Exit;
+    for Q := 1 to Length(S) do
+    begin
+      if (S[Q] < '0') or (S[Q] > '7') then
+        Exit;
+      Acc := Acc * 8 + (Ord(S[Q]) - Ord('0'));
+    end;
+    AV := Acc;
+    Result := True;
+  end;
+
+begin
+  { Octal only. Symbolic modes (u+x, a-w) are a small language of their own and
+    an agent that needs them can write the octal; accepting the syntax and doing
+    it wrong would be worse than refusing. }
+  if (Length(ACall.Args) < 2) or (ACall.Args[0] = '') or
+    (ACall.Args[0][1] = '-') then
+    Exit(Usage('chmod: expected MODE FILE...'));
+  Spec := ACall.Args[0];
+  if not OctalOf(Spec, Mode) then
+    Exit(Usage('chmod: only octal modes are supported, got "' + Spec + '"'));
+  Res := Default(TShellResult);
+  for I := 1 to High(ACall.Args) do
+    if not FFs.SetMode(FFs.Resolve(ACall.Cwd, ACall.Args[I]), Mode, E) then
+    begin
+      Res.Stderr := Res.Stderr + 'chmod: ' + ACall.Args[I] + ': ' + E + #10;
+      Res.ExitCode := 1;
+    end;
+  Result := Res;
 end;
 
 function TBuiltinCommands.Rmdir(const ACall: TShellCall): TShellResult;

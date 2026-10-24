@@ -154,6 +154,60 @@ begin
   Result := True;
 end;
 
+function THostFs.Symlink(const ATarget, ALinkPath: string;
+  out AError: string): Boolean;
+begin
+  { The demo host is a real filesystem, so this works where the platform allows
+    it. Unix only - Windows needs privilege, and the demo does not model that. }
+  {$ifdef unix}
+  AError := '';
+  if fpSymlink(PChar(ATarget), PChar(ALinkPath)) = 0 then
+    Exit(True);
+  AError := 'symlink failed';
+  Result := False;
+  {$else}
+  AError := 'symlinks are not supported here';
+  Result := False;
+  {$endif}
+end;
+
+function THostFs.ReadLink(const APath: string; out ATarget,
+  AError: string): Boolean;
+var
+  Buf: array[0..4095] of Char;
+  N: Integer;
+begin
+  ATarget := '';
+  AError := '';
+  {$ifdef unix}
+  N := fpReadlink(PChar(APath), @Buf[0], SizeOf(Buf) - 1);
+  if N < 0 then
+  begin
+    AError := 'not a symlink';
+    Exit(False);
+  end;
+  Buf[N] := #0;
+  ATarget := string(PChar(@Buf[0]));
+  Result := True;
+  {$else}
+  AError := 'symlinks are not supported here';
+  Result := False;
+  {$endif}
+end;
+
+function THostFs.SetMode(const APath: string; AMode: LongWord;
+  out AError: string): Boolean;
+begin
+  AError := '';
+  {$ifdef unix}
+  Result := fpChmod(PChar(APath), AMode) = 0;
+  if not Result then
+    AError := 'chmod failed';
+  {$else}
+  Result := True;
+  {$endif}
+end;
+
 function THostFs.Stat(const APath: string; out AKind: TShellFileKind;
   out AError: string): Boolean;
 begin

@@ -34,6 +34,12 @@ type
       out AError: string): Boolean;
     function Info(const APath: string; out AInfo: TShellFileInfo;
       out AError: string): Boolean;
+    { Symlinks are not modelled in memory; SetMode is a no-op. }
+    function Symlink(const ATarget, ALinkPath: string;
+      out AError: string): Boolean;
+    function ReadLink(const APath: string; out ATarget, AError: string): Boolean;
+    function SetMode(const APath: string; AMode: LongWord;
+      out AError: string): Boolean;
   end;
 
 implementation
@@ -252,6 +258,29 @@ begin
     AInfo.Mode := $1ED;   // 0755
   AInfo.Modified := 0;
   Result := True;
+end;
+
+function TMemoryFs.Symlink(const ATarget, ALinkPath: string;
+  out AError: string): Boolean;
+begin
+  { Not modelled in memory: refusing is honest, and no test needs it. }
+  AError := 'symlinks are not supported by the memory filesystem';
+  Result := False;
+end;
+
+function TMemoryFs.ReadLink(const APath: string; out ATarget,
+  AError: string): Boolean;
+begin
+  ATarget := '';
+  AError := 'symlinks are not supported by the memory filesystem';
+  Result := False;
+end;
+
+function TMemoryFs.SetMode(const APath: string; AMode: LongWord;
+  out AError: string): Boolean;
+begin
+  AError := '';
+  Result := True;   // in-memory entries carry no meaningful mode
 end;
 
 function TMemoryFs.Stat(const APath: string; out AKind: TShellFileKind;

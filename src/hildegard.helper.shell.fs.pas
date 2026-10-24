@@ -48,6 +48,13 @@ type
       out AError: string): Boolean;
     function Info(const APath: string; out AInfo: TShellFileInfo;
       out AError: string): Boolean;
+    { Symbolic links and mode bits. The LINK must be inside the workspace; its
+      target text need not be, because writing a link is not following one. }
+    function Symlink(const ATarget, ALinkPath: string;
+      out AError: string): Boolean;
+    function ReadLink(const APath: string; out ATarget, AError: string): Boolean;
+    function SetMode(const APath: string; AMode: LongWord;
+      out AError: string): Boolean;
     { Called once per write the shell makes (redirect, sed -i, tee, rm, mv,
       cp, mkdir, touch). Nil when nobody is tracking. }
     property OnChange: TShellFsChangeEvent read FOnChange write FOnChange;
@@ -661,6 +668,74 @@ begin
       Result := False;
     end;
   end;
+end;
+
+function TWorkspaceShellFs.Symlink(const ATarget, ALinkPath: string;
+  out AError: string): Boolean;
+begin
+  AError := '';
+  { The LINK must be inside the workspace; its target text need not be. A link
+    whose text points outside is only dangerous when something FOLLOWS it, and
+    that is what the confinement check on read governs. }
+  if not EnsureInside(ALinkPath, AError) then
+    Exit(False);
+  {$ifdef unix}
+  if fpSymlink(PChar(ATarget), PChar(ALinkPath)) = 0 then
+  begin
+    Report(ALinkPath, fcCreated, False, '', ATarget, True, 0, 0);
+    Exit(True);
+  end;
+  AError := 'could not create symlink: ' + ALinkPath;
+  Result := False;
+  {$else}
+  { Windows needs privilege or developer mode. Refuse rather than silently
+    creating a COPY, which would look like success and behave differently. }
+  AError := 'symlinks are not supported on this platform';
+  Result := False;
+  {$endif}
+end;
+
+function TWorkspaceShellFs.ReadLink(const APath: string; out ATarget,
+  AError: string): Boolean;
+var
+  Buf: array[0..4095] of Char;
+  N: Integer;
+begin
+  AError := '';
+  ATarget := '';
+  if not EnsureInside(APath, AError) then
+    Exit(False);
+  {$ifdef unix}
+  N := fpReadlink(PChar(APath), @Buf[0], SizeOf(Buf) - 1);
+  if N < 0 then
+  begin
+    AError := 'not a symbolic link: ' + APath;
+    Exit(False);
+  end;
+  Buf[N] := #0;
+  ATarget := string(PChar(@Buf[0]));
+  Result := True;
+  {$else}
+  AError := 'symlinks are not supported on this platform';
+  Result := False;
+  {$endif}
+end;
+
+function TWorkspaceShellFs.SetMode(const APath: string; AMode: LongWord;
+  out AError: string): Boolean;
+begin
+  AError := '';
+  if not EnsureInside(APath, AError) then
+    Exit(False);
+  {$ifdef unix}
+  if fpChmod(PChar(APath), AMode) = 0 then
+    Exit(True);
+  AError := 'could not chmod: ' + APath;
+  Result := False;
+  {$else}
+  { No mode bits on Windows. A script that chmods should not fail there. }
+  Result := True;
+  {$endif}
 end;
 
 end.

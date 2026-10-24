@@ -163,7 +163,7 @@ begin
   if (AName = 'cat') or (AName = 'wc') or (AName = 'od') or
      (AName = 'sha256sum') or (AName = 'md5sum') or (AName = 'strings') or
      (AName = 'base64') or (AName = 'yq') or (AName = 'nl') or
-     (AName = 'du') or (AName = 'tree') then
+     (AName = 'du') or (AName = 'tree') or (AName = 'readlink') then
   begin
     AddFiles(AReads, AName, AArgs, 0);
     Exit;
@@ -398,7 +398,7 @@ begin
   end;
 
   if (AName = 'mkdir') or (AName = 'touch') or (AName = 'rmdir') or
-     (AName = 'mktemp') then
+     (AName = 'mktemp') or (AName = 'ln') or (AName = 'chmod') then
   begin
     I := 0;
     while (I <= High(AArgs)) and IsOption(AArgs[I]) do

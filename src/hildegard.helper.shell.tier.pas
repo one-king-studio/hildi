@@ -141,6 +141,9 @@ begin
   FRegistry.Register('tree', FCmd.Tree);
   FRegistry.Register('mktemp', FCmd.MkTemp);
   FRegistry.Register('xargs', FCmd.Xargs);
+  FRegistry.Register('ln', FCmd.Ln);
+  FRegistry.Register('readlink', FCmd.Readlink);
+  FRegistry.Register('chmod', FCmd.Chmod);
   FRegistry.Register('basename', FCmd.Basename);
   FRegistry.Register('dirname', FCmd.Dirname);
   FRegistry.Register('test', FCmd.TestCmd);

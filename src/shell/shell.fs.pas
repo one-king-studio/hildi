@@ -37,6 +37,20 @@ type
     { Kind + size + mode + mtime. A platform without mode bits reports 0. }
     function Info(const APath: string; out AInfo: TShellFileInfo;
       out AError: string): Boolean;
+    { Create a symbolic link at ALinkPath whose text is ATarget. The target is
+      stored verbatim and need NOT exist or resolve inside the workspace: reading
+      the link is what confinement governs, not writing its text.
+      False + AError where the platform cannot create links (Windows without
+      privilege), rather than silently creating a copy of the target. }
+    function Symlink(const ATarget, ALinkPath: string;
+      out AError: string): Boolean;
+    { The raw text of a symbolic link. False when APath is not a link, so a
+      missing link and a broken one are distinguishable. }
+    function ReadLink(const APath: string; out ATarget, AError: string): Boolean;
+    { Set permission bits. A no-op returning True on a platform without mode
+      bits (Windows), because a script that chmods should not fail there. }
+    function SetMode(const APath: string; AMode: LongWord;
+      out AError: string): Boolean;
   end;
 
 implementation

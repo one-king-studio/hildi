@@ -8,7 +8,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  shell.types, shell.registry, hildegard.helper.shell.fs,
+  shell.types, shell.fs, shell.registry, hildegard.helper.shell.fs,
   hildegard.helper.shell.commands;
 
 type
@@ -60,6 +60,7 @@ type
     procedure TestNlDuTree;
     procedure TestMkTemp;
     procedure TestXargs;
+    procedure TestLnReadlinkChmod;
     procedure TestTest;
     procedure TestBracket;
     procedure TestTrueFalse;
@@ -228,6 +229,12 @@ begin
     Result := FCmd.MkTemp(Call)
   else if AName = 'xargs' then
     Result := FCmd.Xargs(Call)
+  else if AName = 'ln' then
+    Result := FCmd.Ln(Call)
+  else if AName = 'readlink' then
+    Result := FCmd.Readlink(Call)
+  else if AName = 'chmod' then
+    Result := FCmd.Chmod(Call)
   else if AName = 'diff' then
     Result := FCmd.Diff(Call)
   else if AName = 'pwd' then
@@ -1206,6 +1213,43 @@ begin
   R := RunCmd('xargs', ['nosuchcmd'], 'a');
   AssertEquals('missing command', 127, R.ExitCode);
   AssertTrue('names it: ' + R.Stderr, Pos('nosuchcmd', R.Stderr) > 0);
+end;
+
+procedure TShellCommandsTest.TestLnReadlinkChmod;
+var
+  R: TShellResult;
+  E: string;
+  Mode: LongWord;
+  Info: TShellFileInfo;
+begin
+  { ln -s creates a link whose text is stored VERBATIM - the target need not
+    exist, and need not be inside the workspace. }
+  FFs.WriteFile(P('target.txt'), 'x', False, E);
+  R := RunCmd('ln', ['-s', 'target.txt', 'link.txt']);
+  AssertEquals('ln exit', 0, R.ExitCode);
+  { readlink prints the stored text, not a resolved path. }
+  R := RunCmd('readlink', ['link.txt']);
+  AssertEquals('readlink', 'target.txt' + #10, R.Stdout);
+  { A non-link is an error, so a missing link and a broken one are distinct. }
+  R := RunCmd('readlink', ['target.txt']);
+  AssertEquals('not a link exits 1', 1, R.ExitCode);
+  { A hard link is refused by NAME rather than silently treated as -s. }
+  R := RunCmd('ln', ['a', 'b']);
+  AssertEquals('hard link refused', 2, R.ExitCode);
+  AssertTrue('named: ' + R.Stderr, Pos('symbolic', R.Stderr) > 0);
+
+  { chmod takes octal only; a symbolic mode is refused rather than guessed. }
+  R := RunCmd('chmod', ['600', 'target.txt']);
+  AssertEquals('chmod exit', 0, R.ExitCode);
+  if FFs.Info(P('target.txt'), Info, E) then
+  begin
+    {$ifdef unix}
+    AssertEquals('mode applied', LongWord(384), Info.Mode and $1FF);
+    {$endif}
+  end;
+  R := RunCmd('chmod', ['u+x', 'target.txt']);
+  AssertEquals('symbolic mode refused', 2, R.ExitCode);
+  AssertTrue('named: ' + R.Stderr, Pos('octal', R.Stderr) > 0);
 end;
 
 initialization
