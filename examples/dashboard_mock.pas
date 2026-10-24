@@ -130,7 +130,7 @@ type
 const
   { Box drawing, from the design language's light family. }
   ChTL = '╭'; ChTR = '╮'; ChBL = '╰'; ChBR = '╯';
-  ChH = '─'; ChV = '│'; ChDotted = '┈'; ChDouble = '═';
+  ChH = '─'; ChV = '│'; ChDotted = '┈';
   ChCursor = '❯'; ChIdle = '○'; ChOk = '✓'; ChDot = '·';
   ChUp = '▲'; ChDown = '▼'; ChHash = '#';
 
@@ -516,16 +516,16 @@ begin
   if LaneW < 8 then
     Exit;
 
-  VisTop := ARect.Y + 3;                    // first row a card may occupy
+  VisTop := ARect.Y + 2;                    // first row a card may occupy
   VisBot := ARect.Y + ARect.H - 2;          // last row a card may occupy
 
   { Every lane shares the board's own background. Focus no longer tints the
     lane at all - the focused CARD carries the accent border, and that is the
-    only thing that moves. A lane that changed colour as well made the whole
-    column flicker as the cursor passed through it.
-    The lane HEADER band is one step brighter still (RaisedBg + 1), so the
-    header reads as a bar sitting above the lane rather than a line of text on
-    it. }
+  { Lanes share the board's own background, EXCEPT the focused lane, which sits
+    one shade darker - that is the active-lane highlight, and it is the only
+    thing that tints. The lane HEADER band is brighter still (RaisedBg + 1) on
+    every lane: the band itself marks the boundary between header and cards, so
+    no rule row is needed and that row goes back to the cards. }
   CardFill := OnBg(FTheme.Panel, FTheme.RaisedBg);
 
   for K := 0 to VisCount - 1 do
@@ -535,7 +535,10 @@ begin
     InnerW := LaneW - 1;
     Total := Length(Lanes[L]);
 
-    LaneFill := FTheme.Panel;
+    if (L = FLane) and (FZone = zTasks) then
+      LaneFill := OnBg(FTheme.Panel, FTheme.SunkenBg)
+    else
+      LaneFill := FTheme.Panel;
     LaneHead := OnBg(FTheme.Title, FTheme.RaisedBg + 1);
 
     { The lane track: fill the column first, so cards sit on it. }
@@ -550,12 +553,6 @@ begin
     { The lane header: padded off the lane's left edge, name and count. }
     Text(S, LaneX + 1, ARect.Y + 1, UnicodeString(LaneTitles[L] + ' ' +
       IntToStr(Total)), LaneHead, InnerW - 2);
-
-    { A double rule under the header. It is drawn in the same +2 colour as the
-      header text, so the header reads as one banded unit; the single hairline
-      it replaced was too quiet to separate a header from a stack of cards. }
-    for I := LaneX to LaneX + InnerW - 1 do
-      Text(S, I, ARect.Y + 2, ChDouble, LaneHead, 1);
 
     { Scroll affordance, in the header's right edge, so a clipped lane says so
       rather than looking complete. }
