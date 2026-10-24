@@ -8,8 +8,10 @@ What is **built**:
 - **Capture**, at every write path. The builtin shell tier writes in-process
   through `TWorkspaceShellFs`, so `sed -i`, `tee`, `rm`, `mv`, `cp` and redirects
   are exact. The process tier (`git`, `make`, `mode=bash`) does an ignore-aware
-  before/after tree walk. The file tools pass through `WriteAtomic`. `run_command`
-  results end with `[changed: …]`.
+  before/after tree walk. The file tools pass through `WriteAtomic`. The set is
+  delivered through the `OnChanges` seam only — it is **not** appended to the
+  tool result (a `[changed: …]` line used to ride it and was removed, since a
+  diff view reads the change log instead).
 - **Storage.** `TChangeRecorder` writes `file_changes` at the turn boundary
   (`hildegard.helper.changes.store`, migration v13), with **16-turn retention**
   enforced at the same boundary. A change is a patch anchored by its before/after
