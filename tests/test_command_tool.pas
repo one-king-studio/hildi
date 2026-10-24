@@ -118,7 +118,10 @@ type
       the command ran at all. }
     procedure TestSilentCommandSaysNoContent;
     procedure TestNoChangeNoteWithoutChanges;
-    procedure TestChangeNoteIsCapped;
+    { Every failure names the command it failed on, so an operator can tell what
+      broke without seeing the arguments JSON. }
+    procedure TestAnErrorNamesTheFailingCommand;
+    procedure TestAParseErrorNamesTheCommand;
     procedure TestProcessExecutorRecordsRealWrites;
     procedure TestModeBashIsPassedThrough;
     procedure TestModeDefaultsToAuto;
@@ -1268,9 +1271,11 @@ begin
   try
     AssertTrue('ok', Tool.Run('{"command":"echo hi","reason":"r"}', R, E));
     AssertEquals('one change delivered', 1, FChangeCount);
-    { The set is also visible in the transcript, for the model and the panel. }
-    AssertTrue('the result names the change',
-      Pos('[changed: A fake.txt]', R) > 0);
+    { The set rides OnChanges only. What a call wrote is ambient context, not
+      the command's output: a diff view reads it from the change log, and the
+      tool block shows what the command printed. }
+    AssertFalse('the result does not carry the change note',
+      Pos('[changed:', R) > 0);
   finally
     Tool.Free;
   end;
@@ -1292,19 +1297,41 @@ begin
   end;
 end;
 
-procedure TCommandToolTest.TestChangeNoteIsCapped;
+procedure TCommandToolTest.TestAnErrorNamesTheFailingCommand;
 var
   Tool: TCommandTool;
   R, E: string;
 begin
-  AddRule(aeAllow, 'run_command:echo', [], True);
-  FExecutor.ChangeCount := 40;
+  { A failure reads like a success: `$ command`, a blank line, then the reason.
+    `mode=builtin` with an unsupported command is the exact case that produced a
+    bare "the builtin shell cannot run this command" with no command in sight. }
   Tool := BuildTool(nil, 0);
   try
-    AssertTrue('ok', Tool.Run('{"command":"echo hi","reason":"r"}', R, E));
-    AssertTrue('a note', Pos('[changed:', R) > 0);
-    AssertTrue('truncated', Pos(', ...]', R) > 0);
-    AssertTrue('bounded', Length(R) < 600);
+    AssertFalse('fails',
+      Tool.Run('{"command":"git status","reason":"r","mode":"builtin"}', R, E));
+    AssertEquals('the transcript shape', '$ git status' + LineEnding +
+      LineEnding, Copy(E, 1, Length('$ git status' + LineEnding + LineEnding)));
+    AssertTrue('and says why: ' + E, Pos('builtin shell', E) > 0);
+    { The result carries the same text, so the tool block shows it: the loop no
+      longer overwrites a tool that reported its own failure. }
+    AssertEquals('the result is the same text', E, R);
+  finally
+    Tool.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestAParseErrorNamesTheCommand;
+var
+  Tool: TCommandTool;
+  R, E: string;
+begin
+  { A command that never parsed is exactly when the operator cannot guess. }
+  Tool := BuildTool(nil, 0);
+  try
+    AssertFalse('fails',
+      Tool.Run('{"command":"cat <<EOF","reason":"r"}', R, E));
+    AssertTrue('the error names the command: ' + E, Pos('cat <<EOF', E) > 0);
+    AssertTrue('and says why: ' + E, Pos('here-document', E) > 0);
   finally
     Tool.Free;
   end;

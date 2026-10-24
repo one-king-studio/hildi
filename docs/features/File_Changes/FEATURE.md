@@ -2,9 +2,14 @@
 
 **Status:** Implemented (phases 1-3 of 4; the plan is closed). The builtin tier
 records every write exactly (content included) through its filesystem seam; the
-process tier takes an ignore-aware before/after snapshot of the tree; and
-`run_command`'s result ends with `[changed: ...]`, so the model and the operator
-see what the call touched.
+process tier takes an ignore-aware before/after snapshot of the tree.
+
+The set is delivered to the **`OnChanges` seam only** — it is ambient context,
+not tool output. `run_command`'s result carries what the command printed and
+nothing else. A `[changed: ...]` line used to be appended to the result; it was
+removed deliberately, because what a call wrote is bookkeeping rather than
+output, and the tool block is read to see what the command *said*. The change
+log (and the diff view that will read it) is what shows the files.
 Two surfaces were deliberately deferred and are **not** part of this feature's
 delivered scope: a TUI diff pane and a checkpoint store, both to be fed by the
 same `OnChanges` set.

@@ -120,9 +120,6 @@ const
     is a nudge for the loop (docs/features/Tool_Limits), never a failure. }
   AbsoluteTimeoutMs = 3600000;
   DefaultMaxOutputBytes = 32768;
-  { The change note in the tool result is capped here (bytes) so a call that
-    rewrites a whole tree cannot flood the transcript. }
-  MaxChangeNoteChars = 400;
 
 implementation
 
@@ -862,30 +859,30 @@ var
   Truncated: Boolean;
   Stream: TCappedObserver;
   Changes: TFileChangeSet;
-  ChangeNote: string;
 
-  { A one-line record of what the call wrote, for the transcript: the model
-    sees what it changed, and so does the operator. }
-  function NoteOf(const ASet: TFileChangeSet): string;
+  { A failure reads like the success shape, so the operator sees which command
+    broke in the same place they see what it printed: `$ command`, a blank line,
+    then the reason. Falls back to the raw arguments when the command never
+    parsed out of them - "which command" is exactly the question then. }
+  function InCommand(const AMsg: string): string;
   var
-    Text: string;
+    Shown: string;
   begin
-    Text := ASet.Summary;
-    if Length(Text) > MaxChangeNoteChars then
-    begin
-      Text := Copy(Text, 1, MaxChangeNoteChars);
-      { Do not split a UTF-8 sequence (paths are not always ASCII). }
-      while (Text <> '') and (Ord(Text[Length(Text)]) and $C0 = $80) do
-        SetLength(Text, Length(Text) - 1);
-      Text := Text + ', ...';
-    end;
-    Result := '[changed: ' + Text + ']';
+    if Command <> '' then
+      Shown := Command
+    else if AArgumentsJson <> '' then
+      Shown := '(unparsed) ' + AArgumentsJson
+    else
+      Shown := '';
+    if Shown = '' then
+      Result := AMsg
+    else
+      Result := '$ ' + Shown + LineEnding + LineEnding + AMsg;
   end;
 
 begin
   AResult := '';
   AError := '';
-  ChangeNote := '';
   Result := False;
   Data := nil;
   try
@@ -952,13 +949,15 @@ begin
       Plan := ParseCommand(Command, FConfig.Shell.Syntax);
       if (Plan.ParseError <> '') or (Length(Plan.Segments) = 0) then
       begin
-        AError := 'could not parse command: ' + Plan.ParseError;
+        AError := InCommand('could not parse command: ' + Plan.ParseError);
+        AResult := AError;
         Exit(False);
       end;
 
       if FService = nil then
       begin
-        AError := 'no approval service configured';
+        AError := InCommand('no approval service configured');
+        AResult := AError;
         Exit(False);
       end;
       { The builtin tier understands the whole script and raises one ask per
@@ -971,7 +970,8 @@ begin
       if (Mode = cmBuiltin) and
         (not FExecutor.OwnsApproval(Command, Mode, Why)) then
       begin
-        AError := 'the builtin shell cannot run this command: ' + Why;
+        AError := InCommand('the builtin shell cannot run this command: ' + Why);
+        AResult := AError;
         Exit(False);
       end;
       if not FExecutor.OwnsApproval(Command, Mode, Why) then
@@ -984,12 +984,14 @@ begin
         begin
           if not FService.Resolve(Asks, Batch) then
           begin
-            AError := 'approval error: ' + Batch.Reason;
+            AError := InCommand('approval error: ' + Batch.Reason);
+        AResult := AError;
             Exit(False);
           end;
           if Batch.Denied then
           begin
-            AError := Batch.Reason;
+            AError := InCommand(Batch.Reason);
+        AResult := AError;
             Exit(False);
           end;
         end;
@@ -1010,12 +1012,15 @@ begin
           if not FExecutor.Execute(FConfig.Shell, Command, EffectiveCwd,
             TimeoutMs, Stream, Reason, Mode, Changes, Execution) then
           begin
-            AError := 'failed to execute: ' + Execution.Error;
+            AError := InCommand('failed to execute: ' + Execution.Error);
+        AResult := AError;
             Exit(False);
           end;
           if (Changes <> nil) and (Changes.Count > 0) then
           begin
-            ChangeNote := NoteOf(Changes);
+            { The set rides OnChanges only - the recorder stores it, and a diff
+              view reads it from there. It is not rendered into AResult: what a
+              call wrote is ambient context, not the command's output. }
             if Assigned(FConfig.OnChanges) then
               FConfig.OnChanges(Changes);
           end;
@@ -1048,8 +1053,11 @@ begin
       if Execution.ExitCode <> 0 then
         AResult := AResult + LineEnding + '[exit ' +
           IntToStr(Execution.ExitCode) + ']';
-      if ChangeNote <> '' then
-        AResult := AResult + LineEnding + ChangeNote;
+      { The change note is deliberately NOT part of AResult. What a call wrote is
+        ambient context, not output: the operator reads a tool block to see what
+        the command printed, and a `[changed: ...]` line is bookkeeping that
+        belongs to the change log. The set is still delivered - OnChanges carries
+        it to the recorder, which is what a diff view will read. }
       Result := True;
     finally
       Data.Free;
@@ -1058,7 +1066,8 @@ begin
     on E: Exception do
     begin
       AResult := '';
-      AError := 'run_command error: ' + E.Message;
+      AError := InCommand('run_command error: ' + E.Message);
+        AResult := AError;
       Result := False;
     end;
   end;
