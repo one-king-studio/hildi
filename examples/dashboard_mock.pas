@@ -47,7 +47,12 @@ const
   MinMsgH = 4;
   SpinIntervalMs = 120;
   LaneCount = 5;
-  CardPad = 1;            // rows of gutter between stacked cards
+  { No gutter between stacked cards: the cards sit flush, so the eye reads one
+    column of content rather than a series of separated objects. }
+  CardPad = 0;
+  { Horizontal padding inside a card, each side. Content starts at CardPadX and
+    the wrap width gives up twice that. }
+  CardPadX = 1;
 
 type
   TZone = (zTasks, zChannels, zMessages);
@@ -94,6 +99,12 @@ type
     FOrigin: Int64;
     procedure Frame(const S: ISurface; const ARect: TRect;
       const ATitle, ARight: UnicodeString; AFocused: Boolean);
+    { A frame with explicit border and fill attributes, for surfaces that are
+      not plain panels: a card sits on a raised (lighter) background, and the
+      focused card's BORDER takes the accent while its content does not. }
+    procedure FrameEx(const S: ISurface; const ARect: TRect;
+      const ATitle, ARight: UnicodeString;
+      const ABorder, AFill: TAttr);
     procedure Text(const S: ISurface; X, Y: Integer; const AText: UnicodeString;
       const AAttr: TAttr; AMaxW: Integer);
     procedure VLine(const S: ISurface; X, Y0, Y1: Integer;
@@ -103,6 +114,10 @@ type
     procedure DrawMessages(const S: ISurface; const ARect: TRect);
     procedure DrawStatus(const S: ISurface; const ARect: TRect);
     procedure EnsureVisible(ALane, AVisH, AInnerW: Integer);
+    { BLOCKED and DROPPED are optional columns: empty ones are not drawn, so
+      navigation must skip them or the selection lands on nothing. }
+    function LaneVisible(ALane: Integer): Boolean;
+    procedure MoveLane(ADelta: Integer);
   public
     constructor Create(const ATheme: TTheme);
     function Measure(const AAvail: TSize): TSize; override;
@@ -434,16 +449,47 @@ begin
       ' ' + ARight + ' ', A, Length(ARight) + 2);
 end;
 
+procedure TDashboard.FrameEx(const S: ISurface; const ARect: TRect;
+  const ATitle, ARight: UnicodeString; const ABorder, AFill: TAttr);
+var
+  I: Integer;
+begin
+  if (ARect.W < 2) or (ARect.H < 2) then
+    Exit;
+  S.FillRect(ARect, AFill);
+  Text(S, ARect.X, ARect.Y, ChTL, ABorder, 1);
+  Text(S, ARect.X + ARect.W - 1, ARect.Y, ChTR, ABorder, 1);
+  Text(S, ARect.X, ARect.Y + ARect.H - 1, ChBL, ABorder, 1);
+  Text(S, ARect.X + ARect.W - 1, ARect.Y + ARect.H - 1, ChBR, ABorder, 1);
+  for I := ARect.X + 1 to ARect.X + ARect.W - 2 do
+  begin
+    Text(S, I, ARect.Y, ChH, ABorder, 1);
+    Text(S, I, ARect.Y + ARect.H - 1, ChH, ABorder, 1);
+  end;
+  for I := ARect.Y + 1 to ARect.Y + ARect.H - 2 do
+  begin
+    Text(S, ARect.X, I, ChV, ABorder, 1);
+    Text(S, ARect.X + ARect.W - 1, I, ChV, ABorder, 1);
+  end;
+  if (ATitle <> '') and (ARect.W >= Length(ATitle) + 4) then
+    Text(S, ARect.X + 1, ARect.Y, ' ' + ATitle + ' ', ABorder, ARect.W - 2);
+  if (ARight <> '') and (ARect.W >= Length(ARight) + 6) then
+    Text(S, ARect.X + ARect.W - Length(ARight) - 3, ARect.Y,
+      ' ' + ARight + ' ', ABorder, Length(ARight) + 2);
+end;
+
 { The kanban. One frame around all five lanes, with a vertical rule between
   lanes rather than a box each: a box per lane doubles the border weight and
   reads as five panels instead of one board. Each lane scrolls on its own, so a
   long lane and an empty one can coexist without the empty one wasting rows. }
 procedure TDashboard.DrawTasks(const S: ISurface; const ARect: TRect);
 var
-  L, I, J, X, Y, LaneW, InnerW, CardH, VisTop, VisBot, Total, Sel, LaneX: Integer;
-  A: TAttr;
+  L, I, J, X, Y, LaneW, InnerW, CardH, VisTop, VisBot, Total, Sel,
+    LaneX, VisCount, K, Wrapped: Integer;
+  A, CardFill, CardBorder, LaneFill, LaneHead: TAttr;
   Lines: TWrapArray;
   Right: UnicodeString;
+  Active: array[0..LaneCount - 1] of Integer;
   Live, Done: Integer;
 begin
   Live := Length(Lanes[0]) + Length(Lanes[1]) + Length(Lanes[2]);
@@ -454,39 +500,62 @@ begin
 
   if (ARect.W < 12) or (ARect.H < 5) then
     Exit;
-  LaneW := (ARect.W - 2) div LaneCount;
+
+  { BLOCKED and DROPPED are optional: an empty BLOCKED lane is good news and
+    an empty DROPPED lane is the normal case, so neither should hold a column
+    of screen hostage. The three working lanes are always shown. }
+  VisCount := 0;
+  for L := 0 to LaneCount - 1 do
+    if (L <> 2) and (L <> 4) or (Length(Lanes[L]) > 0) then
+    begin
+      Active[VisCount] := L;
+      Inc(VisCount);
+    end;
+
+  LaneW := (ARect.W - 2) div VisCount;
   if LaneW < 8 then
     Exit;
 
   VisTop := ARect.Y + 3;                    // first row a card may occupy
   VisBot := ARect.Y + ARect.H - 2;          // last row a card may occupy
 
-  for L := 0 to LaneCount - 1 do
+  { The lane column is one shade DARKER than the app background and the cards
+    are one shade LIGHTER, so the card reads as a raised object on a recessed
+    track. That contrast is what separates lane from card, without either
+    needing a bright fill. }
+  LaneFill := OnBg(FTheme.Panel, FTheme.SunkenBg);
+  CardFill := OnBg(FTheme.Panel, FTheme.RaisedBg);
+
+  for K := 0 to VisCount - 1 do
   begin
-    LaneX := ARect.X + 1 + L * LaneW;
+    L := Active[K];
+    LaneX := ARect.X + 1 + K * LaneW;
     InnerW := LaneW - 1;
+    Total := Length(Lanes[L]);
+
+    { The lane track: fill the column first, so cards sit on it. }
+    for Y := ARect.Y + 1 to ARect.Y + ARect.H - 2 do
+      S.FillRect(R(LaneX, Y, InnerW, 1), LaneFill);
 
     { The lane header: name and count, then a dotted rule. }
     if (L = FLane) and (FZone = zTasks) then
-      A := FTheme.Accent
+      LaneHead := OnBg(FTheme.Accent, FTheme.SunkenBg)
     else
-      A := FTheme.Title;
+      LaneHead := OnBg(FTheme.Title, FTheme.SunkenBg);
     Text(S, LaneX, ARect.Y + 1, UnicodeString(LaneTitles[L] + ' ' +
-      IntToStr(Length(Lanes[L]))), A, InnerW);
+      IntToStr(Total)), LaneHead, InnerW);
 
     { Scroll affordance, in the header's right edge, so a clipped lane says so
       rather than looking complete. }
-    Total := Length(Lanes[L]);
     if FScroll[L] > 0 then
       Text(S, LaneX + InnerW - 2, ARect.Y + 1, ChUp, FTheme.Muted, 1);
     if Total > 0 then
     begin
-      { Would the last card fit? Recompute cheaply: walk the heights. }
       Y := VisTop;
       I := FScroll[L];
       while (I < Total) and (Y <= VisBot) do
       begin
-        Inc(Y, CardHeight(Lanes[L][I], InnerW - 2) + CardPad);
+        Inc(Y, CardHeight(Lanes[L][I], InnerW - 1 - 2 * CardPadX) + CardPad);
         Inc(I);
       end;
       if I < Total then
@@ -494,7 +563,8 @@ begin
     end;
 
     for I := LaneX to LaneX + InnerW - 1 do
-      Text(S, I, ARect.Y + 2, ChDotted, FTheme.Border, 1);
+      Text(S, I, ARect.Y + 2, ChDotted,
+        OnBg(FTheme.Border, FTheme.SunkenBg), 1);
 
     { Cards, from the lane's scroll offset. Height is computed from the wrapped
       title, so every card is exactly as tall as its content. }
@@ -502,30 +572,42 @@ begin
     I := FScroll[L];
     while I < Total do
     begin
-      CardH := CardHeight(Lanes[L][I], InnerW - 2);
+      Wrapped := InnerW - 1 - 2 * CardPadX;
+      CardH := CardHeight(Lanes[L][I], Wrapped);
       if Y + CardH - 1 > VisBot then
         Break;
       Sel := FCard[L];
+      { The selected card takes the accent on its BORDER only. Its content stays
+        the ordinary text colour: a full inverse or accent block is gaudy, and
+        the border alone is enough to say "this one". }
       if (L = FLane) and (I = Sel) and (FZone = zTasks) then
-        A := FTheme.Accent
+      begin
+        CardBorder := OnBg(FTheme.Accent, FTheme.RaisedBg);
+        A := OnBg(FTheme.Text, FTheme.RaisedBg);
+      end
       else
-        A := FTheme.Text;
-      Frame(S, R(LaneX, Y, InnerW, CardH), UnicodeString(Lanes[L][I].Id),
-        '', False);
-      Lines := WrapLines(UnicodeString(Lanes[L][I].Title), InnerW - 2);
-      { Draw EVERY wrapped line. The card's height was computed from the same
-        wrap, so drawing a fixed two would leave the rest of the box blank and
-        make a tall card look empty. }
+      begin
+        CardBorder := OnBg(FTheme.Border, FTheme.RaisedBg);
+        A := OnBg(FTheme.Text, FTheme.RaisedBg);
+      end;
+
+      FrameEx(S, R(LaneX, Y, InnerW, CardH), UnicodeString(Lanes[L][I].Id),
+        '', CardBorder, CardFill);
+
+      { Content is inset by CardPadX on both sides - the padding that makes a
+        card readable - so the id, the wrapped title and the holder all align. }
+      Lines := WrapLines(UnicodeString(Lanes[L][I].Title), Wrapped);
       for J := 0 to High(Lines) do
-        Text(S, LaneX + 1, Y + 1 + J, Lines[J], A, InnerW - 2);
-      Text(S, LaneX + 1, Y + CardH - 2,
-        UnicodeString(Lanes[L][I].Holder), FTheme.Muted, InnerW - 2);
+        Text(S, LaneX + 1 + CardPadX, Y + 1 + J, Lines[J], A, Wrapped);
+      Text(S, LaneX + 1 + CardPadX, Y + CardH - 2,
+        UnicodeString(Lanes[L][I].Holder), OnBg(FTheme.Muted, FTheme.RaisedBg),
+        Wrapped);
       Inc(Y, CardH + CardPad);
       Inc(I);
     end;
 
     { The rule between lanes, never after the last one. }
-    if L < LaneCount - 1 then
+    if K < VisCount - 1 then
     begin
       if (L = FLane) and (FZone = zTasks) then
         A := FTheme.Accent
@@ -754,6 +836,41 @@ begin
   until False;
 end;
 
+function TDashboard.LaneVisible(ALane: Integer): Boolean;
+begin
+  if (ALane < 0) or (ALane >= LaneCount) then
+    Exit(False);
+  { The three working lanes are always drawn; BLOCKED and DROPPED only when
+    they hold something. }
+  Result := (ALane <> 2) and (ALane <> 4) or (Length(Lanes[ALane]) > 0);
+end;
+
+{ Step FLane by ADelta over the DRAWN lanes only. Without this, arrowing right
+  onto an empty DROPPED lane moved the focus to a column that is not on screen:
+  no header highlight, no cursor, and the arrows then seemed dead. }
+procedure TDashboard.MoveLane(ADelta: Integer);
+var
+  L: Integer;
+begin
+  L := FLane + ADelta;
+  while (L >= 0) and (L < LaneCount) do
+  begin
+    if LaneVisible(L) then
+    begin
+      FLane := L;
+      { Keep the card index inside the new lane, or moving lanes leaves a
+        selection past the end of a shorter column. }
+      if FCard[FLane] > Length(Lanes[FLane]) - 1 then
+        FCard[FLane] := Length(Lanes[FLane]) - 1;
+      if FCard[FLane] < 0 then
+        FCard[FLane] := 0;
+      FScroll[FLane] := 0;
+      Exit;
+    end;
+    Inc(L, ADelta);
+  end;
+end;
+
 function TDashboard.HandleEvent(const E: TInputEvent): Boolean;
 var
   Shift: Boolean;
@@ -802,16 +919,10 @@ begin
   case E.Key.Kind of
     kkLeft:
       if FZone = zTasks then
-      begin
-        if FLane > 0 then
-          Dec(FLane);
-      end;
+        MoveLane(-1);
     kkRight:
       if FZone = zTasks then
-      begin
-        if FLane < LaneCount - 1 then
-          Inc(FLane);
-      end;
+        MoveLane(1);
     kkUp:
       case FZone of
         zTasks:
