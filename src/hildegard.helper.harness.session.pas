@@ -244,7 +244,7 @@ end;
 
 function THarnessSession.NoticeBoard: Integer;
 var
-  Cursor: Integer;
+  Cursor, MaxId: Integer;
   Unread, Q, D, F: Integer;
   LastAt: Int64;
   Err: string;
@@ -303,6 +303,17 @@ begin
       ' new board message(s))'
   else
     Text := IntToStr(Unread) + ' new board message(s)';
+  { Honesty about pruning. Unread is computed as "id > cursor", but pruning
+    DELETES rows, so a cursor sitting on a pruned id under-reports with no
+    indication. If the board holds fewer entries than the cursor implies, older
+    ones are gone and we say so rather than silently under-counting.
+
+    Deliberately "some were pruned", not "16 were pruned": if pruning ran twice
+    while nobody watched we cannot distinguish 16 from 200, and inventing a
+    number would be the same error as a confident unread count. }
+  if FBoardStore.BoardMaxId(FView.WorkspaceId, MaxId, Err) and (Cursor > MaxId)
+  then
+    Text := Text + ' - some were pruned since you last read';
   FLoop.PromptQueue.PushBoard(Text, Unread);
   Result := Unread;
 end;
