@@ -216,7 +216,7 @@ headless-agent: libsqlite libmbedtls $(BIN)/hildegard-helper-agent
 
 $(BIN)/hildegard-helper-agent: $(EXAMPLES)/headless_agent.pas $(LIB_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/async -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/fileignore -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Full-screen agent harness (conversation + approvals + sessions). Builds and
 # runs; Ctrl-C quits. Drives the headless agent. A pure client: no engine.
@@ -226,7 +226,7 @@ tui-agent: headless-agent $(BIN)/hildegard-helper-tui
 $(BIN)/hildegard-helper-tui: $(EXAMPLES)/tui_agent.pas $(LIB_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	@# The TUI is a pure client: no agent, loop, tool or runtime unit links here.
-	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/async -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/fileignore -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Printable wall-clock benchmark. `make bench ARGS=--real` measures the real
 # terminal; `make perf` asserts the budgets and is not part of `make check`.
