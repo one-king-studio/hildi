@@ -140,6 +140,7 @@ begin
   FRegistry.Register('du', FCmd.Du);
   FRegistry.Register('tree', FCmd.Tree);
   FRegistry.Register('mktemp', FCmd.MkTemp);
+  FRegistry.Register('xargs', FCmd.Xargs);
   FRegistry.Register('basename', FCmd.Basename);
   FRegistry.Register('dirname', FCmd.Dirname);
   FRegistry.Register('test', FCmd.TestCmd);
@@ -157,6 +158,9 @@ begin
   FRegistry.Register('tee', FCmd.Tee);
   FRegistry.Register('printf', FCmd.Printf);
   FRegistry.Register('rg', FCmd.Rg);
+  { Injected AFTER every command is registered: xargs (and later $()) resolve
+    their target through this, so it must not be handed over half-populated. }
+  FCmd.SetRegistry(FRegistry);
 end;
 
 destructor TBuiltinShell.Destroy;

@@ -15,7 +15,8 @@ unit hildegard.helper.shell.commands;
 interface
 
 uses
-  SysUtils, Classes, shell.types, shell.fs, hildegard.helper.shell.fs,
+  SysUtils, Classes, shell.types, shell.fs, shell.registry,
+  hildegard.helper.shell.fs,
   hildegard.helper.hash, changes.text, hildegard.helper.utf8,
   hildegard.helper.yaml;
 
@@ -33,13 +34,27 @@ type
     FReason: string;
     { Monotonic counter for mktemp names: the clock alone is too coarse. }
     FSeq: Integer;
+    { The command registry, injected after the tier populates it. This is what
+      lets one builtin run another: xargs needs to invoke its target command, and
+      $() will need exactly the same capability. Without it a builtin has no way
+      to reach a sibling. }
+    FRegistry: TShellRegistry;
     function Usage(const AMsg: string): TShellResult;
     function Failure(const AMsg: string; AStatus: Integer): TShellResult;
     function ToolAllowed(const AName: string): Boolean;
     function InvokeTool(const AName, AJson: string): TShellResult;
+    { Run AName with AArgs as a fresh simple command, inheriting this call's cwd,
+      env and stdin. Used by xargs (and later by $()). Returns the handler's
+      result; a missing command is an error naming it, never a silent no-op. }
+    function RunBuiltin(const AName: string; const AArgs: TStringArray;
+      const AStdin, ACwd: string; AEnv: TShellEnv): TShellResult;
   public
     constructor Create(AFs: TWorkspaceShellFs; AInvoke: TShellToolInvoke;
       const AAllowedTools: TStringArray);
+    { Injected by the tier once every command is registered. Not a constructor
+      argument because the registry is created AFTER this object - the commands
+      must exist to be registered. }
+    procedure SetRegistry(ARegistry: TShellRegistry);
     { The reason the current run inherited; injected into tool arguments. }
     property Reason: string read FReason write FReason;
     { The command set. }
@@ -70,6 +85,7 @@ type
     function Du(const ACall: TShellCall): TShellResult;
     function Tree(const ACall: TShellCall): TShellResult;
     function MkTemp(const ACall: TShellCall): TShellResult;
+    function Xargs(const ACall: TShellCall): TShellResult;
     function Grep(const ACall: TShellCall): TShellResult;
     function Ls(const ACall: TShellCall): TShellResult;
     function Mkdir(const ACall: TShellCall): TShellResult;
@@ -140,7 +156,7 @@ type
   end;
 
 const
-  CommandSpecs: array[0..46] of TCommandSpec = (
+  CommandSpecs: array[0..47] of TCommandSpec = (
     (Name: 'echo'; Options: '-n'),
     (Name: 'head'; Options: '-nNc'),
     (Name: 'tail'; Options: '-nNc'),
@@ -161,6 +177,7 @@ const
     (Name: 'du'; Options: '-s'),
     (Name: 'tree'; Options: '-aL'),
     (Name: 'mktemp'; Options: '-dtu'),
+    (Name: 'xargs'; Options: '-nN0I'),
     (Name: 'grep'; Options: '-nivlcFEGrm'),
     (Name: 'sed'; Options: '-nErei'),
     (Name: 'awk'; Options: '-F'),
@@ -340,6 +357,41 @@ begin
   FFs := AFs;
   FInvoke := AInvoke;
   FAllowed := AAllowedTools;
+end;
+
+procedure TBuiltinCommands.SetRegistry(ARegistry: TShellRegistry);
+begin
+  FRegistry := ARegistry;
+end;
+
+function TBuiltinCommands.RunBuiltin(const AName: string;
+  const AArgs: TStringArray; const AStdin, ACwd: string;
+  AEnv: TShellEnv): TShellResult;
+var
+  Handler: TShellHandler;
+  Call: TShellCall;
+begin
+  Result := Default(TShellResult);
+  if FRegistry = nil then
+  begin
+    Result.Stderr := AName + ': no command registry available' + #10;
+    Result.ExitCode := 1;
+    Exit;
+  end;
+  if not FRegistry.Resolve(AName, Handler) then
+  begin
+    { Named, never silent: a typo must not look like "ran and printed nothing". }
+    Result.Stderr := AName + ': command not found' + #10;
+    Result.ExitCode := 127;
+    Exit;
+  end;
+  Call := Default(TShellCall);
+  Call.Name := AName;
+  Call.Args := AArgs;
+  Call.Stdin := AStdin;
+  Call.Cwd := ACwd;
+  Call.Env := AEnv;
+  Result := Handler(Call);
 end;
 
 function TBuiltinCommands.Usage(const AMsg: string): TShellResult;
@@ -1439,6 +1491,163 @@ begin
       Exit(Failure('mktemp: ' + E, 1));
   end;
   Result := ShellResultOk(Name + #10);
+end;
+
+function TBuiltinCommands.Xargs(const ACall: TShellCall): TShellResult;
+var
+  I, J, MaxArgs: Integer;
+  Args: TStringArray;
+  Items: TStringArray;
+  Data, E, Text, CmdName, OutText, ErrText: string;
+  CmdArgs: TStringArray;
+  Batch: TStringArray;
+  Res: TShellResult;
+  Replace: string;
+  UseReplace: Boolean;
+  Failed: Boolean;
+  FailCode: Integer;
+begin
+  { xargs runs a command with arguments taken from stdin. It is the only route
+    from one command's output into another's arguments in this shell, because
+    $() and backquotes hard-fail the parse. That makes it structurally more
+    important than its size suggests. }
+  MaxArgs := 0;
+  FailCode := 1;
+  CmdName := 'echo';
+  Replace := '';
+  UseReplace := False;
+  I := 0;
+  while (I <= High(ACall.Args)) and (ACall.Args[I] <> '') and
+    (ACall.Args[I][1] = '-') do
+  begin
+    if ACall.Args[I] = '-n' then
+    begin
+      if I = High(ACall.Args) then
+        Exit(Usage('xargs: option requires an argument -- n'));
+      MaxArgs := StrToIntDef(ACall.Args[I + 1], -1);
+      if MaxArgs < 1 then
+        Exit(Usage('xargs: invalid number of arguments'));
+      Inc(I, 2);
+    end
+    else if Copy(ACall.Args[I], 1, 2) = '-n' then
+    begin
+      MaxArgs := StrToIntDef(Copy(ACall.Args[I], 3, MaxInt), -1);
+      if MaxArgs < 1 then
+        Exit(Usage('xargs: invalid number of arguments'));
+      Inc(I);
+    end
+    else if ACall.Args[I] = '-I' then
+    begin
+      if I = High(ACall.Args) then
+        Exit(Usage('xargs: option requires an argument -- I'));
+      Replace := ACall.Args[I + 1];
+      UseReplace := True;
+      Inc(I, 2);
+    end
+    else if ACall.Args[I] = '-0' then
+      Inc(I)   // accepted; whitespace splitting is the only mode we offer
+    else
+      Exit(Usage('xargs: unsupported option ' + ACall.Args[I]));
+  end;
+  { The command and its fixed leading arguments. }
+  SetLength(CmdArgs, 0);
+  if I <= High(ACall.Args) then
+  begin
+    CmdName := ACall.Args[I];
+    Inc(I);
+    while I <= High(ACall.Args) do
+    begin
+      SetLength(CmdArgs, Length(CmdArgs) + 1);
+      CmdArgs[High(CmdArgs)] := ACall.Args[I];
+      Inc(I);
+    end;
+  end;
+  Text := ACall.Stdin;
+  { Split on whitespace, as xargs does by default. }
+  SetLength(Items, 0);
+  Data := '';
+  for J := 1 to Length(Text) do
+    if (Text[J] = ' ') or (Text[J] = #9) or (Text[J] = #10) or (Text[J] = #13)
+      then
+    begin
+      if Data <> '' then
+      begin
+        SetLength(Items, Length(Items) + 1);
+        Items[High(Items)] := Data;
+        Data := '';
+      end;
+    end
+    else
+      Data := Data + Text[J];
+  if Data <> '' then
+  begin
+    SetLength(Items, Length(Items) + 1);
+    Items[High(Items)] := Data;
+  end;
+  if Length(Items) = 0 then
+    Exit(ShellResultOk(''));   // nothing to do is not an error
+
+  OutText := '';
+  ErrText := '';
+  J := 0;
+  if UseReplace then
+  begin
+    { -I: one invocation per item, with the placeholder substituted in EVERY
+      argument. }
+    for I := 0 to High(Items) do
+    begin
+      SetLength(Batch, Length(CmdArgs));
+      for J := 0 to High(CmdArgs) do
+      begin
+        Data := CmdArgs[J];
+        while Pos(Replace, Data) > 0 do
+          Data := Copy(Data, 1, Pos(Replace, Data) - 1) + Items[I] +
+            Copy(Data, Pos(Replace, Data) + Length(Replace), MaxInt);
+        Batch[J] := Data;
+      end;
+      Res := RunBuiltin(CmdName, Batch, '', ACall.Cwd, ACall.Env);
+      OutText := OutText + Res.Stdout;
+      ErrText := ErrText + Res.Stderr;
+      if Res.ExitCode <> 0 then
+        Failed := True;
+    end;
+    if Failed then
+      Exit(ShellResultOk(OutText, 1));
+    Exit(ShellResultOk(OutText));
+  end;
+  { Default: append the items to the fixed arguments. -n bounds each invocation;
+    without -n ALL items go into one invocation, which is what POSIX xargs does
+    and what `find | xargs grep pat` depends on. }
+  I := 0;
+  while I <= High(Items) do
+  begin
+    SetLength(Batch, 0);
+    for J := 0 to High(CmdArgs) do
+    begin
+      SetLength(Batch, Length(Batch) + 1);
+      Batch[High(Batch)] := CmdArgs[J];
+    end;
+    J := 0;
+    while (I <= High(Items)) and ((MaxArgs = 0) or (J < MaxArgs)) do
+    begin
+      SetLength(Batch, Length(Batch) + 1);
+      Batch[High(Batch)] := Items[I];
+      Inc(I);
+      Inc(J);
+    end;
+    Res := RunBuiltin(CmdName, Batch, '', ACall.Cwd, ACall.Env);
+    OutText := OutText + Res.Stdout;
+    ErrText := ErrText + Res.Stderr;
+    if Res.ExitCode <> 0 then
+    begin
+      Failed := True;
+      FailCode := Res.ExitCode;
+    end;
+  end;
+  Result := ShellResultOk(OutText);
+  Result.Stderr := ErrText;
+  if Failed then
+    Result.ExitCode := FailCode;
 end;
 
 function TBuiltinCommands.Wc(const ACall: TShellCall): TShellResult;

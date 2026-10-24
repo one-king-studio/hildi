@@ -8,7 +8,8 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  shell.types, hildegard.helper.shell.fs, hildegard.helper.shell.commands;
+  shell.types, shell.registry, hildegard.helper.shell.fs,
+  hildegard.helper.shell.commands;
 
 type
   TShellCommandsTest = class(TTestCase)
@@ -16,6 +17,7 @@ type
     FRoot: string;
     FFs: TWorkspaceShellFs;
     FCmd: TBuiltinCommands;
+    FReg: TShellRegistry;
     FInvokeName: string;
     FInvokeJson: string;
     FInvokeReason: string;
@@ -57,6 +59,7 @@ type
     procedure TestRmdir;
     procedure TestNlDuTree;
     procedure TestMkTemp;
+    procedure TestXargs;
     procedure TestTest;
     procedure TestBracket;
     procedure TestTrueFalse;
@@ -96,6 +99,12 @@ begin
   FInvokeResult := 'tool result';
   FInvokeError := '';
   FCmd := TBuiltinCommands.Create(FFs, Invoke, ['file_read', 'mcp_*']);
+  { xargs resolves its target through the registry, so the fixture must supply
+    one. It mirrors the dispatch in RunCmd for the commands the tests use. }
+  FReg := TShellRegistry.Create;
+  FReg.Register('echo', FCmd.Echo);
+  FReg.Register('cat', FCmd.Cat);
+  FCmd.SetRegistry(FReg);
 end;
 
 procedure TShellCommandsTest.TearDown;
@@ -103,6 +112,7 @@ var
   Tmp: TWorkspaceShellFs;
   E: string;
 begin
+  FReg.Free;
   FCmd.Free;
   FFs.Free;
   if DirectoryExists(FRoot) then
@@ -216,6 +226,8 @@ begin
     Result := FCmd.Tree(Call)
   else if AName = 'mktemp' then
     Result := FCmd.MkTemp(Call)
+  else if AName = 'xargs' then
+    Result := FCmd.Xargs(Call)
   else if AName = 'diff' then
     Result := FCmd.Diff(Call)
   else if AName = 'pwd' then
@@ -1167,6 +1179,33 @@ begin
   R := RunCmd('mktemp', ['-d']);
   AssertTrue('directory created: ' + Trim(R.Stdout),
     DirectoryExists(P(Trim(R.Stdout))));
+end;
+
+procedure TShellCommandsTest.TestXargs;
+var
+  R: TShellResult;
+begin
+  { xargs is the only route from one command's output into another's arguments,
+    because $() and backquotes hard-fail the parse. }
+  R := RunCmd('xargs', ['echo'], 'a b c');
+  AssertEquals('appends items', 'a b c' + #10, R.Stdout);
+  { Fixed leading arguments are preserved. }
+  R := RunCmd('xargs', ['echo', 'pre'], 'a b');
+  AssertEquals('fixed args first', 'pre a b' + #10, R.Stdout);
+  { -n bounds each invocation. }
+  R := RunCmd('xargs', ['-n', '2', 'echo'], 'a b c');
+  AssertEquals('two at a time', 'a b' + #10 + 'c' + #10, R.Stdout);
+  { -I substitutes in every argument, one invocation per item. }
+  R := RunCmd('xargs', ['-I', '{}', 'echo', '[{}]'], 'x y');
+  AssertEquals('replace', '[x]' + #10 + '[y]' + #10, R.Stdout);
+  { Empty input runs nothing and is not an error. }
+  R := RunCmd('xargs', ['echo'], '');
+  AssertEquals('empty', 0, R.ExitCode);
+  AssertEquals('empty says nothing', '', R.Stdout);
+  { A missing target command is named, not silently ignored. }
+  R := RunCmd('xargs', ['nosuchcmd'], 'a');
+  AssertEquals('missing command', 127, R.ExitCode);
+  AssertTrue('names it: ' + R.Stderr, Pos('nosuchcmd', R.Stderr) > 0);
 end;
 
 initialization

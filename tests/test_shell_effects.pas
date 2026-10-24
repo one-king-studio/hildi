@@ -222,6 +222,9 @@ begin
   AssertTrue('du', Known('du', []));
   AssertTrue('tree', Known('tree', []));
   AssertTrue('mktemp', Known('mktemp', []));
+  { xargs runs ANOTHER command whose own effects we cannot see from here, so it
+    must stay opaque rather than claim to be a harmless read. }
+  AssertFalse('xargs is opaque', Known('xargs', []));
   AssertTrue('grep', Known('grep', []));
   AssertTrue('sed', Known('sed', []));
   AssertTrue('awk', Known('awk', []));
