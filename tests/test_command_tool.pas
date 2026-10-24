@@ -90,6 +90,7 @@ type
     procedure TestAsksNameTheScriptAndItsSpan;
     procedure TestStructuralWordsAreNotCommands;
     procedure TestApprovalAsksPerSegment;
+    procedure TestSubstitutionIsShownInTheAsk;
     procedure TestWildcardAllowedCatStillAsksAboutThePath;
     procedure TestExactlyApprovedCatDoesNotAskAboutThePath;
     procedure TestUnknownCommandAsksForBoth;
@@ -570,6 +571,28 @@ begin
       Copy(Src, Asks[0].FocusStart, Asks[0].FocusLen));
     AssertEquals('second focus', 'uname -a',
       Copy(Src, Asks[1].FocusStart, Asks[1].FocusLen));
+  finally
+    Tool.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestSubstitutionIsShownInTheAsk;
+var
+  Tool: TCommandTool;
+  Asks: TApprovalAskArray;
+begin
+  { The whole point of capture-only: execution still refuses $(), but the
+    operator must be able to SEE what the substitution would run. Without this
+    the dialog shows `echo ...` and the operator approves blind. }
+  Tool := BuildTool(nil, 0);
+  try
+    Asks := Tool.ApprovalAsks(
+      '{"command":"echo $(cat secret.txt)","reason":"r"}');
+    AssertTrue('an ask was produced', Length(Asks) > 0);
+    AssertTrue('names the inner command: ' + Asks[0].Summary,
+      Pos('cat secret.txt', Asks[0].Summary) > 0);
+    AssertTrue('and says it runs first: ' + Asks[0].Summary,
+      Pos('runs first', Asks[0].Summary) > 0);
   finally
     Tool.Free;
   end;

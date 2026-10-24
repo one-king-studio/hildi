@@ -366,8 +366,13 @@ begin
       all, so it must not ask. }
     if not SegmentCommand(Seg, CmdName, CmdArgs) then
       Continue;
-    { A pure command needs no approval; its redirects are asked separately. }
-    if IsPureCommand(ExtractFileName(CmdName)) then
+    { A pure command needs no approval; its redirects are asked separately.
+      BUT a pure command carrying a substitution is not pure in effect: its
+      effects are the union of its inner commands. `echo $(cat secret.txt)` reads
+      a file, so skipping it here would approve the read with no ask at all.
+      This is the union rule: effect(compound) = inner U outer. }
+    if IsPureCommand(ExtractFileName(CmdName)) and
+       (Length(Seg.Substitutions) = 0) then
       Continue;
     Bin := ExtractFileName(CmdName);
     if Bin = '' then
@@ -380,6 +385,12 @@ begin
     for J := 0 to High(CmdArgs) do
       Result[High(Result)].Summary := Result[High(Result)].Summary + ' ' +
         CmdArgs[J];
+    { A substitution's inner command is what actually runs first, and we cannot
+      execute it - but the operator must SEE it. Without this the dialog shows
+      `echo ...` for `echo $(cat secret)` and the operator approves blind. }
+    for J := 0 to High(Seg.Substitutions) do
+      Result[High(Result)].Summary := Result[High(Result)].Summary +
+        ' [runs first: ' + Seg.Substitutions[J] + ']';
     for J := 0 to High(Seg.Redirects) do
       Result[High(Result)].Summary := Result[High(Result)].Summary + ' ' +
         Seg.Redirects[J].Operator + ' ' + Seg.Redirects[J].Target;

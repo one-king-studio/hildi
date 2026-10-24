@@ -58,6 +58,10 @@ type
     Arguments: TCommandArgArray;   // argv[1..], quotes removed
     Redirects: TCommandRedirectArray;
     Paths: TCommandPathArray;      // path-like args + redirect targets
+    { Inner commands of any $( ... ) in this segment, in order. Carried so the
+      approval dialog can SHOW what a substitution would run: an operator cannot
+      consent to what they cannot see. Execution still refuses substitution. }
+    Substitutions: TStringArray;
   end;
 
   TCommandSegmentArray = array of TCommandSegment;
@@ -99,6 +103,10 @@ type
     Text: string;          // word text for tkWord; operator text otherwise
     Op: TCommandOp;        // for tkOp
     Unresolvable: Boolean; // tkWord had $ or ` outside single quotes
+    { The inner command of each $( ... ) in this word, in order. Captured so the
+      approval dialog can SHOW what a substitution would run even though we do not
+      execute it: an operator cannot consent to what they cannot see. }
+    Substitutions: TStringArray;
     InlineTarget: string;  // tkRedirect with an inline fd target (e.g. '&1')
   end;
   TTokenArray = array of TToken;
@@ -198,7 +206,7 @@ function ParseCommand(const ACommand: string;
   ASyntax: TShellSyntax): TCommandPlan;
 var
   S: string;
-  N, I, J, K, TokStart, TokCount: Integer;
+  N, I, J, K, M, TokStart, TokCount: Integer;
   C: Char;
   Tokens: TTokenArray;
   SegStart, SegEnd: Integer;
@@ -225,6 +233,57 @@ var
     Unres: Boolean;
     Quote: Char;
     Ch: Char;
+    Subs: TStringArray;
+
+    { At S[I] = '$' with S[I+1] = '(' — capture the balanced inner text. Returns
+      the inner command and advances I past the closing paren. Nesting is
+      honoured so $(cat $(f)) captures 'cat $(f)'. }
+    function CaptureSubstitution(out AInner: string): Boolean;
+    var
+      Depth, K: Integer;
+      StartAt: Integer;
+    begin
+      Result := False;
+      AInner := '';
+      Depth := 0;
+      StartAt := I + 2;
+      K := I + 1;   // on '('
+      while K <= N do
+      begin
+        if S[K] = '(' then
+          Inc(Depth)
+        else if S[K] = ')' then
+        begin
+          Dec(Depth);
+          if Depth = 0 then
+          begin
+            AInner := Trim(Copy(S, StartAt, K - StartAt));
+            I := K + 1;
+            Exit(True);
+          end;
+        end;
+        Inc(K);
+      end;
+      { Unterminated: leave I alone so the caller emits the literal '$'. }
+    end;
+
+    procedure NoteSubstitution;
+    var
+      Inner: string;
+    begin
+      if CaptureSubstitution(Inner) then
+      begin
+        SetLength(Subs, Length(Subs) + 1);
+        Subs[High(Subs)] := Inner;
+        Buf := Buf + '$(' + Inner + ')';
+      end
+      else
+      begin
+        Buf := Buf + '$';
+        Inc(I);
+      end;
+    end;
+
   begin
     Buf := '';
     Unres := False;
@@ -260,7 +319,17 @@ var
           Inc(I);
           Continue;
         end;
-        if (Ch = '$') or (Ch = '`') then
+        if Ch = '$' then
+        begin
+          if (I < N) and (S[I + 1] = '(') then
+          begin
+            Unres := True;
+            NoteSubstitution;
+            Continue;
+          end;
+          Unres := True;
+        end
+        else if Ch = '`' then
           Unres := True;
         Buf := Buf + Ch;
         Inc(I);
@@ -285,7 +354,17 @@ var
         end
         else
         begin
-          if (Ch = '$') or (Ch = '`') then
+          if Ch = '$' then
+          begin
+            if (I < N) and (S[I + 1] = '(') then
+            begin
+              Unres := True;
+              NoteSubstitution;
+              Continue;
+            end;
+            Unres := True;
+          end
+          else if Ch = '`' then
             Unres := True;
           Buf := Buf + Ch;
         end;
@@ -301,6 +380,7 @@ var
     AWord.Kind := tkWord;
     AWord.Text := Buf;
     AWord.Unresolvable := Unres;
+    AWord.Substitutions := Subs;
     Result := True;
   end;
 
@@ -512,6 +592,16 @@ begin
       else
       begin
         { A word. Leading VAR=value assignments are not the executable. }
+        { Collect any $( ... ) captured in this word, so the approval dialog can
+          show the inner commands. Done for EVERY word, including the executable
+          and assignments, since any of them can hold a substitution. }
+        for M := 0 to High(Tokens[J].Substitutions) do
+        begin
+          SetLength(Result.Segments[K].Substitutions,
+            Length(Result.Segments[K].Substitutions) + 1);
+          Result.Segments[K].Substitutions[High(
+            Result.Segments[K].Substitutions)] := Tokens[J].Substitutions[M];
+        end;
         if Result.Segments[K].Executable = '' then
         begin
           if not LooksLikeAssignment(Tokens[J].Text) then
