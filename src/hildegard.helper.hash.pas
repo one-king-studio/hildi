@@ -97,9 +97,17 @@ begin
   Result := True;
 end;
 
+{ 32-bit rotate left.
+
+  Locally unchecked because the build enables range and overflow checking (-Cr
+  -Co) and this shift is 32-bit arithmetic: FPC range-checks the result of an
+  unsigned shift, which MD5 needs to wrap. Same reasoning and the same directive
+  pair as the FNV hasher in tests/test_changes.pas. }
 function Rotl32(V: LongWord; N: Byte): LongWord;
 begin
+  {$push}{$Q-}{$R-}
   Result := (V shl N) or (V shr (32 - N));
+  {$pop}
 end;
 
 { MD5 (RFC 1321). Pure Pascal because the vendored shim exposes SHA-256 only.
@@ -155,6 +163,13 @@ begin
   H[0] := $67452301; H[1] := $efcdab89;
   H[2] := $98badcfe; H[3] := $10325476;
 
+  { MD5 is DEFINED on 32-bit modular arithmetic: every add below is meant to wrap,
+    and both the rotate and the additions overflow by design. The build enables
+    range and overflow checking (-Cr -Co), so the whole compression loop is
+    compiled unchecked - otherwise every call raises ERangeError on the first
+    addition. The rotates need this even for an empty input, because a single
+    padding block is always compressed. }
+  {$push}{$Q-}{$R-}
   Chunk := 0;
   while Chunk < G do
   begin
@@ -191,6 +206,7 @@ begin
     Inc(H[0], A); Inc(H[1], B); Inc(H[2], C); Inc(H[3], D);
     Inc(Chunk, 64);
   end;
+  {$pop}
 
   SetLength(Digest, 16);
   for I := 0 to 3 do
