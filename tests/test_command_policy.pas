@@ -32,6 +32,13 @@ type
     procedure TestSegmentCommandStripsStructure;
     procedure TestSegmentCommandHeadersNameNoCommand;
     procedure TestRedirectionWithoutTargetSetsParseError;
+    { A here-document is a redirect whose target is a delimiter and whose body is
+      DATA. The body must never reach the segment list: an ask set built from it
+      would carry commands the operator never wrote on the command line. }
+    procedure TestHereDocIsARedirectWithADelimiterTarget;
+    procedure TestHereDocBodyIsNotReadAsCommands;
+    procedure TestHereDocStripKeepsTheDash;
+    procedure TestUnterminatedHereDocSetsParseError;
   end;
 
 implementation
@@ -238,6 +245,64 @@ var
 begin
   P := Parse('echo hi >');
   AssertTrue('parse error', P.ParseError <> '');
+end;
+
+procedure TCommandPolicyTest.TestHereDocIsARedirectWithADelimiterTarget;
+var
+  P: TCommandPlan;
+begin
+  { `cat <<EOF` is one command with one redirect whose target is the delimiter.
+    Before this, the tokenizer read `<<` as two separate '<' operators, so the
+    first had no target and the whole line failed to parse - the command never
+    ran, and no ask was ever built. }
+  P := Parse('cat <<EOF' + #10 + 'hello' + #10 + 'EOF');
+  AssertEquals('parses', '', P.ParseError);
+  AssertEquals('one segment', 1, Length(P.Segments));
+  AssertEquals('the executable', 'cat', P.Segments[0].Executable);
+  AssertEquals('no arguments: the delimiter is not argv', 0,
+    Length(P.Segments[0].Arguments));
+  AssertEquals('one redirect', 1, Length(P.Segments[0].Redirects));
+  AssertEquals('operator', '<<', P.Segments[0].Redirects[0].Operator);
+  AssertEquals('target is the delimiter', 'EOF',
+    P.Segments[0].Redirects[0].Target);
+end;
+
+procedure TCommandPolicyTest.TestHereDocBodyIsNotReadAsCommands;
+var
+  P: TCommandPlan;
+begin
+  { The body is DATA. A body line that looks like a command must not become a
+    segment, or the approval dialog would ask for permission to run something the
+    operator never wrote as a command. }
+  P := Parse('cat <<EOF' + #10 + 'rm -rf /' + #10 + 'echo pwned' + #10 + 'EOF');
+  AssertEquals('parses', '', P.ParseError);
+  AssertEquals('still one segment', 1, Length(P.Segments));
+  AssertEquals('and it is cat', 'cat', P.Segments[0].Executable);
+end;
+
+procedure TCommandPolicyTest.TestHereDocStripKeepsTheDash;
+var
+  P: TCommandPlan;
+begin
+  { `<<-` strips leading tabs; the operator stays distinguishable so a display
+    can show what was written. }
+  P := Parse('cat <<-EOF' + #10 + #9 + 'body' + #10 + #9 + 'EOF');
+  AssertEquals('parses', '', P.ParseError);
+  AssertEquals('one redirect', 1, Length(P.Segments[0].Redirects));
+  AssertEquals('operator keeps the dash', '<<-',
+    P.Segments[0].Redirects[0].Operator);
+  AssertEquals('target', 'EOF', P.Segments[0].Redirects[0].Target);
+end;
+
+procedure TCommandPolicyTest.TestUnterminatedHereDocSetsParseError;
+var
+  P: TCommandPlan;
+begin
+  { Fail closed: a heredoc with no closing delimiter is ambiguous, and an ask set
+    built from a guess would be worse than a refusal. }
+  P := Parse('cat <<EOF' + #10 + 'no closing delimiter');
+  AssertTrue('parse error names it',
+    Pos('here-document', LowerCase(P.ParseError)) > 0);
 end;
 
 initialization

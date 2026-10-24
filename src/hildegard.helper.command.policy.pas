@@ -386,8 +386,69 @@ var
 
   procedure ParseRedirect(AWithDigits: Boolean; out AErr: string);
   var
-    Op, Inline: string;
-    T: TToken;
+    Op, Inline, Delim: string;
+    T, W: TToken;
+    StripTabs: Boolean;
+
+    { The delimiter word: a non-space run, with any matching surrounding quotes
+      removed (quoted delimiters suppress expansion in bash; we only need the
+      text of the terminator). }
+    function ReadDelimiter: string;
+    var
+      Start: Integer;
+      Q: Char;
+    begin
+      Start := I;
+      while (I <= N) and (S[I] <> ' ') and (S[I] <> #9) and (S[I] <> #10) do
+        Inc(I);
+      Result := Copy(S, Start, I - Start);
+      if Length(Result) >= 2 then
+      begin
+        Q := Result[1];
+        if ((Q = '''') or (Q = '"')) and (Result[Length(Result)] = Q) then
+          Result := Copy(Result, 2, Length(Result) - 2);
+      end;
+    end;
+
+    { Consume the body up to and including the terminator line, so no body line is
+      ever tokenized. False when the terminator never appears. }
+    function SkipBody(const ADelim: string; AStripTabs: Boolean): Boolean;
+    var
+      Start, Len: Integer;
+      Line: string;
+      C: Char;
+    begin
+      Result := False;
+      { Rest of the delimiter's own line. }
+      while (I <= N) and (S[I] <> #10) do
+        Inc(I);
+      while (I <= N) and (S[I] = #10) do
+        Inc(I);
+      while I <= N do
+      begin
+        Start := I;
+        while (I <= N) and (S[I] <> #10) do
+          Inc(I);
+        Line := Copy(S, Start, I - Start);
+        if AStripTabs then
+        begin
+          Len := 1;
+          while (Len <= Length(Line)) and (Line[Len] = #9) do
+            Inc(Len);
+          while (Len > 1) do
+          begin
+            Delete(Line, 1, 1);
+            Dec(Len);
+          end;
+        end;
+        { Step past the newline that ends this line. }
+        if (I <= N) and (S[I] = #10) then
+          Inc(I);
+        if Line = ADelim then
+          Exit(True);
+      end;
+    end;
+
   begin
     AErr := '';
     Op := '';
@@ -408,6 +469,54 @@ var
     begin
       Op := Op + '>';
       Inc(I);
+    end;
+    if (I <= N) and (S[I] = '<') then
+    begin
+      { A here-document. The delimiter is the redirect's target and the body is
+        DATA - consumed here so its lines never become tokens. Without this the
+        tokenizer read `<<` as two separate '<' operators, so the first had no
+        target and the whole line failed to parse: the command never ran and no
+        ask was ever built. }
+      Op := Op + '<';
+      Inc(I);
+      if (I <= N) and (S[I] = '<') then
+      begin
+        AErr := 'here-strings are not supported';
+        Exit;
+      end;
+      StripTabs := False;
+      if (I <= N) and (S[I] = '-') then
+      begin
+        Op := Op + '-';
+        StripTabs := True;
+        Inc(I);
+      end;
+      while (I <= N) and ((S[I] = ' ') or (S[I] = #9)) do
+        Inc(I);
+      Delim := ReadDelimiter;
+      if Delim = '' then
+      begin
+        AErr := 'here-document without a delimiter';
+        Exit;
+      end;
+      { Fail closed: an ask set built from a guessed body boundary would be worse
+        than a refusal. }
+      if not SkipBody(Delim, StripTabs) then
+      begin
+        AErr := 'here-document is not terminated by its delimiter "' + Delim + '"';
+        Exit;
+      end;
+      T := Default(TToken);
+      T.Kind := tkRedirect;
+      T.Text := Op;
+      Push(T);
+      { Pushing the delimiter as a word is what lets the segment builder consume
+        it as the target; InlineTarget means an fd ('&1'), not a delimiter. }
+      W := Default(TToken);
+      W.Kind := tkWord;
+      W.Text := Delim;
+      Push(W);
+      Exit;
     end;
     T := Default(TToken);
     T.Kind := tkRedirect;
