@@ -51,6 +51,10 @@ type
     procedure TestUniq;
     procedure TestBasenameDirname;
     procedure TestPwdStatSeq;
+    procedure TestExpr;
+    procedure TestStringsAndBase64;
+    procedure TestYq;
+    procedure TestRmdir;
     procedure TestTest;
     procedure TestBracket;
     procedure TestTrueFalse;
@@ -192,6 +196,16 @@ begin
     Result := FCmd.Sha256Sum(Call)
   else if AName = 'md5sum' then
     Result := FCmd.Md5Sum(Call)
+  else if AName = 'expr' then
+    Result := FCmd.Expr(Call)
+  else if AName = 'yq' then
+    Result := FCmd.Yq(Call)
+  else if AName = 'strings' then
+    Result := FCmd.Strings(Call)
+  else if AName = 'base64' then
+    Result := FCmd.Base64Cmd(Call)
+  else if AName = 'rmdir' then
+    Result := FCmd.Rmdir(Call)
   else if AName = 'diff' then
     Result := FCmd.Diff(Call)
   else if AName = 'pwd' then
@@ -1007,6 +1021,90 @@ begin
   RunCmd('mcp', ['my-server:read_file', '{}']);
   AssertEquals('tool name', 'mcp_my-server_read_file', FInvokeName);
   AssertEquals('usage without colon', 2, RunCmd('mcp', ['nope']).ExitCode);
+end;
+
+procedure TShellCommandsTest.TestExpr;
+var
+  R: TShellResult;
+begin
+  { There is no $(( )) in this shell, so expr is the only arithmetic route. }
+  AssertEquals('add', '5' + #10, RunCmd('expr', ['2', '+', '3']).Stdout);
+  AssertEquals('sub', '1' + #10, RunCmd('expr', ['3', '-', '2']).Stdout);
+  AssertEquals('mul', '6' + #10, RunCmd('expr', ['2', '*', '3']).Stdout);
+  AssertEquals('div', '3' + #10, RunCmd('expr', ['7', '/', '2']).Stdout);
+  AssertEquals('mod', '1' + #10, RunCmd('expr', ['7', '%', '2']).Stdout);
+  { A false comparison prints 0 AND exits 1, as expr(1) does. }
+  R := RunCmd('expr', ['1', '=', '2']);
+  AssertEquals('false prints 0', '0' + #10, R.Stdout);
+  AssertEquals('false exits 1', 1, R.ExitCode);
+  R := RunCmd('expr', ['2', '>', '1']);
+  AssertEquals('true prints 1', '1' + #10, R.Stdout);
+  AssertEquals('true exits 0', 0, R.ExitCode);
+  { Division by zero is an error, not a crash or a zero. }
+  AssertEquals('div by zero', 2, RunCmd('expr', ['1', '/', '0']).ExitCode);
+end;
+
+procedure TShellCommandsTest.TestStringsAndBase64;
+var
+  R: TShellResult;
+  E, Enc: string;
+begin
+  { strings is od's complement: printable runs instead of bytes. }
+  FFs.WriteFile(P('bin2.dat'), 'hello' + #0#1#2 + 'world!!', False, E);
+  R := RunCmd('strings', ['bin2.dat']);
+  AssertEquals('runs', 'hello' + #10 + 'world!!' + #10, R.Stdout);
+  R := RunCmd('strings', ['-n', '7', 'bin2.dat']);
+  AssertEquals('min length filters', 'world!!' + #10, R.Stdout);
+
+  { base64 round-trips. Ground truth: 'abc' encodes to YWJj. }
+  FFs.WriteFile(P('b.txt'), 'abc', False, E);
+  R := RunCmd('base64', ['b.txt']);
+  AssertEquals('encode matches ground truth', 'YWJj' + #10, R.Stdout);
+  Enc := Trim(R.Stdout);
+  FFs.WriteFile(P('b64.txt'), Enc, False, E);
+  R := RunCmd('base64', ['-d', 'b64.txt']);
+  AssertEquals('round trip', 'abc', R.Stdout);
+  { Padding cases, which is where a hand-rolled encoder usually breaks. }
+  FFs.WriteFile(P('b2.txt'), 'ab', False, E);
+  R := RunCmd('base64', ['b2.txt']);
+  AssertEquals('two bytes pad', 'YWI=' + #10, R.Stdout);
+  FFs.WriteFile(P('b1.txt'), 'a', False, E);
+  R := RunCmd('base64', ['b1.txt']);
+  AssertEquals('one byte pad', 'YQ==' + #10, R.Stdout);
+end;
+
+procedure TShellCommandsTest.TestYq;
+var
+  R: TShellResult;
+  E: string;
+begin
+  { Reuses the harness's YAML parser, so yq and the yaml_edit tool agree. }
+  FFs.WriteFile(P('d.yaml'), 'name: drain' + #10 + 'count: 3' + #10, False, E);
+  R := RunCmd('yq', ['.', 'd.yaml']);
+  AssertEquals('exit', 0, R.ExitCode);
+  AssertTrue('names the key: ' + R.Stdout, Pos('drain', R.Stdout) > 0);
+  { -r gives the bare scalar, which is what a script wants. }
+  R := RunCmd('yq', ['-r', 'name', 'd.yaml']);
+  AssertEquals('raw scalar', 'drain' + #10, R.Stdout);
+  { A missing path is an error, not an empty success. }
+  R := RunCmd('yq', ['-r', 'nope', 'd.yaml']);
+  AssertEquals('missing path exits 1', 1, R.ExitCode);
+end;
+
+procedure TShellCommandsTest.TestRmdir;
+var
+  R: TShellResult;
+  E: string;
+begin
+  { Unique names: 'sub' already exists from SetUp. }
+  AssertTrue('mkdir', RunCmd('mkdir', ['rd_empty']).ExitCode = 0);
+  R := RunCmd('rmdir', ['rd_empty']);
+  AssertEquals('removes an empty dir', 0, R.ExitCode);
+  { A non-empty directory is refused - that is the whole difference from rm. }
+  AssertTrue('mkdir again', RunCmd('mkdir', ['rd_full']).ExitCode = 0);
+  FFs.WriteFile(P('rd_full/keep.txt'), 'x', False, E);
+  R := RunCmd('rmdir', ['rd_full']);
+  AssertEquals('refuses non-empty', 1, R.ExitCode);
 end;
 
 initialization

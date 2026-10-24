@@ -156,11 +156,13 @@ begin
   AKnown := True;
 
   if (AName = 'echo') or (AName = 'printf') or (AName = 'true') or
-    (AName = 'false') or (AName = 'basename') or (AName = 'dirname') then
+    (AName = 'false') or (AName = 'basename') or (AName = 'dirname') or
+    (AName = 'expr') then
     Exit;
 
   if (AName = 'cat') or (AName = 'wc') or (AName = 'od') or
-     (AName = 'sha256sum') or (AName = 'md5sum') then
+     (AName = 'sha256sum') or (AName = 'md5sum') or (AName = 'strings') or
+     (AName = 'base64') or (AName = 'yq') then
   begin
     AddFiles(AReads, AName, AArgs, 0);
     Exit;
@@ -394,7 +396,7 @@ begin
     Exit;
   end;
 
-  if (AName = 'mkdir') or (AName = 'touch') then
+  if (AName = 'mkdir') or (AName = 'touch') or (AName = 'rmdir') then
   begin
     I := 0;
     while (I <= High(AArgs)) and IsOption(AArgs[I]) do

@@ -131,6 +131,11 @@ begin
   FRegistry.Register('od', FCmd.Od);
   FRegistry.Register('sha256sum', FCmd.Sha256Sum);
   FRegistry.Register('md5sum', FCmd.Md5Sum);
+  FRegistry.Register('expr', FCmd.Expr);
+  FRegistry.Register('yq', FCmd.Yq);
+  FRegistry.Register('strings', FCmd.Strings);
+  FRegistry.Register('base64', FCmd.Base64Cmd);
+  FRegistry.Register('rmdir', FCmd.Rmdir);
   FRegistry.Register('basename', FCmd.Basename);
   FRegistry.Register('dirname', FCmd.Dirname);
   FRegistry.Register('test', FCmd.TestCmd);

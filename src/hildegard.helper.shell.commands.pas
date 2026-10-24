@@ -16,7 +16,8 @@ interface
 
 uses
   SysUtils, Classes, shell.types, shell.fs, hildegard.helper.shell.fs,
-  hildegard.helper.hash, changes.text, hildegard.helper.utf8;
+  hildegard.helper.hash, changes.text, hildegard.helper.utf8,
+  hildegard.helper.yaml;
 
 type
   { The harness's normal tool resolution: (name, args JSON, inherited reason)
@@ -58,6 +59,11 @@ type
       elsewhere - this is for compatibility with scripts that ask for it). }
     function Sha256Sum(const ACall: TShellCall): TShellResult;
     function Md5Sum(const ACall: TShellCall): TShellResult;
+    function Expr(const ACall: TShellCall): TShellResult;
+    function Yq(const ACall: TShellCall): TShellResult;
+    function Strings(const ACall: TShellCall): TShellResult;
+    function Base64Cmd(const ACall: TShellCall): TShellResult;
+    function Rmdir(const ACall: TShellCall): TShellResult;
     function Grep(const ACall: TShellCall): TShellResult;
     function Ls(const ACall: TShellCall): TShellResult;
     function Mkdir(const ACall: TShellCall): TShellResult;
@@ -128,7 +134,7 @@ type
   end;
 
 const
-  CommandSpecs: array[0..37] of TCommandSpec = (
+  CommandSpecs: array[0..42] of TCommandSpec = (
     (Name: 'echo'; Options: '-n'),
     (Name: 'head'; Options: '-nNc'),
     (Name: 'tail'; Options: '-nNc'),
@@ -140,6 +146,11 @@ const
     (Name: 'od'; Options: '-Ancxtd'),
     (Name: 'sha256sum'; Options: ''),
     (Name: 'md5sum'; Options: ''),
+    (Name: 'expr'; Options: ''),
+    (Name: 'yq'; Options: '-r'),
+    (Name: 'strings'; Options: '-nN'),
+    (Name: 'base64'; Options: '-d'),
+    (Name: 'rmdir'; Options: '-p'),
     (Name: 'grep'; Options: '-nivlcFEGrm'),
     (Name: 'sed'; Options: '-nErei'),
     (Name: 'awk'; Options: '-F'),
@@ -838,6 +849,319 @@ begin
     OutText := Dig + '  -' + #10;
   end;
   Result := ShellResultOk(OutText);
+end;
+
+function TBuiltinCommands.Expr(const ACall: TShellCall): TShellResult;
+var
+  I: Integer;
+  Lhs, Op, Rhs: string;
+  A, B: Int64;
+  Numeric: Boolean;
+  OutVal: string;
+
+  function AsInt(const S: string; out V: Int64): Boolean;
+  begin
+    Result := TryStrToInt64(Trim(S), V);
+  end;
+
+begin
+  { Arithmetic and comparison. There is no $(( )) expansion in this shell, so
+    without expr a script needing 2+2 has no route but a language. }
+  if Length(ACall.Args) = 1 then
+    Exit(ShellResultOk(ACall.Args[0] + #10));
+  if Length(ACall.Args) <> 3 then
+    Exit(Usage('expr: expected A OP B'));
+  Lhs := ACall.Args[0];
+  Op := ACall.Args[1];
+  Rhs := ACall.Args[2];
+  Numeric := AsInt(Lhs, A) and AsInt(Rhs, B);
+  if Op = '+' then
+  begin
+    if not Numeric then Exit(Failure('expr: non-integer argument', 2));
+    OutVal := IntToStr(A + B);
+  end
+  else if Op = '-' then
+  begin
+    if not Numeric then Exit(Failure('expr: non-integer argument', 2));
+    OutVal := IntToStr(A - B);
+  end
+  else if Op = '*' then
+  begin
+    if not Numeric then Exit(Failure('expr: non-integer argument', 2));
+    OutVal := IntToStr(A * B);
+  end
+  else if (Op = '/') or (Op = '%') then
+  begin
+    if not Numeric then Exit(Failure('expr: non-integer argument', 2));
+    if B = 0 then Exit(Failure('expr: division by zero', 2));
+    if Op = '/' then OutVal := IntToStr(A div B) else OutVal := IntToStr(A mod B);
+  end
+  else if (Op = '=') or (Op = '==') then
+  begin
+    if Numeric then OutVal := IntToStr(Ord(A = B))
+    else OutVal := IntToStr(Ord(Lhs = Rhs));
+  end
+  else if (Op = '!=') then
+  begin
+    if Numeric then OutVal := IntToStr(Ord(A <> B))
+    else OutVal := IntToStr(Ord(Lhs <> Rhs));
+  end
+  else if (Op = '<') or (Op = '<=') or (Op = '>') or (Op = '>=') then
+  begin
+    if not Numeric then Exit(Failure('expr: non-integer argument', 2));
+    if Op = '<' then OutVal := IntToStr(Ord(A < B))
+    else if Op = '<=' then OutVal := IntToStr(Ord(A <= B))
+    else if Op = '>' then OutVal := IntToStr(Ord(A > B))
+    else OutVal := IntToStr(Ord(A >= B));
+  end
+  else
+    Exit(Usage('expr: unsupported operator ' + Op));
+  { expr's convention: a false comparison exits 1 and prints 0. }
+  if (OutVal = '0') and ((Op = '=') or (Op = '==') or (Op = '!=') or
+     (Op = '<') or (Op = '<=') or (Op = '>') or (Op = '>=')) then
+    Exit(ShellResultOk('0' + #10, 1));
+  Result := ShellResultOk(OutVal + #10);
+end;
+
+function TBuiltinCommands.Yq(const ACall: TShellCall): TShellResult;
+var
+  I: Integer;
+  Raw, E, Data, OutText: string;
+  D: TJSONData;
+  Path: string;
+begin
+  { Reuses the harness's own YAML parser, so `yq` and the yaml_edit tool cannot
+    disagree about what a document means. Deliberately a small subset: print the
+    document, or one path under it. Editing is the yaml_edit tool's job. }
+  Raw := '';
+  Path := '';
+  I := 0;
+  while I <= High(ACall.Args) do
+  begin
+    if ACall.Args[I] = '-r' then
+    begin
+      Raw := 'r';
+      Inc(I);
+    end
+    else
+      Break;
+  end;
+  if I <= High(ACall.Args) then
+  begin
+    Path := ACall.Args[I];
+    Inc(I);
+  end;
+  if I <= High(ACall.Args) then
+  begin
+    if not FFs.ReadFile(FFs.Resolve(ACall.Cwd, ACall.Args[I]), Data, E) then
+      Exit(Failure('yq: ' + ACall.Args[I] + ': ' + E, 2));
+  end
+  else
+    Data := ACall.Stdin;
+  D := ParseYaml(Data, E);
+  if D = nil then
+    Exit(Failure('yq: ' + E, 2));
+  try
+    if (Path <> '') and (Path <> '.') then
+    begin
+      if D is TJSONObject then
+        D := TJSONObject(D).Find(Path);
+      if D = nil then
+        Exit(Failure('yq: no such path: ' + Path, 1));
+    end;
+    if (Raw = 'r') and (D.JSONType = jtString) then
+      OutText := D.AsString + #10
+    else if (Raw = 'r') and (D.JSONType = jtNumber) then
+      OutText := D.AsJSON + #10
+    else
+      OutText := ToYaml(D);
+    Result := ShellResultOk(OutText);
+  finally
+    D.Free;
+  end;
+end;
+
+function TBuiltinCommands.Strings(const ACall: TShellCall): TShellResult;
+var
+  I, J, Min: Integer;
+  Data, E, OutText, Run: string;
+begin
+  { The printable-runs view of a binary - the complement of od, which shows the
+    bytes. Pairs with it for looking inside something that is not text. }
+  Min := 4;
+  I := 0;
+  while I <= High(ACall.Args) do
+  begin
+    if ACall.Args[I] = '-n' then
+    begin
+      if I = High(ACall.Args) then
+        Exit(Usage('strings: option requires an argument -- n'));
+      Min := StrToIntDef(ACall.Args[I + 1], -1);
+      if Min < 1 then
+        Exit(Usage('strings: invalid minimum length'));
+      Inc(I, 2);
+    end
+    else if (Length(ACall.Args[I]) > 2) and (Copy(ACall.Args[I], 1, 2) = '-n')
+      then
+    begin
+      Min := StrToIntDef(Copy(ACall.Args[I], 3, MaxInt), -1);
+      if Min < 1 then
+        Exit(Usage('strings: invalid minimum length'));
+      Inc(I);
+    end
+    else
+      Break;
+  end;
+  if I <= High(ACall.Args) then
+  begin
+    if not FFs.ReadFile(FFs.Resolve(ACall.Cwd, ACall.Args[I]), Data, E) then
+      Exit(Failure('strings: ' + ACall.Args[I] + ': ' + E, 2));
+  end
+  else
+    Data := ACall.Stdin;
+  OutText := '';
+  Run := '';
+  for J := 1 to Length(Data) do
+  begin
+    if (Data[J] >= #32) and (Data[J] <= #126) then
+      Run := Run + Data[J]
+    else
+    begin
+      if Length(Run) >= Min then
+        OutText := OutText + Run + #10;
+      Run := '';
+    end;
+  end;
+  if Length(Run) >= Min then
+    OutText := OutText + Run + #10;
+  Result := ShellResultOk(OutText);
+end;
+
+function TBuiltinCommands.Base64Cmd(const ACall: TShellCall): TShellResult;
+const
+  Alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+var
+  I, J, N: Integer;
+  Decode: Boolean;
+  Data, E, OutText, Bits: string;
+  B: Integer;
+  V: LongWord;
+
+  function DecodeChar(C: Char; out AVal: Integer): Boolean;
+  begin
+    AVal := Pos(C, Alphabet) - 1;
+    Result := AVal >= 0;
+  end;
+
+begin
+  { Standard base64, not the URL-safe variant in the OAuth code - scripts ask for
+    this one. }
+  Decode := False;
+  I := 0;
+  while (I <= High(ACall.Args)) and (ACall.Args[I] <> '') and
+    (ACall.Args[I][1] = '-') do
+  begin
+    if ACall.Args[I] = '-d' then
+      Decode := True;
+    Inc(I);
+  end;
+  if I <= High(ACall.Args) then
+  begin
+    if not FFs.ReadFile(FFs.Resolve(ACall.Cwd, ACall.Args[I]), Data, E) then
+      Exit(Failure('base64: ' + ACall.Args[I] + ': ' + E, 2));
+  end
+  else
+    Data := ACall.Stdin;
+
+  if not Decode then
+  begin
+    OutText := '';
+    I := 1;
+    while I <= Length(Data) do
+    begin
+      V := 0;
+      N := 0;
+      for J := 0 to 2 do
+        if I + J <= Length(Data) then
+        begin
+          V := (V shl 8) or Ord(Data[I + J]);
+          Inc(N);
+        end;
+      { Left-align to 24 bits before slicing 6-bit groups; without this a
+        short final block produces the wrong characters. }
+      V := V shl (8 * (3 - N));
+      Bits := '';
+      for J := 0 to 3 do
+      begin
+        B := (V shr (18 - 6 * J)) and 63;
+        if J <= N then
+          Bits := Bits + Alphabet[B + 1]
+        else
+          Bits := Bits + '=';
+      end;
+      OutText := OutText + Bits;
+      Inc(I, 3);
+    end;
+    Exit(ShellResultOk(OutText + #10));
+  end;
+
+  OutText := '';
+  V := 0;
+  N := 0;
+  for I := 1 to Length(Data) do
+  begin
+    if Data[I] = '=' then
+      Break;
+    if (Data[I] = #10) or (Data[I] = #13) or (Data[I] = ' ') then
+      Continue;
+    if not DecodeChar(Data[I], B) then
+      Exit(Failure('base64: invalid input', 1));
+    V := (V shl 6) or LongWord(B);
+    Inc(N);
+    if N = 4 then
+    begin
+      OutText := OutText + Chr((V shr 16) and $FF) + Chr((V shr 8) and $FF) +
+        Chr(V and $FF);
+      V := 0;
+      N := 0;
+    end;
+  end;
+  if N = 3 then
+    OutText := OutText + Chr((V shr 10) and $FF) + Chr((V shr 2) and $FF)
+  else if N = 2 then
+    OutText := OutText + Chr((V shr 4) and $FF);
+  Result := ShellResultOk(OutText);
+end;
+
+function TBuiltinCommands.Rmdir(const ACall: TShellCall): TShellResult;
+var
+  I: Integer;
+  Parents: Boolean;
+  E: string;
+  Res: TShellResult;
+begin
+  { Only removes EMPTY directories - the seam's Delete(recursive=False) already
+    enforces that, which is why this is a few lines rather than a new primitive. }
+  Parents := False;
+  I := 0;
+  if (Length(ACall.Args) > 0) and (ACall.Args[0] = '-p') then
+  begin
+    Parents := True;
+    I := 1;
+  end;
+  if I > High(ACall.Args) then
+    Exit(Usage('rmdir: missing operand'));
+  Res := Default(TShellResult);
+  while I <= High(ACall.Args) do
+  begin
+    if not FFs.Delete(FFs.Resolve(ACall.Cwd, ACall.Args[I]), False, E) then
+    begin
+      Res.Stderr := Res.Stderr + 'rmdir: ' + ACall.Args[I] + ': ' + E + #10;
+      Res.ExitCode := 1;
+    end;
+    Inc(I);
+  end;
+  Result := Res;
 end;
 
 function TBuiltinCommands.Wc(const ACall: TShellCall): TShellResult;

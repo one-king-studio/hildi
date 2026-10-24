@@ -213,6 +213,11 @@ begin
   AssertTrue('od', Known('od', []));
   AssertTrue('sha256sum', Known('sha256sum', []));
   AssertTrue('md5sum', Known('md5sum', []));
+  AssertTrue('expr', Known('expr', []));
+  AssertTrue('yq', Known('yq', []));
+  AssertTrue('strings', Known('strings', []));
+  AssertTrue('base64', Known('base64', []));
+  AssertTrue('rmdir', Known('rmdir', []));
   AssertTrue('grep', Known('grep', []));
   AssertTrue('sed', Known('sed', []));
   AssertTrue('awk', Known('awk', []));
