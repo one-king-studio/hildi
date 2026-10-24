@@ -40,11 +40,18 @@ No YAML dependency: extraction is a tolerant line scanner over the block.
 
 ### Functional
 
-- [ ] A **leading** YAML frontmatter block (first line `---`) is terminated by a
-      later `---`, **or** tolerantly by a **blank line after block content** (the
-      model often omits the closing fence; YAML frontmatter has no blank lines).
-      A `---` anywhere else is an ordinary thematic break and is left to the
-      parser.
+- [ ] A YAML frontmatter block is terminated by a later `---`, **or** tolerantly
+      by a **blank line after block content** (the model often omits the closing
+      fence; YAML frontmatter has no blank lines).
+- [ ] The block is normally **leading** (first line `---`), but a model sometimes
+      says something first and emits its frontmatter after it. A fence block
+      beginning any line counts, and the text before it is **kept** as a preamble
+      at the start of the body - dropping it would lose the reply's own words.
+- [ ] A fence block is frontmatter **only if it carries a `title` or `keywords`
+      key**. A bare `---` is an ordinary thematic break (or a table separator)
+      and stays in the body, so a mid-reply rule is never mistaken for metadata.
+      A key with an empty value (`title:` with nothing after it) is still
+      frontmatter: presence is the signal, not a non-empty value.
 - [ ] Extraction is a pure function over reply text: it yields a title, a keyword
       set, and the **body with the block removed**. Malformed input yields no
       metadata and the **unmodified** text (it never raises).

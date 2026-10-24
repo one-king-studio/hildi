@@ -38,6 +38,13 @@ type
     procedure TestSuppressorLaterRuleIsNotABlock;
     procedure TestSuppressorMissingFenceEndsAtBlankLine;
     procedure TestFlushReleasesAnUnclosedBlock;
+    { A model sometimes says something first, then emits its frontmatter. The
+      block is still metadata; it must be extracted, not rendered. }
+    procedure TestPreambleThenBlockIsExtracted;
+    procedure TestPreambleIsKeptInTheBody;
+    procedure TestPreambleBlockWithBlankLineClose;
+    procedure TestARuleInTheBodyIsStillNotABlock;
+    procedure TestATableSeparatorIsNotABlock;
   end;
 
 implementation
@@ -295,6 +302,92 @@ begin
   SuppressFrontMatter(S, #10 + 'the body', Out);
   Acc := Acc + Out;
   AssertEquals('block hidden, body shown', 'the body', Acc);
+end;
+
+procedure TReplyMetaTest.TestPreambleThenBlockIsExtracted;
+var
+  M: TReplyMeta;
+begin
+  { The real case: the model says something first, then emits its frontmatter.
+    The block is still metadata - it must be extracted, not rendered as body. }
+  M := ExtractReplyMeta(
+    'Ah, a fine question.' + #10 + #10 +
+    '---' + #10 +
+    'title: The drain' + #10 +
+    'keywords: [drain, tui]' + #10 +
+    '---' + #10 +
+    'The body starts here.');
+  AssertTrue('has meta', M.HasMeta);
+  AssertEquals('title', 'The drain', M.Title);
+  AssertTrue('keyword', ListHasKeyword(M.Keywords, 'drain'));
+  AssertTrue('keyword 2', ListHasKeyword(M.Keywords, 'tui'));
+  { The preamble is the model's words, so it stays - but the BLOCK is gone. }
+  AssertFalse('the block is stripped', Pos('title: The drain', M.Body) > 0);
+  AssertFalse('the fence is stripped', Pos('---', M.Body) > 0);
+end;
+
+procedure TReplyMetaTest.TestPreambleIsKeptInTheBody;
+var
+  M: TReplyMeta;
+begin
+  { Extracting the block must not discard what the model said first. Losing the
+    preamble would be a worse bug than the one being fixed. }
+  M := ExtractReplyMeta(
+    'Short quip first.' + #10 +
+    '---' + #10 +
+    'title: T' + #10 +
+    '---' + #10 +
+    'Body.');
+  AssertTrue('has meta', M.HasMeta);
+  AssertTrue('the quip survives', Pos('Short quip first.', M.Body) > 0);
+  AssertTrue('and the body follows', Pos('Body.', M.Body) > 0);
+  AssertFalse('no title left in body', Pos('title: T', M.Body) > 0);
+end;
+
+procedure TReplyMetaTest.TestPreambleBlockWithBlankLineClose;
+var
+  M: TReplyMeta;
+begin
+  { The same tolerance the leading case has: no closing fence, a blank line
+    after block content ends it. }
+  M := ExtractReplyMeta(
+    'Here you go.' + #10 + #10 +
+    '---' + #10 +
+    'title: Closed by a blank line' + #10 +
+    'keywords: [a]' + #10 + #10 +
+    'Then the rest of it.');
+  AssertTrue('has meta', M.HasMeta);
+  AssertEquals('title', 'Closed by a blank line', M.Title);
+  AssertFalse('block stripped', Pos('title:', M.Body) > 0);
+  AssertTrue('rest kept', Pos('Then the rest of it.', M.Body) > 0);
+end;
+
+procedure TReplyMetaTest.TestARuleInTheBodyIsStillNotABlock;
+var
+  M: TReplyMeta;
+begin
+  { Guard against over-reach: a horizontal rule mid-reply stays a rule. It has
+    no metadata keys under it, so it is not a block. }
+  M := ExtractReplyMeta(
+    'Intro paragraph.' + #10 + #10 +
+    '---' + #10 + #10 +
+    'After the rule.');
+  AssertFalse('no meta from a bare rule', M.HasMeta);
+  AssertEquals('body unchanged', 1, Pos('Intro paragraph.', M.Body));
+end;
+
+procedure TReplyMetaTest.TestATableSeparatorIsNotABlock;
+var
+  M: TReplyMeta;
+begin
+  { A GFM table's separator row is `|---|`, never a bare `---` line, but assert
+    the shape so a future loosening cannot turn a table into metadata. }
+  M := ExtractReplyMeta(
+    'Intro.' + #10 + #10 +
+    '| a | b |' + #10 +
+    '| --- | --- |' + #10 +
+    '| 1 | 2 |');
+  AssertFalse('no meta', M.HasMeta);
 end;
 
 procedure TReplyMetaTest.TestFlushReleasesAnUnclosedBlock;

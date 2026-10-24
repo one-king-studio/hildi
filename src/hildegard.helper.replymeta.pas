@@ -1,11 +1,15 @@
 unit hildegard.helper.replymeta;
-{ Reply metadata: a substantive assistant reply may open with a small YAML
-  frontmatter block carrying a title and keywords. This unit extracts that block
-  as METADATA and returns the body with the block removed - the markdown renderer
+{ Reply metadata: a substantive assistant reply may carry a small YAML
+  frontmatter block with a title and keywords. This unit extracts that block as
+  METADATA and returns the body with the block removed - the markdown renderer
   never sees the frontmatter.
 
-  Tolerant and dependency-free (no YAML library): only a LEADING block (the first
-  line is `---`, closed by a later `---`) is frontmatter; unknown keys are
+  Tolerant and dependency-free (no YAML library). The block is normally LEADING
+  (the first line is `---`), but a model sometimes says something first and emits
+  its frontmatter after; a fence block anywhere at the start of a line counts,
+  and the text before it stays in the body as a preamble. A block is only
+  frontmatter if it actually carries a `title` or `keywords` key - a bare fence
+  is a thematic break or a table separator and is left alone. Unknown keys are
   ignored; malformed input yields no metadata and the unchanged text. See
   docs/features/Session_Management/Reply_Metadata_v1.SPEC.md. }
 
@@ -183,21 +187,83 @@ end;
 
 function ExtractReplyMeta(const ARaw: string): TReplyMeta;
 var
-  Line, BlockText: string;
-  NextPos, BlockStart, CloseStart, CloseNext, P: Integer;
+  Line, BlockText, Preamble: string;
+  NextPos, BlockStart, CloseStart, CloseNext, P, FenceAt: Integer;
   Found, HasContent: Boolean;
+  Title: string;
+  Keywords: TStringArray;
+
+  { True when the candidate block carries a metadata KEY. Presence is the
+    signal, not a non-empty value: `title:` with an empty value is still
+    frontmatter (the model wrote a header), whereas a bare `---` rule or a table
+    separator has no keys at all and must be left in the body untouched. }
+  function BlockCarriesMeta(const ABlock: string): Boolean;
+  var
+    L, V, K: string;
+    Q, R, C: Integer;
+  begin
+    Result := False;
+    Q := 1;
+    while NextLine(ABlock, Q, L, R) do
+    begin
+      Q := R;
+      L := Trim(L);
+      if (L = '') or (L[1] = '-') then
+        Continue;
+      C := Pos(':', L);
+      if C <= 0 then
+        Continue;
+      K := LowerCase(Trim(Copy(L, 1, C - 1)));
+      V := Trim(Copy(L, C + 1, MaxInt));
+      if (K = 'title') or (K = 'keywords') then
+      begin
+        Result := True;
+        Exit;
+      end;
+      { `keywords:` followed by a `- item` list carries its value below. }
+      if (K <> '') and (V = '') and (K = 'keywords') then
+        Exit(True);
+    end;
+  end;
+
 begin
   Result := Default(TReplyMeta);
   Result.HasMeta := False;
   Result.Body := ARaw;
   if ARaw = '' then
     Exit;
-  { The first line must be the opening fence. }
-  if not NextLine(ARaw, 1, Line, NextPos) then
-    Exit;
-  if not IsFence(Line) then
+
+  { A LEADING block is the normal case: the first line is the fence. }
+  if NextLine(ARaw, 1, Line, NextPos) and IsFence(Line) then
+    FenceAt := 1
+  else
+  begin
+    { Otherwise the model may have said something FIRST and emitted its
+      frontmatter after (a quip, then the block). Scan for a fence line that
+      begins a line, and keep the text before it as the start of the body.
+      Only a block that actually carries a metadata key counts, so an ordinary
+      thematic break or a table separator is never mistaken for frontmatter. }
+    FenceAt := 0;
+    P := 1;
+    while NextLine(ARaw, P, Line, NextPos) do
+    begin
+      if IsFence(Line) and (P > 1) then
+      begin
+        FenceAt := P;
+        Break;
+      end;
+      P := NextPos;
+    end;
+    if FenceAt = 0 then
+      Exit;   { no fence at the start of any line: not frontmatter }
+  end;
+
+  BlockStart := FenceAt;
+  { Advance past the opening fence line. }
+  if not NextLine(ARaw, BlockStart, Line, NextPos) then
     Exit;
   BlockStart := NextPos;
+
   { Find the closing fence - or, tolerantly, a blank line after block content:
     the model often forgets the closing `---`, and a blank line is a reliable
     end-of-block signal (YAML frontmatter has no blank lines). The blank line is
@@ -207,7 +273,7 @@ begin
   HasContent := False;
   CloseStart := 0;
   CloseNext := 0;
-  P := NextPos;
+  P := BlockStart;
   while NextLine(ARaw, P, Line, NextPos) do
   begin
     if IsFence(Line) then
@@ -230,10 +296,25 @@ begin
   end;
   if not Found then
     Exit;   { unterminated: not frontmatter }
+
   BlockText := Copy(ARaw, BlockStart, CloseStart - BlockStart);
-  ParseBlock(BlockText, Result.Title, Result.Keywords);
+  { A block with no metadata KEY is not frontmatter - it is an ordinary thematic
+    break, a table separator, or a stray fence - so it stays in the body. }
+  if not BlockCarriesMeta(BlockText) then
+    Exit;
+  ParseBlock(BlockText, Title, Keywords);
+
   Result.HasMeta := True;
-  Result.Body := Copy(ARaw, CloseNext, MaxInt);
+  Result.Title := Title;
+  Result.Keywords := Keywords;
+  { The body is what came BEFORE the block (a preamble, kept - it is the model's
+    words) followed by what came after it. Dropping the preamble would lose
+    content, which is a worse bug than the one this fixes. }
+  if FenceAt > 1 then
+    Preamble := Copy(ARaw, 1, FenceAt - 1)
+  else
+    Preamble := '';
+  Result.Body := Preamble + Copy(ARaw, CloseNext, MaxInt);
 end;
 
 function SuppressFrontMatter(var S: TFrontMatterSuppressor;
