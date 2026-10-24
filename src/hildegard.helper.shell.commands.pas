@@ -48,6 +48,9 @@ type
     { Compare two files. Reuses DiffText from the changes library, so a diff an
       agent asks for and a diff the change log records are the same engine. }
     function Diff(const ACall: TShellCall): TShellResult;
+    function Pwd(const ACall: TShellCall): TShellResult;
+    function StatCmd(const ACall: TShellCall): TShellResult;
+    function Seq(const ACall: TShellCall): TShellResult;
     { The hex viewer: inspect bytes that are not readable text. }
     function Od(const ACall: TShellCall): TShellResult;
     { Content hashes. sha256sum reuses the harness's own Sha256Hex; md5sum is a
@@ -124,12 +127,15 @@ type
   end;
 
 const
-  CommandSpecs: array[0..33] of TCommandSpec = (
+  CommandSpecs: array[0..36] of TCommandSpec = (
     (Name: 'echo'; Options: '-n'),
     (Name: 'head'; Options: '-nN'),
     (Name: 'tail'; Options: '-nN'),
     (Name: 'wc'; Options: '-lwc'),
     (Name: 'diff'; Options: '-quc'),
+    (Name: 'pwd'; Options: ''),
+    (Name: 'stat'; Options: ''),
+    (Name: 'seq'; Options: ''),
     (Name: 'od'; Options: '-Ancxtd'),
     (Name: 'sha256sum'; Options: ''),
     (Name: 'grep'; Options: '-nivlcFEGrm'),
@@ -563,6 +569,93 @@ begin
     OutText := OutText + TrimRight(Line + TrimLeft(Hex)) + #10;
     Inc(I, 16);
     Inc(LineNo);
+  end;
+  Result := ShellResultOk(OutText);
+end;
+
+function TBuiltinCommands.Pwd(const ACall: TShellCall): TShellResult;
+begin
+  { The working directory. Trivial, but an agent reaches for it reflexively and
+    its absence escalated the whole script out of the gated tier. }
+  Result := ShellResultOk(ACall.Cwd + #10);
+end;
+
+function TBuiltinCommands.StatCmd(const ACall: TShellCall): TShellResult;
+var
+  I: Integer;
+  Info: TShellFileInfo;
+  E, Kind, OutText: string;
+begin
+  if Length(ACall.Args) = 0 then
+    Exit(Usage('stat: expected a file'));
+  OutText := '';
+  for I := 0 to High(ACall.Args) do
+  begin
+    if not FFs.Info(FFs.Resolve(ACall.Cwd, ACall.Args[I]), Info, E) then
+      Exit(Failure('stat: ' + ACall.Args[I] + ': ' + E, 1));
+    case Info.Kind of
+      sfkDirectory: Kind := 'directory';
+      sfkFile: Kind := 'regular file';
+      sfkMissing: Kind := 'missing';
+    else
+      Kind := 'special';
+    end;
+    { Size first, because it is the field an agent almost always wants and it
+      must agree with wc -c. }
+    OutText := OutText + ACall.Args[I] + ': ' + Kind + ', ' +
+      IntToStr(Info.Size) + ' bytes';
+    if Info.Modified <> 0 then
+      OutText := OutText + ', modified ' + IntToStr(Info.Modified);
+    OutText := OutText + #10;
+  end;
+  Result := ShellResultOk(OutText);
+end;
+
+function TBuiltinCommands.Seq(const ACall: TShellCall): TShellResult;
+var
+  First, Step, Last, V: Integer;
+  OutText: string;
+  N: Integer;
+begin
+  { seq generates a range - the usual reason an agent reaches for a loop. }
+  Step := 1;
+  case Length(ACall.Args) of
+    1:
+      begin
+        if not TryStrToInt(ACall.Args[0], Last) then
+          Exit(Usage('seq: invalid number: ' + ACall.Args[0]));
+        First := 1;
+      end;
+    2:
+      begin
+        if not TryStrToInt(ACall.Args[0], First) or
+           not TryStrToInt(ACall.Args[1], Last) then
+          Exit(Usage('seq: invalid number'));
+      end;
+    3:
+      begin
+        if not TryStrToInt(ACall.Args[0], First) or
+           not TryStrToInt(ACall.Args[1], Step) or
+           not TryStrToInt(ACall.Args[2], Last) then
+          Exit(Usage('seq: invalid number'));
+        if Step = 0 then
+          Exit(Usage('seq: step must not be zero'));
+      end;
+  else
+    Exit(Usage('seq: expected [first [step]] last'));
+  end;
+  { A step whose sign disagrees with the range yields nothing, as seq(1) does -
+    not an error, and not an unbounded loop. }
+  OutText := '';
+  V := First;
+  N := 0;
+  while ((Step > 0) and (V <= Last)) or ((Step < 0) and (V >= Last)) do
+  begin
+    OutText := OutText + IntToStr(V) + #10;
+    Inc(V, Step);
+    Inc(N);
+    if N > 1000000 then
+      Exit(Failure('seq: range too large', 1));
   end;
   Result := ShellResultOk(OutText);
 end;

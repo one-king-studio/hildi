@@ -50,6 +50,7 @@ type
     procedure TestSort;
     procedure TestUniq;
     procedure TestBasenameDirname;
+    procedure TestPwdStatSeq;
     procedure TestTest;
     procedure TestBracket;
     procedure TestTrueFalse;
@@ -191,6 +192,12 @@ begin
     Result := FCmd.Sha256Sum(Call)
   else if AName = 'diff' then
     Result := FCmd.Diff(Call)
+  else if AName = 'pwd' then
+    Result := FCmd.Pwd(Call)
+  else if AName = 'stat' then
+    Result := FCmd.StatCmd(Call)
+  else if AName = 'seq' then
+    Result := FCmd.Seq(Call)
   else
     raise Exception.Create('unknown command in test: ' + AName);
 end;
@@ -581,6 +588,43 @@ begin
     RunCmd('uniq', ['-d'], 'a' + #10 + 'a' + #10 + 'b' + #10).Stdout);
   AssertEquals('uniq -u', 'b' + #10,
     RunCmd('uniq', ['-u'], 'a' + #10 + 'a' + #10 + 'b' + #10).Stdout);
+end;
+
+procedure TShellCommandsTest.TestPwdStatSeq;
+var
+  R: TShellResult;
+  E: string;
+begin
+  { pwd: the working directory. Trivial, but an agent reaches for it reflexively
+    and its absence escalated the whole script. }
+  R := RunCmd('pwd', []);
+  AssertEquals('pwd exit', 0, R.ExitCode);
+  AssertTrue('pwd says something: ' + R.Stdout, Trim(R.Stdout) <> '');
+
+  { stat names a real file's size. }
+  FFs.WriteFile(P('statme.txt'), 'abcdef', False, E);
+  R := RunCmd('stat', ['statme.txt']);
+  AssertEquals('stat exit', 0, R.ExitCode);
+  AssertTrue('names the file: ' + R.Stdout, Pos('statme.txt', R.Stdout) > 0);
+  { The SAME size wc -c reports, so the two cannot disagree. }
+  AssertTrue('reports the size: ' + R.Stdout, Pos('6', R.Stdout) > 0);
+  { A missing file is an error. }
+  R := RunCmd('stat', ['nope.txt']);
+  AssertEquals('stat missing exit', 1, R.ExitCode);
+
+  { seq generates a range - the usual reason to reach for a loop. }
+  R := RunCmd('seq', ['3']);
+  AssertEquals('seq 3', '1' + #10 + '2' + #10 + '3' + #10, R.Stdout);
+  R := RunCmd('seq', ['2', '4']);
+  AssertEquals('seq from to', '2' + #10 + '3' + #10 + '4' + #10, R.Stdout);
+  R := RunCmd('seq', ['1', '2', '5']);
+  AssertEquals('seq with step', '1' + #10 + '3' + #10 + '5' + #10, R.Stdout);
+  { A descending range needs a negative step, as seq(1) does. }
+  R := RunCmd('seq', ['5', '-2', '1']);
+  AssertEquals('seq descending', '5' + #10 + '3' + #10 + '1' + #10, R.Stdout);
+  { Bad arguments are an error, not an empty range. }
+  R := RunCmd('seq', ['x']);
+  AssertTrue('seq rejects junk', R.ExitCode <> 0);
 end;
 
 procedure TShellCommandsTest.TestBasenameDirname;

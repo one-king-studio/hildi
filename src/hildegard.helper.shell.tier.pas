@@ -125,6 +125,9 @@ begin
   FRegistry.Register('sort', FCmd.SortCmd);
   FRegistry.Register('uniq', FCmd.Uniq);
   FRegistry.Register('diff', FCmd.Diff);
+  FRegistry.Register('pwd', FCmd.Pwd);
+  FRegistry.Register('stat', FCmd.StatCmd);
+  FRegistry.Register('seq', FCmd.Seq);
   FRegistry.Register('od', FCmd.Od);
   FRegistry.Register('sha256sum', FCmd.Sha256Sum);
   FRegistry.Register('basename', FCmd.Basename);
