@@ -33,9 +33,9 @@ set -uo pipefail
 
 cd "$(dirname "$0")/.." || exit 1
 
-BIN="build/bin/hildegard-helper-tests"
+BIN="${HILDEGARD_TEST_BIN:-build/bin/hildegard-helper-tests}"
 if [ ! -x "$BIN" ]; then
-  echo "test-parallel: $BIN is missing - run 'make test' (or 'make check') first" >&2
+  echo "test-parallel: $BIN is missing - build it first" >&2
   exit 2
 fi
 

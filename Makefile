@@ -304,6 +304,15 @@ $(BIN)/hildegard-helper-tests: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) 
 test-leak: libsqlite libmbedtls $(BIN)/hildegard-helper-tests-leak
 	HEAPTRC=$(HEAPTRC) $(BIN)/hildegard-helper-tests-leak $(TESTARGS)
 
+# The leak gate, one process per suite, in parallel. Same binary and same HEAPTRC
+# setting; only the process shape differs. Worth having because the leak run is
+# the second-longest part of `make check` (~103 s of a ~275 s gate) and it was
+# the last piece still paying the single-process cost.
+test-leak-parallel: libsqlite libmbedtls $(BIN)/hildegard-helper-tests-leak \
+    $(BIN)/hildegard-helper-agent
+	HILDEGARD_TEST_BIN=$(BIN)/hildegard-helper-tests-leak HEAPTRC=$(HEAPTRC) \
+	    scripts/test-parallel.sh $(SUITE)
+
 # Auto-rerun TARGET (default: test) whenever sources change.
 watch:
 	@scripts/watch.sh $(TARGET)
@@ -327,7 +336,11 @@ $(BIN)/hildegard-smoke: $(EXAMPLES)/smoke.pas $(TESTS)/smoke_runner.pas $(TESTS)
 	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/async -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # All quality gates, for CI: functional tests + leak check + library isolation.
-check: test test-leak shell-standalone
+# The two suite runs go one-process-per-suite in parallel (see
+# scripts/test-parallel.sh): ~21 s each instead of ~169 s and ~103 s, and the
+# isolation also removes the intra-process state pollution that makes a
+# single-process run of the whole suite report failures that are not real.
+check: test-parallel test-leak-parallel shell-standalone
 
 # The same functional suite, one process per suite, in parallel. Measured on a
 # 10-core machine: ~169 s and 36 spurious failures as one process, ~22 s and 0
