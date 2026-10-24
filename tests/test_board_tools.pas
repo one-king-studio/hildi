@@ -52,6 +52,8 @@ type
     procedure TestAllThreeToolsAreRegistered;
     { The TOC drops whole fields in a stated order, never truncating mid-field. }
     procedure TestTocDropOrderKeepsUnreadAndAge;
+    { A peer is unaddressable if the board does not say who wrote an entry. }
+    procedure TestReadNamesTheAuthor;
     { Full-text search spans titles, bodies and topics, and skips deleted. }
     procedure TestSearchFindsAnEntryByBodyTerm;
     { Pin is a MARKER, not a read-order. Pinned entries are recallable as a set;
@@ -429,6 +431,22 @@ begin
     '"reason":"t"}', Res, Err));
   AssertTrue('the newer is still first: ' + Res,
     Pos('#' + IntToStr(B), Res) < Pos('#' + IntToStr(A), Res));
+end;
+
+procedure TBoardToolsTest.TestReadNamesTheAuthor;
+var
+  Res, Err: string;
+begin
+  { Without authorship every entry is anonymous: an agent cannot tell its own
+    note from a peer's, and must reconstruct that from conversation memory -
+    which dies at the next context reset. }
+  AssertTrue('post', FTools.Post(PostJson('decision', 'retry', 'attributed'),
+    Res, Err));
+  AssertTrue('read', FTools.ReadEntries('{"topic":"retry","reason":"t"}', Res,
+    Err));
+  { The label is preferred over the raw id: "by parent" reads better than a hex
+    session id, and FromLabel is what a session declares about itself. }
+  AssertTrue('names the author: ' + Res, Pos('by parent', Res) > 0);
 end;
 
 initialization

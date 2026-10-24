@@ -437,7 +437,18 @@ begin
         Text := Text + LineEnding;
       Holder := '';
       if Rows[I].ClaimedBy <> '' then
-        Holder := ' · ' + Rows[I].ClaimedBy;
+        Holder := ' · held by ' + Rows[I].ClaimedBy
+      else
+      begin
+        { An OPEN card's author. Without this an open card and an abandoned one
+          are indistinguishable, and a card someone else created looks like
+          yours. ClaimedBy is live ownership; FromSession is permanent
+          authorship - different facts, both worth showing. }
+        if Rows[I].FromLabel <> '' then
+          Holder := ' · from ' + Rows[I].FromLabel
+        else if Rows[I].FromSession <> '' then
+          Holder := ' · from ' + Rows[I].FromSession;
+      end;
       Text := Text + '#' + IntToStr(Rows[I].Id) + ' [' +
         TaskStatusToName(Rows[I].Status) + ']' + Holder +
         LineEnding + '  ' + OneLine(Rows[I].Title);

@@ -210,7 +210,7 @@ end;
 function TBoardTools.RenderEntry(const AEntry: TBoardEntry;
   const ANow: Int64): string;
 var
-  Tags: string;
+  Tags, Who: string;
 begin
   Tags := '#' + IntToStr(AEntry.Id) + ' ' + BoardKindToName(AEntry.Kind) +
     ' [' + AEntry.Topic + ']';
@@ -220,6 +220,15 @@ begin
     Tags := Tags + ' · pinned';
   if AEntry.DeletedAt <> 0 then
     Tags := Tags + ' · deleted';
+  { WHO wrote this. Without it every entry is anonymous and a peer is
+    unaddressable: an agent reading the board could not tell its own note from
+    another session's, and had to reconstruct authorship from conversation
+    memory - which dies at the next context reset. }
+  Who := AEntry.FromLabel;
+  if Who = '' then
+    Who := AEntry.FromSession;
+  if Who <> '' then
+    Tags := Tags + ' · by ' + Who;
   Result := Tags + LineEnding + '  ' + OneLine(AEntry.Title);
   if AEntry.Body <> '' then
     Result := Result + LineEnding + '  ' + AEntry.Body;
