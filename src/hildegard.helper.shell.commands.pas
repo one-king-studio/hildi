@@ -64,6 +64,9 @@ type
     function Strings(const ACall: TShellCall): TShellResult;
     function Base64Cmd(const ACall: TShellCall): TShellResult;
     function Rmdir(const ACall: TShellCall): TShellResult;
+    function Nl(const ACall: TShellCall): TShellResult;
+    function Du(const ACall: TShellCall): TShellResult;
+    function Tree(const ACall: TShellCall): TShellResult;
     function Grep(const ACall: TShellCall): TShellResult;
     function Ls(const ACall: TShellCall): TShellResult;
     function Mkdir(const ACall: TShellCall): TShellResult;
@@ -134,7 +137,7 @@ type
   end;
 
 const
-  CommandSpecs: array[0..42] of TCommandSpec = (
+  CommandSpecs: array[0..45] of TCommandSpec = (
     (Name: 'echo'; Options: '-n'),
     (Name: 'head'; Options: '-nNc'),
     (Name: 'tail'; Options: '-nNc'),
@@ -151,6 +154,9 @@ const
     (Name: 'strings'; Options: '-nN'),
     (Name: 'base64'; Options: '-d'),
     (Name: 'rmdir'; Options: '-p'),
+    (Name: 'nl'; Options: '-ba'),
+    (Name: 'du'; Options: '-s'),
+    (Name: 'tree'; Options: '-aL'),
     (Name: 'grep'; Options: '-nivlcFEGrm'),
     (Name: 'sed'; Options: '-nErei'),
     (Name: 'awk'; Options: '-F'),
@@ -1162,6 +1168,190 @@ begin
     Inc(I);
   end;
   Result := Res;
+end;
+
+function TBuiltinCommands.Nl(const ACall: TShellCall): TShellResult;
+var
+  I, N: Integer;
+  Args: TStringArray;
+  Data, E, Text, OutText: string;
+  Lines: TStringArray;
+  Blank: Boolean;
+begin
+  { Number lines. Not the full POSIX option set - just the common shape: number
+    non-empty lines by default, -ba numbers every line. }
+  Blank := False;
+  I := 0;
+  while (I <= High(ACall.Args)) and (ACall.Args[I] <> '') and
+    (ACall.Args[I][1] = '-') do
+  begin
+    if (ACall.Args[I] = '-ba') or (ACall.Args[I] = '-a') then
+      Blank := True
+    else if ACall.Args[I] = '-bt' then
+      Blank := False
+    else
+      Exit(Usage('nl: unsupported option ' + ACall.Args[I]));
+    Inc(I);
+  end;
+  SetLength(Args, Length(ACall.Args) - I);
+  N := I;
+  while I <= High(ACall.Args) do
+  begin
+    Args[I - N] := ACall.Args[I];
+    Inc(I);
+  end;
+  if Length(Args) = 0 then
+    Text := ACall.Stdin
+  else if not FFs.ReadFile(FFs.Resolve(ACall.Cwd, Args[0]), Data, E) then
+    Exit(Failure('nl: ' + Args[0] + ': ' + E, 2))
+  else
+    Text := Data;
+  Lines := LinesOf(Text);
+  OutText := '';
+  N := 0;
+  for I := 0 to High(Lines) do
+  begin
+    if Blank or (Trim(Lines[I]) <> '') then
+    begin
+      Inc(N);
+      OutText := OutText + Format('%6d'#9, [N]) + Lines[I] + #10;
+    end
+    else
+      OutText := OutText + '      ' + #9 + Lines[I] + #10;
+  end;
+  Result := ShellResultOk(OutText);
+end;
+
+function TBuiltinCommands.Du(const ACall: TShellCall): TShellResult;
+var
+  I: Integer;
+  Args: TStringArray;
+  Err, OutText: string;
+  Total: Int64;
+
+  { Recursive size of a path: a file's own size, or a directory's contents. }
+  function SizeOf(const AFull, ADisplay: string; ADepth: Integer): Int64;
+  var
+    Info: TShellFileInfo;
+    Entries: TStringArray;
+    K: Integer;
+    E: string;
+  begin
+    Result := 0;
+    if ADepth > 64 then
+      Exit;
+    if not FFs.Info(AFull, Info, E) then
+      Exit;
+    if Info.Kind <> sfkDirectory then
+      Exit(Info.Size);
+    if not FFs.ListDir(AFull, Entries, E) then
+      Exit;
+    for K := 0 to High(Entries) do
+      Inc(Result, SizeOf(AFull + '/' + Entries[K], ADisplay + '/' +
+        Entries[K], ADepth + 1));
+  end;
+
+begin
+  { Sizes in bytes. -s summarises (one line per argument); the default is the
+    same here, because a full per-directory breakdown is rarely what an agent
+    wants and doubles the walk. }
+  I := 0;
+  while (I <= High(ACall.Args)) and (ACall.Args[I] <> '') and
+    (ACall.Args[I][1] = '-') do
+  begin
+    if (ACall.Args[I] = '-s') or (ACall.Args[I] = '-sh') then
+      Inc(I)
+    else
+      Exit(Usage('du: unsupported option ' + ACall.Args[I]));
+  end;
+  SetLength(Args, Length(ACall.Args) - I);
+  Total := I;
+  while I <= High(ACall.Args) do
+  begin
+    Args[I - Total] := ACall.Args[I];
+    Inc(I);
+  end;
+  if Length(Args) = 0 then
+  begin
+    SetLength(Args, 1);
+    Args[0] := '.';
+  end;
+  OutText := '';
+  for I := 0 to High(Args) do
+  begin
+    Total := SizeOf(FFs.Resolve(ACall.Cwd, Args[I]), Args[I], 0);
+    OutText := OutText + IntToStr(Total) + #9 + Args[I] + #10;
+  end;
+  Result := ShellResultOk(OutText);
+end;
+
+function TBuiltinCommands.Tree(const ACall: TShellCall): TShellResult;
+var
+  I: Integer;
+  Root: string;
+  OutText, Err: string;
+  Dirs, Files: Integer;
+
+  procedure Walk(const AFull, APrefix: string; ADepth: Integer);
+  var
+    Entries: TStringArray;
+    K: Integer;
+    E, Child, Mark: string;
+    Info: TShellFileInfo;
+  begin
+    if ADepth > 32 then
+      Exit;
+    if not FFs.ListDir(AFull, Entries, E) then
+      Exit;
+    for K := 0 to High(Entries) do
+    begin
+      Child := AFull + '/' + Entries[K];
+      if not FFs.Info(Child, Info, E) then
+        Continue;
+      if Info.Kind = sfkDirectory then
+      begin
+        Inc(Dirs);
+        Mark := Entries[K] + '/';
+      end
+      else
+      begin
+        Inc(Files);
+        Mark := Entries[K];
+      end;
+      OutText := OutText + APrefix + Mark + #10;
+      if Info.Kind = sfkDirectory then
+        Walk(Child, APrefix + '  ', ADepth + 1);
+    end;
+  end;
+
+begin
+  { -a is accepted for compatibility; directory/file counts are always printed,
+    which is the reason to use tree over find in the first place. }
+  I := 0;
+  while (I <= High(ACall.Args)) and (ACall.Args[I] <> '') and
+    (ACall.Args[I][1] = '-') do
+  begin
+    if (ACall.Args[I] = '-a') or (ACall.Args[I] = '-L') then
+    begin
+      if ACall.Args[I] = '-L' then
+        Inc(I, 2)
+      else
+        Inc(I);
+    end
+    else
+      Exit(Usage('tree: unsupported option ' + ACall.Args[I]));
+  end;
+  if I <= High(ACall.Args) then
+    Root := ACall.Args[I]
+  else
+    Root := '.';
+  OutText := Root + #10;
+  Dirs := 0;
+  Files := 0;
+  Walk(FFs.Resolve(ACall.Cwd, Root), '  ', 0);
+  OutText := OutText + #10 + IntToStr(Dirs) + ' directories, ' +
+    IntToStr(Files) + ' files' + #10;
+  Result := ShellResultOk(OutText);
 end;
 
 function TBuiltinCommands.Wc(const ACall: TShellCall): TShellResult;

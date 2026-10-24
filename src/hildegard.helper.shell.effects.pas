@@ -162,7 +162,8 @@ begin
 
   if (AName = 'cat') or (AName = 'wc') or (AName = 'od') or
      (AName = 'sha256sum') or (AName = 'md5sum') or (AName = 'strings') or
-     (AName = 'base64') or (AName = 'yq') then
+     (AName = 'base64') or (AName = 'yq') or (AName = 'nl') or
+     (AName = 'du') or (AName = 'tree') then
   begin
     AddFiles(AReads, AName, AArgs, 0);
     Exit;

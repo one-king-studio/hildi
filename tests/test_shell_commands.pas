@@ -55,6 +55,7 @@ type
     procedure TestStringsAndBase64;
     procedure TestYq;
     procedure TestRmdir;
+    procedure TestNlDuTree;
     procedure TestTest;
     procedure TestBracket;
     procedure TestTrueFalse;
@@ -206,6 +207,12 @@ begin
     Result := FCmd.Base64Cmd(Call)
   else if AName = 'rmdir' then
     Result := FCmd.Rmdir(Call)
+  else if AName = 'nl' then
+    Result := FCmd.Nl(Call)
+  else if AName = 'du' then
+    Result := FCmd.Du(Call)
+  else if AName = 'tree' then
+    Result := FCmd.Tree(Call)
   else if AName = 'diff' then
     Result := FCmd.Diff(Call)
   else if AName = 'pwd' then
@@ -1105,6 +1112,38 @@ begin
   FFs.WriteFile(P('rd_full/keep.txt'), 'x', False, E);
   R := RunCmd('rmdir', ['rd_full']);
   AssertEquals('refuses non-empty', 1, R.ExitCode);
+end;
+
+procedure TShellCommandsTest.TestNlDuTree;
+var
+  R: TShellResult;
+  E: string;
+begin
+  { nl numbers lines. -ba numbers every line; the default skips blanks. }
+  FFs.WriteFile(P('nl.txt'), 'one' + #10 + #10 + 'two' + #10, False, E);
+  R := RunCmd('nl', ['nl.txt']);
+  AssertEquals('exit', 0, R.ExitCode);
+  AssertTrue('numbers the first line: ' + R.Stdout, Pos(#9'one', R.Stdout) > 0);
+  AssertTrue('and the third: ' + R.Stdout, Pos(#9'two', R.Stdout) > 0);
+  { -ba numbers the blank line too, so there are three numbers. }
+  R := RunCmd('nl', ['-ba', 'nl.txt']);
+  AssertTrue('blank numbered: ' + R.Stdout, Pos(#9#10, R.Stdout) > 0);
+
+  { du reports a directory's total size in bytes; it must agree with wc -c on
+    the file it contains. }
+  FFs.WriteFile(P('sized.txt'), 'abcde', False, E);
+  R := RunCmd('du', ['sized.txt']);
+  AssertEquals('du exit', 0, R.ExitCode);
+  AssertTrue('reports 5 bytes: ' + R.Stdout, Pos('5', R.Stdout) > 0);
+
+  { tree lists entries and summarises with counts - the reason to prefer it
+    over find. }
+  AssertTrue('mkdir', RunCmd('mkdir', ['tr_sub']).ExitCode = 0);
+  FFs.WriteFile(P('tr_sub/leaf.txt'), 'x', False, E);
+  R := RunCmd('tree', ['tr_sub']);
+  AssertEquals('tree exit', 0, R.ExitCode);
+  AssertTrue('names the leaf: ' + R.Stdout, Pos('leaf.txt', R.Stdout) > 0);
+  AssertTrue('summarises: ' + R.Stdout, Pos('directories', R.Stdout) > 0);
 end;
 
 initialization

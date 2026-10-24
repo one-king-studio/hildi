@@ -136,6 +136,9 @@ begin
   FRegistry.Register('strings', FCmd.Strings);
   FRegistry.Register('base64', FCmd.Base64Cmd);
   FRegistry.Register('rmdir', FCmd.Rmdir);
+  FRegistry.Register('nl', FCmd.Nl);
+  FRegistry.Register('du', FCmd.Du);
+  FRegistry.Register('tree', FCmd.Tree);
   FRegistry.Register('basename', FCmd.Basename);
   FRegistry.Register('dirname', FCmd.Dirname);
   FRegistry.Register('test', FCmd.TestCmd);

@@ -218,6 +218,9 @@ begin
   AssertTrue('strings', Known('strings', []));
   AssertTrue('base64', Known('base64', []));
   AssertTrue('rmdir', Known('rmdir', []));
+  AssertTrue('nl', Known('nl', []));
+  AssertTrue('du', Known('du', []));
+  AssertTrue('tree', Known('tree', []));
   AssertTrue('grep', Known('grep', []));
   AssertTrue('sed', Known('sed', []));
   AssertTrue('awk', Known('awk', []));
