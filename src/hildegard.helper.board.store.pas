@@ -46,6 +46,15 @@ type
       out AError: string): Boolean;
     function SetCursor(const ASessionId: string; AId: Integer;
       out AError: string): Boolean;
+    { When this session's cursor last moved, as epoch seconds. 0 when unknown (a
+      row from before v16, or a session that has never read). Separate from
+      CursorOf so its five call sites keep their shape. }
+    function CursorLastSeenOf(const ASessionId: string; out ALastSeen: Int64;
+      out AError: string): Boolean;
+    { The highest board id in this workspace, 0 when the board is empty. Used so a
+      NEW session starts CURRENT: it did not miss anything, it was not there. }
+    function BoardMaxId(AWorkspaceId: Integer; out AId: Integer;
+      out AError: string): Boolean;
     { Retention: drop finished noise, never knowledge. `note` and `status` are
       pruned by count and age; `decision`, `finding`, `question` and `answer` are
       never touched. A memory system that forgets its decisions is not one. }
@@ -94,6 +103,15 @@ type
     function CursorOf(const ASessionId: string; out AId: Integer;
       out AError: string): Boolean;
     function SetCursor(const ASessionId: string; AId: Integer;
+      out AError: string): Boolean;
+    { When this session's cursor last moved, as epoch seconds. 0 when unknown (a
+      row from before v16, or a session that has never read). Separate from
+      CursorOf so its five call sites keep their shape. }
+    function CursorLastSeenOf(const ASessionId: string; out ALastSeen: Int64;
+      out AError: string): Boolean;
+    { The highest board id in this workspace, 0 when the board is empty. Used so a
+      NEW session starts CURRENT: it did not miss anything, it was not there. }
+    function BoardMaxId(AWorkspaceId: Integer; out AId: Integer;
       out AError: string): Boolean;
     function Prune(AWorkspaceId, AKeepNotes: Integer;
       AMaxAgeSec: Int64; out APruned: Integer; out AError: string): Boolean;
@@ -600,6 +618,9 @@ begin
   Sid := AnsiString(ASessionId);
   FStore.Lock.Acquire;
   try
+    { last_seen_at is read separately: keeping CursorOf's shape avoids changing
+      five call sites for a value only the revival path needs. 0 = unknown (a row
+      from before v16). }
     if not Prepare('SELECT last_id FROM board_reads WHERE session_id = ?',
       Stmt, AError) then
       Exit;
@@ -626,13 +647,75 @@ begin
   Sid := AnsiString(ASessionId);
   FStore.Lock.Acquire;
   try
-    if not Prepare('INSERT OR REPLACE INTO board_reads (session_id, last_id) ' +
-      'VALUES (?, ?)', Stmt, AError) then
+    { last_seen_at is stamped on every cursor move: a cursor says WHERE a session
+      had read to, the timestamp says WHEN. Without it a revived session cannot be
+      told it was away. }
+    if not Prepare('INSERT OR REPLACE INTO board_reads ' +
+      '(session_id, last_id, last_seen_at) VALUES (?, ?, ?)', Stmt, AError) then
       Exit;
     try
       sqlite3_bind_text(Stmt, 1, PAnsiChar(Sid), -1, nil);
       sqlite3_bind_int(Stmt, 2, AId);
+      sqlite3_bind_int64(Stmt, 3,
+        Round((Now - EncodeDate(1970, 1, 1)) * 86400));
       Result := sqlite3_step(Stmt) = SQLITE_DONE;
+    finally
+      sqlite3_finalize(Stmt);
+    end;
+  finally
+    FStore.Lock.Release;
+  end;
+end;
+
+function TSqliteBoardStore.BoardMaxId(AWorkspaceId: Integer;
+  out AId: Integer; out AError: string): Boolean;
+var
+  Stmt: Psqlite3_stmt;
+begin
+  { A NEW session starts CURRENT: it did not miss anything, it was not there.
+    Greeting it with a backlog would be the same class of error as an invented
+    unread count. }
+  Result := False;
+  AId := 0;
+  FStore.Lock.Acquire;
+  try
+    if not Prepare('SELECT COALESCE(MAX(id), 0) FROM board_entries ' +
+      'WHERE workspace_id = ?', Stmt, AError) then
+      Exit;
+    try
+      sqlite3_bind_int(Stmt, 1, AWorkspaceId);
+      if sqlite3_step(Stmt) = SQLITE_ROW then
+        AId := sqlite3_column_int(Stmt, 0);
+      Result := True;
+    finally
+      sqlite3_finalize(Stmt);
+    end;
+  finally
+    FStore.Lock.Release;
+  end;
+end;
+
+function TSqliteBoardStore.CursorLastSeenOf(const ASessionId: string;
+  out ALastSeen: Int64; out AError: string): Boolean;
+var
+  Stmt: Psqlite3_stmt;
+  Sid: AnsiString;
+begin
+  { 0 means unknown, never "now": a row written before v16, or a session that has
+    never read, must not be mistaken for a session that is current. }
+  Result := False;
+  ALastSeen := 0;
+  Sid := AnsiString(ASessionId);
+  FStore.Lock.Acquire;
+  try
+    if not Prepare('SELECT last_seen_at FROM board_reads WHERE session_id = ?',
+      Stmt, AError) then
+      Exit;
+    try
+      sqlite3_bind_text(Stmt, 1, PAnsiChar(Sid), -1, nil);
+      if sqlite3_step(Stmt) = SQLITE_ROW then
+        ALastSeen := sqlite3_column_int64(Stmt, 0);
+      Result := True;
     finally
       sqlite3_finalize(Stmt);
     end;

@@ -358,7 +358,7 @@ end;
 function DefaultMigrations: TMigrationArray;
 begin
   Result := nil;
-  SetLength(Result, 15);
+  SetLength(Result, 16);
   Result[0].Version := 1;
   Result[0].Name := 'session history';
   Result[0].Statements := [
@@ -721,6 +721,17 @@ begin
       'position)',
     'CREATE INDEX idx_tasks_ws_parent ON task_cards (workspace_id, parent)',
     'CREATE INDEX idx_tasks_ws_claim ON task_cards (workspace_id, claimed_by)'
+  ];
+  { v16: when a board read cursor last moved. Additive.
+
+    A cursor records WHERE a session had read to; without a timestamp it cannot
+    say WHEN. That matters for revival: a session returning after days must be
+    told it was away, not left believing it is current. 0 = never stamped (an
+    existing row from before this migration), which reads as "unknown", not "now". }
+  Result[15].Version := 16;
+  Result[15].Name := 'board cursor last seen';
+  Result[15].Statements := [
+    'ALTER TABLE board_reads ADD COLUMN last_seen_at INTEGER NOT NULL DEFAULT 0'
   ];
 end;
 

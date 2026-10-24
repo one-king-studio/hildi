@@ -441,9 +441,23 @@ begin
         { A bare read: advance from this session's cursor so it sees what is new
           rather than the whole board every time. A pinned recall is a lookup,
           not a "what is new": it must not be narrowed by the cursor, and must
-          not move it. }
-        if FStore.CursorOf(FSessionId, Cursor, Err) then
+          not move it.
+
+          A session with NO cursor is NEW, not behind: it did not miss anything,
+          it was not there. Starting it at 0 would greet every fresh session with
+          a backlog it cannot contextualise. It starts CURRENT and can board_read
+          deliberately if it wants history. }
+        if not FStore.CursorOf(FSessionId, Cursor, Err) then
+          Cursor := 0;
+        if Cursor > 0 then
+          F.SinceId := Cursor
+        else if FStore.BoardMaxId(FWorkspaceId, Cursor, Err) then
+        begin
           F.SinceId := Cursor;
+          { Record it, so the next bare read is incremental rather than the whole
+            board again. }
+          FStore.SetCursor(FSessionId, Cursor, Err);
+        end;
       end;
       if not FStore.Read(FWorkspaceId, F, Rows, Err) then
       begin
