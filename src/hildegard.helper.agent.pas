@@ -1422,7 +1422,13 @@ begin
       Observer.Free;
     end;
     if not AOk then
-      AResult := 'error: tool "' + ACall.Name + '" failed: ' + HandlerError;
+    begin
+      { A tool that reported its own failure text keeps it: a tool knows what it
+        was asked to do, and `run_command` renders the failing command as a
+        transcript. Only a silent failure gets the generic wrapper. }
+      if AResult = '' then
+        AResult := 'error: tool "' + ACall.Name + '" failed: ' + HandlerError;
+    end;
   end;
   ADurMs := Int64(GetTickCount64 - StartMs);
 end;

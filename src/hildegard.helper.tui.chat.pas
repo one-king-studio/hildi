@@ -98,6 +98,10 @@ type
     FAppliedVer: Integer;
     FAppliedWidth: Integer;
     FAppliedSrc: Integer;
+    { True when this block's call failed, so its body renders in the error colour
+      instead of the normal text colour. Set by the TUI from the tool result's ok
+      flag, which the protocol already carries. }
+    FFailed: Boolean;
     { True when the drawn body is the condensed (collapsed) view: the disclosure
       caret reads this for its direction. }
     FDisplayCondensed: Boolean;
@@ -163,6 +167,10 @@ type
     { A live block (streaming reasoning) shows the tail of its body and cannot
       be toggled; it becomes a normal block when the stream finishes. }
     property Live: Boolean read FLive write SetLive;
+    { A failed call renders its body in the error colour. Never colour alone: the
+      body text already names the command and the reason, so the colour is a
+      second cue rather than the only one. }
+    property Failed: Boolean read FFailed write FFailed;
     property OnToggle: TNotifyEvent read FOnToggle write FOnToggle;
     property OnChange: TNotifyEvent read FOnChange write FOnChange;
     { Fires on an animation-state transition only (never per delta). }
@@ -451,7 +459,12 @@ begin
     ckUser:
       Result := OnBg(FTheme.Text, FTheme.RaisedBg);
     ckTool:
-      Result := OnBg(FTheme.Text, FTheme.SunkenBg);
+      { A failed call reads in the error colour. Never colour alone: the body
+        itself names the command and the reason. }
+      if FFailed then
+        Result := OnBg(FTheme.Error, FTheme.SunkenBg)
+      else
+        Result := OnBg(FTheme.Text, FTheme.SunkenBg);
     ckThought:
       Result := FTheme.Muted;
     ckQueued:

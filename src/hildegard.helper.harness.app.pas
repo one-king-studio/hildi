@@ -1472,12 +1472,16 @@ begin
         FlushToolOutput;
         if FToolBlocks.TryGetValue(E.ToolId, Block) then
         begin
+          { The ok flag is already on the wire; use it so a failed call is
+            visibly an error and not just text that happens to say so. }
+          Block.Failed := not E.ToolOk;
           AppendToolResult(Block, E.Text);
           FToolBlocks.Remove(E.ToolId);
         end
         else
         begin
           Block := FPanel.Stream.Add(ckTool, E.ToolName, '');
+          Block.Failed := not E.ToolOk;
           AppendToolResult(Block, E.Text);
         end;
         FToolPending.Remove(E.ToolId);
