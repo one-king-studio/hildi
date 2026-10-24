@@ -20,10 +20,14 @@ A shared flag may still differ in edge cases.
 
 | | just-bash | ours |
 | --- | --- | --- |
-| Commands | **80** | **31** |
-| Both | 27 | |
-| Theirs only | 53 | |
-| Ours only | 4 (`[`, `false`, `tool`, `mcp`) | |
+| Commands | **80** | **38** |
+| Both | 33 | |
+| Theirs only | 47 | |
+| Ours only | 5 (`sha256sum`, `[`, `false`, `tool`, `mcp`) | |
+
+**Progress:** 31 → 38 commands. Added since the first pass: `diff`, `pwd`, `stat`,
+`seq`, `od`, `sha256sum`, `md5sum`. Flags filled in: `sort -n/-k/-t/-f/-o`,
+`grep -o/-w/-x/-q/-h`, `wc -m`, `head -c`, `tail -c`, `uniq -i`.
 
 ## Why the gap matters more than convenience
 
@@ -116,12 +120,30 @@ or the isolation gate breaks.
 the harness's own dispatch and have no just-bash equivalent; `[` and `false` are
 ours for completeness.
 
-## Recommended order
+## Where this stands
 
-1. **`diff`** — highest value-to-effort; removes a real escalation.
-2. **`stat`, `md5sum`, `pwd`, `seq`** — an afternoon, all trivial.
-3. **`yq`** — the parser exists; this is plumbing.
-4. **`grep -o -w -x -q -h`** — analysed and planned; see the matrix.
+Done: `diff`, `stat`, `md5sum`, `pwd`, `seq`, `od`, `sha256sum`, and the
+`grep`/`sort`/`wc`/`head`/`tail`/`uniq` flag gaps.
+
+**The next useful filter is not "what else is on just-bash's list" but "which
+absent command actually pushed an agent out of the gated tier."** The only
+evidence we have is one session's transcript, and it says: `perl`, `python3`,
+`od`. That suggests the remaining wins are where a shell script reaches for a
+*language*, not where it reaches for another coreutil:
+
+| Candidate | Why | Effort |
+| --- | --- | --- |
+| `yq` | the parser exists in `hildegard.helper.yaml`; this is plumbing | low |
+| `expr` | arithmetic in a script; otherwise `$(())` or a language | low |
+| `xargs` | the usual companion to `find`; without it a loop is a language | moderate |
+| `strings` | pairs with `od` for inspecting a binary | low |
+| `base64` | needs real (non-URL) encoding; `Base64Url` is not it | low |
+
+## Deliberately not implemented
+
+`curl` (network), `python3`/`js-exec`/`bash` (interpreters defeat the sandbox),
+`tar`/`gzip` (archive formats), `sqlite3` (we have the store), `history`/`alias`
+(shell state we do not model), and just-bash's product-specific helpers.
 
 ## Caveat
 
