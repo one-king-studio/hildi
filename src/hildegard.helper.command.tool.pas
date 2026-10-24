@@ -931,6 +931,12 @@ begin
           FConfig.MaxOutputBytes)
       else
         AResult := AResult + Execution.Output;
+      { Say so when there is nothing. A silent success (mkdir, mv, a sed -i that
+        matched nothing) otherwise renders as a bare header followed by whatever
+        rides the tail, and an agent cannot tell "ran, printed nothing" from
+        "produced no result". }
+      if Execution.Output = '' then
+        AResult := AResult + '(no content)';
       if Truncated then
         AResult := AResult + LineEnding + '[output truncated at ' +
           IntToStr(FConfig.MaxOutputBytes) + ' bytes]';

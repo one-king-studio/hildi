@@ -111,6 +111,10 @@ type
     procedure TestFdDuplicateIsNotAFileAsk;
     procedure TestOutsideRedirectKeepsThePathAsk;
     procedure TestRunDeliversFileChanges;
+    { A command that prints nothing must SAY it printed nothing: an empty result
+      body leaves the agent staring at a tail with no information about whether
+      the command ran at all. }
+    procedure TestSilentCommandSaysNoContent;
     procedure TestNoChangeNoteWithoutChanges;
     procedure TestChangeNoteIsCapped;
     procedure TestProcessExecutorRecordsRealWrites;
@@ -1168,6 +1172,28 @@ begin
       '{"command":"grep ''\\&lt;'' f","reason":"r"}', R, E));
     AssertEquals('escaped entity kept', 'grep ''\&lt;'' f',
       FExecutor.LastCommand);
+  finally
+    Tool.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestSilentCommandSaysNoContent;
+var
+  Tool: TCommandTool;
+  R, E: string;
+begin
+  { A command that prints nothing used to yield a bare `$ cmd` header and then
+    whatever rode the tail - so an agent could not tell "it ran and printed
+    nothing" from "it produced no result at all". Silent success is common
+    (`mkdir`, `mv`, a `sed -i` that matched nothing) and must say so. }
+  AddRule(aeAllow, 'run_command:true', [], True);
+  Tool := BuildTool(nil, 0);
+  try
+    { The fake executor defaults its output to 'out'; this case is about the
+      SILENT command, so empty it explicitly. }
+    FExecutor.ResultExec.Output := '';
+    AssertTrue('ok', Tool.Run('{"command":"true","reason":"r"}', R, E));
+    AssertTrue('says there was no output: ' + R, Pos('(no content)', R) > 0);
   finally
     Tool.Free;
   end;
