@@ -519,11 +519,10 @@ begin
   VisTop := ARect.Y + 3;                    // first row a card may occupy
   VisBot := ARect.Y + ARect.H - 2;          // last row a card may occupy
 
-  { The lane column is one shade DARKER than the app background and the cards
-    are one shade LIGHTER, so the card reads as a raised object on a recessed
-    track. That contrast is what separates lane from card, without either
-    needing a bright fill. }
-  LaneFill := OnBg(FTheme.Panel, FTheme.SunkenBg);
+  { Every lane shares the board's own background, so the kanban reads as one
+    surface rather than five tinted columns. The FOCUSED lane is the exception:
+    it takes the one-shade-darker background, which is the only highlight. Cards
+    stay one shade lighter than everything, so they sit raised on either. }
   CardFill := OnBg(FTheme.Panel, FTheme.RaisedBg);
 
   for K := 0 to VisCount - 1 do
@@ -533,15 +532,22 @@ begin
     InnerW := LaneW - 1;
     Total := Length(Lanes[L]);
 
+    if (L = FLane) and (FZone = zTasks) then
+    begin
+      LaneFill := OnBg(FTheme.Panel, FTheme.SunkenBg);
+      LaneHead := OnBg(FTheme.Accent, FTheme.SunkenBg);
+    end
+    else
+    begin
+      LaneFill := FTheme.Panel;
+      LaneHead := FTheme.Title;
+    end;
+
     { The lane track: fill the column first, so cards sit on it. }
     for Y := ARect.Y + 1 to ARect.Y + ARect.H - 2 do
       S.FillRect(R(LaneX, Y, InnerW, 1), LaneFill);
 
     { The lane header: name and count, then a dotted rule. }
-    if (L = FLane) and (FZone = zTasks) then
-      LaneHead := OnBg(FTheme.Accent, FTheme.SunkenBg)
-    else
-      LaneHead := OnBg(FTheme.Title, FTheme.SunkenBg);
     Text(S, LaneX, ARect.Y + 1, UnicodeString(LaneTitles[L] + ' ' +
       IntToStr(Total)), LaneHead, InnerW);
 
@@ -606,15 +612,12 @@ begin
       Inc(I);
     end;
 
-    { The rule between lanes, never after the last one. }
+    { The rule between lanes, never after the last one. It is always the plain
+      border: the focused lane is signalled by its own darker fill, so colouring
+      the divider too would say the same thing twice and read as noise. }
     if K < VisCount - 1 then
-    begin
-      if (L = FLane) and (FZone = zTasks) then
-        A := FTheme.Accent
-      else
-        A := FTheme.Border;
-      VLine(S, LaneX + LaneW - 1, ARect.Y + 1, ARect.Y + ARect.H - 2, A);
-    end;
+      VLine(S, LaneX + LaneW - 1, ARect.Y + 1, ARect.Y + ARect.H - 2,
+        FTheme.Border);
   end;
 end;
 
