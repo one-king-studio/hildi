@@ -22,6 +22,16 @@ function Utf8Prefix(const AText: string; AMaxBytes: Integer): string;
   start so the result begins on a whole character. }
 function Utf8From(const AText: string; ASkipBytes: Integer): string;
 
+{ Split AText at the last COMPLETE character boundary: AComplete is everything
+  that ends on a whole character, ACarry the trailing bytes of a sequence that is
+  not finished yet (or '' when AText ends cleanly).
+
+  For a stream consumer: raw byte windows can split a multi-byte character, and
+  forwarding the fragment renders it as U+FFFD. Hold ACarry, prepend it to the
+  next chunk, and flush it when the stream ends. }
+procedure Utf8SplitAtBoundary(const AText: string;
+  out AComplete, ACarry: string);
+
 implementation
 
 { A continuation byte is 10xxxxxx. }
@@ -58,6 +68,44 @@ begin
   while (N <= Length(AText)) and IsContinuation(AText[N]) do
     Inc(N);
   Result := Copy(AText, N, MaxInt);
+end;
+
+procedure Utf8SplitAtBoundary(const AText: string;
+  out AComplete, ACarry: string);
+var
+  I, Need: Integer;
+  B: Byte;
+begin
+  AComplete := AText;
+  ACarry := '';
+  if AText = '' then
+    Exit;
+  { Walk back from the end over continuation bytes to the start of the last
+    sequence, then ask how long that sequence should be. }
+  I := Length(AText);
+  while (I > 0) and IsContinuation(AText[I]) do
+    Dec(I);
+  if I = 0 then
+    { Nothing but continuations: the whole string is a fragment. }
+  begin
+    AComplete := '';
+    ACarry := AText;
+    Exit;
+  end;
+  B := Ord(AText[I]);
+  if B >= $F0 then
+    Need := 4
+  else if B >= $E0 then
+    Need := 3
+  else if B >= $C0 then
+    Need := 2
+  else
+    Need := 1;
+  if (Length(AText) - I + 1) < Need then
+  begin
+    AComplete := Copy(AText, 1, I - 1);
+    ACarry := Copy(AText, I, MaxInt);
+  end;
 end;
 
 end.

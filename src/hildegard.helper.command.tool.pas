@@ -482,6 +482,15 @@ type
     FData: string;
     FExit: Integer;
     FTimedOut: Boolean;
+    { Bytes of an INCOMPLETE UTF-8 sequence at the end of the last chunk. The
+      process reader hands us raw byte windows, so a multi-byte character can
+      straddle two of them; forwarding the tail immediately renders it as a
+      replacement character, which is what turned streamed box-drawing output
+      into a row of question marks. Held here until the next chunk completes it. }
+    FCarry: string;
+    { True once the command finished, so a trailing carry that never completes is
+      flushed rather than silently dropped. }
+    FFinished: Boolean;
   public
     constructor Create(AObserver: TToolObserver);
     destructor Destroy; override;
@@ -508,6 +517,8 @@ begin
   inherited Create;
   FLock := TCriticalSection.Create;
   FObserver := AObserver;
+  FCarry := '';
+  FFinished := False;
 end;
 
 destructor TOutputCollector.Destroy;
@@ -518,20 +529,43 @@ end;
 
 procedure TOutputCollector.OnOutput(const AId: string; AKind: TOutputKind;
   const AText: string; AExitCode: Integer);
+var
+  Send: string;
 begin
+  Send := '';
   FLock.Acquire;
   try
     case AKind of
       okStarted: ;
-      okStdout, okStderr: FData := FData + AText;
-      okFinished: FExit := AExitCode;
+      okStdout, okStderr:
+        begin
+          { The split lives in hildegard.helper.utf8 where it can be tested
+            directly: the process reader hands us raw byte windows, so a
+            multi-byte character can straddle two chunks and forwarding the
+            fragment renders it as U+FFFD. }
+          Utf8SplitAtBoundary(FCarry + AText, Send, FCarry);
+          FData := FData + Send;
+        end;
+      okFinished:
+        begin
+          { Flush a carry that never completed: those bytes were real, and
+            dropping them would lose the tail of the output entirely. }
+          if FCarry <> '' then
+          begin
+            Send := FCarry;
+            FData := FData + Send;
+            FCarry := '';
+          end;
+          FExit := AExitCode;
+          FFinished := True;
+        end;
     end;
   finally
     FLock.Release;
   end;
   { Forward outside the lock: the observer may reach a UI queue. }
-  if (AKind in [okStdout, okStderr]) and (FObserver <> nil) then
-    FObserver.Next(AText);
+  if (AKind in [okStdout, okStderr]) and (FObserver <> nil) and (Send <> '') then
+    FObserver.Next(Send);
 end;
 
 function TOutputCollector.Take(out AExit: Integer;

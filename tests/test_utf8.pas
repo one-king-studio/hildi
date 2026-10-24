@@ -19,6 +19,12 @@ type
     procedure TestPrefixDoesNotSplitFourByte;
     procedure TestPrefixEmptyAndZero;
     procedure TestFromSkipsToABoundary;
+    { The streaming fix: a raw byte window can split a multi-byte character, and
+      forwarding the fragment renders it as U+FFFD. This is the pure function the
+      output collector now uses. }
+    procedure TestSplitAtBoundaryHoldsAnIncompleteTail;
+    procedure TestSplitAtBoundaryPassesCleanTextThrough;
+    procedure TestSplitAtBoundaryCarriesAPureFragment;
   end;
 
 implementation
@@ -72,6 +78,50 @@ begin
   AssertEquals('past the character', 'a', Utf8From(EAcute + 'a', 1));
   AssertEquals('past the character', 'a', Utf8From(EAcute + 'a', 2));
   AssertEquals('past everything', '', Utf8From('abc', 10));
+end;
+
+procedure TUtf8Test.TestSplitAtBoundaryHoldsAnIncompleteTail;
+var
+  Whole, Complete, Carry, Combined: string;
+begin
+  { A 3-byte character (U+2500 BOX DRAWINGS LIGHT HORIZONTAL, the kind a build
+    tool streams) split after its second byte. The safe prefix ends before it, and
+    the two bytes are carried. }
+  Whole := 'ab' + #$E2#$94#$80 + 'cd';
+  Utf8SplitAtBoundary(Copy(Whole, 1, 4), Complete, Carry);
+  AssertEquals('safe prefix', 'ab', Complete);
+  AssertEquals('carried tail', #$E2#$94, Carry);
+  { Prepending the carry to the rest reconstructs the character exactly once.
+    Through a temp: Carry is an `out` parameter, and passing it as both an input
+    and the out target clears it before the argument is read. }
+  Combined := Carry + Copy(Whole, 5, MaxInt);
+  Utf8SplitAtBoundary(Combined, Complete, Carry);
+  AssertEquals('completed', #$E2#$94#$80 + 'cd', Complete);
+  AssertEquals('nothing left over', '', Carry);
+end;
+
+procedure TUtf8Test.TestSplitAtBoundaryPassesCleanTextThrough;
+var
+  Complete, Carry: string;
+begin
+  { Text ending on a whole character is forwarded in full, nothing carried. }
+  Utf8SplitAtBoundary('a' + #$E2#$94#$80, Complete, Carry);
+  AssertEquals('all forwarded', 'a' + #$E2#$94#$80, Complete);
+  AssertEquals('nothing carried', '', Carry);
+  Utf8SplitAtBoundary('', Complete, Carry);
+  AssertEquals('empty', '', Complete);
+  AssertEquals('empty carry', '', Carry);
+end;
+
+procedure TUtf8Test.TestSplitAtBoundaryCarriesAPureFragment;
+var
+  Complete, Carry: string;
+begin
+  { A window that happens to be nothing but continuation bytes is all fragment.
+    Forwarding it would emit a replacement character before the real one. }
+  Utf8SplitAtBoundary(#$94#$80, Complete, Carry);
+  AssertEquals('nothing safe', '', Complete);
+  AssertEquals('all carried', #$94#$80, Carry);
 end;
 
 initialization
