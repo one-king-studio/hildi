@@ -1,7 +1,7 @@
 # Workspace Snapshots
 
 **Status: Implemented — capture and storage; deferred — the TUI surface and
-undo/redo.**
+state revert.**
 
 What is **built**:
 
@@ -25,13 +25,13 @@ What is **built**:
 What is **not built**, and is the remaining work:
 
 - **The TUI surface** that shows a call's or a turn's changes to the operator, and
-  **undo/redo**. Nothing yet reads the log for the operator — a change is recorded
+  **state revert**. Nothing yet reads the log for the operator — a change is recorded
   and retained, but only the board asks about it.
 - **Keyframes are not written.** `KeyframeDue`, `PutKeyframe` and `Replay` exist in
   `src/changes` and are tested there, but the recorder never calls them, so nothing
   in the live path writes a keyframe and nothing replays. Replay is therefore
   *unbounded in principle* today — the retention window (16 turns) is what actually
-  bounds the table. Wiring the keyframe interval is a prerequisite for undo/redo,
+  bounds the table. Wiring the keyframe interval is a prerequisite for a bounded revert,
   not an optimisation to defer. The patches themselves are now recorded, so replay
   has something to apply; what is still missing is the keyframe that bounds how far
   back it must start.
@@ -95,7 +95,7 @@ happens** — a turn can be twenty tool calls, and "what did *that*
 | level | unit | purpose | context cost |
 | --- | --- | --- | --- |
 | **Tool change** | one tool call, or one parallel batch | what the operator sees under the call, as it happens | **zero** (never in the prompt) |
-| **Turn snapshot** | the turn boundary | dedup storage, the undo/redo chain, retention | zero for the model |
+| **Turn snapshot** | the turn boundary | dedup storage, the revert chain, retention | zero for the model |
 
 ### The tool-change record
 
@@ -108,9 +108,13 @@ Three producers, with very different confidence, and the record says which:
 | Process tier (`git`, `make`, `mode=bash`) | a subprocess | only a before/after walk | `process` |
 | Watchdog | a periodic walk | same, later | `watcher` |
 
-Keyed by the **tool-result message id**, so the live view and a resumed session
-render the same block from the same rows — the invariant the streaming work
-already holds. A call touching several files yields several rows for one message.
+Keyed by the **tool-result message id** — *the design intent, not yet implemented*:
+`TChangeRecorder.Observe` hardcodes `R.MessageId := 0`, because the tool result
+row does not exist when the handler runs (`THarnessSession.RecordChanges` says so
+in a comment). Today a change is keyed by its **turn** only, so the review point
+is the turn rather than the call. Stamping the id after the row is written is the
+first thing per-call review needs; until then a batch's changes group by turn.
+A call touching several files yields several rows for one message.
 
 ### Attribution, including parallel batches
 
@@ -170,6 +174,85 @@ staleness check in [the board](../Message_Board/FEATURE.md), the write CAS, and
 "who touched this" for an orchestrator — which is why this is a log rather than a
 viewer's cache.
 
+## The real purpose: an agent's memory of change, not a git replacement
+
+The primary consumer is the **agent**, and the primary reason is that many
+operators will never have a git history at all — a non-technical operator running
+the harness on a device has no repository, no commits, and no `git log` to read.
+The change log is what lets an agent answer "what changed since I last looked?"
+in a workspace that has never seen a version control system.
+
+That reframes the priority order:
+
+| Capability | Value | Why |
+| --- | --- | --- |
+| **Capture + query** | essential | The agent reading its own history is the feature. Without it there is no memory. |
+| **Operator review surface** | essential | A recorded change nobody can see does not earn its retention. |
+| **Revert to a state** | valuable | Restores a known point. Preserves the decision, not the keystrokes. |
+| **Undo/redo of individual actions** | novelty | Parity with other harnesses; not a reason to build. |
+
+### Revert, not undo
+
+The target is **revert to a prior state**, not an undo stack. An undo stack
+replays actions backwards and must decide what "one action" means; a revert names
+a *state* and moves the workspace to it. Revert also preserves the decision the
+agent made — the agent can see what it chose, revert it, and choose differently,
+with both the choice and the reversal in the log.
+
+A clean revert is worth having but is **not required**: because the log keeps the
+before/after text and hashes, an agent that cannot apply a mechanical revert can
+still read the history and write the old content back through the normal tools.
+The fallback is the agent's competence, not a code path — which is why revert is
+valuable but not load-bearing, and why it does not block the review surface.
+
+Consequence for design: **the log must keep enough text to reconstruct**, not just
+counts. A capped diff and a hash are enough to detect and enough to *show*, but a
+revert needs the bytes. The capture flags already distinguish "we have both
+sides" from "we have sizes only"; revert is therefore only possible for records
+whose `Captured` and `BeforeCaptured` are both true, and the surface must say so
+rather than fail at revert time.
+
+## Presentation: a turn summary, then a diff viewer
+
+Two levels, matching the existing granularity table: the **turn** is where a
+summary aggregates, and the **call** (or file) is what a diff shows.
+
+```
+╭─ Turn 14 · 6 calls · 4 files · +38 −12 ──────────────────────╮
+│  M src/hildegard.helper.replymeta.pas            +30 −8      │
+│  A tests/test_replymeta_preamble.pas             +93 −0      │
+│  M docs/features/.../Reply_Metadata_v1.SPEC.md    +17 −4     │
+│  · 3 more files                                   +12 −6     │
+╰──────────────────────────────────────────────────────────────╯
+```
+
+- **The summary is one collapsed block per turn**, at the turn boundary, built
+  from the rows already written. It states counts and per-file `+added −removed`,
+  not the diffs — cheap to render, cheap to skim.
+- **A click opens the diff viewer** for the selected file (or the whole call),
+  showing the unified diff already stored in `patch`. The viewer is a *reader*:
+  it opens on demand, and closing it returns to the stream unchanged.
+- **The model never sees either.** Zero prompt cost, as the granularity table
+  already promises; the summary is for the operator's eye.
+
+Three presentation rules, inherited from the design language:
+
+1. **Counts are honest.** A record whose before-side was never captured shows
+   `+? −?` rather than a line count computed against an empty string. The
+   existing capture flags make this expressible; pretending otherwise would be
+   the `[changed: …]` mistake in a new costume.
+2. **Unattributed changes are labelled.** A write the harness never observed
+   (`source` says so) appears as *unattributed* rather than silently attributed
+   to the agent.
+3. **The summary is a block, not a modal.** It rides the stream where the work
+   happened, so a resumed session shows it in place, from the same rows.
+
+**TUI dependency:** the viewer needs a scrollable pane over styled text, which the
+TUI toolkit already has (`TScrollContainer`, `TTextBlock`), but the toolkit is
+mid-refactor into `src/tui/core` + `src/tui/widgets`. This surface should land
+after that settles and should consume whatever the refactor exposes rather than
+reaching into the current units.
+
 ## Problem Statement
 
 The agent edits the operator's files and runs commands that edit them. The ledger
@@ -202,16 +285,17 @@ genuine gaps are the store, a diff generator, and the TUI surface.
 
 ## Goals
 
-- **Per-tool-call diffs**: what each edit tool did, shown under its own block as
-  it happens, so the operator reviews work where it happens — not only as a
-  turn-end summary.
-- **Per-turn snapshots** of the workspace, captured at the turn boundary,
-  deduplicated so an unchanged tree costs nothing.
-- A **changed-files view** for a turn: path, change kind (added/modified/deleted),
-  and a line count.
-- A **diff view** per file, between the turn's before/after states.
-- **Undo/redo** that walks the snapshot history and restores the files, safely
-  (no partial writes) and visibly (the view reflects the result).
+- **Capture** every change the agent makes, with enough text to reconstruct it —
+  the foundation for an agent's own memory of change in a workspace that may have
+  no git history at all.
+- **A turn summary**: affected files with per-file `+added −removed`, as one
+  collapsed block at the turn boundary.
+- **A diff viewer** per file, opened on demand from the summary, rendering the
+  unified diff already stored on the record.
+- **Revert to a prior state** — not an undo stack. Revert names a state and moves
+  the workspace to it, which preserves the decision the agent made; a mechanical
+  revert is valuable but not required, since a capable agent can read the history
+  and write the old content back through the normal tools.
 - **Self-contained**: one local store; no git, no network, no external tool.
 - **Bounded**: ignore rules, size caps, and binary handling so a workspace with
   `node_modules` or a large binary does not blow up.
@@ -243,7 +327,7 @@ genuine gaps are the store, a diff generator, and the TUI surface.
   is reversible.
 - As an **operator**, after undoing I want to redo, so I can flip back and forth
   while I decide.
-- As an **operator**, I want undo/redo to be safe, so a half-applied revert never
+- As an **operator**, I want a revert to be safe, so a half-applied revert never
   leaves the tree broken.
 - As a **harness author**, I want the snapshot to ride the turn boundary, so I do
   not have to instrument every tool.
@@ -277,8 +361,8 @@ genuine gaps are the store, a diff generator, and the TUI surface.
       forward. Undo is **single-agent only**: it is refused unless exactly one
       live runtime holds the workspace, because reverting a peer's write has no
       correct resolution.
-- [ ] Undo/redo are **atomic per turn**: a failure leaves the workspace in the
-      pre-undo state, never half-applied.
+- [ ] A revert is **atomic per turn**: a failure leaves the workspace in the
+      pre-revert state, never half-applied.
 - [ ] **Ignore rules** apply (`.git/`, `build/`, `node_modules/`, every
       `.gitignore` in its own directory).
 - [ ] **Binary and oversized files** record hash and size only; the view says so.
@@ -330,11 +414,11 @@ genuine gaps are the store, a diff generator, and the TUI surface.
   Windows-only, so it is *prior art only* — the shape, not the code (see Notes).
 - The snapshot store rides **SQLite**, which we already vendor (no new dependency).
 - Capture happens at the **turn boundary** in the runtime (which owns the loop and
-  the workspace); the TUI is a client that reads the store and sends undo/redo.
+  the workspace); the TUI is a client that reads the store and sends revert requests.
 - **The workspace is the boundary**: snapshot only inside it (the `Workspaces`
   trust boundary); never follow symlinks out of it.
-- **One writer.** Undo/redo mutate the workspace, so they are serialized with the
-  turn (no undo while a turn is mid-flight).
+- **One writer.** A revert mutates the workspace, so they are serialized with the
+  turn (no revert while a turn is mid-flight).
 
 ### Business / Time
 
@@ -349,8 +433,8 @@ genuine gaps are the store, a diff generator, and the TUI surface.
   entries) and their migration.
 - `hildegard.helper.workspace` — the root and the trust boundary to confine to.
 - `hildegard.helper.harness.turn` / `session.runtime` — the turn boundary where a
-  snapshot is taken, and the command path for undo/redo.
-- `hildegard.helper.session.protocol` — the undo/redo commands and the
+  snapshot is taken, and the command path for revert.
+- `hildegard.helper.session.protocol` — the revert commands and the
   changed-files/diff replies (the TUI is a client).
 - `hildegard.helper.files` — the existing workspace-confined read/write primitives
   (restore reuses the same path checks and atomic write).
@@ -370,7 +454,7 @@ genuine gaps are the store, a diff generator, and the TUI surface.
   when a path's patches exceed 2× its size, an ignore list, and a size cap; a
   binary or oversized file is recorded by hash and size only.
 - **Undo mid-turn.** Undoing while the agent is writing would race. Mitigation:
-  undo/redo are refused (or queued) while a turn is in flight; the boundary is the
+  revert requests are refused (or queued) while a turn is in flight; the boundary is the
   sync point.
 - **Destructive restore.** Undo rewrites the operator's files. Mitigation: atomic
   per-snapshot restore; the pre-undo state is itself a snapshot (so an undo is
@@ -445,7 +529,7 @@ genuine gaps are the store, a diff generator, and the TUI surface.
   forms.
 - **Why the turn is the unit.** A turn is when the agent's edits land and before the
   next one; it is the natural review point, it matches the ledger, and it is where
-  undo/redo is safe (no writer in flight).
+  a revert is safe (no writer in flight).
 - **Why the tool call is also a unit.** Reviewing work where it happens: a turn-end
   summary cannot answer "what did this one `file_search_replace` do?", and a
   twenty-call turn read as one total hides which step went wrong. The tool-level
@@ -457,7 +541,7 @@ genuine gaps are the store, a diff generator, and the TUI surface.
   for the full argument, including why tool results should be Markdown rather than
   JSON.
 - **The two capabilities are one feature** because they share the store: the
-  changed-files view and the diff view *read* a snapshot pair; undo/redo *move the
+  changed-files view and the diff view *read* a snapshot pair; a revert *moves the
   cursor* over the same snapshots.
 - **Interaction with Context Checkpoint.** They are independent: Context Checkpoint
   versions the *conversation*, this versions the *workspace*. Both ride turn
