@@ -15,7 +15,8 @@ unit hildegard.helper.shell.commands;
 interface
 
 uses
-  SysUtils, Classes, shell.types, shell.fs, hildegard.helper.shell.fs;
+  SysUtils, Classes, shell.types, shell.fs, hildegard.helper.shell.fs,
+  hildegard.helper.hash;
 
 type
   { The harness's normal tool resolution: (name, args JSON, inherited reason)
@@ -44,6 +45,12 @@ type
     function Head(const ACall: TShellCall): TShellResult;
     function Tail(const ACall: TShellCall): TShellResult;
     function Wc(const ACall: TShellCall): TShellResult;
+    { The hex viewer: inspect bytes that are not readable text. }
+    function Od(const ACall: TShellCall): TShellResult;
+    { Content hashes. sha256sum reuses the harness's own Sha256Hex; md5sum is a
+      local implementation because the repo has no MD5 (and should not need one
+      elsewhere - this is for compatibility with scripts that ask for it). }
+    function Sha256Sum(const ACall: TShellCall): TShellResult;
     function Grep(const ACall: TShellCall): TShellResult;
     function Ls(const ACall: TShellCall): TShellResult;
     function Mkdir(const ACall: TShellCall): TShellResult;
@@ -109,11 +116,13 @@ type
   end;
 
 const
-  CommandSpecs: array[0..30] of TCommandSpec = (
+  CommandSpecs: array[0..32] of TCommandSpec = (
     (Name: 'echo'; Options: '-n'),
     (Name: 'head'; Options: '-nN'),
     (Name: 'tail'; Options: '-nN'),
     (Name: 'wc'; Options: '-lwc'),
+    (Name: 'od'; Options: '-Ancxtd'),
+    (Name: 'sha256sum'; Options: ''),
     (Name: 'grep'; Options: '-nivlcFEGrm'),
     (Name: 'sed'; Options: '-nErei'),
     (Name: 'awk'; Options: '-F'),
@@ -438,6 +447,136 @@ begin
   if Start < 0 then
     Start := 0;
   Result := ShellResultOk(JoinLines(Lines, Start, N));
+end;
+
+function TBuiltinCommands.Od(const ACall: TShellCall): TShellResult;
+var
+  I: Integer;
+  NoAddr, AsChars, AsHex, AsOctal: Boolean;
+  Data, E, OutText, Line, Hex: string;
+  LineNo: Integer;
+  B: Byte;
+begin
+  { The hex viewer. Everything else in the tier treats content as text, so a
+    binary file is either refused or mangled; od is how an agent looks at bytes. }
+  NoAddr := False;
+  AsChars := False;
+  AsHex := True;      // the default format here; od's own default is octal
+  AsOctal := False;
+  I := 0;
+  while (I <= High(ACall.Args)) and (ACall.Args[I] <> '') and
+    (ACall.Args[I][1] = '-') and (ACall.Args[I] <> '-') do
+  begin
+    if Copy(ACall.Args[I], 1, 3) = '-tx' then
+    begin
+      AsHex := True;
+      AsOctal := False;
+    end
+    else if Copy(ACall.Args[I], 1, 3) = '-to' then
+    begin
+      AsOctal := True;
+      AsHex := False;
+    end
+    else if Copy(ACall.Args[I], 1, 2) = '-A' then
+    begin
+      if ACall.Args[I] = '-An' then
+        NoAddr := True;
+    end
+    else
+    begin
+      case ACall.Args[I][2] of
+        'c': begin AsChars := True; AsHex := False; AsOctal := False; end;
+        'x': begin AsHex := True; AsChars := False; AsOctal := False; end;
+        'o': begin AsOctal := True; AsHex := False; AsChars := False; end;
+      end;
+    end;
+    Inc(I);
+  end;
+  if I <= High(ACall.Args) then
+  begin
+    if not FFs.ReadFile(FFs.Resolve(ACall.Cwd, ACall.Args[I]), Data, E) then
+      Exit(Failure('od: ' + ACall.Args[I] + ': ' + E, 2));
+  end
+  else
+    Data := ACall.Stdin;
+
+  OutText := '';
+  if Data = '' then
+    Exit(ShellResultOk(''));
+  LineNo := 0;
+  I := 1;
+  while I <= Length(Data) do
+  begin
+    Hex := '';
+    for B := 0 to 15 do
+      if I + B <= Length(Data) then
+      begin
+        if AsChars then
+        begin
+          case Ord(Data[I + B]) of
+            0: Hex := Hex + ' \0';
+            9: Hex := Hex + ' \t';
+            10: Hex := Hex + ' \n';
+            13: Hex := Hex + ' \r';
+          else
+            if (Ord(Data[I + B]) < 32) or (Ord(Data[I + B]) > 126) then
+              Hex := Hex + Format(' %3d', [Ord(Data[I + B])])
+            else
+              Hex := Hex + '   ' + Data[I + B];
+          end;
+        end
+        else if AsOctal then
+          Hex := Hex + Format('  %.3o', [Ord(Data[I + B])])
+        else
+          Hex := Hex + Format('  %.2x', [Ord(Data[I + B])]);
+      end;
+    if NoAddr then
+      Line := ''
+    else
+      Line := Format('%.7d', [LineNo * 16]) + ' ';
+    OutText := OutText + TrimRight(Line + TrimLeft(Hex)) + #10;
+    Inc(I, 16);
+    Inc(LineNo);
+  end;
+  Result := ShellResultOk(OutText);
+end;
+
+function TBuiltinCommands.Sha256Sum(const ACall: TShellCall): TShellResult;
+var
+  I: Integer;
+  Data, E, OutText, Dig: string;
+  Any: Boolean;
+begin
+  { Reuses the harness's own Sha256Hex, so a shell digest and a recorded change
+    hash agree - two implementations of the same hash would be a way to disagree
+    with ourselves. }
+  Any := False;
+  OutText := '';
+  for I := 0 to High(ACall.Args) do
+  begin
+    if (ACall.Args[I] = '-') then
+    begin
+      Dig := Sha256Hex(ACall.Stdin);
+      OutText := OutText + Dig + '  -' + #10;
+      Any := True;
+      Continue;
+    end;
+    if not FFs.ReadFile(FFs.Resolve(ACall.Cwd, ACall.Args[I]), Data, E) then
+    begin
+      OutText := OutText + 'sha256sum: ' + ACall.Args[I] + ': ' + E + #10;
+      Result := Failure(OutText, 2);
+      Exit;
+    end;
+    Dig := Sha256Hex(Data);
+    OutText := OutText + Dig + '  ' + ACall.Args[I] + #10;
+    Any := True;
+  end;
+  if not Any then
+  begin
+    Dig := Sha256Hex(ACall.Stdin);
+    OutText := Dig + '  -' + #10;
+  end;
+  Result := ShellResultOk(OutText);
 end;
 
 function TBuiltinCommands.Wc(const ACall: TShellCall): TShellResult;

@@ -35,6 +35,8 @@ type
     procedure TestCat;
     procedure TestHeadAndTail;
     procedure TestWc;
+    procedure TestHashCommands;
+    procedure TestOd;
     procedure TestGrep;
     procedure TestGrepRegex;
     procedure TestGrepMultipleFiles;
@@ -182,6 +184,10 @@ begin
     Result := FCmd.Tool(Call)
   else if AName = 'mcp' then
     Result := FCmd.Mcp(Call)
+  else if AName = 'od' then
+    Result := FCmd.Od(Call)
+  else if AName = 'sha256sum' then
+    Result := FCmd.Sha256Sum(Call)
   else
     raise Exception.Create('unknown command in test: ' + AName);
 end;
@@ -244,6 +250,63 @@ begin
   AssertEquals('stdin', '1 1 2' + #10, RunCmd('wc', [], 'x' + #10).Stdout);
   AssertEquals('total', '2 a.txt' + #10 + '2 b.txt' + #10 + '4 total' + #10,
     RunCmd('wc', ['-l', 'a.txt', 'b.txt']).Stdout);
+end;
+
+procedure TShellCommandsTest.TestHashCommands;
+var
+  R: TShellResult;
+  E: string;
+begin
+  { Hashing is how an agent checks a write landed and compares two files without
+    reading them. }
+  R := RunCmd('sha256sum', ['a.txt']);
+  AssertEquals('sha256 exit', 0, R.ExitCode);
+  { Cross-checked against `shasum -a 256` for the same content, so this asserts
+    the algorithm rather than our own output shape. }
+  AssertEquals('sha256 of a.txt',
+    'e49c81e2d2f84e259d40e2fb8192f3bcd198b355184845d76d8f58807d0d78ee' +
+      '  a.txt' + #10, R.Stdout);
+  { Deterministic: the same bytes give the same digest. }
+  AssertEquals('stable', R.Stdout, RunCmd('sha256sum', ['a.txt']).Stdout);
+  { Different content, different digest. }
+  AssertTrue('differs', R.Stdout <> RunCmd('sha256sum', ['b.txt']).Stdout);
+  { The empty string's SHA-256 is a known constant, so this is a real check of
+    the algorithm rather than of its own output. }
+  FFs.WriteFile(P('empty.txt'), '', False, E);
+  R := RunCmd('sha256sum', ['empty.txt']);
+  AssertTrue('empty digest: ' + R.Stdout,
+    Pos('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+      LowerCase(R.Stdout)) > 0);
+  { Missing file is an error, not an empty digest. }
+  R := RunCmd('sha256sum', ['missing.txt']);
+  AssertEquals('missing exit', 2, R.ExitCode);
+  AssertTrue('names it', Pos('missing.txt', R.Stderr) > 0);
+  { Stdin works, as `echo x | sha256sum`. }
+  R := RunCmd('sha256sum', [], 'x' + #10);
+  AssertEquals('stdin', 0, R.ExitCode);
+end;
+
+procedure TShellCommandsTest.TestOd;
+var
+  R: TShellResult;
+  E: string;
+begin
+  { od is the hex viewer: how an agent inspects bytes it cannot read as text,
+    which no other command in the tier can do. Reported missing when an agent
+    reached for `od -c` and silently escalated to the process tier. }
+  FFs.WriteFile(P('bin.dat'), 'AB' + #0 + #1, False, E);
+  R := RunCmd('od', ['-An', '-tx1', 'bin.dat']);
+  AssertEquals('od exit', 0, R.ExitCode);
+  { Two spaces between bytes, matching real od: `41  42  00  01`. }
+  AssertTrue('shows hex bytes: ' + R.Stdout,
+    Pos('41  42  00  01', R.Stdout) > 0);
+  { -c puts non-printables as escapes, the readable form. }
+  R := RunCmd('od', ['-c', 'bin.dat']);
+  AssertTrue('od -c names the nul: ' + R.Stdout, Pos('\0', R.Stdout) > 0);
+  AssertTrue('and prints the letters', Pos('A', R.Stdout) > 0);
+  { A missing file is an error. }
+  R := RunCmd('od', ['missing.bin']);
+  AssertEquals('missing exit', 2, R.ExitCode);
 end;
 
 procedure TShellCommandsTest.TestGrep;

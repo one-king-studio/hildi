@@ -159,7 +159,8 @@ begin
     (AName = 'false') or (AName = 'basename') or (AName = 'dirname') then
     Exit;
 
-  if (AName = 'cat') or (AName = 'wc') then
+  if (AName = 'cat') or (AName = 'wc') or (AName = 'od') or
+     (AName = 'sha256sum') then
   begin
     AddFiles(AReads, AName, AArgs, 0);
     Exit;
