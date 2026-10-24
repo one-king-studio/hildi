@@ -139,6 +139,7 @@ begin
   FRegistry.Register('nl', FCmd.Nl);
   FRegistry.Register('du', FCmd.Du);
   FRegistry.Register('tree', FCmd.Tree);
+  FRegistry.Register('mktemp', FCmd.MkTemp);
   FRegistry.Register('basename', FCmd.Basename);
   FRegistry.Register('dirname', FCmd.Dirname);
   FRegistry.Register('test', FCmd.TestCmd);

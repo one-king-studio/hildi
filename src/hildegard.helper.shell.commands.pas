@@ -31,6 +31,8 @@ type
     FInvoke: TShellToolInvoke;
     FAllowed: TStringArray;
     FReason: string;
+    { Monotonic counter for mktemp names: the clock alone is too coarse. }
+    FSeq: Integer;
     function Usage(const AMsg: string): TShellResult;
     function Failure(const AMsg: string; AStatus: Integer): TShellResult;
     function ToolAllowed(const AName: string): Boolean;
@@ -67,6 +69,7 @@ type
     function Nl(const ACall: TShellCall): TShellResult;
     function Du(const ACall: TShellCall): TShellResult;
     function Tree(const ACall: TShellCall): TShellResult;
+    function MkTemp(const ACall: TShellCall): TShellResult;
     function Grep(const ACall: TShellCall): TShellResult;
     function Ls(const ACall: TShellCall): TShellResult;
     function Mkdir(const ACall: TShellCall): TShellResult;
@@ -137,7 +140,7 @@ type
   end;
 
 const
-  CommandSpecs: array[0..45] of TCommandSpec = (
+  CommandSpecs: array[0..46] of TCommandSpec = (
     (Name: 'echo'; Options: '-n'),
     (Name: 'head'; Options: '-nNc'),
     (Name: 'tail'; Options: '-nNc'),
@@ -157,6 +160,7 @@ const
     (Name: 'nl'; Options: '-ba'),
     (Name: 'du'; Options: '-s'),
     (Name: 'tree'; Options: '-aL'),
+    (Name: 'mktemp'; Options: '-dtu'),
     (Name: 'grep'; Options: '-nivlcFEGrm'),
     (Name: 'sed'; Options: '-nErei'),
     (Name: 'awk'; Options: '-F'),
@@ -1352,6 +1356,89 @@ begin
   OutText := OutText + #10 + IntToStr(Dirs) + ' directories, ' +
     IntToStr(Files) + ' files' + #10;
   Result := ShellResultOk(OutText);
+end;
+
+function TBuiltinCommands.MkTemp(const ACall: TShellCall): TShellResult;
+var
+  I: Integer;
+  AsDir, Suffix: Boolean;
+  Template, Name, E, Base: string;
+  Dirs: Boolean;
+
+  function RandomToken: string;
+  const
+    Chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  var
+    K: Integer;
+    Seed: Int64;
+  begin
+    { Not cryptographic: a scratch name only has to be unlikely to collide with
+      a sibling's. The counter matters - Now() has coarse resolution, so two
+      immediate calls would otherwise produce the SAME name and the second
+      WriteFile would silently reuse the first file. }
+    Inc(FSeq);
+    Seed := Round((Now() - 25569.0) * 86400 * 1000) +
+      Int64(GetTickCount64) * 7919 + FSeq * 104729;
+    Result := '';
+    for K := 1 to 10 do
+    begin
+      Result := Result + Chars[(Seed mod Length(Chars)) + 1];
+      Seed := Seed div 7 + 13;
+    end;
+  end;
+
+begin
+  { Creates a unique file (or directory with -d) and prints its path. Written
+    under the workspace, so a scratch file is confined and shows up in the change
+    log - which is strictly better than /tmp for an agent. }
+  AsDir := False;
+  Suffix := False;
+  I := 0;
+  while (I <= High(ACall.Args)) and (ACall.Args[I] <> '') and
+    (ACall.Args[I][1] = '-') do
+  begin
+    if ACall.Args[I] = '-d' then
+      AsDir := True
+    else if ACall.Args[I] = '-t' then
+    begin
+      { -t DIR: accept and use the workspace root instead, since DIR outside the
+        workspace would not be confined. }
+      Suffix := True;
+      Inc(I);
+    end
+    else if (ACall.Args[I] = '-u') or (ACall.Args[I] = '--dry-run') then
+      { Accepted for compatibility; we always print the name. }
+    else
+      Exit(Usage('mktemp: unsupported option ' + ACall.Args[I]));
+    Inc(I);
+  end;
+  if I <= High(ACall.Args) then
+    Template := ACall.Args[I]
+  else
+    Template := '';
+  if Template = '' then
+    Template := 'tmp.XXXXXXXXXX';
+  { Substitute the trailing X run with a random token. }
+  Base := Template;
+  I := Length(Base);
+  while (I > 0) and (Base[I] = 'X') do
+    Dec(I);
+  if I = Length(Base) then
+    Base := Base + '.'
+  else
+    Base := Copy(Base, 1, I) + '.';
+  Name := Base + RandomToken;
+  if AsDir then
+  begin
+    if not FFs.MakeDir(FFs.Resolve(ACall.Cwd, Name), True, E) then
+      Exit(Failure('mktemp: ' + E, 1));
+  end
+  else
+  begin
+    if not FFs.WriteFile(FFs.Resolve(ACall.Cwd, Name), '', False, E) then
+      Exit(Failure('mktemp: ' + E, 1));
+  end;
+  Result := ShellResultOk(Name + #10);
 end;
 
 function TBuiltinCommands.Wc(const ACall: TShellCall): TShellResult;

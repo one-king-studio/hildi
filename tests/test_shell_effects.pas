@@ -221,6 +221,7 @@ begin
   AssertTrue('nl', Known('nl', []));
   AssertTrue('du', Known('du', []));
   AssertTrue('tree', Known('tree', []));
+  AssertTrue('mktemp', Known('mktemp', []));
   AssertTrue('grep', Known('grep', []));
   AssertTrue('sed', Known('sed', []));
   AssertTrue('awk', Known('awk', []));

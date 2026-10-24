@@ -397,7 +397,8 @@ begin
     Exit;
   end;
 
-  if (AName = 'mkdir') or (AName = 'touch') or (AName = 'rmdir') then
+  if (AName = 'mkdir') or (AName = 'touch') or (AName = 'rmdir') or
+     (AName = 'mktemp') then
   begin
     I := 0;
     while (I <= High(AArgs)) and IsOption(AArgs[I]) do

@@ -56,6 +56,7 @@ type
     procedure TestYq;
     procedure TestRmdir;
     procedure TestNlDuTree;
+    procedure TestMkTemp;
     procedure TestTest;
     procedure TestBracket;
     procedure TestTrueFalse;
@@ -213,6 +214,8 @@ begin
     Result := FCmd.Du(Call)
   else if AName = 'tree' then
     Result := FCmd.Tree(Call)
+  else if AName = 'mktemp' then
+    Result := FCmd.MkTemp(Call)
   else if AName = 'diff' then
     Result := FCmd.Diff(Call)
   else if AName = 'pwd' then
@@ -1144,6 +1147,26 @@ begin
   AssertEquals('tree exit', 0, R.ExitCode);
   AssertTrue('names the leaf: ' + R.Stdout, Pos('leaf.txt', R.Stdout) > 0);
   AssertTrue('summarises: ' + R.Stdout, Pos('directories', R.Stdout) > 0);
+end;
+
+procedure TShellCommandsTest.TestMkTemp;
+var
+  R: TShellResult;
+  Name: string;
+begin
+  { Files only. mktemp NEVER writes outside the workspace here - a scratch file
+    inside it is confined and appears in the change log. }
+  R := RunCmd('mktemp', []);
+  AssertEquals('exit', 0, R.ExitCode);
+  Name := Trim(R.Stdout);
+  AssertTrue('prints a path: ' + Name, Name <> '');
+  AssertTrue('and the file exists', FileExists(P(Name)));
+  { Two calls never collide. }
+  AssertTrue('unique', Trim(RunCmd('mktemp', []).Stdout) <> Name);
+  { -d makes a directory. }
+  R := RunCmd('mktemp', ['-d']);
+  AssertTrue('directory created: ' + Trim(R.Stdout),
+    DirectoryExists(P(Trim(R.Stdout))));
 end;
 
 initialization
