@@ -1,5 +1,5 @@
 unit test_tui_layout;
-{ fpcunit tests for hildegard.helper.tui.widget: the widget protocol and the
+{ fpcunit tests for tui.widget: the widget protocol and the
   grid layout engine.
 
   A probe widget with a settable preferred size and a one-row marker render is
@@ -12,8 +12,8 @@ interface
 
 uses
   SysUtils, fpcunit, testregistry,
-  hildegard.helper.tui.base, hildegard.helper.tui.input,
-  hildegard.helper.tui.surface, hildegard.helper.tui.widget;
+  tui.base, tui.input,
+  tui.surface, tui.widget;
 
 type
   TProbeWidget = class(TWidget)

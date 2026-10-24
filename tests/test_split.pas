@@ -18,6 +18,7 @@ type
     procedure TestClientClosureExcludesAgent;
     procedure TestHeadlessClosureExcludesTui;
     procedure TestAsyncClosureIsStandalone;
+    procedure TestEveryLibraryUnitIsResolvable;
   end;
 
 implementation
@@ -27,7 +28,7 @@ type
 
 const
   SrcDir = 'src';
-  TuiPrefix = 'hildegard.helper.tui';
+  TuiPrefix = 'tui.';
   HeadlessRoot = 'hildegard.helper.session.runtime';
   { Units a client (the TUI) must never link. }
   ForbiddenForClient: array[0..7] of string = (
@@ -146,14 +147,34 @@ begin
   end;
 end;
 
-{ The source path of a project unit: `src/<unit>.pas`, or `src/async/<unit>.pas`
-  for the async library (whose unit names are `async.*`). }
+{ The source path of a project unit: `src/<unit>.pas`, or one of the library
+  subdirectories, whose unit names carry the directory as a namespace
+  (`async.*`, `shell.*`, `changes.*`, `fileignore.*`, `tui.*`, `tui.widgets.*`).
+
+  A missing path here is SILENT: the closure walk simply stops, and the
+  boundary assertion passes vacuously. So if this list drifts from the tree the
+  test keeps reporting green while checking nothing. `TestEveryLibraryUnitIs
+  Resolvable` pins that. }
 function UnitPath(const AUnitName: string): string;
+const
+  LibDirs: array[0..4] of string = (
+    'async', 'shell', 'changes', 'fileignore', 'tui/core');
+  WidgetDir = 'tui/widgets';
+var
+  I: Integer;
 begin
   Result := IncludeTrailingPathDelimiter(SrcDir) + AUnitName + '.pas';
-  if not FileExists(Result) then
-    Result := IncludeTrailingPathDelimiter(SrcDir) + 'async' + PathDelim +
-      AUnitName + '.pas';
+  if FileExists(Result) then
+    Exit;
+  for I := Low(LibDirs) to High(LibDirs) do
+  begin
+    Result := IncludeTrailingPathDelimiter(SrcDir) +
+      IncludeTrailingPathDelimiter(LibDirs[I]) + AUnitName + '.pas';
+    if FileExists(Result) then
+      Exit;
+  end;
+  Result := IncludeTrailingPathDelimiter(SrcDir) +
+    IncludeTrailingPathDelimiter(WidgetDir) + AUnitName + '.pas';
 end;
 
 { Every unit reachable from ARoot through `uses`, following only project units. }
@@ -228,6 +249,42 @@ begin
         Copy(Closure[I], 1, Length(TuiPrefix)) = TuiPrefix);
   finally
     Closure.Free;
+  end;
+end;
+
+procedure TSplitBoundaryTest.TestEveryLibraryUnitIsResolvable;
+const
+  Dirs: array[0..5] of string = (
+    'async', 'shell', 'changes', 'fileignore', 'tui/core', 'tui/widgets');
+var
+  I: Integer;
+  SR: TSearchRec;
+  Dir, UnitName, Actual: string;
+begin
+  { A unit UnitPath cannot resolve makes CollectClosure stop early, and every
+    boundary assertion then passes on a truncated closure. That failure is
+    SILENT - it reports green while checking less. So pin the mapping directly:
+    every file in every library directory must resolve to itself. }
+  for I := Low(Dirs) to High(Dirs) do
+  begin
+    Dir := IncludeTrailingPathDelimiter(SrcDir) +
+      IncludeTrailingPathDelimiter(Dirs[I]);
+    AssertTrue(Dir + ' is readable from ' + GetCurrentDir, DirectoryExists(Dir));
+    if FindFirst(Dir + '*.pas', faAnyFile, SR) <> 0 then
+    begin
+      AssertTrue('no .pas files in ' + Dir, False);
+      Continue;
+    end;
+    try
+      repeat
+        UnitName := ChangeFileExt(SR.Name, '');
+        Actual := UnitPath(UnitName);
+        AssertEquals('UnitPath must resolve ' + UnitName + ' to its own file',
+          Dir + SR.Name, Actual);
+      until FindNext(SR) <> 0;
+    finally
+      FindClose(SR);
+    end;
   end;
 end;
 

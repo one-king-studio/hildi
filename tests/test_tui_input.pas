@@ -1,5 +1,5 @@
 unit test_tui_input;
-{ fpcunit tests for hildegard.helper.tui.input.
+{ fpcunit tests for tui.input.
 
   Only the scripted source is exercised here; the terminal adapter (keyboard +
   TIOCGWINSZ) is added in the terminal phase and is not needed by these tests. }
@@ -10,8 +10,8 @@ interface
 
 uses
   SysUtils, baseunix, fpcunit, testregistry,
-  hildegard.helper.tui.base, hildegard.helper.tui.input,
-  hildegard.helper.tui.input.decode, hildegard.helper.tui.input.fd;
+  tui.base, tui.input,
+  tui.input.decode, tui.input.fd;
 
 type
   TTuiInputTest = class(TTestCase)

@@ -174,7 +174,7 @@ Demonstration
       row(s), and an unchanged frame changes zero cells, asserted in `make check`
       (work, not wall-clock, so it cannot flake).
 - [ ] No per-frame heap growth at a fixed size beyond a small tolerance.
-- [ ] Style: `{$mode delphi}{$H+}`, units named `hildegard.helper.tui.*`.
+- [ ] Style: `{$mode delphi}{$H+}`, core units named `tui.*` (pure substrate), widgets named `tui.widgets.*`.
 - [ ] `make check` passes (functional tests plus the leak gate).
 
 ## Success Metrics

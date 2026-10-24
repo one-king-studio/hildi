@@ -1,5 +1,5 @@
 unit test_tui_clock;
-{ fpcunit tests for hildegard.helper.tui.clock: the monotonic source and the
+{ fpcunit tests for tui.clock: the monotonic source and the
   animation registry that negotiates the app's frame rate. }
 
 {$mode delphi}{$H+}
@@ -8,7 +8,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.tui.clock;
+  tui.clock;
 
 type
   TTuiClockTest = class(TTestCase)

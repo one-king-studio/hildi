@@ -1,5 +1,5 @@
 unit test_tui_scroll;
-{ fpcunit tests for hildegard.helper.tui.scroll: scroll containers, clamping,
+{ fpcunit tests for tui.widgets.scroll: scroll containers, clamping,
   keyboard scrolling, and scrollbar thumb geometry. No terminal is attached. }
 
 {$mode delphi}{$H+}
@@ -8,9 +8,9 @@ interface
 
 uses
   SysUtils, fpcunit, testregistry,
-  hildegard.helper.tui.base, hildegard.helper.tui.input,
-  hildegard.helper.tui.surface,
-  hildegard.helper.tui.widget, hildegard.helper.tui.scroll;
+  tui.base, tui.input,
+  tui.surface,
+  tui.widget, tui.widgets.scroll;
 
 type
   TScrollProbe = class(TWidget)

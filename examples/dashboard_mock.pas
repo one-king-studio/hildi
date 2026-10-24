@@ -28,10 +28,10 @@ program dashboard_mock;
 uses
   {$ifdef unix}cthreads, cwstring,{$endif}   // cthreads first; cwstring for Unicode
   SysUtils, Classes,
-  hildegard.helper.tui.base, hildegard.helper.tui.input,
-  hildegard.helper.tui.surface, hildegard.helper.tui.widget,
-  hildegard.helper.tui.app, hildegard.helper.tui.surface.video,
-  hildegard.helper.tui.input.terminal, hildegard.helper.tui.theme;
+  tui.base, tui.input,
+  tui.surface, tui.widget,
+  tui.app, tui.surface.video,
+  tui.input.terminal, tui.theme;
 
 const
   KanbanShare = 3;        // the task board takes ~1/3 of the height

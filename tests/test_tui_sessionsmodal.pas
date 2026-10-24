@@ -1,5 +1,5 @@
 unit test_tui_sessionsmodal;
-{ fpcunit tests for the /sessions modal (hildegard.helper.tui.sessionsmodal):
+{ fpcunit tests for the /sessions modal (tui.widgets.sessionsmodal):
   filtering, navigation, the archived toggle, and the row actions. Headless,
   against TSurfaceMemory and scripted input. }
 
@@ -9,10 +9,10 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.tui.base, hildegard.helper.tui.input,
-  hildegard.helper.tui.surface, hildegard.helper.tui.widget,
-  hildegard.helper.tui.theme, hildegard.helper.session,
-  hildegard.helper.tui.sessionsmodal;
+  tui.base, tui.input,
+  tui.surface, tui.widget,
+  tui.theme, hildegard.helper.session,
+  tui.widgets.sessionsmodal;
 
 type
   TSessionsModalTest = class(TTestCase)

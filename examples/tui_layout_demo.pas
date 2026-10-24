@@ -37,14 +37,14 @@ program tui_layout_demo;
 uses
   {$ifdef unix}cthreads, cwstring,{$endif}   // cthreads first; cwstring for Unicode
   SysUtils, Classes,
-  hildegard.helper.tui.base, hildegard.helper.tui.input,
-  hildegard.helper.tui.surface, hildegard.helper.tui.widget,
-  hildegard.helper.tui.text, hildegard.helper.tui.app,
-  hildegard.helper.tui.surface.video, hildegard.helper.tui.input.terminal,
-  hildegard.helper.tui.theme, hildegard.helper.tui.panel,
-  hildegard.helper.tui.list, hildegard.helper.tui.scroll,
-  hildegard.helper.tui.chat, hildegard.helper.tui.compose,
-  hildegard.helper.tui.chatpanel;
+  tui.base, tui.input,
+  tui.surface, tui.widget,
+  tui.widgets.text, tui.app,
+  tui.surface.video, tui.input.terminal,
+  tui.theme, tui.widgets.panel,
+  tui.widgets.list, tui.widgets.scroll,
+  tui.widgets.chat, tui.widgets.compose,
+  tui.widgets.chatpanel;
 
 const
   WideThreshold = 180;     // two columns appear above this width
@@ -381,10 +381,10 @@ begin
 
   Files := TListView.Create(Theme);
   Files.AddItem('src/');
-  Files.AddItem('  hildegard.helper.tui.app.pas');
-  Files.AddItem('  hildegard.helper.tui.widget.pas');
-  Files.AddItem('  hildegard.helper.tui.text.pas');
-  Files.AddItem('  hildegard.helper.tui.panel.pas');
+  Files.AddItem('  tui.app.pas');
+  Files.AddItem('  tui.widget.pas');
+  Files.AddItem('  tui.text.pas');
+  Files.AddItem('  tui.panel.pas');
   Files.AddItem('examples/');
   Files.AddItem('  tui_layout_demo.pas');
   Files.AddItem('Makefile');
@@ -395,7 +395,7 @@ begin
 
   EditorText := TTextBlock.Create([], wmNone);
   EditorText.SetText(
-    'unit hildegard.helper.tui.app;' + #10 +
+    'unit tui.app;' + #10 +
     '' + #10 +
     'procedure TTuiApp.Tick(const ANowMs: Int64);' + #10 +
     'begin' + #10 +

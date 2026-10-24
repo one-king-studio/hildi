@@ -1,5 +1,5 @@
 unit test_tui_prompt;
-{ fpcunit tests for hildegard.helper.tui.prompt: a single-line editor with
+{ fpcunit tests for tui.widgets.prompt: a single-line editor with
   cluster-aware cursor editing, history, and submit. No terminal. }
 
 {$mode delphi}{$H+}
@@ -8,9 +8,9 @@ interface
 
 uses
   SysUtils, fpcunit, testregistry,
-  hildegard.helper.tui.base, hildegard.helper.tui.input,
-  hildegard.helper.tui.surface, hildegard.helper.tui.widget,
-  hildegard.helper.tui.prompt;
+  tui.base, tui.input,
+  tui.surface, tui.widget,
+  tui.widgets.prompt;
 
 type
   TSubmitRecorder = class

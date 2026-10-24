@@ -18,7 +18,7 @@ unit hildegard.helper.markdown;
 interface
 
 uses
-  hildegard.helper.tui.base;
+  tui.base;
 
 type
   TMdBlockKind = (

@@ -1,5 +1,5 @@
 unit test_tui_sidebar;
-{ fpcunit tests for the sidebar widget (hildegard.helper.tui.sidebar): rows from
+{ fpcunit tests for the sidebar widget (tui.widgets.sidebar): rows from
   a roster, selection movement, Enter firing OnSelect, and the empty state. All
   over TSurfaceMemory — no terminal. }
 
@@ -9,10 +9,10 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.tui.base, hildegard.helper.tui.surface,
-  hildegard.helper.tui.input, hildegard.helper.tui.theme,
-  hildegard.helper.tui.widget,
-  hildegard.helper.harness.subagent, hildegard.helper.tui.sidebar;
+  tui.base, tui.surface,
+  tui.input, tui.theme,
+  tui.widget,
+  hildegard.helper.harness.subagent, tui.widgets.sidebar;
 
 type
   TSelectRecorder = class

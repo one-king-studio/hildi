@@ -1,5 +1,5 @@
 unit test_tui_encoder;
-{ fpcunit tests for hildegard.helper.tui.encoder: the pure frame-diff encoder
+{ fpcunit tests for tui.encoder: the pure frame-diff encoder
   that replaces FPC video's UpdateScreen. Byte-level assertions, no terminal. }
 
 {$mode delphi}{$H+}
@@ -8,7 +8,7 @@ interface
 
 uses
   SysUtils, fpcunit, testregistry,
-  hildegard.helper.tui.base, hildegard.helper.tui.encoder;
+  tui.base, tui.encoder;
 
 type
   TTuiEncoderTest = class(TTestCase)

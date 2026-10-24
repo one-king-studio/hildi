@@ -17,9 +17,9 @@ uses
   {$ifdef unix}cthreads, cwstring,{$endif}   // cthreads first; cwstring for Unicode
   Classes, Contnrs, SysUtils,
   hildegard.helper.cli,
-  hildegard.helper.tui.base, hildegard.helper.tui.input,
-  hildegard.helper.tui.surface, hildegard.helper.tui.surface.video,
-  hildegard.helper.tui.input.terminal, hildegard.helper.tui.theme,
+  tui.base, tui.input,
+  tui.surface, tui.surface.video,
+  tui.input.terminal, tui.theme,
   hildegard.helper.harness.view, hildegard.helper.harness.driver,
   hildegard.helper.harness.app, hildegard.helper.session.protocol,
   hildegard.helper.session.client;

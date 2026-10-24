@@ -1,5 +1,5 @@
 unit test_tui_edit;
-{ fpcunit tests for hildegard.helper.tui.edit: the caret-aware multi-line editor.
+{ fpcunit tests for tui.widgets.edit: the caret-aware multi-line editor.
   Covers the buffer/caret model, display rows and navigation, and rendering on
   the memory surface. No terminal is attached. }
 
@@ -9,10 +9,10 @@ interface
 
 uses
   SysUtils, fpcunit, testregistry,
-  hildegard.helper.tui.base, hildegard.helper.tui.input,
-  hildegard.helper.tui.surface,
-  hildegard.helper.tui.clock, hildegard.helper.tui.text,
-  hildegard.helper.tui.edit;
+  tui.base, tui.input,
+  tui.surface,
+  tui.clock, tui.widgets.text,
+  tui.widgets.edit;
 
 type
   TTuiEditTest = class(TTestCase)

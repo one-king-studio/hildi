@@ -1,5 +1,5 @@
 unit test_tui_chatpanel;
-{ fpcunit tests for hildegard.helper.tui.chatpanel: the composed chat column,
+{ fpcunit tests for tui.widgets.chatpanel: the composed chat column,
   the overlay compose, and the status line. }
 
 {$mode delphi}{$H+}{$codepage utf8}
@@ -8,9 +8,9 @@ interface
 
 uses
   SysUtils, fpcunit, testregistry,
-  hildegard.helper.tui.base, hildegard.helper.tui.input,
-  hildegard.helper.tui.surface, hildegard.helper.tui.theme,
-  hildegard.helper.tui.chat, hildegard.helper.tui.chatpanel;
+  tui.base, tui.input,
+  tui.surface, tui.theme,
+  tui.widgets.chat, tui.widgets.chatpanel;
 
 type
   TTuiChatPanelTest = class(TTestCase)

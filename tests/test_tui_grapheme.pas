@@ -1,5 +1,5 @@
 unit test_tui_grapheme;
-{ fpcunit tests for hildegard.helper.tui.grapheme: cluster splitting, display
+{ fpcunit tests for tui.grapheme: cluster splitting, display
   width for narrow/wide/combining clusters, and cluster offsets. No terminal is
   attached. }
 
@@ -9,7 +9,7 @@ interface
 
 uses
   SysUtils, fpcunit, testregistry,
-  hildegard.helper.tui.grapheme;
+  tui.grapheme;
 
 type
   TTuiGraphemeTest = class(TTestCase)

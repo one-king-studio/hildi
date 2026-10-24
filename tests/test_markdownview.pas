@@ -1,5 +1,5 @@
 unit test_markdownview;
-{ fpcunit tests for hildegard.helper.tui.markdownview: block rendering, chrome,
+{ fpcunit tests for tui.widgets.markdownview: block rendering, chrome,
   and the streaming tail. }
 
 {$mode delphi}{$H+}{$codepage utf8}
@@ -9,8 +9,8 @@ interface
 uses
   Classes, SysUtils, fpcunit, testregistry,
   hildegard.helper.markdown,
-  hildegard.helper.tui.base, hildegard.helper.tui.widget,
-  hildegard.helper.tui.surface, hildegard.helper.tui.markdownview;
+  tui.base, tui.widget,
+  tui.surface, tui.widgets.markdownview;
 
 type
   TMarkdownViewTest = class(TTestCase)

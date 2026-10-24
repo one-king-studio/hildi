@@ -1,5 +1,5 @@
 unit test_tui_text;
-{ fpcunit tests for hildegard.helper.tui.text: styled spans, wrapping, wide
+{ fpcunit tests for tui.widgets.text: styled spans, wrapping, wide
   characters, and clipping. Rendering is asserted through TSurfaceMemory. }
 
 {$mode delphi}{$H+}
@@ -9,8 +9,8 @@ interface
 
 uses
   SysUtils, fpcunit, testregistry,
-  hildegard.helper.tui.base, hildegard.helper.tui.surface,
-  hildegard.helper.tui.text;
+  tui.base, tui.surface,
+  tui.widgets.text;
 
 type
   TTuiTextTest = class(TTestCase)

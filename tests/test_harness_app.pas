@@ -11,9 +11,9 @@ interface
 uses
   Classes, SysUtils, fpcunit, testregistry, Generics.Collections,
   hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.approval,
-  hildegard.helper.tui.base, hildegard.helper.tui.input,
-  hildegard.helper.tui.surface, hildegard.helper.tui.widget,
-  hildegard.helper.tui.chat,
+  tui.base, tui.input,
+  tui.surface, tui.widget,
+  tui.widgets.chat,
   hildegard.helper.harness.turn, hildegard.helper.harness.session,
   hildegard.helper.harness.view,
   hildegard.helper.harness.driver, hildegard.helper.harness.driver.local,

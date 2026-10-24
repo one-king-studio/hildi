@@ -1,5 +1,5 @@
 unit test_tui_actions;
-{ fpcunit tests for the CTA actions bar (hildegard.helper.tui.actions): it renders
+{ fpcunit tests for the CTA actions bar (tui.widgets.actions): it renders
   its hints, fires OnAction by index on the hint's key, and ignores other keys.
   Headless, over TSurfaceMemory. }
 
@@ -9,9 +9,9 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.tui.base, hildegard.helper.tui.surface,
-  hildegard.helper.tui.input, hildegard.helper.tui.theme,
-  hildegard.helper.tui.widget, hildegard.helper.tui.actions;
+  tui.base, tui.surface,
+  tui.input, tui.theme,
+  tui.widget, tui.widgets.actions;
 
 type
   TActionRecorder = class

@@ -1,5 +1,5 @@
 unit test_tui_approvalmodal;
-{ fpcunit tests for hildegard.helper.tui.approvalmodal: option selection, scope,
+{ fpcunit tests for tui.widgets.approvalmodal: option selection, scope,
   deny, the reason line, wrapped/compacted details, and safe handling of an
   empty ask. No terminal. }
 
@@ -9,10 +9,10 @@ interface
 
 uses
   SysUtils, fpcunit, testregistry,
-  hildegard.helper.tui.base, hildegard.helper.tui.input,
-  hildegard.helper.tui.surface, hildegard.helper.tui.widget,
-  hildegard.helper.tui.theme,
-  hildegard.helper.approval, hildegard.helper.tui.approvalmodal;
+  tui.base, tui.input,
+  tui.surface, tui.widget,
+  tui.theme,
+  hildegard.helper.approval, tui.widgets.approvalmodal;
 
 type
   TChoiceRecorder = class

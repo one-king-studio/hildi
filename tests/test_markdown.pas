@@ -9,8 +9,8 @@ interface
 uses
   Classes, SysUtils, fpcunit, testregistry,
   hildegard.helper.markdown,
-  hildegard.helper.tui.base, hildegard.helper.tui.widget,
-  hildegard.helper.tui.text, hildegard.helper.tui.surface;
+  tui.base, tui.widget,
+  tui.widgets.text, tui.surface;
 
 type
   TMarkdownTest = class(TTestCase)

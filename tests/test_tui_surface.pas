@@ -1,5 +1,5 @@
 unit test_tui_surface;
-{ fpcunit tests for hildegard.helper.tui.base and .surface.
+{ fpcunit tests for tui.base and .surface.
 
   Every test drives TSurfaceMemory, so nothing here needs a terminal. The
   surface is asserted cell-by-cell; the flush counters make diff locality a
@@ -11,7 +11,7 @@ interface
 
 uses
   SysUtils, fpcunit, testregistry,
-  hildegard.helper.tui.base, hildegard.helper.tui.surface;
+  tui.base, tui.surface;
 
 type
   TTuiSurfaceTest = class(TTestCase)

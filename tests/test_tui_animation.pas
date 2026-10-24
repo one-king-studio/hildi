@@ -9,11 +9,11 @@ interface
 
 uses
   SysUtils, fpcunit, testregistry,
-  hildegard.helper.tui.base, hildegard.helper.tui.input,
-  hildegard.helper.tui.surface, hildegard.helper.tui.widget,
-  hildegard.helper.tui.theme, hildegard.helper.tui.panel,
-  hildegard.helper.tui.clock, hildegard.helper.tui.app,
-  hildegard.helper.tui.spinner, hildegard.helper.tui.progress;
+  tui.base, tui.input,
+  tui.surface, tui.widget,
+  tui.theme, tui.widgets.panel,
+  tui.clock, tui.app,
+  tui.widgets.spinner, tui.widgets.progress;
 
 type
   { A widget that records Advance calls and animates on demand. }

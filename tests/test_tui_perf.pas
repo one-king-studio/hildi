@@ -11,11 +11,11 @@ interface
 
 uses
   SysUtils, fpcunit, testregistry,
-  hildegard.helper.tui.base, hildegard.helper.tui.input,
-  hildegard.helper.tui.surface, hildegard.helper.tui.widget,
-  hildegard.helper.tui.text, hildegard.helper.tui.scroll,
-  hildegard.helper.tui.theme, hildegard.helper.tui.chat,
-  hildegard.helper.tui.app;
+  tui.base, tui.input,
+  tui.surface, tui.widget,
+  tui.widgets.text, tui.widgets.scroll,
+  tui.theme, tui.widgets.chat,
+  tui.app;
 
 type
   TPerfSpy = class(TWidget)

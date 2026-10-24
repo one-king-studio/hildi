@@ -1,5 +1,5 @@
 unit test_tui_compact;
-{ fpcunit tests for hildegard.helper.tui.compact: trimming blank edges and
+{ fpcunit tests for tui.compact: trimming blank edges and
   eliding long content to head + '...' + tail. No terminal. }
 
 {$mode delphi}{$H+}
@@ -8,7 +8,7 @@ interface
 
 uses
   SysUtils, fpcunit, testregistry,
-  hildegard.helper.tui.compact;
+  tui.compact;
 
 type
   TCompactTest = class(TTestCase)

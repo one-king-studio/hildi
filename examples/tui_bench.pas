@@ -17,11 +17,11 @@ program tui_bench;
 
 uses
   SysUtils, baseunix, unix,
-  hildegard.helper.tui.base, hildegard.helper.tui.input,
-  hildegard.helper.tui.surface, hildegard.helper.tui.widget,
-  hildegard.helper.tui.text, hildegard.helper.tui.scroll,
-  hildegard.helper.tui.app,
-  hildegard.helper.tui.surface.video, hildegard.helper.tui.input.terminal;
+  tui.base, tui.input,
+  tui.surface, tui.widget,
+  tui.widgets.text, tui.widgets.scroll,
+  tui.app,
+  tui.surface.video, tui.input.terminal;
 
 const
   DefW = 80;

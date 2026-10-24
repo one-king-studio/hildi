@@ -89,6 +89,7 @@ endif
 LIB_SRCS  := $(wildcard $(SRC)/*.pas)
 ASYNC_SRCS := $(wildcard $(SRC)/async/*.pas)
 SHELL_SRCS := $(wildcard $(SRC)/shell/*.pas)
+TUILIB_SRCS := $(wildcard $(SRC)/tui/core/*.pas) $(wildcard $(SRC)/tui/widgets/*.pas)
 CHANGES_SRCS := $(wildcard $(SRC)/changes/*.pas)
 FILEIGNORE_SRCS := $(wildcard $(SRC)/fileignore/*.pas)
 TEST_SRCS := $(wildcard $(TESTS)/*.pas)
@@ -143,13 +144,13 @@ store-demo: libsqlite $(BIN)/hildegard-helper-store-demo
 
 $(BIN)/hildegard-helper-store-demo: $(EXAMPLES)/store_demo.pas $(LIB_SRCS) $(SQLITE_AR)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 agent-cli: libsqlite libmbedtls $(BIN)/hildegard-helper-agent-cli
 
 $(BIN)/hildegard-helper-agent-cli: $(EXAMPLES)/agent_cli.pas $(LIB_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Live MCP calibration smoke: drives the MCP client against a real MCP server
 # (the Playwright container over docker stdio). Needs Docker; not part of
@@ -159,18 +160,18 @@ mcp-smoke: libsqlite libmbedtls $(BIN)/mcp-smoke
 
 $(BIN)/mcp-smoke: $(EXAMPLES)/mcp_smoke.pas $(LIB_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Optimized, self-contained production binary (static SQLite, no runtime libs).
 release-agent-cli: libsqlite libmbedtls $(BIN)/hildegard-helper-agent-cli-release
 
 $(BIN)/hildegard-helper-agent-cli-release: $(EXAMPLES)/agent_cli.pas $(LIB_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(BIN) $(RELUNITS)
-	$(FPC) $(RELEASE) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -FU$(RELUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(RELEASE) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(RELUNITS) -FE$(BIN) -o$@ $<
 
 $(BIN)/hildegard-helper-demo: $(EXAMPLES)/demo_harness.pas $(LIB_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(DEBUG) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Interactive TUI demonstration: build, then run it in the terminal.
 tui-demo: $(BIN)/hildegard-helper-tui-demo
@@ -178,7 +179,7 @@ tui-demo: $(BIN)/hildegard-helper-tui-demo
 
 $(BIN)/hildegard-helper-tui-demo: $(EXAMPLES)/tui_demo.pas $(LIB_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(DEBUG) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Widget-kit demo: a list, a preview panel, and focusable buttons. Builds and
 # runs; Tab/Shift-Tab or click to focus, Enter/Space to activate, q to quit.
@@ -187,7 +188,7 @@ widgets-demo: $(BIN)/hildegard-helper-tui-widgets-demo
 
 $(BIN)/hildegard-helper-tui-widgets-demo: $(EXAMPLES)/tui_widgets_demo.pas $(LIB_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(DEBUG) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Mock of the Board Dashboard: three zones over static data, so the operator can
 # judge the layout before the feature is specified. Reads no store, writes none.
@@ -197,7 +198,7 @@ dashboard-mock: $(BIN)/hildegard-helper-dashboard-mock
 
 $(BIN)/hildegard-helper-dashboard-mock: $(EXAMPLES)/dashboard_mock.pas $(LIB_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(DEBUG) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Layout exploration: a responsive two-column harness layout (files + editor |
 # chat column). The chat column has an optional side panel and a persistent
@@ -208,7 +209,7 @@ layout-demo: $(BIN)/hildegard-helper-tui-layout-demo
 
 $(BIN)/hildegard-helper-tui-layout-demo: $(EXAMPLES)/tui_layout_demo.pas $(LIB_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(DEBUG) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Headless agent: hosts a session's runtime; spawned detached by the TUI or the
 # CLI. No terminal. A client finds it as a sibling (or via HILDEGARD_RUNTIME_BIN).
@@ -216,7 +217,7 @@ headless-agent: libsqlite libmbedtls $(BIN)/hildegard-helper-agent
 
 $(BIN)/hildegard-helper-agent: $(EXAMPLES)/headless_agent.pas $(LIB_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/fileignore -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/fileignore -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Full-screen agent harness (conversation + approvals + sessions). Builds and
 # runs; Ctrl-C quits. Drives the headless agent. A pure client: no engine.
@@ -226,7 +227,7 @@ tui-agent: headless-agent $(BIN)/hildegard-helper-tui
 $(BIN)/hildegard-helper-tui: $(EXAMPLES)/tui_agent.pas $(LIB_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	@# The TUI is a pure client: no agent, loop, tool or runtime unit links here.
-	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/fileignore -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/fileignore -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Printable wall-clock benchmark. `make bench ARGS=--real` measures the real
 # terminal; `make perf` asserts the budgets and is not part of `make check`.
@@ -238,7 +239,7 @@ perf: $(BIN)/hildegard-helper-tui-bench
 
 $(BIN)/hildegard-helper-tui-bench: $(EXAMPLES)/tui_bench.pas $(LIB_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(DEBUG) -Fu$(SRC) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 test: libsqlite libmbedtls $(BIN)/hildegard-helper-tests
 	$(BIN)/hildegard-helper-tests $(TESTARGS)
@@ -256,6 +257,20 @@ shell-standalone: $(SHELL_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) -Fu$(SRC)/shell -FU$(DBGUNITS) -FE$(BIN) -o$(BIN)/shell-standalone $(EXAMPLES)/shell_standalone.pas
 	$(BIN)/shell-standalone
+
+# The same gate for TUI CORE: compile and run a program that uses ONLY
+# src/tui/core, with no widget, harness or agent unit on the search path. Core
+# is meant to be pure substrate (geometry, surfaces, input decoding, grapheme
+# width, theming); the composite widgets in src/tui/widgets are allowed to be
+# complex and are deliberately NOT on this path.
+#
+# If this target fails, the split is wrong - a core unit reached into the
+# widget kit or into the harness, and the purity claim in TUI_Core's spec is
+# false. That is exactly the failure this exists to catch.
+tui-standalone: $(wildcard $(SRC)/tui/core/*.pas)
+	@mkdir -p $(BIN) $(DBGUNITS)
+	$(FPC) $(DEBUG) -Fu$(SRC)/tui/core -FU$(DBGUNITS) -FE$(BIN) -o$(BIN)/tui-standalone $(EXAMPLES)/tui_standalone.pas
+	$(BIN)/tui-standalone
 
 # The same gate for the Changes library: compile and run a program that uses ONLY
 # src/changes, with no harness unit on the search path.
@@ -299,7 +314,7 @@ async-examples: $(ASYNC_SRCS)
 
 $(BIN)/hildegard-helper-tests: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(ASYNC_SRCS) $(SHELL_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/fileignore -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/fileignore -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 test-leak: libsqlite libmbedtls $(BIN)/hildegard-helper-tests-leak
 	HEAPTRC=$(HEAPTRC) $(BIN)/hildegard-helper-tests-leak $(TESTARGS)
@@ -319,7 +334,7 @@ watch:
 
 $(BIN)/hildegard-helper-tests-leak: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(ASYNC_SRCS) $(SHELL_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
 	@mkdir -p $(BIN) $(LEAKUNITS)
-	$(FPC) $(LEAKFLAGS) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/fileignore -Fu$(TESTS) -FU$(LEAKUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(LEAKFLAGS) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/fileignore -Fu$(TESTS) -FU$(LEAKUNITS) -FE$(BIN) -o$@ $<
 
 # Live smoke: drive the REAL headless runtime through a scripted turn against a
 # loopback fake provider. Hermetic (loopback only, ephemeral port, temp store);
@@ -333,7 +348,7 @@ smoke-list: libsqlite libmbedtls $(BIN)/hildegard-smoke
 
 $(BIN)/hildegard-smoke: $(EXAMPLES)/smoke.pas $(TESTS)/smoke_runner.pas $(TESTS)/smoke_provider.pas $(LIB_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/async -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # All quality gates, for CI: functional tests + leak check + library isolation.
 # The two suite runs go one-process-per-suite in parallel (see
@@ -356,7 +371,7 @@ release: $(BIN)/hildegard-helper-demo-release
 
 $(BIN)/hildegard-helper-demo-release: $(EXAMPLES)/demo_harness.pas $(LIB_SRCS)
 	@mkdir -p $(BIN) $(RELUNITS)
-	$(FPC) $(RELEASE) -Fu$(SRC) -FU$(RELUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(RELEASE) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(RELUNITS) -FE$(BIN) -o$@ $<
 
 clean:
 	rm -rf $(BUILD)

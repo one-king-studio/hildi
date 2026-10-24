@@ -8,11 +8,11 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.tui.base, hildegard.helper.tui.input,
-  hildegard.helper.tui.surface, hildegard.helper.tui.widget,
-  hildegard.helper.tui.theme, hildegard.helper.tui.panel,
-  hildegard.helper.tui.focus, hildegard.helper.tui.button,
-  hildegard.helper.tui.list;
+  tui.base, tui.input,
+  tui.surface, tui.widget,
+  tui.theme, tui.widgets.panel,
+  tui.widgets.focus, tui.widgets.button,
+  tui.widgets.list;
 
 type
   { Records the widget protocol calls it receives. }

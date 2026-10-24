@@ -184,7 +184,7 @@ Chat windowing
 - `hildegard.helper.harness.turn` — the turn types, split from the worker.
 - `hildegard.helper.harness.driver` — the remote driver stays; `TLocalDriver`
   moves to its own unit.
-- `hildegard.helper.tui.chat` / `.chatpanel` — the chat list that becomes
+- `tui.widgets.chat` / `.chatpanel` — the chat list that becomes
   windowed.
 
 ### External

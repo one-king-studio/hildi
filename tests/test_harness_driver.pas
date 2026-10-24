@@ -17,8 +17,8 @@ uses
   hildegard.helper.harness.turn,
   hildegard.helper.harness.driver,
   hildegard.helper.harness.driver.local,
-  hildegard.helper.tui.base, hildegard.helper.tui.input,
-  hildegard.helper.tui.surface, hildegard.helper.tui.chat,
+  tui.base, tui.input,
+  tui.surface, tui.widgets.chat,
   hildegard.helper.harness.app,
   hildegard.helper.workspace, llm_fakes;
 

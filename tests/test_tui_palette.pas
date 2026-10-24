@@ -1,5 +1,5 @@
 unit test_tui_palette;
-{ fpcunit tests for hildegard.helper.tui.palette: the pure command filter and the
+{ fpcunit tests for tui.widgets.palette: the pure command filter and the
   palette's selection/filter behaviour. }
 
 {$mode delphi}{$H+}
@@ -7,8 +7,8 @@ unit test_tui_palette;
 interface
 
 uses
-  SysUtils, fpcunit, testregistry, hildegard.helper.tui.palette,
-  hildegard.helper.tui.theme;
+  SysUtils, fpcunit, testregistry, tui.widgets.palette,
+  tui.theme;
 
 type
   TTuiPaletteTest = class(TTestCase)

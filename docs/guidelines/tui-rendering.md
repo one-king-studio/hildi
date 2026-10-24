@@ -1,6 +1,6 @@
 # TUI Rendering and Layout Invariants
 
-Hard-won constraints for the widget toolkit (`src/hildegard.helper.tui.*`) and
+Hard-won constraints for the widget toolkit (`src/tui/core/*` = pure substrate, `src/tui/widgets/*` = components) and
 the app loop. Each one cost real debugging time; check them before changing a
 widget's measure/arrange, the chat stack, or the app loop.
 

@@ -19,11 +19,11 @@ program tui_demo;
 
 uses
   SysUtils,
-  hildegard.helper.tui.base, hildegard.helper.tui.input,
-  hildegard.helper.tui.surface, hildegard.helper.tui.surface.video,
-  hildegard.helper.tui.widget, hildegard.helper.tui.text,
-  hildegard.helper.tui.scroll, hildegard.helper.tui.app,
-  hildegard.helper.tui.input.terminal;
+  tui.base, tui.input,
+  tui.surface, tui.surface.video,
+  tui.widget, tui.widgets.text,
+  tui.widgets.scroll, tui.app,
+  tui.input.terminal;
 
 const
   { A small dark palette of 256-colour indices. }

@@ -1,5 +1,5 @@
 unit test_tui_chat;
-{ fpcunit tests for hildegard.helper.tui.chat: the mutable message blocks and
+{ fpcunit tests for tui.widgets.chat: the mutable message blocks and
   the scrolling stream. Rendering is asserted through TSurfaceMemory. }
 
 {$mode delphi}{$H+}{$codepage utf8}
@@ -8,9 +8,9 @@ interface
 
 uses
   SysUtils, fpcunit, testregistry,
-  hildegard.helper.tui.base, hildegard.helper.tui.input,
-  hildegard.helper.tui.surface, hildegard.helper.tui.theme,
-  hildegard.helper.tui.clock, hildegard.helper.tui.chat;
+  tui.base, tui.input,
+  tui.surface, tui.theme,
+  tui.clock, tui.widgets.chat;
 
 type
   TTuiChatTest = class(TTestCase)

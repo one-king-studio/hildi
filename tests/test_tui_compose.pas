@@ -1,5 +1,5 @@
 unit test_tui_compose;
-{ fpcunit tests for hildegard.helper.tui.compose: the input box chrome, growth,
+{ fpcunit tests for tui.widgets.compose: the input box chrome, growth,
   and the submit rule. Rendering is asserted through TSurfaceMemory. }
 
 {$mode delphi}{$H+}{$codepage utf8}
@@ -8,9 +8,9 @@ interface
 
 uses
   SysUtils, fpcunit, testregistry,
-  hildegard.helper.tui.base, hildegard.helper.tui.input,
-  hildegard.helper.tui.surface, hildegard.helper.tui.theme,
-  hildegard.helper.tui.compose;
+  tui.base, tui.input,
+  tui.surface, tui.theme,
+  tui.widgets.compose;
 
 type
   TTuiComposeTest = class(TTestCase)
