@@ -36,6 +36,8 @@ type
     function Touching(AWorkspaceId: Integer; const APaths: TStringArrayLite;
       AFromId: Integer; out ARows: TChangeRecordArray;
       out AError: string): Boolean;
+    function ForTurn(AWorkspaceId, ATurnId: Integer;
+      out ARows: TChangeRecordArray; out AError: string): Boolean;
     function KeyframeBefore(AWorkspaceId: Integer; const APath: string;
       AChangeId: Integer; out AFrame: TKeyframe; out AFound: Boolean;
       out AError: string): Boolean;
@@ -306,6 +308,49 @@ begin
       sqlite3_bind_int(Stmt, 2, AFromId);
       for I := 0 to High(Bound) do
         sqlite3_bind_text(Stmt, 3 + I, PAnsiChar(Bound[I]), -1, nil);
+      while sqlite3_step(Stmt) = SQLITE_ROW do
+      begin
+        SetLength(ARows, N + 1);
+        Fill(Stmt, ARows[N]);
+        Inc(N);
+      end;
+      Result := True;
+    finally
+      sqlite3_finalize(Stmt);
+    end;
+  finally
+    FStore.Lock.Release;
+  end;
+end;
+
+function TSqliteChangeStore.ForTurn(AWorkspaceId, ATurnId: Integer;
+  out ARows: TChangeRecordArray; out AError: string): Boolean;
+var
+  Stmt: Psqlite3_stmt;
+  SQL: string;
+  N: Integer;
+begin
+  Result := False;
+  ARows := nil;
+  AError := '';
+  if (FStore = nil) or (FStore.Db = nil) then
+    Exit;
+  { Ascending id is write order, which is the order the summary lists. }
+  SQL := SqlSelectChange +
+    'WHERE workspace_id = ? AND turn_id = ? ORDER BY id';
+  FStore.Lock.Acquire;
+  try
+    Stmt := nil;
+    if sqlite3_prepare_v2(FStore.Db, PAnsiChar(AnsiString(SQL)), -1, @Stmt, nil)
+      <> 0 then
+    begin
+      AError := 'could not prepare the query';
+      Exit;
+    end;
+    try
+      sqlite3_bind_int(Stmt, 1, AWorkspaceId);
+      sqlite3_bind_int(Stmt, 2, ATurnId);
+      N := 0;
       while sqlite3_step(Stmt) = SQLITE_ROW do
       begin
         SetLength(ARows, N + 1);

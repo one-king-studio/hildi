@@ -34,6 +34,12 @@ type
     function Touching(AWorkspaceId: Integer; const APaths: TStringArrayLite;
       AFromId: Integer; out ARows: TChangeRecordArray;
       out AError: string): Boolean;
+    { Every change recorded for one turn, ascending id (write order). A turn
+      that changed nothing and a turn id that never existed are the same answer
+      here - no rows, and not an error - because the caller renders "nothing
+      changed" the same way either way. }
+    function ForTurn(AWorkspaceId, ATurnId: Integer;
+      out ARows: TChangeRecordArray; out AError: string): Boolean;
     { The newest keyframe at or before AChangeId for a path. }
     function KeyframeBefore(AWorkspaceId: Integer; const APath: string;
       AChangeId: Integer; out AFrame: TKeyframe; out AFound: Boolean;
@@ -76,6 +82,8 @@ type
     function Touching(AWorkspaceId: Integer; const APaths: TStringArrayLite;
       AFromId: Integer; out ARows: TChangeRecordArray;
       out AError: string): Boolean;
+    function ForTurn(AWorkspaceId, ATurnId: Integer;
+      out ARows: TChangeRecordArray; out AError: string): Boolean;
     function KeyframeBefore(AWorkspaceId: Integer; const APath: string;
       AChangeId: Integer; out AFrame: TKeyframe; out AFound: Boolean;
       out AError: string): Boolean;
@@ -197,6 +205,24 @@ begin
       SetLength(ARows, Length(ARows) + 1);
       ARows[High(ARows)] := FRecords[I];
     end;
+  end;
+  Result := True;
+end;
+
+function TMemoryChangeStore.ForTurn(AWorkspaceId, ATurnId: Integer;
+  out ARows: TChangeRecordArray; out AError: string): Boolean;
+var
+  I: Integer;
+begin
+  AError := '';
+  ARows := nil;
+  for I := 0 to High(FRecords) do
+  begin
+    if (FRecords[I].WorkspaceId <> AWorkspaceId) or
+      (FRecords[I].TurnId <> ATurnId) then
+      Continue;
+    SetLength(ARows, Length(ARows) + 1);
+    ARows[High(ARows)] := FRecords[I];
   end;
   Result := True;
 end;

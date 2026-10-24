@@ -31,6 +31,10 @@ type
     procedure TestForPathIsOrderedAndBounded;
     procedure TestLatestReturnsTheNewestOrMisses;
     procedure TestTouchingFiltersByPath;
+    { A turn's changes, for the turn summary. The table has turn_id; this is the
+      query that reads it. }
+    procedure TestForTurnReturnsOneTurnsRowsInWriteOrder;
+    procedure TestForTurnOnAnUnknownTurnIsEmptyNotAnError;
     procedure TestKeyframeRoundTripAndHorizon;
     procedure TestPruneKeepsTheHorizonKeyframe;
     { Retention in turns: past the window, the oldest turn's changes go. }
@@ -210,6 +214,44 @@ begin
   SetLength(Paths, 0);
   AssertTrue('empty list', FChanges.Touching(1, Paths, 0, Rows, Err));
   AssertEquals('nothing', 0, Length(Rows));
+end;
+
+procedure TChangesStoreTest.TestForTurnReturnsOneTurnsRowsInWriteOrder;
+var
+  Rows: TChangeRecordArray;
+  Id: Integer;
+  Err: string;
+begin
+  { Turn 7 writes two files, turn 8 one, in between. The summary needs exactly
+    turn 7's rows, in the order they were written. }
+  AssertTrue('t7 a', FChanges.Append(Rec('a.txt', ckModified, '', 'a1', 7), Id,
+    Err));
+  AssertTrue('t8 c', FChanges.Append(Rec('c.txt', ckModified, '', 'c1', 8), Id,
+    Err));
+  AssertTrue('t7 b', FChanges.Append(Rec('b.txt', ckCreated, '', 'b1', 7), Id,
+    Err));
+
+  AssertTrue('for turn 7', FChanges.ForTurn(1, 7, Rows, Err));
+  AssertEquals('two rows', 2, Length(Rows));
+  AssertEquals('first written', 'a.txt', Rows[0].Path);
+  AssertEquals('second written', 'b.txt', Rows[1].Path);
+  { Ascending id is write order, which is what the summary lists. }
+  AssertTrue('ascending ids', Rows[0].Id < Rows[1].Id);
+end;
+
+procedure TChangesStoreTest.TestForTurnOnAnUnknownTurnIsEmptyNotAnError;
+var
+  Rows: TChangeRecordArray;
+  Id: Integer;
+  Err: string;
+begin
+  { A turn that changed nothing and a turn id that never existed are the same
+    answer for this feature: no rows. Not an error. }
+  AssertTrue('seed', FChanges.Append(Rec('a.txt', ckModified, '', 'x', 7), Id,
+    Err));
+  AssertTrue('unknown turn succeeds', FChanges.ForTurn(1, 999, Rows, Err));
+  AssertEquals('no rows', 0, Length(Rows));
+  AssertEquals('and no error', '', Err);
 end;
 
 procedure TChangesStoreTest.TestKeyframeRoundTripAndHorizon;
