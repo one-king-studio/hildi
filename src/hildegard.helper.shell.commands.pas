@@ -989,7 +989,7 @@ function TBuiltinCommands.Yq(const ACall: TShellCall): TShellResult;
 var
   I: Integer;
   Raw, E, Data, OutText: string;
-  D: TJSONData;
+  D, Root, Node: TJSONData;
   Path: string;
 begin
   { Reuses the harness's own YAML parser, so `yq` and the yaml_edit tool cannot
@@ -1023,23 +1023,28 @@ begin
   D := ParseYaml(Data, E);
   if D = nil then
     Exit(Failure('yq: ' + E, 2));
+  { Root and selected node are tracked separately: Find returns a CHILD owned by
+    the document, so reusing D for it both leaked the root and freed a node the
+    root still owned. The document is freed once, in the finally. }
+  Root := D;
   try
+    Node := Root;
     if (Path <> '') and (Path <> '.') then
     begin
-      if D is TJSONObject then
-        D := TJSONObject(D).Find(Path);
-      if D = nil then
+      if Node is TJSONObject then
+        Node := TJSONObject(Node).Find(Path);
+      if Node = nil then
         Exit(Failure('yq: no such path: ' + Path, 1));
     end;
-    if (Raw = 'r') and (D.JSONType = jtString) then
-      OutText := D.AsString + #10
-    else if (Raw = 'r') and (D.JSONType = jtNumber) then
-      OutText := D.AsJSON + #10
+    if (Raw = 'r') and (Node.JSONType = jtString) then
+      OutText := Node.AsString + #10
+    else if (Raw = 'r') and (Node.JSONType = jtNumber) then
+      OutText := Node.AsJSON + #10
     else
-      OutText := ToYaml(D);
+      OutText := ToYaml(Node);
     Result := ShellResultOk(OutText);
   finally
-    D.Free;
+    Root.Free;
   end;
 end;
 
