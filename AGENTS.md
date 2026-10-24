@@ -60,7 +60,9 @@ All artifacts land under `build/`.
 - `make test-parallel [SUITE="<names>"]` - the same suite, one process per
   suite, in parallel (see below)
 - `make test-leak` - run the suite under heaptrc; fails (exit 203) on leaks
-- `make check` - all gates: `test` + `test-leak` (run before considering work done)
+- `make test-leak-parallel` - the same leak run, one process per suite
+- `make check` - all gates: both suite passes (parallel) + library isolation
+  (run before considering work done), ~60 s
 - `make watch [TARGET=test-leak]` - auto-rerun on source changes
 - `make release` - optimized example build
 - `make clean` - remove build artifacts
@@ -102,8 +104,9 @@ Two reasons to prefer it while iterating, and the second is not about speed:
 integration suites spawn it, and its absence alone produces ~36 spurious
 failures. `make headless-agent` builds it.
 
-It is **not a replacement for `make check`** - the leak gate (`test-leak`) still
-runs as one process and is not parallelized yet.
+It is **not a replacement for `make check`** — the gate now runs both suite
+passes this way (`test-parallel` and `test-leak-parallel`), so there is nothing
+left to run single-process except the standalone library checks.
 
 
 ## Development Workflow
