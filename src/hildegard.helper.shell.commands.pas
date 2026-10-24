@@ -1612,7 +1612,7 @@ end;
 function TBuiltinCommands.Uniq(const ACall: TShellCall): TShellResult;
 var
   I, J, Count: Integer;
-  ShowCount, OnlyDup, OnlyUnique: Boolean;
+  ShowCount, OnlyDup, OnlyUnique, IgnoreCase, Same: Boolean;
   Args: TStringArray;
   Data, E, Text, OutText, Current: string;
   Lines: TStringArray;
@@ -1635,6 +1635,7 @@ begin
   ShowCount := False;
   OnlyDup := False;
   OnlyUnique := False;
+  IgnoreCase := False;
   I := 0;
   while I <= High(ACall.Args) do
   begin
@@ -1646,6 +1647,7 @@ begin
           'c': ShowCount := True;
           'd': OnlyDup := True;
           'u': OnlyUnique := True;
+          'i': IgnoreCase := True;
         end;
       Inc(I);
     end
@@ -1673,7 +1675,13 @@ begin
   Count := 0;
   for I := 0 to High(Lines) do
   begin
-    if Lines[I] = Current then
+    { -i folds case in the COMPARISON only; the line printed is the first of the
+      run, as uniq(1) does. }
+    if IgnoreCase then
+      Same := (LowerCase(Lines[I]) = LowerCase(Current))
+    else
+      Same := (Lines[I] = Current);
+    if Same then
       Inc(Count)
     else
     begin

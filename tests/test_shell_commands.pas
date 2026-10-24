@@ -615,6 +615,12 @@ begin
     RunCmd('uniq', ['-d'], 'a' + #10 + 'a' + #10 + 'b' + #10).Stdout);
   AssertEquals('uniq -u', 'b' + #10,
     RunCmd('uniq', ['-u'], 'a' + #10 + 'a' + #10 + 'b' + #10).Stdout);
+  { -i folds case in the comparison only; the printed line is the first of the
+    run, as uniq(1) does. }
+  AssertEquals('without -i case matters', 'A' + #10 + 'a' + #10,
+    RunCmd('uniq', [], 'A' + #10 + 'a' + #10).Stdout);
+  AssertEquals('uniq -i folds', 'A' + #10,
+    RunCmd('uniq', ['-i'], 'A' + #10 + 'a' + #10).Stdout);
 end;
 
 procedure TShellCommandsTest.TestPwdStatSeq;
