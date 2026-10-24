@@ -10,6 +10,7 @@ program shell_standalone;
 
 uses
   SysUtils, Classes,
+  {$ifdef unix}BaseUnix,{$endif}   // fpSymlink/fpReadlink/fpChmod for the host FS
   shell.types, shell.ast, shell.parser, shell.fs, shell.registry, shell.interpreter;
 
 type
@@ -24,6 +25,14 @@ type
     function Stat(const APath: string; out AKind: TShellFileKind;
       out AError: string): Boolean;
     function Info(const APath: string; out AInfo: TShellFileInfo;
+      out AError: string): Boolean;
+    { The ln/readlink/chmod primitives. Declared here because IShellFileSystem
+      requires them: the bodies were added with the commands, but the class
+      declaration was not, so the demo could not satisfy its own interface. }
+    function Symlink(const ATarget, ALinkPath: string;
+      out AError: string): Boolean;
+    function ReadLink(const APath: string; out ATarget, AError: string): Boolean;
+    function SetMode(const APath: string; AMode: LongWord;
       out AError: string): Boolean;
   end;
 
