@@ -40,7 +40,7 @@ const
   LeftShare = 3;          // sessions take ~1/3 of the width
   MinLeftW = 30;
   MaxLeftW = 44;
-  ComposeH = 3;           // separator + prompt + hint
+  ComposeH = 4;           // separator + prompt + hint + the frame's bottom border
   SpinIntervalMs = 120;
 
 type
@@ -253,9 +253,12 @@ begin
 
   if ATitle <> '' then
     Text(S, ARect.X + 1, ARect.Y, ' ' + ATitle + ' ', A, ARect.W - 2);
-  if ARight <> '' then
-    Text(S, ARect.X + ARect.W - 1 - Length(ARight) - 1, ARect.Y,
-      ' ' + ARight + ' ', A, ARect.W - 2);
+  { The right label must stop one cell short of the corner or it overwrites it -
+    the first headless render showed `live 2 ╭`, with the corner gone. Skip it
+    entirely when the frame is too narrow to hold a label and both corners. }
+  if (ARight <> '') and (ARect.W >= Length(ARight) + 6) then
+    Text(S, ARect.X + ARect.W - Length(ARight) - 3, ARect.Y,
+      ' ' + ARight + ' ', A, Length(ARight) + 2);
 end;
 
 procedure TDashboard.DrawSessions(const S: ISurface; const ARect: TRect);
@@ -407,13 +410,18 @@ begin
       Text(S, I, ARect.Y + 2, ChDotted, FTheme.Border, 1);
 
     { Cards. A card is a bordered box: the border is what makes it a thing you
-      could pick up and move, which is the kanban affordance. }
+      could pick up and move, which is the kanban affordance.
+
+      Height 4, not 3: a card carries TWO content lines (title, holder), so a
+      3-tall frame put the holder on the bottom border - the first headless
+      render showed `╰unclaimed · 12m─╯`. Step 5 leaves a one-row gutter so
+      stacked cards read as separate objects. }
     Y := ARect.Y + 4;
     for I := 0 to N[Col] - 1 do
     begin
       if Y + 3 > ARect.Y + ARect.H - 1 then
         Break;
-      Frame(S, R(X, Y, W, 3), '', '', False);
+      Frame(S, R(X, Y, W, 4), '', '', False);
       if (Col = FColSel) and (I = FCardSel) and (FZone = zTasks) then
         A := FTheme.Accent
       else
@@ -421,7 +429,7 @@ begin
       Text(S, X + 1, Y + 1, UnicodeString(Cards[Col, I]), A, W - 2);
       Text(S, X + 1, Y + 2, UnicodeString(Holders[Col, I]), FTheme.Muted,
         W - 2);
-      Inc(Y, 4);
+      Inc(Y, 5);
     end;
 
     if N[Col] = 0 then
@@ -551,14 +559,105 @@ var
   Theme: TTheme;
   Dash: TDashboard;
   App: TTuiApp;
+  DW, DH: Integer;
 
 function ShouldStop: Boolean;
 begin
   Result := QuitRequested or InputTerm.Terminated;
 end;
 
+{ Parse a WxH terminal size. Returns False on anything malformed, so a typo
+  gets a usage line rather than a zero-sized frame that renders nothing. }
+function ParseSize(const ASpec: string; out AW, AH: Integer): Boolean;
+var
+  P: Integer;
+begin
+  AW := 0;
+  AH := 0;
+  Result := False;
+  P := Pos('x', ASpec);
+  if P = 0 then
+    Exit;
+  AW := StrToIntDef(Copy(ASpec, 1, P - 1), 0);
+  AH := StrToIntDef(Copy(ASpec, P + 1, Length(ASpec)), 0);
+  Result := (AW > 0) and (AH > 0);
+end;
+
+{ Headless render: drive the SAME Render path into an in-memory surface and
+  print it as plain lines.
+
+  The FEATURE records that the mock "has not been visually verified" - it
+  compiles and links, but nobody has looked. This is how it gets looked at
+  without a tty, and it is the cheap place to find layout bugs: the arithmetic
+  is identical to the app's, so an overflow or a mis-sized zone shows up here
+  first. Trailing blanks are trimmed so the frame's right edge is visible. }
+procedure DumpFrame(AWidth, AHeight: Integer);
+var
+  Mem: TSurfaceMemory;
+  Surf: ISurface;
+  DashOut: TDashboard;
+  Theme: TTheme;
+  Y, X, Last: Integer;
+  Line: UnicodeString;
+  Line8: string;
+begin
+  Theme := DarkTheme;
+  Mem := TSurfaceMemory.Create(AWidth, AHeight);
+  Surf := Mem;
+  DashOut := TDashboard.Create(Theme);
+  try
+    DashOut.Arrange(R(0, 0, AWidth, AHeight));
+    { Establish the screen background exactly as TTuiApp.RenderFrame does. The
+      dump bypasses TTuiApp, so without these two lines every sfScreenBg cell
+      would come out as whatever the surface was initialised with, and the
+      frame would be judged against a background the app never shows. }
+    Surf.SetScreenBg(Theme.Bg);
+    Surf.Clear(DefaultAttr);
+    DashOut.Render(Surf);
+    for Y := 0 to AHeight - 1 do
+    begin
+      { Build from CellAt rather than RowText: RowText concatenates each cell's
+        Ch, and a cell that was never Put holds an EMPTY string, so it vanishes
+        and every real gap in the frame collapses. That made the dump lie about
+        adjacent borders. One cell must always be one character. }
+      Line := '';
+      for X := 0 to AWidth - 1 do
+        if Mem.CellAt(X, Y).Ch = '' then
+          Line := Line + ' '
+        else
+          Line := Line + Mem.CellAt(X, Y).Ch;
+      Last := 0;
+      for X := 1 to Length(Line) do
+        if Line[X] <> ' ' then
+          Last := X;
+      { UTF8Encode explicitly: the implicit UnicodeString->string conversion is
+        lossy for the box-drawing glyphs on this build. }
+      Line8 := UTF8Encode(Copy(Line, 1, Last));
+      WriteLn(Line8);
+    end;
+  finally
+    DashOut.Free;
+    Surf := nil;
+  end;
+end;
+
 begin
   QuitRequested := False;
+
+  { `--dump [WxH]` renders one frame and exits; no terminal is opened, so this
+    works over a pipe and in a test harness. }
+  if (ParamCount >= 1) and (ParamStr(1) = '--dump') then
+  begin
+    DW := 100;
+    DH := 30;
+    if (ParamCount >= 2) and not ParseSize(ParamStr(2), DW, DH) then
+    begin
+      WriteLn('usage: dashboard-mock --dump [WxH]');
+      Halt(2);
+    end;
+    DumpFrame(DW, DH);
+    Halt(0);
+  end;
   Surface := TSurfaceVideo.Create;
   InputTerm := TInputSourceTerminal.Create;
   Input := InputTerm;
@@ -566,6 +665,10 @@ begin
 
   Dash := TDashboard.Create(Theme);
   App := TTuiApp.Create(Surface, Input, Dash);
+  { Same wiring as the other examples (tui_layout_demo, harness.app): TTuiApp
+    defaults ScreenBg to 0, so without this every sfScreenBg cell paints
+    palette 0 instead of the theme's background. }
+  App.ScreenBg := Theme.Bg;
   try
     App.Run(@ShouldStop);
   finally
