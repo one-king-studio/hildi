@@ -124,6 +124,7 @@ begin
   FRegistry.Register('touch', FCmd.Touch);
   FRegistry.Register('sort', FCmd.SortCmd);
   FRegistry.Register('uniq', FCmd.Uniq);
+  FRegistry.Register('diff', FCmd.Diff);
   FRegistry.Register('od', FCmd.Od);
   FRegistry.Register('sha256sum', FCmd.Sha256Sum);
   FRegistry.Register('basename', FCmd.Basename);

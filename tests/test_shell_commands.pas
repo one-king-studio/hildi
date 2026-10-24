@@ -35,6 +35,7 @@ type
     procedure TestCat;
     procedure TestHeadAndTail;
     procedure TestWc;
+    procedure TestDiff;
     procedure TestHashCommands;
     procedure TestOd;
     procedure TestGrep;
@@ -188,6 +189,8 @@ begin
     Result := FCmd.Od(Call)
   else if AName = 'sha256sum' then
     Result := FCmd.Sha256Sum(Call)
+  else if AName = 'diff' then
+    Result := FCmd.Diff(Call)
   else
     raise Exception.Create('unknown command in test: ' + AName);
 end;
@@ -250,6 +253,49 @@ begin
   AssertEquals('stdin', '1 1 2' + #10, RunCmd('wc', [], 'x' + #10).Stdout);
   AssertEquals('total', '2 a.txt' + #10 + '2 b.txt' + #10 + '4 total' + #10,
     RunCmd('wc', ['-l', 'a.txt', 'b.txt']).Stdout);
+end;
+
+procedure TShellCommandsTest.TestDiff;
+var
+  R: TShellResult;
+  E: string;
+begin
+  { diff is how an agent verifies its own edit landed. Without it the only route
+    was a perl or python3 escalation out of the gated tier. }
+  FFs.WriteFile(P('same1.txt'), 'a' + #10 + 'b' + #10, False, E);
+  FFs.WriteFile(P('same2.txt'), 'a' + #10 + 'b' + #10, False, E);
+  FFs.WriteFile(P('chg.txt'), 'a' + #10 + 'c' + #10, False, E);
+
+  R := RunCmd('diff', ['same1.txt', 'same2.txt']);
+  AssertEquals('identical exits 0', 0, R.ExitCode);
+  AssertEquals('and says nothing', '', R.Stdout);
+
+  R := RunCmd('diff', ['same1.txt', 'chg.txt']);
+  AssertEquals('different exits 1', 1, R.ExitCode);
+  { DiffText emits unified format, so the removed line is prefixed '-' and the
+    added one '+'. This is also the form patch_apply consumes. }
+  AssertTrue('shows the old line: ' + R.Stdout, Pos('-b', R.Stdout) > 0);
+  AssertTrue('shows the new line: ' + R.Stdout, Pos('+c', R.Stdout) > 0);
+
+  { -q reports without the diff itself - what a script wants to branch on. }
+  R := RunCmd('diff', ['-q', 'same1.txt', 'chg.txt']);
+  AssertEquals('brief exits 1', 1, R.ExitCode);
+  AssertTrue('brief names them: ' + R.Stdout, Pos('differ', R.Stdout) > 0);
+  AssertTrue('and prints no hunks', Pos('-b', R.Stdout) = 0);
+  R := RunCmd('diff', ['-q', 'same1.txt', 'same2.txt']);
+  AssertEquals('brief identical exits 0', 0, R.ExitCode);
+
+  { -u is the unified form, which is what patch_apply consumes. }
+  R := RunCmd('diff', ['-u', 'same1.txt', 'chg.txt']);
+  AssertEquals('unified exits 1', 1, R.ExitCode);
+  AssertTrue('has the --- header: ' + R.Stdout, Pos('---', R.Stdout) > 0);
+  AssertTrue('has the +++ header', Pos('+++', R.Stdout) > 0);
+  AssertTrue('has a hunk header', Pos('@@', R.Stdout) > 0);
+
+  { A missing file is an error, not "no differences". }
+  R := RunCmd('diff', ['same1.txt', 'missing.txt']);
+  AssertEquals('missing exits 2', 2, R.ExitCode);
+  AssertTrue('names it', Pos('missing.txt', R.Stderr) > 0);
 end;
 
 procedure TShellCommandsTest.TestHashCommands;

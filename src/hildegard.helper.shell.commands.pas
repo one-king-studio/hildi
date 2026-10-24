@@ -16,7 +16,7 @@ interface
 
 uses
   SysUtils, Classes, shell.types, shell.fs, hildegard.helper.shell.fs,
-  hildegard.helper.hash;
+  hildegard.helper.hash, changes.text;
 
 type
   { The harness's normal tool resolution: (name, args JSON, inherited reason)
@@ -45,6 +45,9 @@ type
     function Head(const ACall: TShellCall): TShellResult;
     function Tail(const ACall: TShellCall): TShellResult;
     function Wc(const ACall: TShellCall): TShellResult;
+    { Compare two files. Reuses DiffText from the changes library, so a diff an
+      agent asks for and a diff the change log records are the same engine. }
+    function Diff(const ACall: TShellCall): TShellResult;
     { The hex viewer: inspect bytes that are not readable text. }
     function Od(const ACall: TShellCall): TShellResult;
     { Content hashes. sha256sum reuses the harness's own Sha256Hex; md5sum is a
@@ -116,11 +119,12 @@ type
   end;
 
 const
-  CommandSpecs: array[0..32] of TCommandSpec = (
+  CommandSpecs: array[0..33] of TCommandSpec = (
     (Name: 'echo'; Options: '-n'),
     (Name: 'head'; Options: '-nN'),
     (Name: 'tail'; Options: '-nN'),
     (Name: 'wc'; Options: '-lwc'),
+    (Name: 'diff'; Options: '-quc'),
     (Name: 'od'; Options: '-Ancxtd'),
     (Name: 'sha256sum'; Options: ''),
     (Name: 'grep'; Options: '-nivlcFEGrm'),
@@ -539,6 +543,65 @@ begin
     Inc(LineNo);
   end;
   Result := ShellResultOk(OutText);
+end;
+
+function TBuiltinCommands.Diff(const ACall: TShellCall): TShellResult;
+var
+  I: Integer;
+  Brief, Unified: Boolean;
+  Args: TStringArray;
+  A, B, E, OutText, Body: string;
+  Capped: Boolean;
+begin
+  { Reuses DiffText from the changes library, so what an agent asks for here and
+    what the change log records are the same engine - two diff implementations
+    would be a way to disagree with ourselves. }
+  Brief := False;
+  Unified := True;
+  I := 0;
+  while (I <= High(ACall.Args)) and (ACall.Args[I] <> '') and
+    (ACall.Args[I][1] = '-') and (ACall.Args[I] <> '-') do
+  begin
+    if ACall.Args[I] = '-q' then
+      Brief := True
+    else if ACall.Args[I] = '-u' then
+      Unified := True
+    else if ACall.Args[I] = '-c' then
+      Unified := False
+    else
+      Exit(Usage('diff: unsupported option ' + ACall.Args[I]));
+    Inc(I);
+  end;
+  if I + 1 > High(ACall.Args) then
+    Exit(Usage('diff: expected two files'));
+  SetLength(Args, High(ACall.Args) - I + 1);
+  while I <= High(ACall.Args) do
+  begin
+    Args[I - (High(ACall.Args) - High(Args))] := ACall.Args[I];
+    Inc(I);
+  end;
+  if Length(Args) <> 2 then
+    Exit(Usage('diff: expected two files'));
+  if not FFs.ReadFile(FFs.Resolve(ACall.Cwd, Args[0]), A, E) then
+    Exit(Failure('diff: ' + Args[0] + ': ' + E, 2));
+  if not FFs.ReadFile(FFs.Resolve(ACall.Cwd, Args[1]), B, E) then
+    Exit(Failure('diff: ' + Args[1] + ': ' + E, 2));
+
+  { The exit status is the point for scripts: 0 same, 1 different, 2 trouble. }
+  if A = B then
+    Exit(ShellResultOk(''));
+  if Brief then
+    Exit(ShellResultOk('Files ' + Args[0] + ' and ' + Args[1] +
+      ' differ' + #10, 1));
+
+  Body := DiffText(A, B, 1024 * 1024, Capped);
+  if Body = '' then
+    { DiffText returns '' when the texts are equal; we already know they are
+      not, so fall back to a plain summary rather than claiming sameness. }
+    Body := '@@ -1 +1 @@' + #10 + '-see ' + Args[0] + #10 + '+see ' +
+      Args[1] + #10;
+  OutText := '--- ' + Args[0] + #10 + '+++ ' + Args[1] + #10 + Body;
+  Result := ShellResultOk(OutText, 1);
 end;
 
 function TBuiltinCommands.Sha256Sum(const ACall: TShellCall): TShellResult;
