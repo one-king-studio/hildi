@@ -4,22 +4,29 @@ program dashboard_mock;
 
   This is deliberately a mock. It reads no store and posts nothing: the data
   below is the real content of this workspace's board and task list, pasted in
-  so the layout can be judged. The point of the mock is the SHAPE - three zones,
-  what each one answers, and where an operator's attention goes first - not the
+  so the layout can be judged. The point of the mock is the SHAPE, not the
   wiring, which is specified in docs/features/Board_Dashboard/FEATURE.md.
 
   Layout:
-    +---------------------------+---------------------------------+
-    | Sessions                  | Board (one topic)               |
-    |  live / idle / done       |  entries, newest first          |
-    |  turn title, elapsed      |  kind chip, title, linkage      |
-    |---------------------------|  toc: open questions etc.       |
-    | > announcement            |                                 |
-    +---------------------------+---------------------------------+
-    | Tasks: a kanban, one column per status                       |
+    +--------------------------------------------------------------+
+    | Tasks - a kanban, ~60% of the height                          |
+    |  OPEN | CLAIMED | BLOCKED | DONE | DROPPED                    |
+    |  each lane scrolls on its own; a border separates the lanes   |
+    +--------------------------------------------------------------+
+    | Channels   | Messages                                         |
+    |  live feed |  the live feed is EVERY topic (default view);    |
+    |  # topic   |  picking a channel filters to that topic         |
+    +--------------------------------------------------------------+
+    | open questions N . decisions N . findings N . <state>         |
     +--------------------------------------------------------------+
 
-  Keys: Tab / Shift-Tab switch zone; arrows move; 'q' or Ctrl-C quits.
+  Why tasks on top: the kanban is the thing an operator scans for "what is
+  happening", so it gets the eye-line and the majority of the height. Sessions
+  moved into the channel list, where they already are - a session works on a
+  topic.
+
+  Keys: Tab / Shift-Tab switch zone; arrows move; PgUp/PgDn scroll a lane;
+        'q' or Ctrl-C quits.
 
   Run: make dashboard-mock }
 
@@ -34,33 +41,41 @@ uses
   tui.input.terminal, tui.theme;
 
 const
-  KanbanShare = 3;        // the task board takes ~1/3 of the height
-  MinKanbanH = 9;
-  MinTopH = 8;
-  LeftShare = 3;          // sessions take ~1/3 of the width
-  MinLeftW = 30;
-  MaxLeftW = 44;
-  ComposeH = 4;           // separator + prompt + hint + the frame's bottom border
+  TasksPercent = 60;      // the kanban takes 60% of the height
+  MinTasksH = 8;
+  ChanW = 22;             // the channel list's width
+  MinMsgH = 4;
   SpinIntervalMs = 120;
+  LaneCount = 5;
+  CardPad = 1;            // rows of gutter between stacked cards
 
 type
-  TZone = (zSessions, zBoard, zTasks);
+  TZone = (zTasks, zChannels, zMessages);
 
-  { One row of mock session state. State is what the store can answer cheaply;
-    the turn title is what only the live socket can answer. }
-  TSessionMock = record
-    LabelText: string;
+  TCardMock = record
+    Id: string;
     Title: string;
-    State: string;      // 'working' / 'idle' / 'done'
-    Elapsed: string;
+    Holder: string;
   end;
+  TCardArray = array of TCardMock;
 
   TBoardMock = record
     Kind: string;
+    Author: string;
+    Topic: string;
     Title: string;
     Meta: string;
     Link: string;
   end;
+  TBoardArray = array of TBoardMock;
+
+  TChanMock = record
+    Name: string;         // '' => the live feed (every topic)
+    Unread: Integer;
+  end;
+  TChanArray = array of TChanMock;
+
+  TWrapArray = array of UnicodeString;
 
   { The whole dashboard is one widget. A mock does not need the widget kit's
     composition, and painting it directly keeps the layout legible in one file -
@@ -69,17 +84,25 @@ type
   private
     FTheme: TTheme;
     FZone: TZone;
-    FSessSel, FBoardSel, FColSel, FCardSel: Integer;
+    FLane: Integer;
+    FCard: array[0..LaneCount - 1] of Integer;
+    FScroll: array[0..LaneCount - 1] of Integer;
+    FChanSel: Integer;
+    FMsgSel: Integer;
+    FMsgScroll: Integer;
     FSpin: Integer;
     FOrigin: Int64;
     procedure Frame(const S: ISurface; const ARect: TRect;
       const ATitle, ARight: UnicodeString; AFocused: Boolean);
     procedure Text(const S: ISurface; X, Y: Integer; const AText: UnicodeString;
       const AAttr: TAttr; AMaxW: Integer);
-    procedure DrawSessions(const S: ISurface; const ARect: TRect);
-    procedure DrawBoard(const S: ISurface; const ARect: TRect);
+    procedure VLine(const S: ISurface; X, Y0, Y1: Integer;
+      const AAttr: TAttr);
     procedure DrawTasks(const S: ISurface; const ARect: TRect);
-    procedure DrawFooter(const S: ISurface; const ARect: TRect);
+    procedure DrawChannels(const S: ISurface; const ARect: TRect);
+    procedure DrawMessages(const S: ISurface; const ARect: TRect);
+    procedure DrawStatus(const S: ISurface; const ARect: TRect);
+    procedure EnsureVisible(ALane, AVisH, AInnerW: Integer);
   public
     constructor Create(const ATheme: TTheme);
     function Measure(const AAvail: TSize): TSize; override;
@@ -94,32 +117,7 @@ const
   ChTL = '╭'; ChTR = '╮'; ChBL = '╰'; ChBR = '╯';
   ChH = '─'; ChV = '│'; ChDotted = '┈';
   ChCursor = '❯'; ChIdle = '○'; ChOk = '✓'; ChDot = '·';
-
-  { Sessions in this workspace. 'working' only appears while a turn is open. }
-  Sessions: array[0..3] of TSessionMock = (
-    (LabelText: 'main'; Title: 'Board dashboard mock';
-     State: 'working'; Elapsed: '2m 14s'),
-    (LabelText: 'tasks'; Title: 'Claim recovery + boundary tests';
-     State: 'idle'; Elapsed: '14m'),
-    (LabelText: 'docs'; Title: 'The recorder stores its patch';
-     State: 'done'; Elapsed: '41m'),
-    (LabelText: 'review'; Title: 'Read-only: reviewing the diff';
-     State: 'idle'; Elapsed: '1h 02m'));
-
-  { The coordination topic, newest first - the real entries. }
-  Board: array[0..5] of TBoardMock = (
-    (Kind: 'answer'; Title: 'Correction: your answer did set reply_to';
-     Meta: '2h'; Link: '-> #1'),
-    (Kind: 'answer'; Title: 'Closed: lanes done, recorder keeps its patch';
-     Meta: '2h'; Link: '-> #1'),
-    (Kind: 'status'; Title: 'Four docs files uncommitted; commit them';
-     Meta: '3h'; Link: ''),
-    (Kind: 'status'; Title: 'Gate free: 1,784 green at 7eaf6e4';
-     Meta: '3h'; Link: ''),
-    (Kind: 'answer'; Title: 'Lanes A and B done; wiring test asserts nothing';
-     Meta: '4h'; Link: '-> #2'),
-    (Kind: 'answer'; Title: 'Lanes agreed: tasks.* is mine';
-     Meta: '5h'; Link: '-> #1'));
+  ChUp = '▲'; ChDown = '▼'; ChHash = '#';
 
   { A braille frame by index, so the spinner is a pure function of time - the
     app clock owns the cadence, the widget owns nothing. }
@@ -131,6 +129,11 @@ var
     here, after the consts, because a var may not interrupt the type section. }
   QuitRequested: Boolean;
 
+  Lanes: array[0..LaneCount - 1] of TCardArray;
+  LaneTitles: array[0..LaneCount - 1] of string;
+  Board: TBoardArray;
+  Chans: TChanArray;
+
 { A rect built inline; the toolkit assigns fields rather than offering a
   constructor, and a local helper keeps the layout arithmetic readable. }
 function R(X, Y, W, H: Integer): TRect;
@@ -139,6 +142,97 @@ begin
   Result.Y := Y;
   Result.W := W;
   Result.H := H;
+end;
+
+procedure AddCard(var ALane: TCardArray; const AId, ATitle, AHolder: string);
+begin
+  SetLength(ALane, Length(ALane) + 1);
+  ALane[High(ALane)].Id := AId;
+  ALane[High(ALane)].Title := ATitle;
+  ALane[High(ALane)].Holder := AHolder;
+end;
+
+procedure AddEntry(const AKind, AAuthor, ATopic, ATitle, AMeta, ALink: string);
+begin
+  SetLength(Board, Length(Board) + 1);
+  Board[High(Board)].Kind := AKind;
+  Board[High(Board)].Author := AAuthor;
+  Board[High(Board)].Topic := ATopic;
+  Board[High(Board)].Title := ATitle;
+  Board[High(Board)].Meta := AMeta;
+  Board[High(Board)].Link := ALink;
+end;
+
+procedure AddChan(const AName: string; AUnread: Integer);
+begin
+  SetLength(Chans, Length(Chans) + 1);
+  Chans[High(Chans)].Name := AName;
+  Chans[High(Chans)].Unread := AUnread;
+end;
+
+{ The mock's data: the real shape of this workspace's task list and board.
+  Card TITLES are deliberately of mixed length so the wrap path is exercised -
+  a uniform one-line card would hide exactly the bug this layout can have. }
+procedure InitData;
+begin
+  LaneTitles[0] := 'OPEN';
+  LaneTitles[1] := 'CLAIMED';
+  LaneTitles[2] := 'BLOCKED';
+  LaneTitles[3] := 'DONE';
+  LaneTitles[4] := 'DROPPED';
+
+  SetLength(Lanes[0], 0);
+  AddCard(Lanes[0], '#8', 'Tier C: ln/readlink/chmod need new FS primitives',
+    'unclaimed ' + ChDot + ' 12m');
+
+  SetLength(Lanes[1], 0);
+  AddCard(Lanes[1], '#10',
+    'Board Dashboard: settle the two open design questions and render the mock',
+    'sess-main ' + ChDot + ' 3m');
+  AddCard(Lanes[1], '#13',
+    'Cursor honesty: last_seen_at, >=N unread, new-session-current, revival notice',
+    'sess-main ' + ChDot + ' 8m');
+  AddCard(Lanes[1], '#14',
+    'Conditional coordination: cross-session unread + mode-transition notices',
+    'sess-docs ' + ChDot + ' 21m');
+
+  SetLength(Lanes[2], 0);
+  AddCard(Lanes[2], '#9', 'Operator identity has no session to attribute to',
+    'blocked on #10');
+
+  SetLength(Lanes[3], 0);
+  AddCard(Lanes[3], '#6', '$() expressions must be visible in the approval dialog',
+    'sess-main ' + ChOk);
+  AddCard(Lanes[3], '#7', 'Coarse-grained approval buckets by effect class',
+    'sess-tasks ' + ChOk);
+  AddCard(Lanes[3], '#12', 'Split TUI into core and widgets',
+    'sess-main ' + ChOk);
+
+  SetLength(Lanes[4], 0);
+
+  SetLength(Board, 0);
+  AddEntry('answer', 'tasks', 'coordination',
+    'Correction: your answer did set reply_to', '2h', '-> #1');
+  AddEntry('answer', 'docs', 'coordination',
+    'Closed: lanes done, recorder keeps its patch', '2h', '-> #1');
+  AddEntry('status', 'main', 'coordination',
+    'Four docs files uncommitted; commit them', '3h', '');
+  AddEntry('status', 'tasks', 'coordination',
+    'Gate free: 1,784 green at 7eaf6e4', '3h', '');
+  AddEntry('decision', 'main', 'tui-split',
+    'Core keeps tui.*, widgets take tui.widgets.*', '5h', '');
+  AddEntry('finding', 'main', 'tui-split',
+    'test_split would have gone silently vacuous', '5h', '');
+  AddEntry('question', 'docs', 'dashboard',
+    'Should the feed be the default view?', '6h', '');
+  AddEntry('status', 'main', 'dashboard',
+    'Layout mock rendered headlessly at last', '7h', '');
+
+  SetLength(Chans, 0);
+  AddChan('', 0);                    // the live feed: every topic
+  AddChan('coordination', 0);
+  AddChan('tui-split', 2);
+  AddChan('dashboard', 1);
 end;
 
 function KindAttr(const ATheme: TTheme; const AKind: string): TAttr;
@@ -152,28 +246,98 @@ end;
 
 { A fixed chip width keeps the titles in one column, which is what makes the
   list scannable - the design language's "columns stay consistent". }
+{ A fixed chip width keeps the titles in one column, which is what makes the
+  list scannable - the design language's "columns stay consistent". The width
+  must clear the LONGEST kind ('decision' and 'question' are 10 chars with
+  brackets): padding only to 9 left those two with no gap before the author,
+  and the first render showed `[decision]main`. }
 function KindChip(const AKind: string): UnicodeString;
+const
+  ChipW = 11;
 var
   I: Integer;
 begin
   Result := UnicodeString('[' + AKind + ']');
   I := Length(AKind) + 2;
-  while I < 9 do
+  while I < ChipW do
   begin
     Result := Result + ' ';
     Inc(I);
   end;
 end;
 
+{ Word-wrap to AWidth columns. A word longer than the width is hard-broken
+  rather than dropped: a task title is content, and silently vanishing text is
+  worse than an ugly break. Always returns at least one line, so a caller can
+  treat an empty title as a one-line card. }
+function WrapLines(const AText: UnicodeString; AWidth: Integer): TWrapArray;
+var
+  Rest: UnicodeString;
+  Space, I: Integer;
+begin
+  Result := nil;
+  SetLength(Result, 0);
+  if AWidth < 1 then
+    AWidth := 1;
+  Rest := AText;
+  while Rest <> '' do
+  begin
+    if Length(Rest) <= AWidth then
+    begin
+      SetLength(Result, Length(Result) + 1);
+      Result[High(Result)] := Rest;
+      Break;
+    end;
+    Space := 0;
+    for I := AWidth downto 1 do
+      if Rest[I] = ' ' then
+      begin
+        Space := I;
+        Break;
+      end;
+    SetLength(Result, Length(Result) + 1);
+    if Space = 0 then
+    begin
+      Result[High(Result)] := Copy(Rest, 1, AWidth);
+      Rest := Copy(Rest, AWidth + 1, Length(Rest));
+    end
+    else
+    begin
+      Result[High(Result)] := Copy(Rest, 1, Space - 1);
+      Rest := Copy(Rest, Space + 1, Length(Rest));
+    end;
+  end;
+  if Length(Result) = 0 then
+  begin
+    SetLength(Result, 1);
+    Result[0] := '';
+  end;
+end;
+
+{ A card's height is a function of its wrapped title: 2 border rows + one
+  title row per wrapped line + 1 holder row. This is why cards resize instead
+  of being clipped to a fixed box. }
+function CardHeight(const ACard: TCardMock; AInnerW: Integer): Integer;
+begin
+  Result := 2 + Length(WrapLines(UnicodeString(ACard.Title), AInnerW)) + 1;
+end;
+
 constructor TDashboard.Create(const ATheme: TTheme);
+var
+  I: Integer;
 begin
   inherited Create;
   FTheme := ATheme;
-  FZone := zBoard;
-  FSessSel := 0;
-  FBoardSel := 0;
-  FColSel := 1;          // CLAIMED: where the operator's attention goes
-  FCardSel := 0;
+  FZone := zTasks;
+  FLane := 1;            // CLAIMED: where the operator's attention goes
+  for I := 0 to LaneCount - 1 do
+  begin
+    FCard[I] := 0;
+    FScroll[I] := 0;
+  end;
+  FChanSel := 0;         // the live feed
+  FMsgSel := 0;
+  FMsgScroll := 0;
   FOrigin := 0;
   SetAnimation(SpinIntervalMs);
 end;
@@ -220,6 +384,15 @@ begin
   end;
 end;
 
+procedure TDashboard.VLine(const S: ISurface; X, Y0, Y1: Integer;
+  const AAttr: TAttr);
+var
+  Y: Integer;
+begin
+  for Y := Y0 to Y1 do
+    Text(S, X, Y, ChV, AAttr, 1);
+end;
+
 procedure TDashboard.Frame(const S: ISurface; const ARect: TRect;
   const ATitle, ARight: UnicodeString; AFocused: Boolean);
 var
@@ -261,193 +434,258 @@ begin
       ' ' + ARight + ' ', A, Length(ARight) + 2);
 end;
 
-procedure TDashboard.DrawSessions(const S: ISurface; const ARect: TRect);
+{ The kanban. One frame around all five lanes, with a vertical rule between
+  lanes rather than a box each: a box per lane doubles the border weight and
+  reads as five panels instead of one board. Each lane scrolls on its own, so a
+  long lane and an empty one can coexist without the empty one wasting rows. }
+procedure TDashboard.DrawTasks(const S: ISurface; const ARect: TRect);
 var
-  I, Y, X0, Inner: Integer;
-  A, ElapsedAttr: TAttr;
-  Mark, Line: UnicodeString;
+  L, I, J, X, Y, LaneW, InnerW, CardH, VisTop, VisBot, Total, Sel, LaneX: Integer;
+  A: TAttr;
+  Lines: TWrapArray;
+  Right: UnicodeString;
+  Live, Done: Integer;
 begin
-  Frame(S, ARect, 'Sessions', 'live 2', FZone = zSessions);
-  Inner := ARect.W - 4;
-  X0 := ARect.X + 2;
-  Y := ARect.Y + 1;
-  for I := 0 to High(Sessions) do
+  Live := Length(Lanes[0]) + Length(Lanes[1]) + Length(Lanes[2]);
+  Done := Length(Lanes[3]);
+  Right := UnicodeString(IntToStr(Live)) + ' live ' + ChDot + ' ' +
+    UnicodeString(IntToStr(Done)) + ' done';
+  Frame(S, ARect, 'Tasks', Right, FZone = zTasks);
+
+  if (ARect.W < 12) or (ARect.H < 5) then
+    Exit;
+  LaneW := (ARect.W - 2) div LaneCount;
+  if LaneW < 8 then
+    Exit;
+
+  VisTop := ARect.Y + 3;                    // first row a card may occupy
+  VisBot := ARect.Y + ARect.H - 2;          // last row a card may occupy
+
+  for L := 0 to LaneCount - 1 do
   begin
-    if Y >= ARect.Y + ARect.H - ComposeH then
-      Break;
-    if I = FSessSel then
-    begin
-      A := FTheme.Accent;
-      S.FillRect(R(X0 - 1, Y, ARect.W - 2, 1), A);
-      if FZone = zSessions then
-        Include(A.Style, sfReverse);
-      ElapsedAttr := A;
-    end
+    LaneX := ARect.X + 1 + L * LaneW;
+    InnerW := LaneW - 1;
+
+    { The lane header: name and count, then a dotted rule. }
+    if (L = FLane) and (FZone = zTasks) then
+      A := FTheme.Accent
     else
+      A := FTheme.Title;
+    Text(S, LaneX, ARect.Y + 1, UnicodeString(LaneTitles[L] + ' ' +
+      IntToStr(Length(Lanes[L]))), A, InnerW);
+
+    { Scroll affordance, in the header's right edge, so a clipped lane says so
+      rather than looking complete. }
+    Total := Length(Lanes[L]);
+    if FScroll[L] > 0 then
+      Text(S, LaneX + InnerW - 2, ARect.Y + 1, ChUp, FTheme.Muted, 1);
+    if Total > 0 then
     begin
-      A := FTheme.Text;
-      ElapsedAttr := FTheme.Muted;
+      { Would the last card fit? Recompute cheaply: walk the heights. }
+      Y := VisTop;
+      I := FScroll[L];
+      while (I < Total) and (Y <= VisBot) do
+      begin
+        Inc(Y, CardHeight(Lanes[L][I], InnerW - 2) + CardPad);
+        Inc(I);
+      end;
+      if I < Total then
+        Text(S, LaneX + InnerW - 1, ARect.Y + 1, ChDown, FTheme.Muted, 1);
     end;
 
-    { The mark: a spinner for a working session, a ring for idle, a tick for
-      done. Motion is reserved for the one thing that actually moves. }
-    if Sessions[I].State = 'working' then
-      Mark := SpinFrames[FSpin]
-    else if Sessions[I].State = 'idle' then
-      Mark := ChIdle
-    else if Sessions[I].State = 'done' then
-      Mark := ChOk
-    else
-      Mark := ChDot;
+    for I := LaneX to LaneX + InnerW - 1 do
+      Text(S, I, ARect.Y + 2, ChDotted, FTheme.Border, 1);
 
-    { A working session's title is the live turn; an idle one's is its last
-      completed reply - the distinction the design cares about. }
-    Line := Mark + ' ' + UnicodeString(Sessions[I].LabelText) + ' ' + ChDot +
-      ' ' + UnicodeString(Sessions[I].Title);
-    Text(S, X0, Y, Line, A, Inner - Length(Sessions[I].Elapsed) - 1);
-    Text(S, X0 + Inner - Length(Sessions[I].Elapsed), Y,
-      UnicodeString(Sessions[I].Elapsed), ElapsedAttr,
-      Length(Sessions[I].Elapsed));
-    Inc(Y);
-  end;
+    { Cards, from the lane's scroll offset. Height is computed from the wrapped
+      title, so every card is exactly as tall as its content. }
+    Y := VisTop;
+    I := FScroll[L];
+    while I < Total do
+    begin
+      CardH := CardHeight(Lanes[L][I], InnerW - 2);
+      if Y + CardH - 1 > VisBot then
+        Break;
+      Sel := FCard[L];
+      if (L = FLane) and (I = Sel) and (FZone = zTasks) then
+        A := FTheme.Accent
+      else
+        A := FTheme.Text;
+      Frame(S, R(LaneX, Y, InnerW, CardH), UnicodeString(Lanes[L][I].Id),
+        '', False);
+      Lines := WrapLines(UnicodeString(Lanes[L][I].Title), InnerW - 2);
+      { Draw EVERY wrapped line. The card's height was computed from the same
+        wrap, so drawing a fixed two would leave the rest of the box blank and
+        make a tall card look empty. }
+      for J := 0 to High(Lines) do
+        Text(S, LaneX + 1, Y + 1 + J, Lines[J], A, InnerW - 2);
+      Text(S, LaneX + 1, Y + CardH - 2,
+        UnicodeString(Lanes[L][I].Holder), FTheme.Muted, InnerW - 2);
+      Inc(Y, CardH + CardPad);
+      Inc(I);
+    end;
 
-  { The compose line: an operator's announcement is a board post attributed to
-    the operator, not to an agent. }
-  if ARect.H >= ComposeH + 5 then
-  begin
-    Y := ARect.Y + ARect.H - ComposeH;
-    for I := ARect.X + 1 to ARect.X + ARect.W - 2 do
-      Text(S, I, Y, ChDotted, FTheme.Border, 1);
-    Text(S, X0, Y + 1, ChCursor + ' ', FTheme.Accent, 2);
-    Text(S, X0 + 2, Y + 1, 'announce to coordination', FTheme.Muted, Inner);
-    Text(S, X0 + 2, Y + 2, 'ctrl+n topic  enter post', FTheme.Muted, Inner);
+    { The rule between lanes, never after the last one. }
+    if L < LaneCount - 1 then
+    begin
+      if (L = FLane) and (FZone = zTasks) then
+        A := FTheme.Accent
+      else
+        A := FTheme.Border;
+      VLine(S, LaneX + LaneW - 1, ARect.Y + 1, ARect.Y + ARect.H - 2, A);
+    end;
   end;
 end;
 
-procedure TDashboard.DrawBoard(const S: ISurface; const ARect: TRect);
+{ The channel list: the live feed first, then one row per topic. Picking a row
+  filters the message pane - this is the Slack shape the operator asked for. }
+procedure TDashboard.DrawChannels(const S: ISurface; const ARect: TRect);
 var
   I, Y, X0, Inner: Integer;
   A: TAttr;
-  Line, Toc, Right: UnicodeString;
+  Line: UnicodeString;
+  Name: string;
 begin
-  Right := 'q 0 ' + ChDot + ' d 0 ' + ChDot + ' f 0';
-  Frame(S, ARect, 'Board ' + ChDot + ' coordination', Right, FZone = zBoard);
+  Frame(S, ARect, 'Channels', '', FZone = zChannels);
+  Inner := ARect.W - 2;
+  X0 := ARect.X + 1;
+  Y := ARect.Y + 1;
+  for I := 0 to High(Chans) do
+  begin
+    if Y > ARect.Y + ARect.H - 2 then
+      Break;
+    if I = FChanSel then
+    begin
+      A := FTheme.Accent;
+      S.FillRect(R(X0, Y, Inner, 1), A);
+      if FZone = zChannels then
+        Include(A.Style, sfReverse);
+    end
+    else
+      A := FTheme.Text;
+
+    if Chans[I].Name = '' then
+      Name := 'live feed'
+    else
+      Name := ChHash + ' ' + Chans[I].Name;
+
+    Line := UnicodeString(Name);
+    if I = FChanSel then
+      Line := ChCursor + ' ' + Line
+    else
+      Line := '  ' + Line;
+    Text(S, X0, Y, Line, A, Inner);
+    { An unread count is a fact, so it is shown even on the selected row. }
+    if Chans[I].Unread > 0 then
+      Text(S, X0 + Inner - 1, Y, UnicodeString(IntToStr(Chans[I].Unread)),
+        FTheme.Warn, 1)
+    else if Chans[I].Name = '' then
+      Text(S, X0 + Inner - 6, Y, 'LIVE', FTheme.Muted, 4);
+    Inc(Y);
+  end;
+end;
+
+procedure TDashboard.DrawMessages(const S: ISurface; const ARect: TRect);
+var
+  I, Y, X0, Inner, Shown: Integer;
+  A: TAttr;
+  Line: UnicodeString;
+  Right, Title: UnicodeString;
+  Wanted: string;
+begin
+  Wanted := Chans[FChanSel].Name;
+  if Wanted = '' then
+    Right := 'every topic'
+  else
+    Right := ChHash + ' ' + UnicodeString(Wanted);
+  Frame(S, ARect, 'Messages', Right, FZone = zMessages);
+
   Inner := ARect.W - 4;
   X0 := ARect.X + 2;
   Y := ARect.Y + 1;
-
-  for I := 0 to High(Board) do
+  Shown := 0;
+  I := FMsgScroll;
+  while I <= High(Board) do
   begin
-    if Y >= ARect.Y + ARect.H - 3 then
+    if (Wanted <> '') and (Board[I].Topic <> Wanted) then
+    begin
+      Inc(I);
+      Continue;
+    end;
+    if Y > ARect.Y + ARect.H - 3 then
       Break;
-    if I = FBoardSel then
+    if Shown = FMsgSel then
     begin
       A := FTheme.Accent;
-      S.FillRect(R(X0 - 1, Y, ARect.W - 2, 1), A);
-      if FZone = zBoard then
+      { Start one column inside the border: X0 - 2 is the border itself, and
+        the first render showed the selection painting over it, so row 1 had no
+        left edge while every later row did. }
+      S.FillRect(R(X0 - 1, Y, ARect.W - 3, 1), A);
+      if FZone = zMessages then
         Include(A.Style, sfReverse);
     end
     else
       A := KindAttr(FTheme, Board[I].Kind);
 
-    Line := KindChip(Board[I].Kind) + UnicodeString(Board[I].Title);
+    { The author is part of the row now: a feed where you cannot see who wrote
+      a thing is a feed you cannot act on. }
+    Title := KindChip(Board[I].Kind) + UnicodeString(Board[I].Author) +
+      ' ' + ChDot + ' ' + UnicodeString(Board[I].Title);
+    Line := Title;
     Text(S, X0, Y, Line, A, Inner - Length(Board[I].Meta) - 1);
     Text(S, X0 + Inner - Length(Board[I].Meta), Y,
       UnicodeString(Board[I].Meta), FTheme.Muted, Length(Board[I].Meta));
     Inc(Y);
+    Inc(I);
+    Inc(Shown);
   end;
 
-  { The footer states what a reader owes, not just what exists. }
-  Toc := 'open questions 0 ' + ChDot + ' decisions 0 ' + ChDot +
-    ' findings 0 ' + ChDot + ' all answered';
-  Text(S, X0, ARect.Y + ARect.H - 2, Toc, FTheme.Muted, Inner);
+  if Shown = 0 then
+    Text(S, X0, Y, 'no messages in this channel', FTheme.Muted, Inner);
 end;
 
-procedure TDashboard.DrawTasks(const S: ISurface; const ARect: TRect);
+{ The status bar carries the counts spelled out. The header chips (q / d / f)
+  are gone: three unlabelled letters asked the reader to learn a legend, and
+  the same facts read better as words along the bottom. }
+procedure TDashboard.DrawStatus(const S: ISurface; const ARect: TRect);
 var
-  I, Col, X, W, Y, Inner, ColW: Integer;
-  A: TAttr;
-  Titles: array[0..4] of string;
-  Counts: array[0..4] of Integer;
-  Cards: array[0..4, 0..1] of string;
-  Holders: array[0..4, 0..1] of string;
-  N: array[0..4] of Integer;
-begin
-  Frame(S, ARect, 'Tasks', '4 live ' + ChDot + ' 2 done', FZone = zTasks);
-
-  N[0] := 1; N[1] := 1; N[2] := 0; N[3] := 2; N[4] := 0;
-  Titles[0] := 'OPEN'; Titles[1] := 'CLAIMED'; Titles[2] := 'BLOCKED';
-  Titles[3] := 'DONE'; Titles[4] := 'DROPPED';
-  Counts[0] := 1; Counts[1] := 1; Counts[2] := 0; Counts[3] := 2; Counts[4] := 0;
-  Cards[0, 0] := '#1  Wire RenewClaims into the session';
-
-  Holders[0, 0] := 'unclaimed ' + ChDot + ' 12m';
-  Cards[1, 0] := '#2  Record the claim-recovery deviation';
-  Holders[1, 0] := 'sess-main ' + ChDot + ' 3m';
-  Cards[3, 0] := '#3  Correct the stale test-count claims';
-  Holders[3, 0] := 'sess-docs ' + ChOk;
-  Cards[3, 1] := '#4  Mock the board dashboard';
-  Holders[3, 1] := 'sess-main ' + ChOk;
-
-  ColW := (ARect.W - 2) div 5;
-  if ColW < 8 then
-    Exit;
-  for Col := 0 to 4 do
-  begin
-    X := ARect.X + 1 + Col * ColW;
-    W := ColW - 1;
-    Inner := W - 2;
-
-    { The column header: name, count, and a rule that makes the column read as
-      a stack rather than a table row. }
-    if (Col = FColSel) and (FZone = zTasks) then
-      A := FTheme.Accent
-    else
-      A := FTheme.Title;
-    Text(S, X, ARect.Y + 1, UnicodeString(Titles[Col] + ' ' +
-      IntToStr(Counts[Col])), A, Inner);
-    for I := X to X + W - 1 do
-      Text(S, I, ARect.Y + 2, ChDotted, FTheme.Border, 1);
-
-    { Cards. A card is a bordered box: the border is what makes it a thing you
-      could pick up and move, which is the kanban affordance.
-
-      Height 4, not 3: a card carries TWO content lines (title, holder), so a
-      3-tall frame put the holder on the bottom border - the first headless
-      render showed `╰unclaimed · 12m─╯`. Step 5 leaves a one-row gutter so
-      stacked cards read as separate objects. }
-    Y := ARect.Y + 4;
-    for I := 0 to N[Col] - 1 do
-    begin
-      if Y + 3 > ARect.Y + ARect.H - 1 then
-        Break;
-      Frame(S, R(X, Y, W, 4), '', '', False);
-      if (Col = FColSel) and (I = FCardSel) and (FZone = zTasks) then
-        A := FTheme.Accent
-      else
-        A := FTheme.Text;
-      Text(S, X + 1, Y + 1, UnicodeString(Cards[Col, I]), A, W - 2);
-      Text(S, X + 1, Y + 2, UnicodeString(Holders[Col, I]), FTheme.Muted,
-        W - 2);
-      Inc(Y, 5);
-    end;
-
-    if N[Col] = 0 then
-      Text(S, X + 1, ARect.Y + 4, '--', FTheme.Muted, Inner);
-  end;
-end;
-
-procedure TDashboard.DrawFooter(const S: ISurface; const ARect: TRect);
+  Questions, Decisions, Findings, Open, I: Integer;
+  Left: UnicodeString;
 begin
   S.FillRect(ARect, FTheme.Panel);
-  Text(S, ARect.X, ARect.Y, 'MOCK ' + ChDot + ' reads nothing, writes nothing' +
-    '   ' + ChDot + '   tab zone  arrows move  q quit', FTheme.Muted, ARect.W);
+
+  Questions := 0;
+  Decisions := 0;
+  Findings := 0;
+  Open := 0;
+  for I := 0 to High(Board) do
+  begin
+    if Board[I].Kind = 'question' then
+    begin
+      Inc(Questions);
+      if Board[I].Link = '' then
+        Inc(Open);
+    end
+    else if Board[I].Kind = 'decision' then
+      Inc(Decisions)
+    else if Board[I].Kind = 'finding' then
+      Inc(Findings);
+  end;
+
+  Left := 'open questions ' + UnicodeString(IntToStr(Open)) + '  ' + ChDot +
+    '  decisions ' + UnicodeString(IntToStr(Decisions)) + '  ' + ChDot +
+    '  findings ' + UnicodeString(IntToStr(Findings)) + '  ' + ChDot + '  ';
+  if Open = 0 then
+    Left := Left + 'all answered';
+  Text(S, ARect.X + 1, ARect.Y, Left, FTheme.Muted, ARect.W - 2);
+  Text(S, ARect.X + ARect.W - Length('tab zone  arrows move  q quit'),
+    ARect.Y, 'tab zone  arrows move  q quit', FTheme.Muted,
+    Length('tab zone  arrows move  q quit'));
 end;
 
 procedure TDashboard.Render(const S: ISurface);
 var
-  W, H, TopH, KanbanH, LeftW: Integer;
-  SessionsRect, BoardRect, TasksRect, FooterRect: TRect;
+  W, H, TasksH, BoardY, BoardH: Integer;
+  TasksRect, ChanRect, MsgRect, StatusRect: TRect;
 begin
   W := FBounds.W;
   H := FBounds.H;
@@ -456,36 +694,70 @@ begin
 
   S.FillRect(FBounds, FTheme.Base);
 
-  FooterRect := R(0, H - 1, W, 1);
-  KanbanH := H div KanbanShare;
-  if KanbanH < MinKanbanH then
-    KanbanH := MinKanbanH;
-  TopH := H - 1 - KanbanH;
-  if TopH < MinTopH then
+  StatusRect := R(0, H - 1, W, 1);
+  { Tasks take 60% of the usable height (everything above the status bar). }
+  TasksH := ((H - 1) * TasksPercent) div 100;
+  if TasksH < MinTasksH then
+    TasksH := MinTasksH;
+  if TasksH > H - 1 - MinMsgH then
+    TasksH := H - 1 - MinMsgH;
+  BoardY := TasksH;
+  BoardH := H - 1 - TasksH;
+
+  TasksRect := R(0, 0, W, TasksH);
+  ChanRect := R(0, BoardY, ChanW, BoardH);
+  MsgRect := R(ChanW, BoardY, W - ChanW, BoardH);
+
+  DrawTasks(S, TasksRect);
+  DrawChannels(S, ChanRect);
+  DrawMessages(S, MsgRect);
+  DrawStatus(S, StatusRect);
+end;
+
+{ Keep the selected card visible: after a move, nudge the lane's scroll so the
+  selected index is within the window. The layout owns the heights, so this
+  recomputes them the same way DrawTasks does. }
+procedure TDashboard.EnsureVisible(ALane, AVisH, AInnerW: Integer);
+var
+  H, Y, I, Need: Integer;
+begin
+  if (ALane < 0) or (ALane >= LaneCount) then
+    Exit;
+  if Length(Lanes[ALane]) = 0 then
   begin
-    TopH := MinTopH;
-    KanbanH := H - 1 - TopH;
+    FScroll[ALane] := 0;
+    Exit;
   end;
 
-  LeftW := W div LeftShare;
-  if LeftW < MinLeftW then LeftW := MinLeftW;
-  if LeftW > MaxLeftW then LeftW := MaxLeftW;
-  if LeftW > W - 24 then LeftW := W - 24;
-  if LeftW < 10 then LeftW := 10;
+  { Scroll up until the selection is at or after the top. }
+  if FScroll[ALane] > FCard[ALane] then
+    FScroll[ALane] := FCard[ALane];
 
-  SessionsRect := R(0, 0, LeftW, TopH);
-  BoardRect := R(LeftW, 0, W - LeftW, TopH);
-  TasksRect := R(0, TopH, W, KanbanH);
-
-  DrawSessions(S, SessionsRect);
-  DrawBoard(S, BoardRect);
-  DrawTasks(S, TasksRect);
-  DrawFooter(S, FooterRect);
+  { Then walk from the scroll top and scroll down until it fits. }
+  repeat
+    Y := 0;
+    Need := -1;
+    for I := FScroll[ALane] to High(Lanes[ALane]) do
+    begin
+      H := CardHeight(Lanes[ALane][I], AInnerW) + CardPad;
+      if I = FCard[ALane] then
+      begin
+        Need := Y + CardHeight(Lanes[ALane][I], AInnerW);
+        Break;
+      end;
+      Inc(Y, H);
+    end;
+    if (Need >= 0) and (Need > AVisH) and (FScroll[ALane] < FCard[ALane]) then
+      Inc(FScroll[ALane])
+    else
+      Break;
+  until False;
 end;
 
 function TDashboard.HandleEvent(const E: TInputEvent): Boolean;
 var
   Shift: Boolean;
+  LaneW, InnerW, VisH: Integer;
 begin
   if E.Kind <> ikKey then
     Exit(False);
@@ -505,46 +777,77 @@ begin
     if Shift then
     begin
       case FZone of
-        zSessions: FZone := zTasks;
-        zBoard: FZone := zSessions;
-        zTasks: FZone := zBoard;
+        zTasks: FZone := zMessages;
+        zChannels: FZone := zTasks;
+        zMessages: FZone := zChannels;
       end;
     end
     else
     begin
       case FZone of
-        zSessions: FZone := zBoard;
-        zBoard: FZone := zTasks;
-        zTasks: FZone := zSessions;
+        zTasks: FZone := zChannels;
+        zChannels: FZone := zMessages;
+        zMessages: FZone := zTasks;
       end;
     end;
     Exit;
   end;
 
+  { The visible card height, recomputed the same way the layout does, so a
+    keyboard move can keep the selection on screen. }
+  LaneW := (FBounds.W - 2) div LaneCount;
+  InnerW := LaneW - 3;
+  VisH := FBounds.H - ((FBounds.H - 1) * TasksPercent) div 100 - 3;
+
   case E.Key.Kind of
-    kkUp:
-      case FZone of
-        zSessions: if FSessSel > 0 then Dec(FSessSel);
-        zBoard: if FBoardSel > 0 then Dec(FBoardSel);
-        zTasks: if FCardSel > 0 then Dec(FCardSel);
-      end;
-    kkDown:
-      case FZone of
-        zSessions: if FSessSel < High(Sessions) then Inc(FSessSel);
-        zBoard: if FBoardSel < High(Board) then Inc(FBoardSel);
-        zTasks: if FCardSel < 1 then Inc(FCardSel);
-      end;
     kkLeft:
       if FZone = zTasks then
       begin
-        if FColSel > 0 then Dec(FColSel);
-        FCardSel := 0;
+        if FLane > 0 then
+          Dec(FLane);
       end;
     kkRight:
       if FZone = zTasks then
       begin
-        if FColSel < 4 then Inc(FColSel);
-        FCardSel := 0;
+        if FLane < LaneCount - 1 then
+          Inc(FLane);
+      end;
+    kkUp:
+      case FZone of
+        zTasks:
+          if FCard[FLane] > 0 then
+          begin
+            Dec(FCard[FLane]);
+            EnsureVisible(FLane, VisH, InnerW);
+          end;
+        zChannels:
+          if FChanSel > 0 then
+          begin
+            Dec(FChanSel);
+            FMsgSel := 0;
+            FMsgScroll := 0;
+          end;
+        zMessages:
+          if FMsgSel > 0 then
+            Dec(FMsgSel);
+      end;
+    kkDown:
+      case FZone of
+        zTasks:
+          if FCard[FLane] < Length(Lanes[FLane]) - 1 then
+          begin
+            Inc(FCard[FLane]);
+            EnsureVisible(FLane, VisH, InnerW);
+          end;
+        zChannels:
+          if FChanSel < High(Chans) then
+          begin
+            Inc(FChanSel);
+            FMsgSel := 0;
+            FMsgScroll := 0;
+          end;
+        zMessages:
+          Inc(FMsgSel);
       end;
     kkEscape: QuitRequested := True;
   else
@@ -596,22 +899,22 @@ var
   Mem: TSurfaceMemory;
   Surf: ISurface;
   DashOut: TDashboard;
-  Theme: TTheme;
+  ThemeOut: TTheme;
   Y, X, Last: Integer;
   Line: UnicodeString;
   Line8: string;
 begin
-  Theme := DarkTheme;
+  ThemeOut := DarkTheme;
   Mem := TSurfaceMemory.Create(AWidth, AHeight);
   Surf := Mem;
-  DashOut := TDashboard.Create(Theme);
+  DashOut := TDashboard.Create(ThemeOut);
   try
     DashOut.Arrange(R(0, 0, AWidth, AHeight));
     { Establish the screen background exactly as TTuiApp.RenderFrame does. The
       dump bypasses TTuiApp, so without these two lines every sfScreenBg cell
       would come out as whatever the surface was initialised with, and the
       frame would be judged against a background the app never shows. }
-    Surf.SetScreenBg(Theme.Bg);
+    Surf.SetScreenBg(ThemeOut.Bg);
     Surf.Clear(DefaultAttr);
     DashOut.Render(Surf);
     for Y := 0 to AHeight - 1 do
@@ -643,6 +946,7 @@ end;
 
 begin
   QuitRequested := False;
+  InitData;
 
   { `--dump [WxH]` renders one frame and exits; no terminal is opened, so this
     works over a pipe and in a test harness. }
@@ -658,6 +962,7 @@ begin
     DumpFrame(DW, DH);
     Halt(0);
   end;
+
   Surface := TSurfaceVideo.Create;
   InputTerm := TInputSourceTerminal.Create;
   Input := InputTerm;
