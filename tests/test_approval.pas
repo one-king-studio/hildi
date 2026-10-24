@@ -112,6 +112,11 @@ type
     procedure TestGrantForOneChildAppliesToSibling;
     procedure TestConcurrentResolveDoesNotDoublePrompt;
     procedure TestNoPromptResolveIsNotBlockedByAPromptingSibling;
+    procedure TestBucketReadGrantCoversAReadCommand;
+    procedure TestBucketNeverCoversAnUnknownEffect;
+    procedure TestBucketAnyCoversEverythingKnown;
+    procedure TestBucketWriteGrantDoesNotCoverARead;
+    procedure TestBucketRuleIgnoresRef;
   protected
     procedure SetUp; override;
     procedure TearDown; override;
@@ -353,6 +358,90 @@ begin
   Rules[2] := Rule(aeAllow, asSession, 7, 'abc', 'run_command:pwd', [], True);
   AssertEquals('session allow', Ord(adAllow),
     Ord(Decide(Rules, Subject('run_command:pwd', []))));
+end;
+
+procedure TApprovalTest.TestBucketReadGrantCoversAReadCommand;
+var
+  R: TApprovalRule;
+  S: TApprovalSubject;
+begin
+  { The point of buckets: one grant for a CLASS of work, not one binary at a
+    time. A read grant covers grep, cat, wc - anything classified read. }
+  R := Default(TApprovalRule);
+  R.Effect := aeAllow;
+  R.Bucket := abRead;
+  S := Subject('run_command:grep', ['pat', 'f']);
+  S.Bucket := abRead;
+  AssertEquals('read grant covers grep', Ord(adAllow),
+    Ord(Decide([R], S)));
+  S := Subject('run_command:cat', ['f']);
+  S.Bucket := abRead;
+  AssertEquals('and cat, with no per-binary rule', Ord(adAllow),
+    Ord(Decide([R], S)));
+end;
+
+procedure TApprovalTest.TestBucketNeverCoversAnUnknownEffect;
+var
+  R: TApprovalRule;
+  S: TApprovalSubject;
+begin
+  { abNone means the producer could not classify the operation. A broad grant
+    must NOT cover it, or an unknown effect would be silently authorised. }
+  R := Default(TApprovalRule);
+  R.Effect := aeAllow;
+  R.Bucket := abAny;
+  S := Subject('run_command:whatever', []);
+  S.Bucket := abNone;
+  AssertEquals('unknown is never covered', Ord(adAsk), Ord(Decide([R], S)));
+end;
+
+procedure TApprovalTest.TestBucketAnyCoversEverythingKnown;
+var
+  R: TApprovalRule;
+  S: TApprovalSubject;
+  B: TApprovalBucket;
+begin
+  R := Default(TApprovalRule);
+  R.Effect := aeAllow;
+  R.Bucket := abAny;
+  for B := abRead to abOpaque do
+  begin
+    S := Subject('run_command:x', []);
+    S.Bucket := B;
+    AssertEquals('abAny covers bucket ' + IntToStr(Ord(B)), Ord(adAllow),
+      Ord(Decide([R], S)));
+  end;
+end;
+
+procedure TApprovalTest.TestBucketWriteGrantDoesNotCoverARead;
+var
+  R: TApprovalRule;
+  S: TApprovalSubject;
+begin
+  { A write grant is not a read grant. Separate decisions. }
+  R := Default(TApprovalRule);
+  R.Effect := aeAllow;
+  R.Bucket := abWrite;
+  S := Subject('run_command:cat', ['f']);
+  S.Bucket := abRead;
+  AssertEquals('write does not cover read', Ord(adAsk), Ord(Decide([R], S)));
+end;
+
+procedure TApprovalTest.TestBucketRuleIgnoresRef;
+var
+  R: TApprovalRule;
+  S: TApprovalSubject;
+begin
+  { A bucket rule that named a Ref would not be coarse. It must match on the
+    effect class alone. }
+  R := Default(TApprovalRule);
+  R.Effect := aeAllow;
+  R.Ref := 'run_command:somethingelse';
+  R.Bucket := abRead;
+  S := Subject('run_command:cat', ['f']);
+  S.Bucket := abRead;
+  AssertEquals('ref is ignored for a bucket rule', Ord(adAllow),
+    Ord(Decide([R], S)));
 end;
 
 procedure TApprovalTest.TestNoMatchAsks;

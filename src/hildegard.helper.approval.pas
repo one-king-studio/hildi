@@ -24,6 +24,15 @@ type
   TApprovalEffect = (aeAllow, aeDeny);
   TApprovalDecision = (adAllow, adAsk, adDeny);
 
+  { A coarse-grained EFFECT class, so one grant can cover a whole kind of work
+    instead of one binary at a time. Derived from the same classification the
+    shell's effect table uses, so a bucket can never disagree with what the tier
+    thinks a command does.
+
+    abPure is deliberately NOT a bucket option: a pure command has no effects, so
+    it never asks and a grant for it would be meaningless. }
+  TApprovalBucket = (abNone, abRead, abWrite, abReadWrite, abOpaque, abAny);
+
   TApprovalParams = array of string;
 
   TApprovalRule = record
@@ -41,6 +50,10 @@ type
       '' = any. }
     Directory: string;
     Extension: string;
+    { A coarse effect-class grant. abNone = an ordinary rule (v1 behaviour). A
+      bucket rule ignores Ref/Params and matches ANY subject whose Bucket is
+      covered by this one, so one grant can authorise a class of work. }
+    Bucket: TApprovalBucket;
   end;
 
   TApprovalRuleArray = array of TApprovalRule;
@@ -52,6 +65,10 @@ type
       workspace-relative path for the file tools, an absolute path (outside the
       root) for the command tool. '' = none (never matches a path rule). }
     Path: string;
+    { The coarse effect class of the operation, for bucket matching. abNone when
+      the producer does not know - and abNone is NEVER covered by a bucket grant,
+      so an unknown effect can never be silently authorised by a broad one. }
+    Bucket: TApprovalBucket;
   end;
 
   TApprovalOption = record
@@ -219,9 +236,25 @@ begin
   Result := True;
 end;
 
+function BucketCovers(AGrant, ASubject: TApprovalBucket): Boolean;
+begin
+  { abAny is the explicit "everything" bucket. abNone on the SUBJECT means the
+    producer does not know the effect class - which must NEVER be covered, or an
+    unknown operation would be silently authorised by a broad grant. }
+  if ASubject = abNone then
+    Exit(False);
+  if AGrant = abAny then
+    Exit(True);
+  Result := AGrant = ASubject;
+end;
+
 function ApprovalMatches(const ARule: TApprovalRule;
   const ASubject: TApprovalSubject): Boolean;
 begin
+  { A bucket rule is coarse by design: it ignores Ref and Params and matches on
+    the effect class alone, so one grant covers a whole kind of work. }
+  if ARule.Bucket <> abNone then
+    Exit(BucketCovers(ARule.Bucket, ASubject.Bucket));
   if (ARule.Ref = '') or (ARule.Ref <> ASubject.Ref) then
     Exit(False);
   if ARule.AnyParams then

@@ -19,7 +19,7 @@ uses
   Classes, SysUtils, SyncObjs,
   hildegard.helper.agent, hildegard.helper.llm,
   hildegard.helper.command.policy, hildegard.helper.approval,
-  hildegard.helper.command.paths,
+  hildegard.helper.command.paths, hildegard.helper.shell.effects,
   hildegard.helper.process, hildegard.helper.workspace.changes,
   hildegard.helper.workspace.snapshot, hildegard.helper.command.pure,
   hildegard.helper.utf8;
@@ -230,6 +230,8 @@ var
   Bin, Ref, PathRef, Op, Rel, FileRef, CmdName: string;
   CmdArgs: TCommandArgArray;
   Access: TPathAccessArray;
+  R2, W2: TStringArray;
+  Known2: Boolean;
 
   function OneParam(const AValue: string): TApprovalParams;
   begin
@@ -395,6 +397,25 @@ begin
       Result[High(Result)].Summary := Result[High(Result)].Summary + ' ' +
         Seg.Redirects[J].Operator + ' ' + Seg.Redirects[J].Target;
     Result[High(Result)].Subject.Ref := Ref;
+    { The bucket comes from the SAME effect classification the tier dispatches
+      with, so a broad grant can never disagree with what the command actually
+      does. AKnown False (tool/mcp/unknown) maps to abOpaque - deliberately not
+      abNone, so an opaque command still shows up in a bucket ask rather than
+      escaping one. }
+    begin
+      R2 := nil;
+      W2 := nil;
+      Known2 := False;
+      ComputeEffects(Bin, CmdArgs, R2, W2, Known2);
+      if not Known2 then
+        Result[High(Result)].Subject.Bucket := abOpaque
+      else if (Length(R2) > 0) and (Length(W2) > 0) then
+        Result[High(Result)].Subject.Bucket := abReadWrite
+      else if Length(W2) > 0 then
+        Result[High(Result)].Subject.Bucket := abWrite
+      else
+        Result[High(Result)].Subject.Bucket := abRead;
+    end;
     Result[High(Result)].Subject.Params :=
       Copy(CmdArgs, 0, Length(CmdArgs));
     AddOption(Result[High(Result)], 'once', 'allow once', False, nil, False);
