@@ -130,6 +130,7 @@ begin
   FRegistry.Register('seq', FCmd.Seq);
   FRegistry.Register('od', FCmd.Od);
   FRegistry.Register('sha256sum', FCmd.Sha256Sum);
+  FRegistry.Register('md5sum', FCmd.Md5Sum);
   FRegistry.Register('basename', FCmd.Basename);
   FRegistry.Register('dirname', FCmd.Dirname);
   FRegistry.Register('test', FCmd.TestCmd);

@@ -16,7 +16,7 @@ interface
 
 uses
   SysUtils, Classes, shell.types, shell.fs, hildegard.helper.shell.fs,
-  hildegard.helper.hash, changes.text;
+  hildegard.helper.hash, changes.text, hildegard.helper.utf8;
 
 type
   { The harness's normal tool resolution: (name, args JSON, inherited reason)
@@ -57,6 +57,7 @@ type
       local implementation because the repo has no MD5 (and should not need one
       elsewhere - this is for compatibility with scripts that ask for it). }
     function Sha256Sum(const ACall: TShellCall): TShellResult;
+    function Md5Sum(const ACall: TShellCall): TShellResult;
     function Grep(const ACall: TShellCall): TShellResult;
     function Ls(const ACall: TShellCall): TShellResult;
     function Mkdir(const ACall: TShellCall): TShellResult;
@@ -127,17 +128,18 @@ type
   end;
 
 const
-  CommandSpecs: array[0..36] of TCommandSpec = (
+  CommandSpecs: array[0..37] of TCommandSpec = (
     (Name: 'echo'; Options: '-n'),
-    (Name: 'head'; Options: '-nN'),
-    (Name: 'tail'; Options: '-nN'),
-    (Name: 'wc'; Options: '-lwc'),
+    (Name: 'head'; Options: '-nNc'),
+    (Name: 'tail'; Options: '-nNc'),
+    (Name: 'wc'; Options: '-lwcm'),
     (Name: 'diff'; Options: '-quc'),
     (Name: 'pwd'; Options: ''),
     (Name: 'stat'; Options: ''),
     (Name: 'seq'; Options: ''),
     (Name: 'od'; Options: '-Ancxtd'),
     (Name: 'sha256sum'; Options: ''),
+    (Name: 'md5sum'; Options: ''),
     (Name: 'grep'; Options: '-nivlcFEGrm'),
     (Name: 'sed'; Options: '-nErei'),
     (Name: 'awk'; Options: '-F'),
@@ -154,7 +156,7 @@ const
     { -k, -t and -o take a value, attached (-k2, -t:) or separate. The letters
       cover the attached form; the separate form is admitted by the same list. }
     (Name: 'sort'; Options: '-rufnhMkbtsco'),
-    (Name: 'uniq'; Options: '-cdu'),
+    (Name: 'uniq'; Options: '-cdui'),
     (Name: 'cat'; Options: ''),
     (Name: 'mv'; Options: ''),
     (Name: 'cp'; Options: ''),
@@ -378,15 +380,20 @@ end;
 
 function TBuiltinCommands.Head(const ACall: TShellCall): TShellResult;
 var
-  I, N, Start: Integer;
+  I, N, Start, ByteCount: Integer;
+  ByBytes: Boolean;
   Args: TStringArray;
   Data, E, Text: string;
   Lines: TStringArray;
 begin
   N := DefaultLines;
+  ByteCount := 0;
+  ByBytes := False;
   I := 0;
   while I <= High(ACall.Args) do
   begin
+    { -c counts BYTES, not lines: the usual way to peek at a fixed slice of a
+      large or binary file without reading all of it. }
     if ACall.Args[I] = '-n' then
     begin
       if I = High(ACall.Args) then
@@ -394,6 +401,16 @@ begin
       N := StrToIntDef(ACall.Args[I + 1], -1);
       if N < 0 then
         Exit(Usage('head: invalid number of lines: ' + ACall.Args[I + 1]));
+      Inc(I, 2);
+    end
+    else if ACall.Args[I] = '-c' then
+    begin
+      if I = High(ACall.Args) then
+        Exit(Usage('head: option requires an argument -- c'));
+      ByteCount := StrToIntDef(ACall.Args[I + 1], -1);
+      if ByteCount < 0 then
+        Exit(Usage('head: invalid number of bytes: ' + ACall.Args[I + 1]));
+      ByBytes := True;
       Inc(I, 2);
     end
     else if IsNumericOption(ACall.Args[I], '-nN') then
@@ -424,21 +441,41 @@ begin
   Lines := LinesOf(Text);
   if N > Length(Lines) then
     N := Length(Lines);
+  if ByBytes then
+  begin
+    if ByteCount > Length(Text) then
+      ByteCount := Length(Text);
+    Exit(ShellResultOk(Utf8Prefix(Text, ByteCount)));
+  end;
   Result := ShellResultOk(JoinLines(Lines, 0, N));
 end;
 
 function TBuiltinCommands.Tail(const ACall: TShellCall): TShellResult;
 var
-  I, N, Start: Integer;
+  I, N, Start, ByteCount: Integer;
+  ByBytes: Boolean;
   Args: TStringArray;
   Data, E, Text: string;
   Lines: TStringArray;
 begin
   N := DefaultLines;
+  ByteCount := 0;
+  ByBytes := False;
   I := 0;
   while I <= High(ACall.Args) do
   begin
-    if ACall.Args[I] = '-n' then
+    { -c takes the last N BYTES. }
+    if ACall.Args[I] = '-c' then
+    begin
+      if I = High(ACall.Args) then
+        Exit(Usage('tail: option requires an argument -- c'));
+      ByteCount := StrToIntDef(ACall.Args[I + 1], -1);
+      if ByteCount < 0 then
+        Exit(Usage('tail: invalid number of bytes: ' + ACall.Args[I + 1]));
+      ByBytes := True;
+      Inc(I, 2);
+    end
+    else if ACall.Args[I] = '-n' then
     begin
       if I = High(ACall.Args) then
         Exit(Usage('tail: option requires an argument -- n'));
@@ -478,6 +515,14 @@ begin
   Start := Length(Lines) - N;
   if Start < 0 then
     Start := 0;
+  if ByBytes then
+  begin
+    if ByteCount > Length(Text) then
+      ByteCount := Length(Text);
+    { Utf8From moves forward to a sequence start, so a byte slice never begins
+      mid-character. }
+    Exit(ShellResultOk(Utf8From(Text, Length(Text) - ByteCount)));
+  end;
   Result := ShellResultOk(JoinLines(Lines, Start, N));
 end;
 
@@ -757,16 +802,54 @@ begin
   Result := ShellResultOk(OutText);
 end;
 
+function TBuiltinCommands.Md5Sum(const ACall: TShellCall): TShellResult;
+var
+  I: Integer;
+  Data, E, OutText, Dig: string;
+  Any: Boolean;
+begin
+  { Same shape as sha256sum. md5sum exists for script compatibility - published
+    checksums and a great many pipelines ask for it - and refusing it sent the
+    whole script out of the gated tier. It is NOT a security hash. }
+  Any := False;
+  OutText := '';
+  for I := 0 to High(ACall.Args) do
+  begin
+    if (ACall.Args[I] = '-') then
+    begin
+      Dig := Md5Hex(ACall.Stdin);
+      OutText := OutText + Dig + '  -' + #10;
+      Any := True;
+      Continue;
+    end;
+    if not FFs.ReadFile(FFs.Resolve(ACall.Cwd, ACall.Args[I]), Data, E) then
+    begin
+      OutText := OutText + 'md5sum: ' + ACall.Args[I] + ': ' + E + #10;
+      Result := Failure(OutText, 2);
+      Exit;
+    end;
+    Dig := Md5Hex(Data);
+    OutText := OutText + Dig + '  ' + ACall.Args[I] + #10;
+    Any := True;
+  end;
+  if not Any then
+  begin
+    Dig := Md5Hex(ACall.Stdin);
+    OutText := Dig + '  -' + #10;
+  end;
+  Result := ShellResultOk(OutText);
+end;
+
 function TBuiltinCommands.Wc(const ACall: TShellCall): TShellResult;
 var
-  I, J, P, L, W, C, TL, TW, TC: Integer;
-  ShowL, ShowW, ShowC: Boolean;
+  I, J, P, L, W, C, TL, TW, TC, M, TM: Integer;
+  ShowL, ShowW, ShowC, ShowM: Boolean;
   Args, Fields: TStringArray;
   Data, E, Text, Line: string;
   PerFile: TStringList;
   AnyFlag: Boolean;
 
-  function Format(const AL, AW, AC: Integer; const AName: string): string;
+  function Format(const AL, AW, AC, AM: Integer; const AName: string): string;
   var
     S: string;
   begin
@@ -783,15 +866,33 @@ var
       if S <> '' then S := S + ' ';
       S := S + IntToStr(AC);
     end;
+    if ShowM then
+    begin
+      if S <> '' then S := S + ' ';
+      S := S + IntToStr(AM);
+    end;
     if AName <> '' then
       S := S + ' ' + AName;
     Result := S;
+  end;
+
+  { Characters, not bytes: every byte that is not a UTF-8 continuation starts
+    one character. }
+  function CharsOf(const S: string): Integer;
+  var
+    K: Integer;
+  begin
+    Result := 0;
+    for K := 1 to Length(S) do
+      if (Ord(S[K]) and $C0) <> $80 then
+        Inc(Result);
   end;
 
 begin
   ShowL := False;
   ShowW := False;
   ShowC := False;
+  ShowM := False;
   AnyFlag := False;
   I := 0;
   while I <= High(ACall.Args) do
@@ -805,6 +906,7 @@ begin
           'l': ShowL := True;
           'w': ShowW := True;
           'c': ShowC := True;
+          'm': ShowM := True;
         end;
       Inc(I);
     end
@@ -829,10 +931,11 @@ begin
     TL := 0;
     TW := 0;
     TC := 0;
+    TM := 0;
     if Length(Args) = 0 then
     begin
       CountText(ACall.Stdin, L, W, C);
-      Result := ShellResultOk(Format(L, W, C, '') + #10);
+      Result := ShellResultOk(Format(L, W, C, CharsOf(ACall.Stdin), '') + #10);
       Exit;
     end;
     for I := 0 to High(Args) do
@@ -846,10 +949,12 @@ begin
       Inc(TL, L);
       Inc(TW, W);
       Inc(TC, C);
-      PerFile.Add(Format(L, W, C, Args[I]));
+      M := CharsOf(Data);
+      Inc(TM, M);
+      PerFile.Add(Format(L, W, C, M, Args[I]));
     end;
     if Length(Args) > 1 then
-      PerFile.Add(Format(TL, TW, TC, 'total'));
+      PerFile.Add(Format(TL, TW, TC, TM, 'total'));
     Line := '';
     for I := 0 to PerFile.Count - 1 do
       Line := Line + PerFile[I] + #10;

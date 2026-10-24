@@ -190,6 +190,8 @@ begin
     Result := FCmd.Od(Call)
   else if AName = 'sha256sum' then
     Result := FCmd.Sha256Sum(Call)
+  else if AName = 'md5sum' then
+    Result := FCmd.Md5Sum(Call)
   else if AName = 'diff' then
     Result := FCmd.Diff(Call)
   else if AName = 'pwd' then
@@ -249,9 +251,17 @@ begin
     RunCmd('head', [], 'x' + #10 + 'y' + #10).Stdout);
   AssertEquals('head usage', 2, RunCmd('head', ['-n']).ExitCode);
   AssertEquals('head missing', 1, RunCmd('head', ['nope']).ExitCode);
+  { -c takes a byte slice, not lines. }
+  AssertEquals('head -c', 'alp', RunCmd('head', ['-c', '3', 'a.txt']).Stdout);
+  AssertEquals('tail -c', 'eta' + #10, RunCmd('tail', ['-c', '4', 'a.txt']).Stdout);
+  { More bytes than the file has is the whole file, not an error. }
+  AssertEquals('head -c over', 'alpha' + #10 + 'beta' + #10,
+    RunCmd('head', ['-c', '999', 'a.txt']).Stdout);
 end;
 
 procedure TShellCommandsTest.TestWc;
+var
+  E: string;
 begin
   AssertEquals('lines', '2 a.txt' + #10, RunCmd('wc', ['-l', 'a.txt']).Stdout);
   AssertEquals('bytes', '11 a.txt' + #10, RunCmd('wc', ['-c', 'a.txt']).Stdout);
@@ -260,6 +270,14 @@ begin
   AssertEquals('stdin', '1 1 2' + #10, RunCmd('wc', [], 'x' + #10).Stdout);
   AssertEquals('total', '2 a.txt' + #10 + '2 b.txt' + #10 + '4 total' + #10,
     RunCmd('wc', ['-l', 'a.txt', 'b.txt']).Stdout);
+  { -m counts CHARACTERS, not bytes: a multibyte file must not report its byte
+    length. 'é' is 2 bytes, 1 character. }
+  FFs.WriteFile(P('x.txt'), #$C3#$A9 + #10, False, E);
+  AssertEquals('wc -m counts chars', '2 x.txt' + #10,
+    RunCmd('wc', ['-m', 'x.txt']).Stdout);
+  { ...and -c still reports the bytes, so the two differ as they should. }
+  AssertEquals('wc -c counts bytes', '3 x.txt' + #10,
+    RunCmd('wc', ['-c', 'x.txt']).Stdout);
 end;
 
 procedure TShellCommandsTest.TestDiff;
@@ -330,6 +348,11 @@ begin
   AssertTrue('empty digest: ' + R.Stdout,
     Pos('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
       LowerCase(R.Stdout)) > 0);
+  { md5sum: ground truth verified against `printf 'abc' | md5`, since a digest
+    test that only checks its own output proves nothing. }
+  R := RunCmd('md5sum', [], 'abc');
+  AssertEquals('md5 of abc',
+    '900150983cd24fb0d6963f7d28e17f72  -' + #10, R.Stdout);
   { Missing file is an error, not an empty digest. }
   R := RunCmd('sha256sum', ['missing.txt']);
   AssertEquals('missing exit', 2, R.ExitCode);

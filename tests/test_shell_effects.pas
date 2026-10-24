@@ -212,6 +212,7 @@ begin
   AssertTrue('wc', Known('wc', []));
   AssertTrue('od', Known('od', []));
   AssertTrue('sha256sum', Known('sha256sum', []));
+  AssertTrue('md5sum', Known('md5sum', []));
   AssertTrue('grep', Known('grep', []));
   AssertTrue('sed', Known('sed', []));
   AssertTrue('awk', Known('awk', []));

@@ -160,7 +160,7 @@ begin
     Exit;
 
   if (AName = 'cat') or (AName = 'wc') or (AName = 'od') or
-     (AName = 'sha256sum') then
+     (AName = 'sha256sum') or (AName = 'md5sum') then
   begin
     AddFiles(AReads, AName, AArgs, 0);
     Exit;
