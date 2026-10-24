@@ -107,6 +107,7 @@ type
     procedure TestCommandTimeoutIsClampedToMax;
     procedure TestTimeoutIsHonouredWithoutACap;
     procedure TestHtmlEntitiesAreDecoded;
+    procedure TestBucketOptionIsOfferedForTheMatchingClass;
     procedure TestRedirectSummaryAndFileAsk;
     procedure TestRedirectReadAsk;
     procedure TestFdDuplicateIsNotAFileAsk;
@@ -1064,6 +1065,41 @@ begin
     AssertTrue('below cap', Tool.Run(
       '{"command":"echo hi","reason":"r","timeout_ms":2000}', R, E));
     AssertEquals('requested kept', 2000, FExecutor.LastTimeoutMs);
+  finally
+    Tool.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestBucketOptionIsOfferedForTheMatchingClass;
+var
+  Tool: TCommandTool;
+  Asks: TApprovalAskArray;
+  I: Integer;
+  Found: Boolean;
+begin
+  Tool := BuildToolWithRoot('/tmp/nowhere');
+  try
+    { grep reads, so the READ bucket is offered and the WRITE bucket is not.
+      Offering both would be clutter and would invite granting more than asked. }
+    Asks := Tool.ApprovalAsks('{"command":"grep x a.txt","reason":"r"}');
+    AssertTrue('an ask exists', Length(Asks) > 0);
+    Found := False;
+    for I := 0 to High(Asks[0].Options) do
+    begin
+      AssertFalse('no write bucket on a read command',
+        Asks[0].Options[I].Key = 'bucket_write');
+      if Asks[0].Options[I].Key = 'bucket_read' then
+      begin
+        Found := True;
+        { A bucket rule must carry NO Ref - that is what makes it coarse. }
+        AssertEquals('bucket rule has no ref', '',
+          Asks[0].Options[I].Rule.Ref);
+        AssertEquals('and carries the bucket', Ord(abRead),
+          Ord(Asks[0].Options[I].Rule.Bucket));
+        AssertTrue('and persists', Asks[0].Options[I].Persists);
+      end;
+    end;
+    AssertTrue('the read bucket is offered', Found);
   finally
     Tool.Free;
   end;

@@ -240,6 +240,25 @@ var
     Result[0] := AValue;
   end;
 
+  { A BUCKET option: a coarse grant that ignores Ref/Params and covers a whole
+    effect class. Separate from AddOption because a bucket rule must leave Ref
+    empty - setting it would make the rule narrow again. }
+  procedure AddBucketOption(var AAsk: TApprovalAsk; const AKey, ACaption: string;
+    ABucket: TApprovalBucket);
+  var
+    Opt: TApprovalOption;
+  begin
+    Opt := Default(TApprovalOption);
+    Opt.Key := AKey;
+    Opt.Caption := ACaption;
+    Opt.Persists := True;
+    Opt.Rule := DefaultApprovalRule(aeAllow);
+    Opt.Rule.Ref := '';
+    Opt.Rule.Bucket := ABucket;
+    SetLength(AAsk.Options, Length(AAsk.Options) + 1);
+    AAsk.Options[High(AAsk.Options)] := Opt;
+  end;
+
   procedure AddOption(var AAsk: TApprovalAsk; const AKey, ACaption: string;
     APersists: Boolean; const AParams: TApprovalParams; AAny: Boolean);
   var
@@ -428,6 +447,26 @@ begin
       AddOption(Result[High(Result)], 'prefix',
         'always ' + Bin + ' ' + CmdArgs[0] + ' ...', True,
         OneParam(CmdArgs[0]), True);
+    { A coarse grant, offered only for the class THIS command belongs to. Showing
+      both on every dialog would be clutter, and offering a bucket the command
+      does not need invites granting more than asked. "Allow all reads" is what an
+      operator wants on the fifth grep of a session; the granular options remain
+      for when they do not. }
+    case Result[High(Result)].Subject.Bucket of
+      abRead:
+        AddBucketOption(Result[High(Result)], 'bucket_read',
+          'always allow READS (any command that only reads)', abRead);
+      abWrite:
+        AddBucketOption(Result[High(Result)], 'bucket_write',
+          'always allow WRITES (any command that writes)', abWrite);
+      abReadWrite:
+        AddBucketOption(Result[High(Result)], 'bucket_rw',
+          'always allow READS AND WRITES', abReadWrite);
+      abOpaque, abNone, abAny:
+        { No bucket: an opaque command has no known class, so a coarse grant
+          would be a guess. }
+        ;
+    end;
     StampFocus(Result[High(Result)], I);
   end;
   { A shell redirect is a file effect: here-docs and fd duplications are not
