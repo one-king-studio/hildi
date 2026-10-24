@@ -38,6 +38,8 @@ type
     procedure TestThePromptDescribesTheBoardAndTheTaskList;
     procedure TestThePromptNamesTheModeAndItsOpposite;
     procedure TestThePromptAsksForProtocolsToBePinnedInMultiMode;
+    procedure TestThePromptSaysTheBoardIsNotPersistence;
+    procedure TestThePromptDistinguishesPeersFromSubagents;
     procedure TestAnUnknownModeDoesNotClaimYouAreAlone;
   end;
 
@@ -204,6 +206,34 @@ begin
     be shared. }
   AssertTrue('does not say alone: ' + P, Pos('ALONE', P) = 0);
   AssertTrue('says it may be shared', Pos('may be shared', P) > 0);
+end;
+
+procedure TCoordinationTest.TestThePromptSaysTheBoardIsNotPersistence;
+var
+  P: string;
+begin
+  { The correction the design doc exists to make: the board is frictionless, so
+    it quietly replaces the durable record. The rule must ride every request, not
+    only live in a document. }
+  P := CoordinationPromptFor(cmSingle, crOnlyRuntime);
+  AssertTrue('names coordination: ' + P, Pos('COORDINATION', P) > 0);
+  AssertTrue('names persistence', Pos('persistence', P) > 0);
+  AssertTrue('says artifacts belong in a FILE', Pos('FILE', P) > 0);
+  AssertTrue('says it is pruned', Pos('pruned', P) > 0);
+  AssertTrue('and invisible to the repo', Pos('repo', P) > 0);
+end;
+
+procedure TCoordinationTest.TestThePromptDistinguishesPeersFromSubagents;
+var
+  P: string;
+begin
+  { A subagent has a parent that decides; a peer is an equal. Conflating them
+    applies consensus rules where an owner already exists. }
+  P := CoordinationPromptFor(cmMulti, crPeerRuntime);
+  AssertTrue('names peer sessions: ' + P, Pos('PEER SESSIONS', P) > 0);
+  AssertTrue('says peers are equals', Pos('equals', P) > 0);
+  AssertTrue('names subagent as the other thing', Pos('subagent', P) > 0);
+  AssertTrue('and says a subagent has a parent', Pos('parent', P) > 0);
 end;
 
 initialization

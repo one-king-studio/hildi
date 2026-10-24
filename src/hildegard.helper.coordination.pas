@@ -27,10 +27,23 @@ type
   TCoordinationMode = (cmSingle, cmMulti);
 
   { Why we believe the mode, so the prompt can be honest about it rather than
-    asserting a fact it cannot support. }
+    asserting a fact it cannot support.
+
+    The distinct reasons matter because they call for DIFFERENT behaviour even
+    though two of them yield the same mode:
+
+      crSpawnedChild  - a parent exists and decides. Coordination here is
+                        dispatch; the child does not negotiate with equals.
+      crPeerRuntime   - another INDEPENDENT session is live: the operator opened
+                        another instance in this workspace. Peers are equals,
+                        nobody decides for anyone, and a dead peer has no owner -
+                        which is why liveness (not lineage) must be load-bearing.
+
+    "Multi-agent" in this design means crPeerRuntime. Treating a spawned child as
+    a peer would apply consensus rules where an owner already exists. }
   TCoordinationReason = (
     crOnlyRuntime,     // exactly one live runtime in this workspace
-    crPeerRuntime,     // another live runtime shares this workspace
+    crPeerRuntime,     // another INDEPENDENT session shares this workspace
     crSpawnedChild,    // this session was spawned by another (depth > 0)
     crUnknown);        // no store, or the query failed - do not guess
 
@@ -65,6 +78,16 @@ const
     + 'context; a status does not.'
     + LineEnding
     + '- Before reporting done, check that your check could have failed.'
+    + LineEnding
+    + '- The board is for COORDINATION, not persistence. An artifact that must '
+    + 'survive a fresh clone - a spec, a decision worth keeping, the docs a '
+    + 'project requires - belongs in a FILE in the workspace. The board is what '
+    + 'is true now; it is pruned, and it is invisible to anyone reading the repo.'
+    + LineEnding + LineEnding
+    + 'Here, "more than one agent" means PEER SESSIONS: the operator opening '
+    + 'another instance in the same workspace. Peers are equals - nobody decides '
+    + 'for anyone. (A subagent is a different thing: it has a parent that decides, '
+    + 'and coordination there is dispatch, not negotiation.)'
     + LineEnding + LineEnding
     + 'If more than one agent is working here, agree protocols BEFORE you start '
     + 'and PIN them to the board as a `decision` under the topic `protocols`: '
