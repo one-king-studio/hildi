@@ -9,7 +9,7 @@ program hildegard_helper_tests;
 {$mode delphi}{$H+}
 
 uses
-  {$ifdef unix}cthreads, cwstring,{$endif}   // cthreads first; cwstring for Unicode
+  {$ifdef unix}cthreads, cwstring, BaseUnix,{$endif}   // cthreads first; cwstring for Unicode
   SysUtils, fpcunit, testregistry, consoletestrunner,
   hildegard.helper.session.runtime,
   test_hildegard_helper, test_store, test_llm, test_agent, test_ansi, test_env,
@@ -59,6 +59,16 @@ var
   I: Integer;
   Args: array of string;
 begin
+  {$ifdef unix}
+  { A child that closes a pipe must not kill the suite with SIGPIPE. The leak
+    test binary writes far more (heaptrc walks every allocation), so a spawned
+    runtime whose pipe has already gone away terminated the whole process with
+    signal 13 - and only when the suites ran in isolation, which is the shape
+    scripts/test-parallel.sh uses. Ignoring it turns a dead process into an EPIPE
+    the writing call can report, like the sockets already do via SO_NOSIGPIPE. }
+  fpSignal(SIGPIPE, SignalHandler(SIG_IGN));
+  {$endif}
+
   { When the client spawns a runtime it re-executes this binary with the
     runtime argv; run the runtime instead of the test suite. }
   if (ParamCount >= 2) and (ParamStr(1) = '--session-runtime') then
