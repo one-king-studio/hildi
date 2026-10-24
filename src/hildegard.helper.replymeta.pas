@@ -214,15 +214,11 @@ var
       if C <= 0 then
         Continue;
       K := LowerCase(Trim(Copy(L, 1, C - 1)));
-      V := Trim(Copy(L, C + 1, MaxInt));
       if (K = 'title') or (K = 'keywords') then
       begin
         Result := True;
         Exit;
       end;
-      { `keywords:` followed by a `- item` list carries its value below. }
-      if (K <> '') and (V = '') and (K = 'keywords') then
-        Exit(True);
     end;
   end;
 
