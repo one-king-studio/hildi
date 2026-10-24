@@ -386,6 +386,14 @@ clean:
 WORKTREES  := .worktrees
 ACTIVE     ?= $(shell cat $(WORKTREES)/ACTIVE 2>/dev/null)
 
+# Create a BUILDABLE worktree. Never call `git worktree add` directly for this
+# project: a bare checkout has no deps/ and no build/, so it cannot compile, and
+# the integration suites then fail ~36 tests for a reason unrelated to the code.
+#   make worktree-add NAME=feature WT_ARGS="-b agent/feature"
+worktree-add:
+	@test -n "$(NAME)" || { echo "usage: make worktree-add NAME=<dir> [WT_ARGS='-b <branch>']"; exit 2; }
+	@scripts/worktree-add.sh $(WORKTREES)/$(NAME) $(WT_ARGS)
+
 agents:
 	@echo "playgrounds (.worktrees/):"
 	@for d in $(WORKTREES)/*/; do \
