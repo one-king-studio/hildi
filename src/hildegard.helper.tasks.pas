@@ -36,11 +36,21 @@ const
   { A blocked card is worth surfacing in the tail after this long. }
   StaleBlockMinutes = 30;
 
-  { How long a claim may go unrenewed before another turn boundary reclaims it.
-    Deliberately generous: a claim is renewed at every turn boundary, so this only
-    fires for a session that genuinely stopped. Longer than the slowest plausible
-    turn, shorter than the interval at which a human notices a stuck card. }
+  { How long a claim may go unrenewed before it is recovered.
+
+    Narrowed: this now answers only "has a LIVE session stopped working on
+    this?" - abandonment. A claim whose holder has no live runtime row is
+    reclaimed immediately instead, because death is observable and no longer has
+    to be inferred from elapsed time. Renewal happens on the runtime heartbeat,
+    not the turn boundary, so a long think no longer looks like abandonment. }
   DefaultClaimLeaseSec = 30 * 60;
+
+  { How long a runtime row may go un-hearted before the session is presumed gone.
+
+    Generous relative to a tick (seconds) and short relative to a human's
+    attention: a crashed session's cards should become reclaimable within a
+    minute or two, not the half hour an abandonment lease would impose. }
+  DefaultRuntimeExpirySec = 90;
   { The explanation of the task list rides the coordination block in the system
     prompt (hildegard.helper.coordination), which teaches the board and the task
     list together plus the protocol rules and the detected mode. It lives there

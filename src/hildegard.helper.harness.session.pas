@@ -311,6 +311,7 @@ procedure THarnessSession.NoteTurnOpened(ATurnId: Int64);
 var
   ErrIgnored: string;
   Ignored: Integer;
+  StoreErrIgnored: TStoreError;
 begin
   if FRecorder <> nil then
     FRecorder.SetTurn(ATurnId);
@@ -331,13 +332,20 @@ begin
   begin
     FTaskStore.Prune(FView.WorkspaceId, DefaultTaskKeepDone,
       DefaultTaskDoneMaxAgeSec, Ignored, ErrIgnored);
-    { Claim recovery has two halves and both belong here. Renewing says this
-      session is alive - opening a turn IS the heartbeat, so no background timer
-      is needed. Reclaiming releases cards whose holders stopped. Without this
-      pair the store's recovery is dead code, which is how the gap opened in the
-      first place. }
+    { Claim recovery has three parts now, and the boundary is where two of them
+      belong. The heartbeat (runtime tick) keeps a live session looking alive -
+      NOT the turn boundary, which was only ever a proxy. Expiry removes runtime
+      rows whose process stopped heartbeating, so a crash cannot leave a session
+      looking present forever. Reclaim then releases two different things: a live
+      session that stopped working (the lease), and a session that is simply
+      gone (no runtime row). Without all three the store's recovery is dead code,
+      which is how the original gap opened. }
     FTaskStore.RenewClaims(FView.WorkspaceId, FView.SessionId, Ignored,
       ErrIgnored);
+    if FView.Store <> nil then
+      FView.Store.ExpireRuntimes(
+        Round((Now - EncodeDate(1970, 1, 1)) * 86400) - DefaultRuntimeExpirySec,
+        Ignored, StoreErrIgnored);
     FTaskStore.ReclaimStale(FView.WorkspaceId, DefaultClaimLeaseSec, Ignored,
       ErrIgnored);
   end;

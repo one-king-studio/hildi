@@ -63,6 +63,7 @@ type
     procedure TestRuntimeRowRoundTrip;
     procedure TestRuntimeRowUnknownSessionFails;
     procedure TestClearRuntime;
+    procedure TestExpireRuntimes;
     procedure TestListRuntimes;
     procedure TestMcpServerMigrationIsAdditive;
     procedure TestSaveMcpServerUpserts;
@@ -1143,6 +1144,40 @@ begin
     Row.SessionId := 'no-such-session';
     AssertFalse('unknown session', S.RegisterRuntime(Row, Err));
     AssertEquals('not found', Ord(seNotFound), Ord(Err.Code));
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestExpireRuntimes;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws: Integer;
+  OldSid, NewSid: string;
+  Row: TSessionRuntimeRow;
+  Expired: Integer;
+begin
+  { A crashed session never deregisters, so its row lives forever and the
+    liveness check in ReclaimStale would never fire for the case it matters most.
+    Expiry is the other half. }
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, OldSid, Err);
+    S.CreateSession(Ws, NewSid, Err);
+    Row := Default(TSessionRuntimeRow);
+    Row.SessionId := OldSid;
+    Row.UpdatedAt := 1000;      // long ago
+    AssertTrue('old', S.RegisterRuntime(Row, Err));
+    Row.SessionId := NewSid;
+    Row.UpdatedAt := 9000000000;  // far future, so never stale in this test
+    AssertTrue('new', S.RegisterRuntime(Row, Err));
+
+    AssertTrue('expire', S.ExpireRuntimes(5000, Expired, Err));
+    AssertEquals('only the stale one', 1, Expired);
+    AssertFalse('the old row is gone', S.LoadRuntime(OldSid, Row, Err));
+    AssertTrue('the fresh row survives', S.LoadRuntime(NewSid, Row, Err));
   finally
     S.Free;
   end;

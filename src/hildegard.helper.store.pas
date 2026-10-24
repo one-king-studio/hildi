@@ -307,6 +307,15 @@ type
     { Every runtime row, oldest session first. }
     function ListRuntimes(out ARows: TSessionRuntimeRowArray;
       out AError: TStoreError): Boolean;
+    { Delete runtime rows whose updated_at is older than ACutoffEpochSec.
+
+      The heartbeat makes presence observable, but a row only disappears on a
+      CLEAN shutdown - a crash leaves it forever, so the liveness check in
+      ReclaimStale would never fire for the case it matters most. Expiry is the
+      other half: without it, "a dead session's claims are reclaimed" is only
+      true of sessions that never registered at all. Returns how many went. }
+    function ExpireRuntimes(ACutoffEpochSec: Int64; out AExpired: Integer;
+      out AError: TStoreError): Boolean;
 
     { The raw handle, for an adapter that owns its own tables (the change log).
       Narrow on purpose: it is for units that need a SQL statement the store does
@@ -3853,6 +3862,38 @@ begin
         ARows[N] := Row;
         Inc(N);
       end;
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.ExpireRuntimes(ACutoffEpochSec: Int64;
+  out AExpired: Integer; out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  { The other half of liveness. Without this, a CRASHED session keeps its runtime
+    row forever, so ReclaimStale's "has no live runtime" test never fires for the
+    case it matters most - only for a session that never registered at all. }
+  AError := OkError;
+  AExpired := 0;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb,
+      'DELETE FROM session_runtimes WHERE updated_at < ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not expire runtimes', DbErrorText));
+      Stmt.BindInt64(1, Int64(ACutoffEpochSec));
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not expire runtimes', DbErrorText));
+      AExpired := sqlite3_changes(FDb);
     finally
       Stmt.Free;
     end;
