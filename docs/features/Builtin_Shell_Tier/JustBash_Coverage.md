@@ -106,7 +106,7 @@ or the isolation gate breaks.
 
 | Command(s) | Why |
 | --- | --- |
-| `curl` | network — out of scope by design |
+| `curl` | **reconsidered — see the decision matrix**; a builtin is more controllable than the binary |
 | `python3`, `js-exec`, `bash` | interpreters defeat the point of a sandbox |
 | `tar`, `gzip`, `compression` | archive formats, no agent need seen |
 | `sqlite3` | we have the store |
@@ -141,9 +141,14 @@ evidence we have is one session's transcript, and it says: `perl`, `python3`,
 
 ## Deliberately not implemented
 
-`curl` (network), `python3`/`js-exec`/`bash` (interpreters defeat the sandbox),
-`tar`/`gzip` (archive formats), `sqlite3` (we have the store), `history`/`alias`
-(shell state we do not model), and just-bash's product-specific helpers.
+`python3`/`js-exec`/`bash` (interpreters defeat the sandbox), `tar`/`gzip`
+(archive formats), `sqlite3` (we have the store), `history`/`alias` (shell state
+we do not model), and just-bash's product-specific helpers.
+
+`curl` is **not** on this list any more — see
+[`Shell_Coverage_Decisions.md`](Shell_Coverage_Decisions.md) for why a builtin
+version is more controllable than the binary it replaces, and what it requires
+first (a network effect class).
 
 ## Caveat
 
