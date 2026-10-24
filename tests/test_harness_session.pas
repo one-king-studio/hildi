@@ -274,6 +274,8 @@ var
   Err: string;
   Id, Renewed: Integer;
   Now2: Int64;
+  Row: TSessionRuntimeRow;
+  SE: TStoreError;
 begin
   { The wiring test, and it has to go through the BOUNDARY rather than the store:
     RenewClaims is tested directly in test_tasks_store, so calling it here would
@@ -281,6 +283,16 @@ begin
   Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
   AssertTrue('opened: ' + Err, Session <> nil);
   try
+    { Liveness is now the authority: a claim whose holder has no runtime row is
+      reclaimed immediately. This test is about RENEWAL, so the holding session
+      must be present for renewal to be what gets measured. }
+    Row := Default(TSessionRuntimeRow);
+    Row.SessionId := Session.View.SessionId;
+    Row.Pid := 1;
+    Row.SocketPath := '/tmp/x';
+    Row.StartedAt := Round((Now - EncodeDate(1970, 1, 1)) * 86400);
+    Row.UpdatedAt := Row.StartedAt;
+    AssertTrue('runtime row', Session.View.Store.RegisterRuntime(Row, SE));
     Tasks := TSqliteTaskStore.Create(Session.View.Store);
     Card := Default(TTaskCard);
     Card.WorkspaceId := Session.View.WorkspaceId;

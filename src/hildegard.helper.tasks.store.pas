@@ -780,11 +780,22 @@ begin
   Cutoff := Round((Now - EncodeDate(1970, 1, 1)) * 86400) - AMaxAgeSec;
   FStore.Lock.Acquire;
   try
+    { Two ways a claim is reclaimable, and they answer DIFFERENT questions:
+
+      1. The holder is DEAD - no live runtime row. That is an existence fact we
+         can now observe, so it needs no waiting: reclaim immediately.
+      2. The holder is ALIVE but has not renewed within the lease. That is
+         abandonment, an intent fact we must still infer from elapsed time.
+
+      Before the heartbeat existed, (1) was unobservable and the lease carried
+      both jobs - which made a session that simply THOUGHT for longer than the
+      lease lose its card. Liveness fixes that without weakening (2). }
     if not Prepare('UPDATE task_cards SET status = ?, claimed_by = '''', ' +
       'claimed_at = 0, status_at = ?, updated_at = ?, ' +
       'done_note = ''claim recovered from '' || claimed_by || ' +
       ''' after it went stale'' WHERE workspace_id = ? AND status = ? ' +
-      'AND claimed_at < ?', Stmt, AError) then
+      'AND ( claimed_at < ? OR claimed_by NOT IN ' +
+      '(SELECT session_id FROM session_runtimes) )', Stmt, AError) then
       Exit;
     try
       sqlite3_bind_int(Stmt, 1, Ord(tsOpen));

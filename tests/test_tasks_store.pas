@@ -9,7 +9,8 @@ interface
 uses
   Classes, SysUtils, fpcunit, testregistry,
   hildegard.helper.store, hildegard.helper.tasks,
-  hildegard.helper.tasks.store, hildegard.helper.sqlite;
+  hildegard.helper.tasks.store, hildegard.helper.sqlite,
+  hildegard.helper.session;
 
 type
   TTaskStoreTest = class(TTestCase)
@@ -69,6 +70,9 @@ type
     procedure TestReclaimLeavesAFreshClaimAlone;
     procedure TestReclaimRecordsWhyInTheDoneNote;
     procedure TestReclaimNeverTouchesLiveOrFinishedCards;
+    { Liveness is the authority: a claim whose holder has no live runtime is
+      reclaimed IMMEDIATELY, without waiting out the lease. }
+    procedure TestADeadSessionsClaimIsReclaimedWithoutWaitingForTheLease;
     { List's filters and ordering: the plan's Phase 1, exercised directly. }
     procedure TestListFiltersByStatus;
     procedure TestListFiltersByMine;
@@ -766,17 +770,37 @@ var
   Reclaimed: Integer;
   Back: TTaskCard;
   Found: Boolean;
+  Row: TSessionRuntimeRow;
+  SE: TStoreError;
+  Sid: string;
+  Ws: Integer;
 begin
   { The half that makes the threshold mean something. A running agent's claim is
-    untouched, or two agents would fight over every card. }
+    untouched, or two agents would fight over every card.
+
+    The holder must have a LIVE RUNTIME ROW: liveness is now the authority, so a
+    claim whose session has no runtime is reclaimed immediately regardless of age.
+    This test is about the lease (abandonment), so the holder has to actually be
+    present for the lease to be the thing under test. }
+  AssertTrue('workspace', FStore.EnsureWorkspace(FDir, Ws, SE));
+  AssertTrue('session', FStore.CreateSession(Ws, Sid, SE));
+  Row := Default(TSessionRuntimeRow);
+  Row.SessionId := Sid;
+  Row.Pid := 1;
+  Row.SocketPath := '/tmp/x';
+  Row.StartedAt := 1700000000;
+  Row.UpdatedAt := 1700000000;
+  AssertTrue('runtime', FStore.RegisterRuntime(Row, SE));
   AssertTrue('add', AddCard('freshly claimed', Id));
-  ClaimOk(Id, 'sess-live');
+  { Claim as the session that actually has a runtime row: CreateSession generates
+    its own id, so a hardcoded holder would look dead. }
+  ClaimOk(Id, Sid);
   AssertTrue('reclaim', FTasks.ReclaimStale(1, 3600, Reclaimed, Err));
   AssertEquals('nothing reclaimed', 0, Reclaimed);
   AssertTrue('get', FTasks.Get(1, Id, Back, Found, Err));
   AssertTrue('found', Found);
   AssertEquals('still claimed', Ord(tsClaimed), Ord(Back.Status));
-  AssertEquals('still held', 'sess-live', Back.ClaimedBy);
+  AssertEquals('still held', Sid, Back.ClaimedBy);
 end;
 
 procedure TTaskStoreTest.TestReclaimRecordsWhyInTheDoneNote;
@@ -798,6 +822,30 @@ begin
   AssertTrue('found', Found);
   AssertTrue('names the holder it took it from: ' + Back.DoneNote,
     Pos('sess-dead', Back.DoneNote) > 0);
+end;
+
+procedure TTaskStoreTest.TestADeadSessionsClaimIsReclaimedWithoutWaitingForTheLease;
+var
+  Id: Integer;
+  Err: string;
+  Reclaimed: Integer;
+  Back: TTaskCard;
+  Found: Boolean;
+begin
+  { The lease used to answer two questions at once: "is it alive?" and "is it
+    still working?". Liveness now answers the first, so a claim held by a session
+    with no runtime row goes immediately - no 30-minute wait for a fact we can
+    observe. The holder here never registered a runtime, so it is dead. }
+  AssertTrue('add', AddCard('held by a session that is gone', Id));
+  ClaimOk(Id, 'sess-that-never-registered');
+  { A ONE-HOUR lease: only liveness can reclaim this, not the clock. }
+  AssertTrue('reclaim', FTasks.ReclaimStale(1, 3600, Reclaimed, Err));
+  AssertEquals('reclaimed by liveness, not age', 1, Reclaimed);
+  AssertTrue('get', FTasks.Get(1, Id, Back, Found, Err));
+  AssertTrue('found', Found);
+  AssertEquals('back to open', Ord(tsOpen), Ord(Back.Status));
+  AssertTrue('and the note names the dead holder: ' + Back.DoneNote,
+    Pos('sess-that-never-registered', Back.DoneNote) > 0);
 end;
 
 procedure TTaskStoreTest.TestReclaimNeverTouchesLiveOrFinishedCards;
