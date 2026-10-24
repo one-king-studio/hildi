@@ -484,12 +484,13 @@ begin
   AssertTrue('opened: ' + Err, Session <> nil);
   try
     AssertTrue('the loop is built', Session.Loop <> nil);
-    { A session with no MCP and no skills: the value is '' but the assignment
-      must have happened. Distinguishing "assigned empty" from "never assigned"
-      needs a skill, so this test's real value is that it exercises the
-      no-MCP path at all - which is the path that was broken. }
-    AssertEquals('no skills declared, so nothing to add', '',
-      Session.Loop.StablePrompt);
+    { The stable prompt is never empty now: the shell guidance rides it
+      unconditionally, because a session with no store can still run composed
+      commands and must be told which ones stay in the gated tier. }
+    AssertTrue('the shell guidance is present',
+      Pos('Prefer the built-in shell', Session.Loop.StablePrompt) > 0);
+    AssertTrue('and names commands',
+      Pos('grep', Session.Loop.StablePrompt) > 0);
   finally
     Session.Free;
   end;

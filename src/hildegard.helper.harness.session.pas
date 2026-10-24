@@ -423,6 +423,23 @@ begin
     FLoop.StablePrompt := FLoop.StablePrompt + LineEnding + LineEnding +
       CoordinationPromptFor(Mode, Reason);
   end;
+  { Tell the model which shell commands the gated tier runs, and why to prefer
+    them. Without this it reaches for perl or python3 - which are NOT in the tier,
+    so the whole script silently escalates to the process tier, where effects are
+    inferred by a tree walk rather than known exactly. The list is generated from
+    the dispatch table, so it cannot drift from what actually runs. }
+  FLoop.StablePrompt := FLoop.StablePrompt + LineEnding + LineEnding +
+    'Prefer the built-in shell for composed file work. run_command runs these '
+    + 'commands in-process, gated and with exact before/after effects: '
+    + BuiltinCommandList + '.'
+    + LineEnding
+    + 'Loops, pipelines, redirects and command substitution all work. Anything '
+    + 'else - perl, python3, node, a binary - is NOT in that list: the whole '
+    + 'script leaves the gated tier and runs as a subprocess, where what it '
+    + 'changed can only be inferred by comparing the tree before and after. If a '
+    + 'job needs a language you cannot express in the commands above, prefer the '
+    + 'dedicated file tools (file_read, file_edit, file_search_replace, '
+    + 'patch_apply, json_edit, yaml_edit) over a script.';
 end;
 
 function THarnessSession.McpTokenSourceFor(

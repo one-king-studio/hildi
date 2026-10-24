@@ -89,6 +89,11 @@ function BuiltinCommandOptions(const AName: string; out AOptions: string): Boole
 { True when the name is one of the tier's commands. }
 function IsBuiltinCommand(const AName: string): Boolean;
 
+{ The tier's command names, space-separated, for the system prompt. GENERATED
+  from the same table IsBuiltinCommand reads, so the list a model is shown cannot
+  drift from what the tier actually runs. }
+function BuiltinCommandList: string;
+
 { True when a literal argument is an option the command does not support.
   A combined short flag is decomposed (-rf -> r, f); '--' is always allowed;
   a long option is unsupported. 'N' in AOptions allows the BSD numeric
@@ -176,6 +181,23 @@ var
   Dummy: string;
 begin
   Result := BuiltinCommandOptions(AName, Dummy);
+end;
+
+function BuiltinCommandList: string;
+var
+  I: Integer;
+begin
+  { Generated from the same table the tier dispatches with, so the list a model
+    reads cannot disagree with what actually runs. }
+  Result := '';
+  for I := 0 to High(CommandSpecs) do
+  begin
+    if CommandSpecs[I].Name = '' then
+      Continue;
+    if Result <> '' then
+      Result := Result + ' ';
+    Result := Result + CommandSpecs[I].Name;
+  end;
 end;
 
 function IsNumericOption(const AArg, AOptions: string): Boolean;
