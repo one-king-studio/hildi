@@ -248,10 +248,71 @@ Three presentation rules, inherited from the design language:
    happened, so a resumed session shows it in place, from the same rows.
 
 **TUI dependency:** the viewer needs a scrollable pane over styled text, which the
-TUI toolkit already has (`TScrollContainer`, `TTextBlock`), but the toolkit is
-mid-refactor into `src/tui/core` + `src/tui/widgets`. This surface should land
-after that settles and should consume whatever the refactor exposes rather than
-reaching into the current units.
+toolkit already has. The toolkit is being split into `src/tui/core` (pure) and
+`src/tui/widgets`; per the board it is **done on `agent/tui-split` (`57e5fa3`)
+but not merged**, so this surface should land after that merges and should
+consume what it exposes rather than reaching into the current units. The diff
+viewer is a `widgets` consumer (scroll + styled text), not core.
+
+## Three commands, and the mode decides who may use them
+
+| Command | What it does | Single | Multi |
+| --- | --- | --- | --- |
+| `/undo` | Move the message tail back one turn; revert the captured changes from that turn | ✅ | ❌ |
+| `/redo` | Move forward again, re-applying the changes | ✅ | ❌ |
+| `/revert` | Open a history dialog; move to a chosen point | ✅ | ✅ |
+
+`/undo` and `/redo` are **operator** commands. They move the conversation back a
+turn and revert that turn's captured changes together, so the transcript and the
+workspace stay consistent. The redo window stays open **until the operator sends
+another prompt** — that is the same rule as an editor's undo history, and it is
+what makes `/redo` safe: once new work exists there is no ambiguity about what
+"forward" means.
+
+`/revert` is the dialog form of the same idea: it opens the change history and
+lets the operator pick a point to move to, rather than stepping one turn at a
+time. `/undo` and `/revert` open **the same dialog**; they differ only in what
+happens on selection — `/undo` is the one-step case and defaults to the previous
+turn, `/revert` asks which point.
+
+### Why multi-agent mode allows only `/revert`
+
+In single-agent mode the operator owns the conversation: moving the tail back is
+a local act, and nothing else can be relying on that turn.
+
+With several sessions in a workspace, **another agent may already have read that
+turn** — from the board, from a task card, from a claim. Moving the tail back
+unilaterally would invalidate a conclusion someone else is acting on, silently.
+So the operator does not get a choice: `/undo` and `/redo` are unavailable, and a
+revert goes through the agent, which can see what its peers have done and can
+say so on the board. The agent is the one that knows whether the revert is safe.
+
+This is the same rule as the claim model: the thing that can see the
+consequences is the thing that decides.
+
+### What a rewind costs
+
+`DeleteTurnMessages` already exists, so moving the tail back is a store operation
+rather than a new mechanism.
+
+Two invariants the commands must hold:
+
+1. **The transcript and the workspace move together.** An `/undo` that reverts
+   files but leaves the messages is a worse lie than no undo at all. Both halves
+   move, or neither does.
+2. **Refused while a turn is in flight.** The runtime holds the workspace; a
+   revert under a running turn has no correct resolution. Refuse and say why
+   rather than queue, since a queued revert would land on a state the operator
+   never saw.
+
+### Revert needs bytes, and not every record has them
+
+Already stated above, but it is sharper for a command than for a viewer: a
+command that offers a revert it cannot perform has failed the operator. So the
+history dialog shows which points are revertible and which are
+**inspect-only** — the ones whose before-side was never captured (process tier,
+watchdog). The agent can still reconstruct those by reading history and writing
+the old content back; the command cannot, and must not pretend to.
 
 ## Problem Statement
 
@@ -357,12 +418,21 @@ genuine gaps are the store, a diff generator, and the TUI surface.
 - [ ] The operator can **list the changes of a turn**: added / modified / deleted
       files, with per-file and total counts.
 - [ ] The operator can open a **per-file diff** between two points in the log.
-- [ ] **Undo** restores the workspace to a prior state; **redo** re-applies
-      forward. Undo is **single-agent only**: it is refused unless exactly one
-      live runtime holds the workspace, because reverting a peer's write has no
-      correct resolution.
+- [ ] **`/undo`** moves the message tail back one turn **and** reverts that turn's
+      captured changes together; **`/redo`** moves forward and re-applies them.
+      Both are **single-agent only**, refused unless exactly one live runtime
+      holds the workspace. The redo window closes when the operator sends another
+      prompt.
+- [ ] **`/revert`** opens a history dialog listing revertible points and moves to
+      the chosen one. Available in **both** modes; in multi-agent mode it is the
+      only one of the three, because a peer may already be acting on the turn.
+- [ ] The history dialog distinguishes **revertible** points from
+      **inspect-only** ones (a record whose before-side was never captured), so
+      a command never offers a revert it cannot perform.
 - [ ] A revert is **atomic per turn**: a failure leaves the workspace in the
       pre-revert state, never half-applied.
+- [ ] A command is **refused while a turn is in flight**, with the reason shown —
+      never queued onto a state the operator never saw.
 - [ ] **Ignore rules** apply (`.git/`, `build/`, `node_modules/`, every
       `.gitignore` in its own directory).
 - [ ] **Binary and oversized files** record hash and size only; the view says so.
