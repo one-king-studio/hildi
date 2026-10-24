@@ -399,6 +399,21 @@ begin
     R.Stdout);
   R := RunCmd('grep', ['-h', 'beta', 'a.txt', 'b.txt']);
   AssertEquals('no names', 'beta' + #10 + 'beta' + #10, R.Stdout);
+  { -o prints only the match, once per occurrence. }
+  R := RunCmd('grep', ['-o', 'al', 'a.txt']);
+  AssertEquals('only the match', 'al' + #10, R.Stdout);
+  R := RunCmd('grep', ['-o', 'a', 'a.txt']);
+  AssertEquals('one per match', 'a' + #10 + 'a' + #10 + 'a' + #10, R.Stdout);
+  { -w needs whole words: 'bet' must not match 'beta'. }
+  R := RunCmd('grep', ['-w', 'bet', 'a.txt']);
+  AssertEquals('word miss', 1, R.ExitCode);
+  R := RunCmd('grep', ['-w', 'alpha', 'a.txt']);
+  AssertEquals('word hit', 'alpha' + #10, R.Stdout);
+  { -x needs the whole line. }
+  R := RunCmd('grep', ['-x', 'alph', 'a.txt']);
+  AssertEquals('line miss', 1, R.ExitCode);
+  R := RunCmd('grep', ['-x', 'alpha', 'a.txt']);
+  AssertEquals('line hit', 'alpha' + #10, R.Stdout);
 end;
 
 procedure TShellCommandsTest.TestGrepRegex;

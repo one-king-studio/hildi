@@ -863,7 +863,7 @@ function TBuiltinCommands.Grep(const ACall: TShellCall): TShellResult;
 var
   I, J, P: Integer;
   ShowN, IgnoreCase, Invert, ListOnly, CountOnly, Fixed, Extended,
-    Recursive, Quiet, NoFilename: Boolean;
+    Recursive, Quiet, NoFilename, OnlyMatch, WordMatch, LineMatch: Boolean;
   MaxCount, MatchSoFar: Integer;
   Args: TStringArray;
   Pattern, Data, E, Text, Full: string;
@@ -876,8 +876,9 @@ var
 
   procedure ScanStream(const AText, AName: string; AShowName: Boolean);
   var
-    K, Count: Integer;
+    K, Count, M: Integer;
     Ls: TStringArray;
+    Hits: TStringArray;
   begin
     Ls := LinesOf(AText);
     Count := 0;
@@ -889,6 +890,18 @@ var
         Inc(Count);
         if ListOnly or CountOnly or Quiet then
           Continue;
+        { -o prints only the matched text, once per match. }
+        if OnlyMatch then
+        begin
+          Hits := Matcher.AllMatches(Ls[K]);
+          for M := 0 to High(Hits) do
+          begin
+            if AShowName and (not NoFilename) then
+              OutText := OutText + AName + ':';
+            OutText := OutText + Hits[M] + #10;
+          end;
+          Continue;
+        end;
         { -h drops the filename a multi-file search would print. }
         if AShowName and (not NoFilename) then
           OutText := OutText + AName + ':';
@@ -1013,6 +1026,9 @@ begin
   Recursive := False;
   Quiet := False;
   NoFilename := False;
+  OnlyMatch := False;
+  WordMatch := False;
+  LineMatch := False;
   MaxCount := 0;
   I := 0;
   while I <= High(ACall.Args) do
@@ -1051,6 +1067,9 @@ begin
           'r': Recursive := True;
           'q': Quiet := True;
           'h': NoFilename := True;
+          'o': OnlyMatch := True;
+          'w': WordMatch := True;
+          'x': LineMatch := True;
           'm':
             begin
               if J < Length(ACall.Args[I]) then
@@ -1087,6 +1106,9 @@ begin
   end;
   Multiple := Length(Args) > 1;
   Matcher := TPatternMatcher.Create(Pattern, Fixed, Extended, IgnoreCase, Invert);
+  { -w and -x constrain what counts as a match, inside the matcher so every scan
+    path agrees. }
+  Matcher.SetMatchMode(WordMatch, LineMatch);
   try
     if Matcher.Invalid <> '' then
       Exit(Failure('grep: invalid regular expression: ' + Matcher.Invalid, 2));

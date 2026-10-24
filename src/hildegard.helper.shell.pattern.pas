@@ -32,11 +32,30 @@ type
     FIgnoreCase: Boolean;
     FInvert: Boolean;
     FInvalid: string;
+    FMatched: string;
+    FMatchStart: Integer;
+    FRawMatched: Boolean;
+    FWordMode: Boolean;
+    FLineMode: Boolean;
   public
     constructor Create(const APattern: string; AFixed, AExtended, AIgnoreCase,
       AInvert: Boolean);
     destructor Destroy; override;
     function Matches(const ALine: string): Boolean;
+    { The text of the last raw match, for grep -o. '' when the last call did not
+      match, or when the match was inverted (nothing matched, so nothing to
+      print). }
+    property MatchedText: string read FMatched;
+    { The 1-based offset of the last raw match in the line; 0 when none. }
+    property MatchStart: Integer read FMatchStart;
+    { True when the last call matched BEFORE inversion was applied. }
+    property RawMatched: Boolean read FRawMatched;
+    { Constrain matching to whole words (-w) or the whole line (-x). Applied
+      inside Matches, so every consumer gets the same answer. }
+    procedure SetMatchMode(AWord, ALine: Boolean);
+    { Every match in the line, in order, honouring the mode. grep -o prints
+      these. Empty when nothing matches. }
+    function AllMatches(const ALine: string): TStringArray;
     property Invalid: string read FInvalid;
   end;
 
@@ -215,6 +234,11 @@ begin
   FIgnoreCase := AIgnoreCase;
   FInvert := AInvert;
   FInvalid := '';
+  FMatched := '';
+  FMatchStart := 0;
+  FRawMatched := False;
+  FWordMode := False;
+  FLineMode := False;
   if AFixed then
     Exit;
   Translated := TranslatePattern(APattern, AExtended, FInvalid);
@@ -240,14 +264,33 @@ begin
   inherited Destroy;
 end;
 
+{ A word character for -w: letters, digits and underscore. }
+function IsWordChar(C: Char): Boolean;
+begin
+  Result := C in ['a'..'z', 'A'..'Z', '0'..'9', '_'];
+end;
+
 function TPatternMatcher.Matches(const ALine: string): Boolean;
 var
   Hay, Needle: string;
+  Posn: Integer;
 begin
+  { Reset per call: a stale match must never leak into grep -o's output. }
+  FMatched := '';
+  FMatchStart := 0;
+  FRawMatched := False;
   if FInvalid <> '' then
     Exit(False);
   if FRe <> nil then
-    Result := FRe.Exec(ALine)
+  begin
+    Result := FRe.Exec(ALine);
+    if Result then
+    begin
+      FRawMatched := True;
+      FMatched := FRe.Match[0];
+      FMatchStart := FRe.MatchPos[0];
+    end;
+  end
   else
   begin
     Hay := ALine;
@@ -257,10 +300,128 @@ begin
       Hay := LowerCase(Hay);
       Needle := LowerCase(Needle);
     end;
-    Result := Pos(Needle, Hay) > 0;
+    Posn := Pos(Needle, Hay);
+    Result := Posn > 0;
+    if Result then
+    begin
+      FRawMatched := True;
+      { The text comes from the ORIGINAL line, not the folded one, so -o prints
+        what the file actually says. }
+      FMatched := Copy(ALine, Posn, Length(Needle));
+      FMatchStart := Posn;
+    end;
   end;
   if FInvert then
     Result := not Result;
+  { -w and -x constrain what counts as a match: applied after the raw match and
+    before inversion, so `grep -v -x` means "lines that are not exactly this". }
+  if Result and (not FInvert) and FRawMatched then
+  begin
+    if FLineMode and (FMatched <> ALine) then
+      Result := False
+    else if FWordMode then
+    begin
+      { The characters either side of the match must not be word characters. }
+      if (FMatchStart > 1) and IsWordChar(ALine[FMatchStart - 1]) then
+        Result := False
+      else if (FMatchStart + Length(FMatched) <= Length(ALine)) and
+        IsWordChar(ALine[FMatchStart + Length(FMatched)]) then
+        Result := False;
+    end;
+    if not Result then
+    begin
+      FRawMatched := False;
+      FMatched := '';
+      FMatchStart := 0;
+    end;
+  end;
+end;
+
+procedure TPatternMatcher.SetMatchMode(AWord, ALine: Boolean);
+begin
+  FWordMode := AWord;
+  FLineMode := ALine;
+end;
+
+function TPatternMatcher.AllMatches(const ALine: string): TStringArray;
+var
+  Hay, Needle: string;
+  Offset, Posn, N: Integer;
+begin
+  Result := nil;
+  if FInvalid <> '' then
+    Exit;
+  { -x: the whole line is the match, when it is a match at all. }
+  if FLineMode then
+  begin
+    if Matches(ALine) and FRawMatched then
+      Result := [ALine];
+    Exit;
+  end;
+  if FRe <> nil then
+  begin
+    { Regex: walk successive matches, advancing past each so a zero-length match
+      cannot loop forever. }
+    Offset := 1;
+    N := 0;
+    while (Offset <= Length(ALine)) and FRe.Exec(Copy(ALine, Offset, MaxInt)) do
+    begin
+      Posn := Offset + FRe.MatchPos[0] - 1;
+      if FRe.MatchLen[0] = 0 then
+      begin
+        Inc(Offset);
+        Continue;
+      end;
+      if FWordMode then
+      begin
+        if ((Posn > 1) and IsWordChar(ALine[Posn - 1])) or
+           ((Posn + FRe.MatchLen[0] - 1 < Length(ALine)) and
+            IsWordChar(ALine[Posn + FRe.MatchLen[0]])) then
+        begin
+          Inc(Offset, FRe.MatchPos[0] + FRe.MatchLen[0] - 1);
+          Continue;
+        end;
+      end;
+      SetLength(Result, N + 1);
+      Result[N] := FRe.Match[0];
+      Inc(N);
+      Inc(Offset, FRe.MatchPos[0] + FRe.MatchLen[0] - 1);
+    end;
+    Exit;
+  end;
+  Hay := ALine;
+  Needle := FPattern;
+  if FIgnoreCase then
+  begin
+    Hay := LowerCase(Hay);
+    Needle := LowerCase(Needle);
+  end;
+  if Needle = '' then
+    Exit;
+  Offset := 1;
+  N := 0;
+  while Offset <= Length(Hay) do
+  begin
+    Posn := Pos(Needle, Copy(Hay, Offset, MaxInt));
+    if Posn = 0 then
+      Break;
+    Inc(Posn, Offset - 1);
+    if FWordMode then
+    begin
+      if ((Posn > 1) and IsWordChar(ALine[Posn - 1])) or
+         ((Posn + Length(Needle) - 1 < Length(ALine)) and
+          IsWordChar(ALine[Posn + Length(Needle)])) then
+      begin
+        Offset := Posn + Length(Needle);
+        Continue;
+      end;
+    end;
+    { The text comes from the ORIGINAL line, so -o prints what the file says. }
+    SetLength(Result, N + 1);
+    Result[N] := Copy(ALine, Posn, Length(Needle));
+    Inc(N);
+    Offset := Posn + Length(Needle);
+  end;
 end;
 
 function PatternSupported(const APattern: string; AFixed, AExtended: Boolean;
