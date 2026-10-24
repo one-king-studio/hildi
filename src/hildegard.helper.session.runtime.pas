@@ -112,6 +112,11 @@ type
     function Bind: Boolean;
     function Hwm: Int64;
     procedure RegisterRow;
+    { Re-stamp the runtime row's updated_at. RegisterRuntime is an upsert, so
+      re-registering IS the heartbeat - no separate store method. Called from the
+      tick, unconditionally in every coordination mode: an unrenewed claim would
+      otherwise be stolen the moment a peer joins. }
+    procedure Heartbeat;
     { Finalize any tsRunning turn for this session (a loop that is gone). }
     procedure RecoverInterruptedTurns;
     procedure UnregisterRow;
@@ -440,7 +445,35 @@ procedure TSessionRuntime.UnregisterRow;
 var
   Err: TStoreError;
 begin
+  { Best effort: a clean exit deregisters, a crash cannot, so expiry is the
+    backstop. Correctness must not depend on a graceful shutdown. }
   FSession.View.Store.ClearRuntime(FSessionId, Err);
+end;
+
+procedure TSessionRuntime.Heartbeat;
+var
+  Row: TSessionRuntimeRow;
+  Err: TStoreError;
+begin
+  { Presence, and nothing else. RegisterRuntime upserts, so this only moves
+    updated_at - which is exactly what "I am still here" means.
+
+    Unconditional in every mode on purpose. If renewal were conditional on
+    multi-mode, a solo session's claims would go unrenewed, a peer would join, and
+    the first reclaim would steal live work - with the mode-change notice arriving
+    AFTER the damage. Notices are conditional; liveness is not. }
+  Row := Default(TSessionRuntimeRow);
+  Row.SessionId := FSessionId;
+  {$ifdef unix}
+  Row.Pid := fpGetPid;
+  {$else}
+  Row.Pid := 0;
+  {$endif}
+  Row.SocketPath := FSocketPath;
+  Row.Status := rsRunning;
+  Row.StartedAt := NowMs;   // re-stamped; the row is the live process, not history
+  Row.UpdatedAt := NowMs;
+  FSession.View.Store.RegisterRuntime(Row, Err);
 end;
 
 procedure TSessionRuntime.EmitLoopStarted;
@@ -1597,6 +1630,8 @@ begin
         HandleClients;
       end;
       DrainTurn;
+      { Presence: re-stamp this runtime's row. Unconditional - see Heartbeat. }
+      Heartbeat;
       { A peer's board post becomes ONE transient notice. Coalesced per tick, so
         a busy board costs O(ticks) rather than O(entries). }
       if FSession <> nil then
