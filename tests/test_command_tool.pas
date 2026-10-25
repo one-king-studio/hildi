@@ -112,6 +112,8 @@ type
     procedure TestAwkRegexIsNotTreatedAsAPath;
     { A command naming a real file must offer file-scope options. }
     procedure TestACommandNamingFilesOffersFileScopes;
+    { All five scopes the operator asked for: exact, ext, dir, dir+ext, all. }
+    procedure TestACommandAskOffersAllFiveFileScopes;
     { A read ask highlights the COMMAND, not the redirect. }
     procedure TestTheReadAskExcludesTheRedirect;
     procedure TestRedirectSummaryAndFileAsk;
@@ -1095,6 +1097,41 @@ begin
     for I := 0 to High(Asks) do
       AssertFalse('no outside-path ask for a regex: ' + Asks[I].Summary,
         Copy(Asks[I].Subject.Ref, 1, 5) = 'path:');
+  finally
+    Tool.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestACommandAskOffersAllFiveFileScopes;
+var
+  Tool: TCommandTool;
+  Asks: TApprovalAskArray;
+  I: Integer;
+  HasExt, HasDir, HasDirExt, HasAnyFile: Boolean;
+begin
+  { The operator asked for five read scopes: exact file, same extension, same
+    directory, directory+extension, and ALL files in the workspace. Four existed;
+    the fifth did not, because 'dir' means THIS directory and is only the whole
+    workspace when the file sits at the root. }
+  Tool := BuildToolWithRoot('/tmp/nowhere');
+  try
+    Asks := Tool.ApprovalAsks('{"command":"cat sub/a.txt","reason":"r"}');
+    AssertTrue('an ask exists', Length(Asks) > 0);
+    HasExt := False;
+    HasDir := False;
+    HasDirExt := False;
+    HasAnyFile := False;
+    for I := 0 to High(Asks[0].Options) do
+    begin
+      if Asks[0].Options[I].Key = 'ext' then HasExt := True;
+      if Asks[0].Options[I].Key = 'dir' then HasDir := True;
+      if Asks[0].Options[I].Key = 'dir_ext' then HasDirExt := True;
+      if Asks[0].Options[I].Key = 'any_file' then HasAnyFile := True;
+    end;
+    AssertTrue('same extension', HasExt);
+    AssertTrue('same directory', HasDir);
+    AssertTrue('directory + extension', HasDirExt);
+    AssertTrue('all files in the workspace', HasAnyFile);
   finally
     Tool.Free;
   end;
