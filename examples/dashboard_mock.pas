@@ -113,6 +113,7 @@ type
     procedure DrawChannels(const S: ISurface; const ARect: TRect);
     procedure DrawMessages(const S: ISurface; const ARect: TRect);
     procedure DrawStatus(const S: ISurface; const ARect: TRect);
+    function StatsLine: UnicodeString;
     procedure EnsureVisible(ALane, AVisH, AInnerW: Integer);
     { BLOCKED and DROPPED are optional columns: empty ones are not drawn, so
       navigation must skip them or the selection lands on nothing. }
@@ -693,12 +694,45 @@ begin
   end;
 end;
 
+{ The board's counts, spelled out. One builder, because the same line is drawn
+  on the Messages pane's bottom border and nothing in the status bar - two
+  copies would drift. The header chips (q / d / f) are gone: three unlabelled
+  letters asked the reader to learn a legend for facts that read as words. }
+function TDashboard.StatsLine: UnicodeString;
+var
+  I, Questions, Decisions, Findings, Open: Integer;
+begin
+  Questions := 0;
+  Decisions := 0;
+  Findings := 0;
+  Open := 0;
+  for I := 0 to High(Board) do
+  begin
+    if Board[I].Kind = 'question' then
+    begin
+      Inc(Questions);
+      if Board[I].Link = '' then
+        Inc(Open);
+    end
+    else if Board[I].Kind = 'decision' then
+      Inc(Decisions)
+    else if Board[I].Kind = 'finding' then
+      Inc(Findings);
+  end;
+
+  Result := ' open questions ' + UnicodeString(IntToStr(Open)) + ' ' + ChDot +
+    ' decisions ' + UnicodeString(IntToStr(Decisions)) + ' ' + ChDot +
+    ' findings ' + UnicodeString(IntToStr(Findings)) + ' ';
+  if Open = 0 then
+    Result := Result + ChDot + ' all answered ';
+end;
+
 procedure TDashboard.DrawMessages(const S: ISurface; const ARect: TRect);
 var
   I, Y, X0, Inner, Shown: Integer;
   A: TAttr;
   Line: UnicodeString;
-  Right, Title: UnicodeString;
+  Right, Title, Stats: UnicodeString;
   Wanted: string;
 begin
   Wanted := Chans[FChanSel].Name;
@@ -750,45 +784,41 @@ begin
 
   if Shown = 0 then
     Text(S, X0, Y, 'no messages in this channel', FTheme.Muted, Inner);
+
+  { The board's counts ride the pane's own bottom border rather than taking a
+    row of their own: the border was already drawing a rule there, so this
+    spends nothing and puts the facts next to the messages they describe. It is
+    drawn last so the message rows cannot paint over it. }
+  Stats := StatsLine;
+  if (ARect.H >= 2) and (ARect.W > Length(Stats) + 4) then
+    Text(S, ARect.X + 2, ARect.Y + ARect.H - 1, Stats,
+      OnBg(FTheme.Muted, FTheme.Bg), Length(Stats));
 end;
 
-{ The status bar carries the counts spelled out. The header chips (q / d / f)
-  are gone: three unlabelled letters asked the reader to learn a legend, and
-  the same facts read better as words along the bottom. }
+{ The status bar carries the workspace on the left, and nothing else: the
+  board's counts moved onto the Messages pane's bottom border, where they sit
+  beside the messages they describe instead of in a bar of their own. }
 procedure TDashboard.DrawStatus(const S: ISurface; const ARect: TRect);
 var
-  Questions, Decisions, Findings, Open, I: Integer;
-  Left: UnicodeString;
+  Left, Hints, Dir: UnicodeString;
 begin
   S.FillRect(ARect, FTheme.Panel);
 
-  Questions := 0;
-  Decisions := 0;
-  Findings := 0;
-  Open := 0;
-  for I := 0 to High(Board) do
-  begin
-    if Board[I].Kind = 'question' then
-    begin
-      Inc(Questions);
-      if Board[I].Link = '' then
-        Inc(Open);
-    end
-    else if Board[I].Kind = 'decision' then
-      Inc(Decisions)
-    else if Board[I].Kind = 'finding' then
-      Inc(Findings);
-  end;
+  { The workspace directory, not just its name: two checkouts of the same
+    project are different workspaces, and the tail of the path is what tells
+    them apart. Truncated from the LEFT when it will not fit, so the leaf
+    directory - the part that identifies it - survives. }
+  Dir := UnicodeString(GetCurrentDir);
+  Left := ' ' + Dir;
+  if Length(Left) > ARect.W - 30 then
+    Left := ' ' + ChDotted + Copy(Dir, Length(Dir) - (ARect.W - 34),
+      Length(Dir));
+  Text(S, ARect.X, ARect.Y, Left, FTheme.Muted, ARect.W - 26);
 
-  Left := 'open questions ' + UnicodeString(IntToStr(Open)) + '  ' + ChDot +
-    '  decisions ' + UnicodeString(IntToStr(Decisions)) + '  ' + ChDot +
-    '  findings ' + UnicodeString(IntToStr(Findings)) + '  ' + ChDot + '  ';
-  if Open = 0 then
-    Left := Left + 'all answered';
-  Text(S, ARect.X + 1, ARect.Y, Left, FTheme.Muted, ARect.W - 2);
-  Text(S, ARect.X + ARect.W - Length('tab zone  arrows move  q quit'),
-    ARect.Y, 'tab zone  arrows move  q quit', FTheme.Muted,
-    Length('tab zone  arrows move  q quit'));
+  Hints := 'tab zone  arrows move  q quit ';
+  if ARect.W > Length(Left) + Length(Hints) then
+    Text(S, ARect.X + ARect.W - Length(Hints), ARect.Y, Hints, FTheme.Muted,
+      Length(Hints));
 end;
 
 procedure TDashboard.Render(const S: ISurface);
