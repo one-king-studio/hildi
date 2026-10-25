@@ -43,6 +43,9 @@ type
     { A revived session must be told it was away, what it missed, and what it
       lost. }
     procedure TestARevivedSessionIsToldItWasAway;
+    { A peer arriving mid-session must change behaviour, and the first
+      observation is not a transition. }
+    procedure TestAPeerArrivingRaisesOneTransitionNotice;
     { Claim recovery runs at the turn boundary: a working session renews, and a
       claim whose holder stopped is released. }
     procedure TestTheTurnBoundaryRenewsAThisSessionsClaim;
@@ -369,6 +372,51 @@ begin
       Pos('sess-dead', Card.DoneNote) > 0);
   finally
     Tasks := nil;
+    Session.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestAPeerArrivingRaisesOneTransitionNotice;
+var
+  Session: THarnessSession;
+  Err: string;
+  Items: TPromptItemArray;
+  I: Integer;
+  Seen: Boolean;
+  Row: TSessionRuntimeRow;
+  E: TStoreError;
+  PeerSid: string;
+begin
+  { An agent must switch behaviour when a peer arrives, not carry on alone. And
+    the FIRST observation is not a transition: a session must never be told a peer
+    "joined" when it merely looked for the first time. }
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    { First tick: alone, so no transition from nowhere. }
+    Session.NoticeBoard;
+    Session.Loop.PromptQueue.DrainItems;
+
+    { A peer registers a runtime row - the signal that someone else is live. }
+    AssertTrue('peer session', Session.View.Store.CreateSession(
+      Session.View.WorkspaceId, PeerSid, E));
+    Row := Default(TSessionRuntimeRow);
+    Row.SessionId := PeerSid;
+    Row.Pid := 1;
+    Row.SocketPath := '/tmp/peer.sock';
+    Row.StartedAt := 1700000000;
+    Row.UpdatedAt := 1700000000;
+    AssertTrue('peer runtime', Session.View.Store.RegisterRuntime(Row, E));
+
+    { The next tick sees multi-mode: one notice, naming coordination. }
+    Session.NoticeBoard;
+    Items := Session.Loop.PromptQueue.DrainItems;
+    Seen := False;
+    for I := 0 to High(Items) do
+      if Pos('Another session', Items[I].Text) > 0 then
+        Seen := True;
+    AssertTrue('the peer arrival is announced', Seen);
+  finally
     Session.Free;
   end;
 end;

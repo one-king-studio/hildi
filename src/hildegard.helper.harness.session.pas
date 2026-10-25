@@ -75,6 +75,14 @@ type
       session that was away must be told, but re-telling it every tick would be
       noise - and the fact does not change while the session runs. }
     FRevivalChecked: Boolean;
+    { The coordination mode observed at the last board tick. A TRANSITION between
+      single and multi raises one ambient notice, so an agent switches behaviour
+      mid-session rather than continuing to act alone after a peer arrives.
+
+      TModeKnown separates "never checked" from "checked and found single" - the
+      first tick must not announce a transition from nowhere. }
+    FLastMode: TCoordinationMode;
+    FModeKnown: Boolean;
     FChangeStore: IChangeStore;
     FLoop: TAgentLoop;
     FQueue: TTurnQueue;
@@ -262,6 +270,9 @@ var
   Found: Boolean;
   I: Integer;
   Title, Text: string;
+  NewMode: TCoordinationMode;
+  Peers: Integer;
+  Why: TCoordinationReason;
 begin
   Result := 0;
   if (FBoardStore = nil) or (FLoop = nil) then
@@ -276,6 +287,35 @@ begin
   begin
     FRevivalChecked := True;
     NoticeRevival;
+  end;
+  { A MODE TRANSITION raises one ambient notice, so an agent switches behaviour
+    mid-session rather than carrying on alone after a peer arrives (or competing
+    with nobody after one leaves).
+
+    Safe to detect here precisely because claim renewal is UNCONDITIONAL: the
+    transition changes what the agent is TOLD, never what state is valid. A
+    conditional-renewal design would have needed the notice to repair state, and
+    it would have arrived after the damage. }
+  if FView.Store <> nil then
+  begin
+    NewMode := DetectCoordinationMode(FView.Store, FView.WorkspaceId,
+      FView.SessionId, Peers, Why);
+    { The first observation is not a transition: a session must not be told a peer
+      "joined" when it simply looked for the first time. }
+    if FModeKnown and (NewMode <> FLastMode) then
+    begin
+      if NewMode = cmMulti then
+        FLoop.PromptQueue.PushBoard(
+          'Another session is now live in this workspace. Switch to coordination '
+          + 'mode: claim before you change, and read the board before assuming a '
+          + 'file is untouched.', 0)
+      else if NewMode = cmSingle then
+        FLoop.PromptQueue.PushBoard(
+          'You are alone in this workspace again. The board is a journal for your '
+          + 'own future self now, not coordination with a peer.', 0);
+    end;
+    FLastMode := NewMode;
+    FModeKnown := True;
   end;
   { Coalesce: ONE notice naming the total, not one per entry. A busy board with
     ten agents must cost O(ticks), not O(entries). }

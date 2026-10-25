@@ -55,6 +55,17 @@ type
       NEW session starts CURRENT: it did not miss anything, it was not there. }
     function BoardMaxId(AWorkspaceId: Integer; out AId: Integer;
       out AError: string): Boolean;
+    { How many entries ASessionId has not read, for a PEER's benefit.
+
+      A different question from the TOC: the TOC tells a session about its OWN
+      unread and runs every tick. This is asked ABOUT another session, on demand -
+      by a dashboard, or when deciding whether to mention a peer has fallen
+      behind. Never per tick per session.
+
+      Returns 0 for a session with no cursor, because a session that has never
+      read is NEW, not behind. }
+    function UnreadFor(const ASessionId: string; out AUnread: Integer;
+      out AError: string): Boolean;
     { Retention: drop finished noise, never knowledge. `note` and `status` are
       pruned by count and age; `decision`, `finding`, `question` and `answer` are
       never touched. A memory system that forgets its decisions is not one. }
@@ -112,6 +123,17 @@ type
     { The highest board id in this workspace, 0 when the board is empty. Used so a
       NEW session starts CURRENT: it did not miss anything, it was not there. }
     function BoardMaxId(AWorkspaceId: Integer; out AId: Integer;
+      out AError: string): Boolean;
+    { How many entries ASessionId has not read, for a PEER's benefit.
+
+      A different question from the TOC: the TOC tells a session about its OWN
+      unread and runs every tick. This is asked ABOUT another session, on demand -
+      by a dashboard, or when deciding whether to mention a peer has fallen
+      behind. Never per tick per session.
+
+      Returns 0 for a session with no cursor, because a session that has never
+      read is NEW, not behind. }
+    function UnreadFor(const ASessionId: string; out AUnread: Integer;
       out AError: string): Boolean;
     function Prune(AWorkspaceId, AKeepNotes: Integer;
       AMaxAgeSec: Int64; out APruned: Integer; out AError: string): Boolean;
@@ -686,6 +708,44 @@ begin
       sqlite3_bind_int(Stmt, 1, AWorkspaceId);
       if sqlite3_step(Stmt) = SQLITE_ROW then
         AId := sqlite3_column_int(Stmt, 0);
+      Result := True;
+    finally
+      sqlite3_finalize(Stmt);
+    end;
+  finally
+    FStore.Lock.Release;
+  end;
+end;
+
+function TSqliteBoardStore.UnreadFor(const ASessionId: string;
+  out AUnread: Integer; out AError: string): Boolean;
+var
+  Stmt: Psqlite3_stmt;
+  Sid: AnsiString;
+begin
+  { Asked ABOUT a session, not by it - a dashboard or a peer-warning. The TOC
+    answers the same shape for the ASKING session every tick; this is on demand
+    for someone else, so it is deliberately NOT part of any tick.
+
+    No cursor returns 0: a session that has never read is NEW, not behind. That
+    is the same rule the new-session-starts-current fix applies. }
+  Result := False;
+  AUnread := 0;
+  AError := '';
+  Sid := AnsiString(ASessionId);
+  FStore.Lock.Acquire;
+  try
+    if not Prepare('SELECT COUNT(*) FROM board_entries ' +
+      'WHERE workspace_id = (SELECT workspace_id FROM board_reads ' +
+      'WHERE session_id = ?) AND id > ' +
+      '(SELECT last_id FROM board_reads WHERE session_id = ?) ' +
+      'AND deleted_at = 0', Stmt, AError) then
+      Exit;
+    try
+      sqlite3_bind_text(Stmt, 1, PAnsiChar(Sid), -1, nil);
+      sqlite3_bind_text(Stmt, 2, PAnsiChar(Sid), -1, nil);
+      if sqlite3_step(Stmt) = SQLITE_ROW then
+        AUnread := sqlite3_column_int(Stmt, 0);
       Result := True;
     finally
       sqlite3_finalize(Stmt);
