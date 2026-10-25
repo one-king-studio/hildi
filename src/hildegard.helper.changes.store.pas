@@ -53,13 +53,13 @@ const
   SqlInsertChange =
     'INSERT INTO file_changes (workspace_id, session_id, turn_id, message_id, ' +
     'path, kind, before_hash, after_hash, patch, patch_bytes, capped, ' +
-    'before_size, after_size, source, external_session, created_at) ' +
-    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+    'before_size, after_size, source, external_session, created_at, is_net) ' +
+    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
 
   SqlSelectChange =
     'SELECT id, workspace_id, session_id, turn_id, message_id, path, kind, ' +
     'before_hash, after_hash, patch, patch_bytes, capped, before_size, ' +
-    'after_size, source, external_session, created_at FROM file_changes ';
+    'after_size, source, external_session, created_at, is_net FROM file_changes ';
 
 implementation
 
@@ -101,6 +101,7 @@ begin
   S := sqlite3_column_text(AStmt, 15);
   if S <> nil then ARow.ExternalSession := AnsiString(S);
   ARow.CreatedAt := sqlite3_column_int64(AStmt, 16);
+  ARow.IsNet := sqlite3_column_int(AStmt, 17) <> 0;
 end;
 
 function TSqliteChangeStore.Append(const ARecord: TChangeRecord;
@@ -156,6 +157,7 @@ begin
       sqlite3_bind_int(Stmt, 14, Ord(ARecord.Source));
       sqlite3_bind_text(Stmt, 15, PAnsiChar(ExtSession), -1, nil);
       sqlite3_bind_int64(Stmt, 16, ARecord.CreatedAt);
+      sqlite3_bind_int(Stmt, 17, Ord(ARecord.IsNet));
       Result := sqlite3_step(Stmt) = SQLITE_DONE;
       if Result then
         AId := Integer(sqlite3_last_insert_rowid(FStore.Db))

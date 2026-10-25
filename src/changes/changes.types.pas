@@ -53,6 +53,11 @@ type
     Source: TChangeSource;
     ExternalSession: string;   // a peer caught writing (CAS residue)
     CreatedAt: Int64;
+    { True for the folded per-path row written at the turn boundary, carrying
+      diff(first before, last after). False for a per-call row. A turn's summary
+      reads only net rows; a call's drill-down reads only per-call rows. Never
+      mixed, or the summary double-counts the net and its parts. }
+    IsNet: Boolean;
   end;
 
   TChangeRecordArray = array of TChangeRecord;

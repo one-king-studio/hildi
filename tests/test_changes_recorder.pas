@@ -47,6 +47,10 @@ type
     procedure TestACreationRecordsAPatchFromNothing;
     procedure TestAnUncapturedBeforeSideStoresNoPatch;
     procedure TestThePatchIsCappedAndSaysSo;
+    { The net fold: a turn's per-path change, not a pile of per-call patches. }
+    procedure TestTwoEditsToOnePathFoldIntoOneNetRow;
+    procedure TestEditsThatCancelYieldAnEmptyNetPatch;
+    procedure TestPerCallRowsAreStillWrittenAlongsideNetOnes;
   end;
 
 implementation
@@ -396,6 +400,116 @@ begin
   AssertTrue('capped', Row.Capped);
   AssertTrue('the stored patch is bounded by the cap',
     Length(Row.Patch) <= DefaultPatchCapBytes + 4096);
+end;
+
+procedure TChangesRecorderTest.TestTwoEditsToOnePathFoldIntoOneNetRow;
+var
+  R: TChangeRecorder;
+  Set_: TFileChangeSet;
+  Rows: TChangeRecordArray;
+  Err: string;
+begin
+  { Two calls edit a.txt in one turn: v1 -> v2, then v2 -> v3. The net row must
+    be v1 -> v3 - one row, not two patches the operator has to mentally compose. }
+  R := TChangeRecorder.Create(FStore, 1, 'sess');
+  Set_ := TFileChangeSet.Create;
+  try
+    Set_.Add(Change('a.txt', fcModified, 'v1' + LineEnding, 'v2' + LineEnding,
+      True, True));
+    R.SetTurn(7);
+    R.Observe(Set_);
+    Set_.Clear;
+    Set_.Add(Change('a.txt', fcModified, 'v2' + LineEnding, 'v3' + LineEnding,
+      True, True));
+    R.Observe(Set_);
+    R.FlushTurn;
+  finally
+    Set_.Free;
+    R.Free;
+  end;
+
+  AssertTrue('read', FStore.ForTurn(1, 7, Rows, Err));
+  { Two per-call rows plus one net row. }
+  AssertEquals('three rows total', 3, Length(Rows));
+  AssertTrue('the last is the net row', Rows[2].IsNet);
+  AssertEquals('net path', 'a.txt', Rows[2].Path);
+  { The net patch goes v1 -> v3: it must mention v1 as removed and v3 as added,
+    which no single per-call patch does. }
+  AssertTrue('removes v1', Pos('-v1', Rows[2].Patch) > 0);
+  AssertTrue('adds v3', Pos('+v3', Rows[2].Patch) > 0);
+  AssertFalse('and does not mention the intermediate v2 in a hunk',
+    Pos('-v2', Rows[2].Patch) > 0);
+end;
+
+procedure TChangesRecorderTest.TestEditsThatCancelYieldAnEmptyNetPatch;
+var
+  R: TChangeRecorder;
+  Set_: TFileChangeSet;
+  Rows: TChangeRecordArray;
+  Err: string;
+begin
+  { The case that motivated the fold: an edit and its reversal. The net change is
+    NOTHING, and saying so is the whole point - two patches would read as a
+    large change. }
+  R := TChangeRecorder.Create(FStore, 1, 'sess');
+  Set_ := TFileChangeSet.Create;
+  try
+    Set_.Add(Change('a.txt', fcModified, 'orig' + LineEnding,
+      'modified' + LineEnding, True, True));
+    R.SetTurn(7);
+    R.Observe(Set_);
+    Set_.Clear;
+    Set_.Add(Change('a.txt', fcModified, 'modified' + LineEnding,
+      'orig' + LineEnding, True, True));
+    R.Observe(Set_);
+    R.FlushTurn;
+  finally
+    Set_.Free;
+    R.Free;
+  end;
+
+  AssertTrue('read', FStore.ForTurn(1, 7, Rows, Err));
+  AssertTrue('net row exists', Rows[High(Rows)].IsNet);
+  AssertEquals('the net change is empty', '', Rows[High(Rows)].Patch);
+  AssertEquals('and its size is zero', 0, Rows[High(Rows)].PatchBytes);
+end;
+
+procedure TChangesRecorderTest.TestPerCallRowsAreStillWrittenAlongsideNetOnes;
+var
+  R: TChangeRecorder;
+  Set_: TFileChangeSet;
+  Rows: TChangeRecordArray;
+  Err: string;
+  I, PerCall, Net: Integer;
+begin
+  { The per-call rows are what a diff under the tool block reads; the net rows
+    are what the turn summary reads. Both must exist, and be distinguishable -
+    otherwise the summary double-counts. }
+  R := TChangeRecorder.Create(FStore, 1, 'sess');
+  Set_ := TFileChangeSet.Create;
+  try
+    Set_.Add(Change('a.txt', fcModified, 'a1' + LineEnding, 'a2' + LineEnding,
+      True, True));
+    Set_.Add(Change('b.txt', fcCreated, '', 'b1' + LineEnding, False, True));
+    R.SetTurn(7);
+    R.Observe(Set_);
+    R.FlushTurn;
+  finally
+    Set_.Free;
+    R.Free;
+  end;
+
+  AssertTrue('read', FStore.ForTurn(1, 7, Rows, Err));
+  PerCall := 0;
+  Net := 0;
+  for I := 0 to High(Rows) do
+    if Rows[I].IsNet then
+      Inc(Net)
+    else
+      Inc(PerCall);
+  AssertEquals('two per-call rows', 2, PerCall);
+  AssertEquals('two net rows, one per path', 2, Net);
+  AssertEquals('four rows total', 4, Length(Rows));
 end;
 
 initialization

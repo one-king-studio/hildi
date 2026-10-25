@@ -358,7 +358,7 @@ end;
 function DefaultMigrations: TMigrationArray;
 begin
   Result := nil;
-  SetLength(Result, 16);
+  SetLength(Result, 17);
   Result[0].Version := 1;
   Result[0].Name := 'session history';
   Result[0].Statements := [
@@ -732,6 +732,20 @@ begin
   Result[15].Name := 'board cursor last seen';
   Result[15].Statements := [
     'ALTER TABLE board_reads ADD COLUMN last_seen_at INTEGER NOT NULL DEFAULT 0'
+  ];
+
+  { v17: net rows. A turn that edits one path three times must not present three
+    diffs - patches that undo each other read as a large change. The recorder
+    also writes one folded row per path at the turn boundary, carrying
+    diff(first before, last after). is_net distinguishes the two kinds so a
+    summary reads only net rows and a call drill-down reads only per-call rows;
+    without the flag they would double-count. Additive: every existing row is a
+    per-call row, which is what DEFAULT 0 says. }
+  Result[16].Version := 17;
+  Result[16].Name := 'net change rows';
+  Result[16].Statements := [
+    'ALTER TABLE file_changes ADD COLUMN is_net INTEGER NOT NULL DEFAULT 0',
+    'CREATE INDEX idx_changes_turn ON file_changes (workspace_id, turn_id, is_net)'
   ];
 end;
 
