@@ -56,6 +56,19 @@ function KeyframeDue(AAccumulatedPatchBytes, ACurrentBytes: Int64;
   Bounded, and it never renders a line delta it cannot support. }
 function Summarize(const ARows: TChangeRecordArray; ACapChars: Integer): string;
 
+{ The text a change should be reverted TO, given what is on disk now.
+
+  A revert is a compare-and-swap, not a blind undo: the file must still hold the
+  after-text the record was anchored to, or the revert refuses. That is what
+  stops a revert from silently discarding work done since.
+
+  Returns False + AError when the current text is not the record's after-text
+  (someone changed it since), when the patch will not invert, or when the result
+  does not hash to the record's before-hash - the last check is what proves the
+  revert actually restored the original rather than merely applying. }
+function RevertText(const APatch, ABeforeHash, AAfterHash, ACurrentText: string;
+  AHasher: TChangeHasher; out AText, AError: string): Boolean;
+
 { The id from which history should be pruned so that ARetentionTurns remain.
   Turn ids are ascending, so this is the id of the first change of the oldest
   turn worth keeping. 0 when there is nothing to prune. }
@@ -242,6 +255,48 @@ begin
       end;
     end;
   end;
+end;
+
+function RevertText(const APatch, ABeforeHash, AAfterHash, ACurrentText: string;
+  AHasher: TChangeHasher; out AText, AError: string): Boolean;
+var
+  Inv, Applied: string;
+begin
+  Result := False;
+  AText := '';
+  AError := '';
+  if not Assigned(AHasher) then
+  begin
+    AError := 'a revert needs a hasher';
+    Exit;
+  end;
+  { The compare half. If the file no longer holds what the record was anchored
+    to, someone has worked on it since; reverting would silently discard that. }
+  if (AAfterHash <> '') and (AHasher(ACurrentText) <> AAfterHash) then
+  begin
+    AError := 'the file changed since this was recorded';
+    Exit;
+  end;
+  if not InvertPatch(APatch, Inv, AError) then
+  begin
+    AError := 'could not invert the patch: ' + AError;
+    Exit;
+  end;
+  if not ApplyUnifiedDiff(ACurrentText, Inv, Applied, AError) then
+  begin
+    AError := 'the inverse did not apply: ' + AError;
+    Exit;
+  end;
+  { The swap half, and the reason this verifies rather than trusts: applying an
+    inverse proves the diff matched, not that it restored the ORIGINAL. Checking
+    the result against the before-hash is what proves the revert. }
+  if (ABeforeHash <> '') and (AHasher(Applied) <> ABeforeHash) then
+  begin
+    AError := 'the revert did not restore the recorded original';
+    Exit;
+  end;
+  AText := Applied;
+  Result := True;
 end;
 
 end.

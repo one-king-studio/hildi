@@ -40,6 +40,9 @@ type
     procedure TestInvertPatchRoundTripsAnEdit;
     procedure TestInvertPatchSwapsHunkNumbers;
     procedure TestInvertOfAnEmptyPatchIsANoOp;
+    { The revert: compare-and-swap, invert, apply, verify. }
+    procedure TestRevertRestoresTheOriginal;
+    procedure TestRevertRefusesWhenTheFileMovedSince;
     { The log. }
     procedure TestReplayWithoutKeyframeStartsEmpty;
     procedure TestReplayFromKeyframeIsBounded;
@@ -264,6 +267,45 @@ begin
   AssertTrue('inverts', InvertPatch('', Inv, Err));
   AssertEquals('and stays empty', '', Inv);
   AssertEquals('no error', '', Err);
+end;
+
+procedure TChangesTest.TestRevertRestoresTheOriginal;
+var
+  Before, After, D, Text, Err: string;
+  Capped: Boolean;
+begin
+  { The revert path end to end: a recorded change, reverted against the current
+    text, lands exactly on the original - and the hash check proves it rather
+    than trusting the apply. }
+  Err := '';
+  Text := '';
+  Before := 'one'#10'two'#10'three'#10;
+  After := 'one'#10'TWO'#10'three'#10;
+  D := DiffText(Before, After, DefaultPatchCapBytes, Capped);
+  AssertTrue('reverts: ' + Err,
+    RevertText(D, FHasher.OfText(Before), FHasher.OfText(After), After,
+      FHasher.OfText, Text, Err));
+  AssertEquals('back to the original', Before, Text);
+end;
+
+procedure TChangesTest.TestRevertRefusesWhenTheFileMovedSince;
+var
+  Before, After, D, Text, Err: string;
+  Capped: Boolean;
+begin
+  { A revert is a compare-and-swap. If the file no longer holds the after-text
+    the record was anchored to, someone has worked on it since, and reverting
+    would silently discard that work. Refuse rather than clobber. }
+  Err := '';
+  Text := '';
+  Before := 'one'#10'two'#10;
+  After := 'one'#10'TWO'#10;
+  D := DiffText(Before, After, DefaultPatchCapBytes, Capped);
+  AssertFalse('refuses',
+    RevertText(D, FHasher.OfText(Before), FHasher.OfText(After),
+      'something else entirely'#10, FHasher.OfText, Text, Err));
+  AssertTrue('and says why: ' + Err, Pos('changed', Err) > 0);
+  AssertEquals('nothing written', '', Text);
 end;
 
 { --- the log ----------------------------------------------------------- }
