@@ -659,6 +659,15 @@ begin
             AddFileScope(Result[High(Result)], 'dir_ext',
               'always .' + FirstExt + ' files in ' + FirstDir + '/', FirstDir,
               FirstExt);
+          { An explicit "any file in the workspace" scope, ALWAYS offered.
+
+            The `dir` scope above means "this directory", which is only the whole
+            workspace when the file sits at the root. Without this, a command
+            naming `sub/a.txt` offers no way to grant "all files" short of the
+            command-wide bucket - which also covers commands, not just files. }
+          if (FirstDir <> '') or (not SameExt) then
+            AddFileScope(Result[High(Result)], 'any_file',
+              'always any file in the workspace', '', '');
         end;
       end;
     end;
