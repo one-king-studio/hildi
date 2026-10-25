@@ -260,7 +260,13 @@ begin
   case ALane of
     0: Result := ATheme.Muted;                        // OPEN - plain, dimmed
     1: Result := ATheme.Warn;                         // CLAIMED - amber
-    2: Result := WithStyle(ATheme.Error, []);         // BLOCKED - dull red
+    { WithStyle ADDS flags (Result.Style + AStyle); it cannot remove one. Error
+      carries sfBold, and bold red reads as a fault in the dashboard itself
+      rather than a caution in the work, so the flag is excluded directly. }
+    2: begin
+         Result := ATheme.Error;
+         Exclude(Result.Style, sfBold);
+       end;
     3: Result := ATheme.Success;                      // DONE - cool green
   else
     Result := ATheme.Muted;                           // DROPPED - muted
