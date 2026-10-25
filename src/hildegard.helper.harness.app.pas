@@ -228,6 +228,11 @@ type
       Reads the NET rows only, so a file edited twice shows its net change and a
       file edited then reverted shows nothing at all. }
     procedure AddTurnChanges(ATurnId: Int64);
+    { The expanded body for a turn-summary block: each file's diff, in the same
+      order the stat lines use. Built once when the block is created, so
+      expanding is a rendering change rather than a store read. }
+    function TurnSummaryDiffs(const ARows: TChangeRecordArray;
+      const ASummary: TTurnChangeSummary): string;
     { Add a stored assistant reply to the stream: strip a leading frontmatter
       block and draw it as the title/keyword header (a resume path, so a
       previously-stored malformed block is still cleaned up). }
@@ -1306,7 +1311,57 @@ begin
     demand. It rides the stream after the divider, so a resumed session shows it
     in the same place from the same rows. }
   Block := FPanel.Stream.Add(ckTurnChanges, 'turn changes', Text);
+  Block.SetExpandedText(TurnSummaryDiffs(Rows, Summary));
   Block.Expanded := False;
+end;
+
+function THarnessApp.TurnSummaryDiffs(const ARows: TChangeRecordArray;
+  const ASummary: TTurnChangeSummary): string;
+var
+  I, J: Integer;
+  R: TChangeRecord;
+  V: TDiffView;
+  Kind: TDiffLineKind;
+  Line: string;
+  Part: string;
+begin
+  { The expanded body: every file's diff, in the same order the stat lines use
+    (by path). Built once, when the block is created - expanding is a rendering
+    change, not a store read. }
+  Result := '';
+  for I := 0 to High(ASummary.Files) do
+  begin
+    { Find the net row for this path. The summary already tells us which paths
+      are worth showing, so this walks the summary, not the rows. }
+    R := Default(TChangeRecord);
+    for J := 0 to High(ARows) do
+      if ARows[J].IsNet and (ARows[J].Path = ASummary.Files[I].Path) then
+      begin
+        R := ARows[J];
+        Break;
+      end;
+    if Result <> '' then
+      Result := Result + LineEnding + LineEnding;
+    Part := ChangeKindCode(ASummary.Files[I].Kind) + ' ' + ASummary.Files[I].Path;
+    Result := Result + Part;
+    V := TDiffView.FromRecord(R);
+    try
+      if V.NotCaptured then
+        Result := Result + LineEnding + '  (not captured: no before-text)'
+      else if V.LineCount = 0 then
+        Result := Result + LineEnding + '  (no change)'
+      else
+      begin
+        if V.Capped then
+          Result := Result + LineEnding + '  (capped at the patch limit)';
+        for J := 0 to V.LineCount - 1 do
+          if V.Line(J, Kind, Line) then
+            Result := Result + LineEnding + '  ' + Line;
+      end;
+    finally
+      V.Free;
+    end;
+  end;
 end;
 
 procedure THarnessApp.AddAssistantBlock(const AContent: string);

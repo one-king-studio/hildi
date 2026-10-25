@@ -57,6 +57,11 @@ type
     FKind: TChatKind;
     FLabel: string;
     FBody: string;
+    { What an EXPANDED turn-summary block shows instead of FBody: the per-file
+      diffs. Collapsed shows FBody (the stat lines), which is what the operator
+      wants at a glance; expanding is a request to see the changes themselves.
+      Empty for every other kind, where expanding just un-condenses FBody. }
+    FExpandedBody: string;
     { Reply metadata (an assistant reply's frontmatter, extracted): a title line
       and keyword chips drawn above the body. Empty for a reply with no block. }
     FTitle: string;
@@ -138,6 +143,10 @@ type
     destructor Destroy; override;
     { Replace or append the body text (streaming); both fire OnChange. }
     procedure SetText(const AText: string);
+    { What this block shows when EXPANDED, when that differs from the collapsed
+      body. A turn summary is the only user: collapsed it shows per-file stats,
+      expanded the diffs themselves. Ignored when empty. }
+    procedure SetExpandedText(const AText: string);
     { Set the reply metadata (title + keywords) drawn above the body. The body
       is the stripped text; the frontmatter never reaches the renderer. }
     procedure SetMeta(const ATitle: string; const AKeywords: TStringArray);
@@ -708,6 +717,19 @@ begin
     FOnChange(Self);
 end;
 
+procedure TChatItem.SetExpandedText(const AText: string);
+begin
+  if AText = FExpandedBody then
+    Exit;
+  FExpandedBody := AText;
+  { Only the expanded view changes, but the version bump is what makes
+    ApplyDisplay rebuild - and it is cheap when the block is collapsed. }
+  Inc(FTextVer);
+  InvalidateHeight;
+  if Assigned(FOnChange) then
+    FOnChange(Self);
+end;
+
 procedure TChatItem.AppendText(const AText: string);
 begin
   if AText = '' then
@@ -828,6 +850,7 @@ var
   I, Start, Last: Integer;
   Res: UnicodeString;
   One: TSpan;
+  Body: string;
 begin
   if FText = nil then
   begin
@@ -839,10 +862,16 @@ begin
   end;
   if (FAppliedVer = FTextVer) and (FAppliedWidth = AWidth) then
     Exit;
+  { Expanded, a turn summary shows the diffs; collapsed it shows the stat lines.
+    Every other kind ignores FExpandedBody (it is empty) and behaves as before. }
+  if FExpanded and (FExpandedBody <> '') then
+    Body := FExpandedBody
+  else
+    Body := FBody;
   if not Condenseable then
   begin
     One := Default(TSpan);
-    One.Text := UnicodeString(FBody);
+    One.Text := UnicodeString(Body);
     One.Attr := BodyAttr;
     FText.SetSpans([One]);
     FDisplayCondensed := False;
@@ -853,7 +882,7 @@ begin
     begin
       if FSrc = nil then
         FSrc := TTextBlock.Create([], wmWord);
-      FSrc.SetText(FBody, FTheme.Text);
+      FSrc.SetText(Body, FTheme.Text);
       FAppliedSrc := FTextVer;
     end;
     Rows := FSrc.WrappedRows(InnerWidth(AWidth));
