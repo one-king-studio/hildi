@@ -1,7 +1,13 @@
 # Feature: Board Dashboard
 
-**Status:** Proposed — no spec yet. A layout mock exists
-(`examples/dashboard_mock.pas`, `make dashboard-mock`).
+**Status:** Implemented (v1, read-only). `make dashboard` runs the real binary;
+`make dashboard-mock` renders the same widget over static data. No SPEC — the
+layout was settled by iterating on the mock against real feedback, and this doc
+records the as-built shape.
+
+**Code:** `src/hildegard.helper.dashboard.panel.pas` (the widget) ·
+`examples/dashboard.pas` (the binary: store → panel) ·
+`examples/dashboard_mock.pas` (the same widget, static data).
 
 **Related:** [Workspace Board](../Message_Board/FEATURE.md) ·
 [Task List](../Task_List/FEATURE.md) ·
@@ -82,32 +88,83 @@ must clear, and it is why v1 is deliberately read-mostly.
   "one binary, one concern" boundary of the [Process Split](../Process_Split/FEATURE.md)
   gets a real test rather than a diagram.
 
-## The shape: three zones
+## The shape: kanban on top, channels below
 
 ```
-╭─ Sessions ────────────╮╭─ Board · coordination ── q 0 · d 0 · f 0 ╮
-│ ⠹ main · Board dash…  ││ [answer]  Correction: your answer…  2h -> #1│
-│ ○ tasks · Claim rec…  ││ [status]  Four docs files uncomm…   3h      │
-│ ✓ docs · The recorder…││ open questions 0 · decisions 0 · all answered│
-│ ┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈││                                          │
-│ ❯ announce to coord…  ││                                          │
-╰───────────────────────╯╰──────────────────────────────────────────╯
-╭─ Tasks ───────────────────── 4 live · 2 done ───────────────────────╮
-│ OPEN 1  │ CLAIMED 1 │ BLOCKED 0 │ DONE 2     │ DROPPED 0            │
-│ ┌─────┐ │ ┌───────┐ │           │ ┌───────┐  │                      │
-│ │#1 … │ │ │#2 …   │ │           │ │#3 …   │  │                      │
-│ └─────┘ │ └───────┘ │           │ └───────┘  │                      │
-╰──────────────────────────────────────────────────────────────────────╯
+╭ Tasks ────────────────────────────────────── 1 live · 15 done ╮
+│ OPEN 1                │ CLAIMED 0             │ DONE 15       ▼ │
+│╭ #15 ─────────────────╮│                       │╭ #10 ──────────╮│
+││ Workspace Snapshots: ││                       ││ Board Dashboar ││
+││ turn summary + diff  ││                       ││ settle the two ││
+││ unclaimed · 1h       ││                       ││ eb3fde56 · 2h  ││
+╰────────────────────────────────────────────────────────────────╯
+╭ Channels ──────────╮╭ Messages ────────────────── every topic ─╮
+│❯ live feed   LIVE  ││ [status]   parent · TUI split merged… 2h │
+│  # coordination    ││ [answer]   parent · 169s → 22s, and…  18h │
+│  # tui-split       ││ [status]   parent · #6 is committed … 18h │
+╰────────────────────╯╰─ open questions 1 · decisions 0 · find… ─╯
+ /Users/…/hildegard-helper        live  tab zone  arrows move  q quit
 ```
 
-**Why this arrangement.** The kanban takes the bottom strip because five columns
-need *width* and only about three cards need *height*; placed left or right it
-would collapse to two visible columns and lose the left-to-right reading that
-makes a kanban a kanban. Sessions and board are both vertical lists, so they take
-the upper band and split it.
+**Tasks on top, at 60% of the height.** The kanban is what an operator scans for
+"what is happening", so it takes the eye-line and the majority of the frame. The
+earlier layout put it in the bottom third and gave the top band to a sessions
+list — wrong, because the cards *are* the work. A session's identity already
+appears on the cards it holds, so a separate sessions pane showed the same fact
+twice.
 
-**Why sessions on the left.** The left edge is where the eye starts, and "who is
-doing what" is the question that frames everything else in the frame.
+**Cards size to their content.** A card's height is `2 (borders) + N (wrapped
+title lines) + 1 (holder)`. A long title wraps rather than being cut, so a lane
+of mixed-length cards stays readable. Cards sit flush — no gutter — so a lane
+reads as one column.
+
+**Lanes are the board's own background; only the header band differs.** The
+focused lane takes a one-shade-darker fill and the focused card's **border**
+takes the accent, leaving its content at the normal text colour. Two signals,
+not redundant: the lane tint says which column, the card border says which card.
+
+**BLOCKED and DROPPED are optional.** An empty BLOCKED lane is good news and an
+empty DROPPED lane is the normal case; neither should hold a column of screen
+hostage. The three working lanes always show. Navigation skips the hidden ones.
+
+**lane headers encode meaning by colour**, so the board reads before the labels
+do: OPEN plain and dim, CLAIMED amber, BLOCKED a dull red (not `Error` — a
+caution, not a fault), DONE the same cool green the messages use, DROPPED muted.
+
+## The board is Slack-shaped: channels plus a live feed
+
+The first channel entry is the **live feed** — every topic, newest first, and
+the default view. The rest are `# topic` rows. Selecting one filters the message
+pane to that topic.
+
+This replaced a single "board" pane showing one topic. The Slack shape was worth
+it because a workspace has several concurrent topics and the operator's question
+is usually "what changed anywhere", which the feed answers and a topic filter
+cannot.
+
+`IBoardStore.ListTopics` exists for this: a filter can narrow to a topic the
+caller already knows, but a channel *list* needs the topics themselves.
+
+## Near-realtime: polling, with the age on screen
+
+The dashboard re-reads the store every 2 s. The panel owns the clock and the
+rule; the host owns the store and supplies a callback
+(`TDashboard.SetPoll(2000, @RefreshData)`). Two properties matter:
+
+- **Throttled.** The callback runs at most once per interval *and* never more
+  often than the app ticks. A busy frame loop cannot become a busy store loop.
+- **Repaint only on change.** The host returns whether anything the frame shows
+  actually differs (lane sizes, card ids and holders, message titles). No change,
+  no repaint.
+
+**The age is stated, not implied.** The status bar carries `live` or
+`read Ns ago`. A dashboard that repaints while showing a frozen snapshot is the
+failure this doc names in its risks; saying the age is what keeps it honest.
+
+`ponytail:` the refresh is a **full reload** per tick — one board `Read` (capped
+at 200) plus one `List` per lane. Milliseconds locally at 2 s, but not the
+cheap-aggregate precheck this doc originally described; that needs a per-status
+task count `ITaskStore` does not expose yet.
 
 ## The hard part: a live turn title does not exist
 
@@ -327,22 +384,41 @@ None. No new dependency; no network.
 
 ## Notes
 
-- **The mock is the design.** `examples/dashboard_mock.pas` renders all three
-  zones from static data pasted in from a real workspace, so the layout could be
-  judged before any store code was written. It reads nothing and writes nothing.
-  **It has not been visually verified** — it compiles and links, but no headless
-  render has been dumped. Do that first; layout bugs found by eye are cheap.
+- **The mock is the design, and the mock and the binary share one widget.**
+  `examples/dashboard_mock.pas` renders the panel from static data pasted in
+  from a real workspace, so layout changes can be judged without a store. It was
+  **visually verified** by adding `--dump [WxH]`, which drives the same `Render`
+  path into an in-memory surface and prints the frame as plain lines — no tty,
+  works over a pipe. That is how the layout bugs were found: a right-aligned
+  label eating the top-right corner, a compose hint painted on the bottom
+  border, a card holder landing on the card's own border, and a kind chip too
+  narrow for `[decision]`.
+
+  The widget lives in `hildegard.helper.dashboard.panel`; the mock is ~96 lines
+  of static data, and `make dashboard-mock` and `make dashboard` draw through
+  the same implementation.
+
+- **`--dump` is the verification tool for the binary too.** It renders one frame
+  and exits, so what the real binary reads can be checked over a pipe. Running
+  it from the main checkout (workspace 1: 16 cards, 13 entries) is how two
+  further defects surfaced — a raw 32-hex session id filling a card holder, and
+  mid-word truncation with no ellipsis. Neither was visible in the mock's data.
+
+- **A worktree is its own workspace.** Running the binary from a worktree shows
+  that worktree's board, which is usually empty. That is correct, not a bug: the
+  workspace id is keyed on the canonical path.
+
 - **Why a second binary rather than a TUI panel.** The TUI is a client of one
   session; the dashboard is a view of the workspace. Making it a panel would
   either give the TUI a second data source with a different lifetime, or force
   the operator to attach to a session to see the others. Separate binary keeps the
   Process Split honest and lets this be read-only.
+
 - **Why the kanban is the right task view here.** The task list's tail shows a
   capped list of open cards because tails are prompts. A dashboard has a screen,
   so it can show the real shape: every status, the true counts, and which column
   is backing up.
-- **ICE score.** Impact **7** (the operator's blind spot is real and growing with
-  the number of sessions), Confidence **7** (the data all exists; the one
-  unknown is the authorship field), Ease **6** (a mock already exists; the work is
-  polling, layout fidelity and one write). Total **20/30** — worth building, after
-  the in-flight correctness work rather than ahead of it.
+
+- **What is NOT built.** The announcement write (blocked on the authorship
+  question above), unread counts in the channel list (`UnreadFor` exists on
+  main; the binary reports 0), and mode B observer attach.

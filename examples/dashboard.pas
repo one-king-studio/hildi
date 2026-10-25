@@ -299,11 +299,13 @@ begin
         App.Run(@ShouldStop);
       finally
         App.Free;
+        { Panel is NOT freed here: TTuiApp owns its root widget and frees it in
+          TTuiApp.Destroy -> TPlane.Destroy -> FRoot.Free. Freeing it again was
+          a double-free that surfaced as a bus error on quit. }
         Input := nil;
         Surface := nil;
       end;
     finally
-      Panel.Free;
       BoardStore := nil;
       TaskStore := nil;
     end;

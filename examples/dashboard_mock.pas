@@ -75,7 +75,7 @@ begin
     App.Run(@ShouldStop);
   finally
     App.Free;
-    Panel.Free;
+    { Panel is NOT freed: TTuiApp owns its root widget. }
     Input := nil;
     Surface := nil;
   end;
