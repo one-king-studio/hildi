@@ -33,6 +33,14 @@ type
     FirstBeforeSize, LastAfterSize: Int64;
   end;
 
+  { Rows waiting for the message id of the call that produced them. Keyed by
+    the provider's tool-call id, not "most recent": two concurrent calls must
+    each anchor their OWN rows, or one would take the other's. }
+  TPendingAnchor = record
+    CallId: string;
+    RowIds: array of Integer;
+  end;
+
   TChangeRecorder = class
   private
     FStore: IChangeStore;
@@ -43,11 +51,10 @@ type
     FRecords: Integer;
     FFolds: array of TFoldEntry;
     FNetRecords: Integer;
-    { The ids appended by the most recent Observe call - one tool call's rows.
-      Anchoring happens after the tool-result row exists, so the recorder has to
-      remember which rows are waiting for an id. }
-    FLastIds: array of Integer;
+    { The rows each call wrote, waiting for its tool-result message id. }
+    FPending: array of TPendingAnchor;
     function IndexOfFold(const APath: string): Integer;
+    function PendingIndex(const ACallId: string): Integer;
     procedure FoldInto(const C: TFileChange);
   public
     { AStore may be nil, in which case every call is a no-op: a session with no
@@ -59,11 +66,20 @@ type
       it happened in - which is what the retention window and the changed-files
       view group by. }
     procedure SetTurn(ATurnId: Int64);
-    { Matches TCommandChangesEvent: one call's set. }
-    procedure Observe(const AChanges: TFileChangeSet);
+    { One call's set. AToolCallId is the provider's id for the call, or '' when
+      the producer has none. It is what makes attribution correct rather than
+      merely ordered: two concurrent calls each pass their own id, so neither can
+      anchor the other's rows. }
+    procedure Observe(const AChanges: TFileChangeSet;
+      const AToolCallId: string = '');
     { True when a set would produce at least one record - a caller can use this
       to skip the work of building one. }
     function Wants: Boolean;
+    { Anchor the rows written by the call AToolCallId to its tool-result message.
+      Returns how many rows were stamped. A call that wrote nothing, or one whose
+      rows were pruned, is a no-op - neither is worth failing a turn over. }
+    function AnchorCall(const AToolCallId: string;
+      AMessageId: Integer): Integer;
     { Write one NET row per path folded during this turn, carrying
       diff(first before, last after), then clear the fold. Called at the turn
       boundary. A path whose two ends are identical yields an empty patch: the
@@ -119,6 +135,39 @@ begin
     if FFolds[I].Path = APath then
       Exit(I);
   Result := -1;
+end;
+
+function TChangeRecorder.PendingIndex(const ACallId: string): Integer;
+var
+  I: Integer;
+begin
+  for I := 0 to High(FPending) do
+    if FPending[I].CallId = ACallId then
+      Exit(I);
+  Result := -1;
+end;
+
+function TChangeRecorder.AnchorCall(const AToolCallId: string;
+  AMessageId: Integer): Integer;
+var
+  K, I: Integer;
+  Err: string;
+  Ids: array of Integer;
+begin
+  Result := 0;
+  if (FStore = nil) or (AToolCallId = '') then
+    Exit;
+  K := PendingIndex(AToolCallId);
+  if K < 0 then
+    Exit;   { the call wrote nothing }
+  { Take the ids out before stamping: a SetMessageId failure must not leave the
+    entry behind to be retried forever. }
+  Ids := FPending[K].RowIds;
+  FPending[K] := FPending[High(FPending)];
+  SetLength(FPending, Length(FPending) - 1);
+  for I := 0 to High(Ids) do
+    if FStore.SetMessageId(FWorkspaceId, Ids[I], AMessageId, Err) then
+      Inc(Result);
 end;
 
 procedure TChangeRecorder.FoldInto(const C: TFileChange);
@@ -208,9 +257,10 @@ begin
   FFolds := nil;
 end;
 
-procedure TChangeRecorder.Observe(const AChanges: TFileChangeSet);
+procedure TChangeRecorder.Observe(const AChanges: TFileChangeSet;
+  const AToolCallId: string);
 var
-  I: Integer;
+  I, K: Integer;
   C: TFileChange;
   R: TChangeRecord;
   Id: Integer;
@@ -221,9 +271,9 @@ var
 begin
   if (FStore = nil) or (AChanges = nil) then
     Exit;
-  { This call's rows replace the previous call's: AnchorLast works on the most
-    recent Observe. }
-  FLastIds := nil;
+  { Rows wait for the id of the call that made them, keyed by that call's
+    provider id rather than "the most recent Observe": two concurrent calls must
+    each anchor their OWN rows, or one would take the other's. }
   Inc(FTurns);
   for I := 0 to AChanges.Count - 1 do
   begin
@@ -284,24 +334,32 @@ begin
     if not FStore.Append(R, Id, Err) then
       Continue;   // a failed append must not fail the tool call
     Inc(FRecords);
-    { Remembered so the tool-result id can anchor it once that row exists. }
-    SetLength(FLastIds, Length(FLastIds) + 1);
-    FLastIds[High(FLastIds)] := Id;
+    { Remembered against its OWN call, so the tool-result id anchors exactly
+      these rows once that message exists. }
+    if AToolCallId <> '' then
+    begin
+      K := PendingIndex(AToolCallId);
+      if K < 0 then
+      begin
+        SetLength(FPending, Length(FPending) + 1);
+        K := High(FPending);
+        FPending[K] := Default(TPendingAnchor);
+        FPending[K].CallId := AToolCallId;
+      end;
+      SetLength(FPending[K].RowIds, Length(FPending[K].RowIds) + 1);
+      FPending[K].RowIds[High(FPending[K].RowIds)] := Id;
+    end;
   end;
 end;
 
 function TChangeRecorder.AnchorLast(AMessageId: Integer): Integer;
-var
-  I: Integer;
-  Err: string;
 begin
+  { Kept for callers that have no call id: anchors whatever is still pending.
+    A caller that knows the id should use AnchorCall instead, or it can take
+    another call's rows when two run concurrently. }
   Result := 0;
-  if FStore = nil then
-    Exit;
-  for I := 0 to High(FLastIds) do
-    if FStore.SetMessageId(FWorkspaceId, FLastIds[I], AMessageId, Err) then
-      Inc(Result);
-  FLastIds := nil;
+  while Length(FPending) > 0 do
+    Inc(Result, AnchorCall(FPending[High(FPending)].CallId, AMessageId));
 end;
 
 end.
