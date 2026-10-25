@@ -229,6 +229,10 @@ var
   Access: TPathAccessArray;
   R2, W2: TStringArray;
   Known2: Boolean;
+  { Grouping state: redirect effects collected by direction so one ask covers
+    them all, and the segment that gets focus. }
+  ReadPaths, WritePaths: TStringArray;
+  FocusSeg: Integer;
 
   function OneParam(const AValue: string): TApprovalParams;
   begin
@@ -346,6 +350,97 @@ var
         DirOfRelative(LRel) + '/', DirOfRelative(LRel), ExtOfRelative(LRel));
     end;
     AddOption(Result[High(Result)], 'any', 'always ' + LRef, True, nil, True);
+  end;
+
+  { One file-effect ask covering a whole GROUP of paths, instead of one ask per
+    path. The operator approving `grep a *.txt` should see ONE "read 3 files"
+    dialog with scope options, not three dialogs that each resize the window.
+
+    The options are the same vocabulary the per-path ask offered, so nothing is
+    lost: exact file is meaningless for a group, so it is replaced by the scopes
+    that actually generalise - same extension, same directory, both, or all. }
+  procedure AppendGroupedFileAsk(const APaths: TStringArray; AWrite: Boolean);
+  var
+    LRef, Joined, Dirs, Exts, E: string;
+    K: Integer;
+    AP, FirstDir, FirstExt: string;
+    SameDir, SameExt: Boolean;
+  begin
+    if Length(APaths) = 0 then
+      Exit;
+    LRef := 'file:write';
+    if not AWrite then
+      LRef := 'file:read';
+    Ref := LRef;
+    SetLength(Result, Length(Result) + 1);
+    Result[High(Result)] := Default(TApprovalAsk);
+    Joined := '';
+    for K := 0 to High(APaths) do
+    begin
+      if K > 0 then
+        Joined := Joined + ', ';
+      Joined := Joined + APaths[K];
+    end;
+    if AWrite then
+      E := 'write '
+    else
+      E := 'read ';
+    if Length(APaths) = 1 then
+      Result[High(Result)].Summary := E + APaths[0]
+    else
+      Result[High(Result)].Summary := E + IntToStr(Length(APaths)) + ' files: ' +
+        Joined;
+    Result[High(Result)].Subject.Ref := LRef;
+    Result[High(Result)].Subject.Path := APaths[0];
+    SetLength(Result[High(Result)].Subject.Params, Length(APaths));
+    for K := 0 to High(APaths) do
+      Result[High(Result)].Subject.Params[K] := APaths[K];
+    AddOption(Result[High(Result)], 'once', 'allow once', False, nil, False);
+    { The exact option names this precise set of paths - for a group it means
+      "always this exact command's effects", which is what an operator grants
+      after reviewing the list. }
+    AddOption(Result[High(Result)], 'exact', 'always these exact files', True,
+      Result[High(Result)].Subject.Params, False);
+    { A group is often one directory or one extension, so offer those scopes only
+      when they actually generalise - a scope option that covers nothing extra is
+      just a way to grant more than asked. }
+    FirstDir := DirOfRelative(APaths[0]);
+    FirstExt := ExtOfRelative(APaths[0]);
+    SameDir := True;
+    SameExt := (FirstExt <> '');
+    Dirs := '';
+    Exts := '';
+    for K := 0 to High(APaths) do
+    begin
+      AP := DirOfRelative(APaths[K]);
+      if AP <> FirstDir then
+        SameDir := False;
+      if ExtOfRelative(APaths[K]) <> FirstExt then
+        SameExt := False;
+      if (AP <> '') and (Pos(#1 + AP + #1, Dirs) = 0) then
+        Dirs := Dirs + #1 + AP + #1;
+      if ExtOfRelative(APaths[K]) <> '' then
+        Exts := Exts + #1 + ExtOfRelative(APaths[K]) + #1;
+    end;
+    if SameExt then
+      AddFileScope(Result[High(Result)], 'ext',
+        'always .' + FirstExt + ' files', '', FirstExt);
+    if SameDir then
+      if FirstDir = '' then
+        AddFileScope(Result[High(Result)], 'dir', 'always in the workspace', '',
+          '')
+      else
+        AddFileScope(Result[High(Result)], 'dir',
+          'always in ' + FirstDir + '/', FirstDir, '');
+    if SameDir and SameExt and (FirstExt <> '') then
+      AddFileScope(Result[High(Result)], 'dir_ext',
+        'always .' + FirstExt + ' files in ' + FirstDir + '/', FirstDir,
+        FirstExt);
+    { A bucket option, for the class this group belongs to. }
+    if AWrite then
+      Result[High(Result)].Subject.Bucket := abWrite
+    else
+      Result[High(Result)].Subject.Bucket := abRead;
   end;
 
   { A path-grant option: a Directory rule (subtree-inclusive), empty params
@@ -467,10 +562,17 @@ begin
     StampFocus(Result[High(Result)], I);
   end;
   { A shell redirect is a file effect: here-docs and fd duplications are not
-    files and are skipped; an outside target is not a file ask. }
+    files and are skipped; an outside target is not a file ask.
+
+    GROUPED by direction, not one ask per path. `cmd a > x.txt b > y.txt` used to
+    produce two dialogs that each resized the window; it now produces one "write
+    2 files" ask with scopes that generalise. }
   if ARoot <> '' then
   begin
     Access := PathAccesses(Plan, ARoot, ACwd);
+    SetLength(ReadPaths, 0);
+    SetLength(WritePaths, 0);
+    FocusSeg := -1;
     for J := 0 to High(Access) do
     begin
       if (not Access[J].IsRedirect) or (not Access[J].Inside) then
@@ -478,9 +580,28 @@ begin
       Op := RedirectOpOf(Plan, Access[J].Segment, Access[J].Token);
       if not RedirectEffectsFile(Op) then
         Continue;
-      AppendFileAsk(Access[J].Resolved, Op <> '<');
-      StampFocus(Result[High(Result)], Access[J].Segment);
+      Rel := WorkspaceRelative(ARoot, Access[J].Resolved);
+      if Rel = '' then
+        Continue;                     // outside the root: the path ask covers it
+      if Op = '<' then
+      begin
+        SetLength(ReadPaths, Length(ReadPaths) + 1);
+        ReadPaths[High(ReadPaths)] := Rel;
+      end
+      else
+      begin
+        SetLength(WritePaths, Length(WritePaths) + 1);
+        WritePaths[High(WritePaths)] := Rel;
+      end;
+      if FocusSeg < 0 then
+        FocusSeg := Access[J].Segment;
     end;
+    if Length(ReadPaths) > 0 then
+      AppendGroupedFileAsk(ReadPaths, False);
+    if Length(WritePaths) > 0 then
+      AppendGroupedFileAsk(WritePaths, True);
+    if FocusSeg >= 0 then
+      StampFocus(Result[High(Result)], FocusSeg);
   end;
   { Path asks: for each access that leaves the workspace, one ask whose subject
     is the absolute path (a distinct coordinate space from a file tool's

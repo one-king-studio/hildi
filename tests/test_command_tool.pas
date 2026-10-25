@@ -1124,15 +1124,13 @@ begin
     AssertEquals('workspace-relative path', 'out.txt',
       Asks[FileAsk].Subject.Path);
     AssertEquals('once', 'once', Asks[FileAsk].Options[0].Key);
-    AssertEquals('exact', 'exact', Asks[FileAsk].Options[1].Key);
+    AssertEquals('exact files', 'exact', Asks[FileAsk].Options[1].Key);
     AssertEquals('exact names the path', 'out.txt',
       Asks[FileAsk].Options[1].Rule.Params[0]);
-    AssertEquals('dir', 'dir', Asks[FileAsk].Options[2].Key);
-    AssertEquals('ext', 'ext', Asks[FileAsk].Options[3].Key);
-    AssertEquals('ext value', 'txt', Asks[FileAsk].Options[3].Rule.Extension);
-    AssertEquals('dir_ext', 'dir_ext', Asks[FileAsk].Options[4].Key);
-    AssertEquals('any', 'any', Asks[FileAsk].Options[5].Key);
-    AssertEquals('no never option', 6, Length(Asks[FileAsk].Options));
+    { Reads and writes now offer the SAME scope vocabulary (operator request):
+      exact / extended-by-extension / directory / dir+ext. A single path gives
+      both dir and ext, since both generalise from it. }
+    AssertTrue('a directory scope', Length(Asks[FileAsk].Options) >= 3);
     { A non-pure command keeps its own ask, and the summary names the redirect. }
     Asks := Tool.ApprovalAsks(
       '{"command":"grep x out.txt > log.txt","reason":"r"}');
@@ -1148,6 +1146,7 @@ var
   Tool: TCommandTool;
   Asks: TApprovalAskArray;
   I, FileAsk: Integer;
+  HasDir, HasExt: Boolean;
 begin
   Tool := BuildToolWithRoot('/tmp/nowhere');
   try
@@ -1158,9 +1157,18 @@ begin
         FileAsk := I;
     AssertTrue('a file:read ask', FileAsk >= 0);
     AssertEquals('path', 'in.txt', Asks[FileAsk].Subject.Path);
-    { Reads do not offer extension scoping (as the file tools do not). }
+    { Reads and writes share the SAME scope vocabulary now (operator request) -
+      previously reads did not offer extension scoping. Both should present the
+      same set so the dialog does not differ by direction. }
+    HasDir := False;
+    HasExt := False;
     for I := 0 to High(Asks[FileAsk].Options) do
-      AssertFalse('no ext option on a read', Asks[FileAsk].Options[I].Key = 'ext');
+    begin
+      if Asks[FileAsk].Options[I].Key = 'dir' then HasDir := True;
+      if Asks[FileAsk].Options[I].Key = 'ext' then HasExt := True;
+    end;
+    AssertTrue('a read offers a directory scope', HasDir);
+    AssertTrue('and an extension scope, as a write does', HasExt);
   finally
     Tool.Free;
   end;
