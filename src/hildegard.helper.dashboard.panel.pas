@@ -148,6 +148,11 @@ var
   Board: TBoardArray;
   Chans: TChanArray;
 
+{ Fill the globals above with a static workspace's shape. The mock calls this
+  so it needs no store; the real binary fills the same globals from the store
+  instead, and draws through the one panel implementation either way. }
+procedure InitData;
+
 { Render one frame to stdout as plain lines. No terminal is opened, so this
   works over a pipe - the way a real binary gets verified without a tty. }
 procedure DumpFrame(AWidth, AHeight: Integer);
