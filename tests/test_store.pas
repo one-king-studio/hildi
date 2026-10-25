@@ -47,6 +47,8 @@ type
     procedure TestTurnRequestMessageRoundTrip;
     procedure TestTurnRollupSumsRequests;
     procedure TestMessageSeqIsPerSession;
+    { Per-call anchoring: resolve a tool call id to the message row it produced. }
+    procedure TestToolMessageIdResolvesTheToolCallRow;
     procedure TestRequestSeqIsPerTurn;
     procedure TestBeginRequestUnknownTurnFails;
     procedure TestAppendMessageUnknownSessionFails;
@@ -732,6 +734,44 @@ begin
     AssertEquals('seq 2', 2, Msgs[1].Seq);
     AssertEquals('seq 3', 3, Msgs[2].Seq);
     AssertEquals('second turn link', T2, Msgs[2].TurnId);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestToolMessageIdResolvesTheToolCallRow;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws: Integer;
+  Sid: string;
+  TurnId, Id: Int64;
+  M: TMessageRecord;
+begin
+  { The seam per-call change anchoring needs. A change row is written while the
+    tool runs; its message does not exist yet. Given the tool-call id the loop
+    already carries, this resolves the row so the change can be stamped with it. }
+  S := OpenStore;
+  try
+    AssertTrue('workspace', S.EnsureWorkspace('/tmp', Ws, Err));
+    AssertTrue('create session', S.CreateSession(Ws, Sid, Err));
+    AssertTrue('begin turn', S.BeginTurn(Sid, TurnId, Err));
+
+    M := MakeTurnMsg(Sid, TurnId, mrTool, 'result');
+    M.ToolCallId := 'call_abc';
+    AssertTrue('append tool', S.AppendMessage(M, Err));
+
+    AssertTrue('resolve', S.ToolMessageId(Sid, 'call_abc', Id, Err));
+    AssertTrue('found', Id > 0);
+
+    { An unknown call id is not an error: a call that produced no row is a
+      normal outcome, and the anchor is simply skipped. }
+    AssertTrue('unknown', S.ToolMessageId(Sid, 'call_zzz', Id, Err));
+    AssertEquals('no row', 0, Id);
+
+    { An empty id is a no-op rather than a query. }
+    AssertTrue('empty', S.ToolMessageId(Sid, '', Id, Err));
+    AssertEquals('no row for empty', 0, Id);
   finally
     S.Free;
   end;

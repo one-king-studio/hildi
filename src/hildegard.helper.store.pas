@@ -196,6 +196,14 @@ type
     function LastAssistantMessageId(const ASessionId: string; out AId: Int64;
       out AError: TStoreError): Boolean;
 
+    { The id of the message row a tool call produced, by the provider's tool-call
+      id (0 when none). This is the seam per-call change anchoring needs: a change
+      row is written while the tool runs, and its message does not exist yet, so
+      the id is resolved afterwards through the tool-call id the loop already
+      carries. }
+    function ToolMessageId(const ASessionId, AToolCallId: string;
+      out AId: Int64; out AError: TStoreError): Boolean;
+
     { Opens a turn (loop) for a session, assigning its per-session sequence.
       Any prior tsRunning turn for the session is finalized (tsCancelled,
       'superseded') first, so a turn can never be orphaned. }
@@ -3289,7 +3297,40 @@ begin
   end;
 end;
 
-{ --- context checkpoint: checkpoints, window, recall (v9) ------------------- }
+function TSqliteStore.ToolMessageId(const ASessionId, AToolCallId: string;
+  out AId: Int64; out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  AId := 0;
+  if AToolCallId = '' then
+    Exit(True);   // no call id, nothing to resolve
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb,
+      'SELECT id FROM messages WHERE session_id = ? AND role = ? ' +
+      'AND tool_call_id = ? ORDER BY seq DESC LIMIT 1');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not read the tool message',
+          DbErrorText));
+      Stmt.BindText(1, ASessionId);
+      Stmt.BindInt(2, Ord(mrTool));
+      Stmt.BindText(3, AToolCallId);
+      if Stmt.Step = SQLITE_ROW then
+        AId := Stmt.ColInt64(0);
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
 
 function TSqliteStore.SaveCheckpoint(const ASessionId, ASummary: string;
   out ASeq: Int64; out AError: TStoreError): Boolean;
