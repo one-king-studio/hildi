@@ -35,6 +35,10 @@ type
     procedure TestRestoreBringsBackTheOlderCurrent;
     procedure TestTopicLockAndUnlock;
     procedure TestTocCounts;
+    { The dashboard's channel list: every live topic, so it can offer them as
+      channels. Filtering by topic already exists; ENUMERATING them did not,
+      which is the one thing a Slack-shaped sidebar needs. }
+    procedure TestListTopicsNamesEachLiveTopicOnce;
     { An answered question is not an open one. The count drives whether an agent
       thinks someone needs it, so a question that has been answered must not keep
       counting - which is what q=1 forever meant before this. }
@@ -310,6 +314,51 @@ begin
   { From the third entry: only the fourth is newer. }
   AssertTrue('toc from 3', FBoard.Toc(1, 3, Unread, Q, D, F, LastAt, Err));
   AssertEquals('one unread', 1, Unread);
+end;
+
+{ Whether ATopics contains ATopic. A local helper rather than IndexStr: that
+  function is not available in this RTL build, and the test only needs presence. }
+function HasTopic(const ATopics: TStringArray; const ATopic: string): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 0 to High(ATopics) do
+    if ATopics[I] = ATopic then
+      Exit(True);
+end;
+
+{ The dashboard lists the board's topics as channels, so it must be able to
+  ENUMERATE them. Filtering by topic already existed; listing them did not, and
+  a filter cannot answer "what topics are there?" without knowing them first. }
+procedure TBoardStoreTest.TestListTopicsNamesEachLiveTopicOnce;
+var
+  E: TBoardEntry;
+  Id: Integer;
+  Topics: TStringArray;
+  Err: string;
+begin
+  E := Entry('coordination', 'a', bkStatus); AssertTrue('1', FBoard.Append(E, Id, Err));
+  E := Entry('coordination', 'b', bkStatus); AssertTrue('2', FBoard.Append(E, Id, Err));
+  E := Entry('tui-split', 'c', bkFinding);   AssertTrue('3', FBoard.Append(E, Id, Err));
+  E := Entry('dashboard', 'd', bkNote);      AssertTrue('4', FBoard.Append(E, Id, Err));
+
+  AssertTrue('list', FBoard.ListTopics(1, Topics, Err));
+  { Each topic once, however many entries it holds: three topics, four entries. }
+  AssertEquals('three topics', 3, Length(Topics));
+  AssertTrue('coordination present', HasTopic(Topics, 'coordination'));
+  AssertTrue('tui-split present', HasTopic(Topics, 'tui-split'));
+  AssertTrue('dashboard present', HasTopic(Topics, 'dashboard'));
+
+  { A deleted entry's topic does not vanish while the topic still has a live
+    entry - and a topic emptied by deletion drops out. }
+  E := Entry('empty', 'e', bkNote); AssertTrue('5', FBoard.Append(E, Id, Err));
+  AssertTrue('list 2', FBoard.ListTopics(1, Topics, Err));
+  AssertEquals('four topics', 4, Length(Topics));
+  AssertTrue('delete', FBoard.MarkDeleted(1, Id, True, 'parent', Err));
+  AssertTrue('list 3', FBoard.ListTopics(1, Topics, Err));
+  AssertEquals('the emptied topic drops out', 3, Length(Topics));
+  AssertTrue('empty is gone', not HasTopic(Topics, 'empty'));
 end;
 
 procedure TBoardStoreTest.TestCursorRoundTrip;

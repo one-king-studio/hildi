@@ -42,6 +42,11 @@ type
     function Toc(AWorkspaceId, ASinceId: Integer; out AUnread, AQuestions,
       ADecisions, AFindings: Integer; out ALastAt: Int64;
       out AError: string): Boolean;
+    { Every live topic, alphabetically. A filter can narrow to a topic it is
+      told about; a channel list needs the topics themselves, and deriving them
+      by reading the whole board and de-duplicating is what this avoids. }
+    function ListTopics(AWorkspaceId: Integer; out ATopics: TStringArray;
+      out AError: string): Boolean;
     function CursorOf(const ASessionId: string; out AId: Integer;
       out AError: string): Boolean;
     function SetCursor(const ASessionId: string; AId: Integer;
@@ -110,6 +115,8 @@ type
       out ALockedBy: string; out AError: string): Boolean;
     function Toc(AWorkspaceId, ASinceId: Integer; out AUnread, AQuestions,
       ADecisions, AFindings: Integer; out ALastAt: Int64;
+      out AError: string): Boolean;
+    function ListTopics(AWorkspaceId: Integer; out ATopics: TStringArray;
       out AError: string): Boolean;
     function CursorOf(const ASessionId: string; out AId: Integer;
       out AError: string): Boolean;
@@ -619,6 +626,40 @@ begin
         ADecisions := sqlite3_column_int(Stmt, 2);
         AFindings := sqlite3_column_int(Stmt, 3);
         ALastAt := sqlite3_column_int64(Stmt, 4);
+      end;
+      Result := True;
+    finally
+      sqlite3_finalize(Stmt);
+    end;
+  finally
+    FStore.Lock.Release;
+  end;
+end;
+
+{ Every live topic, alphabetically. DISTINCT because a topic holds many entries
+  and the channel list wants each once; deleted_at = 0 so a topic emptied by
+  deletion drops out rather than lingering as an empty channel. }
+function TSqliteBoardStore.ListTopics(AWorkspaceId: Integer;
+  out ATopics: TStringArray; out AError: string): Boolean;
+var
+  Stmt: Psqlite3_stmt;
+  S: AnsiString;
+begin
+  Result := False;
+  ATopics := nil;
+  FStore.Lock.Acquire;
+  try
+    if not Prepare('SELECT DISTINCT topic FROM board_entries ' +
+      'WHERE workspace_id = ? AND deleted_at = 0 ORDER BY topic',
+      Stmt, AError) then
+      Exit;
+    try
+      sqlite3_bind_int(Stmt, 1, AWorkspaceId);
+      while sqlite3_step(Stmt) = SQLITE_ROW do
+      begin
+        S := AnsiString(sqlite3_column_text(Stmt, 0));
+        SetLength(ATopics, Length(ATopics) + 1);
+        ATopics[High(ATopics)] := string(S);
       end;
       Result := True;
     finally
