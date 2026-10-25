@@ -358,7 +358,7 @@ end;
 function DefaultMigrations: TMigrationArray;
 begin
   Result := nil;
-  SetLength(Result, 17);
+  SetLength(Result, 18);
   Result[0].Version := 1;
   Result[0].Name := 'session history';
   Result[0].Statements := [
@@ -746,6 +746,24 @@ begin
   Result[16].Statements := [
     'ALTER TABLE file_changes ADD COLUMN is_net INTEGER NOT NULL DEFAULT 0',
     'CREATE INDEX idx_changes_turn ON file_changes (workspace_id, turn_id, is_net)'
+  ];
+
+  { v18: a bucket column on approvals. Additive.
+
+    A bucket rule is coarse by design and carries an EMPTY ref - that is what
+    makes it match any command of its effect class rather than one binary. But
+    the approvals table required a non-empty ref, so every bucket grant failed to
+    persist with "approval ref is required". The matching logic worked; nothing
+    could store it.
+
+    A bucket grant is identified by the bucket alone, so ref stays '' for those
+    rows and this column carries the discriminator. 0 = an ordinary ref-keyed
+    rule, which is every existing row. }
+  Result[17].Version := 18;
+  Result[17].Name := 'approval buckets';
+  Result[17].Statements := [
+    'ALTER TABLE approvals ADD COLUMN bucket INTEGER NOT NULL DEFAULT 0',
+    'CREATE INDEX idx_approvals_bucket ON approvals (bucket)'
   ];
 end;
 
@@ -1408,7 +1426,7 @@ begin
       Exit(False);
     Stmt := TStmt.Create(FDb,
       'SELECT effect, scope, workspace_id, session_id, ref, params, ' +
-      'any_params, directory, extension FROM approvals ' +
+      'any_params, directory, extension, bucket FROM approvals ' +
       'WHERE scope = 0 OR (scope = 1 AND workspace_id = ?) ' +
       'OR (scope = 2 AND session_id = ? AND ? <> '''')');
     try
@@ -1430,6 +1448,7 @@ begin
         Rule.AnyParams := Stmt.ColInt(6) <> 0;
         Rule.Directory := Stmt.ColText(7);
         Rule.Extension := Stmt.ColText(8);
+        Rule.Bucket := TApprovalBucket(Stmt.ColInt(9));
         SetLength(ARules, N + 1);
         ARules[N] := Rule;
         Inc(N);
@@ -1453,12 +1472,18 @@ begin
   try
     if not EnsureOpen(AError) then
       Exit(False);
-    if ARule.Ref = '' then
+    { A bucket rule carries NO ref by design: that is what makes it coarse,
+      matching any command of its effect class rather than one binary. Requiring
+      a ref here made every bucket grant fail to persist with "approval ref is
+      required" - the matching worked, nothing could store it. A rule needs a ref
+      OR a bucket. }
+    if (ARule.Ref = '') and (ARule.Bucket = abNone) then
       Exit(Fail(AError, seInvalidArgument, 'approval ref is required', ''));
     Stmt := TStmt.Create(FDb,
       'INSERT OR IGNORE INTO approvals ' +
       '(effect, scope, workspace_id, session_id, ref, params, any_params, ' +
-      'directory, extension, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+      'directory, extension, bucket, created_at) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     try
       if not Stmt.Valid then
         Exit(Fail(AError, seError, 'could not save approval', DbErrorText));
@@ -1471,7 +1496,8 @@ begin
       Stmt.BindInt(7, Ord(ARule.AnyParams));
       Stmt.BindText(8, ARule.Directory);
       Stmt.BindText(9, ARule.Extension);
-      Stmt.BindInt64(10, NowMs);
+      Stmt.BindInt(10, Ord(ARule.Bucket));
+      Stmt.BindInt64(11, NowMs);
       if Stmt.Step <> SQLITE_DONE then
         Exit(Fail(AError, seError, 'could not save approval', DbErrorText));
     finally
@@ -1496,7 +1522,7 @@ begin
     Stmt := TStmt.Create(FDb,
       'DELETE FROM approvals WHERE effect = ? AND scope = ? AND ' +
       'workspace_id = ? AND session_id = ? AND ref = ? AND params = ? AND ' +
-      'any_params = ? AND directory = ? AND extension = ?');
+      'any_params = ? AND directory = ? AND extension = ? AND bucket = ?');
     try
       if not Stmt.Valid then
         Exit(Fail(AError, seError, 'could not remove approval', DbErrorText));
@@ -1509,6 +1535,7 @@ begin
       Stmt.BindInt(7, Ord(ARule.AnyParams));
       Stmt.BindText(8, ARule.Directory);
       Stmt.BindText(9, ARule.Extension);
+      Stmt.BindInt(10, Ord(ARule.Bucket));
       if Stmt.Step <> SQLITE_DONE then
         Exit(Fail(AError, seError, 'could not remove approval', DbErrorText));
     finally

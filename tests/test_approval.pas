@@ -104,6 +104,9 @@ type
     procedure TestInvalidOptionDenies;
     procedure TestStoreSaveLoadRemoveRoundTrip;
     procedure TestPathRulesRoundTrip;
+    { A bucket grant must SURVIVE the store. It failed until v18: the rule has no
+      ref by design, and the store required one. }
+    procedure TestBucketRuleRoundTrips;
     procedure TestRulesDifferingOnlyByPathCoexist;
     procedure TestApprovalsMigrationRebuildsWithPathColumns;
     procedure TestStoreSuppressesDuplicates;
@@ -900,6 +903,46 @@ begin
     AssertTrue('remove', Src.Remove(Rules[0], E));
     AssertTrue('load empty', Src.Load(Ctx, Rules, E));
     AssertEquals('none', 0, Length(Rules));
+  finally
+    Store.Free;
+  end;
+end;
+
+procedure TApprovalTest.TestBucketRuleRoundTrips;
+var
+  Store: TSqliteStore;
+  Src: IApprovalStore;
+  Ctx: TApprovalContext;
+  Rules: TApprovalRuleArray;
+  R: TApprovalRule;
+  E: string;
+  S: TApprovalSubject;
+begin
+  { The reported bug: "could not persist approval: approval ref is required".
+    A bucket rule carries NO ref by design - that is what makes it coarse - and
+    the store required one, so every bucket grant failed to save. Fixing it needed
+    a schema column too, because a bucket is the rule's identity. }
+  Store := OpenStore;
+  try
+    Src := TStoreApprovalStore.Create(Store);
+    Ctx.WorkspaceId := 7;
+    Ctx.SessionId := 's1';
+    R := Default(TApprovalRule);
+    R.Effect := aeAllow;
+    R.Scope := asWorkspace;
+    R.WorkspaceId := 7;
+    R.Ref := '';                 // a bucket rule has no ref
+    R.Bucket := abRead;
+    AssertTrue('save a bucket rule', Src.Save(R, E));
+    AssertTrue('load', Src.Load(Ctx, Rules, E));
+    AssertEquals('one rule', 1, Length(Rules));
+    AssertEquals('the bucket survived', Ord(abRead), Ord(Rules[0].Bucket));
+    AssertEquals('and it still has no ref', '', Rules[0].Ref);
+    { And it actually MATCHES after the round trip, which is the point. }
+    S := Subject('run_command:grep', ['pat', 'f']);
+    S.Bucket := abRead;
+    AssertEquals('a read command is covered after reload', Ord(adAllow),
+      Ord(Decide(Rules, S)));
   finally
     Store.Free;
   end;
