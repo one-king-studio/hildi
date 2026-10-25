@@ -287,6 +287,7 @@ type
     FCancel: TAgentCancelCheck;
     FOnTurnStart: TAgentBoundaryEvent;
     FOnTurnOpened: TAgentTurnEvent;
+    FOnTurnFinished: TAgentTurnEvent;
     FProviders: array of IToolProvider;
     FPromptQueue: TPromptQueue;
     FLastTurnDropped: Boolean;
@@ -366,6 +367,11 @@ type
       known. }
     property OnTurnOpened: TAgentTurnEvent read FOnTurnOpened
       write FOnTurnOpened;
+    { Fires when a turn reaches a terminal state, after FinishTurn and before
+      the next turn may open. The change recorder folds a turn here, so the
+      summary is complete when the turn ends rather than a turn late. }
+    property OnTurnFinished: TAgentTurnEvent read FOnTurnFinished
+      write FOnTurnFinished;
     { Register a per-turn tool/prompt contributor. Prepare fires at each turn
       start; its Specs join the request's tool list; its Find resolves calls. }
     procedure AddProvider(const AProvider: IToolProvider);
@@ -1866,6 +1872,11 @@ begin
       TurnOutcome.Status := tsCompleted;
       TurnOutcome.FinishReason := ChatResult.RawFinishReason;
       FStore.FinishTurn(TurnId, TurnOutcome);
+      { The turn is terminal here, so this is where a consumer folds it. Emitted
+        after FinishTurn and before a queued prompt may open the next turn, so
+        the summary is complete when the turn ends rather than a turn late. }
+      if Assigned(FOnTurnFinished) then
+        FOnTurnFinished(TurnId);
       { Prompts queued before the stop start the next turn immediately. }
       if FPromptQueue.Pending then
       begin

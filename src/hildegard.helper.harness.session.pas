@@ -117,6 +117,9 @@ type
     procedure RecordChanges(const AChanges: TFileChangeSet);
     { The loop reports its turn id here, so changes are attributed to a turn. }
     procedure NoteTurnOpened(ATurnId: Int64);
+    { The loop reports the turn as terminal here, so the fold is flushed and the
+      summary is complete when the turn ends - not when the next one opens. }
+    procedure NoteTurnFinished(ATurnId: Int64);
     { At each turn boundary, re-declare the MCP skills from the current config so
       a server added/enabled/removed is picked up without a restart. Lazy: it
       declares, it does not connect. }
@@ -509,6 +512,17 @@ begin
   end;
 end;
 
+procedure THarnessSession.NoteTurnFinished(ATurnId: Int64);
+begin
+  { Fold the turn into one net row per path. This is the turn-boundary, not the
+    next turn's opening: the summary must be complete when the turn ends, and a
+    flush that waited for the following turn would render an empty block under
+    the turn that just finished. Swallowed - a summary is not worth failing a
+    turn over. }
+  if (FRecorder <> nil) and (ATurnId <> 0) then
+    FRecorder.FlushTurn;
+end;
+
 function THarnessSession.TaskQuestionExists(AWorkspaceId, AId: Integer;
   out ATitle: string): Boolean;
 var
@@ -892,6 +906,8 @@ begin
   ComposeStablePrompt;
   { The change log attributes each change to the turn it happened in. }
   FLoop.OnTurnOpened := NoteTurnOpened;
+  { The fold flushes when the turn is TERMINAL, not when the next one opens. }
+  FLoop.OnTurnFinished := NoteTurnFinished;
   if FMcp <> nil then
   begin
     ReconcileMcpSkills;
