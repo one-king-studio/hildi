@@ -31,8 +31,18 @@ usage() {
 [ $# -lt 1 ] && usage 1
 case "$1" in -h|--help) usage 0 ;; esac
 
+# --repair: fix an EXISTING worktree's deps instead of creating one. Needed
+# because this script only ever ran at creation, so any worktree made with plain
+# `git worktree add` has no deps payload and cannot build.
+REPAIR=0
+if [ "$1" = "--repair" ]; then
+  REPAIR=1
+  shift
+  [ $# -lt 1 ] && usage 1
+fi
+
 WT_PATH="$1"
-shift
+[ "$REPAIR" = 1 ] || shift
 
 # The primary worktree is the one holding the common git dir's parent. Deriving it
 # this way means the script works when run FROM a worktree, not just from main.
@@ -45,11 +55,19 @@ if [ ! -d "$PRIMARY/deps" ]; then
   exit 1
 fi
 
-# --- create the worktree -------------------------------------------------
+# --- create the worktree (unless repairing) ------------------------------
 # Pass the remaining arguments straight to git so -b / --detach / a commit-ish all
 # behave exactly as they do for plain `git worktree add`.
-echo "creating worktree at $WT_PATH"
-git worktree add "$WT_PATH" "$@"
+if [ "$REPAIR" = 0 ]; then
+  echo "creating worktree at $WT_PATH"
+  git worktree add "$WT_PATH" "$@"
+else
+  if [ ! -d "$WT_PATH" ]; then
+    echo "error: $WT_PATH does not exist; --repair fixes an existing worktree." >&2
+    exit 1
+  fi
+  echo "repairing deps in $WT_PATH"
+fi
 
 # Resolve to an absolute path for the symlinks below.
 WT_ABS="$(cd "$WT_PATH" && pwd)"

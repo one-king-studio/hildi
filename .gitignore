@@ -16,10 +16,13 @@
 /deps/sqlite3/sqlite3ext.h
 
 # Vendored mbedTLS source (fetched by scripts/fetch-mbedtls.sh)
-/deps/mbedtls/
+# No trailing slash: `worktree-add.sh` shares these as SYMLINKS, and a pattern
+# ending in `/` matches only a real directory, so the links showed as untracked
+# in every worktree.
+/deps/mbedtls
 
 # Vendored CA bundle (fetched by scripts/fetch-cacert.sh)
-/deps/cacert/
+/deps/cacert
 
 # Local secrets and environment overrides
 .env
