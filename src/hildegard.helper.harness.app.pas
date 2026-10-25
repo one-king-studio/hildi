@@ -30,6 +30,7 @@ uses
   hildegard.helper.harness.subagent, hildegard.helper.harness.subagent.spy,
   tui.widgets.sidebar, tui.widgets.list,
   hildegard.helper.session.protocol, hildegard.helper.session.client,
+  hildegard.helper.changes.store, changes.types, changes.store, changes.summary,
   hildegard.helper.utf8;
 
 type
@@ -223,6 +224,10 @@ type
     procedure SettleOpenTool;
     { End a completed loop with its metrics; a zero/absent turn draws nothing. }
     procedure AddTurnDivider;
+    { The turn summary: what this turn wrote, as one block under the divider.
+      Reads the NET rows only, so a file edited twice shows its net change and a
+      file edited then reverted shows nothing at all. }
+    procedure AddTurnChanges(ATurnId: Int64);
     { Add a stored assistant reply to the stream: strip a leading frontmatter
       block and draw it as the title/keyword header (a resume path, so a
       previously-stored malformed block is still cleaned up). }
@@ -358,6 +363,9 @@ function ShouldTrimHistory(AOlderPages: Integer; ANowMs, ALastScrollMs: Int64;
 implementation
 
 const
+  { How many files a collapsed turn summary names before it tails off. }
+  TurnSummaryMaxFiles = 8;
+
   { The interaction hints live in the CTA strip, which acts as a context
     toolbar; the status bar is reserved for the workspace and the metrics. }
   { The toolbar hints, right-aligned above the composer. }
@@ -1264,6 +1272,43 @@ begin
     FPanel.Stream.Add(ckTurn, '', Stats);
 end;
 
+procedure THarnessApp.AddTurnChanges(ATurnId: Int64);
+var
+  Changes: IChangeStore;
+  Rows: TChangeRecordArray;
+  Summary: TTurnChangeSummary;
+  Lines: TStringArray;
+  Block: TChatItem;
+  Text: string;
+  Err: string;
+  I: Integer;
+begin
+  { Nothing to read without a store, and a zero turn id is not a turn. }
+  if (FSession.Store = nil) or (ATurnId = 0) then
+    Exit;
+  Changes := TSqliteChangeStore.Create(FSession.Store);
+  if not Changes.ForTurn(FSession.WorkspaceId, Integer(ATurnId), Rows, Err) then
+    Exit;
+  Summary := SummarizeTurn(Rows);
+  { A turn that changed nothing renders NO block: an empty summary is noise, and
+    its absence already says the tree is untouched. }
+  Lines := SummaryLines(Summary, TurnSummaryMaxFiles);
+  if Length(Lines) = 0 then
+    Exit;
+  Text := '';
+  for I := 0 to High(Lines) do
+  begin
+    if I > 0 then
+      Text := Text + LineEnding;
+    Text := Text + Lines[I];
+  end;
+  { One collapsed block: the stat lines are visible, the per-file diffs open on
+    demand. It rides the stream after the divider, so a resumed session shows it
+    in the same place from the same rows. }
+  Block := FPanel.Stream.Add(ckTurnChanges, 'turn changes', Text);
+  Block.Expanded := False;
+end;
+
 procedure THarnessApp.AddAssistantBlock(const AContent: string);
 var
   Meta: TReplyMeta;
@@ -1528,8 +1573,12 @@ begin
       end;
     teDone:
       begin
-        { A successful loop ends with its metrics. }
+        { A successful loop ends with its metrics, then its change summary. The
+          summary is a block under the divider, and is absent entirely when the
+          turn wrote nothing - an empty summary would be noise. }
         AddTurnDivider;
+        if FSession.LastTurn.Status = tsCompleted then
+          AddTurnChanges(FSession.LastTurn.Id);
         FinishTurn(psReady, 'ready');
       end;
     teError:
