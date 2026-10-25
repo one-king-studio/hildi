@@ -22,7 +22,9 @@ unit hildegard.helper.dashboard.panel;
   topic.
 
   Keys: Tab / Shift-Tab switch zone; arrows move; PgUp/PgDn scroll a lane;
-        'q' or Ctrl-C quits.
+        'q' or Ctrl-C quits. Escape does NOT quit - it is the universal "back
+        out of this" key, and quitting on it lost the dashboard to a reflexive
+        press.
 
   Run: make dashboard-mock }
 
@@ -1123,7 +1125,10 @@ begin
         zMessages:
           Inc(FMsgSel);
       end;
-    kkEscape: QuitRequested := True;
+    { Escape does NOT quit. It is the universal "back out of this" key, and an
+      operator reaches for it to leave a selection or a channel, not to end the
+      program - quitting on it lost the whole dashboard to a reflexive press.
+      Quit stays on q and Ctrl-C, which are unambiguous. }
   else
     Result := False;
   end;

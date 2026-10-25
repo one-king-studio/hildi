@@ -28,7 +28,9 @@ type
   published
     procedure TestQRequestsQuit;
     procedure TestCtrlCRequestsQuit;
-    procedure TestEscapeRequestsQuit;
+    { Escape is the universal "back out of this" key. Quitting on it lost the
+      whole dashboard to a reflexive press, so it must NOT raise the quit flag. }
+    procedure TestEscapeDoesNotQuit;
     { The poll runs at most once per interval: a busy frame loop must not turn
       into a busy store loop. }
     procedure TestPollIsThrottledToItsInterval;
@@ -89,7 +91,7 @@ begin
   AssertTrue('ctrl-c raises the flag', QuitRequested);
 end;
 
-procedure TDashboardPanelTest.TestEscapeRequestsQuit;
+procedure TDashboardPanelTest.TestEscapeDoesNotQuit;
 var
   E: TInputEvent;
 begin
@@ -97,7 +99,7 @@ begin
   E.Kind := ikKey;
   E.Key.Kind := kkEscape;
   FPanel.HandleEvent(E);
-  AssertTrue('escape raises the flag', QuitRequested);
+  AssertFalse('escape must not quit', QuitRequested);
 end;
 
 procedure TDashboardPanelTest.TestPollIsThrottledToItsInterval;
