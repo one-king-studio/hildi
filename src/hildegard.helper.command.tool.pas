@@ -296,7 +296,55 @@ var
   { A BUCKET option: a coarse grant that ignores Ref/Params and covers a whole
     effect class. Separate from AddOption because a bucket rule must leave Ref
     empty - setting it would make the rule narrow again. }
-  procedure AddBucketOption(var AAsk: TApprovalAsk; const AKey, ACaption: string;
+  { Risk rank of an approval option: LOWER sorts first.
+
+  The order is a security signal, not accident. `once` is always first because it
+  is the narrowest answer - one call, no persistence. Then grants widen by
+  degrees: this exact command, this command with these args, then a file scope
+  (one file, one extension, one directory, a directory+extension), then the whole
+  command with any args, then a class-wide bucket, and last the explicit
+  everything. An operator scanning the list sees the tightest option first and the
+  broadest last, so a hurried press lands on the narrow grant. }
+function ApprovalOptionRank(const AKey: string): Integer;
+begin
+  if AKey = 'once' then Result := 0
+  else if AKey = 'exact' then Result := 10
+  else if AKey = 'prefix' then Result := 20
+  else if AKey = 'any_file' then Result := 30
+  else if AKey = 'ext' then Result := 31
+  else if AKey = 'dir' then Result := 32
+  else if AKey = 'dir_ext' then Result := 33
+  else if AKey = 'any' then Result := 40
+  else if AKey = 'bucket_read' then Result := 50
+  else if AKey = 'bucket_write' then Result := 51
+  else if AKey = 'bucket_rw' then Result := 52
+  else Result := 60;                 // anything unrecognised goes last
+end;
+
+{ Stable sort of an ask's options by risk rank. Equal ranks keep their insertion
+  order, so an option we did not anticipate sits at the end rather than jumping
+  ahead of `once`. }
+procedure SortOptionsByRisk(var AAsk: TApprovalAsk);
+var
+  I, J: Integer;
+  Tmp: TApprovalOption;
+begin
+  for I := 1 to High(AAsk.Options) do
+  begin
+    J := I;
+    Tmp := AAsk.Options[I];
+    while (J > 0) and
+      (ApprovalOptionRank(AAsk.Options[J - 1].Key) >
+       ApprovalOptionRank(Tmp.Key)) do
+    begin
+      AAsk.Options[J] := AAsk.Options[J - 1];
+      Dec(J);
+    end;
+    AAsk.Options[J] := Tmp;
+  end;
+end;
+
+procedure AddBucketOption(var AAsk: TApprovalAsk; const AKey, ACaption: string;
     ABucket: TApprovalBucket);
   var
     Opt: TApprovalOption;
@@ -705,6 +753,10 @@ begin
           would be a guess. }
         ;
     end;
+    { Risk order, not append order: `once` first, the broadest grants last. The
+      append sequence was an accident of where each option was added from, which
+      put file scopes ahead of `allow once`. }
+    SortOptionsByRisk(Result[High(Result)]);
     StampCommandFocus(Result[High(Result)], I);
   end;
   { A shell redirect is a file effect: here-docs and fd duplications are not

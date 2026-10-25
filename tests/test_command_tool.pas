@@ -115,6 +115,8 @@ type
     procedure TestACommandNamingFilesOffersFileScopes;
     { All five scopes the operator asked for: exact, ext, dir, dir+ext, all. }
     procedure TestACommandAskOffersAllFiveFileScopes;
+    { Options are ordered by RISK: `allow once` first, broadest last. }
+    procedure TestApprovalOptionsAreOrderedByRisk;
     { A read ask highlights the COMMAND, not the redirect. }
     procedure TestTheReadAskExcludesTheRedirect;
     procedure TestRedirectSummaryAndFileAsk;
@@ -1099,6 +1101,44 @@ begin
     for I := 0 to High(Asks) do
       AssertFalse('no outside-path ask for a regex: ' + Asks[I].Summary,
         Copy(Asks[I].Subject.Ref, 1, 5) = 'path:');
+  finally
+    Tool.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestApprovalOptionsAreOrderedByRisk;
+var
+  Tool: TCommandTool;
+  Asks: TApprovalAskArray;
+  I, ExactAt, FirstScopeAt: Integer;
+begin
+  { The order is a security signal, not an accident of append order. `allow
+    once` is the narrowest answer and must be first; the class-wide bucket is the
+    broadest and must come after every narrower grant, so a hurried press lands
+    on the tight option. }
+  Tool := BuildToolWithRoot('/tmp/nowhere');
+  try
+    Asks := Tool.ApprovalAsks('{"command":"cat sub/a.txt","reason":"r"}');
+    AssertTrue('an ask exists', Length(Asks) > 0);
+    AssertTrue('several options', Length(Asks[0].Options) > 3);
+    AssertEquals('allow once is first', 'once', Asks[0].Options[0].Key);
+    { The broadest grant is LAST. Checked by name rather than by calling the rank
+      function, which is private to the builder. }
+    AssertEquals('the class-wide bucket is last',
+      'bucket_read', Asks[0].Options[High(Asks[0].Options)].Key);
+    { And `exact` precedes any file scope: the narrowest persistent grant comes
+      before anything that widens to a directory or extension. }
+    ExactAt := -1;
+    FirstScopeAt := -1;
+    for I := 0 to High(Asks[0].Options) do
+    begin
+      if Asks[0].Options[I].Key = 'exact' then ExactAt := I;
+      if (FirstScopeAt < 0) and (Asks[0].Options[I].Key = 'any_file') then
+        FirstScopeAt := I;
+    end;
+    AssertTrue('exact is offered', ExactAt >= 0);
+    AssertTrue('a file scope is offered', FirstScopeAt >= 0);
+    AssertTrue('exact comes before the file scopes', ExactAt < FirstScopeAt);
   finally
     Tool.Free;
   end;
