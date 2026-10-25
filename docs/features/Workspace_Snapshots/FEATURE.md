@@ -24,9 +24,22 @@ What is **built**:
 
 What is **not built**, and is the remaining work:
 
-- **The TUI surface** that shows a call's or a turn's changes to the operator, and
-  **state revert**. Nothing yet reads the log for the operator — a change is recorded
-  and retained, but only the board asks about it.
+- **The diff *viewer*.** A turn summary block now renders per-file stats
+  (collapsed) and the diffs (expanded), so the log is legible to an operator for
+  the first time. What does not exist yet is a dedicated viewer pane with per-file
+  selection — the block shows every diff at once rather than letting the operator
+  open one. See `Turn_Summary_v1.SPEC.md`.
+- **Per-call anchoring** (`MessageId`). `TChangeRecorder.Observe` still writes
+  `MessageId := 0`, because the tool-result row does not exist when the handler
+  runs, so a diff cannot yet sit *under the tool block that produced it*. The
+  turn summary groups by turn; per-call grouping needs the id stamped after the
+  row is written, plus an `ekChanges` event carrying row ids to the client.
+- **State revert**, and therefore `/undo`, `/redo` and `/revert`. The design is
+  recorded in the FEATURE; two things gate it. Revert needs bytes, and a
+  process-tier record has none (it captures no before-text), so only
+  `Captured` rows are revertible and the UI must say which. And a subagent's
+  writes land with `TurnId = 0` (only `THarnessSession` calls `SetTurn`), so a
+  delegated turn would revert partially.
 - **Keyframes are not written.** `KeyframeDue`, `PutKeyframe` and `Replay` exist in
   `src/changes` and are tested there, but the recorder never calls them, so nothing
   in the live path writes a keyframe and nothing replays. Replay is therefore
