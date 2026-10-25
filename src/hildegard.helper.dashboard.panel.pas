@@ -413,11 +413,28 @@ procedure TDashboard.Text(const S: ISurface; X, Y: Integer;
 var
   I: Integer;
   C: TCell;
+  N: Integer;
 begin
-  for I := 1 to Length(AText) do
+  { Truncation carries an ellipsis. Cutting a title mid-word with no mark made
+    a real board read `...stale branche` - indistinguishable from a title that
+    genuinely ends there. One cell is reserved for the mark. }
+  N := Length(AText);
+  if (AMaxW > 0) and (N > AMaxW) then
+    N := AMaxW;
+  for I := 1 to N do
   begin
     if (AMaxW > 0) and (I > AMaxW) then
       Break;
+    { The last cell before the cut becomes the ellipsis, so a truncated line
+      still reports its whole width and the reader sees it was cut. }
+    if (AMaxW > 1) and (Length(AText) > AMaxW) and (I = AMaxW) then
+    begin
+      C := Default(TCell);
+      C.Ch := '…';
+      C.Attr := AAttr;
+      S.Put(X + I - 1, Y, C);
+      Break;
+    end;
     C := Default(TCell);
     C.Ch := UnicodeString(AText[I]);
     C.Attr := AAttr;

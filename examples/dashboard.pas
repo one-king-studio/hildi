@@ -40,6 +40,17 @@ end;
 const
   Dot8 = ' ' + #$C2#$B7 + ' ';
 
+{ A session id is 32 hex chars. A card has no room for that, and none of it is
+  meaningful to a reader - shorten to a prefix that is still distinguishable on
+  screen, since the full id is in the store for anyone who needs it. }
+function ShortId(const AId: string): string;
+begin
+  if Length(AId) <= 12 then
+    Result := AId
+  else
+    Result := Copy(AId, 1, 8);
+end;
+
 { A relative age: "3m", "2h", "4d". The dashboard answers "how stale is this",
   and a wall-clock timestamp makes the reader do the subtraction. }
 function AgeOf(ATime: Int64): string;
@@ -114,7 +125,7 @@ begin
         prepared as UTF-8 bytes: Holder is an AnsiString, and concatenating a
         UnicodeString literal into it silently converts (and -Sew rejects it). }
       if Cards[K].ClaimedBy <> '' then
-        Lanes[I][K].Holder := Cards[K].ClaimedBy + Dot8 +
+        Lanes[I][K].Holder := ShortId(Cards[K].ClaimedBy) + Dot8 +
           AgeOf(Cards[K].StatusAt)
       else if Cards[K].Status = tsDone then
         Lanes[I][K].Holder := 'done' + Dot8 + AgeOf(Cards[K].StatusAt)
