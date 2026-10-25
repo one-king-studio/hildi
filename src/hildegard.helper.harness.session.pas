@@ -71,6 +71,10 @@ type
       advances on an actual board_read, so without this every tick would
       re-announce the same post forever. }
     FLastBoardNotice: Integer;
+    { The revival notice fires ONCE, on the first board tick of this session. A
+      session that was away must be told, but re-telling it every tick would be
+      noise - and the fact does not change while the session runs. }
+    FRevivalChecked: Boolean;
     FChangeStore: IChangeStore;
     FLoop: TAgentLoop;
     FQueue: TTurnQueue;
@@ -129,6 +133,10 @@ type
       transient prompt item so ten agents posting is O(ticks), not O(entries).
       Called by the runtime on its tick. Returns the count noticed. }
     function NoticeBoard: Integer;
+    { One-shot revival notice: says how long this session was away, whether the
+      board was pruned, what is readable now, and which of its claims were
+      recovered while it was gone. Called once, from the first board tick. }
+    procedure NoticeRevival;
     property Tools: TToolRegistry read FTools;
     property Queue: TTurnQueue read FQueue;
     property Gate: TApprovalGate read FGate;
@@ -258,6 +266,17 @@ begin
   Result := 0;
   if (FBoardStore = nil) or (FLoop = nil) then
     Exit;
+  { REVIVAL, once per session. A long-lived session returning after days gets one
+    notice naming what it missed and what it lost, then never again - the facts do
+    not change while it runs.
+
+    It reports rather than injects: auto-dumping a backlog would blow the context
+    budget, and the session can board_read deliberately if it wants history. }
+  if not FRevivalChecked then
+  begin
+    FRevivalChecked := True;
+    NoticeRevival;
+  end;
   { Coalesce: ONE notice naming the total, not one per entry. A busy board with
     ten agents must cost O(ticks), not O(entries). }
   if not FBoardStore.CursorOf(FView.SessionId, Cursor, Err) then
@@ -316,6 +335,94 @@ begin
     Text := Text + ' - some were pruned since you last read';
   FLoop.PromptQueue.PushBoard(Text, Unread);
   Result := Unread;
+end;
+
+procedure THarnessSession.NoticeRevival;
+var
+  Cursor: Integer;
+  LastSeen, Now2, AgeSec: Int64;
+  Unread, Q, D, F: Integer;
+  LastAt: Int64;
+  Err: string;
+  Cards: TTaskCardArray;
+  Ids: string;
+  I: Integer;
+  Text, Changed: string;
+
+  function AgeText(ASec: Int64): string;
+  begin
+    if ASec < 3600 then
+      Result := IntToStr(ASec div 60) + 'm'
+    else if ASec < 86400 then
+      Result := IntToStr(ASec div 3600) + 'h'
+    else
+      Result := IntToStr(ASec div 86400) + 'd';
+  end;
+
+begin
+  { A session that has never read the board is NEW, not returning: it missed
+    nothing because it was not there. Only a session WITH a cursor and a
+    timestamp can have been away. }
+  if not FBoardStore.CursorOf(FView.SessionId, Cursor, Err) then
+    Exit;
+  if Cursor <= 0 then
+    Exit;
+  if not FBoardStore.CursorLastSeenOf(FView.SessionId, LastSeen, Err) then
+    Exit;
+  if LastSeen <= 0 then
+    Exit;                              // a pre-v16 row: unknown, not "now"
+
+  Now2 := Round((Now - EncodeDate(1970, 1, 1)) * 86400);
+  AgeSec := Now2 - LastSeen;
+  if AgeSec < 0 then
+    AgeSec := 0;
+  { Short absences are ordinary turn gaps, not a revival. Announcing every one
+    would be noise. }
+  if AgeSec < 1800 then
+    Exit;
+
+  Changed := '';
+  if FBoardStore.Toc(FView.WorkspaceId, Cursor, Unread, Q, D, F, LastAt, Err)
+  then
+  begin
+    if Unread > 0 then
+      if Unread = 1 then
+        Changed := '1 board entry since you last read'
+      else
+        Changed := IntToStr(Unread) + ' board entries since you last read';
+    { Pruning honesty: if the board holds fewer entries than the cursor implies,
+      older ones are gone. "Some were pruned", never a fabricated count. }
+    if (LastAt <> 0) and (Cursor > LastAt) then
+    begin
+      if Changed <> '' then
+        Changed := Changed + '; ';
+      Changed := Changed + 'the board has been pruned since';
+    end;
+  end;
+
+  { Claims recovered while away. A revived session returns believing it holds work
+    it no longer does, which is worse than not knowing at all. }
+  Ids := '';
+  if FTaskStore <> nil then
+    if FTaskStore.ReclaimedFrom(FView.WorkspaceId, FView.SessionId, Cards, Err)
+    then
+      for I := 0 to High(Cards) do
+      begin
+        if Ids <> '' then
+          Ids := Ids + ', ';
+        Ids := Ids + '#' + IntToStr(Cards[I].Id);
+      end;
+
+  if (Changed = '') and (Ids = '') then
+    Exit;
+
+  Text := 'You were away ' + AgeText(AgeSec) + ' ago';
+  if Changed <> '' then
+    Text := Text + '. ' + Changed;
+  if Ids <> '' then
+    Text := Text + '. Claims recovered from you while away: ' + Ids +
+      ' - they are open again, so re-claim anything you still intend to do';
+  FLoop.PromptQueue.PushBoard(Text, 0);
 end;
 
 procedure THarnessSession.NoteTurnOpened(ATurnId: Int64);

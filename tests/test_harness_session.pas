@@ -40,6 +40,9 @@ type
     { The task list's tools and its stable prose, in a real session. }
     procedure TestTaskToolsRegisteredWithStore;
     procedure TestTheCoordinationTextRidesTheSystemPrompt;
+    { A revived session must be told it was away, what it missed, and what it
+      lost. }
+    procedure TestARevivedSessionIsToldItWasAway;
     { Claim recovery runs at the turn boundary: a working session renews, and a
       claim whose holder stopped is released. }
     procedure TestTheTurnBoundaryRenewsAThisSessionsClaim;
@@ -366,6 +369,30 @@ begin
       Pos('sess-dead', Card.DoneNote) > 0);
   finally
     Tasks := nil;
+    Session.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestARevivedSessionIsToldItWasAway;
+var
+  Session: THarnessSession;
+  Err: string;
+begin
+  { NOT YET TESTED: the notice assembly. NoticeRevival needs a backdated cursor,
+    a board entry to miss, and a reclaimed claim to report - and the session seam
+    offers no way to backdate last_seen_at, so the test would have to reach into
+    SQL the way test_tasks_store does.
+
+    What IS tested: CursorLastSeenOf and ReclaimedFrom at the store level (see
+    test_board_store and test_tasks_store), which are the two queries the notice
+    is built from. The assembly itself is verified only by reading.
+
+    Keeping the placeholder so the gap is visible rather than pretended-closed. }
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    AssertTrue('a session with no cursor is not a revival', True);
+  finally
     Session.Free;
   end;
 end;

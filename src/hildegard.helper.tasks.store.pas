@@ -53,6 +53,12 @@ type
       so its length is how many are named, never how many exist. }
     function OpenCount(AWorkspaceId: Integer; out ACount: Integer;
       out AError: string): Boolean;
+    { Cards whose claim was RECOVERED from ASessionId and which are still open.
+      A revived session returns believing it holds work it no longer does; this
+      lets the revival notice say so. Matched on done_note, where ReclaimStale
+      records the former holder. }
+    function ReclaimedFrom(AWorkspaceId: Integer; const ASessionId: string;
+      out ACards: TTaskCardArray; out AError: string): Boolean;
     { Blocked cards, oldest first. The tail needs these because a block is only
       worth surfacing when it is yours OR has gone stale - and a card held by
       another session never appears in Mine. }
@@ -109,6 +115,12 @@ type
       out ACards: TTaskCardArray; out AError: string): Boolean;
     function OpenCount(AWorkspaceId: Integer; out ACount: Integer;
       out AError: string): Boolean;
+    { Cards whose claim was RECOVERED from ASessionId and which are still open.
+      A revived session returns believing it holds work it no longer does; this
+      lets the revival notice say so. Matched on done_note, where ReclaimStale
+      records the former holder. }
+    function ReclaimedFrom(AWorkspaceId: Integer; const ASessionId: string;
+      out ACards: TTaskCardArray; out AError: string): Boolean;
     function BlockedCards(AWorkspaceId, ALimit: Integer;
       out ACards: TTaskCardArray; out AError: string): Boolean;
     function RenewClaims(AWorkspaceId: Integer; const ABy: string;
@@ -666,6 +678,51 @@ begin
       sqlite3_bind_int(Stmt, 2, Ord(tsOpen));
       if sqlite3_step(Stmt) = SQLITE_ROW then
         ACount := sqlite3_column_int(Stmt, 0);
+      Result := True;
+    finally
+      sqlite3_finalize(Stmt);
+    end;
+  finally
+    FStore.Lock.Release;
+  end;
+end;
+
+function TSqliteTaskStore.ReclaimedFrom(AWorkspaceId: Integer;
+  const ASessionId: string; out ACards: TTaskCardArray; out AError: string): Boolean;
+var
+  Stmt: Psqlite3_stmt;
+  Pat: AnsiString;
+  N: Integer;
+begin
+  { ReclaimStale writes "claim recovered from <session> after it went stale" into
+    done_note, so the former holder is recoverable without a new column. Only OPEN
+    cards count: once someone re-claims it, the loss is no longer news. }
+  Result := False;
+  ACards := nil;
+  AError := '';
+  if ASessionId = '' then
+  begin
+    Result := True;
+    Exit;
+  end;
+  Pat := AnsiString('claim recovered from ' + ASessionId + ' ');
+  N := 0;
+  FStore.Lock.Acquire;
+  try
+    if not Prepare('SELECT ' + TaskColumns + ' FROM task_cards ' +
+      'WHERE workspace_id = ? AND status = ? AND done_note LIKE ? ' +
+      'ORDER BY id', Stmt, AError) then
+      Exit;
+    try
+      sqlite3_bind_int(Stmt, 1, AWorkspaceId);
+      sqlite3_bind_int(Stmt, 2, Ord(tsOpen));
+      sqlite3_bind_text(Stmt, 3, PAnsiChar(Pat), -1, nil);
+      while sqlite3_step(Stmt) = SQLITE_ROW do
+      begin
+        SetLength(ACards, N + 1);
+        Fill(Stmt, ACards[N]);
+        Inc(N);
+      end;
       Result := True;
     finally
       sqlite3_finalize(Stmt);
