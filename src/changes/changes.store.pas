@@ -40,6 +40,16 @@ type
       changed" the same way either way. }
     function ForTurn(AWorkspaceId, ATurnId: Integer;
       out ARows: TChangeRecordArray; out AError: string): Boolean;
+    { Anchor a row to the tool-result message that caused it, AFTER the fact.
+
+      The row is written while the tool is still running, so its message id is
+      not knowable yet - the tool-result row does not exist. Stamping it later is
+      what lets a diff sit under the tool block that produced it.
+
+      A row that is no longer there (pruned between the write and the anchor) is
+      a no-op returning True: it is a normal race, not a failure. }
+    function SetMessageId(AWorkspaceId, AChangeId, AMessageId: Integer;
+      out AError: string): Boolean;
     { The newest keyframe at or before AChangeId for a path. }
     function KeyframeBefore(AWorkspaceId: Integer; const APath: string;
       AChangeId: Integer; out AFrame: TKeyframe; out AFound: Boolean;
@@ -84,6 +94,8 @@ type
       out AError: string): Boolean;
     function ForTurn(AWorkspaceId, ATurnId: Integer;
       out ARows: TChangeRecordArray; out AError: string): Boolean;
+    function SetMessageId(AWorkspaceId, AChangeId, AMessageId: Integer;
+      out AError: string): Boolean;
     function KeyframeBefore(AWorkspaceId: Integer; const APath: string;
       AChangeId: Integer; out AFrame: TKeyframe; out AFound: Boolean;
       out AError: string): Boolean;
@@ -224,6 +236,23 @@ begin
     SetLength(ARows, Length(ARows) + 1);
     ARows[High(ARows)] := FRecords[I];
   end;
+  Result := True;
+end;
+
+function TMemoryChangeStore.SetMessageId(AWorkspaceId, AChangeId,
+  AMessageId: Integer; out AError: string): Boolean;
+var
+  I: Integer;
+begin
+  AError := '';
+  for I := 0 to High(FRecords) do
+    if (FRecords[I].WorkspaceId = AWorkspaceId) and
+      (FRecords[I].Id = AChangeId) then
+    begin
+      FRecords[I].MessageId := AMessageId;
+      Break;
+    end;
+  { A row that is gone is a race, not a failure. }
   Result := True;
 end;
 

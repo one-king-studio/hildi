@@ -35,6 +35,10 @@ type
       query that reads it. }
     procedure TestForTurnReturnsOneTurnsRowsInWriteOrder;
     procedure TestForTurnOnAnUnknownTurnIsEmptyNotAnError;
+    { Per-call anchoring: the tool-result row does not exist when the change is
+      written, so the id is stamped afterwards. }
+    procedure TestSetMessageIdAnchorsARowAfterTheFact;
+    procedure TestSetMessageIdOnAMissingRowIsNotAnError;
     procedure TestKeyframeRoundTripAndHorizon;
     procedure TestPruneKeepsTheHorizonKeyframe;
     { Retention in turns: past the window, the oldest turn's changes go. }
@@ -252,6 +256,34 @@ begin
   AssertTrue('unknown turn succeeds', FChanges.ForTurn(1, 999, Rows, Err));
   AssertEquals('no rows', 0, Length(Rows));
   AssertEquals('and no error', '', Err);
+end;
+
+procedure TChangesStoreTest.TestSetMessageIdAnchorsARowAfterTheFact;
+var
+  Rows: TChangeRecordArray;
+  Id: Integer;
+  Err: string;
+begin
+  { Per-call anchoring: the row is written while the tool runs, but the
+    tool-result row it belongs to does not exist until the call finishes. So the
+    id is stamped AFTER the fact. Without this a diff can never sit under the
+    tool block that produced it. }
+  AssertTrue('append', FChanges.Append(Rec('a.txt', ckModified, '', 'x', 7), Id,
+    Err));
+  AssertTrue('anchored', FChanges.SetMessageId(1, Id, 4242, Err));
+  AssertTrue('read back', FChanges.ForTurn(1, 7, Rows, Err));
+  AssertEquals('one row', 1, Length(Rows));
+  AssertEquals('message id', 4242, Rows[0].MessageId);
+end;
+
+procedure TChangesStoreTest.TestSetMessageIdOnAMissingRowIsNotAnError;
+var
+  Err: string;
+begin
+  { Nothing to anchor is a no-op, not a failure: a row pruned between the write
+    and the anchor is a normal race, and it must not fail the turn. }
+  AssertTrue('no such row', FChanges.SetMessageId(1, 9999, 4242, Err));
+  AssertEquals('no error', '', Err);
 end;
 
 procedure TChangesStoreTest.TestKeyframeRoundTripAndHorizon;

@@ -38,6 +38,8 @@ type
       out AError: string): Boolean;
     function ForTurn(AWorkspaceId, ATurnId: Integer;
       out ARows: TChangeRecordArray; out AError: string): Boolean;
+    function SetMessageId(AWorkspaceId, AChangeId, AMessageId: Integer;
+      out AError: string): Boolean;
     function KeyframeBefore(AWorkspaceId: Integer; const APath: string;
       AChangeId: Integer; out AFrame: TKeyframe; out AFound: Boolean;
       out AError: string): Boolean;
@@ -359,6 +361,46 @@ begin
         Fill(Stmt, ARows[N]);
         Inc(N);
       end;
+      Result := True;
+    finally
+      sqlite3_finalize(Stmt);
+    end;
+  finally
+    FStore.Lock.Release;
+  end;
+end;
+
+function TSqliteChangeStore.SetMessageId(AWorkspaceId, AChangeId,
+  AMessageId: Integer; out AError: string): Boolean;
+var
+  Stmt: Psqlite3_stmt;
+  SQL: AnsiString;
+begin
+  Result := False;
+  AError := '';
+  if (FStore = nil) or (FStore.Db = nil) then
+    Exit;
+  SQL := AnsiString('UPDATE file_changes SET message_id = ? ' +
+    'WHERE workspace_id = ? AND id = ?');
+  FStore.Lock.Acquire;
+  try
+    Stmt := nil;
+    if sqlite3_prepare_v2(FStore.Db, PAnsiChar(SQL), -1, @Stmt, nil) <> 0 then
+    begin
+      AError := 'could not prepare the anchor update';
+      Exit;
+    end;
+    try
+      sqlite3_bind_int(Stmt, 1, AMessageId);
+      sqlite3_bind_int(Stmt, 2, AWorkspaceId);
+      sqlite3_bind_int(Stmt, 3, AChangeId);
+      if sqlite3_step(Stmt) <> SQLITE_DONE then
+      begin
+        AError := 'could not anchor the change';
+        Exit;
+      end;
+      { Zero rows changed is a race (the row was pruned between the write and
+        the anchor), not a failure. }
       Result := True;
     finally
       sqlite3_finalize(Stmt);
