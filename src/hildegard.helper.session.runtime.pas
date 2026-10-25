@@ -164,6 +164,8 @@ type
       const ACommand: TSessionCommand);
     { Drain child events for the runtime loop; relay them as events. }
     procedure DrainSubagents;
+    { Test seam accessor: the session's loop. }
+    function GetLoop: TAgentLoop;
     procedure StartAmbientTurn;
     { Record a checkpoint for a completed checkpoint turn (the assistant's reply)
       at the current message boundary. }
@@ -197,6 +199,11 @@ type
     property ReplayCount: Integer read FReplayLen;
     property ReplayCapacity: Integer read FReplayCap;
     property ReplayFirstSeq: Int64 read FReplayFirstSeq;
+    { Test seam: the session's loop, so a test can queue an ambient item (a
+      subagent result) at a controlled moment and assert the runtime starts the
+      turn that delivers it. Not for production callers. }
+    property ForTestLoop: TAgentLoop read GetLoop;
+    property ForTestTurnActive: Boolean read FTurnActive;
   end;
 
 const
@@ -786,6 +793,11 @@ begin
     Result := IdlePollMs
   else
     Result := ARemainingMs;
+end;
+
+function TSessionRuntime.GetLoop: TAgentLoop;
+begin
+  Result := FSession.Loop;
 end;
 
 function TSessionRuntime.NextTimeout: Integer;

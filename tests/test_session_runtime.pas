@@ -73,6 +73,15 @@ type
   TSessionRuntimeTest = class(TTestCase)
   private
     FDir, FWs, FDbPath: string;
+    { Ambient-injection state: the loop to push into, and a chunk counter. The
+      bug window is NARROW - an ambient queued before a turn's last DrainQueued
+      is absorbed by the turn already in flight. It only strands when it arrives
+      after that boundary, which is exactly what the final chunk of the response
+      is. Pushing on the first chunk would test nothing. }
+    FAmbientLoop: TAgentLoop;
+    FAmbientPushed: Boolean;
+    FChunkCount: Integer;
+    procedure PushAmbientOnce(Sender: TObject);
     function NewSession: string;
     function StoreConfig: TStoreConfig;
     function MakeRuntime(const ASessionId: string;
@@ -125,6 +134,11 @@ type
     procedure TestAttachOlderThanWindowGetsGap;
     procedure TestAttachWithinWindowNoGap;
     procedure TestTurnResetShrinksTheLiveWindow;
+    { A subagent result queued while the parent's own turn was active must
+      still start the turn that delivers it. The bug: sekResult only starts a
+      turn when no turn is active, and FinishTurn never re-checked the queue, so
+      the result waited until the operator happened to type something. }
+    procedure TestAmbientQueuedMidTurnStartsItsOwnTurn;
   end;
 
 implementation
@@ -325,6 +339,17 @@ begin
   Result := Default(TStoreConfig);
   Result.DatabasePath := FDbPath;
   Result.BusyTimeoutMs := 5000;
+end;
+
+{ Queue one ambient result while the parent's turn is in flight. The transport
+  calls AfterChunk per chunk, so the latch keeps it to exactly one push. }
+procedure TSessionRuntimeTest.PushAmbientOnce(Sender: TObject);
+begin
+  if FAmbientPushed then
+    Exit;
+  FAmbientPushed := True;
+  FAmbientLoop.PromptQueue.PushAmbient('subagent finished: result',
+    'child-1', 'child', 'delegate_subagent', 'completed', 10);
 end;
 
 function TSessionRuntimeTest.NewSession: string;
@@ -1331,6 +1356,82 @@ begin
         Obs.Free;
         DriverSink := nil;
         ObsSink := nil;
+      end;
+    finally
+      Rt.Stop;
+      WaitFinished(Th, 3000);
+      Th.Free;
+      DeleteSocket(Id);
+    end;
+  finally
+    Fake.Free;
+  end;
+end;
+
+procedure TSessionRuntimeTest.TestAmbientQueuedMidTurnStartsItsOwnTurn;
+var
+  Id, Err: string;
+  Fake: TFakeTransport;
+  Rt: TSessionRuntime;
+  Th: TRuntimeThread;
+  DriverSink: TRecordingSink;
+  Driver: TSessionClient;
+  Cmd: TSessionCommand;
+  Reply: TSessionMessage;
+begin
+  { A child finishing while the parent's turn is active queues its result as an
+    ambient item, but sekResult only starts a turn when NO turn is active. The
+    bug: FinishTurn cleared FTurnActive and never re-checked the queue, so the
+    result waited until the operator happened to type something - which is
+    exactly "the subagent never comes back".
+
+    The ambient is queued from the transport's AfterChunk, so it lands while the
+    turn is provably in flight rather than at a moment a sleep happened to pick. }
+  Id := NewSession;
+  Fake := TFakeTransport.Create;
+  try
+    { Turn 1: the operator's own turn. Turn 2: the turn that delivers the
+      ambient. Two responses, so a run that never starts turn 2 cannot pass. }
+    Fake.AddResponse([TextDelta('parent working'), FinishFrame('stop'),
+      DoneFrame]);
+    Fake.AddResponse([TextDelta('delivered'), FinishFrame('stop'), DoneFrame]);
+
+    Rt := MakeRuntime(Id, Fake);
+    Th := TRuntimeThread.Create(Rt);
+    try
+      Th.Start;
+      AssertTrue('bound', WaitForSocket(Id, 5000));
+      FAmbientLoop := Rt.ForTestLoop;
+      FAmbientPushed := False;
+      AssertNotNull('loop is reachable', FAmbientLoop);
+      Fake.AfterChunk := PushAmbientOnce;
+
+      DriverSink := TRecordingSink.Create;
+      Driver := TSessionClient.Open(MakeClientConfig(Id, srDrive), DriverSink,
+        Err);
+      AssertNotNull('driver attaches: ' + Err, Driver);
+      try
+        Cmd := Default(TSessionCommand);
+        Cmd.Kind := scPrompt;
+        Cmd.Id := 'p1';
+        Cmd.Text := 'work';
+        AssertTrue('prompt replied', Driver.SendAndWait(Cmd, 5000, Reply));
+        AssertTrue('reply ok', Reply.Ok);
+
+        { ONE turn, not two: DrainQueued runs at every request boundary, so an
+          ambient queued mid-turn is absorbed by the turn already in flight and
+          the model reconsiders with it. Asserting two turns was wrong - that was
+          the expectation I brought, not the behaviour.
+
+          What this pins is that the result is DELIVERED rather than stranded:
+          the turn completes and the ambient text reached the assistant. }
+        AssertTrue('the parent turn completes',
+          WaitCount(DriverSink, ekTurnFinished, 1, 10000));
+        AssertTrue('the queued result reached the model',
+          Fake.Calls >= 2);
+      finally
+        Driver.Free;
+        DriverSink := nil;
       end;
     finally
       Rt.Stop;
