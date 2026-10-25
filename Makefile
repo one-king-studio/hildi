@@ -200,6 +200,16 @@ $(BIN)/hildegard-helper-dashboard-mock: $(EXAMPLES)/dashboard_mock.pas $(LIB_SRC
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
+# The real dashboard: opens this workspace's store and draws it. A viewer with
+# one write deferred; it links no agent-loop unit, the same closure discipline
+# the TUI client is held to. See docs/features/Board_Dashboard/FEATURE.md.
+dashboard: libsqlite libmbedtls $(BIN)/hildegard-helper-dashboard
+	$(BIN)/hildegard-helper-dashboard
+
+$(BIN)/hildegard-helper-dashboard: $(EXAMPLES)/dashboard.pas $(LIB_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP)
+	@mkdir -p $(BIN) $(DBGUNITS)
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+
 # Layout exploration: a responsive two-column harness layout (files + editor |
 # chat column). The chat column has an optional side panel and a persistent
 # bottom input panel. The split appears only when the terminal is wider than 180
