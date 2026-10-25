@@ -1418,6 +1418,12 @@ begin
       end;
     teToolResult:
       begin
+        { The tool has finished, so its changes can now be anchored to the
+          message row it just produced. FinishCall appends that row BEFORE
+          emitting this event for exactly this reason. Swallowed: an unattributed
+          change is a lesser problem than a failed turn. }
+        if FSession <> nil then
+          FSession.AnchorChanges(AEvent.ToolId);
         E := EmitEvent(ekToolResult);
         E.ToolId := AEvent.ToolId;
         E.ToolName := AEvent.ToolName;

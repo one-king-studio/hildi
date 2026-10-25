@@ -121,11 +121,6 @@ type
     { The loop reports the turn as terminal here, so the fold is flushed and the
       summary is complete when the turn ends - not when the next one opens. }
     procedure NoteTurnFinished(ATurnId: Int64);
-    { Anchor the change rows written by the tool call AToolCallId to the message
-      row it produced, so a diff can be shown under the call that made it. The
-      rows exist already; the message may not, which is why this is called after
-      the tool result rather than during it. }
-    procedure AnchorChanges(const AToolCallId: string);
     { At each turn boundary, re-declare the MCP skills from the current config so
       a server added/enabled/removed is picked up without a restart. Lazy: it
       declares, it does not connect. }
@@ -146,6 +141,11 @@ type
     { The client-side view: identity, store, history, and metrics. }
     property View: TSessionView read FView;
     property Loop: TAgentLoop read FLoop;
+    { Anchor the change rows written by the tool call AToolCallId to the message
+      row it produced, so a diff can be shown under the call that made it. The
+      rows exist already; the message may not, which is why the runtime calls this
+      after the tool result rather than the tool calling it during the run. }
+    procedure AnchorChanges(const AToolCallId: string);
     { Notice any board entries this session has not seen, coalesced into ONE
       transient prompt item so ten agents posting is O(ticks), not O(entries).
       Called by the runtime on its tick. Returns the count noticed. }
