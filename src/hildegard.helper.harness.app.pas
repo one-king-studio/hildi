@@ -1881,7 +1881,14 @@ begin
       Break;
     { While spying, the parent's events are consumed but not drawn: its turn
       keeps running and is persisted, and its transcript is rebuilt on leave. Only
-      the state (busy / roster) is updated, so the two streams never interleave. }
+      the state (busy / roster) is updated, so the two streams never interleave.
+
+      APPROVAL ASKS ARE THE EXCEPTION, and dropping them was a deadlock. An ask
+      is not transcript - it is a blocking demand for operator action. Suppressing
+      it while spying left the child waiting forever: the supervisor only
+      auto-denies when NO client is attached, and the TUI is attached, so
+      TickAutoDeny exits early and nobody ever answers. The modal must still
+      appear over the spy view. }
     if FSpyId <> '' then
     begin
       case E.Kind of
@@ -1889,6 +1896,8 @@ begin
           FBusy := False;
         teSubagent:
           HandleSubagentEvent(E);
+        teApprovalAsk, teSubagentAsk:
+          HandleTurnEvent(E);
       else
         ;
       end;
