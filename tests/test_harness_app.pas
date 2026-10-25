@@ -21,7 +21,8 @@ uses
   hildegard.helper.harness.subagent.spy,
   hildegard.helper.session.protocol, hildegard.helper.session.client,
   hildegard.helper.store,
-  hildegard.helper.session, llm_fakes;
+  hildegard.helper.session, llm_fakes,
+  hildegard.helper.changes.store, changes.types, changes.store, changes.text;
 
 type
   { Calls Gate.Ask on its own thread so the app can answer it. }
@@ -160,6 +161,11 @@ type
     { A turn that wrote nothing renders no summary block: an empty summary is
       noise, and its absence already says the tree is untouched. }
     procedure TestNoTurnChangesBlockWhenNothingChanged;
+    { The positive path: a turn that DID change files renders the block, with the
+      per-file stat lines. Without this, an emitter that returned early on every
+      call would leave the suite green. }
+    procedure TestTurnSummaryBlockListsTheChangedFiles;
+    procedure TestTurnSummaryOmitsAFileWhoseEditsCancelled;
     procedure TestResumeRendersTurnDividers;
     procedure TestThoughtShowsDuration;
     procedure TestCtaHintsAreBlank;
@@ -1627,6 +1633,103 @@ begin
   for I := 0 to BlockCount - 1 do
     AssertFalse('no summary block when nothing changed',
       BlockKind(I) = ckTurnChanges);
+end;
+
+procedure THarnessAppTest.TestTurnSummaryBlockListsTheChangedFiles;
+var
+  I: Integer;
+  Text: string;
+
+  { Seed one net change row for the turn the app is about to run. The recorder
+    would normally write these at the turn boundary; seeding them directly keeps
+    this test about the BLOCK (does it render? does it name the files?) rather
+    than about capture, which has its own tests. }
+  procedure SeedNet(const APath: string; ABefore, AAfter: string);
+  var
+    Changes: IChangeStore;
+    R: TChangeRecord;
+    Id: Integer;
+    Err, Patch: string;
+    Capped: Boolean;
+  begin
+    Err := '';
+    Changes := TSqliteChangeStore.Create(FSession.View.Store);
+    R := Default(TChangeRecord);
+    R.WorkspaceId := FSession.View.WorkspaceId;
+    R.SessionId := FSession.View.SessionId;
+    R.TurnId := 1;
+    R.Path := APath;
+    R.Kind := ckModified;
+    R.IsNet := True;
+    R.BeforeHash := 'h:' + ABefore;
+    R.AfterHash := 'h:' + AAfter;
+    Patch := DiffText(ABefore, AAfter, DefaultPatchCapBytes, Capped);
+    R.Patch := Patch;
+    R.PatchBytes := Length(Patch);
+    R.Capped := Capped;
+    AssertTrue('seeded: ' + Err, Changes.Append(R, Id, Err));
+  end;
+
+begin
+  { The positive path. Only the NEGATIVE case was covered, so an emitter that
+    returned early on every call would have left the suite green. }
+  BuildWithStore;
+  SeedNet('src/a.pas', 'one' + LineEnding + 'two' + LineEnding,
+    'one' + LineEnding + 'TWO' + LineEnding + 'three' + LineEnding);
+  SeedNet('build/out.txt', '', 'x' + LineEnding);
+  FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
+  SubmitPrompt('do it');
+  AssertTrue('turn finished', Pump(300));
+
+  Text := '';
+  for I := 0 to BlockCount - 1 do
+    if BlockKind(I) = ckTurnChanges then
+      Text := BlockText(I);
+  AssertTrue('a summary block was rendered', Text <> '');
+  AssertTrue('it names the modified file: ' + Text, Pos('src/a.pas', Text) > 0);
+  AssertTrue('and its counts: ' + Text, Pos('+2', Text) > 0);
+  AssertTrue('and the removal: ' + Text, Pos('-1', Text) > 0);
+  AssertTrue('it names the created file too', Pos('build/out.txt', Text) > 0);
+end;
+
+procedure THarnessAppTest.TestTurnSummaryOmitsAFileWhoseEditsCancelled;
+var
+  I: Integer;
+
+  procedure SeedNet(const APath, ATwiceEndsSame: string);
+  var
+    Changes: IChangeStore;
+    R: TChangeRecord;
+    Id: Integer;
+    Err: string;
+  begin
+    Err := '';
+    Changes := TSqliteChangeStore.Create(FSession.View.Store);
+    R := Default(TChangeRecord);
+    R.WorkspaceId := FSession.View.WorkspaceId;
+    R.SessionId := FSession.View.SessionId;
+    R.TurnId := 1;
+    R.Path := APath;
+    R.Kind := ckModified;
+    R.IsNet := True;
+    { The fold's output for a file edited and reverted: both ends identical, so
+      no patch. This is the payoff of the net fold, asserted end to end. }
+    R.BeforeHash := 'h:' + ATwiceEndsSame;
+    R.AfterHash := 'h:' + ATwiceEndsSame;
+    AssertTrue('seeded: ' + Err, Changes.Append(R, Id, Err));
+  end;
+
+begin
+  BuildWithStore;
+  SeedNet('src/cancelled.pas', 'orig' + LineEnding);
+  FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
+  SubmitPrompt('do it');
+  AssertTrue('turn finished', Pump(300));
+  for I := 0 to BlockCount - 1 do
+  begin
+    AssertFalse('the cancelled file is not listed',
+      Pos('cancelled.pas', BlockText(I)) > 0);
+  end;
 end;
 
 procedure THarnessAppTest.TestResumeRendersTurnDividers;
