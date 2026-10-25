@@ -67,7 +67,8 @@ type
     function AddRule(AEffect: TApprovalEffect; const ARef: string;
       const AParams: array of string; AAny: Boolean): TApprovalRule;
     function ServiceWith(APrompt: TApprovalPrompt): IApprovalService;
-    procedure OnChanges(const AChanges: TFileChangeSet);
+    procedure OnChanges(const AChanges: TFileChangeSet;
+      const AToolCallId: string);
   protected
     procedure SetUp; override;
     procedure TearDown; override;
@@ -215,7 +216,8 @@ begin
   FChangeCount := 0;
 end;
 
-procedure TCommandToolTest.OnChanges(const AChanges: TFileChangeSet);
+procedure TCommandToolTest.OnChanges(const AChanges: TFileChangeSet;
+  const AToolCallId: string);
 begin
   FChangeCount := FChangeCount + AChanges.Count;
 end;

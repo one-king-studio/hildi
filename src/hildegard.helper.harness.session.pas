@@ -114,12 +114,18 @@ type
       out AResult, AError: string): Boolean;
     { The change-log sink: what a run_command call changed, handed to the
       recorder. Matches TCommandChangesEvent. }
-    procedure RecordChanges(const AChanges: TFileChangeSet);
+    procedure RecordChanges(const AChanges: TFileChangeSet;
+      const AToolCallId: string);
     { The loop reports its turn id here, so changes are attributed to a turn. }
     procedure NoteTurnOpened(ATurnId: Int64);
     { The loop reports the turn as terminal here, so the fold is flushed and the
       summary is complete when the turn ends - not when the next one opens. }
     procedure NoteTurnFinished(ATurnId: Int64);
+    { Anchor the change rows written by the tool call AToolCallId to the message
+      row it produced, so a diff can be shown under the call that made it. The
+      rows exist already; the message may not, which is why this is called after
+      the tool result rather than during it. }
+    procedure AnchorChanges(const AToolCallId: string);
     { At each turn boundary, re-declare the MCP skills from the current config so
       a server added/enabled/removed is picked up without a restart. Lazy: it
       declares, it does not connect. }
@@ -523,6 +529,24 @@ begin
     FRecorder.FlushTurn;
 end;
 
+procedure THarnessSession.AnchorChanges(const AToolCallId: string);
+var
+  MsgId: Int64;
+  StoreErr: TStoreError;
+begin
+  { The change rows exist already - they were appended while the tool ran. The
+    message row may not, which is why this runs after the result rather than
+    during the call. A missing row (or no store) is skipped silently: an
+    unattributed change is a lesser problem than a failed turn. }
+  if (FRecorder = nil) or (FView.Store = nil) or (AToolCallId = '') then
+    Exit;
+  if not FView.Store.ToolMessageId(FView.SessionId, AToolCallId, MsgId,
+    StoreErr) then
+    Exit;
+  if MsgId > 0 then
+    FRecorder.AnchorCall(AToolCallId, Integer(MsgId));
+end;
+
 function THarnessSession.TaskQuestionExists(AWorkspaceId, AId: Integer;
   out ATitle: string): Boolean;
 var
@@ -549,14 +573,16 @@ begin
   Result := True;
 end;
 
-procedure THarnessSession.RecordChanges(const AChanges: TFileChangeSet);
+procedure THarnessSession.RecordChanges(const AChanges: TFileChangeSet;
+  const AToolCallId: string);
 begin
-  { The turn is known (the loop reports it); the message id is not, because the
-    tool result row does not exist yet when the handler runs. A change is
-    attributed to its turn, which is what the retention window and the
-    changed-files view need. }
+  { The turn is known (the loop reports it); the message id is NOT, because the
+    tool result row does not exist yet when the handler runs. So the rows are
+    recorded against their CALL id, and anchored later by AnchorChanges once the
+    result row exists. Without the call id, two concurrent calls could not be
+    told apart. }
   if FRecorder <> nil then
-    FRecorder.Observe(AChanges);
+    FRecorder.Observe(AChanges, AToolCallId);
 end;
 
 function THarnessSession.InvokeShellTool(const AName, AArgumentsJson,

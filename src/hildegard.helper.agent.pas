@@ -107,6 +107,11 @@ type
   public
     procedure Next(const AText: string); virtual; abstract;
     procedure Complete; virtual; abstract;
+    { The provider's id for the call this observer belongs to, or '' when the
+      observer is not per-call. A tool that reports side effects needs it to say
+      WHICH call produced them - without it, two concurrent calls cannot be told
+      apart and an attribution would be a guess. }
+    function ToolCallId: string; virtual;
   end;
 
   { Fires for each streamed chunk of a tool's output. }
@@ -124,6 +129,7 @@ type
     constructor Create(const AId, AName: string; AOnOutput: TToolOutputEvent);
     procedure Next(const AText: string); override;
     procedure Complete; override;
+    function ToolCallId: string; override;
   end;
 
   { Receives the raw JSON arguments string and an output observer, and returns a
@@ -536,6 +542,15 @@ begin
   Result := True;
 end;
 
+{ --- TToolObserver ------------------------------------------------------- }
+
+function TToolObserver.ToolCallId: string;
+begin
+  { Not every observer is per-call: a single-shot tool may be given none at all.
+    An override supplies the id when the call is known. }
+  Result := '';
+end;
+
 { --- TToolForwardObserver ----------------------------------------------- }
 
 constructor TToolForwardObserver.Create(const AId, AName: string;
@@ -559,6 +574,11 @@ end;
 procedure TToolForwardObserver.Complete;
 begin
   FDone := True;
+end;
+
+function TToolForwardObserver.ToolCallId: string;
+begin
+  Result := FId;
 end;
 
 { --- TToolBatchState ---------------------------------------------------- }
@@ -1444,8 +1464,6 @@ procedure TAgentLoop.FinishCall(const ACall: TChatToolCall; const AText: string;
 var
   Msg: TChatMessage;
 begin
-  if Assigned(AEvents.OnToolResult) then
-    AEvents.OnToolResult(ACall.Id, ACall.Name, AText, AOk);
   Msg := Default(TChatMessage);
   Msg.Role := crTool;
   Msg.ToolCallId := ACall.Id;
@@ -1453,7 +1471,12 @@ begin
   Msg.ToolName := ACall.Name;
   Msg.ToolOk := AOk;
   Msg.DurationMs := ADurMs;
+  { Append BEFORE emitting: a listener may need to resolve this row (the change
+    recorder anchors a call's changes to it), and an event that fires before the
+    row exists would find nothing. }
   FStore.Append(Msg);
+  if Assigned(AEvents.OnToolResult) then
+    AEvents.OnToolResult(ACall.Id, ACall.Name, AText, AOk);
 end;
 
 function ToolSoftNotice(ARound, AHard: Integer): string;

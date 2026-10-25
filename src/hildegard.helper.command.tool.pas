@@ -31,8 +31,11 @@ type
     Syntax: TShellSyntax; // ssPosix
   end;
 
-  { The files a call changed, delivered once per successful run. }
-  TCommandChangesEvent = procedure(const AChanges: TFileChangeSet) of object;
+  { The files a call changed, delivered once per successful run. AToolCallId is
+    the provider's id for the call ('' when unknown); it is what lets a consumer
+    attribute the rows to the right call when several run concurrently. }
+  TCommandChangesEvent = procedure(const AChanges: TFileChangeSet;
+    const AToolCallId: string) of object;
 
   TCommandToolConfig = record
     Shell: TShellProfile;
@@ -1344,9 +1347,14 @@ begin
           begin
             { The set rides OnChanges only - the recorder stores it, and a diff
               view reads it from there. It is not rendered into AResult: what a
-              call wrote is ambient context, not the command's output. }
+              call wrote is ambient context, not the command's output. The call
+              id travels with it so the rows anchor to THIS call, not to
+              whichever call happened to run last. }
             if Assigned(FConfig.OnChanges) then
-              FConfig.OnChanges(Changes);
+              if AObserver <> nil then
+                FConfig.OnChanges(Changes, AObserver.ToolCallId)
+              else
+                FConfig.OnChanges(Changes, '');
           end;
         finally
           Changes.Free;
