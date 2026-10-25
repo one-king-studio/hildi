@@ -250,6 +250,23 @@ begin
   AddChan('dashboard', 1);
 end;
 
+{ A lane header's colour encodes what the lane MEANS, so the header reads
+  before the label does: OPEN is plain and slightly dim, CLAIMED is the amber
+  of work in flight, BLOCKED is a dull red (not Error - it is a warning, not a
+  failure), DONE is the same cool green the message pane uses for success, and
+  DROPPED is muted because nothing lives there. }
+function LaneHeadAttr(const ATheme: TTheme; ALane: Integer): TAttr;
+begin
+  case ALane of
+    0: Result := ATheme.Muted;                        // OPEN - plain, dimmed
+    1: Result := ATheme.Warn;                         // CLAIMED - amber
+    2: Result := WithStyle(ATheme.Error, []);         // BLOCKED - dull red
+    3: Result := ATheme.Success;                      // DONE - cool green
+  else
+    Result := ATheme.Muted;                           // DROPPED - muted
+  end;
+end;
+
 function KindAttr(const ATheme: TTheme; const AKind: string): TAttr;
 begin
   if AKind = 'question' then Result := ATheme.Warn
@@ -487,6 +504,7 @@ var
   L, I, J, X, Y, LaneW, InnerW, CardH, VisTop, VisBot, Total, Sel,
     LaneX, VisCount, K, Wrapped: Integer;
   A, CardFill, CardBorder, LaneFill, LaneHead: TAttr;
+  BandBg: Byte;
   Lines: TWrapArray;
   Right: UnicodeString;
   Active: array[0..LaneCount - 1] of Integer;
@@ -519,13 +537,11 @@ begin
   VisTop := ARect.Y + 2;                    // first row a card may occupy
   VisBot := ARect.Y + ARect.H - 2;          // last row a card may occupy
 
-  { Every lane shares the board's own background. Focus no longer tints the
-    lane at all - the focused CARD carries the accent border, and that is the
   { Lanes share the board's own background, EXCEPT the focused lane, which sits
     one shade darker - that is the active-lane highlight, and it is the only
-    thing that tints. The lane HEADER band is brighter still (RaisedBg + 1) on
-    every lane: the band itself marks the boundary between header and cards, so
-    no rule row is needed and that row goes back to the cards. }
+    thing that tints the lane. The lane HEADER band sits at the card's own
+    shade (RaisedBg) on every lane: the band marks the boundary between header
+    and cards, so no rule row is needed and that row goes back to the cards. }
   CardFill := OnBg(FTheme.Panel, FTheme.RaisedBg);
 
   for K := 0 to VisCount - 1 do
@@ -539,7 +555,11 @@ begin
       LaneFill := OnBg(FTheme.Panel, FTheme.SunkenBg)
     else
       LaneFill := FTheme.Panel;
-    LaneHead := OnBg(FTheme.Title, FTheme.RaisedBg + 1);
+    { The band sits at the card's own shade, not above it: a brighter band drew
+      the eye to the header strip instead of the cards under it. The colour
+      change between band and lane is what marks the boundary. }
+    BandBg := FTheme.RaisedBg;
+    LaneHead := OnBg(LaneHeadAttr(FTheme, L), BandBg);
 
     { The lane track: fill the column first, so cards sit on it. }
     for Y := ARect.Y + 1 to ARect.Y + ARect.H - 2 do
@@ -547,8 +567,7 @@ begin
 
     { The header band: the full lane width on the header row, so the title and
       the scroll arrows sit ON a bar rather than floating. }
-    S.FillRect(R(LaneX, ARect.Y + 1, InnerW, 1),
-      OnBg(FTheme.Panel, FTheme.RaisedBg + 1));
+    S.FillRect(R(LaneX, ARect.Y + 1, InnerW, 1), OnBg(FTheme.Panel, BandBg));
 
     { The lane header: padded off the lane's left edge, name and count. }
     Text(S, LaneX + 1, ARect.Y + 1, UnicodeString(LaneTitles[L] + ' ' +
