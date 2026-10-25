@@ -19,7 +19,28 @@ Work TDD-first: each phase adds its tests before its implementation and runs
       Additive; no data change.
 - [ ] `make changes-standalone` still passes (the library gained no harness unit).
 
-## Phase 2 — the summary model (pure)
+## Phase 2 — the net fold (the recorder learns to fold a turn)
+
+The summary must show **net** change per path, not a pile of per-call patches.
+That is a capture-side change, and it comes before the summary model.
+
+- [ ] **Test**: two edits to one path in a turn yield **one** net row whose patch
+      is `diff(first before, last after)`.
+- [ ] **Test**: two edits that cancel out yield a net row with an **empty** patch
+      (the file is unchanged), and the summary reports it as unchanged.
+- [ ] **Test**: a create then a delete in one turn yields no net change for the
+      path.
+- [ ] **Test**: per-call rows are still written as they happen (the tool-block
+      diff needs them), and are distinguishable from net rows.
+- [ ] **Migration**: `is_net INTEGER NOT NULL DEFAULT 0` on `file_changes`;
+      `ForTurn` filters by it.
+- [ ] **Implement** the per-turn fold in `TChangeRecorder`: hold first-before and
+      last-after per path, flush one net row per path at the turn boundary.
+- [ ] **Test**: the fold is bounded — a turn touching 200 paths holds 200 entries,
+      not 200 file bodies retained for the session.
+- [ ] `make check` green.
+
+## Phase 3 — the summary model (pure)
 
 - [ ] **Test**: counts come from the patch — a one-line change reads `+1 −0`.
 - [ ] **Test**: `Patch = ''` yields `CountsKnown = False`, never `+0 −0`.
@@ -35,7 +56,7 @@ Work TDD-first: each phase adds its tests before its implementation and runs
       reports `UnknownCount` so the total is not silently wrong.
 - [ ] `make check` green.
 
-## Phase 3 — the diff view model (pure)
+## Phase 4 — the diff view model (pure)
 
 - [ ] **Test**: a unified diff parses into hunk/added/removed/context lines.
 - [ ] **Test**: a capped patch is reported as capped.
@@ -45,7 +66,7 @@ Work TDD-first: each phase adds its tests before its implementation and runs
 - [ ] **Implement** `TDiffView` (parse once, expose lines).
 - [ ] `make check` green.
 
-## Phase 4 — the TUI block
+## Phase 5 — the TUI block
 
 - [ ] **Test**: a turn with changes renders a `ckTurnChanges` block, collapsed.
 - [ ] **Test**: a turn with no changes renders **no** block.
@@ -58,7 +79,7 @@ Work TDD-first: each phase adds its tests before its implementation and runs
       text for the same turn.
 - [ ] `make tui-standalone` still green.
 
-## Phase 5 — the viewer
+## Phase 6 — the viewer
 
 - [ ] **Test**: selecting a file opens the viewer with the parsed diff.
 - [ ] **Test**: closing the viewer leaves the stream unchanged.

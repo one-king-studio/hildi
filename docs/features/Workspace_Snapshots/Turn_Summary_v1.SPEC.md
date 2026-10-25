@@ -21,6 +21,58 @@ revert. Those are separate specs; see [Out of Scope](#out-of-scope).
 
 ## Scope and the two gaps it must not paper over
 
+### Net changes, not a pile of patches
+
+A turn that edits one file three times must not show three diffs. Three patches
+that undo each other read as a large change; the operator concludes the agent
+rewrote something it merely touched. **The summary shows the net change per
+path**: `diff(first before-text, last after-text)` within the turn.
+
+That is a different question from "what did this call do", and both are wanted:
+
+| View | Question | Source |
+| --- | --- | --- |
+| **Turn (net)** | what does the workspace look like now, versus when the turn started? | folded per path across the turn |
+| **Call** | what did *this* tool call do? | the per-call row's own patch |
+
+So the log keeps **both**, and they are written at different times:
+
+- **Per-call rows** are appended as they happen (today's behaviour), each with
+  its own patch. These are what a diff-under-the-tool-block reads.
+- **One net row per path** is written at the turn boundary, carrying
+  `diff(first.Before, last.After)`. This is what the summary and the diff viewer
+  read.
+
+`ForTurn` must return the **net** rows for presentation and the per-call rows for
+call detail, so the record needs to say which it is:
+
+```pascal
+TChangeRecord = record
+  ...
+  { True for the folded per-path row written at the turn boundary; False for a
+    per-call row. A turn's summary reads only net rows; a call's drill-down
+    reads only per-call rows. Never mixed. }
+  IsNet: Boolean;
+end;
+```
+
+A new column (`is_net INTEGER NOT NULL DEFAULT 0`) and `ForTurn` gains a filter.
+Without the flag the two kinds would double-count and the summary would report
+both the net and the parts.
+
+**The cost, stated plainly:** the recorder must hold, per turn, the *first*
+before-text and the *last* after-text for each path. That is a small in-memory
+map (bounded by the turn's file count), and it is the only way to compute a net
+diff — the stored patch alone cannot reconstruct the turn's starting text,
+because a keyframe is what `Reconstruct` needs and none is written.
+
+**A nullified change is the point.** Two edits to a file that cancel out produce
+a net row whose patch is empty; the summary shows the file as unchanged and the
+viewer says so. That is the correct answer, and the one a pile of patches cannot
+give.
+
+### The two gaps
+
 The feature doc names two things the code does not do. Both are visible in the
 UI, so they must be stated rather than hidden:
 
