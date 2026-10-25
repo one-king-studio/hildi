@@ -47,6 +47,11 @@ type
     procedure TestACreationRecordsAPatchFromNothing;
     procedure TestAnUncapturedBeforeSideStoresNoPatch;
     procedure TestThePatchIsCappedAndSaysSo;
+    { Per-call anchoring: rows are held against the call that wrote them, so one
+      call cannot stamp another's rows when two run concurrently. }
+    procedure TestAnchorCallStampsOnlyThatCallsRows;
+    procedure TestAnchorCallForACallThatWroteNothingIsANoOp;
+    procedure TestAnchorCallIsSingleUse;
     { The net fold: a turn's per-path change, not a pile of per-call patches. }
     procedure TestTwoEditsToOnePathFoldIntoOneNetRow;
     procedure TestEditsThatCancelYieldAnEmptyNetPatch;
@@ -510,6 +515,92 @@ begin
   AssertEquals('two per-call rows', 2, PerCall);
   AssertEquals('two net rows, one per path', 2, Net);
   AssertEquals('four rows total', 4, Length(Rows));
+end;
+
+procedure TChangesRecorderTest.TestAnchorCallStampsOnlyThatCallsRows;
+var
+  R: TChangeRecorder;
+  Set_: TFileChangeSet;
+  Rows: TChangeRecordArray;
+  Err: string;
+  I, CallA, CallB: Integer;
+begin
+  { Two calls write in one turn - run_command is parallel-safe, so this is the
+    real shape. Each anchors its OWN rows: if A could stamp B's, a diff would
+    appear under the wrong tool block. }
+  R := TChangeRecorder.Create(FStore, 1, 'sess');
+  Set_ := TFileChangeSet.Create;
+  try
+    R.SetTurn(7);
+    Set_.Add(Change('a.txt', fcModified, 'x' + LineEnding, 'y' + LineEnding,
+      True, True));
+    R.Observe(Set_, 'call_A');
+    Set_.Clear;
+    Set_.Add(Change('b.txt', fcModified, 'p' + LineEnding, 'q' + LineEnding,
+      True, True));
+    R.Observe(Set_, 'call_B');
+
+    CallA := R.AnchorCall('call_A', 111);
+    CallB := R.AnchorCall('call_B', 222);
+  finally
+    Set_.Free;
+    R.Free;
+  end;
+
+  AssertEquals('A anchored one row', 1, CallA);
+  AssertEquals('B anchored one row', 1, CallB);
+
+  AssertTrue('read', FStore.ForTurn(1, 7, Rows, Err));
+  for I := 0 to High(Rows) do
+    if Rows[I].Path = 'a.txt' then
+      AssertEquals('a.txt carries A message id', 111, Rows[I].MessageId)
+    else if Rows[I].Path = 'b.txt' then
+      AssertEquals('b.txt carries B message id', 222, Rows[I].MessageId);
+end;
+
+procedure TChangesRecorderTest.TestAnchorCallForACallThatWroteNothingIsANoOp;
+var
+  R: TChangeRecorder;
+  Set_: TFileChangeSet;
+begin
+  { A call that changed no files has nothing to anchor. Anchoring it must not
+    raise, and must not consume another call's pending rows. }
+  R := TChangeRecorder.Create(FStore, 1, 'sess');
+  Set_ := TFileChangeSet.Create;
+  try
+    R.SetTurn(7);
+    Set_.Add(Change('a.txt', fcModified, 'x' + LineEnding, 'y' + LineEnding,
+      True, True));
+    R.Observe(Set_, 'call_A');
+    AssertEquals('nothing for a silent call', 0, R.AnchorCall('call_zzz', 9));
+    { A's rows are still waiting, and still anchor to A. }
+    AssertEquals('A still anchors', 1, R.AnchorCall('call_A', 111));
+  finally
+    Set_.Free;
+    R.Free;
+  end;
+end;
+
+procedure TChangesRecorderTest.TestAnchorCallIsSingleUse;
+var
+  R: TChangeRecorder;
+  Set_: TFileChangeSet;
+begin
+  { Anchoring consumes the pending entry: a second anchor for the same call must
+    not re-stamp rows that already carry an id. }
+  R := TChangeRecorder.Create(FStore, 1, 'sess');
+  Set_ := TFileChangeSet.Create;
+  try
+    R.SetTurn(7);
+    Set_.Add(Change('a.txt', fcModified, 'x' + LineEnding, 'y' + LineEnding,
+      True, True));
+    R.Observe(Set_, 'call_A');
+    AssertEquals('first anchor', 1, R.AnchorCall('call_A', 111));
+    AssertEquals('second anchor does nothing', 0, R.AnchorCall('call_A', 222));
+  finally
+    Set_.Free;
+    R.Free;
+  end;
 end;
 
 initialization
