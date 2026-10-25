@@ -23,6 +23,7 @@ uses
   test_tui_animation, test_tui_grapheme, test_tui_edit, test_tui_chat,
   test_tui_compose, test_tui_chatpanel, test_recall_tool, test_harness_stats,
   test_tui_compact, test_markdown, test_markdownview, test_tls,
+  test_dashboard_panel,
   test_session_protocol, test_session_runtime, test_session_client,
   test_session_socket,
   test_harness_driver, test_jsonrpc, test_stdio_child, test_mcp_config,

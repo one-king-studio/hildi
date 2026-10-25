@@ -25,15 +25,6 @@ uses
   tui.base, tui.theme, tui.app, tui.surface, tui.surface.video,
   tui.input, tui.input.terminal, tui.widget;
 
-var
-  { Set by the panel's quit keys via the app's stop condition. }
-  DashQuit: Boolean;
-
-function ShouldStop: Boolean;
-begin
-  Result := DashQuit;
-end;
-
 { The middot separator as UTF-8 bytes. Holder is an AnsiString, so a
   UnicodeString literal cannot be concatenated into it without an implicit
   (and lossy) conversion that -Sew rejects. }
@@ -185,9 +176,52 @@ var
   App: TTuiApp;
   DumpW, DumpH: Integer;
 
+{ No local quit flag: the panel owns the quit key and sets the unit's
+  QuitRequested. A second flag in this program was exactly the bug this fixes -
+  it was declared, never assigned, so the app never saw a quit. }
+function ShouldStop: Boolean;
 begin
-  DashQuit := False;
+  Result := QuitRequested or InputTerm.Terminated;
+end;
 
+{ A cheap signature of what the panel is showing: if this changes, the frame
+  would differ and a repaint is owed. Comparing the whole structure field by
+  field would be as expensive as the read itself. }
+function DataSignature: string;
+var
+  I, J: Integer;
+begin
+  Result := IntToStr(Length(Board)) + '|' + IntToStr(Length(Chans));
+  for I := 0 to LaneCount - 1 do
+  begin
+    Result := Result + '|' + IntToStr(Length(Lanes[I]));
+    for J := 0 to High(Lanes[I]) do
+      Result := Result + Lanes[I][J].Id + Lanes[I][J].Holder;
+  end;
+  for I := 0 to High(Board) do
+    Result := Result + Board[I].Meta + Board[I].Title;
+end;
+
+var
+  SigBefore: string;
+
+{ The panel's poll callback. Re-reads and reports whether the frame changed.
+
+  ponytail: this does a FULL reload each tick (one board Read capped at 200 plus
+  one List per lane). At a 2s interval on a local store that is milliseconds,
+  and it is the honest way to be correct: a cheap-aggregate precheck (Toc's
+  last_at plus a task count) would skip most loads but needs a per-status count
+  the task store does not expose yet. Add that if the store grows or the
+  interval tightens. }
+function RefreshData: Boolean;
+begin
+  SigBefore := DataSignature;
+  LoadWorkspace(BoardStore, TaskStore, WorkspaceId);
+  Panel.MarkRead(DateTimeToUnix(Now));
+  Result := DataSignature <> SigBefore;
+end;
+
+begin
   StorePath := GetEnvironmentVariable('HILDEGARD_STORE_PATH');
   if StorePath = '' then
     StorePath := IncludeTrailingPathDelimiter(GetUserDir) +
@@ -250,6 +284,9 @@ begin
 
     Theme := DarkTheme;
     Panel := TDashboard.Create(Theme);
+    { Near-realtime: re-read every 2s. The panel calls back at most that often,
+      and only repaints when the data signature actually changed. }
+    Panel.SetPoll(2000, @RefreshData);
     try
       Surface := TSurfaceVideo.Create;
       InputTerm := TInputSourceTerminal.Create;

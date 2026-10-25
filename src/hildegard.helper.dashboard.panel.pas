@@ -32,7 +32,7 @@ interface
 
 uses
   {$ifdef unix}cthreads, cwstring,{$endif}   // cthreads first; cwstring for Unicode
-  SysUtils, Classes,
+  SysUtils, Classes, DateUtils,
   tui.base, tui.input,
   tui.surface, tui.widget,
   tui.app, tui.surface.video,
@@ -80,6 +80,12 @@ type
 
   TWrapArray = array of UnicodeString;
 
+  { A host's data refresh: refill the panel's globals, return True when what is
+    on screen would actually differ (so the panel only repaints on a change).
+    A plain function pointer: the host's data is globals or captured state, and
+    requiring an object method would force a holder class for no gain. }
+  TDashboardRefresh = function: Boolean;
+
   { The whole dashboard is one widget. A mock does not need the widget kit's
     composition, and painting it directly keeps the layout legible in one file -
     which is the point. The real feature composes panels plus a kanban widget. }
@@ -95,6 +101,11 @@ type
     FMsgScroll: Integer;
     FSpin: Integer;
     FOrigin: Int64;
+    FOnPoll: TDashboardRefresh;
+    FPollMs: Integer;
+    FLastPoll: Int64;
+    FHasPolled: Boolean;
+    FReadAt: Int64;       // epoch secs of the last data fill, for the age chip
     procedure Frame(const S: ISurface; const ARect: TRect;
       const ATitle, ARight: UnicodeString; AFocused: Boolean);
     { A frame with explicit border and fill attributes, for surfaces that are
@@ -124,6 +135,18 @@ type
     function HandleEvent(const E: TInputEvent): Boolean; override;
     function Advance(const ANowMs: Int64): Boolean; override;
     function Animating: Boolean; override;
+
+    { Near-realtime reading. The panel owns the CLOCK and the STALENESS rule;
+      the host owns the store, so it supplies a callback that refills the data
+      globals and returns whether anything actually changed. The panel calls it
+      at most once per APollMs, and only when the app ticks.
+
+      This keeps the panel free of any store unit - the same reason the mock can
+      drive it with static data. }
+    procedure SetPoll(AIntervalMs: Integer; ARefresh: TDashboardRefresh);
+    { Called by a host after it has filled the data, so the age chip is honest. }
+    procedure MarkRead(AEpochSec: Int64);
+    property ReadAt: Int64 read FReadAt;
   end;
 
 const
@@ -385,7 +408,25 @@ begin
   FMsgSel := 0;
   FMsgScroll := 0;
   FOrigin := 0;
+  FOnPoll := nil;
+  FPollMs := 0;
+  FLastPoll := 0;
+  FHasPolled := False;
+  FReadAt := 0;
   SetAnimation(SpinIntervalMs);
+end;
+
+procedure TDashboard.SetPoll(AIntervalMs: Integer; ARefresh: TDashboardRefresh);
+begin
+  FOnPoll := ARefresh;
+  FPollMs := AIntervalMs;
+  FLastPoll := 0;
+  FHasPolled := False;   // poll on the next tick, so the first frame is current
+end;
+
+procedure TDashboard.MarkRead(AEpochSec: Int64);
+begin
+  FReadAt := AEpochSec;
 end;
 
 function TDashboard.Measure(const AAvail: TSize): TSize;
@@ -402,6 +443,7 @@ end;
 function TDashboard.Advance(const ANowMs: Int64): Boolean;
 var
   NewIndex: Integer;
+  Changed: Boolean;
 begin
   if FOrigin = 0 then
     FOrigin := ANowMs;
@@ -409,8 +451,28 @@ begin
     NewIndex := 0
   else
     NewIndex := ((ANowMs - FOrigin) div SpinIntervalMs) mod 10;
-  Result := NewIndex <> FSpin;
+  { The spinner changing is a repaint; so is the store returning new data. }
+  Changed := NewIndex <> FSpin;
   FSpin := NewIndex;
+
+  { Poll at most once per interval, and never more often than the app ticks.
+    A poll that reports a change forces a repaint; one that does not is free.
+
+    FHasPolled is a separate flag, NOT `FLastPoll = 0`: the app's clock can
+    legitimately be 0 on the first tick, so a 0 sentinel made the first two
+    ticks both poll. The throttle test caught that. }
+  if (@FOnPoll <> nil) and (FPollMs > 0) then
+  begin
+    if (not FHasPolled) or (ANowMs - FLastPoll >= FPollMs) then
+    begin
+      FHasPolled := True;
+      FLastPoll := ANowMs;
+      if FOnPoll() then
+        Changed := True;
+    end;
+  end;
+
+  Result := Changed;
 end;
 
 procedure TDashboard.Text(const S: ISurface; X, Y: Integer;
@@ -824,7 +886,8 @@ end;
   beside the messages they describe instead of in a bar of their own. }
 procedure TDashboard.DrawStatus(const S: ISurface; const ARect: TRect);
 var
-  Left, Hints, Dir: UnicodeString;
+  Left, Hints, Dir, Age: UnicodeString;
+  Secs: Int64;
 begin
   S.FillRect(ARect, FTheme.Panel);
 
@@ -838,6 +901,25 @@ begin
     Left := ' ' + ChDotted + Copy(Dir, Length(Dir) - (ARect.W - 34),
       Length(Dir));
   Text(S, ARect.X, ARect.Y, Left, FTheme.Muted, ARect.W - 26);
+
+  { How old the data on screen is. A dashboard that repaints while showing a
+    frozen snapshot is the failure this feature's own risk list names, so the
+    age is stated rather than implied. Absent when the host does not report a
+    read (the mock, which has nothing to poll). }
+  if FReadAt > 0 then
+  begin
+    Secs := DateTimeToUnix(Now) - FReadAt;
+    if Secs < 0 then
+      Secs := 0;
+    if Secs < 2 then
+      Age := 'live'
+    else
+      Age := 'read ' + UnicodeString(IntToStr(Secs)) + 's ago';
+    Hints := 'tab zone  arrows move  q quit';
+    if ARect.W > Length(Left) + Length(Hints) + Length(Age) + 4 then
+      Text(S, ARect.X + ARect.W - Length(Hints) - Length(Age) - 3, ARect.Y,
+        Age, FTheme.Muted, Length(Age));
+  end;
 
   Hints := 'tab zone  arrows move  q quit ';
   if ARect.W > Length(Left) + Length(Hints) then
