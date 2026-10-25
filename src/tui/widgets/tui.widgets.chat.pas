@@ -24,7 +24,7 @@ uses
 
 type
   TChatKind = (ckUser, ckAssistant, ckError, ckThought, ckTool, ckThinking,
-    ckTurn, ckAmbient, ckQueued, ckHandoff);
+    ckTurn, ckTurnChanges, ckAmbient, ckQueued, ckHandoff);
 
   { An item's animation state changed (a live box started or settled). }
   TChatAnimatingEvent = procedure(Sender: TObject; AAnimating: Boolean)
@@ -465,6 +465,10 @@ begin
         Result := OnBg(FTheme.Error, FTheme.SunkenBg)
       else
         Result := OnBg(FTheme.Text, FTheme.SunkenBg);
+    ckTurnChanges:
+      { A turn summary is not a failure and never red: it reports what the turn
+        wrote, whether that turned out well or badly. }
+      Result := OnBg(FTheme.Text, FTheme.SunkenBg);
     ckThought:
       Result := FTheme.Muted;
     ckQueued:
@@ -622,7 +626,7 @@ begin
   FLive := AValue;
   { A live thought/tool box shows the corner spinner, so it animates; a settled
     one does not. }
-  FAnimating := (FKind = ckThinking) or (FLive and (FKind in [ckThought, ckTool]));
+  FAnimating := (FKind = ckThinking) or (FLive and (FKind in [ckThought, ckTool, ckTurnChanges]));
   Inc(FTextVer);
   InvalidateHeight;
   if Assigned(FOnChange) then
@@ -773,7 +777,7 @@ end;
 function TChatItem.Inset: Integer;
 begin
   if (FKind = ckUser) or (FKind = ckQueued) or
-    (FKind in [ckAmbient, ckHandoff]) or (FKind in [ckThought, ckTool]) then
+    (FKind in [ckAmbient, ckHandoff]) or (FKind in [ckThought, ckTool, ckTurnChanges]) then
     Result := 4
   else if (FKind = ckAssistant) or (FKind = ckError) then
     Result := 1
@@ -793,7 +797,7 @@ begin
   { A thought/tool condenses (first + ellipsis + last rows) and is collapsible.
     An ambient block is a box with a disclosure caret (down/up); it shows its
     full body, so it never condenses. }
-  Result := FKind in [ckThought, ckTool];
+  Result := FKind in [ckThought, ckTool, ckTurnChanges];
 end;
 
 function TChatItem.CaretShown: Boolean;
@@ -906,7 +910,7 @@ end;
 function TChatItem.Boxed: Boolean;
 begin
   Result := (FKind = ckUser) or (FKind = ckQueued) or
-    (FKind in [ckAmbient, ckHandoff]) or (FKind in [ckThought, ckTool]);
+    (FKind in [ckAmbient, ckHandoff]) or (FKind in [ckThought, ckTool, ckTurnChanges]);
 end;
 
 procedure TChatItem.BodyRows(AWidth: Integer; out ATextRows, ALines: Integer);
@@ -971,7 +975,7 @@ begin
       end;
     ckThinking, ckTurn:
       Result.H := 1;
-    ckThought, ckTool:
+    ckThought, ckTool, ckTurnChanges:
       begin
         { A thought/tool is always a box: a condensed view (or the full body
           when it is short, or a live tail while streaming) plus the borders. }
@@ -1103,7 +1107,7 @@ begin
   { An active (live) thought/tool box shows the activity spinner in the caret's
     slot instead of a caret — it is not toggleable while live, and the spinner
     says the work is still happening right where it is. }
-  LiveSpinner := FLive and (FKind in [ckThought, ckTool]);
+  LiveSpinner := FLive and (FKind in [ckThought, ckTool, ckTurnChanges]);
   if LiveSpinner then
     CaretCh := FSpark;
 
@@ -1125,7 +1129,7 @@ begin
     Border.Fg := QueuedBorderFg;
     Border.Style := Border.Style + [sfDim];
   end
-  else if FKind = ckTool then
+  else if (FKind = ckTool) or (FKind = ckTurnChanges) then
   begin
     SurfaceAttr := OnBg(FTheme.Text, FTheme.SunkenBg);
     Border := OnBg(FTheme.Text, FTheme.SunkenBg);
