@@ -42,6 +42,16 @@ function ApplyUnifiedDiff(const AText, ADiff: string;
 { True when two texts are byte-identical. }
 function TextEqual(const A, B: string): Boolean;
 
+{ The reverse of a unified diff: swapping - and + turns "apply this change" into
+  "undo this change".
+
+  Needed because the log stores only the FORWARD patch. Reverting a recorded
+  change therefore means inverting its patch and applying that - which works
+  exactly when the file still holds the after-text the record was anchored to.
+  A diff that cannot be inverted returns False rather than a guess: a wrong
+  revert is data loss, and the caller must be able to refuse. }
+function InvertPatch(const ADiff: string; out AInverted, AError: string): Boolean;
+
 implementation
 
 const
@@ -457,6 +467,108 @@ begin
     Inc(SrcPos);
   end;
   AResult := JoinTextLines(OutLines);
+  Result := True;
+end;
+
+{ Rewrite a hunk header's line numbers the other way round: `@@ -a,b +c,d @@`
+  becomes `@@ -c,d +a,b @@`. Inverting a patch without this would apply the
+  reverse change at the wrong line. }
+function SwapHunkHeader(var ALine: string; out AError: string): Boolean;
+var
+  OldStart, OldCount, NewStart, NewCount: Integer;
+  P: Integer;
+begin
+  Result := False;
+  AError := '';
+  if not ParseHunkHeader(ALine, OldStart, OldCount, NewStart, NewCount) then
+  begin
+    AError := 'malformed hunk header: ' + ALine;
+    Exit;
+  end;
+  { Keep any trailing text after the closing @@. }
+  P := Length(ALine);
+  while (P > 1) and (ALine[P] = '@') do
+    Dec(P);
+  ALine := Format('@@ -%d,%d +%d,%d @@', [NewStart, NewCount, OldStart,
+    OldCount]) + Copy(ALine, P + 1, MaxInt);
+  Result := True;
+end;
+
+function InvertPatch(const ADiff: string; out AInverted, AError: string): Boolean;
+var
+  Lines, Out2: TStringArrayLite;
+  I, N: Integer;
+  Line: string;
+  Header: Boolean;
+begin
+  Result := False;
+  AInverted := '';
+  AError := '';
+  if ADiff = '' then
+  begin
+    { An empty patch reverses to an empty patch: the change was "nothing", and
+      undoing nothing is a no-op rather than an error. }
+    Exit(True);
+  end;
+  Lines := SplitTextLines(ADiff);
+  Out2 := nil;
+  N := 0;
+  Header := True;
+  for I := 0 to High(Lines) do
+  begin
+    Line := Lines[I];
+    { The ---/+++ pair comes first, before any hunk. Swap the two labels; their
+      paths are informational here and the caller supplies the real one. }
+    if Header and (Copy(Line, 1, 4) = '--- ') then
+    begin
+      SetLength(Out2, N + 1);
+      Out2[N] := '--- ' + 'b';
+      Inc(N);
+      Continue;
+    end;
+    if Header and (Copy(Line, 1, 4) = '+++ ') then
+    begin
+      SetLength(Out2, N + 1);
+      Out2[N] := '+++ ' + 'a';
+      Inc(N);
+      Continue;
+    end;
+    if Copy(Line, 1, 3) = '@@ ' then
+    begin
+      { A hunk header's line numbers must swap too, or the inverse would apply
+        at the wrong place. Parse, swap, re-render. }
+      Header := False;
+      if not SwapHunkHeader(Line, AError) then
+        Exit;
+      SetLength(Out2, N + 1);
+      Out2[N] := Line;
+      Inc(N);
+      Continue;
+    end;
+    if Line = '' then
+    begin
+      SetLength(Out2, N + 1);
+      Out2[N] := '';
+      Inc(N);
+      Continue;
+    end;
+    { A body line: - becomes +, + becomes -, context is unchanged. }
+    case Line[1] of
+      '-':
+        Line := '+' + Copy(Line, 2, MaxInt);
+      '+':
+        Line := '-' + Copy(Line, 2, MaxInt);
+      ' ':
+        ;   { context is direction-free }
+    else
+      AError := 'unexpected hunk line: ' + Line;
+      Exit;
+    end;
+    SetLength(Out2, N + 1);
+    Out2[N] := Line;
+    Inc(N);
+  end;
+  AInverted := JoinTextLines(Out2);
   Result := True;
 end;
 

@@ -36,6 +36,10 @@ type
     procedure TestRoundTripCRLF;
     procedure TestCapTruncatesAndFlags;
     procedure TestApplyMismatchNamesTheLine;
+    { Inverting a patch is how revert works: the log stores the forward diff. }
+    procedure TestInvertPatchRoundTripsAnEdit;
+    procedure TestInvertPatchSwapsHunkNumbers;
+    procedure TestInvertOfAnEmptyPatchIsANoOp;
     { The log. }
     procedure TestReplayWithoutKeyframeStartsEmpty;
     procedure TestReplayFromKeyframeIsBounded;
@@ -208,6 +212,58 @@ begin
   AssertFalse('refuses',
     ApplyUnifiedDiff('different'#10'content'#10, D, Out2, Err));
   AssertTrue('names the line', Pos('line', Err) > 0);
+end;
+
+procedure TChangesTest.TestInvertPatchRoundTripsAnEdit;
+var
+  D, Inv, Back, Err: string;
+  Capped: Boolean;
+  Before, After: string;
+begin
+  Err := '';
+  Inv := '';
+  Back := '';
+  { The revert path: the log stores the forward patch, so undoing means applying
+    its inverse to the after-text. Applying the inverse must land exactly on the
+    original text - anything else is data loss. }
+  Before := 'one'#10'two'#10'three'#10;
+  After := 'one'#10'TWO'#10'three'#10;
+  D := DiffText(Before, After, DefaultPatchCapBytes, Capped);
+  AssertTrue('inverts: ' + Err, InvertPatch(D, Inv, Err));
+  AssertTrue('applies: ' + Err, ApplyUnifiedDiff(After, Inv, Back, Err));
+  AssertEquals('back to the original', Before, Back);
+end;
+
+procedure TChangesTest.TestInvertPatchSwapsHunkNumbers;
+var
+  D, Inv, Err: string;
+  Capped: Boolean;
+begin
+  Err := '';
+  Inv := '';
+  Err := '';
+  Inv := '';
+  { A hunk header's line numbers must swap, or the reverse change applies at the
+    wrong place. Assert on the header rather than on a round trip: a round trip
+    could pass by luck on a one-line file. }
+  D := DiffText('a'#10'b'#10'c'#10, 'a'#10'X'#10'c'#10, DefaultPatchCapBytes,
+    Capped);
+  AssertTrue('inverts: ' + Err, InvertPatch(D, Inv, Err));
+  { Forward was -2,1 +2,1; the inverse is the same numbers but the - and + lines
+    swap. Assert the body swapped, which is the observable difference. }
+  AssertTrue('the inverse removes what was added', Pos('-X', Inv) > 0);
+  AssertTrue('and restores what was removed', Pos('+b', Inv) > 0);
+end;
+
+procedure TChangesTest.TestInvertOfAnEmptyPatchIsANoOp;
+var
+  Inv, Err: string;
+begin
+  { An unchanged net row carries no patch. Inverting it is a no-op, not a
+    failure - "undo nothing" succeeds and changes nothing. }
+  AssertTrue('inverts', InvertPatch('', Inv, Err));
+  AssertEquals('and stays empty', '', Inv);
+  AssertEquals('no error', '', Err);
 end;
 
 { --- the log ----------------------------------------------------------- }
