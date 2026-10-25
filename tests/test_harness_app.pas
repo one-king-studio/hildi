@@ -157,6 +157,9 @@ type
     procedure TestResumeHeaderMatchesLive;
     procedure TestTurnDividerAfterSuccessfulTurn;
     procedure TestNoDividerAfterFailedTurn;
+    { A turn that wrote nothing renders no summary block: an empty summary is
+      noise, and its absence already says the tree is untouched. }
+    procedure TestNoTurnChangesBlockWhenNothingChanged;
     procedure TestResumeRendersTurnDividers;
     procedure TestThoughtShowsDuration;
     procedure TestCtaHintsAreBlank;
@@ -1608,6 +1611,22 @@ begin
   AssertTrue('turn finished', Pump(300));
   for I := 0 to BlockCount - 1 do
     AssertFalse('no divider for a failed loop', BlockKind(I) = ckTurn);
+end;
+
+procedure THarnessAppTest.TestNoTurnChangesBlockWhenNothingChanged;
+var
+  I: Integer;
+begin
+  { A turn that wrote no files renders NO summary block. An empty block would be
+    noise on every conversational turn, and its absence already says the tree is
+    untouched. }
+  BuildWithStore;
+  FFake.AddResponse([TextDelta('hi'), FinishFrame('stop'), DoneFrame]);
+  SubmitPrompt('hello');
+  AssertTrue('turn finished', Pump(300));
+  for I := 0 to BlockCount - 1 do
+    AssertFalse('no summary block when nothing changed',
+      BlockKind(I) = ckTurnChanges);
 end;
 
 procedure THarnessAppTest.TestResumeRendersTurnDividers;
