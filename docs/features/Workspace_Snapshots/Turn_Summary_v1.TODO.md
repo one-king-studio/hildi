@@ -66,7 +66,7 @@ That is a capture-side change, and it comes before the summary model.
 - [ ] **Implement** `TDiffView` (parse once, expose lines).
 - [ ] `make check` green.
 
-## Phase 5 — the TUI block
+## Phase 5 — the TUI block (DONE)
 
 - [ ] **Test**: a turn with changes renders a `ckTurnChanges` block, collapsed.
 - [ ] **Test**: a turn with no changes renders **no** block.
@@ -79,7 +79,7 @@ That is a capture-side change, and it comes before the summary model.
       text for the same turn.
 - [ ] `make tui-standalone` still green.
 
-## Phase 6 — the viewer
+## Phase 6 — the viewer (NEXT)
 
 - [ ] **Test**: selecting a file opens the viewer with the parsed diff.
 - [ ] **Test**: closing the viewer leaves the stream unchanged.
