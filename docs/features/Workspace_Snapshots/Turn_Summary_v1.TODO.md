@@ -68,19 +68,24 @@ That is a capture-side change, and it comes before the summary model.
 
 ## Phase 5 — the TUI block (DONE)
 
-- [ ] **Test**: a turn with changes renders a `ckTurnChanges` block, collapsed.
-- [ ] **Test**: a turn with no changes renders **no** block.
-- [ ] **Test**: the block expands and its file rows are selectable.
+- [x] **Test**: a turn with changes renders a `ckTurnChanges` block, collapsed.
+- [x] **Test**: a turn with no changes renders **no** block.
+- [x] **Test**: a file whose edits cancelled is not listed (the net fold, end to
+      end through the app).
+- [x] **Implement** the block in `src/tui/widgets/` (a `tui.widgets.*` consumer).
+- [x] **Wire** the runtime to emit the summary at the turn boundary, from
+      `OnTurnFinished` (not the next turn's open).
+- [x] **Implement** the expanded body: collapsed shows the stat lines, expanded
+      shows the diffs (`SetExpandedText`).
 - [ ] **Test**: the block's height is memoised per width like any other block
-      (no per-frame re-measure).
-- [ ] **Implement** the block in `src/tui/widgets/` (a `tui.widgets.*` consumer).
-- [ ] **Wire** the runtime to emit the summary at the turn boundary.
+      (no per-frame re-measure). It inherits the box path, but nothing pins it.
 - [ ] **Test**: the live path and a resumed replay produce the **same** summary
       text for the same turn.
-- [ ] `make tui-standalone` still green.
 
 ## Phase 6 — the viewer (NEXT)
 
+- [ ] **Test**: the block's file rows are **selectable** (moved here from Phase 5:
+      no hit-testing existed, and selection is the viewer's job, not the block's).
 - [ ] **Test**: selecting a file opens the viewer with the parsed diff.
 - [ ] **Test**: closing the viewer leaves the stream unchanged.
 - [ ] **Test**: a not-captured file says so; a capped diff says "at least".
