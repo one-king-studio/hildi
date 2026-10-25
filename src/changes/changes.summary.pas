@@ -42,6 +42,39 @@ type
 
   TFileChangeStatArray = array of TFileChangeStat;
 
+  { What a diff line is, so the renderer can colour it without re-parsing. }
+  TDiffLineKind = (
+    dkFile,      // the --- / +++ header pair
+    dkHunk,      // @@ -a,b +c,d @@
+    dkAdded,
+    dkRemoved,
+    dkContext);
+
+  { One stored patch, parsed once for rendering. Built from a TChangeRecord only:
+    it never opens a workspace file, so it cannot leak a path outside the
+    workspace and cannot disagree with what was recorded. }
+  TDiffView = class
+  private
+    FLines: array of string;
+    FKinds: array of TDiffLineKind;
+    FNotCaptured: Boolean;
+    FCapped: Boolean;
+    procedure Parse(const APatch: string);
+  public
+    class function FromRecord(const ARow: TChangeRecord): TDiffView;
+    destructor Destroy; override;
+    function LineCount: Integer;
+    { False when AIndex is out of range. }
+    function Line(AIndex: Integer; out AKind: TDiffLineKind;
+      out AText: string): Boolean;
+    { True when the record carried no patch at all: the change happened but its
+      sides were never captured, so there is nothing to show. Distinct from an
+      empty patch, which means the two ends are identical. }
+    property NotCaptured: Boolean read FNotCaptured;
+    { The patch was truncated at the cap, so this view is a prefix. }
+    property Capped: Boolean read FCapped;
+  end;
+
   TTurnChangeSummary = record
     TurnId: Integer;
     Files: TFileChangeStatArray;
@@ -216,6 +249,94 @@ begin
     Result[Shown] := Format('- %d more files  +%d -%d',
       [Hidden, HiddenAdd, HiddenRem]);
   end;
+end;
+
+{ TDiffView }
+
+destructor TDiffView.Destroy;
+begin
+  inherited Destroy;
+end;
+
+procedure TDiffView.Parse(const APatch: string);
+var
+  P, Start, N: Integer;
+  Line: string;
+  Kind: TDiffLineKind;
+begin
+  FLines := nil;
+  FKinds := nil;
+  N := 0;
+  P := 1;
+  while P <= Length(APatch) + 1 do
+  begin
+    Start := P;
+    while (P <= Length(APatch)) and (APatch[P] <> #10) do
+      Inc(P);
+    Line := Copy(APatch, Start, P - Start);
+    if (Line <> '') and (Line[Length(Line)] = #13) then
+      SetLength(Line, Length(Line) - 1);
+    Inc(P);
+    if (Line = '') and (Start > Length(APatch)) then
+      Break;
+    { Classify by the leading byte, with the header pair checked FIRST: `---` and
+      `+++` also start with - and +, and calling them removed/added would put two
+      spurious lines at the top of every diff. }
+    if (Copy(Line, 1, 3) = '---') or (Copy(Line, 1, 3) = '+++') then
+      Kind := dkFile
+    else if Copy(Line, 1, 2) = '@@' then
+      Kind := dkHunk
+    else if (Line <> '') and (Line[1] = '+') then
+      Kind := dkAdded
+    else if (Line <> '') and (Line[1] = '-') then
+      Kind := dkRemoved
+    else
+      Kind := dkContext;
+    SetLength(FLines, N + 1);
+    SetLength(FKinds, N + 1);
+    FLines[N] := Line;
+    FKinds[N] := Kind;
+    Inc(N);
+  end;
+end;
+
+class function TDiffView.FromRecord(const ARow: TChangeRecord): TDiffView;
+begin
+  Result := TDiffView.Create;
+  Result.FCapped := ARow.Capped;
+  if ARow.Patch = '' then
+  begin
+    { Two facts look alike here and must not be conflated:
+      - the ends are identical (both hashes present and equal): the file is
+        unchanged, so show nothing and do NOT call it uncaptured;
+      - a side was never captured (the process tier): the change happened but
+        there is nothing to draw, so say so. }
+    if (ARow.BeforeHash <> '') and (ARow.BeforeHash = ARow.AfterHash) then
+      Result.FNotCaptured := False
+    else
+      Result.FNotCaptured := True;
+    Exit;
+  end;
+  Result.Parse(ARow.Patch);
+end;
+
+function TDiffView.LineCount: Integer;
+begin
+  Result := Length(FLines);
+end;
+
+function TDiffView.Line(AIndex: Integer; out AKind: TDiffLineKind;
+  out AText: string): Boolean;
+begin
+  if (AIndex < 0) or (AIndex > High(FLines)) then
+  begin
+    AKind := dkContext;
+    AText := '';
+    Exit(False);
+  end;
+  AKind := FKinds[AIndex];
+  AText := FLines[AIndex];
+  Result := True;
 end;
 
 end.

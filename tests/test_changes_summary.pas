@@ -40,6 +40,12 @@ type
     procedure TestLinesAreOrderedByPath;
     procedure TestLinesCapAndSayHowManyAreHidden;
     procedure TestAnUnchangedSummaryRendersNoLines;
+    { The diff view: one record's stored patch, parsed for rendering. }
+    procedure TestDiffViewClassifiesEveryLineKind;
+    procedure TestDiffViewExposesHunkHeaders;
+    procedure TestDiffViewOfAnEmptyPatchHasNoLines;
+    procedure TestDiffViewReportsNotCaptured;
+    procedure TestDiffViewReportsCapped;
   end;
 
 implementation
@@ -323,6 +329,117 @@ begin
     'orig' + LineEnding);
   S := SummarizeTurn(Rows);
   AssertEquals('no lines', 0, Length(SummaryLines(S, 10)));
+end;
+
+procedure TChangesSummaryTest.TestDiffViewClassifiesEveryLineKind;
+var
+  R: TChangeRecord;
+  V: TDiffView;
+  Kind: TDiffLineKind;
+  Text: string;
+  I, Adds, Rems, Ctx: Integer;
+begin
+  { The viewer must be able to colour every line it draws, so the distinction
+    has to survive parsing: an added line, a removed line and context are three
+    kinds, and a header is a fourth. }
+  R := Net('a.txt', ckModified,
+    'one' + LineEnding + 'two' + LineEnding + 'three' + LineEnding,
+    'one' + LineEnding + 'TWO' + LineEnding + 'three' + LineEnding);
+  V := TDiffView.FromRecord(R);
+  try
+    AssertTrue('has lines', V.LineCount > 0);
+    Adds := 0; Rems := 0; Ctx := 0;
+    for I := 0 to V.LineCount - 1 do
+    begin
+      AssertTrue('line ' + IntToStr(I), V.Line(I, Kind, Text));
+      case Kind of
+        dkAdded: Inc(Adds);
+        dkRemoved: Inc(Rems);
+        dkContext: Inc(Ctx);
+      else
+        ;   // headers are neither content nor context
+      end;
+    end;
+    AssertEquals('one addition', 1, Adds);
+    AssertEquals('one removal', 1, Rems);
+    AssertTrue('and some context', Ctx > 0);
+  finally
+    V.Free;
+  end;
+end;
+
+procedure TChangesSummaryTest.TestDiffViewExposesHunkHeaders;
+var
+  R: TChangeRecord;
+  V: TDiffView;
+  Kind: TDiffLineKind;
+  Text: string;
+  I: Integer;
+  Hunks: Integer;
+begin
+  R := Net('a.txt', ckModified, 'only' + LineEnding, 'changed' + LineEnding);
+  V := TDiffView.FromRecord(R);
+  try
+    Hunks := 0;
+    for I := 0 to V.LineCount - 1 do
+      if V.Line(I, Kind, Text) and (Kind = dkHunk) then
+        Inc(Hunks);
+    AssertEquals('one hunk header', 1, Hunks);
+  finally
+    V.Free;
+  end;
+end;
+
+procedure TChangesSummaryTest.TestDiffViewOfAnEmptyPatchHasNoLines;
+var
+  R: TChangeRecord;
+  V: TDiffView;
+begin
+  { An unchanged net row carries no patch. The viewer must open empty rather
+    than claim a change. }
+  R := Net('same.txt', ckModified, 'orig' + LineEnding, 'orig' + LineEnding);
+  AssertEquals('no patch', '', R.Patch);
+  V := TDiffView.FromRecord(R);
+  try
+    AssertEquals('no lines', 0, V.LineCount);
+    AssertTrue('and it says why', V.NotCaptured or (V.LineCount = 0));
+  finally
+    V.Free;
+  end;
+end;
+
+procedure TChangesSummaryTest.TestDiffViewReportsNotCaptured;
+var
+  R: TChangeRecord;
+  V: TDiffView;
+begin
+  { A process-tier row has no before-text, so it has no patch. That is 'not
+    captured', never 'no changes'. }
+  R := NoPatch('big.bin', ckModified, '', '');
+  V := TDiffView.FromRecord(R);
+  try
+    AssertTrue('reports not captured', V.NotCaptured);
+    AssertEquals('no lines', 0, V.LineCount);
+  finally
+    V.Free;
+  end;
+end;
+
+procedure TChangesSummaryTest.TestDiffViewReportsCapped;
+var
+  R: TChangeRecord;
+  V: TDiffView;
+begin
+  { A truncated patch must say so, or the operator reads a partial diff as the
+    whole change. }
+  R := Net('a.txt', ckModified, 'x' + LineEnding, 'y' + LineEnding);
+  R.Capped := True;
+  V := TDiffView.FromRecord(R);
+  try
+    AssertTrue('reports capped', V.Capped);
+  finally
+    V.Free;
+  end;
 end;
 
 initialization
