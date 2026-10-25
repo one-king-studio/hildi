@@ -47,7 +47,7 @@ uses
   test_shell_tier_corpus,
   changes.types, changes.text, changes.store, changes.log, test_changes,
   test_changes_isolation, fileignore.rules, test_fileignore,
-  hildegard.helper.changes.store, test_changes_store,
+  hildegard.helper.changes.store, test_changes_store, test_changes_summary,
   hildegard.helper.board, hildegard.helper.board.store, test_board_store,
   hildegard.helper.board.tools, test_board_tools,
   hildegard.helper.tasks, hildegard.helper.tasks.store, test_tasks_store,
