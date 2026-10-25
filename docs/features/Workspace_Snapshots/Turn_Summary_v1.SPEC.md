@@ -71,6 +71,47 @@ a net row whose patch is empty; the summary shows the file as unchanged and the
 viewer says so. That is the correct answer, and the one a pile of patches cannot
 give.
 
+### Per-call diffs ride the tool block, not the result text
+
+The captured diff for a call appears **immediately under that call's tool block**
+so it is unambiguous which call produced it:
+
+- **Collapsed** (the default): the block shows **stats only** — `M path  +30 −8`,
+  one line per file.
+- **Expanded**: the block shows the **full diff**.
+
+This is the presentation the operator asked for, and it has one hard constraint:
+**the diff must not be appended to the tool result text.** `AResult` is what the
+model reads back; a diff there would enter the prompt on every subsequent turn.
+The block is a *rendering* of stored data, not part of the result.
+
+That means the diff has to reach the TUI by a route other than the result
+string. Today nothing carries it:
+
+```pascal
+TToolResultEvent = procedure(const AId, AName, AResult: string;
+  AOk: Boolean) of object;         // no change payload
+// and on the wire:
+ekToolResult: PutStr(O, 'tool_id', ...); PutStr(O, 'text', ...)
+```
+
+Two options, and the second is the one this spec takes:
+
+| Route | Cost | Problem |
+| --- | --- | --- |
+| Extend `TToolResultEvent` with a changes payload | one signature change, 2 call sites | the payload crosses the NDJSON wire for every call; large for a big diff |
+| **Read the rows in the TUI, keyed by tool id** | a new `ekChanges` event carrying only *ids* | none — the TUI already has a store handle |
+
+So: the runtime emits a small `ekChanges` event at each tool-call boundary
+carrying the **ids** of the rows it just wrote (not their patches), and the TUI
+reads those rows and renders them under the matching block. The patch crosses
+the socket once, inside the reply to that read, instead of riding every event.
+
+**Consequence for the net/patch split:** the per-call rows are what this block
+renders. The net rows are what the turn summary renders. A call whose changes are
+later undone in the same turn still shows its own diff — that is a true statement
+about that call — but the turn summary shows the net. See the tension below.
+
 ### The two gaps
 
 The feature doc names two things the code does not do. Both are visible in the
