@@ -176,6 +176,9 @@ type
     procedure TestSpyEnterShowsChildAndIndicator;
     procedure TestSpyEscapeRestoresTheParent;
     procedure TestSpySuppressesParentEvents;
+    { An approval ask is NOT transcript: dropping it while spying deadlocked the
+      child, because auto-deny stands down whenever a client is attached. }
+    procedure TestSpyStillShowsAnApprovalAsk;
     procedure TestSpyUnknownChildIsAnError;
     procedure TestSpyActionsBarAbortsAndReleases;
     procedure TestThinkingStateDuringATurn;
@@ -2474,6 +2477,48 @@ begin
 
   AssertFalse('the parent event is not drawn',
     FindText(ckAssistant, 'parent noise'));
+end;
+
+procedure THarnessAppTest.TestSpyStillShowsAnApprovalAsk;
+var
+  Store: TSqliteStore;
+  StoreCfg: TStoreConfig;
+  StoreErr: TStoreError;
+  WorkspaceId: Integer;
+  ChildId: string;
+  Ask: TApprovalAsk;
+begin
+  { The bug this guards: while spying, the pump dropped every parent event,
+    approval asks included. An ask is a blocking demand for operator action, not
+    a transcript entry - and the supervisor stops auto-denying whenever a client
+    is attached, so a dropped ask could never be answered by anyone. The child
+    hung forever. }
+  BuildWithStore;
+  StoreCfg := Default(TStoreConfig);
+  StoreCfg.DatabasePath := FStorePath;
+  StoreCfg.BusyTimeoutMs := 5000;
+  Store := TSqliteStore.Create(StoreCfg);
+  try
+    AssertTrue('open store', Store.Open(StoreErr));
+    Store.EnsureWorkspace(FDir, WorkspaceId, StoreErr);
+    Store.CreateChildSession(WorkspaceId, FSession.View.SessionId, 1, 'child',
+      ChildId, StoreErr);
+  finally
+    Store.Free;
+  end;
+
+  FApp.OnSpyFactory := OpenStubSpy;
+  FSpyQueue := TTurnQueue.Create;
+  FApp.ShowSpy(ChildId);
+  FApp.Step;
+  AssertFalse('no modal on entering the spy', FApp.ModalActive);
+
+  Ask := Default(TApprovalAsk);
+  Ask.Summary := 'run_command';
+  FSession.Queue.Push(ApprovalEvent(1, Ask));
+  FApp.Step;
+
+  AssertTrue('an ask still opens its modal while spying', FApp.ModalActive);
 end;
 
 procedure THarnessAppTest.TestSpyUnknownChildIsAnError;
