@@ -193,6 +193,49 @@ begin
     Result := '';
 end;
 
+{ Resolve a command argument to a workspace-RELATIVE path, or '' when it lands
+  outside the root (those get their own outside-path ask).
+
+  ComputeEffects returns paths as WRITTEN, so a relative operand has to be joined
+  against the caller's cwd before it can be compared with the root. }
+function ResolveCommandPath(const ACwd, ARoot, AArg: string): string;
+var
+  Full: string;
+begin
+  Result := '';
+  if AArg = '' then
+    Exit;
+  if AArg[1] = '~' then
+    Exit;                        // home is outside the workspace by definition
+  if AArg[1] = '/' then
+    Full := ExpandFileName(AArg)
+  else if ACwd <> '' then
+    Full := ExpandFileName(IncludeTrailingPathDelimiter(ACwd) + AArg)
+  else if ARoot <> '' then
+    { No cwd given: the tool's configured root IS the working directory. }
+    Full := ExpandFileName(IncludeTrailingPathDelimiter(ARoot) + AArg)
+  else
+    Exit;
+  Result := WorkspaceRelative(ARoot, Full);
+end;
+
+{ True when AToken appears in the effects ComputeEffects named. Used to tell a
+  real operand from a token that merely CONTAINS a slash - an awk or sed program
+  is not a path however many separators it has. }
+function PathNamedByEffects(const AToken: string;
+  const AReads, AWrites: TStringArray): Boolean;
+var
+  I: Integer;
+begin
+  for I := 0 to High(AReads) do
+    if AReads[I] = AToken then
+      Exit(True);
+  for I := 0 to High(AWrites) do
+    if AWrites[I] = AToken then
+      Exit(True);
+  Result := False;
+end;
+
 function DirOfRelative(const ARel: string): string;
 var
   P: Integer;
@@ -234,6 +277,11 @@ var
   ReadPaths, WritePaths: TStringArray;
   FocusSeg: Integer;
   Wd: string;
+  { File-scope state for the command ask, built from ComputeEffects rather than
+    the path planner's heuristic - a regex containing '/' is not a directory. }
+  ScopePaths: TStringArray;
+  ScopeWrite, SameDir, SameExt: Boolean;
+  FirstDir, FirstExt, Resolved: string;
 
   function OneParam(const AValue: string): TApprovalParams;
   begin
@@ -306,6 +354,22 @@ var
     begin
       AAsk.FocusStart := Plan.Segments[ASegIndex].Start;
       AAsk.FocusLen := Plan.Segments[ASegIndex].Len;
+    end;
+  end;
+
+  { Focus on the COMMAND only, excluding its redirect.
+
+    In `echo "Test" > test.log` the read ask is about `echo "Test"`; the redirect
+    belongs to the write ask. Highlighting the whole segment made the read ask
+    swallow `> test.log`, so two asks described overlapping spans and neither read
+    cleanly. }
+  procedure StampCommandFocus(var AAsk: TApprovalAsk; ASegIndex: Integer);
+  begin
+    AAsk.Script := ACommand;
+    if (ASegIndex >= 0) and (ASegIndex <= High(Plan.Segments)) then
+    begin
+      AAsk.FocusStart := Plan.Segments[ASegIndex].Start;
+      AAsk.FocusLen := Plan.Segments[ASegIndex].CmdLen;
     end;
   end;
 
@@ -527,13 +591,82 @@ begin
         Result[High(Result)].Subject.Bucket := abWrite
       else
         Result[High(Result)].Subject.Bucket := abRead;
+
+      { File-scope options for the files this command NAMES.
+
+        ComputeEffects is positional and authoritative: it knows grep's first
+        operand is a pattern and awk's is a program, so a regex containing '/' is
+        not mistaken for a directory. The path planner's IsPathLike heuristic is
+        not used here for exactly that reason.
+
+        Only paths INSIDE the workspace get file scopes; an outside path has its
+        own ask with its own directory rule. }
+      if ARoot <> '' then
+      begin
+        SetLength(ScopePaths, 0);
+        ScopeWrite := False;
+        for J := 0 to High(R2) do
+        begin
+          Resolved := ResolveCommandPath(ACwd, ARoot, R2[J]);
+          if Resolved <> '' then
+          begin
+            SetLength(ScopePaths, Length(ScopePaths) + 1);
+            ScopePaths[High(ScopePaths)] := Resolved;
+          end;
+        end;
+        { A command that both reads and writes gets the WRITE scopes: granting
+          read on a file it also writes would be granting less than the ask. }
+        if Length(W2) > 0 then
+        begin
+          ScopeWrite := True;
+          SetLength(ScopePaths, 0);
+          for J := 0 to High(W2) do
+          begin
+            Resolved := ResolveCommandPath(ACwd, ARoot, W2[J]);
+            if Resolved <> '' then
+            begin
+              SetLength(ScopePaths, Length(ScopePaths) + 1);
+              ScopePaths[High(ScopePaths)] := Resolved;
+            end;
+          end;
+        end;
+        if Length(ScopePaths) > 0 then
+        begin
+          FirstDir := DirOfRelative(ScopePaths[0]);
+          FirstExt := ExtOfRelative(ScopePaths[0]);
+          SameDir := True;
+          SameExt := (FirstExt <> '');
+          for J := 1 to High(ScopePaths) do
+          begin
+            if DirOfRelative(ScopePaths[J]) <> FirstDir then
+              SameDir := False;
+            if ExtOfRelative(ScopePaths[J]) <> FirstExt then
+              SameExt := False;
+          end;
+          { Only scopes that actually generalise: one covering nothing beyond the
+            exact set is a way to grant more than was asked. }
+          if SameExt then
+            AddFileScope(Result[High(Result)], 'ext',
+              'always .' + FirstExt + ' files', '', FirstExt);
+          if SameDir then
+            if FirstDir = '' then
+              AddFileScope(Result[High(Result)], 'dir',
+                'always in the workspace', '', '')
+            else
+              AddFileScope(Result[High(Result)], 'dir',
+                'always in ' + FirstDir + '/', FirstDir, '');
+          if SameDir and SameExt and (FirstExt <> '') then
+            AddFileScope(Result[High(Result)], 'dir_ext',
+              'always .' + FirstExt + ' files in ' + FirstDir + '/', FirstDir,
+              FirstExt);
+        end;
+      end;
     end;
     Result[High(Result)].Subject.Params :=
       Copy(CmdArgs, 0, Length(CmdArgs));
     AddOption(Result[High(Result)], 'once', 'allow once', False, nil, False);
     AddOption(Result[High(Result)], 'exact', 'always this exact command', True,
-      Copy(CmdArgs, 0, Length(CmdArgs)), False);
-    AddOption(Result[High(Result)], 'any',
+      Copy(CmdArgs, 0, Length(CmdArgs)), False);    AddOption(Result[High(Result)], 'any',
       'always ' + Bin + ' with any arguments', True, nil, True);
     if (Length(CmdArgs) > 0) and (CmdArgs[0] <> '') and
       (CmdArgs[0][1] <> '-') then
@@ -560,7 +693,7 @@ begin
           would be a guess. }
         ;
     end;
-    StampFocus(Result[High(Result)], I);
+    StampCommandFocus(Result[High(Result)], I);
   end;
   { A shell redirect is a file effect: here-docs and fd duplications are not
     files and are skipped; an outside target is not a file ask.
@@ -613,6 +746,27 @@ begin
     Access := OutsideAccesses(Plan, ARoot, ACwd);
     for J := 0 to High(Access) do
     begin
+      { A token is only a PATH if the command's own positional grammar says so.
+        IsPathLike is a heuristic (any '/' in the arg), which turned an awk
+        program into a directory. ComputeEffects knows where the operands are,
+        so ask it instead.
+
+        REDIRECT targets are exempt: `> /etc/passwd` names a file however it is
+        spelled, and the redirect IS the evidence. The heuristic only misleads
+        for plain operands. (No braces in this comment: a bare open-brace would
+        close it early.) }
+      if (not Access[J].IsRedirect) and
+         (Access[J].Segment >= 0) and
+         (Access[J].Segment <= High(Plan.Segments)) then
+      begin
+        R2 := nil;
+        W2 := nil;
+        Known2 := False;
+        ComputeEffects(Plan.Segments[Access[J].Segment].Executable,
+          Plan.Segments[Access[J].Segment].Arguments, R2, W2, Known2);
+        if Known2 and (not PathNamedByEffects(Access[J].Token, R2, W2)) then
+          Continue;
+      end;
       PathRef := 'path:';
       SetLength(Result, Length(Result) + 1);
       Result[High(Result)] := Default(TApprovalAsk);

@@ -108,6 +108,12 @@ type
     procedure TestTimeoutIsHonouredWithoutACap;
     procedure TestHtmlEntitiesAreDecoded;
     procedure TestBucketOptionIsOfferedForTheMatchingClass;
+    { A regex containing '/' is not a directory. }
+    procedure TestAwkRegexIsNotTreatedAsAPath;
+    { A command naming a real file must offer file-scope options. }
+    procedure TestACommandNamingFilesOffersFileScopes;
+    { A read ask highlights the COMMAND, not the redirect. }
+    procedure TestTheReadAskExcludesTheRedirect;
     procedure TestRedirectSummaryAndFileAsk;
     procedure TestRedirectReadAsk;
     procedure TestFdDuplicateIsNotAFileAsk;
@@ -1068,6 +1074,82 @@ begin
     AssertTrue('below cap', Tool.Run(
       '{"command":"echo hi","reason":"r","timeout_ms":2000}', R, E));
     AssertEquals('requested kept', 2000, FExecutor.LastTimeoutMs);
+  finally
+    Tool.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestAwkRegexIsNotTreatedAsAPath;
+var
+  Tool: TCommandTool;
+  Asks: TApprovalAskArray;
+  I: Integer;
+begin
+  { Report from live use: an awk program containing '/' was treated as an
+    external DIRECTORY. IsPathLike is a heuristic (any '/' in the arg); compute
+    effects positionally instead, where awk's first operand is the PROGRAM. }
+  Tool := BuildToolWithRoot('/tmp/nowhere');
+  try
+    Asks := Tool.ApprovalAsks(
+      '{"command":"awk ''/foo/{print $1}'' a.txt","reason":"r"}');
+    for I := 0 to High(Asks) do
+      AssertFalse('no outside-path ask for a regex: ' + Asks[I].Summary,
+        Copy(Asks[I].Subject.Ref, 1, 5) = 'path:');
+  finally
+    Tool.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestACommandNamingFilesOffersFileScopes;
+var
+  Tool: TCommandTool;
+  Asks: TApprovalAskArray;
+  I: Integer;
+  HasDir, HasExt: Boolean;
+begin
+  { Report from live use: the command ask offered "exact command" and "awk with
+    any arguments" but no FILE scopes, even though a real file was named. The
+    file-scope options existed only for redirects. }
+  Tool := BuildToolWithRoot('/tmp/nowhere');
+  try
+    Asks := Tool.ApprovalAsks('{"command":"awk ''{print}'' a.txt","reason":"r"}');
+    AssertTrue('an ask exists', Length(Asks) > 0);
+    HasDir := False;
+    HasExt := False;
+    for I := 0 to High(Asks[0].Options) do
+    begin
+      if Asks[0].Options[I].Key = 'dir' then HasDir := True;
+      if Asks[0].Options[I].Key = 'ext' then HasExt := True;
+    end;
+    AssertTrue('a directory scope is offered', HasDir);
+    AssertTrue('and an extension scope', HasExt);
+  finally
+    Tool.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestTheReadAskExcludesTheRedirect;
+var
+  Tool: TCommandTool;
+  Asks: TApprovalAskArray;
+  I: Integer;
+begin
+  { `echo "Test" > test.log` is a read of nothing and a WRITE of test.log. The
+    read ask's highlight must not swallow the redirect - otherwise two asks
+    describe overlapping spans. }
+  Tool := BuildToolWithRoot('/tmp/nowhere');
+  try
+    Asks := Tool.ApprovalAsks(
+      '{"command":"cat a.txt > out.log","reason":"r"}');
+    for I := 0 to High(Asks) do
+      if Asks[I].Subject.Ref = 'run_command:cat' then
+      begin
+        AssertFalse('the command focus excludes the redirect: ' +
+          Copy(Asks[I].Script, Asks[I].FocusStart, Asks[I].FocusLen),
+          Pos('>', Copy(Asks[I].Script, Asks[I].FocusStart,
+            Asks[I].FocusLen)) > 0);
+        Exit;
+      end;
   finally
     Tool.Free;
   end;

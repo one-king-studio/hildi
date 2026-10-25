@@ -49,10 +49,15 @@ type
   TCommandSegment = record
     Text: string;                  // reconstructed segment text
     { The segment's span in the raw command: 1-based bytes, Len 0 when the
-      tokenizer could not place it. Covers the words and redirects, not the
+      tokenizer could not place it. Covers the words AND redirects, not the
       operator that introduced it. }
     Start: Integer;
     Len: Integer;
+    { The span of the WORDS only - the command and its arguments, excluding any
+      redirect. A read ask highlights this, so `echo "Test" > test.log` shows the
+      read as `echo "Test"` and leaves `> test.log` to the write ask. Without it
+      one ask's highlight swallowed the other's subject. }
+    CmdLen: Integer;
     Op: TCommandOp;                // operator that introduced the segment
     Executable: string;            // argv[0] token as written, '' if none
     Arguments: TCommandArgArray;   // argv[1..], quotes removed
@@ -209,7 +214,7 @@ var
   N, I, J, K, M, TokStart, TokCount: Integer;
   C: Char;
   Tokens: TTokenArray;
-  SegStart, SegEnd: Integer;
+  SegStart, SegEnd, CmdEnd: Integer;
 
   procedure Push(const T: TToken);
   begin
@@ -645,6 +650,7 @@ begin
     { Consume words and redirects until the next operator. }
     SegStart := 0;
     SegEnd := 0;
+    CmdEnd := 0;
     while (J <= High(Tokens)) and (Tokens[J].Kind <> tkOp) do
     begin
       if Tokens[J].StartPos > 0 then
@@ -652,6 +658,10 @@ begin
         if SegStart = 0 then
           SegStart := Tokens[J].StartPos;
         SegEnd := Tokens[J].EndPos;
+        { CmdEnd stops before any REDIRECT, so the command span excludes
+          `> test.log` while the segment span includes it. }
+        if Tokens[J].Kind = tkWord then
+          CmdEnd := Tokens[J].EndPos;
       end;
       if Tokens[J].Kind = tkRedirect then
       begin
@@ -741,6 +751,12 @@ begin
     begin
       Result.Segments[K].Start := SegStart;
       Result.Segments[K].Len := SegEnd - SegStart + 1;
+      { The command span stops at the last WORD: `echo "Test"` excludes
+        `> test.log`, so the read ask highlights only what it asks about. }
+      if CmdEnd >= SegStart then
+        Result.Segments[K].CmdLen := CmdEnd - SegStart + 1
+      else
+        Result.Segments[K].CmdLen := Result.Segments[K].Len;
     end;
   end;
 
