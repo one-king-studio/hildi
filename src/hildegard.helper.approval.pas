@@ -166,6 +166,14 @@ function PathInDirectory(const APath, ADirectory: string): Boolean;
 { True when APath's final component ends in '.' + AExtension. '' ext = any. }
 function PathHasExtension(const APath, AExtension: string): Boolean;
 function DefaultApprovalRule(const AEffect: TApprovalEffect): TApprovalRule;
+{ Risk rank of an approval option: LOWER sorts first. The order is a security
+  signal - `once` is the narrowest answer, so it leads; class-wide buckets are
+  the broadest, so they trail. Lives here rather than in one tool so EVERY ask
+  producer gets the same order. }
+function ApprovalOptionRank(const AKey: string): Integer;
+{ Stable-sort an ask's options by risk rank. Callers that build options by hand
+  call this last, so the list never depends on the accident of append order. }
+procedure SortOptionsByRisk(var AAsk: TApprovalAsk);
 function FindOption(const AAsk: TApprovalAsk; const AKey: string;
   out AOption: TApprovalOption): Boolean;
 
@@ -373,6 +381,44 @@ begin
   Result := adAsk;
 end;
 
+function ApprovalOptionRank(const AKey: string): Integer;
+begin
+  { LOWER sorts first. `once` is narrowest; class-wide buckets are broadest. }
+  if AKey = 'once' then Result := 0
+  else if AKey = 'exact' then Result := 10
+  else if AKey = 'prefix' then Result := 20
+  else if AKey = 'any_file' then Result := 30
+  else if AKey = 'ext' then Result := 31
+  else if AKey = 'dir' then Result := 32
+  else if AKey = 'dir_ext' then Result := 33
+  else if AKey = 'any' then Result := 40
+  else if AKey = 'bucket_read' then Result := 50
+  else if AKey = 'bucket_write' then Result := 51
+  else if AKey = 'bucket_rw' then Result := 52
+  else Result := 60;                 // unrecognised sorts last, never first
+end;
+
+procedure SortOptionsByRisk(var AAsk: TApprovalAsk);
+var
+  I, J: Integer;
+  Tmp: TApprovalOption;
+begin
+  { Insertion sort: stable, so equal ranks keep their order. }
+  for I := 1 to High(AAsk.Options) do
+  begin
+    J := I;
+    Tmp := AAsk.Options[I];
+    while (J > 0) and
+      (ApprovalOptionRank(AAsk.Options[J - 1].Key) > ApprovalOptionRank(Tmp.Key))
+    do
+    begin
+      AAsk.Options[J] := AAsk.Options[J - 1];
+      Dec(J);
+    end;
+    AAsk.Options[J] := Tmp;
+  end;
+end;
+
 function DefaultApprovalRule(const AEffect: TApprovalEffect): TApprovalRule;
 begin
   Result := Default(TApprovalRule);
@@ -520,6 +566,7 @@ var
   Choice: TApprovalChoice;
   Option: TApprovalOption;
   Applied: TApprovalRule;
+  Sorted: TApprovalAsk;
 begin
   AResult := Default(TApprovalBatchResult);
   if FStore = nil then
@@ -594,7 +641,13 @@ begin
           AAsks[I].Summary;
         Exit(True);
       end;
-      Choice := FPrompt(AAsks[I]);
+      { Sorted HERE, centrally, so every ask producer gets the same risk order
+        without having to remember. The narrowest grant leads, so a hurried press
+        lands on the tight option - and a producer that appends by accident
+        cannot put a broad grant above a narrow one. }
+      Sorted := AAsks[I];
+      SortOptionsByRisk(Sorted);
+      Choice := FPrompt(Sorted);
       if not Choice.Allowed then
       begin
         AResult.Denied := True;

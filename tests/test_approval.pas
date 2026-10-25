@@ -73,6 +73,9 @@ type
       const ARef: string; const AParams: array of string;
       AAny: Boolean): TApprovalOption;
   published
+    { Risk ordering is enforced CENTRALLY, so every producer gets it. }
+    procedure TestSortOptionsByRiskPutsOnceFirst;
+    procedure TestUnrecognisedOptionSortsLast;
     procedure TestExactRefAndParamsMatch;
     procedure TestExactParamsRejectDifferentArgs;
     procedure TestAnyParamsPrefixMatches;
@@ -283,6 +286,40 @@ begin
   Result.TimedOut := TimedOut;
   Result.OptionKey := OptionKey;
   Result.Scope := Scope;
+end;
+
+procedure TApprovalTest.TestSortOptionsByRiskPutsOnceFirst;
+var
+  A: TApprovalAsk;
+begin
+  { A deliberately mis-ordered ask: the broad grant is first and `once` is last,
+    which is exactly what append-order produced in practice. }
+  A := Default(TApprovalAsk);
+  SetLength(A.Options, 4);
+  A.Options[0].Key := 'bucket_rw';
+  A.Options[1].Key := 'dir';
+  A.Options[2].Key := 'any';
+  A.Options[3].Key := 'once';
+  SortOptionsByRisk(A);
+  AssertEquals('once leads', 'once', A.Options[0].Key);
+  AssertEquals('then the directory scope', 'dir', A.Options[1].Key);
+  AssertEquals('then any-args', 'any', A.Options[2].Key);
+  AssertEquals('the broadest bucket trails', 'bucket_rw', A.Options[3].Key);
+end;
+
+procedure TApprovalTest.TestUnrecognisedOptionSortsLast;
+var
+  A: TApprovalAsk;
+begin
+  { An option whose key we do not know must never jump ahead of `once` - a
+    producer adding a new option should not be able to widen the first slot. }
+  A := Default(TApprovalAsk);
+  SetLength(A.Options, 2);
+  A.Options[0].Key := 'something_new';
+  A.Options[1].Key := 'once';
+  SortOptionsByRisk(A);
+  AssertEquals('once still leads', 'once', A.Options[0].Key);
+  AssertEquals('the unknown trails', 'something_new', A.Options[1].Key);
 end;
 
 procedure TApprovalTest.TestExactRefAndParamsMatch;
