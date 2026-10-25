@@ -233,6 +233,7 @@ var
     them all, and the segment that gets focus. }
   ReadPaths, WritePaths: TStringArray;
   FocusSeg: Integer;
+  Wd: string;
 
   function OneParam(const AValue: string): TApprovalParams;
   begin
@@ -655,6 +656,45 @@ begin
       AddOption(Result[High(Result)], 'any',
         'always allow any path outside the workspace', True, nil, True);
     end;
+  end;
+
+  { Working directory: if the command changes it with cd/pushd, every ask says
+    where the effects actually land. `cd /tmp && touch test.txt` writes somewhere
+    the operator cannot infer from the text, and approving that blind is worse
+    than not approving at all.
+
+    Resolved against ACwd so a relative cd still shows an absolute destination.
+    A cd whose target cannot be resolved is shown verbatim rather than dropped:
+    the operator needs to know the directory CHANGED, even if we cannot say
+    exactly where. }
+  if Length(Result) > 0 then
+  begin
+    Wd := '';
+    for J := 0 to High(Plan.Segments) do
+    begin
+      if not ((Plan.Segments[J].Executable = 'cd') or
+              (Plan.Segments[J].Executable = 'pushd')) then
+        Continue;
+      if Length(Plan.Segments[J].Arguments) = 0 then
+        Continue;
+      if ACwd <> '' then
+      begin
+        { A relative cd resolves against the caller's cwd; an absolute one stands
+          alone. Deliberately simple joining rather than a real resolver: the
+          dialog only has to SHOW the operator where effects land. }
+        if (Plan.Segments[J].Arguments[0] <> '') and
+           (Plan.Segments[J].Arguments[0][1] = '/') then
+          Wd := Plan.Segments[J].Arguments[0]
+        else
+          Wd := IncludeTrailingPathDelimiter(ACwd) +
+            Plan.Segments[J].Arguments[0];
+      end
+      else
+        Wd := Plan.Segments[J].Arguments[0];
+    end;
+    if Wd <> '' then
+      for J := 0 to High(Result) do
+        Result[J].WorkDir := Wd;
   end;
 end;
 

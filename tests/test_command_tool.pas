@@ -1186,6 +1186,13 @@ begin
     for I := 0 to High(Asks) do
       AssertFalse('no file ask for an fd duplication',
         Copy(Asks[I].Subject.Ref, 1, 5) = 'file:');
+    { And a fd duplication on a PURE command is not an effect at all: it names an
+      fd, not a path, so the whole command needs no approval. }
+    AssertEquals('2>&1 on a pure command asks for nothing', 0, Length(Asks));
+    { The same for a write target that IS a path, which must still ask: this pins
+      that 2>&1 is excluded rather than redirects being ignored wholesale. }
+    Asks := Tool.ApprovalAsks('{"command":"echo x 2>&1 > out.txt","reason":"r"}');
+    AssertEquals('the real redirect still asks', 1, Length(Asks));
   finally
     Tool.Free;
   end;

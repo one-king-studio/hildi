@@ -38,6 +38,8 @@ type
     procedure TearDown; override;
   published
     procedure TestRendersSummaryAndOptions;
+    { A command that cd's must show where its effects land. }
+    procedure TestRendersTheWorkingDirectoryWhenChanged;
     procedure TestModalTitlesAndBorders;
     procedure TestModalDefaultWidthIsWide;
     procedure TestModalMouseHoverBrightens;
@@ -149,6 +151,34 @@ end;
 { With the reason line and a one-line details band, the rows are: title 0,
   reason 1, details 2, blank 3, options from 4, blank, scope, separator, footer,
   bottom. Tests use a tall surface so nothing clips. }
+
+procedure TApprovalModalTest.TestRendersTheWorkingDirectoryWhenChanged;
+var
+  Modal: TApprovalModal;
+  Surface: TSurfaceMemory;
+  A: TApprovalAsk;
+  Found: Boolean;
+  Row: Integer;
+begin
+  { `cd /tmp && touch test.txt` writes where the operator cannot infer from the
+    command text. Approving a write without knowing WHERE is approving blind. }
+  A := MakeAsk(2);
+  A.WorkDir := '/tmp';
+  Modal := TApprovalModal.Create(A);
+  Surface := TSurfaceMemory.Create(60, 24);
+  try
+    Modal.Arrange(Rc(60, MeasuredHeight(Modal)));
+    Modal.Render(Surface);
+    Found := False;
+    for Row := 0 to 10 do
+      if Pos('/tmp', Surface.RowText(Row, 0, 60)) > 0 then
+        Found := True;
+    AssertTrue('the working directory is shown', Found);
+  finally
+    Modal.Free;
+    Surface.Free;
+  end;
+end;
 
 procedure TApprovalModalTest.TestRendersSummaryAndOptions;
 var
@@ -429,7 +459,10 @@ begin
     { The whole command, not just the segment. }
     AssertTrue('the script is shown',
       Pos(UnicodeString('echo hi; rm -rf build/'), Row) > 0);
-    AssertTrue('the focus row is marked',
+    { No arrow marks the focus row any more: it shifted the script one column
+      whenever the focus moved, which read as the dialog resizing. The span is
+      bold, which the assertions below verify. }
+    AssertFalse('the focus row carries no arrow',
       Pos(UnicodeString(WideChar($2192)), Row) > 0);
     { Only the focus span is bold: the segment is, the command before it is
       not. (Cells, not string offsets: an erased cell takes no string index.) }

@@ -532,8 +532,8 @@ begin
     R := 1;
   if D < 1 then
     D := 1;
-  { Top border, the reason rows, a blank, the details rows, and one blank. }
-  Result := FBounds.Y + 1 + R + 1 + D + 1;
+  { Top border, [wdir], the reason rows, a blank, the details rows, one blank. }
+  Result := FBounds.Y + 1 + Ord(FAsk.WorkDir <> '') + R + 1 + D + 1;
 end;
 
 function TApprovalModal.HitTest(AX, AY: Integer): Integer;
@@ -566,6 +566,7 @@ function TApprovalModal.Measure(const AAvail: TSize): TSize;
 var
   I, W, OptW, ScopeW, InnerW, MaxW, MaxH, R, D, ReasonW, DetailW: Integer;
   NaturalW: Integer;
+  H0, Over, Band, Take: Integer;
 begin
   Result := Default(TSize);
   ScopeW := StringWidth(UnicodeString('scope: ') +
@@ -619,12 +620,34 @@ begin
     R := 1;
   if D < 1 then
     D := 1;
-  Result.H := R + D + Length(FAsk.Options) + RowsAfterOptions + 3;
   MaxH := AAvail.H - 2 * EdgePad;
   if MaxH < 7 then
     MaxH := AAvail.H;
-  if Result.H > MaxH then
-    Result.H := MaxH;
+
+  { Under height pressure the SCRIPT band shrinks first, never the footer. An
+    operator who cannot see "accept / deny" has a dialog they cannot dismiss, so
+    the actions bar is the last thing to go.
+
+    Done by giving rows back from the script band before clamping, rather than
+    clamping the final height: a clamp cuts whatever is last, and what is last is
+    the footer. }
+  H0 := R + D + Ord(FAsk.WorkDir <> '') + Length(FAsk.Options) +
+    RowsAfterOptions + 3;
+  if (H0 > MaxH) and (FAsk.Script <> '') then
+  begin
+    Over := H0 - MaxH;
+    Band := ScriptBandRows;
+    Take := Over;
+    if Take > Band then
+      Take := Band;
+    Dec(D, Take);            // give the rows back to the script band
+    H0 := H0 - Take;
+  end;
+  { The footer and borders are never surrendered; if it still does not fit, the
+    box is clipped rather than made unusable. }
+  if H0 > MaxH then
+    H0 := MaxH;
+  Result.H := H0;
 end;
 
 procedure TApprovalModal.Render(const S: ISurface);
@@ -633,7 +656,7 @@ var
   D, Col, RowIdx: Integer;
   ReasonW, DetailW: Integer;
   Bg, BorderAttr, MutedAttr, ActiveAttr, NormalAttr, DetailAttr: TAttr;
-  DimAttr, FocusAttr: TAttr;
+  DimAttr, FocusAttr, ReasonAttr, WdAttr: TAttr;
   Key: UnicodeString;
   SRow: TScriptRow;
   ReasonLines, DetailLines: TUnicodeLines;
@@ -669,6 +692,10 @@ begin
   MutedAttr := OnBg(FTheme.Muted, FTheme.RaisedBg);
   ActiveAttr := OnBg(FTheme.AccentSoft, FTheme.RaisedBg);
   NormalAttr := OnBg(FTheme.Text, FTheme.RaisedBg);
+  { The reason is the second thing the eye should land on, so bold; the working
+    directory is a warning-level fact, so it uses the accent colour. }
+  ReasonAttr := OnBg(WithStyle(FTheme.Text, [sfBold]), FTheme.RaisedBg);
+  WdAttr := OnBg(FTheme.AccentSoft, FTheme.RaisedBg);
 
   S.FillRect(FBounds, Bg);
 
@@ -695,8 +722,27 @@ begin
   DetailLines := WrapPlain(CompactLines(UnicodeString(FAsk.Summary),
     DefaultCompactOptions), DetailW);
 
-  { Reason beneath the title: a muted label, the reason text (or a placeholder). }
-  Row := T + 1;
+  { Working directory, ABOVE the options and highlighted: when a command includes
+    cd, the operator must see where the effects land before choosing a scope.
+    `cd /tmp && touch test.txt` writes outside the workspace, and that is the
+    single most important fact about the ask. }
+  if FAsk.WorkDir <> '' then
+  begin
+    Row := T + 1;
+    if Row < B then
+    begin
+      Text(InnerL + 1, Row, 'wdir: ', MutedAttr);
+      Text(InnerL + 7, Row, UnicodeString(FAsk.WorkDir), WdAttr);
+      Inc(Row);          // the reason starts BELOW it, not on top of it
+    end;
+  end
+  else
+    Row := T + 1;
+
+  { Reason beneath the title: a muted label, the reason text bolded, with padding
+    on each side so it reads as a distinct block rather than running into the
+    border. Bold because the reason is why the operator is being asked at all -
+    it should be the second thing the eye lands on, after the title. }
   for I := 0 to High(ReasonLines) do
   begin
     if Row >= B then
@@ -706,7 +752,7 @@ begin
     if FAsk.Reason = '' then
       Text(InnerL + 1 + ReasonLabelW, Row, '—', MutedAttr)
     else
-      Text(InnerL + 1 + ReasonLabelW, Row, ReasonLines[I], NormalAttr);
+      Text(InnerL + 1 + ReasonLabelW, Row, ReasonLines[I], ReasonAttr);
     Inc(Row);
   end;
 
@@ -743,8 +789,9 @@ begin
         if RowIdx > High(FScriptRows) then
           Break;
         S.FillRect(Rc(InnerL, Row, InnerR - InnerL + 1, 1), DetailAttr);
-        if RowIdx = FFocusRow then
-          Text(InnerL + 1, Row, '→', FocusAttr);
+        { No arrow marking the focused row: it shifted the script one column
+          whenever the focus moved, which read as the dialog resizing. The span is
+          already bold, so the eye lands on it unaided. }
         SRow := FScriptRows[RowIdx];
         if SRow.HiLen > 0 then
         begin

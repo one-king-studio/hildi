@@ -92,6 +92,13 @@ type
     { The model's stated reason for the call, shown in the dialog. '' when the
       tool could not read one; the dialog then shows a placeholder. }
     Reason: string;
+    { The effective working directory for this ask, when the command changes it
+      with cd/pushd. '' means "unchanged" and the dialog shows nothing.
+
+      Shown because `cd /tmp && touch test.txt` writes somewhere the operator
+      cannot infer from the command text alone, and approving a write without
+      knowing WHERE is approving blind. }
+    WorkDir: string;
     Subject: TApprovalSubject;
     Options: TApprovalOptionArray;
     { A subject this ask is REDUNDANT with when it is already allowed by an
