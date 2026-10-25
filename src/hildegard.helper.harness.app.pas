@@ -374,7 +374,7 @@ const
   { The interaction hints live in the CTA strip, which acts as a context
     toolbar; the status bar is reserved for the workspace and the metrics. }
   { The toolbar hints, right-aligned above the composer. }
-  CtaHints = 'shift+enter newline · ctrl+b subagents';
+  CtaHints = 'shift+enter newline · ctrl+d subagents';
   { How long the first Escape stays armed before the interrupt prompt expires. }
   InterruptWindowMs = 2000;
   { The first frame loads at most this many messages of the active window (the
@@ -483,7 +483,11 @@ function TAppShell.HandleEvent(const E: TInputEvent): Boolean;
 begin
   if (E.Kind = ikKey) and (E.Key.Kind = kkChar) and (moCtrl in E.Key.Mods) then
   begin
-    if (E.Key.Ch = 'b') or (E.Key.Ch = 'B') then
+    { Ctrl+D toggles the subagent sidebar, NOT Ctrl+B: an integrated terminal
+      (VSCode's) claims Ctrl+B for its own sidebar and never passes it to the
+      pty, so the shortcut was unreachable in the editor most operators use.
+      Ctrl+D reaches us as a raw byte; it only means EOF to a shell. }
+    if (E.Key.Ch = 'd') or (E.Key.Ch = 'D') then
     begin
       if Assigned(FOnToggleSidebar) then
         FOnToggleSidebar(Self);
@@ -501,12 +505,9 @@ begin
         FOnQuit(Self);
       Exit(True);
     end;
-    if (E.Key.Ch = 'd') or (E.Key.Ch = 'D') then
-    begin
-      if Assigned(FOnQuit) then
-        FOnQuit(Self);
-      Exit(True);
-    end;
+    { Ctrl+D is no longer a quit key: it now toggles the subagent sidebar. Quit
+      stays on Ctrl-C, which is context-aware and standard. Two quit bindings
+      for one action was part of how the sidebar became unreachable. }
   end;
   if (E.Kind = ikKey) and (E.Key.Kind = kkEscape) then
   begin

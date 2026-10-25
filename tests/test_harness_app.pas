@@ -171,7 +171,7 @@ type
     procedure TestCtaHintsAreBlank;
     procedure TestCoarseScrollTargetMapsSegments;
     procedure TestShouldTrimHistory;
-    procedure TestSidebarTogglesWithCtrlB;
+    procedure TestSidebarTogglesWithCtrlD;
     procedure TestSidebarRendersItsRows;
     procedure TestSpyEnterShowsChildAndIndicator;
     procedure TestSpyEscapeRestoresTheParent;
@@ -1821,7 +1821,7 @@ procedure THarnessAppTest.TestCtaHintsAreBlank;
 begin
   Build;
   { The toolbar carries the subagent toggle hint. }
-  AssertEquals('hints', 'shift+enter newline · ctrl+b subagents',
+  AssertEquals('hints', 'shift+enter newline · ctrl+d subagents',
     FApp.HintsText);
   AssertFalse('hints are not in the status bar',
     Pos('newline', FApp.StatusText) > 0);
@@ -2321,14 +2321,14 @@ begin
   AssertTrue('the refusal is shown', FindText(ckError, 'cannot switch sessions'));
 end;
 
-procedure THarnessAppTest.TestSidebarTogglesWithCtrlB;
+procedure THarnessAppTest.TestSidebarTogglesWithCtrlD;
 begin
   Build;
   AssertFalse('hidden by default', FApp.SidebarVisible);
-  FInput.Push(Ctrl('b'));
+  FInput.Push(Ctrl('d'));
   Pump(4);
-  AssertTrue('shown after ctrl+b', FApp.SidebarVisible);
-  FInput.Push(Ctrl('b'));
+  AssertTrue('shown after ctrl+d', FApp.SidebarVisible);
+  FInput.Push(Ctrl('d'));
   Pump(4);
   AssertFalse('hidden again', FApp.SidebarVisible);
 end;
@@ -2339,12 +2339,12 @@ var
   Found: Boolean;
 begin
   { The regression this guards: the sidebar was created and toggled but never
-    drawn. With a roster entry, Ctrl+B must put the child's label on the
+    drawn. With a roster entry, Ctrl+D must put the child's label on the
     surface. }
   Build;
   FSession.Queue.Push(SubagentEvent('child-1', 'scan the tree', 'running'));
   FApp.Step;   { the roster entry is applied }
-  FInput.Push(Ctrl('b'));
+  FInput.Push(Ctrl('d'));
   FApp.Step;
   FApp.Step;
 
