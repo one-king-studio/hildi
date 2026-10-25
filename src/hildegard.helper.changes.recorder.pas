@@ -43,6 +43,10 @@ type
     FRecords: Integer;
     FFolds: array of TFoldEntry;
     FNetRecords: Integer;
+    { The ids appended by the most recent Observe call - one tool call's rows.
+      Anchoring happens after the tool-result row exists, so the recorder has to
+      remember which rows are waiting for an id. }
+    FLastIds: array of Integer;
     function IndexOfFold(const APath: string): Integer;
     procedure FoldInto(const C: TFileChange);
   public
@@ -66,6 +70,12 @@ type
       net change is "nothing", which is the correct answer and the one a pile of
       per-call patches cannot give. }
     procedure FlushTurn;
+    { Anchor the rows written by the most recent Observe call to the tool-result
+      message that caused them. The row is written while the tool runs, but the
+      message does not exist until the call finishes, so the id arrives here.
+      Returns how many rows were anchored; a row already pruned is skipped
+      silently, because that race is not worth failing a turn over. }
+    function AnchorLast(AMessageId: Integer): Integer;
     property RecordsWritten: Integer read FRecords;
     property NetRecordsWritten: Integer read FNetRecords;
     property TurnsSeen: Integer read FTurns;
@@ -211,6 +221,9 @@ var
 begin
   if (FStore = nil) or (AChanges = nil) then
     Exit;
+  { This call's rows replace the previous call's: AnchorLast works on the most
+    recent Observe. }
+  FLastIds := nil;
   Inc(FTurns);
   for I := 0 to AChanges.Count - 1 do
   begin
@@ -271,7 +284,24 @@ begin
     if not FStore.Append(R, Id, Err) then
       Continue;   // a failed append must not fail the tool call
     Inc(FRecords);
+    { Remembered so the tool-result id can anchor it once that row exists. }
+    SetLength(FLastIds, Length(FLastIds) + 1);
+    FLastIds[High(FLastIds)] := Id;
   end;
+end;
+
+function TChangeRecorder.AnchorLast(AMessageId: Integer): Integer;
+var
+  I: Integer;
+  Err: string;
+begin
+  Result := 0;
+  if FStore = nil then
+    Exit;
+  for I := 0 to High(FLastIds) do
+    if FStore.SetMessageId(FWorkspaceId, FLastIds[I], AMessageId, Err) then
+      Inc(Result);
+  FLastIds := nil;
 end;
 
 end.
