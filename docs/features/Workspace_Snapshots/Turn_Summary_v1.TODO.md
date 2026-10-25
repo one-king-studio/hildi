@@ -24,17 +24,17 @@ Work TDD-first: each phase adds its tests before its implementation and runs
 The summary must show **net** change per path, not a pile of per-call patches.
 That is a capture-side change, and it comes before the summary model.
 
-- [ ] **Test**: two edits to one path in a turn yield **one** net row whose patch
+- [x] **Test**: two edits to one path in a turn yield **one** net row whose patch
       is `diff(first before, last after)`.
-- [ ] **Test**: two edits that cancel out yield a net row with an **empty** patch
+- [x] **Test**: two edits that cancel out yield a net row with an **empty** patch
       (the file is unchanged), and the summary reports it as unchanged.
-- [ ] **Test**: a create then a delete in one turn yields no net change for the
+- [x] **Test**: a create then a delete in one turn yields no net change for the
       path.
-- [ ] **Test**: per-call rows are still written as they happen (the tool-block
+- [x] **Test**: per-call rows are still written as they happen (the tool-block
       diff needs them), and are distinguishable from net rows.
-- [ ] **Migration**: `is_net INTEGER NOT NULL DEFAULT 0` on `file_changes`;
+- [x] **Migration**: `is_net INTEGER NOT NULL DEFAULT 0` on `file_changes`;
       `ForTurn` filters by it.
-- [ ] **Implement** the per-turn fold in `TChangeRecorder`: hold first-before and
+- [x] **Implement** the per-turn fold in `TChangeRecorder`: hold first-before and
       last-after per path, flush one net row per path at the turn boundary.
 - [ ] **Test**: the fold is bounded — a turn touching 200 paths holds 200 entries,
       not 200 file bodies retained for the session.
