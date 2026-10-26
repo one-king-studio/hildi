@@ -28,6 +28,7 @@ uses
   hildegard.helper.replymeta,
   tui.widgets.sessionsmodal,
   tui.widgets.diffviewer,
+  tui.widgets.historymodal,
   tui.widgets.actions,
   hildegard.helper.harness.subagent, hildegard.helper.harness.subagent.spy,
   tui.widgets.sidebar, tui.widgets.list,
@@ -94,6 +95,11 @@ type
     { The diff viewer pane (nil when closed). One file's stored diff, opened by
       clicking a file row in a turn-summary block. }
     FDiffViewer: TDiffViewer;
+    { The shared history dialog (/undo, /redo, /revert): the same list, three
+      actions. nil when closed. }
+    FHistoryModal: THistoryModal;
+    FHistoryShown: Boolean;
+    FHistoryIntent: THistoryIntent;
     FDiffShown: Boolean;
     { A deferred close, for the same reason as FCloseSessions: the pane's Escape
       is dispatched from inside the pane, so the plane pop waits for the next
@@ -219,6 +225,12 @@ type
     procedure SyncDiff;
     { The diff viewer: open one file's stored diff, and close it. }
     procedure ShowDiff(ATurnId: Int64; const APath: string);
+    { The shared history dialog: open it for an intent, resolve a choice, close. }
+    procedure ShowHistory(AIntent: THistoryIntent);
+    procedure RefreshHistory;
+    procedure CloseHistory;
+    procedure OnHistoryChoose(const ATurnId: Int64);
+    procedure SyncHistory;
     procedure CloseDiff;
     procedure DiffClosed(Sender: TObject);
     { Subagents: feed the roster, toggle/show the sidebar, spy on a child. }
@@ -976,43 +988,31 @@ begin
   end;
   if (AName = 'undo') and (FDriver <> nil) then
   begin
-    { The runtime owns the workspace, so this only asks. The reply arrives as an
-      event - a fault shows up as an error block with the refusal reason, never
-      as a silent no-op. 0 means the newest completed turn. }
-    FDriver.Undo(0);
-    FApp.Invalidate;
+    { The spec's shared dialog: /undo opens the "go back to here" list, and
+      selecting a turn undoes the suffix back to and including it. Bare undo with
+      no dialog is still what the newest-turn case does, but choosing is the
+      point of the dialog, so every undo goes through it now. }
+    ShowHistory(hiUndo);
     Exit;
   end;
   if (AName = 'redo') and (FDriver <> nil) then
   begin
-    { The mechanical inverse of /undo: re-apply the suffix the undo took away,
-      oldest first. Available only while the undo still stands on screen - a new
-      prompt makes "forward" ambiguous, because the operator abandoned that
-      future. The runtime refuses when nothing is undone, so this stays a plain
-      ask. 0 means the oldest undone turn. }
-    FDriver.Redo(0);
-    FApp.Invalidate;
+    { The same list, the other direction: only the turns an undo took away are
+      selectable. 0 means the oldest redoable turn, which the runtime resolves
+      through the redo floor so abandoned work cannot come back. }
+    ShowHistory(hiRedo);
     Exit;
   end;
   if (AName = 'revert') and (FDriver <> nil) then
   begin
-    { AGENTIC revert: unlike /undo this moves FORWARDS. The agent is asked to
-      undo an earlier turn's effect as NEW work - the git-revert model, not
-      git-reset - so the reverted turn stays in the ledger and the record shows
-      both what was done and that it was later undone.
-
-      The instruction is client-side on purpose: the runtime needs nothing but a
-      prompt, and the client may not link harness.session. }
-    FDriver.QueuePrompt(
-      'Revert the file changes made in the most recent completed turn, by moving ' +
-      'FORWARDS: make a new change that undoes their effect. Do not rewrite ' +
-      'history or delete anything from the transcript. Read what that turn ' +
-      'changed first, then undo its EFFECT in the current state of the files, ' +
-      'which may have moved on since - the goal is that the work is no longer in ' +
-      'effect, not a byte-exact restore. Use your normal tools so the change is ' +
-      'recorded like any other. If some of it cannot be undone coherently, undo ' +
-      'what you can and say plainly what you left and why.');
-    FApp.Invalidate;
+    { AGENTIC revert, and the SAME dialog as undo: the operator picks a turn,
+      but here nothing is rewound. Selecting a turn injects a prompt asking the
+      agent to undo that turn's EFFECT going forwards - the git-revert model -
+      so the reverted turn stays in the ledger and the record shows both what was
+      done and that it was later undone. The instruction is client-side on
+      purpose: the runtime needs only a prompt, and the client may not link
+      harness.session. }
+    ShowHistory(hiRevert);
     Exit;
   end;
   if (AName = 'checkpoint') and (FDriver <> nil) then
@@ -2273,6 +2273,144 @@ begin
   SetState(psReady, 'ready');
 end;
 
+procedure THarnessApp.ShowHistory(AIntent: THistoryIntent);
+var
+  Wrap: TContainer;
+  R: TRect;
+begin
+  if FSession = nil then
+  begin
+    AppendError('no session; history needs one');
+    Exit;
+  end;
+  FHistoryIntent := AIntent;
+  FHistoryModal := THistoryModal.Create(FTheme);
+  FHistoryModal.Intent := AIntent;
+  FHistoryModal.OnChoose := OnHistoryChoose;
+  RefreshHistory;
+  Wrap := TContainer.Create([Fill(1), Auto, Fill(1)], [Fill(1), Auto, Fill(1)]);
+  Wrap.Add(FHistoryModal, 1, 1);
+  R := Default(TRect);
+  R.W := FSurface.Width;
+  R.H := FSurface.Height;
+  Wrap.Arrange(R);
+  FApp.PushPlane(TPlane.Create(Wrap, True, True));
+  FHistoryShown := True;
+  SetState(psReady, 'history');
+end;
+
+procedure THarnessApp.RefreshHistory;
+var
+  Turns: TTurnRecordArray;
+  Changes: IChangeStore;
+  Rows: TChangeRecordArray;
+  Summary: TTurnChangeSummary;
+  Resolved: THistoryRowArray;
+  Err: string;
+  I, N: Integer;
+  Floor: Int64;
+  StoreErr: TStoreError;
+  R: THistoryRow;
+begin
+  if (FHistoryModal = nil) or (FSession = nil) or (FSession.Store = nil) then
+    Exit;
+  Turns := FSession.Turns;
+  Changes := TSqliteChangeStore.Create(FSession.Store);
+  { The redo floor decides which turns a REDO may act on. Reading it here rather
+    than in the widget keeps the dialog free of the store entirely, and keeps the
+    one rule that matters in one place: an abandoned turn is not redoable. }
+  Floor := 0;
+  FSession.Store.RedoFloor(FSession.SessionId, Floor, StoreErr);
+
+  Resolved := nil;
+  N := 0;
+  { Newest first: the operator's most likely target is the most recent turn. }
+  for I := High(Turns) downto 0 do
+  begin
+    R := Default(THistoryRow);
+    R.TurnId := Turns[I].Id;
+    R.Seq := Turns[I].Seq;
+    R.Title := Turns[I].Prompt;
+    if R.Title = '' then
+      R.Title := '(no prompt recorded)';
+    R.Undone := (Turns[I].Status = tsUndone);
+
+    { The stats come from the turn's NET rows, the same source the summary block
+      reads, so the dialog and the transcript never disagree. }
+    R.Files := 0;
+    if Changes.ForTurn(FSession.WorkspaceId, Integer(Turns[I].Id), Rows, Err) then
+    begin
+      Summary := SummarizeTurn(Rows);
+      R.Files := Length(Summary.Files);
+      R.Added := Summary.TotalAdded;
+      R.Removed := Summary.TotalRemoved;
+      R.CountsKnown := Summary.UnknownCount = 0;
+    end;
+
+    { Selectability is the host's call, because it depends on the intent. }
+    case FHistoryIntent of
+      hiUndo:
+        { A suffix undo needs a completed turn; an undone one is already back. }
+        R.Selectable := Turns[I].Status = tsCompleted;
+      hiRedo:
+        { Only what an undo took away, and only above the floor: a prompt
+          abandons the turns above it. }
+        R.Selectable := (Turns[I].Status = tsUndone) and (Turns[I].Id > Floor);
+    else
+      { Revert is agentic and moves forward, so any completed turn is fair game -
+        including one already undone, which the agent would find already done. }
+      R.Selectable := Turns[I].Status = tsCompleted;
+    end;
+
+    SetLength(Resolved, N + 1);
+    Resolved[N] := R;
+    Inc(N);
+  end;
+  FHistoryModal.SetRows(Resolved);
+end;
+
+procedure THarnessApp.CloseHistory;
+begin
+  if not FHistoryShown then
+    Exit;
+  if FApp.ModalActive then
+    FApp.PopPlane;
+  FHistoryModal := nil;
+  FHistoryShown := False;
+  SetState(psReady, 'ready');
+end;
+
+procedure THarnessApp.OnHistoryChoose(const ATurnId: Int64);
+var
+  Intent: THistoryIntent;
+begin
+  { The dialog rendered and reported a choice; the ACTION is entirely the
+    host's, which is what lets one list serve three commands. }
+  Intent := FHistoryIntent;
+  CloseHistory;
+  if FDriver = nil then
+    Exit;
+  case Intent of
+    hiUndo:
+      FDriver.Undo(ATurnId);
+    hiRedo:
+      FDriver.Redo(ATurnId);
+  else
+    { Agentic: nothing is rewound. The agent is asked to undo that turn's effect
+      as new work, naming the turn so it reads the right one. }
+    FDriver.QueuePrompt(Format(
+      'Revert the file changes made in turn %d, by moving FORWARDS: make a new ' +
+      'change that undoes their effect. Do not rewrite history or delete ' +
+      'anything from the transcript. Read what that turn changed first, then undo ' +
+      'its EFFECT in the current state of the files, which may have moved on ' +
+      'since - the goal is that the work is no longer in effect, not a ' +
+      'byte-exact restore. Use your normal tools so the change is recorded like ' +
+      'any other. If some of it cannot be undone coherently, undo what you can ' +
+      'and say plainly what you left and why.', [ATurnId]));
+  end;
+  FApp.Invalidate;
+end;
+
 procedure THarnessApp.DiffClosed(Sender: TObject);
 begin
   { Escape inside the pane. Deferred like the sessions modal's close: the modal's
@@ -2317,6 +2455,20 @@ begin
   begin
     FDiffViewer := nil;
     FDiffShown := False;
+    SetState(psReady, 'ready');
+  end;
+end;
+
+procedure THarnessApp.SyncHistory;
+begin
+  { The dialog has no deferred close of its own - its Enter is dispatched from
+    inside the widget, so OnHistoryChoose closes through this same drain rather
+    than popping the plane mid-dispatch. An unhandled Escape pops the plane in
+    TTuiApp without telling the app, so clear the dangling widget here. }
+  if FHistoryShown and (not FApp.ModalActive) then
+  begin
+    FHistoryModal := nil;
+    FHistoryShown := False;
     SetState(psReady, 'ready');
   end;
 end;
@@ -2651,6 +2803,7 @@ begin
   CloseModal;
   SyncSessionsModal;
   SyncDiff;
+  SyncHistory;
   CheckInterruptWindow;
   DrainQueue;
   FlushToolOutput;
