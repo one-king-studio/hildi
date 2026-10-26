@@ -203,10 +203,27 @@ begin
 end;
 
 function TSidebar.Measure(const AAvail: TSize): TSize;
+var
+  Entries: TSubagentEntryArray;
+  I, W: Integer;
 begin
-  { The list owns the composer's box now, so it has no intrinsic size of its
-    own - it takes what the layout gives it. }
-  Result := AAvail;
+  { The list reports its INTRINSIC size - one row per child, as wide as the
+    widest row - even though the host stretches it to the composer's box. A
+    widget whose Measure simply returns AAvail can never be smaller than what it
+    is given, which makes the method meaningless and hides a wrong layout. }
+  Result := Default(TSize);
+  if FRoster = nil then
+    Exit;
+  Entries := FRoster.Entries;
+  Result.H := Length(Entries);
+  for I := 0 to High(Entries) do
+  begin
+    W := StringWidth(RowText(Entries[I], MaxInt));
+    if W > Result.W then
+      Result.W := W;
+  end;
+  if Result.W > AAvail.W then
+    Result.W := AAvail.W;
 end;
 
 procedure TSidebar.Render(const S: ISurface);

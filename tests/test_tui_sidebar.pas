@@ -125,10 +125,18 @@ begin
   FRoster.Apply('a', 'alpha', 'running', 1000);
   FRoster.Apply('b', 'beta', 'running', 1000);
   FSb.Refresh;
+  { Navigation LOADS the session, per the operator: "when the user navigates on
+    the list, the selected session is loaded into the chat stream". So Down fires
+    OnSelect, and Enter fires it again for the row already selected. This test
+    used to expect exactly one selection, which pinned the older contract where
+    only Enter loaded - that made the list a picker you had to operate twice. }
   FSb.HandleEvent(Key(kkDown));
+  AssertEquals('navigating loads the session', 1, FRec.Ids.Count);
+  AssertEquals('loaded b', 'b', FRec.Ids[0]);
+
   AssertTrue('enter handled', FSb.HandleEvent(Key(kkEnter)));
-  AssertEquals('one selection', 1, FRec.Ids.Count);
-  AssertEquals('selected b', 'b', FRec.Ids[0]);
+  AssertEquals('enter re-selects the same row', 2, FRec.Ids.Count);
+  AssertEquals('still b', 'b', FRec.Ids[1]);
 end;
 
 procedure TSidebarTest.TestSidebarEmptyState;
