@@ -19,7 +19,9 @@ type
     FToggles: Integer;
     FNeedOlder: Integer;
     FScrolled: Integer;
+    FClickedPath: string;
     procedure OnToggle(Sender: TObject);
+    procedure NoteFile(Sender: TObject; const APath: string);
     procedure NoteNeedOlder(Sender: TObject);
     procedure NoteScrolled(Sender: TObject);
     function Rc(AX, AY, AW, AH: Integer): TRect;
@@ -53,6 +55,9 @@ type
     { A click outside the file rows, and on a block with no file paths, resolves
       to '' instead of crashing or inventing a path. }
     procedure TestARowOutsideTheFilesSelectsNothing;
+    { The whole chain: a click on a file row reaches the host with that file's
+      path, so the app can open its diff. }
+    procedure TestClickingAFileRowRaisesThePath;
     procedure TestCollapsedToolDrawsAThinFullContrastRule;
     procedure TestAmbientBlockRenders;
     procedure TestAmbientRendersMarkdownInABox;
@@ -108,6 +113,11 @@ end;
 procedure TTuiChatTest.OnToggle(Sender: TObject);
 begin
   Inc(FToggles);
+end;
+
+procedure TTuiChatTest.NoteFile(Sender: TObject; const APath: string);
+begin
+  FClickedPath := APath;
 end;
 
 procedure TTuiChatTest.NoteNeedOlder(Sender: TObject);
@@ -514,6 +524,47 @@ begin
     AssertEquals('a block with no paths', '', It.FilePathAtRow(1));
   finally
     It.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestClickingAFileRowRaisesThePath;
+var
+  Stack: TChatStack;
+  S: TSurfaceMemory;
+  Item: TChatItem;
+begin
+  { The whole chain, not just the block's arithmetic: the stack must attach the
+    handler to blocks it creates, the block must resolve the row, and the host
+    must receive the path. Testing FilePathAtRow alone would pass even if nothing
+    were wired to it - which is exactly how the pane sat unopenable. }
+  AnimationClock.Reset;
+  S := TSurfaceMemory.Create(40, 12);
+  Stack := TChatStack.Create(FTheme);
+  try
+    FClickedPath := '';
+    Stack.OnFile := NoteFile;
+    Item := Stack.Add(ckTurnChanges, 'turn changes',
+      'M a.txt  +1 -0'#10'M b.txt  +2 -1');
+    Item.SetFilePaths(['a.txt', 'b.txt']);
+    Item.Materialize;
+    Item.Measure(Avail(40, 12));
+    Item.Arrange(Rc(0, 0, 40, 12));
+
+    { Row 1 is the first file (a boxed block's body starts below the frame). }
+    AssertTrue('the click is consumed', Item.HandleEvent(MouseEvent(2, 1)));
+    AssertEquals('the host got the file the row names', 'a.txt', FClickedPath);
+
+    FClickedPath := '';
+    AssertTrue('second row', Item.HandleEvent(MouseEvent(2, 2)));
+    AssertEquals('and the second file', 'b.txt', FClickedPath);
+
+    { A click on the frame is NOT a file: the host must not be told one. }
+    FClickedPath := '';
+    Item.HandleEvent(MouseEvent(2, 0));
+    AssertEquals('no path for a non-file row', '', FClickedPath);
+  finally
+    Stack.Free;
+    S.Free;
   end;
 end;
 

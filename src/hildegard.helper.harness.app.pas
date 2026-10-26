@@ -27,6 +27,7 @@ uses
   hildegard.helper.harness.stats, hildegard.helper.session,
   hildegard.helper.replymeta,
   tui.widgets.sessionsmodal,
+  tui.widgets.diffviewer,
   tui.widgets.actions,
   hildegard.helper.harness.subagent, hildegard.helper.harness.subagent.spy,
   tui.widgets.sidebar, tui.widgets.list,
@@ -90,6 +91,14 @@ type
     { The /sessions modal (nil when closed) and its wrap. }
     FSessionsModal: TSessionsModal;
     FSessionsShown: Boolean;
+    { The diff viewer pane (nil when closed). One file's stored diff, opened by
+      clicking a file row in a turn-summary block. }
+    FDiffViewer: TDiffViewer;
+    FDiffShown: Boolean;
+    { A deferred close, for the same reason as FCloseSessions: the pane's Escape
+      is dispatched from inside the pane, so the plane pop waits for the next
+      Step rather than freeing the widget mid-call. }
+    FCloseDiff: Boolean;
     { True once the operator has dismissed the command palette with Escape. It
       stays down until the composer no longer holds a lone '/token', because
       ComposeChanged reopens the palette on every keystroke - without this a
@@ -205,6 +214,13 @@ type
       and clear FSessionsModal when the plane is gone (an unhandled Escape pops
       it in TTuiApp). Called each Step/OnLoop, like CloseModal. }
     procedure SyncSessionsModal;
+    { Reconcile the diff pane with the plane, like SyncSessionsModal: pop a
+      requested close, and clear a dangling pane after an unhandled Escape. }
+    procedure SyncDiff;
+    { The diff viewer: open one file's stored diff, and close it. }
+    procedure ShowDiff(const APath: string);
+    procedure CloseDiff;
+    procedure DiffClosed(Sender: TObject);
     { Subagents: feed the roster, toggle/show the sidebar, spy on a child. }
     procedure HandleSubagentEvent(const E: TTurnEvent);
     { Show a queued prompt (a violet 'Queued' box) at the end of the stream. }
@@ -304,6 +320,8 @@ type
     function PageScrub(const E: TInputEvent): Boolean;
     { The view scrolled: recompute which page the viewport is on. }
     procedure StreamScrolled(Sender: TObject);
+    { A file row in a turn-summary block was clicked: open its diff. }
+    procedure StreamFileClicked(Sender: TObject; const APath: string);
     { The continuation page: one more than the session's checkpoint count. }
     function PageNumber: Integer;
     { The compose changed: show/hide and filter the command palette. }
@@ -843,6 +861,7 @@ begin
     Title := 'Hildegard';
   FPanel := TChatPanel.Create(FTheme, Title, ComposerHints(FRoster.Count > 0));
   FPanel.Stream.OnToggle := Invalidate;
+  FPanel.Stream.OnFile := StreamFileClicked;
   FPanel.Stream.OnChange := Invalidate;
   FPanel.Stream.OnNeedOlder := NeedOlderHistory;
   FPanel.Stream.OnScroll := StreamScrolled;
@@ -2136,6 +2155,131 @@ begin
   SetState(psReady, 'ready');
 end;
 
+procedure THarnessApp.ShowDiff(const APath: string);
+var
+  Changes: IChangeStore;
+  Rows: TChangeRecordArray;
+  Row: TChangeRecord;
+  V: TDiffView;
+  Kind: TDiffLineKind;
+  Lines: TDiffPaneLineArray;
+  Wrap: TContainer;
+  R: TRect;
+  Err, Line: string;
+  I, N: Integer;
+  Found: Boolean;
+begin
+  { One file's diff, from the LAST turn's recorded rows. The path arrived from a
+    click on a specific summary block, but the block does not carry its turn id
+    through the event, so this searches the newest turn's net rows for the path.
+    A path that is not found is reported rather than shown empty: "no diff" and
+    "no such row" are different answers. }
+  if (FSession = nil) or (FSession.Store = nil) then
+  begin
+    AppendError('no store; cannot show a diff');
+    Exit;
+  end;
+  if FSession.LastTurn.Id = 0 then
+  begin
+    AppendError('no turn to read a diff from');
+    Exit;
+  end;
+  Changes := TSqliteChangeStore.Create(FSession.Store);
+  if not Changes.ForTurn(FSession.WorkspaceId,
+    Integer(FSession.LastTurn.Id), Rows, Err) then
+  begin
+    AppendError('could not read the change log: ' + Err);
+    Exit;
+  end;
+
+  Found := False;
+  Row := Default(TChangeRecord);
+  for I := 0 to High(Rows) do
+    if Rows[I].IsNet and (Rows[I].Path = APath) then
+    begin
+      Row := Rows[I];
+      Found := True;
+      Break;
+    end;
+  if not Found then
+  begin
+    AppendError('no recorded change for ' + APath + ' in the last turn');
+    Exit;
+  end;
+
+  V := TDiffView.FromRecord(Row);
+  try
+    Lines := nil;
+    if V.NotCaptured then
+    begin
+      SetLength(Lines, 1);
+      Lines[0].Kind := dpContext;
+      Lines[0].Text := 'not captured: this change stored no before-text';
+      Lines[0].Caveat := True;
+    end
+    else
+    begin
+      if V.Capped then
+      begin
+        SetLength(Lines, 1);
+        Lines[0].Kind := dpContext;
+        Lines[0].Text := 'capped: this diff is a prefix of a larger change';
+        Lines[0].Caveat := True;
+      end;
+      N := Length(Lines);
+      SetLength(Lines, N + V.LineCount);
+      for I := 0 to V.LineCount - 1 do
+        if V.Line(I, Kind, Line) then
+        begin
+          case Kind of
+            dkAdded: Lines[N + I].Kind := dpAdded;
+            dkRemoved: Lines[N + I].Kind := dpRemoved;
+            dkHunk: Lines[N + I].Kind := dpHunk;
+            dkFile: Lines[N + I].Kind := dpFile;
+          else
+            Lines[N + I].Kind := dpContext;
+          end;
+          Lines[N + I].Text := Line;
+          Lines[N + I].Caveat := False;
+        end;
+    end;
+  finally
+    V.Free;
+  end;
+
+  FDiffViewer := TDiffViewer.Create(FTheme);
+  FDiffViewer.OnClose := DiffClosed;
+  FDiffViewer.Show(APath, Lines);
+  Wrap := TContainer.Create([Fill(1), Auto, Fill(1)], [Fill(1), Auto, Fill(1)]);
+  Wrap.Add(FDiffViewer, 1, 1);
+  R := Default(TRect);
+  R.W := FSurface.Width;
+  R.H := FSurface.Height;
+  Wrap.Arrange(R);
+  FApp.PushPlane(TPlane.Create(Wrap, True, True));
+  FDiffShown := True;
+  SetState(psReady, 'diff: ' + APath);
+end;
+
+procedure THarnessApp.CloseDiff;
+begin
+  if not FDiffShown then
+    Exit;
+  if FApp.ModalActive then
+    FApp.PopPlane;
+  FDiffViewer := nil;
+  FDiffShown := False;
+  SetState(psReady, 'ready');
+end;
+
+procedure THarnessApp.DiffClosed(Sender: TObject);
+begin
+  { Escape inside the pane. Deferred like the sessions modal's close: the modal's
+    own handler is dispatching here, so popping the plane now would free the
+    widget mid-call. }
+  FCloseDiff := True;
+end;
+
 procedure THarnessApp.SyncSessionsModal;
 begin
   if FCloseSessions then
@@ -2152,6 +2296,26 @@ begin
   begin
     FSessionsModal := nil;
     FSessionsShown := False;
+    SetState(psReady, 'ready');
+  end;
+end;
+
+procedure THarnessApp.SyncDiff;
+begin
+  if FCloseDiff then
+  begin
+    { Escape inside the pane: the pane's own handler is dispatching, so the pop
+      waits until here. Same discipline as the sessions modal's deferred close. }
+    FCloseDiff := False;
+    CloseDiff;
+    Exit;
+  end;
+  { An unhandled Escape pops the plane in TTuiApp without telling the app; clear
+    the dangling widget and the flag so the state does not lie. }
+  if FDiffShown and (not FApp.ModalActive) then
+  begin
+    FDiffViewer := nil;
+    FDiffShown := False;
     SetState(psReady, 'ready');
   end;
 end;
@@ -2425,6 +2589,14 @@ begin
   Result := True;
 end;
 
+procedure THarnessApp.StreamFileClicked(Sender: TObject; const APath: string);
+begin
+  { A click on a file row of a turn-summary block. The block resolved the row to
+    a path; the app owns the store, so it resolves the path to a diff. }
+  if APath <> '' then
+    ShowDiff(APath);
+end;
+
 procedure THarnessApp.StreamScrolled(Sender: TObject);
 var
   Boundary: Integer;
@@ -2476,6 +2648,7 @@ begin
     fresh ask is never stacked on top of one still being answered. }
   CloseModal;
   SyncSessionsModal;
+  SyncDiff;
   CheckInterruptWindow;
   DrainQueue;
   FlushToolOutput;

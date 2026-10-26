@@ -233,6 +233,7 @@ type
     FBottomInset: Integer;
     FOnToggle: TNotifyEvent;
     FOnChange: TNotifyEvent;
+    FOnFile: TChatFileEvent;
     FGeneration: Integer;
     FAnimatingBlocks: Integer;    { items whose animation is registered }
     FLayoutValid: Boolean;
@@ -256,6 +257,9 @@ type
     procedure EnsureLayout(AItemWidth: Integer);
     procedure ItemChanged(Sender: TObject);
     procedure ItemToggled(Sender: TObject);
+    { A file row in a block was clicked; re-raised to the host with the path. }
+    procedure ItemFile(Sender: TObject; const APath: string);
+    procedure SetOnFile(AValue: TChatFileEvent);
     { An item's animation state changed; keep the running count. }
     procedure ItemAnimatingChanged(Sender: TObject; AAnimating: Boolean);
   public
@@ -277,6 +281,8 @@ type
       overlay). The stack keeps room for them, so the last block still shows its
       two blank pad rows above the overlay. }
     property BottomInset: Integer read FBottomInset write FBottomInset;
+    { A file row in a turn-summary block was clicked; APath is that file. }
+    property OnFile: TChatFileEvent read FOnFile write SetOnFile;
     { Assign a callback to every block, including ones added earlier. }
     procedure SetOnToggle(AValue: TNotifyEvent);
     procedure SetOnChange(AValue: TNotifyEvent);
@@ -303,6 +309,7 @@ type
     FOnToggle: TNotifyEvent;
     FOnChange: TNotifyEvent;
     FOnNeedOlder: TNotifyEvent;
+    FOnFile: TChatFileEvent;
     FOnScroll: TNotifyEvent;
     FBottomInset: Integer;
     procedure SetOnToggle(AValue: TNotifyEvent);
@@ -314,6 +321,9 @@ type
     procedure SetBottomInset(AValue: Integer);
     procedure ItemChanged(Sender: TObject);
     procedure ItemToggled(Sender: TObject);
+    { A file row was clicked in a block; re-raised to the host. }
+    procedure ItemFile(Sender: TObject; const APath: string);
+    procedure SetOnFile(AValue: TChatFileEvent);
   public
     constructor Create(const ATheme: TTheme);
     destructor Destroy; override;
@@ -340,6 +350,9 @@ type
     function Advance(const ANowMs: Int64): Boolean; override;
     function Animating: Boolean; override;
     property OnToggle: TNotifyEvent read FOnToggle write SetOnToggle;
+    { A file row of a turn-summary block was clicked; APath is that file. The
+      host opens its diff. }
+    property OnFile: TChatFileEvent read FOnFile write SetOnFile;
     { Fired when a block's text changes, so the host re-arranges. }
     property OnChange: TNotifyEvent read FOnChange write SetOnChange;
     { Fired when the operator scrolls to the top, so the host can load older
@@ -1454,6 +1467,7 @@ begin
   SetLength(FItems, Length(FItems) + 1);
   Result := TChatItem.Create(AKind, ALabel, AText, FTheme);
   Result.OnToggle := ItemToggled;
+  Result.OnFile := ItemFile;
   Result.OnChange := ItemChanged;
   Result.OnAnimatingChanged := ItemAnimatingChanged;
   FItems[High(FItems)] := Result;
@@ -1503,6 +1517,23 @@ begin
   FOnToggle := AValue;
   for I := 0 to High(FItems) do
     FItems[I].OnToggle := ItemToggled;
+end;
+
+procedure TChatStack.SetOnFile(AValue: TChatFileEvent);
+var
+  I: Integer;
+begin
+  FOnFile := AValue;
+  { Every existing item is re-pointed, the same way OnToggle does it: a block
+    created before the host set the handler must still report clicks. }
+  for I := 0 to High(FItems) do
+    FItems[I].OnFile := ItemFile;
+end;
+
+procedure TChatStack.ItemFile(Sender: TObject; const APath: string);
+begin
+  if Assigned(FOnFile) then
+    FOnFile(Self, APath);
 end;
 
 procedure TChatStack.SetOnChange(AValue: TNotifyEvent);
@@ -1822,6 +1853,23 @@ end;
 procedure TChatStream.SetOnToggle(AValue: TNotifyEvent);
 begin
   FOnToggle := AValue;
+end;
+
+procedure TChatStream.SetOnFile(AValue: TChatFileEvent);
+begin
+  FOnFile := AValue;
+  { Also re-point the stack, so a block created before the host set the handler
+    still reports clicks. Without this the pane would open only for blocks
+    created after the wiring ran. }
+  FStack.SetOnFile(ItemFile);
+end;
+
+procedure TChatStream.ItemFile(Sender: TObject; const APath: string);
+begin
+  { Unlike a toggle, this does not change any layout - it opens a modal - so the
+    follow flag is left alone. }
+  if Assigned(FOnFile) then
+    FOnFile(Self, APath);
 end;
 
 procedure TChatStream.ItemToggled(Sender: TObject);
