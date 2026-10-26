@@ -35,11 +35,21 @@ What is **not built**, and is the remaining work:
   turn summary groups by turn; per-call grouping needs the id stamped after the
   row is written, plus an `ekChanges` event carrying row ids to the client.
 - **State revert**, and therefore `/undo`, `/redo` and `/revert`. The design is
-  recorded in the FEATURE; two things gate it. Revert needs bytes, and a
+  recorded in the FEATURE; one thing gates it. Revert needs bytes, and a
   process-tier record has none (it captures no before-text), so only
-  `Captured` rows are revertible and the UI must say which. And a subagent's
-  writes land with `TurnId = 0` (only `THarnessSession` calls `SetTurn`), so a
-  delegated turn would revert partially.
+  `Captured` rows are revertible and the UI must say which.
+- **Subagent changes are attributed to the CHILD's turn, not the parent's.**
+  (Correcting an earlier claim in this doc that said they landed with
+  `TurnId = 0` — that was wrong.) A child runtime is spawned with the **same
+  store path**, and its `THarnessSession` creates its own recorder and opens its
+  own turn through the same `BeginTurn` → `SetTurn` path. `turns.id` is
+  `AUTOINCREMENT`, so those ids are globally unique, not per-session. The
+  consequence is subtler than "reverts partially": `ForTurn(parentTurn)` simply
+  does not contain the child's rows, so reverting a parent turn restores the
+  parent's own files and leaves the delegated work in place. `RevertTurn` is
+  therefore correct per turn but incomplete per *decision*. Reverting a delegating
+  turn needs a lineage-aware walk (parent turn plus its child turns), which is a
+  design choice rather than a bug.
 - **Keyframes are not written.** `KeyframeDue`, `PutKeyframe` and `Replay` exist in
   `src/changes` and are tested there, but the recorder never calls them, so nothing
   in the live path writes a keyframe and nothing replays. Replay is therefore
