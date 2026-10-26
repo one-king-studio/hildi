@@ -148,6 +148,11 @@ type
     { Context checkpoint: draft a summary, then commit it as a checkpoint. }
     procedure HandleCheckpoint(AClient: TClientConn;
       const ACommand: TSessionCommand);
+    { Undo a turn: revert its files and rewind its transcript. Lives here because
+      the runtime owns the workspace - the client only asks, exactly as with a
+      checkpoint. TurnId 0 means the newest completed turn. }
+    procedure HandleUndo(AClient: TClientConn;
+      const ACommand: TSessionCommand);
     procedure HandlePrompt(AClient: TClientConn;
       const ACommand: TSessionCommand);
     procedure HandleApprove(AClient: TClientConn;
@@ -975,6 +980,8 @@ begin
       HandleRelease(AClient, ACommand);
     scPing:
       ReplyTo(AClient, ACommand.Id, True, '');
+    scUndo:
+      HandleUndo(AClient, ACommand);
     scCheckpoint:
       HandleCheckpoint(AClient, ACommand);
     scShutdown:
@@ -1070,6 +1077,48 @@ begin
     if Store.LastAssistantMessageId(FSessionId, MsgId, StoreErr) and (MsgId > 0)
     then
       Store.SetReplyKeywords(MsgId, Meta.Keywords, StoreErr);
+end;
+
+procedure TSessionRuntime.HandleUndo(AClient: TClientConn;
+  const ACommand: TSessionCommand);
+var
+  TurnId: Int64;
+  Detail: string;
+begin
+  { The runtime owns the workspace, so this is the only party that may move it -
+    the client only asks, exactly as with a checkpoint. }
+  if AClient.Role <> srDrive then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'not_driver');
+    Exit;
+  end;
+  { Refused while a turn runs: the loop holds the workspace, so a revert
+    underneath it has no correct resolution. }
+  if FWorker <> nil then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'busy');
+    Exit;
+  end;
+  TurnId := ACommand.TurnId;
+  if TurnId <= 0 then
+  begin
+    { 0 means "the newest one the operator could mean": the latest COMPLETED
+      turn. A running turn is refused above, a failed one changed nothing worth
+      undoing. }
+    if FSession.View.LastTurn.Status = tsCompleted then
+      TurnId := FSession.View.LastTurn.Id;
+  end;
+  if TurnId <= 0 then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'no turn to undo');
+    Exit;
+  end;
+  { UndoTurn moves the files AND the transcript together, or neither. Its refusal
+    reason is the operator's explanation, so it goes back verbatim. }
+  if FSession.UndoTurn(TurnId, Detail) then
+    ReplyTo(AClient, ACommand.Id, True, '')
+  else
+    ReplyTo(AClient, ACommand.Id, False, Detail);
 end;
 
 procedure TSessionRuntime.HandlePrompt(AClient: TClientConn;

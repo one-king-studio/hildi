@@ -100,7 +100,11 @@ type
     scAbortSubagent, scReleaseSubagent,
     { Context checkpoint: request a draft, then commit an edited one. Driver-only.
       Appended last so stored ordinals are unchanged. }
-    scCheckpoint);
+    scCheckpoint,
+    { Undo a turn: revert its files and rewind its transcript. Driver-only. The
+      runtime owns the workspace, so this is the only party that may do it - the
+      client only asks. Appended last so stored ordinals are unchanged. }
+    scUndo);
 
   { One client command. Id is echoed in the reply. }
   TSessionCommand = record
@@ -113,6 +117,8 @@ type
     Choice: TApprovalChoice;    // approve
     { The child session an abort/release subagent command acts on. }
     SessionId: string;
+    { scUndo: which turn to undo. 0 means the newest completed one. }
+    TurnId: Int64;
     { scCheckpoint: no payload; it starts a checkpoint turn. }
   end;
 
@@ -246,7 +252,7 @@ const
   CommandKindNames: array[TSessionCommandKind] of string = (
     'attach', 'detach', 'prompt', 'approve', 'interrupt',
     'claim_drive', 'release_drive', 'ping', 'shutdown',
-    'abort_subagent', 'release_subagent', 'checkpoint');
+    'abort_subagent', 'release_subagent', 'checkpoint', 'undo');
 
 { --- enum <-> wire ------------------------------------------------------ }
 
@@ -796,6 +802,8 @@ begin
     scAbortSubagent, scReleaseSubagent:
       PutStr(O, 'session', C.SessionId);
     scAttach, scDetach, scInterrupt, scClaimDrive, scReleaseDrive, scPing,
+    scUndo:
+      PutInt(O, 'turn_id', C.TurnId);
     scShutdown, scCheckpoint:
       ;   // no payload beyond the name
   end;
@@ -829,6 +837,8 @@ begin
       end;
     scAbortSubagent, scReleaseSubagent:
       C.SessionId := OptStr(O, 'session');
+    scUndo:
+      C.TurnId := OptInt64(O, 'turn_id', 0);
     scAttach, scDetach, scInterrupt, scClaimDrive, scReleaseDrive, scPing,
     scShutdown, scCheckpoint:
       ;
