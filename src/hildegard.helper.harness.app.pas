@@ -857,6 +857,15 @@ begin
     AppendError('not connected yet');
     Exit;
   end;
+  if (AName = 'undo') and (FDriver <> nil) then
+  begin
+    { The runtime owns the workspace, so this only asks. The reply arrives as an
+      event - a fault shows up as an error block with the refusal reason, never
+      as a silent no-op. 0 means the newest completed turn. }
+    FDriver.Undo(0);
+    FApp.Invalidate;
+    Exit;
+  end;
   if (AName = 'checkpoint') and (FDriver <> nil) then
   begin
     { The runtime drafts synchronously; show the state now so the operator sees
