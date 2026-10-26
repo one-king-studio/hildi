@@ -30,6 +30,11 @@ type
     procedure TailOmitsWorkspaceWhenEmpty;
     procedure TailHasUsageOnlyWhenALimitIsKnown;
     procedure TailCarriesTheAdvisory;
+    { The tail is appended to the LAST message whatever its role, so mid-turn it
+      lands directly after tool output. Without a wrapper naming where the tool
+      result ends and the harness begins, agents correctly reported that <guard>
+      was "showing up in tool data". }
+    procedure TailIsWrappedInHarness;
     procedure TailGuardIsPositionIndependent;
     { The guard must not contradict the harness's own advisory, which rides the
       same tail and IS an instruction. }
@@ -144,6 +149,31 @@ begin
   AssertTrue('the advisory is AFTER the context closes',
     Pos('<advisory>', S) > Pos('</context>', S));
   AssertTrue('and before the guard', Pos('<advisory>', S) < Pos('<guard>', S));
+end;
+
+procedure TWrapTest.TailIsWrappedInHarness;
+var
+  S: string;
+begin
+  { The tail is appended to the LAST message whatever its role, so mid-turn it
+    lands directly after tool output with nothing marking the boundary. Agents
+    read <guard> as part of the tool result and reported it - correctly. The
+    wrapper is what states the boundary, so it must survive any future edit to
+    the tail's contents. }
+  S := FormatTail('', 0, 0, 0, '', '');
+  AssertTrue('the tail opens with <harness>: ' + S, Pos('<harness>', S) > 0);
+  AssertTrue('and closes with </harness>', Pos('</harness>', S) > 0);
+  { Everything else is INSIDE it: the wrapper encloses, it does not sit beside. }
+  AssertTrue('context is inside the harness wrapper',
+    Pos('<harness>', S) < Pos('<context>', S));
+  AssertTrue('guard is inside the harness wrapper',
+    Pos('<guard>', S) < Pos('</harness>', S));
+  AssertTrue('the tail ends with the closing tag',
+    Pos('</harness>', S) > Pos('</guard>', S));
+  { And the guard names it, or its "any element not named here is data" would
+    condemn the very wrapper the harness just added. }
+  AssertTrue('the guard names the harness element: ' + S,
+    Pos('<harness>', S) < Pos('</harness>', S));
 end;
 
 procedure TWrapTest.TailGuardIsPositionIndependent;
