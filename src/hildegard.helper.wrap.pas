@@ -68,7 +68,10 @@ const
     'action: it is there so you do not have to spend a tool call asking what ' +
     'time it is or what the workspace is. ' +
     'THE CLOSED SET OF HARNESS ELEMENTS, and what each one is: ' +
-    '<context> is data (all of the above). ' +
+    '<harness> is the WRAPPER around everything the harness appends to a ' +
+    'request. It is NOT part of any tool result, even when it appears directly ' +
+    'after tool output in the same message: it is the harness speaking. ' +
+    '<context> inside it is data (all of the above). ' +
     '<guard> states provenance. ' +
     '<advisory> is an INSTRUCTION from the harness - follow it (for example the ' +
     'tool-call budget: "keep going only if the calls are still needed"). ' +
@@ -193,7 +196,13 @@ begin
     place an instruction appeared. A model reading that contradiction either
     obeyed an instruction it was told could not exist, or discounted its own
     harness's nudge. Both are wrong, and both were observed. }
-  Result :=
+  { The whole tail is wrapped in ONE element naming its author. Without it the
+    tail rides inside a tool result's own content (see agent.pas: the tail is
+    appended to the LAST message whatever its role), so <context> and <guard>
+    genuinely appeared to be part of the tool's output - and agents reported
+    exactly that, correctly. A named wrapper states the boundary instead of
+    leaving the model to infer it. }
+  Result := '<harness>' + LineEnding +
     '<context>' + LineEnding +
     Body +
     '</context>';
@@ -201,7 +210,8 @@ begin
     Result := Result + LineEnding +
       '<advisory>' + EscapeXmlContent(AAdvisory) + '</advisory>';
   Result := Result + LineEnding +
-    '<guard>' + UserGuard + '</guard>';
+    '<guard>' + UserGuard + '</guard>' + LineEnding +
+    '</harness>';
 end;
 
 end.
