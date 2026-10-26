@@ -371,6 +371,10 @@ function CoarseScrollTarget(ASeg, ASegCount, AMessageCount: Integer): Integer;
 function ShouldTrimHistory(AOlderPages: Integer; ANowMs, ALastScrollMs: Int64;
   AScrollY, AMaxScroll: Integer): Boolean;
 
+{ Order session rows so each delegated child follows its parent, indenting the
+  child's title. Pure, so the nesting policy is testable without a modal. }
+procedure OrderByLineage(var ARows: TSessionRowArray);
+
 implementation
 
 const
@@ -1766,6 +1770,103 @@ begin
   ShowNextAsk;
 end;
 
+{ Order session rows so a delegated child follows its parent, and indent its
+  title. The sessions modal draws the rows in the order it is given, so the
+  nesting lives here rather than in the modal - which keeps this file the only
+  one that has to know about lineage.
+
+  Roots keep the query's order (pinned, then most recently updated). Children
+  are emitted directly after their parent, recursively, so a grandchild nests
+  under its own parent rather than being flattened to the top. A child whose
+  parent is absent from the list (archived, or filtered out) is treated as a
+  root rather than dropped: losing a session silently is worse than showing it
+  flat. }
+procedure OrderByLineage(var ARows: TSessionRowArray);
+var
+  i, j, N, W: Integer;
+  Roots: TIntArray;
+  Kids: array of TIntArray;
+  Emitted: array of Boolean;
+  Claimed: array of Boolean;
+  OutRows: TSessionRowArray;
+
+  function IndexOfId(const AId: string): Integer;
+  var
+    K: Integer;
+  begin
+    Result := -1;
+    for K := 0 to N - 1 do
+      if ARows[K].Id = AId then
+        Exit(K);
+  end;
+
+  procedure AddKid(AParent, AChild: Integer);
+  begin
+    SetLength(Kids[AParent], Length(Kids[AParent]) + 1);
+    Kids[AParent][High(Kids[AParent])] := AChild;
+    Claimed[AChild] := True;
+  end;
+
+  procedure Emit(AIndex, ADepth: Integer);
+  var
+    K: Integer;
+    Prefix: string;
+  begin
+    if Emitted[AIndex] then
+      Exit;
+    Emitted[AIndex] := True;
+    SetLength(OutRows, Length(OutRows) + 1);
+    OutRows[High(OutRows)] := ARows[AIndex];
+    { Two spaces per level, and a marker so a child is visibly not a root even
+      when its title is the only thing on the row. }
+    if ADepth > 0 then
+    begin
+      Prefix := '';
+      for K := 1 to ADepth do
+        Prefix := Prefix + '  ';
+      OutRows[High(OutRows)].Title := Prefix + '└ ' + ARows[AIndex].Title;
+    end;
+    for K := 0 to High(Kids[AIndex]) do
+      Emit(Kids[AIndex][K], ADepth + 1);
+  end;
+
+begin
+  N := Length(ARows);
+  if N < 2 then
+    Exit;
+  SetLength(Kids, N);
+  SetLength(Emitted, N);
+  SetLength(Claimed, N);
+  SetLength(Roots, 0);
+
+  { Link parent -> children. }
+  for i := 0 to N - 1 do
+    if ARows[i].ParentSessionId <> '' then
+    begin
+      W := IndexOfId(ARows[i].ParentSessionId);
+      if W >= 0 then
+        AddKid(W, i);
+    end;
+
+  { Anything not claimed by a parent in this list is a root. }
+  for i := 0 to N - 1 do
+    if not Claimed[i] then
+    begin
+      SetLength(Roots, Length(Roots) + 1);
+      Roots[High(Roots)] := i;
+    end;
+
+  SetLength(OutRows, 0);
+  for j := 0 to High(Roots) do
+    Emit(Roots[j], 0);
+  { A cycle would leave rows unemitted; append them flat rather than lose them. }
+  for i := 0 to N - 1 do
+    if not Emitted[i] then
+      Emit(i, 0);
+
+  ARows := OutRows;
+end;
+
 procedure THarnessApp.RefreshSessions;
 var
   Rows: TSessionRowArray;
@@ -1775,7 +1876,10 @@ begin
     Exit;
   if FSession.Store.ListSessionRows(FSession.WorkspaceId,
     FSessionsModal.ShowArchived, Rows, StoreErr) then
+  begin
+    OrderByLineage(Rows);
     FSessionsModal.SetRows(Rows);
+  end;
 end;
 
 procedure THarnessApp.ShowSessions;

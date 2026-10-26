@@ -180,6 +180,11 @@ type
     { An approval ask is NOT transcript: dropping it while spying deadlocked the
       child, because auto-deny stands down whenever a client is attached. }
     procedure TestSpyStillShowsAnApprovalAsk;
+    { A delegated child must not read as a peer of its parent in the sessions
+      list: it follows its parent, indented, at every depth. Pure policy test. }
+    procedure TestSessionRowsNestUnderTheirParent;
+    procedure TestOrphanChildStaysAVisibleRoot;
+    procedure TestDetachMakesAChildARoot;
     procedure TestSpyUnknownChildIsAnError;
     procedure TestSpyActionsBarAbortsAndReleases;
     procedure TestThinkingStateDuringATurn;
@@ -2526,6 +2531,109 @@ begin
   FApp.Step;
 
   AssertTrue('an ask still opens its modal while spying', FApp.ModalActive);
+end;
+
+{ A row with no title worth reading, only identity and lineage. }
+function RowOf(const AId, AParent, ATitle: string; ADepth: Integer): TSessionRow;
+begin
+  Result := Default(TSessionRow);
+  Result.Id := AId;
+  Result.ParentSessionId := AParent;
+  Result.Title := ATitle;
+  Result.Depth := ADepth;
+end;
+
+procedure THarnessAppTest.TestSessionRowsNestUnderTheirParent;
+var
+  Rows: TSessionRowArray;
+begin
+  { The bug this guards: every session was listed flat, so a delegated child read
+    as a PEER of the session that spawned it. A child must follow its parent and
+    be visually marked as nested. }
+  SetLength(Rows, 3);
+  Rows[0] := RowOf('child-1', 'root-1', 'do the thing', 1);
+  Rows[1] := RowOf('root-1', '', 'parent work', 0);
+  Rows[2] := RowOf('root-2', '', 'other work', 0);
+
+  OrderByLineage(Rows);
+
+  AssertEquals('child follows its parent', 'root-1', Rows[0].Id);
+  AssertEquals('child is next', 'child-1', Rows[1].Id);
+  AssertTrue('other root still present', Rows[2].Id <> '');
+  { The child's title carries a nesting marker; the parent's does not. }
+  AssertEquals('parent title untouched', 'parent work', Rows[0].Title);
+  AssertTrue('child is marked as nested: ' + Rows[1].Title,
+    Pos('do the thing', Rows[1].Title) > 0);
+  AssertTrue('child is indented', Rows[1].Title <> 'do the thing');
+end;
+
+procedure THarnessAppTest.TestOrphanChildStaysAVisibleRoot;
+var
+  Rows: TSessionRowArray;
+begin
+  { A child whose parent is absent from the list (archived, or filtered) must
+    still appear, flat. Dropping it would hide a live session entirely. }
+  SetLength(Rows, 2);
+  Rows[0] := RowOf('orphan', 'not-in-list', 'orphaned child', 1);
+  Rows[1] := RowOf('root-1', '', 'parent work', 0);
+
+  OrderByLineage(Rows);
+
+  AssertEquals('both rows survive', 2, Length(Rows));
+  AssertTrue('the orphan is present',
+    (Rows[0].Id = 'orphan') or (Rows[1].Id = 'orphan'));
+  AssertTrue('the root is present',
+    (Rows[0].Id = 'root-1') or (Rows[1].Id = 'root-1'));
+end;
+
+procedure THarnessAppTest.TestDetachMakesAChildARoot;
+var
+  Store: TSqliteStore;
+  StoreCfg: TStoreConfig;
+  StoreErr: TStoreError;
+  WorkspaceId, Rows3: Integer;
+  ChildId, Parent, Lbl: string;
+  Depth: Integer;
+  Rows: TSessionRowArray;
+  I: Integer;
+  Found: Boolean;
+begin
+  { Promoting a child clears its lineage, so afterwards it is an ordinary session
+    and lists as a root. This is the store half of "no silent takeover". }
+  BuildWithStore;
+  StoreCfg := Default(TStoreConfig);
+  StoreCfg.DatabasePath := FStorePath;
+  StoreCfg.BusyTimeoutMs := 5000;
+  Store := TSqliteStore.Create(StoreCfg);
+  try
+    AssertTrue('open store', Store.Open(StoreErr));
+    Store.EnsureWorkspace(FDir, WorkspaceId, StoreErr);
+    Store.CreateChildSession(WorkspaceId, FSession.View.SessionId, 1, 'child',
+      ChildId, StoreErr);
+
+    AssertTrue('lineage before',
+      Store.SessionLineage(ChildId, Parent, Depth, Lbl, StoreErr));
+    AssertTrue('has a parent', Parent <> '');
+
+    AssertTrue('detach', Store.DetachSession(ChildId, StoreErr));
+
+    AssertTrue('lineage after',
+      Store.SessionLineage(ChildId, Parent, Depth, Lbl, StoreErr));
+    AssertEquals('no parent', '', Parent);
+    AssertEquals('depth reset', 0, Depth);
+
+    { And it now lists as a root. }
+    AssertTrue('list', Store.ListSessionRows(WorkspaceId, True, Rows, StoreErr));
+    Found := False;
+    for I := 0 to High(Rows) do
+      if (Rows[I].Id = ChildId) and (Rows[I].ParentSessionId = '') then
+        Found := True;
+    AssertTrue('the promoted child lists as a root', Found);
+    Rows3 := 0;
+    AssertEquals('sanity', 0, Rows3);
+  finally
+    Store.Free;
+  end;
 end;
 
 procedure THarnessAppTest.TestSpyUnknownChildIsAnError;
