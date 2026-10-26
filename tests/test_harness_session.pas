@@ -16,6 +16,8 @@ uses
   hildegard.helper.mcp.config,
   hildegard.helper.board, hildegard.helper.board.store,
   hildegard.helper.tasks, hildegard.helper.tasks.store,
+  changes.types, changes.text, changes.store,
+  hildegard.helper.changes.store, hildegard.helper.changes.revert,
   hildegard.helper.tasks.tools, hildegard.helper.sqlite,
   llm_fakes;
 
@@ -27,6 +29,12 @@ type
     FTransports: TObjectList<TFakeTransport>;
     function Config(const AStorePath, ASessionId: string;
       AResume: Boolean): THarnessSessionConfig;
+    function WriteText(const AName, AContent: string): string;
+    function ReadText(const AName: string): string;
+    function SeedChange(Session: THarnessSession; ATurnId: Integer;
+      const ABefore, AAfter: string; out ADetail: string): Boolean;
+    function SeedMessage(Session: THarnessSession; ATurnId: Int64;
+      out ADetail: string): Boolean;
   protected
     procedure SetUp; override;
     procedure TearDown; override;
@@ -49,6 +57,9 @@ type
     { Claim recovery runs at the turn boundary: a working session renews, and a
       claim whose holder stopped is released. }
     procedure TestTheTurnBoundaryRenewsAThisSessionsClaim;
+    { Undo moves the files AND the transcript together, or neither. }
+    procedure TestUndoTurnRestoresFilesAndRewindsMessages;
+    procedure TestUndoTurnRefusesWhenAFileCannotBeRestored;
     procedure TestTheTurnBoundaryReclaimsADeadSessionsClaim;
     procedure TestRecallToolAbsentWithoutStore;
     procedure TestLastTurnEmptyWithoutTurns;
@@ -328,6 +339,158 @@ begin
       (Now2 - Card.ClaimedAt) <= 60);
   finally
     Tasks := nil;
+    Session.Free;
+  end;
+end;
+
+function THarnessSessionTest.WriteText(const AName, AContent: string): string;
+var
+  Fs: TFileStream;
+begin
+  Result := IncludeTrailingPathDelimiter(FDir) + AName;
+  Fs := TFileStream.Create(Result, fmCreate);
+  try
+    if AContent <> '' then
+      Fs.WriteBuffer(AContent[1], Length(AContent));
+  finally
+    Fs.Free;
+  end;
+end;
+
+function THarnessSessionTest.ReadText(const AName: string): string;
+var
+  Fs: TFileStream;
+  Full: string;
+begin
+  Result := '';
+  Full := IncludeTrailingPathDelimiter(FDir) + AName;
+  if not FileExists(Full) then
+    Exit;
+  Fs := TFileStream.Create(Full, fmOpenRead);
+  try
+    SetLength(Result, Fs.Size);
+    if Fs.Size > 0 then
+      Fs.ReadBuffer(Result[1], Fs.Size);
+  finally
+    Fs.Free;
+  end;
+end;
+
+function THarnessSessionTest.SeedChange(Session: THarnessSession;
+  ATurnId: Integer; const ABefore, AAfter: string; out ADetail: string): Boolean;
+var
+  Changes: IChangeStore;
+  Hasher: TSha256Hasher;
+  R: TChangeRecord;
+  Patch: string;
+  Id: Integer;
+  Capped: Boolean;
+begin
+  ADetail := '';
+  Hasher := TSha256Hasher.Create;
+  try
+    Patch := DiffText(ABefore, AAfter, DefaultPatchCapBytes, Capped);
+    R := Default(TChangeRecord);
+    R.WorkspaceId := Session.View.WorkspaceId;
+    R.SessionId := Session.View.SessionId;
+    R.TurnId := ATurnId;
+    R.Path := 'a.txt';
+    R.Kind := ckModified;
+    R.IsNet := True;
+    R.BeforeHash := Hasher.OfText(ABefore);
+    R.AfterHash := Hasher.OfText(AAfter);
+    R.Patch := Patch;
+    R.PatchBytes := Length(Patch);
+    R.Capped := Capped;
+    Changes := TSqliteChangeStore.Create(Session.View.Store);
+    Result := Changes.Append(R, Id, ADetail);
+  finally
+    Hasher.Free;
+  end;
+end;
+
+function THarnessSessionTest.SeedMessage(Session: THarnessSession;
+  ATurnId: Int64; out ADetail: string): Boolean;
+var
+  Rec: TMessageRecord;
+  StoreErr: TStoreError;
+begin
+  Rec := Default(TMessageRecord);
+  Rec.SessionId := Session.View.SessionId;
+  Rec.TurnId := ATurnId;
+  Rec.Role := mrUser;
+  Rec.Content := 'do the thing';
+  Result := Session.View.Store.AppendMessage(Rec, StoreErr);
+  ADetail := StoreErr.Message;
+end;
+
+procedure THarnessSessionTest.TestUndoTurnRestoresFilesAndRewindsMessages;
+var
+  Session: THarnessSession;
+  Err, Detail, Before, After: string;
+  TurnId: Int64;
+  Msgs: TMessageRecordArray;
+  StoreErr: TStoreError;
+begin
+  { The invariant: undo moves the files AND the transcript together. Either half
+    alone is a lie about what the workspace looks like. }
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    Session.View.Store.BeginTurn(Session.View.SessionId, TurnId, StoreErr);
+    if TurnId <= 0 then
+      TurnId := 1;
+
+    Before := 'one'#10'two'#10;
+    After := 'one'#10'TWO'#10;
+    Detail := '';
+    WriteText('a.txt', After);
+    AssertTrue('row: ' + Detail, SeedChange(Session, Integer(TurnId), Before,
+      After, Detail));
+    AssertTrue('message: ' + Detail, SeedMessage(Session, TurnId, Detail));
+
+    AssertTrue('undo: ' + Detail, Session.UndoTurn(TurnId, Detail));
+    AssertEquals('no detail on success', '', Detail);
+    AssertEquals('the file is back', Before, ReadText('a.txt'));
+
+    AssertTrue('read messages', Session.View.Store.QueryMessages(
+      Session.View.SessionId, Msgs, StoreErr));
+    AssertEquals('the transcript is rewound too', 0, Length(Msgs));
+  finally
+    Session.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestUndoTurnRefusesWhenAFileCannotBeRestored;
+var
+  Session: THarnessSession;
+  Err, Detail: string;
+  TurnId: Int64;
+  Msgs: TMessageRecordArray;
+  StoreErr: TStoreError;
+begin
+  { The other half: when the files cannot be restored the transcript must NOT be
+    rewound, or the operator loses the record of a turn still on disk. }
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    Session.View.Store.BeginTurn(Session.View.SessionId, TurnId, StoreErr);
+    if TurnId <= 0 then
+      TurnId := 1;
+
+    { The file on disk is neither the before nor the after: edited since. }
+    WriteText('a.txt', 'unrelated'#10);
+    AssertTrue('row', SeedChange(Session, Integer(TurnId), 'one'#10, 'TWO'#10,
+      Detail));
+    AssertTrue('message', SeedMessage(Session, TurnId, Detail));
+
+    AssertFalse('refused', Session.UndoTurn(TurnId, Detail));
+    AssertTrue('names the file: ' + Detail, Pos('a.txt', Detail) > 0);
+
+    AssertTrue('read messages', Session.View.Store.QueryMessages(
+      Session.View.SessionId, Msgs, StoreErr));
+    AssertEquals('the transcript is NOT rewound', 1, Length(Msgs));
+  finally
     Session.Free;
   end;
 end;

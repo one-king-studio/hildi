@@ -147,6 +147,21 @@ type
       rows exist already; the message may not, which is why the runtime calls this
       after the tool result rather than the tool calling it during the run. }
     procedure AnchorChanges(const AToolCallId: string);
+    { Undo one turn: revert the files it changed AND rewind the transcript to
+      before it. The two halves must move together, or the transcript and the
+      workspace disagree - which is the failure this feature exists to prevent.
+
+      Order is deliberate: FILES FIRST, then messages. If the revert refuses
+      (a file moved on since), nothing is lost - the transcript is still there
+      and says what happened. Deleting messages first and then failing to revert
+      would destroy the record of work that is still on disk.
+
+      Refused while a turn is in flight: the runtime holds the workspace, so a
+      revert underneath it has no correct resolution. Refused too when any of the
+      turn's changes cannot be reverted at all - rewinding the transcript would
+      hide a turn whose files are still changed, the lie in the other direction.
+      ADetail says which refusal, naming the path. }
+    function UndoTurn(ATurnId: Int64; out ADetail: string): Boolean;
     { Notice any board entries this session has not seen, coalesced into ONE
       transient prompt item so ten agents posting is O(ticks), not O(entries).
       Called by the runtime on its tick. Returns the count noticed. }
@@ -546,6 +561,89 @@ begin
     Exit;
   if MsgId > 0 then
     FRecorder.AnchorCall(AToolCallId, Integer(MsgId));
+end;
+
+function THarnessSession.UndoTurn(ATurnId: Int64; out ADetail: string): Boolean;
+var
+  Rows: TChangeRecordArray;
+  Results: TRevertResultArray;
+  I, N, Reverted, Skipped: Integer;
+  Hasher: TSha256Hasher;
+  StoreErr: TStoreError;
+begin
+  Result := False;
+  ADetail := '';
+  if FView.Store = nil then
+  begin
+    ADetail := 'this session has no store, so it recorded no changes';
+    Exit;
+  end;
+  if ATurnId <= 0 then
+  begin
+    ADetail := 'no turn to undo';
+    Exit;
+  end;
+
+  if not FChangeStore.ForTurn(FView.WorkspaceId, Integer(ATurnId), Rows,
+    ADetail) then
+    Exit;
+
+  { Only net rows describe what the turn did. }
+  N := 0;
+  for I := 0 to High(Rows) do
+    if Rows[I].IsNet then
+      Inc(N);
+  if N = 0 then
+  begin
+    ADetail := 'this turn changed no files';
+    Exit;
+  end;
+
+  Hasher := TSha256Hasher.Create;
+  try
+    if not RevertTurn(FView.WorkspaceRoot, Rows, Hasher.OfText, 0, Results) then
+    begin
+      ADetail := 'could not read this turn''s changes';
+      Exit;
+    end;
+  finally
+    Hasher.Free;
+  end;
+
+  { Refuse the whole undo if any file could not be restored. Rewinding the
+    transcript while files stay changed would hide a turn that is still in
+    effect - the same lie as moving one without the other, in the other
+    direction. A SKIPPED row (no patch captured) also blocks: the file may well
+    have changed and nothing can prove otherwise. }
+  Reverted := 0;
+  Skipped := 0;
+  for I := 0 to High(Results) do
+    case Results[I].Outcome of
+      rvReverted: Inc(Reverted);
+      rvSkipped:
+        begin
+          Inc(Skipped);
+          if ADetail = '' then
+            ADetail := Results[I].Path + ': ' + Results[I].Detail;
+        end;
+    else
+      ADetail := Results[I].Path + ': ' + Results[I].Detail;
+    end;
+  if Reverted <> N then
+  begin
+    if ADetail = '' then
+      ADetail := 'not every changed file could be restored';
+    Exit;
+  end;
+
+  { Files are back. Now move the transcript, so both halves agree. }
+  if not FView.Store.DeleteTurnMessages(ATurnId, StoreErr) then
+  begin
+    ADetail := 'the files were restored but the transcript could not be rewound: '
+      + StoreErr.Message;
+    Exit;
+  end;
+  Result := True;
 end;
 
 function THarnessSession.TaskQuestionExists(AWorkspaceId, AId: Integer;
