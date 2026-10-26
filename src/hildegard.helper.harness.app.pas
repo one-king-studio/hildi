@@ -2393,6 +2393,10 @@ begin
   FlushToolOutput;
   TrimHistory;
   SyncBusy;
+  { THE PRODUCTION PATH for a deferred selection. It lived only in Step - which
+    is the TEST loop - so arrows moved the list's selection and the transcript
+    never changed. Both loops must honour it, and this is the one the app runs. }
+  ConsumePendingSelect;
   { The caret is steady while the terminal is unfocused (DECSET 1004). }
   FPanel.Compose.Edit.Blinking := FApp.TerminalFocused;
 end;
@@ -2485,6 +2489,12 @@ begin
       begin
         FRoster.Apply(E.SubSessionId, E.SubLabel, E.SubStatus,
           Int64(GetTickCount64));
+        { The composer's hints depend on whether there are subagents, so a roster
+          change must refresh them. Without this the ctrl+d segment never
+          appeared after the first child spawned - the hint was computed once at
+          build time, when the roster was empty. }
+        FHintsText := ComposerHints(FRoster.Count > 0);
+        FPanel.SetHints(FHintsText);
         if FSidebarShown then
         begin
           RefreshSubagentTitles;
@@ -2562,19 +2572,24 @@ begin
     or resize the bottom panel by a single row. An earlier version shrank the box
     to the row count, which made it read as a floating panel again. }
   Compose := FPanel.ComposeBounds;
+  { The two lines come BEFORE the composer is hidden. Hiding it can make
+    ComposeBounds return an empty rect, and the guard below would then exit
+    without ever setting them - which is why the box kept showing "enter spy"
+    after a child was already selected. State first, geometry second. }
+  FSidebar.SetInfo('Hildegard · ' + FSession.Model);
+  { The CTAs live in this box, so they are always visible while in subagent
+    mode - that is the point of not switching to a separate actions bar. Once a
+    child is selected "enter spy" is wrong: it is already spying. }
+  if FSpyId <> '' then
+    FSidebar.SetHints('ctrl+a abort · ctrl+r release · ctrl+p promote')
+  else if FRoster.Count > 0 then
+    FSidebar.SetHints('enter spy')
+  else
+    FSidebar.SetHints('');
   FPanel.Compose.Visible := False;
   if (Compose.H <= 0) or (Compose.W <= 0) then
     Exit;
   FSidebar.Arrange(Compose);
-  { The two lines the composer shows, in the same places: the model at the lower
-    left, the action hints at the lower right. }
-  FSidebar.SetInfo('Hildegard · ' + FSession.Model);
-  { The CTAs live in this box, so they are always visible while in subagent
-    mode - that is the point of not switching to a separate actions bar. }
-  if FSpyId <> '' then
-    FSidebar.SetHints('ctrl+a abort · ctrl+r release · ctrl+p promote')
-  else
-    FSidebar.SetHints('enter spy');
 end;
 
 procedure THarnessApp.OnSidebarSelect(const ASessionId: string);
