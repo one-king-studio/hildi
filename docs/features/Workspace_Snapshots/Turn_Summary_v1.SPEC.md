@@ -321,12 +321,62 @@ two entry points.
 - A turn with uncaptured changes says so, visibly, rather than showing `+0 −0`.
 - Resuming the session shows the same blocks.
 
+## The three commands: two mechanisms, one dialog
+
+**`/undo` and `/redo` are MECHANICAL. `/revert` is AGENTIC.** They are not
+variations on one operation, and the difference is the whole design.
+
+| Command | Mechanism | What it does | Available |
+| --- | --- | --- | --- |
+| **`/undo`** | mechanical | Reset to an earlier state: revert the captured changes and rewind the transcript. The traditional undo. | When a completed turn exists |
+| **`/redo`** | mechanical | Move forward again, re-applying the changes undone. | **Only after an `/undo`** |
+| **`/revert`** | **agentic** | Inject a prompt telling the agent to revert the changes **while moving FORWARD** — the way `git revert` applies an inverse as a *new* commit rather than `git reset` erasing history. | Any completed turn |
+
+### Why revert is agentic, and why that is not the same as undo
+
+`/undo` moves the workspace *backwards*: the state after undoing turn N is the
+state before turn N, and the transcript no longer contains N.
+
+`/revert` moves **forwards**: the agent is asked to produce the inverse of a
+previous turn's changes as *new work*. The reverted turn stays in the ledger; the
+repository moves forward with a change that undoes it. Nothing is erased, so the
+record shows both what was done and that it was later reverted — the `git revert`
+model rather than the `git reset` one.
+
+That is why it cannot be mechanical. The agent has to read what changed, decide
+how to invert it in the *current* state (which may have moved on), and make a
+coherent change. A patch inversion (`RevertText`) proves a byte-exact restore is
+possible; a revert only needs the *effect* undone, and only the agent can judge
+that when the file has changed since.
+
+**Consequence for the machinery:** `/undo` uses `RevertTurn` (the mechanical
+engine, precondition-checked). `/revert` uses none of it — it queues a prompt and
+lets the loop do the work, through the agent's own gated tools.
+
+### One dialog, two handlers
+
+`/undo`, `/redo` and `/revert` all open **the same history dialog**: the captured
+turns, newest first, with each turn's file stats. What differs is what selection
+*does*:
+
+- **`/undo`** — the dialog is the "go back to here" list. Selecting a turn undoes
+  every turn from the newest back to and including it.
+- **`/redo`** — the dialog is the "move forward to here" list, and it appears
+  **only after an undo**. It shows the turns the undo took away, so the operator
+  can move forward again. Absent after a prompt, because new work makes "forward"
+  ambiguous.
+- **`/revert`** — the same list, but selecting a turn injects the agentic revert
+  prompt for it. Nothing is rewound; the reply is new work.
+
+Sharing the dialog is deliberate: the operator is answering one question (*which
+turn?*) three times, and the difference is in the action, not the browsing.
+
 ## Out of Scope
 
 - **Per-call anchoring** (`MessageId`) and diff-under-tool-block. Separate spec;
   requires stamping the id after the tool-result row exists.
-- **`/undo`, `/redo`, `/revert`** and the history dialog. Separate spec.
-- **Revert**, and therefore any reconstruction of file contents.
+- **The commands themselves** (`/undo`, `/redo`, `/revert`) and the history
+  dialog. Separate spec — see above for the semantics they must implement.
 - **Keyframes** — `KeyframeDue`/`PutKeyframe` stay unwired; nothing here replays.
 - **Side-by-side / word-level diffs**; the viewer renders the stored unified diff.
 - **Editing or exporting** a diff.
