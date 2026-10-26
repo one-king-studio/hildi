@@ -11,7 +11,7 @@ unit hildegard.helper.harness.app;
 interface
 
 uses
-  Classes, SysUtils, Generics.Collections,
+  Classes, SysUtils, DateUtils, Generics.Collections,
   hildegard.helper.llm, hildegard.helper.approval,
   tui.base, tui.input,
   tui.surface, tui.widget,
@@ -23,6 +23,7 @@ uses
   tui.app, hildegard.helper.harness.turn,
   hildegard.helper.harness.driver, hildegard.helper.harness.view,
   hildegard.helper.store,
+  hildegard.helper.board, hildegard.helper.board.store,
   hildegard.helper.harness.stats, hildegard.helper.session,
   hildegard.helper.replymeta,
   tui.widgets.sessionsmodal,
@@ -200,6 +201,11 @@ type
     { The spy's CTA actions bar (abort / release / leave). }
     procedure SetupSpyActions;
     procedure OnSpyAction(AIndex: Integer);
+    { Tell the PARENT that an operator took one of its children over, and detach
+      the child so it is no longer the parent's. A takeover the parent cannot see
+      is worse than no takeover: the parent would keep issuing instructions to a
+      session the operator now drives. }
+    procedure AnnounceTakeover(const AChildId, AWhat: string);
     procedure DrainSpy;
     procedure SendSubagentCommand(AKind: TSessionCommandKind;
       const ASessionId: string);
@@ -2312,33 +2318,92 @@ procedure THarnessApp.SetupSpyActions;
 var
   Hints: TActionHintArray;
 begin
-  SetLength(Hints, 3);
+  SetLength(Hints, 4);
   Hints[0].Key := 'a';
   Hints[0].Action := ' abort';
   Hints[1].Key := 'r';
   Hints[1].Action := ' release';
-  Hints[2].Key := 'esc';
-  Hints[2].Action := ' leave';
+  { Promote: keep the work, but make it the operator's own session. }
+  Hints[2].Key := 'p';
+  Hints[2].Action := ' promote';
+  Hints[3].Key := 'esc';
+  Hints[3].Action := ' leave';
   FPanel.Actions.SetHints(Hints);
   FPanel.Actions.Label_ := 'subagent';
   FPanel.Actions.OnAction := OnSpyAction;
   FPanel.SetActionsMode(True);
 end;
 
+procedure THarnessApp.AnnounceTakeover(const AChildId, AWhat: string);
+var
+  Board: IBoardStore;
+  Entry: TBoardEntry;
+  Id: Integer;
+  Err: string;
+  Parent, Depth, Lbl: string;
+  StoreErr: TStoreError;
+  D: Integer;
+begin
+  { Best-effort throughout: a takeover must not fail because a notice could not
+    be written. The operator has already taken control; refusing to complete the
+    detachment would leave the parent believing it still owns the child, which is
+    the exact state this exists to prevent. }
+  if (FSession.Store = nil) then
+    Exit;
+
+  if not FSession.Store.SessionLineage(AChildId, Parent, D, Lbl, StoreErr) then
+    Exit;
+
+  { Detach FIRST: after this the child is nobody's, and a parent that missed the
+    notice still cannot issue it further instructions through the supervisor. }
+  FSession.Store.DetachSession(AChildId, StoreErr);
+
+  Board := TSqliteBoardStore.Create(FSession.Store);
+  Entry := Default(TBoardEntry);
+  Entry.WorkspaceId := FSession.WorkspaceId;
+  { A STATUS entry: it is a fact about what is happening now, and the board's
+    retention prunes status by count and age rather than keeping it forever. }
+  Entry.Kind := bkStatus;
+  Entry.Topic := 'coordination';
+  Entry.Title := 'Operator took over subagent ' + Copy(AChildId, 1, 8) + ': ' +
+    AWhat;
+  Entry.Body := 'The operator ' + AWhat + ' on this subagent and detached it ' +
+    'from its parent. It is now an ordinary session and is no longer yours to ' +
+    'direct; do not message or abort it.' + LineEnding + LineEnding +
+    'Session: ' + AChildId;
+  Entry.FromSession := '';
+  { No session: this is the OPERATOR acting, not an agent. '' means "not from a
+    session", the same convention Transition uses for operator moves. }
+  Entry.FromLabel := 'operator';
+  Entry.CreatedAt := DateTimeToUnix(Now);
+  Board.Append(Entry, Id, Err);
+end;
+
 procedure THarnessApp.OnSpyAction(AIndex: Integer);
 begin
-  { Index matches SetupSpyActions: 0 abort, 1 release, 2 leave (esc is the global
-    handler's, so it never reaches here). }
+  { Index matches SetupSpyActions: 0 abort, 1 release, 2 promote, 3 leave (esc is
+    the global handler's, so it never reaches here). }
   case AIndex of
     0:
       begin
+        { An abort the parent cannot see is a silent takeover: the parent would
+          keep waiting on, and messaging, a task the operator just killed. }
+        AnnounceTakeover(FSpyId, 'cancelled');
         SendSubagentCommand(scAbortSubagent, FSpyId);
-        SetState(psReady, 'subagent aborted');
+        SetState(psReady, 'subagent cancelled; parent notified');
       end;
     1:
       begin
         SendSubagentCommand(scReleaseSubagent, FSpyId);
         SetState(psReady, 'subagent released');
+      end;
+    2:
+      begin
+        { Promote: the child keeps running, but as the OPERATOR's session. The
+          parent must stop treating it as its own. }
+        AnnounceTakeover(FSpyId, 'promoted');
+        LeaveSpy;
+        SetState(psReady, 'subagent promoted to its own session');
       end;
   else
     ;
