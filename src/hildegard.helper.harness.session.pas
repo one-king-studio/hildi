@@ -714,6 +714,21 @@ begin
       ADetail := 'nothing to undo: no completed turn in that range';
     Exit;
   end;
+  { THE LAST UNDO DEFINES THE REDO WINDOW. The suffix it just took away is
+    exactly what /redo may put back, and any earlier window is void - there is
+    only ever one legal path forward, from the most recent undo. The floor is the
+    id just below that suffix, so every undone turn sits above it.
+
+    Set here rather than in BeginTurn: a prompt does NOT abandon the window. The
+    operator undoes, prompts, undoes again, and expects to redo the second undo's
+    suffix; a prompt raising the floor made that permanently impossible. }
+  if not FView.Store.SetRedoFloor(FView.SessionId, Turns[First].Id - 1,
+    StoreErr) then
+  begin
+    ADetail := 'the turns were undone but the redo window could not be set: '
+      + StoreErr.Message;
+    Exit;
+  end;
   if SkippedUndone > 0 then
     ADetail := 'undid ' + IntToStr(UndidCount) + ' turn(s); '
       + IntToStr(SkippedUndone) + ' was already undone';

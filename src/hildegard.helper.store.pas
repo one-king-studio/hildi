@@ -2324,34 +2324,12 @@ begin
     if not FinalizeRunningTurnsLocked(ASessionId, 'superseded', Ignored,
       AError) then
       Exit(False);
-    { A NEW PROMPT ABANDONS THE FUTURE an undo opened, so the redo window closes
-      here - but ONLY when a window is actually open. Raising the floor
-      unconditionally would break the ordinary case: with turns 1-5 recorded, the
-      floor would sit at 4 from turn 5's own begin, so undoing all five and
-      redoing would restore only turn 5.
-
-      So the floor rises to the highest existing turn id only if some undone turn
-      sits ABOVE the current floor. That is precisely "there is a live redo window
-      and the operator just walked away from it". }
-    Stmt := TStmt.Create(FDb,
-      'UPDATE sessions SET redo_floor = ' +
-      '(SELECT COALESCE(MAX(t.id), 0) FROM turns t WHERE t.session_id = ?) ' +
-      'WHERE id = ? AND EXISTS (SELECT 1 FROM turns t ' +
-      'WHERE t.session_id = ? AND t.status = ? AND t.id > ' +
-      '(SELECT s.redo_floor FROM sessions s WHERE s.id = ?))');
-    try
-      if not Stmt.Valid then
-        Exit(Fail(AError, seError, 'could not begin turn', DbErrorText));
-      Stmt.BindText(1, ASessionId);
-      Stmt.BindText(2, ASessionId);
-      Stmt.BindText(3, ASessionId);
-      Stmt.BindInt(4, Ord(tsUndone));
-      Stmt.BindText(5, ASessionId);
-      if Stmt.Step <> SQLITE_DONE then
-        Exit(Fail(AError, seError, 'could not begin turn', DbErrorText));
-    finally
-      Stmt.Free;
-    end;
+    { A PROMPT DOES NOT CLOSE THE REDO WINDOW. The window is defined by the LAST
+      UNDO alone - it is exactly the suffix that undo took away, and it stays
+      valid until another undo replaces it. An earlier design had a prompt raise
+      the floor, on the theory that prompting "abandons the future"; in practice
+      that made an undo performed after a prompt permanently un-redoable, which
+      is not what the operator meant. See SetRedoFloor. }
     Stmt := TStmt.Create(FDb,
       'INSERT INTO turns (session_id, seq, status, created_at) VALUES (' +
       '?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM turns WHERE session_id = ?), ' +
@@ -2471,8 +2449,11 @@ function TSqliteStore.SetRedoFloor(const ASessionId: string; AFloor: Int64;
 var
   Stmt: TStmt;
 begin
-  { MAX, not assignment: the floor only ever rises. An older abandonment must
-    not re-open a window that a newer prompt already closed. }
+  { ASSIGNMENT, not MAX. The redo window is defined by the LAST undo: it is
+    exactly the suffix that undo took away, and any earlier undo's window is
+    void. A monotonic floor could never reopen a window, so an undo performed
+    after a prompt was permanently un-redoable - which is what the operator hit
+    after undoing, prompting, then undoing again. }
   Result := False;
   AError := OkError;
   FLock.Acquire;
@@ -2482,7 +2463,7 @@ begin
     if ASessionId = '' then
       Exit(Fail(AError, seInvalidArgument, 'session id is required', ''));
     Stmt := TStmt.Create(FDb,
-      'UPDATE sessions SET redo_floor = MAX(redo_floor, ?) WHERE id = ?');
+      'UPDATE sessions SET redo_floor = ? WHERE id = ?');
     try
       if not Stmt.Valid then
         Exit(Fail(AError, seError, 'could not set the redo floor', DbErrorText));
