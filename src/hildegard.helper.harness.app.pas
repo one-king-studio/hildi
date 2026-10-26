@@ -866,6 +866,27 @@ begin
     FApp.Invalidate;
     Exit;
   end;
+  if (AName = 'revert') and (FDriver <> nil) then
+  begin
+    { AGENTIC revert: unlike /undo this moves FORWARDS. The agent is asked to
+      undo an earlier turn's effect as NEW work - the git-revert model, not
+      git-reset - so the reverted turn stays in the ledger and the record shows
+      both what was done and that it was later undone.
+
+      The instruction is client-side on purpose: the runtime needs nothing but a
+      prompt, and the client may not link harness.session. }
+    FDriver.QueuePrompt(
+      'Revert the file changes made in the most recent completed turn, by moving ' +
+      'FORWARDS: make a new change that undoes their effect. Do not rewrite ' +
+      'history or delete anything from the transcript. Read what that turn ' +
+      'changed first, then undo its EFFECT in the current state of the files, ' +
+      'which may have moved on since - the goal is that the work is no longer in ' +
+      'effect, not a byte-exact restore. Use your normal tools so the change is ' +
+      'recorded like any other. If some of it cannot be undone coherently, undo ' +
+      'what you can and say plainly what you left and why.');
+    FApp.Invalidate;
+    Exit;
+  end;
   if (AName = 'checkpoint') and (FDriver <> nil) then
   begin
     { The runtime drafts synchronously; show the state now so the operator sees
