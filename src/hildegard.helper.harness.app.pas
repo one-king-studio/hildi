@@ -384,6 +384,16 @@ function CoarseScrollTarget(ASeg, ASegCount, AMessageCount: Integer): Integer;
 function ShouldTrimHistory(AOlderPages: Integer; ANowMs, ALastScrollMs: Int64;
   AScrollY, AMaxScroll: Integer): Boolean;
 
+{ How a session identifies itself anywhere it is shown: `<label> - <title>`,
+  where the label is the operator's stored label, or the short session id when
+  there is none. A session is an agent, so what identifies it is the name plus
+  what it is currently doing - not one or the other.
+
+  Empty parts are dropped rather than leaving a dangling separator: a session
+  with no title shows just its label, and one with neither shows the id. Pure,
+  so the format is testable without a widget. }
+function SessionDisplayName(const ALabel, ATitle, ASessionId: string): string;
+
 { Order session rows so each delegated child follows its parent, indenting the
   child's title. Pure, so the nesting policy is testable without a modal. }
 procedure OrderByLineage(var ARows: TSessionRowArray);
@@ -996,7 +1006,8 @@ end;
 
 procedure THarnessApp.UpdateHeader;
 var
-  Context, Title, Left: string;
+  Context, Title, Left, Lbl, Parent: string;
+  Depth: Integer;
   StoreErr: TStoreError;
   MaxW: Integer;
 begin
@@ -1005,14 +1016,21 @@ begin
     status bar. }
   Context := FormatContextUsage(FSession.SessionTotals.ContextTokens,
     FSession.MaxContextTokens);
-  { The session's title (the operator's override, else the model's extracted one)
-    names the header when present; a session without one shows the id prefix, so
-    an unnamed session is still identifiable. }
+  { The session identifies itself as `<label> - <latest turn title>`: the label
+    names the AGENT (the operator's, else the short id), the title says what it
+    is doing. The title override is deprecated - a rename writes the label - but
+    SessionTitle still honours an old override so a pre-existing rename is not
+    silently lost. }
   Left := '';
-  if (FSession.Store <> nil) and
-    FSession.Store.SessionTitle(FSession.SessionId, Title, StoreErr) and
-    (Title <> '') then
-    Left := Title;
+  Title := '';
+  Lbl := '';
+  if (FSession.Store <> nil) then
+  begin
+    FSession.Store.SessionTitle(FSession.SessionId, Title, StoreErr);
+    FSession.Store.SessionLineage(FSession.SessionId, Parent, Depth, Lbl,
+      StoreErr);
+    Left := SessionDisplayName(Lbl, Title, FSession.SessionId);
+  end;
   if Left = '' then
     Left := Copy(FSession.SessionId, 1, 12);
   { Keep the title within the border: reserve room for the right-aligned context
@@ -1854,6 +1872,29 @@ end;
   parent is absent from the list (archived, or filtered out) is treated as a
   root rather than dropped: losing a session silently is worse than showing it
   flat. }
+function SessionDisplayName(const ALabel, ATitle, ASessionId: string): string;
+var
+  Name: string;
+begin
+  { The label names the agent: the operator's stored label, else the short id.
+    The title says what it is doing. Both, when both exist. }
+  Name := ALabel;
+  if Name = '' then
+  begin
+    if Length(ASessionId) > 12 then
+      Name := Copy(ASessionId, 1, 12)
+    else
+      Name := ASessionId;
+  end;
+
+  if ATitle = '' then
+    Result := Name
+  else if Name = '' then
+    Result := ATitle
+  else
+    Result := Name + ' - ' + ATitle;
+end;
+
 procedure OrderByLineage(var ARows: TSessionRowArray);
 var
   i, j, N, W: Integer;
@@ -1944,12 +1985,19 @@ procedure THarnessApp.RefreshSessions;
 var
   Rows: TSessionRowArray;
   StoreErr: TStoreError;
+  I: Integer;
 begin
   if (FSessionsModal = nil) or (FSession = nil) or (FSession.Store = nil) then
     Exit;
   if FSession.Store.ListSessionRows(FSession.WorkspaceId,
     FSessionsModal.ShowArchived, Rows, StoreErr) then
   begin
+    { Every row identifies its session the same way the header does:
+      `<label> - <latest turn title>`, the label falling back to the short id.
+      Applied BEFORE the lineage ordering, which indents whatever it finds. }
+    for I := 0 to High(Rows) do
+      Rows[I].Title := SessionDisplayName(Rows[I].LabelText, Rows[I].Title,
+        Rows[I].Id);
     OrderByLineage(Rows);
     FSessionsModal.SetRows(Rows);
   end;
@@ -2053,8 +2101,10 @@ var
 begin
   if (FSession = nil) or (FSession.Store = nil) or (ASessionId = '') then
     Exit;
-  { An empty title clears the override (back to the extracted title). }
-  FSession.Store.SetSessionTitleOverride(ASessionId, ANewTitle, Err);
+  { A rename names the AGENT, so it writes the label - not the title override.
+    The extracted title keeps tracking the latest turn; the label is the
+    operator's own handle. Clearing it falls back to the short session id. }
+  FSession.Store.SetSessionLabel(ASessionId, ANewTitle, Err);
   { A rename of the current session renames the header too. }
   if (FSession <> nil) and (ASessionId = FSession.SessionId) then
     UpdateHeader;

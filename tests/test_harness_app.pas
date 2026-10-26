@@ -200,6 +200,11 @@ type
     { A delegated child must not read as a peer of its parent in the sessions
       list: it follows its parent, indented, at every depth. Pure policy test. }
     procedure TestSessionRowsNestUnderTheirParent;
+    { A session identifies itself as `<label> - <title>` wherever it is shown:
+      the label names the agent, the title says what it is doing. }
+    procedure TestSessionDisplayNameJoinsLabelAndTitle;
+    procedure TestSessionDisplayNameFallsBackToTheShortId;
+    procedure TestRenameWritesTheLabelNotTheTitleOverride;
     procedure TestOrphanChildStaysAVisibleRoot;
     procedure TestDetachMakesAChildARoot;
     procedure TestSpyUnknownChildIsAnError;
@@ -1471,7 +1476,8 @@ begin
   AssertEquals('id prefix without a title',
     Copy(FSession.View.SessionId, 1, 12), FApp.Panel.HeaderLeft);
 
-  { An extracted title is shown instead of the id. Set it directly, then trigger
+  { An extracted title is shown beside the identifier, which falls back to the
+    short session id when there is no label. Set the title directly, then trigger
     a header refresh the way a completed turn does (UpdateStats -> UpdateHeader).
     A no-op status render is not enough, so submit a turn. }
   AssertTrue('set title', FSession.View.Store.SetSessionTitle(
@@ -1479,7 +1485,8 @@ begin
   FFake.AddResponse([TextDelta('hi'), FinishFrame('stop'), DoneFrame]);
   SubmitPrompt('hello');
   AssertTrue('turn finished', Pump(300));
-  AssertEquals('the title names the header', 'Fix the drain',
+  AssertEquals('the title is shown beside the id',
+    Copy(FSession.View.SessionId, 1, 12) + ' - Fix the drain',
     FApp.Panel.HeaderLeft);
 end;
 
@@ -1511,15 +1518,21 @@ var
   Title: string;
 begin
   { A non-ASCII title (a UTF-8 em dash) must survive the store and render as the
-    real glyph in the header, not '?'. }
+    real glyph in the header, not '?'. The title is kept SHORT on purpose: the
+    header now prefixes the id under the `<label> - <title>` format, so a long
+    title gets truncated and the glyph we are testing for would be cut away. }
   BuildWithStore;
-  Title := 'Fix the drain ' + #$E2#$80#$94 + ' phase 2';
+  Title := 'drain ' + #$E2#$80#$94 + ' p2';
   AssertTrue('set title', FSession.View.Store.SetSessionTitle(
     FSession.View.SessionId, Title, Err));
   FFake.AddResponse([TextDelta('hi'), FinishFrame('stop'), DoneFrame]);
   SubmitPrompt('hello');
   AssertTrue('turn finished', Pump(300));
-  AssertEquals('the title is in the header', Title, FApp.Panel.HeaderLeft);
+  { The em dash must survive; the id prefixes it under the new format. Assert
+    against Title itself - naming the string twice is how the previous version
+    silently drifted out of sync with the value it set. }
+  AssertTrue('the title is in the header: ' + FApp.Panel.HeaderLeft,
+    Pos(Title, FApp.Panel.HeaderLeft) > 0);
 end;
 
 procedure THarnessAppTest.TestRenamingTheCurrentSessionUpdatesTheHeader;
@@ -2740,6 +2753,72 @@ begin
   AssertTrue('child is marked as nested: ' + Rows[1].Title,
     Pos('do the thing', Rows[1].Title) > 0);
   AssertTrue('child is indented', Rows[1].Title <> 'do the thing');
+end;
+
+procedure THarnessAppTest.TestSessionDisplayNameJoinsLabelAndTitle;
+begin
+  { A session is an agent: what identifies it is the operator's name for it PLUS
+    what it is currently doing. Either alone loses half the answer. }
+  AssertEquals('label and title', 'docs - fix the parser',
+    SessionDisplayName('docs', 'fix the parser', 'abcdef0123456789abcdef'));
+end;
+
+procedure THarnessAppTest.TestSessionDisplayNameFallsBackToTheShortId;
+begin
+  { No label: the short id identifies it. No title: no dangling separator. }
+  AssertEquals('short id and title', 'abcdef012345 - doing the thing',
+    SessionDisplayName('', 'doing the thing', 'abcdef0123456789abcdef'));
+  AssertEquals('label only, no separator', 'docs',
+    SessionDisplayName('docs', '', 'abcdef0123456789abcdef'));
+  { Neither label nor title still yields something identifiable. }
+  AssertEquals('id alone', 'abcdef012345',
+    SessionDisplayName('', '', 'abcdef0123456789abcdef'));
+end;
+
+procedure THarnessAppTest.TestRenameWritesTheLabelNotTheTitleOverride;
+var
+  Store: TSqliteStore;
+  StoreCfg: TStoreConfig;
+  StoreErr: TStoreError;
+  WorkspaceId: Integer;
+  ChildId, Parent, Lbl, Title: string;
+  Depth: Integer;
+begin
+  { Rename moved from title_override to label: the label names the agent and
+    must survive a later extracted title, whereas the override SHADOWED the
+    title. After a rename, both must be readable, and the title must be free to
+    keep tracking the turn. }
+  BuildWithStore;
+  StoreCfg := Default(TStoreConfig);
+  StoreCfg.DatabasePath := FStorePath;
+  StoreCfg.BusyTimeoutMs := 5000;
+  Store := TSqliteStore.Create(StoreCfg);
+  try
+    AssertTrue('open store', Store.Open(StoreErr));
+    Store.EnsureWorkspace(FDir, WorkspaceId, StoreErr);
+    Store.CreateChildSession(WorkspaceId, FSession.View.SessionId, 1, 'child',
+      ChildId, StoreErr);
+
+    AssertTrue('set label', Store.SetSessionLabel(ChildId, 'my-agent', StoreErr));
+    AssertTrue('lineage label',
+      Store.SessionLineage(ChildId, Parent, Depth, Lbl, StoreErr));
+    AssertEquals('label stored', 'my-agent', Lbl);
+
+    { The extracted title is independent of the label - it is NOT shadowed. }
+    AssertTrue('set title', Store.SetSessionTitle(ChildId, 'a turn title',
+      StoreErr));
+    AssertTrue('title readable', Store.SessionTitle(ChildId, Title, StoreErr));
+    AssertEquals('title tracked separately', 'a turn title', Title);
+    AssertTrue('label still there',
+      Store.SessionLineage(ChildId, Parent, Depth, Lbl, StoreErr));
+    AssertEquals('label unchanged by a title', 'my-agent', Lbl);
+
+    { And the display joins them. }
+    AssertEquals('joined', 'my-agent - a turn title',
+      SessionDisplayName(Lbl, Title, ChildId));
+  finally
+    Store.Free;
+  end;
 end;
 
 procedure THarnessAppTest.TestOrphanChildStaysAVisibleRoot;

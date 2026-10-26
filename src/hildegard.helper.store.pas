@@ -185,7 +185,15 @@ type
     { Set the extracted (generated) title; a no-op when an override is set. }
     function SetSessionTitle(const ASessionId, ATitle: string;
       out AError: TStoreError): Boolean;
-    { Set ('' clears) the operator's title override. }
+    { Set ('' clears) the session's LABEL: the operator's own name for it.
+      Replaces the title override as the rename target. A long-lived session is
+      an agent, so what the operator names is the agent, not the transcript; the
+      extracted title keeps tracking the latest turn. }
+    function SetSessionLabel(const ASessionId, ALabel: string;
+      out AError: TStoreError): Boolean;
+    { Set ('' clears) the operator's title override. DEPRECATED: renames now
+      write the label. Kept so an old override still resolves in SessionTitle
+      until a migration clears the column. }
     function SetSessionTitleOverride(const ASessionId, AOverride: string;
       out AError: TStoreError): Boolean;
     { The resolved title (override else extracted; '' when neither). }
@@ -3302,6 +3310,37 @@ begin
         Exit(Fail(AError, seError, 'could not set title', DbErrorText));
       Stmt.BindText(1, ATitle);
       Stmt.BindText(2, ASessionId);
+      Stmt.Step;
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.SetSessionLabel(const ASessionId, ALabel: string;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    { The label is the operator's name for the AGENT. Unlike the extracted title
+      it is never overwritten by a reply, and unlike the old title override it
+      does not shadow the title: both are kept, and the display joins them. }
+    Stmt := TStmt.Create(FDb,
+      'UPDATE sessions SET label = ?, updated_at = ? WHERE id = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not set label', DbErrorText));
+      Stmt.BindText(1, ALabel);
+      Stmt.BindInt64(2, NowMs);
+      Stmt.BindText(3, ASessionId);
       Stmt.Step;
     finally
       Stmt.Free;
