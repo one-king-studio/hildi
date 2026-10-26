@@ -320,6 +320,9 @@ type
     { One iteration: drain the queue, resolve any answered approval modal, then
       run TTuiApp.Step. Returns False once stopped. }
     function Step: Boolean;
+    { One per-frame body, shared by Step (tests) and OnLoop (the app), so the two
+      cannot drift apart. Five subagent bugs shipped from that drift. }
+    procedure Tick;
     { Clock-driven loop: wait on input, drain the queue each iteration, and render
       on the frame cadence while a turn is in flight. }
     procedure Run(ACheckStop: TStopCheck = nil);
@@ -510,6 +513,13 @@ end;
 function ShouldTrimHistory(AOlderPages: Integer; ANowMs, ALastScrollMs: Int64;
   AScrollY, AMaxScroll: Integer): Boolean;
 begin
+  { ALastScrollMs = 0 means the operator has NEVER scrolled, which is not the
+    same as "idle for a long time". GetTickCount64 is system uptime, so treating
+    0 as a timestamp made the trim fire instantly on any machine up longer than
+    TrimIdleMs - and it unloaded pages the operator was still reading. No scroll
+    yet is evidence of nothing, so it is not evidence of idleness. }
+  if ALastScrollMs <= 0 then
+    Exit(False);
   Result := (AOlderPages > 0) and
     (ANowMs - ALastScrollMs >= TrimIdleMs) and
     (AScrollY >= AMaxScroll - 2);
@@ -2397,24 +2407,22 @@ end;
 
 procedure THarnessApp.OnLoop;
 begin
-  { Drain each iteration, then reflect the resulting busy state so Run picks the
-    frame cadence (not the idle wait) while a turn is streaming. }
-  CloseModal;
-  SyncSessionsModal;
-  CheckInterruptWindow;
-  DrainQueue;
-  FlushToolOutput;
-  TrimHistory;
-  SyncBusy;
+  Tick;
   { THE PRODUCTION PATH for a deferred selection. It lived only in Step - which
     is the TEST loop - so arrows moved the list's selection and the transcript
-    never changed. Both loops must honour it, and this is the one the app runs. }
+    never changed. It stays outside Tick because it must run after dispatch,
+    which Tick cannot see; both loops call it for the same reason. }
   ConsumePendingSelect;
   { The caret is steady while the terminal is unfocused (DECSET 1004). }
   FPanel.Compose.Edit.Blinking := FApp.TerminalFocused;
 end;
 
-function THarnessApp.Step: Boolean;
+{ One per-frame body, called by BOTH Step (tests) and OnLoop (the app). They had
+  drifted apart - Step drained the spy and OnLoop trimmed history and synced the
+  busy state - so a behaviour could work in the suite and be absent in the app.
+  Five subagent bugs shipped that way. Anything that must happen once per frame
+  belongs HERE, not in one of the two callers. }
+procedure THarnessApp.Tick;
 begin
   { Pop an answered modal (and show the next queued ask) before draining, so a
     fresh ask is never stacked on top of one still being answered. }
@@ -2424,6 +2432,13 @@ begin
   DrainQueue;
   FlushToolOutput;
   DrainSpy;
+  TrimHistory;
+  SyncBusy;
+end;
+
+function THarnessApp.Step: Boolean;
+begin
+  Tick;
   Result := FApp.Step;
   { A selection the list requested DURING dispatch is honoured HERE, after every
     widget has finished handling the key. ShowSpy closes one client, opens

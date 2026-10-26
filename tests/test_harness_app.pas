@@ -1973,15 +1973,27 @@ end;
 procedure THarnessAppTest.TestShouldTrimHistory;
 begin
   { Trim only when older pages are loaded, the operator has been idle past the
-    window, AND the viewport is at the bottom. }
-  AssertFalse('no older pages: no trim', ShouldTrimHistory(0, 100000, 0, 500, 500));
-  AssertFalse('recent scroll: no trim', ShouldTrimHistory(2, 5000, 0, 500, 500));
+    window, AND the viewport is at the bottom.
+
+    ALastScrollMs must be a REAL timestamp here. The old version passed 0
+    everywhere, and 0 meant "never scrolled" - which on a machine whose uptime
+    exceeds TrimIdleMs made the trim fire instantly and unload pages the operator
+    was still reading. The test could not catch that because it only ever used
+    the sentinel. }
+  AssertFalse('no older pages: no trim',
+    ShouldTrimHistory(0, 100000, 1000, 500, 500));
+  AssertFalse('recent scroll: no trim',
+    ShouldTrimHistory(2, 5000, 1000, 500, 500));
   AssertFalse('scrolled up (not at the bottom): no trim',
-    ShouldTrimHistory(2, 100000, 0, 100, 500));
+    ShouldTrimHistory(2, 100000, 1000, 100, 500));
   AssertTrue('idle + at the bottom: trim',
-    ShouldTrimHistory(2, 100000, 0, 500, 500));
+    ShouldTrimHistory(2, 100000, 1000, 500, 500));
   AssertTrue('within 2 rows of the bottom still trims',
-    ShouldTrimHistory(2, 100000, 0, 498, 500));
+    ShouldTrimHistory(2, 100000, 1000, 498, 500));
+  { Never scrolled is not the same as idle - it is no evidence either way, and
+    trimming on it unloads pages nobody has finished reading. }
+  AssertFalse('never scrolled: never trim',
+    ShouldTrimHistory(2, 100000, 0, 500, 500));
 end;
 
 procedure THarnessAppTest.TestThinkingStateDuringATurn;
