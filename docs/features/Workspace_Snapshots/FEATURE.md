@@ -22,10 +22,11 @@ What is **built**:
 - **One consumer.** The board's staleness check reads the log
   (`ChangedSince`), which is what makes a board entry call itself stale.
 
-What is **built** as of `88b0eef`: capture on every write path, patch storage with
+What is **built** as of `ec8121d`: capture on every write path, patch storage with
 16-turn retention, the net fold, the turn summary block (per-file stats collapsed,
 diffs expanded), per-call anchoring end to end, the mechanical revert engine, and
-`/undo` + `/revert` dispatch.
+`/undo` + `/redo` + `/revert` dispatch — with the undo/redo bookkeeping complete
+(see below).
 
 What is **not built**, and is the remaining work:
 
@@ -33,14 +34,43 @@ What is **not built**, and is the remaining work:
   and the diffs expanded, so the log is legible — but there is no dedicated pane
   with per-file selection. Card #22. See `Turn_Summary_v1.SPEC.md`.
 - **The history dialog**, shared by `/undo`, `/redo` and `/revert`. It is what lets
-  the operator pick a turn rather than only the newest. Card #26 has the
-  prerequisites; do not wire it before they land.
-- **`/redo`.** The mechanical inverse of `/undo`: replay the suffix the undo took
-  away. Needs a redo buffer, closed when the operator prompts.
-- **Three integrity prerequisites for the dialog** (card #26): mark undone turns'
-  `file_changes` rows reverted so the dialog cannot offer a stale turn; report
-  "already undone" rather than skipping silently; exclude undone turns in
-  `Compose` so they no longer reach the provider.
+  the operator pick a turn rather than only the newest. Its prerequisites have
+  landed, so it is unblocked — but it must resolve redo through
+  `OldestRedoableTurn` rather than scanning for `tsUndone`, or it will offer the
+  abandoned turns the redo floor exists to hide.
+### Undo, redo and the record
+
+Undo is **mechanical and cumulative**, and its bookkeeping is now complete — which
+it was not when the command first shipped, and each gap was a different lie about
+what the workspace contained.
+
+- **`tsUndone` is its own turn status**, appended to the enum because the status is
+  persisted as its ordinal. It is distinct from `tsCancelled`, which means
+  "interrupted, possibly partly in effect"; only an *undone* turn is wholly
+  reverted, and only that one may be dropped from the context.
+- **Undone turns are soft-deleted.** The turn keeps its row, its messages and its
+  change rows. Its `file_changes` rows are marked `reverted_at` (migration v19) so
+  a dialog cannot offer a turn whose files are already back at the pre-turn state.
+  Its **messages are kept, not deleted** — an earlier version called
+  `DeleteTurnMessages`, which contradicted this spec and would have made the turn
+  unrecoverable by redo.
+- **The context excludes undone turns** through a `NOT EXISTS` filter in
+  `QueryMessagesAfter`, not in `Compose`. That query feeds both the provider prompt
+  and the transcript (`QueryActiveMessages` routes through it), so one filter keeps
+  the two moving together; two paths would have drifted.
+- **Redo is the exact mirror**: `ApplyText` is `RevertText` with the halves swapped
+  (compare `BeforeHash`, apply the patch forward, verify `AfterHash`), and
+  `ApplyRecord`/`ApplyTurn` share their worker with the revert so the two
+  directions cannot disagree about refusals. Redo walks the suffix **oldest-first**
+  — the mirror of undo's newest-first, and required for the same reason: the turn
+  being moved is the one whose precondition currently holds.
+- **A prompt closes the redo window** (migration v20, `sessions.redo_floor`). This
+  cannot be derived from status, because the spec requires abandoned turns to keep
+  `tsUndone` — the record must still show the work happened. So the floor is
+  recorded: a prompt raises it to the newest turn that existed at that moment, and
+  nothing at or below it is redoable. Undo five turns, prompt, undo two more, redo:
+  the redo resolves to the third turn, and the abandoned five stay undone.
+
 - **Process-tier records have no bytes.** A `csProcess` row captures the after-text
   but not the before, so it carries no patch. `RevertTurn` reports those as
   `rvSkipped` and `UndoTurn` refuses the turn rather than half-reverting it. The

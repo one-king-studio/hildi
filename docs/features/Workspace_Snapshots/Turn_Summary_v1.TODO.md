@@ -2,6 +2,14 @@
 
 **Spec:** [Turn_Summary_v1.SPEC.md](Turn_Summary_v1.SPEC.md)
 
+> **STATUS (as of `ec8121d`): the checkboxes below are NOT reliable — do not read
+> them as a work list.** Phases 1, 3 and 4 are entirely unticked yet fully shipped
+> (`ForTurn` on both stores, `SummarizeTurn`/`TTurnChangeSummary`/`TFileChangeStat`,
+> and `TDiffView` all exist and are wired through `hildegard.helper.harness.app.pas`).
+> The plan was abandoned mid-flight and never reconciled against the merged code.
+> [FEATURE.md](FEATURE.md) is the authority on what is built. What is genuinely
+> unbuilt is **Phase 6** (the viewer pane, card #22) and the shared history dialog.
+
 Work TDD-first: each phase adds its tests before its implementation and runs
 `make check` before moving on. Phase 1 is pure and needs no TUI.
 
