@@ -135,7 +135,7 @@ type
     function Poll(out AEvent: TSubagentEvent): Boolean;
 
     { ISubagentService. }
-    function Delegate(const ATask, AContext, ALabel: string;
+    function Delegate(const ATask, AContext, ALabel, ATitle: string;
       out AResult: TSubagentSpawnResult): Boolean;
     function Message(const ASessionId, AText: string;
       out AError: string): Boolean;
@@ -419,7 +419,7 @@ begin
   AError := '';
 end;
 
-function TSubagentSupervisor.Delegate(const ATask, AContext, ALabel: string;
+function TSubagentSupervisor.Delegate(const ATask, AContext, ALabel, ATitle: string;
   out AResult: TSubagentSpawnResult): Boolean;
 var
   ChildId, Err: string;
@@ -464,6 +464,14 @@ begin
     AResult.Error := 'could not create subagent session: ' + StoreErr.Message;
     Exit;
   end;
+
+  { The delegation REASON becomes the child's title. Delegation always carries a
+    reason, and it is the only thing that says what the task is for - without it
+    the child shows up as an untitled session and the list is unnavigable.
+    `label` stays as the short handle; the title is the sentence. Best-effort:
+    a title that fails to write must not fail the spawn. }
+  if Trim(ATitle) <> '' then
+    FStore.SetSessionTitle(ChildId, ATitle, StoreErr);
 
   Cfg := MakeClientConfig(ChildId, Err);
   Sink := TChildSink.Create(Self, ChildId);

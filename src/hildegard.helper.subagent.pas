@@ -53,7 +53,7 @@ type
   ISubagentService = interface
     { Spawn a child for a task. Non-blocking: returns once the child session
       exists and its runtime is spawned; its first turn runs asynchronously. }
-    function Delegate(const ATask, AContext, ALabel: string;
+    function Delegate(const ATask, AContext, ALabel, ATitle: string;
       out AResult: TSubagentSpawnResult): Boolean;
     { Send a follow-up message to an existing child by session id. }
     function Message(const ASessionId, AText: string;
@@ -405,7 +405,10 @@ begin
           if not Approve(SubagentApprovalRef(FVerb), Summary, Reason, AError)
           then
             Exit;
-          if not FService.Delegate(Task, Context, Lbl, Spawn) then
+          { The reason is required on every delegate call, and it is the best
+            description of what the child is for - so it becomes the child's
+            title. Lbl stays the short handle. }
+          if not FService.Delegate(Task, Context, Lbl, Reason, Spawn) then
           begin
             AError := Spawn.Error;
             Exit;

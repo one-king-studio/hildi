@@ -38,7 +38,7 @@ type
     LastMessageText: string;
     LastAbortId: string;
     LastReleaseId: string;
-    function Delegate(const ATask, AContext, ALabel: string;
+    function Delegate(const ATask, AContext, ALabel, ATitle: string;
       out AResult: TSubagentSpawnResult): Boolean;
     function Message(const ASessionId, AText: string;
       out AError: string): Boolean;
@@ -100,7 +100,7 @@ end;
 
 { TFakeService }
 
-function TFakeService.Delegate(const ATask, AContext, ALabel: string;
+function TFakeService.Delegate(const ATask, AContext, ALabel, ATitle: string;
   out AResult: TSubagentSpawnResult): Boolean;
 begin
   LastTask := ATask;

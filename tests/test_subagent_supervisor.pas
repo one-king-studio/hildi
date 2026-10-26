@@ -220,7 +220,7 @@ procedure TSubagentSupervisorTest.TestDelegateSpawnsChildWithLineage;
 var
   Sup: TSubagentSupervisor;
   Res: TSubagentSpawnResult;
-  Parent, Lbl: string;
+  Parent, Lbl, Title: string;
   Depth: Integer;
   Err: TStoreError;
   Ev: TSubagentEvent;
@@ -228,7 +228,7 @@ begin
   FChildTransport := TFakeTransport.Create;
   Sup := MakeSupervisor(10, 1);
   try
-    AssertTrue('delegate ok', Sup.Delegate('do it', 'ctx', 'research', Res));
+    AssertTrue('delegate ok', Sup.Delegate('do it', 'ctx', 'research', 'why', Res));
     AssertTrue('spawned event', WaitEvent(Sup, sekSpawned, Ev));
     { The child is an ordinary session with lineage. }
     AssertTrue('lineage readable',
@@ -236,6 +236,12 @@ begin
     AssertEquals('parent', FRoot, Parent);
     AssertEquals('depth', 1, Depth);
     AssertEquals('label', 'research', Lbl);
+    { The delegation REASON becomes the title, so the session list says what the
+      task is for. Before this, the reason was discarded at spawn and the child
+      showed up untitled. }
+    AssertTrue('title readable',
+      FStore.SessionTitle(Res.SessionId, Title, Err));
+    AssertEquals('title is the reason', 'why', Title);
   finally
     Sup.Free;
   end;
@@ -249,7 +255,7 @@ begin
   FChildTransport := TFakeTransport.Create;
   Sup := MakeSupervisor(10, 1);
   try
-    AssertTrue('delegate ok', Sup.Delegate('t', 'c', 'l', Res));
+    AssertTrue('delegate ok', Sup.Delegate('t', 'c', 'l', 'why', Res));
     AssertTrue('has session id', Res.SessionId <> '');
     AssertEquals('max', 10, Res.Max);
     AssertEquals('one slot used', 9, Res.Available);
@@ -267,8 +273,8 @@ begin
   FChildTransport := TFakeTransport.Create;
   Sup := MakeSupervisor(1, 1);
   try
-    AssertTrue('first ok', Sup.Delegate('t', 'c', 'l', Res));
-    AssertFalse('second fails', Sup.Delegate('t2', 'c', 'l2', Res));
+    AssertTrue('first ok', Sup.Delegate('t', 'c', 'l', 'why', Res));
+    AssertFalse('second fails', Sup.Delegate('t2', 'c', 'l2', 'why', Res));
     AssertTrue('names capacity', Pos('capacity', Res.Error) > 0);
     AssertEquals('still one available', 0, Res.Available);
   finally
@@ -293,7 +299,7 @@ begin
   Cfg.MaxDepth := 1;
   Sup := TSubagentSupervisor.Create(Cfg, FStore);
   try
-    AssertFalse('depth cap fails', Sup.Delegate('t', 'c', 'l', Res));
+    AssertFalse('depth cap fails', Sup.Delegate('t', 'c', 'l', 'why', Res));
     AssertTrue('names depth', Pos('depth', Res.Error) > 0);
   finally
     Sup.Free;
@@ -313,7 +319,7 @@ begin
   FChildTransport := Fake;
   Sup := MakeSupervisor(10, 1);
   try
-    AssertTrue('delegate ok', Sup.Delegate('do it', 'ctx', 'l', Res));
+    AssertTrue('delegate ok', Sup.Delegate('do it', 'ctx', 'l', 'why', Res));
     AssertTrue('result event', WaitEvent(Sup, sekResult, Ev));
     AssertEquals('child id', Res.SessionId, Ev.SessionId);
     AssertTrue('captures the answer', Pos('the delegated answer',
@@ -333,7 +339,7 @@ begin
   FChildTransport := TFakeTransport.Create;
   Sup := MakeSupervisor(10, 1);
   try
-    Sup.Delegate('t', 'c', 'l', Res);
+    Sup.Delegate('t', 'c', 'l', 'why', Res);
     AssertEquals('one slot used', 9, Sup.Available);
     AssertTrue('abort ok', Sup.Abort(Res.SessionId, Err));
     AssertEquals('slot freed', 10, Sup.Available);
@@ -353,7 +359,7 @@ begin
   FChildTransport := TFakeTransport.Create;
   Sup := MakeSupervisor(10, 1);
   try
-    Sup.Delegate('t', 'c', 'l', Res);
+    Sup.Delegate('t', 'c', 'l', 'why', Res);
     AssertEquals('one slot used', 9, Sup.Available);
     AssertTrue('release ok', Sup.Release(Res.SessionId, Err));
     AssertEquals('slot freed', 10, Sup.Available);
@@ -389,7 +395,7 @@ begin
   FChildTransport := TFakeTransport.Create;
   Sup := MakeSupervisor(10, 1);
   try
-    Sup.Delegate('t', 'c', 'l', Res);
+    Sup.Delegate('t', 'c', 'l', 'why', Res);
     AssertEquals('one slot used', 9, Sup.Available);
     Sup.TerminateAll;
     AssertEquals('all slots free', 10, Sup.Available);
@@ -418,7 +424,7 @@ begin
   FChildTransport := Fake;
   Sup := MakeSupervisor(10, 1);
   try
-    AssertTrue('delegate ok', Sup.Delegate('do it', 'ctx', 'l', Res));
+    AssertTrue('delegate ok', Sup.Delegate('do it', 'ctx', 'l', 'why', Res));
     AssertTrue('child ask relayed', WaitEvent(Sup, sekApprovalAsk, Ev));
     AssertEquals('names the child', Res.SessionId, Ev.SessionId);
     AssertTrue('has a child ask id', Ev.AskId <> '');
@@ -467,7 +473,7 @@ begin
   Sup.Factory := ChildFactory;
   Sup.HasClient := False;   // headless
   try
-    AssertTrue('delegate ok', Sup.Delegate('do it', 'ctx', 'l', Res));
+    AssertTrue('delegate ok', Sup.Delegate('do it', 'ctx', 'l', 'why', Res));
     AssertTrue('child ask relayed', WaitEvent(Sup, sekApprovalAsk, Ev));
     { Wait past the auto-deny window; the supervisor denies and the child, told
       it was denied, continues and finishes. }
