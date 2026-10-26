@@ -184,6 +184,10 @@ type
     procedure TestShouldTrimHistory;
     procedure TestSidebarTogglesWithCtrlD;
     procedure TestSidebarRendersItsRows;
+    { The list moved into the composer's place; keys must still reach it, and
+      Enter on a row must open that child's spy. This is the one behaviour I
+      shipped without proof. }
+    procedure TestSidebarRoutesKeysAndEntersTheSpy;
     procedure TestSpyEnterShowsChildAndIndicator;
     procedure TestSpyCtrlDReturnsToParent;
     { Escape is now a two-step CANCEL, not an exit: the first press arms, the
@@ -2447,6 +2451,58 @@ begin
     if Pos('scan the tree', FSurface.RowText(Y, 0, FSurface.Width)) > 0 then
       Found := True;
   AssertTrue('the sidebar row is rendered', Found);
+end;
+
+procedure THarnessAppTest.TestSidebarRoutesKeysAndEntersTheSpy;
+var
+  Store: TSqliteStore;
+  StoreCfg: TStoreConfig;
+  StoreErr: TStoreError;
+  WorkspaceId: Integer;
+  ChildId: string;
+begin
+  { The list now sits in the composer's place rather than floating over the
+    transcript. What must still hold is that keys REACH it and Enter opens that
+    child's spy - the routing depends on the overlay, not on the list itself, so
+    a green TSidebar unit test proves nothing about it.
+
+    A child session has to exist for the spy to open, so this needs a store. }
+  BuildWithStore;
+  StoreCfg := Default(TStoreConfig);
+  StoreCfg.DatabasePath := FStorePath;
+  StoreCfg.BusyTimeoutMs := 5000;
+  Store := TSqliteStore.Create(StoreCfg);
+  try
+    AssertTrue('open store', Store.Open(StoreErr));
+    Store.EnsureWorkspace(FDir, WorkspaceId, StoreErr);
+    Store.CreateChildSession(WorkspaceId, FSession.View.SessionId, 1, 'child',
+      ChildId, StoreErr);
+  finally
+    Store.Free;
+  end;
+
+  FApp.OnSpyFactory := OpenStubSpy;
+  FSpyQueue := TTurnQueue.Create;
+
+  { Put the child in the roster, then open the list. }
+  FSession.Queue.Push(SubagentEvent(ChildId, 'scan the tree', 'running'));
+  FApp.Step;
+  FInput.Push(Ctrl('d'));
+  FApp.Step;
+  FApp.Step;
+  AssertTrue('the list is up', FApp.SidebarVisible);
+
+  { Keys must reach the list through the overlay while it is visible. Down is
+    handled by TSidebar; if routing were broken this would be swallowed and the
+    selection would never move. }
+  FInput.Push(Key(kkDown));
+  FApp.Step;
+
+  { Enter opens that child's spy. }
+  FInput.Push(Key(kkEnter));
+  FApp.Step;
+  FApp.Step;
+  AssertEquals('enter opened the child spy', ChildId, FApp.SpiedSessionId);
 end;
 
 procedure THarnessAppTest.TestSpyEnterShowsChildAndIndicator;
