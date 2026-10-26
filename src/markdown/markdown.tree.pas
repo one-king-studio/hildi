@@ -427,6 +427,8 @@ begin
   while (I <= Length(ALine)) and (ALine[I] = ' ') do
     Inc(I);
   D := 0;
+  { `>` alone is a valid empty quote line - requiring a trailing space made a
+    blank quote line terminate the run. }
   while (I <= Length(ALine)) and (ALine[I] = '>') do
   begin
     Inc(D);
@@ -1028,18 +1030,8 @@ begin
       Continue;
     end;
 
-    { thematic break }
-    if IsRule(ALines[I]) then
-    begin
-      N := Default(TMdNode);
-      N.Kind := mnHorizontalRule;
-      B.Add(N, Id);
-      B.Append(AParent, Id);
-      Inc(I);
-      Continue;
-    end;
-
-    { setext heading: the very next line is the underline }
+    { setext heading: the very next line is the underline. This MUST precede the
+      thematic break, or `---` is claimed as a rule and the heading vanishes. }
     if (I < ATo) and SetextLevel(ALines[I + 1], Level) then
     begin
       N := Default(TMdNode);
@@ -1049,6 +1041,17 @@ begin
       B.Append(AParent, Id);
       ParseInlines(B, Id, TrimU(ALines[I]));
       Inc(I, 2);
+      Continue;
+    end;
+
+    { thematic break }
+    if IsRule(ALines[I]) then
+    begin
+      N := Default(TMdNode);
+      N.Kind := mnHorizontalRule;
+      B.Add(N, Id);
+      B.Append(AParent, Id);
+      Inc(I);
       Continue;
     end;
 

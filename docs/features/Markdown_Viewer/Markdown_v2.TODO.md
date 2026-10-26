@@ -26,15 +26,34 @@ not done.
 
 ## Phase 2 — The compat adapter
 
-- [ ] `src/markdown/markdown.compat.pas` — `BlocksForTui(const ADoc: TMdDocument;
+- [x] `src/markdown/markdown.compat.pas` — `BlocksForTui(const ADoc: TMdDocument;
       out ALossy: Boolean): TMdBlockArray`, projecting only what has a v1 equivalent.
-- [ ] Repoint `tui.widgets.markdownview` and `tui.widgets.chat` at the tree + adapter.
-- [ ] **The regression wall:** every document in `tests/data/md_corpus/` projects through
+- [ ] Repoint `tui.widgets.markdownview` and `tui.widgets.chat` at the tree + adapter. **DEFERRED** — the adapter is proven faithful first (below), which is the order that makes the repoint safe. The repoint is itself the trigger for the deletion condition, so it belongs with Phase 7.
+- [x] **The regression wall:** every document in `tests/data/md_corpus/` projects through
       the adapter to exactly the blocks the v1 parser produced.
       *Test:* `TestCompatIsLosslessForV1Corpus` — asserts `ALossy = False` for the whole
       corpus, so the adapter cannot quietly become the product.
-- [ ] `tests/test_markdown.pas` still passes with import changes only. Any assertion that
+- [x] `tests/test_markdown.pas` still passes with import changes only. *(No repoint yet, so it is untouched and green.)* Any assertion that
       must change is justified in the commit.
+
+**Two real bugs in the tree, found by the adapter's corpus guard** — not by review,
+and not by the tree's own tests (which asserted shapes the bugs did not reach):
+
+1. **Setext was checked after the paragraph branch had claimed the line**, so
+   `Title` / `=====` became a paragraph plus a stray rule. The corpus document
+   `04_setext_and_rules.md` is what caught it.
+2. **A bare `>` was not a quote line.** Requiring a space after the marker split
+   `07_quote_nesting.md` into two quotes and reported it lossy. A blank quote line
+   is valid.
+
+Plus one bug in the adapter itself: a **formatted run is a wrapper `text` node**
+whose `Content` is empty and whose child holds the text. Pushing the wrapper's
+content and stopping turned `a **bold** word` into `a word`.
+
+**Three of my own assertions were wrong** and were rewritten rather than
+weakened: I asserted that footnotes and math are lossy, but the tree does not
+parse that syntax yet, so no node exists and nothing is discarded. A test that
+asserts lossiness for unparsed syntax passes for the wrong reason.
 
 ## Phase 3 — Inline, once, linearly
 
