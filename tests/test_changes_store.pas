@@ -39,6 +39,8 @@ type
       written, so the id is stamped afterwards. }
     procedure TestSetMessageIdAnchorsARowAfterTheFact;
     procedure TestSetMessageIdOnAMissingRowIsNotAnError;
+    { A delegating turn records under its CHILD session: one query for the lineage. }
+    procedure TestForSessionsCoversTheWholeLineage;
     procedure TestKeyframeRoundTripAndHorizon;
     procedure TestPruneKeepsTheHorizonKeyframe;
     { Retention in turns: past the window, the oldest turn's changes go. }
@@ -284,6 +286,41 @@ begin
     and the anchor is a normal race, and it must not fail the turn. }
   AssertTrue('no such row', FChanges.SetMessageId(1, 9999, 4242, Err));
   AssertEquals('no error', '', Err);
+end;
+
+procedure TChangesStoreTest.TestForSessionsCoversTheWholeLineage;
+var
+  Rows: TChangeRecordArray;
+  Id: Integer;
+  Err: string;
+  Ids: TStringArrayLite;
+  R: TChangeRecord;
+begin
+  { A delegating turn's work is recorded under its CHILD session's turn, so
+    ForTurn(parentTurn) cannot see it. This is the query that lets a revert walk
+    the lineage in one go rather than one session at a time. }
+  R := Rec('parent.txt', ckModified, '', 'p', 7);
+  R.SessionId := 'sess-parent';
+  AssertTrue('parent row', FChanges.Append(R, Id, Err));
+
+  R := Rec('child.txt', ckModified, '', 'c', 8);
+  R.SessionId := 'sess-child';
+  AssertTrue('child row', FChanges.Append(R, Id, Err));
+
+  R := Rec('other.txt', ckModified, '', 'o', 9);
+  R.SessionId := 'sess-unrelated';
+  AssertTrue('unrelated row', FChanges.Append(R, Id, Err));
+
+  SetLength(Ids, 2);
+  Ids[0] := 'sess-parent';
+  Ids[1] := 'sess-child';
+  AssertTrue('lineage', FChanges.ForSessions(1, Ids, Rows, Err));
+  AssertEquals('parent and child, not the unrelated one', 2, Length(Rows));
+
+  { An empty lineage is an answer, not a failure. }
+  SetLength(Ids, 0);
+  AssertTrue('empty lineage', FChanges.ForSessions(1, Ids, Rows, Err));
+  AssertEquals('nothing', 0, Length(Rows));
 end;
 
 procedure TChangesStoreTest.TestKeyframeRoundTripAndHorizon;

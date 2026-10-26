@@ -38,6 +38,9 @@ type
       out AError: string): Boolean;
     function ForTurn(AWorkspaceId, ATurnId: Integer;
       out ARows: TChangeRecordArray; out AError: string): Boolean;
+    function ForSessions(AWorkspaceId: Integer;
+      const ASessionIds: TStringArrayLite; out ARows: TChangeRecordArray;
+      out AError: string): Boolean;
     function SetMessageId(AWorkspaceId, AChangeId, AMessageId: Integer;
       out AError: string): Boolean;
     function KeyframeBefore(AWorkspaceId: Integer; const APath: string;
@@ -354,6 +357,67 @@ begin
     try
       sqlite3_bind_int(Stmt, 1, AWorkspaceId);
       sqlite3_bind_int(Stmt, 2, ATurnId);
+      N := 0;
+      while sqlite3_step(Stmt) = SQLITE_ROW do
+      begin
+        SetLength(ARows, N + 1);
+        Fill(Stmt, ARows[N]);
+        Inc(N);
+      end;
+      Result := True;
+    finally
+      sqlite3_finalize(Stmt);
+    end;
+  finally
+    FStore.Lock.Release;
+  end;
+end;
+
+function TSqliteChangeStore.ForSessions(AWorkspaceId: Integer;
+  const ASessionIds: TStringArrayLite; out ARows: TChangeRecordArray;
+  out AError: string): Boolean;
+var
+  Stmt: Psqlite3_stmt;
+  Bound: array of AnsiString;
+  SQL, List: string;
+  I, N: Integer;
+begin
+  Result := False;
+  ARows := nil;
+  AError := '';
+  if (FStore = nil) or (FStore.Db = nil) then
+    Exit;
+  if Length(ASessionIds) = 0 then
+  begin
+    { An empty lineage is an answer, not a failure. }
+    Result := True;
+    Exit;
+  end;
+  { One placeholder per session. A lineage is small and bounded by depth. }
+  List := '';
+  SetLength(Bound, Length(ASessionIds));
+  for I := 0 to High(ASessionIds) do
+  begin
+    if I > 0 then
+      List := List + ', ';
+    List := List + '?';
+    Bound[I] := AnsiString(ASessionIds[I]);
+  end;
+  SQL := SqlSelectChange + 'WHERE workspace_id = ? AND session_id IN (' +
+    List + ') ORDER BY id';
+  FStore.Lock.Acquire;
+  try
+    Stmt := nil;
+    if sqlite3_prepare_v2(FStore.Db, PAnsiChar(AnsiString(SQL)), -1, @Stmt, nil)
+      <> 0 then
+    begin
+      AError := 'could not prepare the query';
+      Exit;
+    end;
+    try
+      sqlite3_bind_int(Stmt, 1, AWorkspaceId);
+      for I := 0 to High(Bound) do
+        sqlite3_bind_text(Stmt, 2 + I, PAnsiChar(Bound[I]), -1, nil);
       N := 0;
       while sqlite3_step(Stmt) = SQLITE_ROW do
       begin

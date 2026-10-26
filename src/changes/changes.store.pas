@@ -40,6 +40,15 @@ type
       changed" the same way either way. }
     function ForTurn(AWorkspaceId, ATurnId: Integer;
       out ARows: TChangeRecordArray; out AError: string): Boolean;
+    { Every change recorded by any of ASessionIds, ascending id.
+
+      A delegating turn's work is recorded under its CHILD session's turn, so
+      ForTurn(parentTurn) cannot see it. Reverting a decision therefore needs the
+      parent's rows plus its children's - which is what this answers, one query
+      for the whole lineage rather than one per session. }
+    function ForSessions(AWorkspaceId: Integer;
+      const ASessionIds: TStringArrayLite; out ARows: TChangeRecordArray;
+      out AError: string): Boolean;
     { Anchor a row to the tool-result message that caused it, AFTER the fact.
 
       The row is written while the tool is still running, so its message id is
@@ -94,6 +103,9 @@ type
       out AError: string): Boolean;
     function ForTurn(AWorkspaceId, ATurnId: Integer;
       out ARows: TChangeRecordArray; out AError: string): Boolean;
+    function ForSessions(AWorkspaceId: Integer;
+      const ASessionIds: TStringArrayLite; out ARows: TChangeRecordArray;
+      out AError: string): Boolean;
     function SetMessageId(AWorkspaceId, AChangeId, AMessageId: Integer;
       out AError: string): Boolean;
     function KeyframeBefore(AWorkspaceId: Integer; const APath: string;
@@ -232,6 +244,34 @@ begin
   begin
     if (FRecords[I].WorkspaceId <> AWorkspaceId) or
       (FRecords[I].TurnId <> ATurnId) then
+      Continue;
+    SetLength(ARows, Length(ARows) + 1);
+    ARows[High(ARows)] := FRecords[I];
+  end;
+  Result := True;
+end;
+
+function TMemoryChangeStore.ForSessions(AWorkspaceId: Integer;
+  const ASessionIds: TStringArrayLite; out ARows: TChangeRecordArray;
+  out AError: string): Boolean;
+var
+  I, K: Integer;
+  Hit: Boolean;
+begin
+  AError := '';
+  ARows := nil;
+  for I := 0 to High(FRecords) do
+  begin
+    if FRecords[I].WorkspaceId <> AWorkspaceId then
+      Continue;
+    Hit := False;
+    for K := 0 to High(ASessionIds) do
+      if FRecords[I].SessionId = ASessionIds[K] then
+      begin
+        Hit := True;
+        Break;
+      end;
+    if not Hit then
       Continue;
     SetLength(ARows, Length(ARows) + 1);
     ARows[High(ARows)] := FRecords[I];
