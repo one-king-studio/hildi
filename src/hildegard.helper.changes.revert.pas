@@ -18,7 +18,17 @@ interface
 uses
   Classes, SysUtils,
   changes.types, changes.log,
-  hildegard.helper.workspace;
+  hildegard.helper.workspace, hildegard.helper.hash;
+
+type
+  { The production hasher: TChangeHasher backed by the same Sha256Hex the
+    recorder stamps with. A caller that passed a different function would have
+    every revert rejected at the verify step, so this exists to make the correct
+    choice the easy one. }
+  TSha256Hasher = class
+  public
+    function OfText(const AText: string): string;
+  end;
 
 type
   TRevertOutcome = (
@@ -66,6 +76,11 @@ function RevertTurn(const ARoot: string; const ARows: TChangeRecordArray;
   out AResults: TRevertResultArray): Boolean;
 
 implementation
+
+function TSha256Hasher.OfText(const AText: string): string;
+begin
+  Result := Sha256Hex(AText);
+end;
 
 const
   { Above this, refuse rather than read: a revert that cannot verify the whole
