@@ -101,6 +101,12 @@ type
       inline; the pop waits for the next Step/OnLoop. }
     FCloseSessions: Boolean;
     FPendingAskRef: string;
+    { Ask refs already answered this session. A spy re-attaches on every switch
+      with FromSeq=0, which means "replay the whole live turn" - so a child's ask
+      that was already answered is delivered AGAIN as if it were new, and the
+      operator sees the same dialog on every switch. Replay is not evidence the
+      ask is still open. }
+    FAnsweredAsks: TStringList;
     FCloseModal: Boolean;
     FAskQueue: array of TTurnEvent;
     FStatusText: string;
@@ -615,6 +621,9 @@ begin
   FDriver := ADriver;
   FTheme := SelectTheme(AMode, ALightDetected);
   FRoster := TSubagentRoster.Create;
+  FAnsweredAsks := TStringList.Create;
+  FAnsweredAsks.Sorted := True;
+  FAnsweredAsks.Duplicates := dupIgnore;
   FToolBlocks := TDictionary<string, TChatItem>.Create;
   FToolPending := TDictionary<string, string>.Create;
   FApp := TTuiApp.Create(ASurface, AInput, BuildTree);
@@ -805,6 +814,7 @@ begin
   FSpy.Free;
   FSidebar.Free;
   FRoster.Free;
+  FAnsweredAsks.Free;
   FToolBlocks.Free;
   FToolPending.Free;
   FApp.Free;
@@ -1871,6 +1881,10 @@ begin
     runtime routes it down to the child. A parent's own ask answers the gate. }
   if FDriver <> nil then
     FDriver.AnswerAsk(FPendingAskRef, AChoice);
+  { Remember it, so a later spy re-attach replaying the same turn does not offer
+    the identical dialog again. Answered once, ignored thereafter. }
+  if (FPendingAskRef <> '') and (FAnsweredAsks <> nil) then
+    FAnsweredAsks.Add(FPendingAskRef);
   FAskRefIsChild := False;
   { Defer popping: we are inside the modal's own event handler. }
   FCloseModal := True;
@@ -2539,6 +2553,12 @@ begin
       end;
     teSubagentAsk:
       begin
+        { A spy re-attaches on every switch with FromSeq=0 - "replay the whole
+          live turn" - so an ask the operator ALREADY answered is delivered
+          again as if it were new. That is the repeated-dialog bug: replay is not
+          evidence the ask is still open. Skip any ref already answered. }
+        if FAnsweredAsks.IndexOf(E.AskRef) >= 0 then
+          Exit;
         FAskRefIsChild := True;
         EnqueueAsk(E);
       end;
