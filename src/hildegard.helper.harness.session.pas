@@ -162,6 +162,11 @@ type
       hide a turn whose files are still changed, the lie in the other direction.
       ADetail says which refusal, naming the path. }
     function UndoTurn(ATurnId: Int64; out ADetail: string): Boolean;
+    { One turn of a cumulative undo: revert its files and rewind its messages,
+      all-or-nothing. Called newest-first by UndoTurn, because each revert
+      compares against that turn's AfterHash and only holds once the later turns
+      are already undone. }
+    function UndoOneTurn(ATurnId: Int64; out ADetail: string): Boolean;
     { Notice any board entries this session has not seen, coalesced into ONE
       transient prompt item so ten agents posting is O(ticks), not O(entries).
       Called by the runtime on its tick. Returns the count noticed. }
@@ -588,6 +593,74 @@ begin
 end;
 
 function THarnessSession.UndoTurn(ATurnId: Int64; out ADetail: string): Boolean;
+var
+  Turns: TTurnRecordArray;
+  I, First: Integer;
+  StoreErr: TStoreError;
+  Part: string;
+begin
+  { CUMULATIVE undo: undoing turn N walks back every turn from the newest to N
+    inclusive, newest first. Undoing one turn in the middle while later turns
+    survive would leave the transcript claiming work that happened after a turn
+    that no longer exists, on top of files derived from reverted state.
+
+    Newest-first order is required, not cosmetic: each turn's revert compares the
+    file against that turn's AfterHash, and that only holds if the later turns
+    have already been undone. }
+  Result := False;
+  ADetail := '';
+  if FView.Store = nil then
+  begin
+    ADetail := 'this session has no store, so it recorded no changes';
+    Exit;
+  end;
+  if ATurnId <= 0 then
+  begin
+    ADetail := 'no turn to undo';
+    Exit;
+  end;
+
+  Turns := FView.Turns;
+  First := -1;
+  for I := 0 to High(Turns) do
+    if Turns[I].Id = ATurnId then
+    begin
+      First := I;
+      Break;
+    end;
+  if First < 0 then
+  begin
+    ADetail := 'that turn is not in this session';
+    Exit;
+  end;
+
+  { Walk newest down to the target. Any refusal stops the whole undo, but the
+    turns already undone stay undone - each one is itself all-or-nothing, and
+    re-reverting is refused by the CAS, so a retry cannot double-apply. }
+  for I := High(Turns) downto First do
+  begin
+    if Turns[I].Status <> tsCompleted then
+      Continue;   { already undone, failed, or running - nothing to move }
+    if not UndoOneTurn(Turns[I].Id, Part) then
+    begin
+      ADetail := Part;
+      Exit;
+    end;
+    { Soft-delete: the turn stays in the ledger so the record still shows it
+      happened, but it is no longer part of the current context. The lifetime
+      token totals keep counting it, because it did consume them. }
+    if not FView.Store.FinishTurn(Turns[I].Id, tsCancelled, 'undone', 0, '',
+      '', StoreErr) then
+    begin
+      ADetail := 'the files were restored but the turn could not be marked: '
+        + StoreErr.Message;
+      Exit;
+    end;
+  end;
+  Result := True;
+end;
+
+function THarnessSession.UndoOneTurn(ATurnId: Int64; out ADetail: string): Boolean;
 var
   Rows: TChangeRecordArray;
   Results: TRevertResultArray;

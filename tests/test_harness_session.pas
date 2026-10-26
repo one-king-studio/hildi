@@ -440,6 +440,10 @@ begin
     Session.View.Store.BeginTurn(Session.View.SessionId, TurnId, StoreErr);
     if TurnId <= 0 then
       TurnId := 1;
+    { A turn worth undoing is a COMPLETED one; the undo walk skips anything
+      still running. }
+    Session.View.Store.FinishTurn(TurnId, tsCompleted, 'stop', 0, '', '',
+      StoreErr);
 
     Before := 'one'#10'two'#10;
     After := 'one'#10'TWO'#10;
@@ -477,6 +481,10 @@ begin
     Session.View.Store.BeginTurn(Session.View.SessionId, TurnId, StoreErr);
     if TurnId <= 0 then
       TurnId := 1;
+    { A turn worth undoing is a COMPLETED one; the undo walk skips anything
+      still running. }
+    Session.View.Store.FinishTurn(TurnId, tsCompleted, 'stop', 0, '', '',
+      StoreErr);
 
     { The file on disk is neither the before nor the after: edited since. }
     WriteText('a.txt', 'unrelated'#10);
