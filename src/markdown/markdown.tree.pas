@@ -42,10 +42,6 @@ type
     mnText, mnCodeSpan, mnLineBreak, mnHyperlink, mnLink, mnImage,
     mnHtml, mnMathSpan, mnFootnoteCallout, mnAbbreviation);
 
-  TMdFormat = (mfBold, mfItalic, mfStrike, mfInsert, mfDelete, mfMark,
-    mfSuper, mfSub);
-  TMdFormats = set of TMdFormat;
-
   TMdListStyle = (lsOrdered, lsUnordered, lsCheckbox);
   TMdMarker = (lmInteger, lmAlphaLower, lmAlphaUpper, lmRomanLower,
     lmRomanUpper);
@@ -113,7 +109,7 @@ function IsInlineKind(AKind: TMdNodeKind): Boolean;
 implementation
 
 uses
-  SysUtils;
+  SysUtils, markdown.inline;
 
 type
   TStrArray = array of UnicodeString;
@@ -637,134 +633,134 @@ end;
 
 { --- inline (Phase 1: deliberately minimal, replaced in Phase 3) ---------- }
 
+{ --- inline, driven by the linear tokenizer ------------------------------- }
+
+{ Build nodes from markdown.inline's token stream. The tokens are a flat stream
+  with explicit open/close markers, so nesting is resolved by a STACK here rather
+  than by recursion in the tokenizer - that is what keeps the tokenizer free of
+  any dependency on the node model.
+
+  A formatted run becomes a wrapper `text` node carrying the format set, with the
+  actual text as its child. markdown.compat relies on that shape. }
 procedure ParseInlines(var B: TBuilder; const AParent: Integer;
   const AText: UnicodeString); forward;
 
 procedure ParseInlines(var B: TBuilder; const AParent: Integer;
   const AText: UnicodeString);
 var
-  I, Close, Bracket: Integer;
-  Plain: UnicodeString;
+  Toks: TMdTokenArray;
+  I, Id, LinkId: Integer;
+  Parents: array of Integer;
+  Fmts: array of TMdFormats;
+  Top: Integer;
+  Active: TMdFormats;
   N: TMdNode;
-  Id: Integer;
+  Depth: Integer;
 
-  procedure FlushPlain;
+  function CurrentParent: Integer;
   begin
-    if Plain <> '' then
-    begin
-      EmitText(B, AParent, Plain, []);
-      Plain := '';
-    end;
+    if Top = 0 then
+      Result := AParent
+    else
+      Result := Parents[Top - 1];
+  end;
+
+  procedure OpenRun(const AFmt: TMdFormats);
+  begin
+    N := Default(TMdNode);
+    N.Kind := mnText;
+    N.Formats := AFmt;
+    B.Add(N, Id);
+    B.Append(CurrentParent, Id);
+    SetLength(Parents, Top + 1);
+    Parents[Top] := Id;
+    SetLength(Fmts, Top + 1);
+    Fmts[Top] := AFmt;
+    Inc(Top);
+  end;
+
+  procedure CloseRun;
+  begin
+    if Top > 0 then
+      Dec(Top);
   end;
 
 begin
-  Plain := '';
-  I := 1;
-  while I <= Length(AText) do
+  Toks := TokenizeInline(AText);
+  Top := 0;
+  LinkId := 0;
+  Parents := nil;
+  Fmts := nil;
+  for I := 0 to High(Toks) do
   begin
-    { code span }
-    if AText[I] = '`' then
-    begin
-      Close := I + 1;
-      while (Close <= Length(AText)) and (AText[Close] <> '`') do
-        Inc(Close);
-      if (Close <= Length(AText)) and (Close > I + 1) then
-      begin
-        FlushPlain;
-        EmitLeaf(B, AParent, mnCodeSpan, Copy(AText, I + 1, Close - I - 1));
-        I := Close + 1;
-        Continue;
-      end;
-      Plain := Plain + AText[I];
-      Inc(I);
-      Continue;
-    end;
-
-    { **bold** (and ~~strike~~, *italic*) share one shape: find the closing run,
-      wrap the inside recursively with the format set. }
-    if ((AText[I] = '*') and (I < Length(AText)) and (AText[I + 1] = '*')) or
-       ((AText[I] = '~') and (I < Length(AText)) and (AText[I + 1] = '~')) then
-    begin
-      Close := I + 2;
-      while (Close < Length(AText)) and not
-        ((AText[Close] = AText[I]) and (AText[Close + 1] = AText[I])) do
-        Inc(Close);
-      if (Close < Length(AText)) and (Close > I + 2) then
-      begin
-        FlushPlain;
-        N := Default(TMdNode);
-        N.Kind := mnText;
-        if AText[I] = '~' then
-          N.Formats := [mfStrike]
-        else
-          N.Formats := [mfBold];
-        B.Add(N, Id);
-        B.Append(AParent, Id);
-        ParseInlines(B, Id, Copy(AText, I + 2, Close - I - 2));
-        I := Close + 2;
-        Continue;
-      end;
-      Plain := Plain + AText[I];
-      Inc(I);
-      Continue;
-    end;
-
-    { *italic* }
-    if AText[I] = '*' then
-    begin
-      Close := I + 1;
-      while (Close <= Length(AText)) and (AText[Close] <> '*') do
-        Inc(Close);
-      if (Close <= Length(AText)) and (Close > I + 1) then
-      begin
-        FlushPlain;
-        N := Default(TMdNode);
-        N.Kind := mnText;
-        N.Formats := [mfItalic];
-        B.Add(N, Id);
-        B.Append(AParent, Id);
-        ParseInlines(B, Id, Copy(AText, I + 1, Close - I - 1));
-        I := Close + 1;
-        Continue;
-      end;
-      Plain := Plain + AText[I];
-      Inc(I);
-      Continue;
-    end;
-
-    { [text](uri) }
-    if AText[I] = '[' then
-    begin
-      Bracket := I + 1;
-      while (Bracket <= Length(AText)) and (AText[Bracket] <> ']') do
-        Inc(Bracket);
-      if (Bracket < Length(AText)) and (AText[Bracket + 1] = '(') then
-      begin
-        Close := Bracket + 2;
-        while (Close <= Length(AText)) and (AText[Close] <> ')') do
-          Inc(Close);
-        if Close <= Length(AText) then
+    { The formats in force are the union of every open run. }
+    Active := [];
+    for Depth := 0 to Top - 1 do
+      Active := Active + Fmts[Depth];
+    case Toks[I].Kind of
+      tkOpen:
+        OpenRun(Toks[I].Formats);
+      tkClose:
+        CloseRun;
+      tkText:
+        EmitText(B, CurrentParent, Toks[I].Text, Active);
+      tkCode:
         begin
-          FlushPlain;
+          N := Default(TMdNode);
+          N.Kind := mnCodeSpan;
+          N.Content := Toks[I].Text;
+          B.Add(N, Id);
+          B.Append(CurrentParent, Id);
+        end;
+      tkSoftBreak:
+        begin
+          N := Default(TMdNode);
+          N.Kind := mnLineBreak;
+          N.Soft := True;
+          B.Add(N, Id);
+          B.Append(CurrentParent, Id);
+        end;
+      tkHardBreak:
+        begin
+          N := Default(TMdNode);
+          N.Kind := mnLineBreak;
+          N.Soft := False;
+          B.Add(N, Id);
+          B.Append(CurrentParent, Id);
+        end;
+      tkLinkOpen:
+        begin
           N := Default(TMdNode);
           N.Kind := mnLink;
-          N.Uri := TrimU(Copy(AText, Bracket + 2, Close - Bracket - 2));
-          B.Add(N, Id);
-          B.Append(AParent, Id);
-          ParseInlines(B, Id, Copy(AText, I + 1, Bracket - I - 1));
-          I := Close + 1;
-          Continue;
+          N.Uri := Toks[I].Uri;
+          B.Add(N, LinkId);
+          B.Append(CurrentParent, LinkId);
+          SetLength(Parents, Top + 1);
+          Parents[Top] := LinkId;
+          SetLength(Fmts, Top + 1);
+          Fmts[Top] := [];
+          Inc(Top);
         end;
-      end;
-      Plain := Plain + AText[I];
-      Inc(I);
-      Continue;
+      tkImageOpen:
+        begin
+          N := Default(TMdNode);
+          N.Kind := mnImage;
+          N.Uri := Toks[I].Uri;
+          N.Alt := Toks[I].Text;
+          B.Add(N, Id);
+          B.Append(CurrentParent, Id);
+        end;
+      tkAutolink:
+        begin
+          N := Default(TMdNode);
+          N.Kind := mnHyperlink;
+          N.Content := Toks[I].Text;
+          N.Uri := Toks[I].Uri;
+          B.Add(N, Id);
+          B.Append(CurrentParent, Id);
+        end;
     end;
-
-    Plain := Plain + AText[I];
-    Inc(I);
   end;
-  FlushPlain;
 end;
 
 { --- block parser --------------------------------------------------------- }

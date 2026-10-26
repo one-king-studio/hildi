@@ -35,7 +35,7 @@ unit markdown.inline;
 interface
 
 uses
-  markdown.tree;
+  markdown.types;
 
 type
   TMdTokKind = (

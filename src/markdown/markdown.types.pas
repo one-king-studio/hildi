@@ -41,6 +41,14 @@ type
 
   TMdSpanArray = array of TMdSpan;
 
+  { Inline emphasis, carried as a SET on a text run rather than as wrapper nodes:
+    a terminal has no nesting to express, and a set makes attribute resolution a
+    pure function. Lives here, not in markdown.tree, because both the tree and the
+    inline tokenizer need it and neither may depend on the other. }
+  TMdFormat = (mfBold, mfItalic, mfStrike, mfInsert, mfDelete, mfMark,
+    mfSuper, mfSub);
+  TMdFormats = set of TMdFormat;
+
   { A table column's alignment, from the delimiter row. }
   TMdAlign = (maNone, maLeft, maCenter, maRight);
   TMdAlignArray = array of TMdAlign;
