@@ -67,8 +67,10 @@ readings.
 
 ## Phase 3 — Pass-order guard
 
-- [ ] Declare the pass order as data; a test reads it and pins it, so a reorder fails.
-      *Test:* `TestBlockPassOrderIsPinned`.
+- [x] Declare the pass order as data; a test reads it and pins it, so a reorder fails.
+      *Test:* `TestBlockPassOrderIsPinned`. *Proven to bite: swapping setext
+      and the thematic break in the declared list fails it at "pass 4 is in
+      place".*
 
 ## Phase 4 — The file viewer
 

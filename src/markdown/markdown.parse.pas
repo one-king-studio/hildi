@@ -33,6 +33,12 @@ uses
   markdown.types;
 
 type
+  { One block pass in ProcessLine. Named so the order can be declared as data
+    and pinned by a test instead of living only in the branch sequence. }
+  TMdBlockPass = (
+    bpFenceContinue, bpTableContinue, bpBlank, bpAtxHeading, bpSetextHeading,
+    bpThematicBreak, bpFenceOpen, bpListMarker, bpQuote, bpTableStart);
+
   { The parser. Create once; Reset before a new document. }
   TMarkdownParser = class
   private
@@ -68,6 +74,29 @@ type
     { The open tail as raw text (including the pending partial line), or ''. }
     function TailText: UnicodeString;
   end;
+
+{ The block passes, in the order ProcessLine tries them.
+
+  Declared as DATA rather than left implicit in the code, because the order is
+  load-bearing and a reorder COMPILES silently while breaking a feature:
+  setext must precede the thematic break (or `---` is eaten as a rule and a
+  heading vanishes), and the table delimiter must come after the paragraph pass
+  because it uses the open paragraph as its header.
+
+  TestBlockPassOrderIsPinned reads this list. Reordering it on purpose means
+  changing that test in the same commit. }
+const
+  MdBlockPassOrder: array[0..9] of TMdBlockPass = (
+    bpFenceContinue,   { inside a fence only the closing fence matters }
+    bpTableContinue,   { a pipe row continues an open table }
+    bpBlank,           { a blank line closes, except in a list }
+    bpAtxHeading,
+    bpSetextHeading,   { BEFORE the break, or `---` is eaten as a rule }
+    bpThematicBreak,
+    bpFenceOpen,
+    bpListMarker,
+    bpQuote,
+    bpTableStart);     { last: needs the open paragraph as its header }
 
 { The batch form: one call, same tree. Equivalence with the streamed form is
   asserted over a corpus (tests/test_markdown_equivalence.pas), not assumed. }

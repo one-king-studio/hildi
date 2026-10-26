@@ -86,6 +86,9 @@ type
     procedure TestRuleAfterAListItemStaysARule;
     procedure TestSetextUnderlineWithSpacesIsLiteral;
     procedure TestIncrementalSetextMatchesFullParse;
+    { The block pass order is declared as data and pinned here: a reorder
+      compiles silently and breaks a feature, so it must fail a test instead. }
+    procedure TestBlockPassOrderIsPinned;
   end;
 
 implementation
@@ -735,6 +738,35 @@ begin
   AssertEquals('one block', 1, Length(FBlocks));
   AssertTrue('a paragraph', FBlocks[0].Kind = mbParagraph);
   AssertEquals('text kept', 'Title = =', JoinedText(0));
+end;
+
+procedure TMarkdownTest.TestBlockPassOrderIsPinned;
+const
+  { The order ProcessLine actually implements. Changing the parser's branch
+    order without changing this constant fails here - which is the point. }
+  Expected: array[0..9] of TMdBlockPass = (
+    bpFenceContinue, bpTableContinue, bpBlank, bpAtxHeading, bpSetextHeading,
+    bpThematicBreak, bpFenceOpen, bpListMarker, bpQuote, bpTableStart);
+var
+  I: Integer;
+begin
+  AssertEquals('the declared order has every pass',
+    Length(Expected), Length(MdBlockPassOrder));
+  for I := 0 to High(Expected) do
+    AssertTrue('pass ' + IntToStr(I) + ' is in place',
+      Expected[I] = MdBlockPassOrder[I]);
+
+  { The two adjacencies that carry a feature, asserted by name so a failure
+    says WHICH ordering broke rather than just "an index differs". }
+  AssertTrue('setext precedes the thematic break, or --- is a rule',
+    MdBlockPassOrder[Ord(bpSetextHeading) - Ord(bpFenceContinue)] =
+      bpSetextHeading);
+  AssertEquals('setext sits directly before the thematic break',
+    Ord(bpThematicBreak), Ord(bpSetextHeading) + 1);
+  AssertEquals('the table start runs last, after the paragraph pass',
+    Ord(bpTableStart), Ord(bpQuote) + 1);
+  AssertTrue('a fence continues before anything reopens',
+    MdBlockPassOrder[0] = bpFenceContinue);
 end;
 
 procedure TMarkdownTest.TestIncrementalSetextMatchesFullParse;
