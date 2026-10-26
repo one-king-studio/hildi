@@ -62,6 +62,16 @@ type
       wants at a glance; expanding is a request to see the changes themselves.
       Empty for every other kind, where expanding just un-condenses FBody. }
     FExpandedBody: string;
+    { Per-file selection for a turn-summary block: the workspace path of each
+      body row, in draw order, with '' for a row that is not a file (the
+      `· N more files` tail). Empty for every other kind. A click maps its row
+      to this array, which is why it is stored rather than re-parsed from the
+      text - the text is display, this is what the path IS. }
+    FFilePaths: array of string;
+    { The absolute Y of the body's first row, recorded when the body is
+      arranged. A click is relative to the block, but the file rows are relative
+      to the body, and the two differ by the frame and any meta rows. }
+    FBodyTop: Integer;
     { Reply metadata (an assistant reply's frontmatter, extracted): a title line
       and keyword chips drawn above the body. Empty for a reply with no block. }
     FTitle: string;
@@ -147,6 +157,15 @@ type
       body. A turn summary is the only user: collapsed it shows per-file stats,
       expanded the diffs themselves. Ignored when empty. }
     procedure SetExpandedText(const AText: string);
+    { The workspace path of each collapsed body row, in draw order, with '' for a
+      row that is not a file. A turn-summary block sets this so a click on a file
+      row can open that file's diff; every other kind leaves it empty and clicks
+      keep their old meaning (toggle). }
+    procedure SetFilePaths(const APaths: array of string);
+    { The path a click at screen row AY would select, or '' when the row is not a
+      file. Public so the host can resolve a click without knowing the frame
+      geometry. }
+    function FilePathAtRow(AY: Integer): string;
     { Set the reply metadata (title + keywords) drawn above the body. The body
       is the stripped text; the frontmatter never reaches the renderer. }
     procedure SetMeta(const ATitle: string; const AKeywords: TStringArray);
@@ -730,6 +749,29 @@ begin
     FOnChange(Self);
 end;
 
+procedure TChatItem.SetFilePaths(const APaths: array of string);
+var
+  I: Integer;
+begin
+  SetLength(FFilePaths, Length(APaths));
+  for I := 0 to High(APaths) do
+    FFilePaths[I] := APaths[I];
+end;
+
+function TChatItem.FilePathAtRow(AY: Integer): string;
+var
+  Row: Integer;
+begin
+  { The collapsed body is one row per file, so the body row index IS the file
+    index. The tail row (`· N more files`) is stored as '' and selects nothing,
+    which is the honest answer: there is no single file behind it. }
+  Result := '';
+  Row := AY - FBodyTop;
+  if (Row < 0) or (Row > High(FFilePaths)) then
+    Exit;
+  Result := FFilePaths[Row];
+end;
+
 procedure TChatItem.AppendText(const AText: string);
 begin
   if AText = '' then
@@ -1044,6 +1086,10 @@ begin
   else
     BodyR := Rc(ABounds.X + Inset, ABounds.Y + MetaRows(ABounds.W),
       ABounds.W - Inset, ABounds.H - MetaRows(ABounds.W));
+  { A click is in screen rows; the file rows are relative to the body. Record the
+    body's first row here, where it is decided, rather than recomputing the frame
+    geometry at hit-test time and risking the two drifting apart. }
+  FBodyTop := BodyR.Y;
   if FMarkdown <> nil then
     FMarkdown.Arrange(BodyR)
   else

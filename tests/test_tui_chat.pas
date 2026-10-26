@@ -44,6 +44,15 @@ type
     procedure TestSetTextThenAppendRendersOneBlock;
     procedure TestCollapsedThoughtDrawsADimmedRule;
     procedure TestTurnDividerDrawsRuleAndRightAlignedStats;
+    { A turn-changes block resolves a click's ROW back to a workspace path, so the
+      host can open that file's diff without knowing the frame geometry. }
+    procedure TestFileRowResolvesToItsPath;
+    { The `· N more files` tail row is not a file: it resolves to '' rather than
+      to the last file or to garbage. }
+    procedure TestTheMoreFilesTailIsNotAFile;
+    { A click outside the file rows, and on a block with no file paths, resolves
+      to '' instead of crashing or inventing a path. }
+    procedure TestARowOutsideTheFilesSelectsNothing;
     procedure TestCollapsedToolDrawsAThinFullContrastRule;
     procedure TestAmbientBlockRenders;
     procedure TestAmbientRendersMarkdownInABox;
@@ -442,6 +451,69 @@ begin
     end;
   finally
     S.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestFileRowResolvesToItsPath;
+var
+  It: TChatItem;
+begin
+  { The collapsed body is one row per file, so a click's row maps to a path. The
+    host needs this to open the right file's diff without re-deriving the frame
+    geometry - which is why the block records its body origin when it arranges. }
+  It := TChatItem.Create(ckTurnChanges, 'turn changes',
+    'M a.txt  +1 -0'#10'M b.txt  +2 -1', FTheme);
+  try
+    It.SetFilePaths(['a.txt', 'b.txt']);
+    It.Materialize;
+    It.Measure(Avail(40, 12));
+    It.Arrange(Rc(0, 0, 40, 12));
+    { A boxed block's body starts one row below the frame top. }
+    AssertEquals('the first file row', 'a.txt', It.FilePathAtRow(1));
+    AssertEquals('the second file row', 'b.txt', It.FilePathAtRow(2));
+  finally
+    It.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestTheMoreFilesTailIsNotAFile;
+var
+  It: TChatItem;
+begin
+  { `· 3 more files` is a statement about the block, not a file. It resolves to
+    '' rather than to the last real path: there is no single file behind it. }
+  It := TChatItem.Create(ckTurnChanges, 'turn changes',
+    'M a.txt  +1 -0'#10#$C2#$B7' 3 more files  +4 -2', FTheme);
+  try
+    It.SetFilePaths(['a.txt', '']);
+    It.Materialize;
+    It.Measure(Avail(40, 12));
+    It.Arrange(Rc(0, 0, 40, 12));
+    AssertEquals('the file row', 'a.txt', It.FilePathAtRow(1));
+    AssertEquals('the tail is not a file', '', It.FilePathAtRow(2));
+  finally
+    It.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestARowOutsideTheFilesSelectsNothing;
+var
+  It: TChatItem;
+begin
+  { A click above the body, below the last file, or on a block that never
+    declared file paths must all resolve to '' - never to a guessed path. }
+  It := TChatItem.Create(ckTurnChanges, 'turn changes', 'M a.txt  +1 -0', FTheme);
+  try
+    It.SetFilePaths(['a.txt']);
+    It.Materialize;
+    It.Measure(Avail(40, 12));
+    It.Arrange(Rc(0, 0, 40, 12));
+    AssertEquals('the frame row above the body', '', It.FilePathAtRow(0));
+    AssertEquals('well past the last file', '', It.FilePathAtRow(9));
+    It.SetFilePaths([]);
+    AssertEquals('a block with no paths', '', It.FilePathAtRow(1));
+  finally
+    It.Free;
   end;
 end;
 
