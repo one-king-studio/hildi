@@ -824,17 +824,15 @@ end;
   keybindings. }
 function THarnessApp.DefaultCommands: TCommandArray;
 begin
-  { Two entries so the command is discoverable however it is typed: the
-    palette's filter is a prefix match, so '/c' shows both and either runs the
-    same checkpoint turn. }
+  { One entry per command, no aliases: two names for one action reads as two
+    actions in a list, and the palette's prefix filter already finds a command
+    from '/c' or '/ch'. }
   Result := nil;
-  SetLength(Result, 3);
+  SetLength(Result, 2);
   Result[0].Name := 'checkpoint';
   Result[0].Description := 'create a checkpoint for this session';
-  Result[1].Name := 'cp';
-  Result[1].Description := 'create a checkpoint for this session';
-  Result[2].Name := 'sessions';
-  Result[2].Description := 'list and manage this workspace''s sessions';
+  Result[1].Name := 'sessions';
+  Result[1].Description := 'list and manage this workspace''s sessions';
 end;
 
 procedure THarnessApp.ComposeChanged(Sender: TObject);
