@@ -151,6 +151,12 @@ type
     function SessionLineage(const AId: string; out AParentId: string;
       out ADepth: Integer; out ALabel: string;
       out AError: TStoreError): Boolean;
+    { Promote a delegated child to a normal session: clear its lineage so it is
+      no longer anyone's child. Used when an operator takes a child over - the
+      parent must not keep believing it owns a session the operator now drives.
+      Idempotent: detaching a root is a no-op that succeeds. }
+    function DetachSession(const AId: string;
+      out AError: TStoreError): Boolean;
     { Direct children of a session, newest updated first. }
     function ChildrenOf(const AParentId: string;
       out AChildren: TSessionSummaryArray; out AError: TStoreError): Boolean;
@@ -2029,6 +2035,39 @@ begin
       AParentId := Stmt.ColText(0);
       ADepth := Stmt.ColInt(1);
       ALabel := Stmt.ColText(2);
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.DetachSession(const AId: string;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    { Idempotent by construction: the UPDATE simply matches nothing when the
+      session is already a root, which is a success, not an error. Depth resets
+      to 0 so the promoted session is indistinguishable from one created
+      normally - leaving depth > 0 with no parent would be a row that lies. }
+    Stmt := TStmt.Create(FDb,
+      'UPDATE sessions SET parent_session_id = '''', depth = 0, label = '''', ' +
+      'updated_at = ? WHERE id = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not detach session', DbErrorText));
+      Stmt.BindInt64(1, NowMs);
+      Stmt.BindText(2, AId);
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not detach session', DbErrorText));
     finally
       Stmt.Free;
     end;
