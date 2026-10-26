@@ -46,6 +46,12 @@ but stays public for testability.
 
 ### 4.1 The AST
 
+> **SUPERSEDED by [Markdown v2](Markdown_v2.SPEC.md).** The shape below ships and stays
+> valid for v1's flat model, but the operator has decided to adopt the full node vocabulary
+> so a consumer can address a specific kind of node — nesting, footnotes, references, math,
+> HTML, description lists, custom blocks. `TMdBlock` survives only as the v2 compat adapter.
+> The text below is kept as the record of what v1 actually built.
+
 Unchanged in shape from today's, deliberately: the AST already works, and a new shape would
 mean silently changing behaviour.
 
