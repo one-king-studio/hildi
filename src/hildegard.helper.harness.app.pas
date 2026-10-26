@@ -141,6 +141,9 @@ type
     FSidebarShown: Boolean;
     FSpy: TSubagentSpy;
     FSpyId: string;
+    { A child the list asked to spy, honoured after dispatch returns rather than
+      from inside the list's own key handler. }
+    FPendingSelect: string;
     FAskRefIsChild: Boolean;
     { Back-pagination: how many archived pages are shown above the boundary. The
       scroll anchor is held by the stream itself (PreserveAnchor), so the visible
@@ -206,7 +209,14 @@ type
       list answers "which of these is doing the thing I care about". }
     procedure RefreshSubagentTitles;
     procedure OnSidebarSelect(const ASessionId: string);
+    { An action key from the list: 'a' abort, 'r' release, 'p' promote. }
+    procedure OnSidebarAction(const AAction: Char);
+    { Honour a selection the list requested during dispatch. }
+    procedure ConsumePendingSelect;
     procedure LeaveSpy;
+    { Leave subagent mode entirely: back to the parent's tail AND the composer.
+      Ctrl+D. Distinct from LeaveSpy, which returns to the LIST. }
+    procedure LeaveSubagentMode;
     { The spied child's display name: its roster label, else its id prefix. }
     function SpyLabel: string;
     { Render the child's transcript tail into the panel (the spy view). }
@@ -394,6 +404,11 @@ function ShouldTrimHistory(AOlderPages: Integer; ANowMs, ALastScrollMs: Int64;
   so the format is testable without a widget. }
 function SessionDisplayName(const ALabel, ATitle, ASessionId: string): string;
 
+{ The composer's hint line: the base hints, plus the ctrl+d segment only when the
+  session has subagents to show. Pure, so the policy is testable without a widget
+  - and so nobody re-introduces an inert key hint by hardcoding it. }
+function ComposerHints(AHasSubagents: Boolean): string;
+
 { Order session rows so each delegated child follows its parent, indenting the
   child's title. Pure, so the nesting policy is testable without a modal. }
 procedure OrderByLineage(var ARows: TSessionRowArray);
@@ -406,8 +421,12 @@ const
 
   { The interaction hints live in the CTA strip, which acts as a context
     toolbar; the status bar is reserved for the workspace and the metrics. }
-  { The toolbar hints, right-aligned above the composer. }
-  CtaHints = 'shift+enter newline · ctrl+d subagents';
+  { The toolbar hints, right-aligned above the composer. The ctrl+d segment is
+    only present when the session actually HAS subagents: advertising a key that
+    can only open an empty list is noise, and the operator asked for it to be
+    absent rather than inert. }
+  CtaHintsBase = 'shift+enter newline';
+  CtaHintsSubagents = ' · ctrl+d subagents';
   { How long the first Escape stays armed before the interrupt prompt expires. }
   InterruptWindowMs = 2000;
   { The first frame loads at most this many messages of the active window (the
@@ -802,7 +821,7 @@ begin
     Title := 'Hildegard · ' + FSession.Model
   else
     Title := 'Hildegard';
-  FPanel := TChatPanel.Create(FTheme, Title, CtaHints);
+  FPanel := TChatPanel.Create(FTheme, Title, ComposerHints(FRoster.Count > 0));
   FPanel.Stream.OnToggle := Invalidate;
   FPanel.Stream.OnChange := Invalidate;
   FPanel.Stream.OnNeedOlder := NeedOlderHistory;
@@ -817,11 +836,13 @@ begin
     bar keeps the workspace. The toolbar holds the run state and the hints. }
   FStatusText := FSession.WorkspaceRoot;
   FPanel.SetStatus(FStatusText);
-  FHintsText := CtaHints;
+  FHintsText := ComposerHints(FRoster.Count > 0);
   FPanel.SetHints(FHintsText);
   UpdateCta;
   FSidebar := TSidebar.Create(FTheme, FRoster);
   FSidebar.OnSelect := OnSidebarSelect;
+  { The CTAs live in the warm box now, so the box reads the keys too. }
+  FSidebar.OnAction := OnSidebarAction;
   FSidebar.Visible := False;
   Shell := TAppShell.Create(FPanel, Quit, HandleEscape, ComposeIsEmpty);
   Shell.SetSidebarToggle(ToggleSidebar);
@@ -1061,9 +1082,9 @@ begin
   { The checkpoint nudge: advisory only. }
   Context := FSession.SessionTotals.ContextTokens;
   if CheckpointNudgeNeeded(Context, FSession.MaxContextTokens) then
-    FHintsText := CtaHints + ' · /checkpoint to continue'
+    FHintsText := ComposerHints(FRoster.Count > 0) + ' · /checkpoint to continue'
   else
-    FHintsText := CtaHints;
+    FHintsText := ComposerHints(FRoster.Count > 0);
   FPanel.SetHints(FHintsText);
   FApp.Invalidate;
 end;
@@ -1091,17 +1112,15 @@ begin
     CloseSessions;
     Exit;
   end;
-  { Then dismisses the subagent sidebar. }
-  if FSidebarShown then
-  begin
-    ToggleSidebar(Sender);
-    Exit;
-  end;
   { While spying, Escape is a two-step cancel: the first press arms, the second
     within the window cancels the child (and tells the parent). Leaving the spy
     is Ctrl+D's job, so Escape is free to be the destructive-but-recoverable one.
     A single Escape is not enough for a cancel - the same key must not both back
-    out and kill work. }
+    out and kill work.
+
+    This check comes BEFORE the sidebar branch because subagent mode now keeps
+    the list visible while spying: both flags are true at once, and the list must
+    not swallow Escape while a child is selected. }
   if FSpyId <> '' then
   begin
     if FSpyCancelPending and
@@ -1872,6 +1891,16 @@ end;
   parent is absent from the list (archived, or filtered out) is treated as a
   root rather than dropped: losing a session silently is worse than showing it
   flat. }
+function ComposerHints(AHasSubagents: Boolean): string;
+begin
+  { The ctrl+d segment is present only when there is something to show. A hint
+    for a key that can only open an empty list is noise, and the operator asked
+    for it to be absent rather than inert. }
+  Result := CtaHintsBase;
+  if AHasSubagents then
+    Result := Result + CtaHintsSubagents;
+end;
+
 function SessionDisplayName(const ALabel, ATitle, ASessionId: string): string;
 var
   Name: string;
@@ -2379,6 +2408,11 @@ begin
   FlushToolOutput;
   DrainSpy;
   Result := FApp.Step;
+  { A selection the list requested DURING dispatch is honoured HERE, after every
+    widget has finished handling the key. ShowSpy closes one client, opens
+    another, rebuilds the transcript and re-lays out - doing that from inside
+    TSidebar.HandleEvent re-enters the widget being dispatched and crashed. }
+  ConsumePendingSelect;
 end;
 
 procedure THarnessApp.Run(ACheckStop: TStopCheck);
@@ -2486,30 +2520,35 @@ begin
 end;
 
 procedure THarnessApp.ToggleSidebar(Sender: TObject);
+var
+  Entries: TSubagentEntryArray;
 begin
-  { Ctrl+D is the way BACK to the parent. While spying, it leaves the spy rather
-    than toggling the list - otherwise the key that got you into a child does
-    nothing useful once you are in one. }
-  if FSpyId <> '' then
+  { Ctrl+D is one key with two states: it enters subagent mode from the parent,
+    and exits it from anywhere inside - list or child tail. No third behaviour
+    to remember. }
+  if FSidebarShown or (FSpyId <> '') then
   begin
-    LeaveSpy;
+    LeaveSubagentMode;
     Exit;
   end;
-  FSidebarShown := not FSidebarShown;
-  FSidebar.Visible := FSidebarShown;
-  if FSidebarShown then
+
+  FSidebarShown := True;
+  FSidebar.Visible := True;
+  FSidebar.Refresh;
+  LayoutSidebar;
+
+  { Spy the first child immediately. Entering the mode should show something,
+    not a list beside an empty transcript waiting for a second keypress. }
+  if FRoster <> nil then
   begin
-    FSidebar.Refresh;
-    LayoutSidebar;
+    Entries := FRoster.Entries;
+    if Length(Entries) > 0 then
+      ShowSpy(Entries[0].SessionId)
+    else
+      FApp.Invalidate;
   end
   else
-  begin
-    { The list borrowed the composer's place, so leaving subagent mode gives it
-      back. Without this the compose would stay hidden and the operator could
-      not type - the list would look like it had replaced the prompt for good. }
-    FPanel.Compose.Visible := True;
     FApp.Invalidate;
-  end;
 end;
 
 procedure THarnessApp.LayoutSidebar;
@@ -2530,12 +2569,51 @@ begin
   { The two lines the composer shows, in the same places: the model at the lower
     left, the action hints at the lower right. }
   FSidebar.SetInfo('Hildegard · ' + FSession.Model);
-  FSidebar.SetHints('enter spy');
+  { The CTAs live in this box, so they are always visible while in subagent
+    mode - that is the point of not switching to a separate actions bar. }
+  if FSpyId <> '' then
+    FSidebar.SetHints('a abort · r release · p promote')
+  else
+    FSidebar.SetHints('enter spy');
 end;
 
 procedure THarnessApp.OnSidebarSelect(const ASessionId: string);
 begin
-  ShowSpy(ASessionId);
+  { DEFER. This fires from inside TSidebar.HandleEvent, and ShowSpy closes a
+    client, opens another, rebuilds the transcript and re-lays out the list -
+    re-entering the widget mid-dispatch, which crashed. Record the request and
+    let Step honour it once every widget has finished with the key. }
+  FPendingSelect := ASessionId;
+end;
+
+procedure THarnessApp.ConsumePendingSelect;
+var
+  Id: string;
+begin
+  if FPendingSelect = '' then
+    Exit;
+  Id := FPendingSelect;
+  FPendingSelect := '';
+  { Already looking at it: nothing to do, and re-opening would close and reopen
+    the spy on every keystroke that re-selected the current row. }
+  if Id = FSpyId then
+    Exit;
+  ShowSpy(Id);
+end;
+
+procedure THarnessApp.OnSidebarAction(const AAction: Char);
+begin
+  { Routed through OnSpyAction so the list and the old action bar share ONE
+    implementation of abort/release/promote - including the takeover notice that
+    detaches the child. Two copies would drift, and the notice is the part that
+    must never be missed. }
+  if FSpyId = '' then
+    Exit;
+  case AAction of
+    'a': OnSpyAction(0);
+    'r': OnSpyAction(1);
+    'p': OnSpyAction(2);
+  end;
 end;
 
 procedure THarnessApp.ShowSpy(const ASessionId: string);
@@ -2558,13 +2636,16 @@ begin
     Exit;
   end;
   FSpyId := ASessionId;
-  { The spy takes over the panel; the sidebar is hidden AND its shown flag
-    cleared, so Escape leaves the spy rather than re-showing the sidebar. }
-  FSidebarShown := False;
-  FSidebar.Visible := False;
+  { The list STAYS UP: subagent mode is one state, not a list that hands off to
+    a spy view. Hiding the list and switching to the actions bar is what put the
+    teal composer back on screen the moment the operator pressed Enter, which is
+    the bug. The warm box remains, and only the messages panel swaps to this
+    child's tail. }
+  FSidebarShown := True;
+  FSidebar.Visible := True;
+  FSidebar.Refresh;
+  LayoutSidebar;
   FPanel.SetComposeActive(False);
-  { The compose gives way to a CTA actions bar (abort/release/leave). }
-  SetupSpyActions;
   { Rebuild the panel to show the child's transcript (history tail, then its live
     stream), and mark the header so the operator knows whose session this is. }
   ResetWindow;
@@ -2740,19 +2821,43 @@ begin
   if FSpyId <> '' then
   begin
     FSpyId := '';
-    FPanel.SetActionsMode(False);
-    FPanel.SetComposeActive(True);
+    { The list stays exactly where it is: subagent mode is one state, so leaving
+      a child returns to the LIST, not to the composer. It also must not be
+      re-arranged here - this runs from inside the list's own key handler, and
+      arranging a widget mid-dispatch is what crashed. }
+    if FSidebarShown then
+      LayoutSidebar
+    else
+    begin
+      FPanel.SetActionsMode(False);
+      FPanel.SetComposeActive(True);
+      FPanel.Compose.Visible := True;
+    end;
     UpdateCta;
-    { Restore the parent's transcript (the child's view replaced it) and header. }
+    { Restore the parent's transcript and header. }
     ResetWindow;
     RenderHistory;
     UpdateStats;
-    { Re-show the sidebar the operator used to pick the child. }
-    FSidebarShown := True;
-    FSidebar.Visible := True;
-    FSidebar.Refresh;
-    LayoutSidebar;
+    UpdateHeader;
   end;
+  FApp.Invalidate;
+end;
+
+procedure THarnessApp.LeaveSubagentMode;
+begin
+  { The one way out of subagent mode: back to the parent's tail and the composer.
+    Ctrl+D. Undoes everything entering the mode did, in one place. }
+  LeaveSpy;
+  FSidebarShown := False;
+  FSidebar.Visible := False;
+  FPanel.SetActionsMode(False);
+  FPanel.SetComposeActive(True);
+  FPanel.Compose.Visible := True;
+  ResetWindow;
+  RenderHistory;
+  UpdateStats;
+  UpdateHeader;
+  UpdateCta;
   FApp.Invalidate;
 end;
 

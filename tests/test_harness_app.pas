@@ -180,6 +180,8 @@ type
     procedure TestResumeRendersTurnDividers;
     procedure TestThoughtShowsDuration;
     procedure TestCtaHintsAreBlank;
+    { The ctrl+d segment is conditional on having subagents at all. }
+    procedure TestComposerHintsShowCtrlDOnlyWithSubagents;
     procedure TestCoarseScrollTargetMapsSegments;
     procedure TestShouldTrimHistory;
     procedure TestSidebarTogglesWithCtrlD;
@@ -1931,11 +1933,25 @@ end;
 procedure THarnessAppTest.TestCtaHintsAreBlank;
 begin
   Build;
-  { The toolbar carries the subagent toggle hint. }
-  AssertEquals('hints', 'shift+enter newline · ctrl+d subagents',
+  { No subagents in this session, so the ctrl+d segment is ABSENT: a hint for a
+    key that could only open an empty list is noise. The policy itself is pinned
+    separately by TestComposerHintsShowCtrlDOnlyWithSubagents. }
+  AssertEquals('hints without subagents', 'shift+enter newline',
     FApp.HintsText);
   AssertFalse('hints are not in the status bar',
     Pos('newline', FApp.StatusText) > 0);
+end;
+
+procedure THarnessAppTest.TestComposerHintsShowCtrlDOnlyWithSubagents;
+begin
+  { The conditional, as a pure function - so the rule is testable without
+    building an app and a store. }
+  AssertFalse('no ctrl+d when there are no subagents: ' +
+    ComposerHints(False), Pos('ctrl+d', ComposerHints(False)) > 0);
+  AssertTrue('ctrl+d offered when there are subagents: ' +
+    ComposerHints(True), Pos('ctrl+d subagents', ComposerHints(True)) > 0);
+  AssertTrue('the base hints survive both ways',
+    Pos('shift+enter newline', ComposerHints(True)) > 0);
 end;
 
 procedure THarnessAppTest.TestCoarseScrollTargetMapsSegments;
@@ -2910,8 +2926,11 @@ var
   WorkspaceId: Integer;
   ChildId: string;
 begin
-  { In spy mode the compose gives way to the actions bar; pressing 'a' aborts and
-    'r' releases the child through the driver. }
+  { In subagent mode the CTAs live in the WARM list box, not a separate teal
+    actions bar: switching to that bar was what put the composer back on screen
+    and made the mode look like it had ended. The keys are still a/r/p, read by
+    the list, and routed through the same handler as the old bar so the takeover
+    notice cannot diverge between them. }
   BuildWithStore;
   StoreCfg := Default(TStoreConfig);
   StoreCfg.DatabasePath := FStorePath;
@@ -2926,7 +2945,6 @@ begin
     Store.Free;
   end;
 
-  { A driver that records the subagent commands (the local one is a no-op). }
   FRecording := TRecordingDriver.Create;
   FApp.Attach(FSession.View, FRecording);
 
@@ -2935,7 +2953,10 @@ begin
   FApp.ShowSpy(ChildId);
   FApp.Step;
 
-  AssertTrue('the actions bar replaces the compose', FApp.Panel.ActionsMode);
+  { The old assertion was that the actions bar replaced the compose. The point
+    now is the opposite: the list stays up and there is no actions bar. }
+  AssertTrue('the list stays up while spying', FApp.SidebarVisible);
+  AssertFalse('no separate actions bar', FApp.Panel.ActionsMode);
 
   FInput.Push(Ch('a'));
   FApp.Step;

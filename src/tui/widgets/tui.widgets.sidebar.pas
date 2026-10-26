@@ -26,6 +26,9 @@ uses
 
 type
   TSubagentSelectedEvent = procedure(const ASessionId: string) of object;
+  { An action key pressed while the list has focus: 'a' abort, 'r' release,
+    'p' promote. The CTAs live in this box, so the keys must too. }
+  TSubagentActionEvent = procedure(const AAction: Char) of object;
 
   TSidebar = class(TWidget)
   private
@@ -33,6 +36,7 @@ type
     FRoster: TSubagentRoster;
     FSelected: Integer;
     FOnSelect: TSubagentSelectedEvent;
+    FOnAction: TSubagentActionEvent;
     FInfo: string;             // lower-left, as the compose shows the model
     FHints: string;            // lower-right CTAs
     FTurnTitles: TStringList;  // session id -> its current turn title
@@ -53,6 +57,9 @@ type
     function HandleEvent(const E: TInputEvent): Boolean; override;
     property Selected: Integer read FSelected;
     property OnSelect: TSubagentSelectedEvent read FOnSelect write FOnSelect;
+    { An action key pressed in the list: 'a' abort, 'r' release, 'p' promote.
+      The CTAs live in this box, so the box must also read the keys. }
+    property OnAction: TSubagentActionEvent read FOnAction write FOnAction;
     { The lower-left line: the session's model, exactly as the compose shows it. }
     procedure SetInfo(const AText: string);
     { The lower-right key hints. }
@@ -382,6 +389,21 @@ begin
           Entries := FRoster.Entries;
           if (FSelected <= High(Entries)) and Assigned(FOnSelect) then
             FOnSelect(Entries[FSelected].SessionId);
+          Exit(True);
+        end;
+      end;
+    kkChar:
+      begin
+        { The CTAs live in this box, so the keys must too. Only 'a', 'r' and 'p'
+          are claimed; anything else falls through, so an ordinary letter can
+          never be swallowed by the list. }
+        if Assigned(FOnAction) and (Length(E.Key.Ch) = 1) and
+          (E.Key.Ch[1] in ['a', 'r', 'p']) then
+        begin
+          { Ch is a UnicodeString; the callback takes a Char, so convert
+            explicitly - an implicit WideChar->Char narrowing is what -Sew
+            rejects, and these are ASCII keys either way. }
+          FOnAction(Char(E.Key.Ch[1]));
           Exit(True);
         end;
       end;
