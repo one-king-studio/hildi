@@ -1,0 +1,86 @@
+# Markdown v1 — Implementation Plan
+
+**Spec:** [Markdown_v1.SPEC.md](Markdown_v1.SPEC.md) · **Feature:** [FEATURE.md](FEATURE.md)
+
+Ordered so each phase leaves the tree green. Nothing here is started.
+
+## Phase 0 — Baseline
+
+- [ ] Record the current gate: `make test-parallel` count, and `tests/test_markdown.pas`
+      passing. This is the number every later phase is measured against.
+- [ ] Add the equivalence corpus as a **failing-capable** test against the *existing*
+      parser: ~12 documents, batch vs chunked, asserting identical trees.
+      *Files:* `tests/test_markdown_equivalence.pas`, `tests/data/md_corpus/*.md`
+      *Why first:* it will find real bugs in what we already ship, before any move makes
+      attribution ambiguous.
+
+## Phase 1 — Extract the module (mechanical, behaviour-preserving)
+
+- [ ] `src/markdown/markdown.types.pas` — move `TMdBlock`, `TMdSpan`, kinds, alignment
+      verbatim. No `uses tui.*`.
+- [ ] `src/markdown/markdown.parse.pas` — move `TMarkdownParser` and its block/inline
+      scanners. Split into `markdown.inline` / `markdown.blocks` / `markdown.stream` as
+      the units are touched, not in one commit.
+- [ ] `src/markdown/markdown.render.pas` — `RenderPlain`.
+- [ ] `markdown-standalone` make target: `-Fu$(SRC)/markdown` only.
+      *Test:* `TestMarkdownModuleLinksNoTui` — grep the module for `tui.` and fail.
+- [ ] `src/tui/widgets/tui.widgets.mdtheme.pas` — theme, `DefaultMdTheme`, `MdAttrFor`,
+      `MdBlockAttr` moved out.
+- [ ] Point `tui.widgets.markdownview` at the new units.
+- [ ] Delete `src/hildegard.helper.markdown.pas`. No alias.
+- [ ] `tests/test_markdown.pas` compiles against the new units with import changes only —
+      **zero assertion changes**. Any assertion that must change is a regression; justify
+      it in the commit.
+
+## Phase 2 — Setext headings
+
+- [ ] Block pass for `Title\n=====` → `mbHeading` level 1, `Title\n-----` → level 2.
+      Position: **after** lists (so `- item` is consumed), **before** thematic breaks (so
+      `---` is not eaten as a rule).
+      *Tests:* setext under a paragraph; `---` under text is a heading not a rule;
+      `- item\n---` is a list then a rule.
+- [ ] Streaming: a `---` under open text appends to the open segment.
+
+## Phase 3 — Pass-order guard
+
+- [ ] Declare the pass order as data; a test reads it and pins it, so a reorder fails.
+      *Test:* `TestBlockPassOrderIsPinned`.
+
+## Phase 4 — The file viewer
+
+- [ ] `src/tui/widgets/tui.widgets.fileviewer.pas` — `TFileViewer`, `Open`/`Reload`.
+      Markdown by extension, plain otherwise.
+      *Tests:* markdown file renders blocks; plain file renders lines; missing file draws
+      an error rather than raising; oversized file truncates with a notice.
+- [ ] Scroll: Up/Down one line, PageUp/PageDown a screen, Home/End. Clamped.
+- [ ] Wrapping at the pane width via `tui.grapheme`.
+
+## Phase 5 — Wiring
+
+- [ ] Decide open question §10.1: pane in the TUI, or separate binary.
+- [ ] Expose it — a command or a key. Out of scope for the module.
+
+## Testing phase (explicit)
+
+| Test | Proves |
+| --- | --- |
+| `TestMarkdownModuleLinksNoTui` | purity, by grep |
+| `TestBatchAndStreamingAgree` (corpus) | the AST is one thing, not two |
+| `TestBlockPassOrderIsPinned` | a reorder fails loudly |
+| `TestSetextHeading*` | the one missing construct |
+| `TestRenderPlain*` | the AST is consumable without a terminal |
+| `TestFileViewer*` | reads, distinguishes, survives a missing/oversized file |
+| existing `test_markdown.pas` | nothing regressed |
+
+## Completion criteria
+
+- `make markdown-standalone` green; `make check` green and leak-clean.
+- `hildegard.helper.markdown` gone.
+- A markdown README of ≥10 KB opens in the viewer and scrolls.
+- The equivalence corpus passes at chunk sizes 1, 7, 64 and 997 bytes.
+
+## Sequencing note
+
+Phases 1–3 are one lane and must be serial: every one touches the parser. Phase 4 is
+independent once Phase 1 lands — it only needs the AST — so it can run in parallel with
+Phase 2/3 in its own worktree.
