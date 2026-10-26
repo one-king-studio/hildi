@@ -175,7 +175,10 @@ type
     procedure TestSidebarTogglesWithCtrlD;
     procedure TestSidebarRendersItsRows;
     procedure TestSpyEnterShowsChildAndIndicator;
-    procedure TestSpyEscapeRestoresTheParent;
+    procedure TestSpyCtrlDReturnsToParent;
+    { Escape is now a two-step CANCEL, not an exit: the first press arms, the
+      second cancels the child. Exit is Ctrl+D's job. }
+    procedure TestSpyEscapeArmsWithoutLeaving;
     procedure TestSpySuppressesParentEvents;
     { An approval ask is NOT transcript: dropping it while spying deadlocked the
       child, because auto-deny stands down whenever a client is attached. }
@@ -2416,7 +2419,7 @@ begin
     Pos('spying', FApp.Panel.HeaderLeft) > 0);
 end;
 
-procedure THarnessAppTest.TestSpyEscapeRestoresTheParent;
+procedure THarnessAppTest.TestSpyCtrlDReturnsToParent;
 var
   Store: TSqliteStore;
   StoreCfg: TStoreConfig;
@@ -2446,11 +2449,51 @@ begin
   FApp.Step;
   AssertEquals('in spy mode', ChildId, FApp.SpiedSessionId);
 
-  FInput.Push(Key(kkEscape));
+  { Ctrl+D is the way back. It leaves the spy rather than toggling the list, so
+    the key that got you into a child also gets you out. }
+  FInput.Push(Ctrl('d'));
   FApp.Step;
   FApp.Step;
   AssertEquals('left the spy', '', FApp.SpiedSessionId);
   AssertEquals('still on the parent', Before, FApp.SessionId);
+end;
+
+procedure THarnessAppTest.TestSpyEscapeArmsWithoutLeaving;
+var
+  Store: TSqliteStore;
+  StoreCfg: TStoreConfig;
+  StoreErr: TStoreError;
+  WorkspaceId: Integer;
+  ChildId: string;
+begin
+  { The regression this guards: Escape used to leave the spy directly. Now it is
+    a two-step cancel, so ONE press must arm and stay - a single Escape must not
+    kill the child, and must not exit either. }
+  BuildWithStore;
+  StoreCfg := Default(TStoreConfig);
+  StoreCfg.DatabasePath := FStorePath;
+  StoreCfg.BusyTimeoutMs := 5000;
+  Store := TSqliteStore.Create(StoreCfg);
+  try
+    AssertTrue('open store', Store.Open(StoreErr));
+    Store.EnsureWorkspace(FDir, WorkspaceId, StoreErr);
+    Store.CreateChildSession(WorkspaceId, FSession.View.SessionId, 1, 'child',
+      ChildId, StoreErr);
+  finally
+    Store.Free;
+  end;
+
+  FApp.OnSpyFactory := OpenStubSpy;
+  FSpyQueue := TTurnQueue.Create;
+  FApp.ShowSpy(ChildId);
+  FApp.Step;
+
+  FInput.Push(Key(kkEscape));
+  FApp.Step;
+  FApp.Step;
+
+  AssertEquals('one escape does not leave the spy', ChildId,
+    FApp.SpiedSessionId);
 end;
 
 procedure THarnessAppTest.TestSpySuppressesParentEvents;

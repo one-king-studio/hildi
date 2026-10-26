@@ -103,6 +103,10 @@ type
     FStateLabel: string;
     FInterruptPending: Boolean;
     FInterruptAt: Int64;
+    { The two-step cancel while spying: first Escape arms, the second cancels.
+      Separate from the turn interrupt so the two windows cannot arm each other. }
+    FSpyCancelPending: Boolean;
+    FSpyCancelAt: Int64;
     { The blocks of the turn in flight, so deltas land in the right one. }
     FAssistant: TChatItem;
     { The assistant reply's raw text and the streaming frontmatter suppressor,
@@ -1022,10 +1026,26 @@ begin
     ToggleSidebar(Sender);
     Exit;
   end;
-  { Then leaves the subagent spy (never a dead end). }
+  { While spying, Escape is a two-step cancel: the first press arms, the second
+    within the window cancels the child (and tells the parent). Leaving the spy
+    is Ctrl+D's job, so Escape is free to be the destructive-but-recoverable one.
+    A single Escape is not enough for a cancel - the same key must not both back
+    out and kill work. }
   if FSpyId <> '' then
   begin
-    LeaveSpy;
+    if FSpyCancelPending and
+      (GetTickCount64 - FSpyCancelAt < InterruptWindowMs) then
+    begin
+      FSpyCancelPending := False;
+      AnnounceTakeover(FSpyId, 'cancelled');
+      SendSubagentCommand(scAbortSubagent, FSpyId);
+      LeaveSpy;
+      SetState(psReady, 'subagent cancelled; parent notified');
+      Exit;
+    end;
+    FSpyCancelPending := True;
+    FSpyCancelAt := GetTickCount64;
+    SetState(psInterrupt, 'esc again to cancel this subagent');
     Exit;
   end;
   if not FBusy then
@@ -2339,6 +2359,14 @@ end;
 
 procedure THarnessApp.ToggleSidebar(Sender: TObject);
 begin
+  { Ctrl+D is the way BACK to the parent. While spying, it leaves the spy rather
+    than toggling the list - otherwise the key that got you into a child does
+    nothing useful once you are in one. }
+  if FSpyId <> '' then
+  begin
+    LeaveSpy;
+    Exit;
+  end;
   FSidebarShown := not FSidebarShown;
   FSidebar.Visible := FSidebarShown;
   if FSidebarShown then
