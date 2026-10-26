@@ -181,6 +181,18 @@ begin
     E.Kind := teError;
     E.Text := 'undo refused: ' + Detail;
     FSession.Queue.Push(E);
+  end
+  else
+  begin
+    { Tell the app the transcript moved, so it rebuilds the stream and hands the
+      prompt back to the composer - the cancel behaviour. The runtime broadcasts
+      ekUndone for remote clients; without this the in-process path would undo
+      the store and leave the screen unchanged, which is exactly the "undo did
+      nothing" the operator reported. }
+    E := Default(TTurnEvent);
+    E.Kind := teUndone;
+    E.ElapsedMs := Id;
+    FSession.Queue.Push(E);
   end;
 end;
 

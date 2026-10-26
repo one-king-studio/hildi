@@ -227,6 +227,10 @@ type
     procedure ShowDiff(ATurnId: Int64; const APath: string);
     { The shared history dialog: open it for an intent, resolve a choice, close. }
     procedure ShowHistory(AIntent: THistoryIntent);
+    { After an undo, hand the turn's prompt back to the composer - the cancel
+      behaviour - and drop any queued prompt belonging to a turn now gone. }
+    procedure RestorePromptAfterUndo(ATurnId: Int64);
+    procedure RemoveUndoneQueued;
     procedure RefreshHistory;
     procedure CloseHistory;
     procedure OnHistoryChoose(const ATurnId: Int64);
@@ -1851,6 +1855,26 @@ begin
         RenderHistory;
         FApp.Invalidate;
       end;
+    teUndone:
+      begin
+        { An undo (or redo) moved the transcript. Rebuild it from the ledger, so
+          the stream shows exactly the turns still in the context - the undone
+          ones are filtered out by the store, not deleted.
+
+          Then behave like a CANCEL: the operator went back to before their
+          prompt, so the prompt returns to the composer for editing rather than
+          being lost. They can rewrite and resend, which is the point of undoing
+          a conversational turn. A REDO restores the turn and must NOT put the
+          prompt back - the turn is live again. }
+        FPanel.Stream.Clear;
+        RenderHistory;
+        RemoveUndoneQueued;
+        { ElapsedMs carries the turn the undo moved to; only an undo hands the
+          prompt back, so re-read the turn to see which side of the line we are
+          on. }
+        RestorePromptAfterUndo(E.ElapsedMs);   { the turn id, on the wire as turn_id }
+        FinishTurn(psReady, 'undone');
+      end;
     teDone:
       begin
         { A successful loop ends with its metrics, then its change summary. The
@@ -2378,6 +2402,49 @@ begin
   FHistoryModal := nil;
   FHistoryShown := False;
   SetState(psReady, 'ready');
+end;
+
+procedure THarnessApp.RestorePromptAfterUndo(ATurnId: Int64);
+var
+  Turns: TTurnRecordArray;
+  I: Integer;
+begin
+  { Undo behaves like a CANCEL: the operator went back to before their prompt, so
+    the prompt belongs in the composer for editing rather than being thrown away.
+    They can rewrite it and resend - which is the whole point of undoing a
+    conversational turn.
+
+    A REDO must not do this: the turn is live again, so handing its prompt back
+    would duplicate it. The two are distinguished by the turn's own status after
+    the move, not by which command ran - the event carries only the turn.
+
+    Matched by ID, not Seq: the runtime puts the turn's database id on the wire
+    (the field is named turn_id), and the seq is a different number entirely.
+    Comparing the wrong one silently restored nothing - a bug that fails quietly,
+    which is the worst kind here. }
+  if ATurnId <= 0 then
+    Exit;
+  Turns := FSession.Turns;
+  for I := 0 to High(Turns) do
+    if Turns[I].Id = ATurnId then
+    begin
+      { Undone: put the prompt back. Anything else (a redo restored
+        tsCompleted) leaves the composer alone. }
+      if Turns[I].Status = tsUndone then
+        PrependCompose(Turns[I].Prompt);
+      Exit;
+    end;
+end;
+
+procedure THarnessApp.RemoveUndoneQueued;
+begin
+  { The stream was just cleared and rebuilt from the ledger, so every queued box
+    that was drawn is already gone. What remains is the app's array of pointers
+    to those freed blocks - keep them and the next removal would touch freed
+    memory. A prompt queued for a turn the operator undid past must not fire
+    later either, and clearing the array is what stops the app treating it as
+    still in flight. }
+  FQueuedBlocks := nil;
 end;
 
 procedure THarnessApp.OnHistoryChoose(const ATurnId: Int64);

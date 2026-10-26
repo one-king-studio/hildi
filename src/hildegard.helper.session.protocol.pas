@@ -49,7 +49,12 @@ type
       A patch on every event would put kilobytes of diff on the wire per call,
       and the client already holds a store handle. Appended last so stored
       ordinals are unchanged. }
-    ekChanges);
+    ekChanges,
+    { An undo or redo completed: turn_id is the turn moved to. The client
+      rebuilds the transcript from the store and, after an undo, returns that
+      turn's prompt to the composer - the "cancel" behaviour. Appended last so
+      stored ordinals are unchanged. }
+    ekUndone);
 
   { One streamed event. A flat record with optional fields, the same shape as
     TTurnEvent: only the fields named by Kind are meaningful. }
@@ -246,7 +251,7 @@ const
     'drive_requested', 'drive_granted', 'drive_released',
     'turn_finished', 'error', 'gap', 'loop_exited', 'reasoning_done',
     'tool_output', 'ambient', 'subagent', 'subagent_ask',
-    'checkpoint_committed', 'changes');
+    'checkpoint_committed', 'changes', 'undone');
 
   MessageKindNames: array[TSessionMessageKind] of string = (
     'hello', 'attached', 'event', 'reply', 'detached', 'error',
@@ -659,6 +664,8 @@ begin
       end;
     ekCheckpointCommitted:
       PutInt(O, 'turn_seq', E.TurnSeq);
+    ekUndone:
+      PutInt(O, 'turn_id', E.TurnSeq);
     ekChanges:
       begin
         PutStr(O, 'tool_id', E.ChangeCallId);
@@ -782,6 +789,8 @@ begin
       end;
     ekCheckpointCommitted:
       E.TurnSeq := OptInt64(O, 'turn_seq', 0);
+    ekUndone:
+      E.TurnSeq := OptInt64(O, 'turn_id', 0);
     ekChanges:
       begin
         E.ChangeCallId := OptStr(O, 'tool_id');

@@ -1123,6 +1123,7 @@ procedure TSessionRuntime.HandleUndo(AClient: TClientConn;
 var
   TurnId: Int64;
   Detail: string;
+  E: TSessionEvent;
 begin
   { The runtime owns the workspace, so this is the only party that may move it -
     the client only asks, exactly as with a checkpoint. }
@@ -1155,7 +1156,15 @@ begin
   { UndoTurn moves the files AND the transcript together, or neither. Its refusal
     reason is the operator's explanation, so it goes back verbatim. }
   if FSession.UndoTurn(TurnId, Detail) then
-    ReplyTo(AClient, ACommand.Id, True, '')
+  begin
+    ReplyTo(AClient, ACommand.Id, True, '');
+    { Tell every client the transcript moved, so the app can rebuild it and hand
+      the turn's prompt back to the composer. Without this the operator sees no
+      change at all even though the undo succeeded. }
+    E := EmitEvent(ekUndone);
+    E.TurnSeq := TurnId;   { the wire field is named turn_id; it carries the ID }
+    Broadcast(E);
+  end
   else
     ReplyTo(AClient, ACommand.Id, False, Detail);
 end;

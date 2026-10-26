@@ -234,6 +234,10 @@ type
     procedure TestResumeMatchesLiveAfterTruncationError;
     procedure TestEscapeArmsThenCancels;
     procedure TestEarlyCancelRestoresThePrompt;
+    { Undo behaves like a CANCEL: the transcript shrinks and the turn's prompt
+      comes back to the composer for editing. That is the primary meaning of
+      undo on a conversational turn. }
+    procedure TestUndoShrinksTheStreamAndRestoresThePrompt;
     procedure TestSubmitWhileBusyQueuesThePrompt;
     procedure TestPasteInsertsIntoTheCompose;
     procedure TestCtrlCQuitsOnlyWhenComposeIsEmpty;
@@ -2254,6 +2258,52 @@ begin
   finally
     Slow.Free;
   end;
+end;
+
+procedure THarnessAppTest.TestUndoShrinksTheStreamAndRestoresThePrompt;
+var
+  Turns: TTurnRecordArray;
+  TurnId: Int64;
+  StoreErr: TStoreError;
+  Rec: TMessageRecord;
+begin
+  { The cancel behaviour, end to end: a completed conversational turn is in the
+    stream, undo runs, and the stream loses it while its prompt returns to the
+    composer for editing. }
+  BuildWithStore;
+  { Seed one completed turn with a user message and NO file change: the
+    conversational case that undo used to refuse outright. }
+  AssertTrue('begin turn',
+    FSession.View.Store.BeginTurn(FSession.View.SessionId, TurnId, StoreErr));
+  Rec := Default(TMessageRecord);
+  Rec.SessionId := FSession.View.SessionId;
+  Rec.TurnId := TurnId;
+  Rec.Role := mrUser;
+  Rec.Content := 'do the thing';
+  AssertTrue('message', FSession.View.Store.AppendMessage(Rec, StoreErr));
+  AssertTrue('finish',
+    FSession.View.Store.FinishTurn(TurnId, tsCompleted, 'stop', 0, '', '',
+      StoreErr));
+
+  { The undo goes through the real local driver, so this exercises the event the
+    app acts on rather than calling the handler directly. }
+  FApp.Panel.Compose.Clear;
+  FApp.Panel.Palette.OnRun('undo');
+  AssertTrue('the history dialog opened', FApp.ModalActive);
+
+  { Choose the seeded turn. The dialog reports it; the app performs the undo and
+    drains teUndone on the next Step. }
+  FInput.Push(Key(kkEnter));
+  FApp.Step;
+  FApp.Step;
+
+  Turns := FSession.View.Turns;
+  AssertEquals('one turn still in the ledger', 1, Length(Turns));
+  AssertEquals('but it is undone', Ord(tsUndone), Ord(Turns[0].Status));
+
+  { The prompt is back in the composer, which is the point of the change. }
+  AssertEquals('the prompt came back', 'do the thing',
+    string(FApp.Panel.Compose.Text));
 end;
 
 procedure THarnessAppTest.TestSubmitWhileBusyQueuesThePrompt;

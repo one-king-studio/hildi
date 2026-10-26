@@ -165,6 +165,8 @@ begin
         AEvent.Ask.Options[0].Key := 'once';
         AEvent.Ask.Options[0].Caption := 'Allow once';
       end;
+    ekUndone:
+      AEvent.TurnSeq := 42;
     ekCheckpointCommitted:
       AEvent.TurnSeq := 42;
     ekChanges:

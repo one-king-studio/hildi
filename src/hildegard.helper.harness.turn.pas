@@ -39,7 +39,12 @@ type
     teSubagent, teSubagentAsk, teAmbient,
     { Context checkpoint: a checkpoint was recorded (ElapsedMs carries its boundary
       seq). Appended last so stored ordinals are unchanged. }
-    teCheckpointCommitted
+    teCheckpointCommitted,
+    { An undo or redo completed: TurnId is the turn moved to, and Dropped-style
+      flags are unused. The app rebuilds the transcript and, for an undo, hands
+      the turn's prompt back to the composer. Appended last so stored ordinals
+      are unchanged. }
+    teUndone
   );
 
   TTurnEvent = record
