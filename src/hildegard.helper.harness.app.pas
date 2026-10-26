@@ -1874,9 +1874,16 @@ begin
     FApp.PopPlane;
   FModal := nil;
   FCloseModal := False;
-  { The turn resumes once the ask is answered. }
+  { The turn resumes once the ask is answered - but a CHILD's ask arrives while
+    the parent is NOT in a turn, so `if FBusy` left the parent stuck on
+    "approval needed" forever after answering one. The state must always be
+    restored when the modal closes; FBusy only decides which state to restore. }
   if FBusy then
-    SetState(psThinking, 'thinking');
+    SetState(psThinking, 'thinking')
+  else if FSpyId <> '' then
+    SetState(psReady, 'spying')
+  else
+    SetState(psReady, 'ready');
   ShowNextAsk;
 end;
 
@@ -2250,7 +2257,13 @@ begin
   FPanel.Stream.PreserveAnchor;
   Inc(FOlderPages);
   FPanel.Stream.Clear;
-  RenderHistory;
+  { While spying, the messages panel holds the CHILD's transcript, so paging must
+    re-render the child - RenderHistory reads the parent's session and would
+    swap the operator onto the wrong history mid-scroll. }
+  if FSpyId <> '' then
+    RenderSpyHistory(FSpyId)
+  else
+    RenderHistory;
   { RenderHistory sets FWindowStart to the window's start index in the session;
     0 means the window now holds everything, so the head is reached. (Content
     height is stale until the next layout, so it is not the signal.) }

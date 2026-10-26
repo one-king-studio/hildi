@@ -240,6 +240,7 @@ end;
 procedure TSidebar.Render(const S: ISurface);
 var
   L, R, T, B, X, Y, I, InnerW: Integer;
+  Hints: UnicodeString;
   Entries: TSubagentEntryArray;
   SurfaceAttr, Border, RowAttr: TAttr;
   Line: UnicodeString;
@@ -310,19 +311,17 @@ begin
   PutText(S, L + 2, B - 1, UnicodeString(FInfo),
     OnBg(FTheme.Muted, FTheme.RaisedBg));
 
-  { CTAs at the lower right, the key dimmed and the action in the amber, so it
-    reads as the thing to press - the compose's own convention. }
+  { CTAs at the lower right. The text comes from FHints - the whole point of the
+    setter. It used to test FHints for emptiness and then draw a HARDCODED
+    "enter spy", so the box said "enter spy" even while a child was selected and
+    the real CTAs were set. Right-aligned as one string, in the amber, which is
+    the compose's own convention. }
   if FHints <> '' then
   begin
-    Key := 'enter';
-    Act := ' spy';
-    X := R - 1 - (StringWidth(Key) + StringWidth(Act));
+    Hints := UnicodeString(FHints);
+    X := R - 1 - StringWidth(Hints);
     if X > L + 3 + StringWidth(UnicodeString(FInfo)) then
-    begin
-      PutText(S, X, B - 1, Key, OnBg(FTheme.Muted, FTheme.RaisedBg));
-      PutText(S, X + StringWidth(Key), B - 1, Act,
-        OnBg(FTheme.Warn, FTheme.RaisedBg));
-    end;
+      PutText(S, X, B - 1, Hints, OnBg(FTheme.Warn, FTheme.RaisedBg));
   end;
 end;
 
