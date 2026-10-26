@@ -24,6 +24,7 @@ type
     FDir: string;
     FHasher: TShaHasher;
     function WriteFile(const AName, AContent: string): string;
+    function ReadBack(const AName: string): string;
     function RecordFor(const APath, ABefore, AAfter: string): TChangeRecord;
   public
     procedure SetUp; override;
@@ -34,6 +35,9 @@ type
     procedure TestRevertSkipsARecordWithNoPatch;
     procedure TestRevertRefusesAPathOutsideTheWorkspace;
     procedure TestRevertRefusesAFileAboveTheReadLimit;
+    { Turn-level revert: all files or none. }
+    procedure TestRevertTurnRevertsEveryNetFile;
+    procedure TestRevertTurnWritesNothingWhenOneFileWouldBeRefused;
   end;
 
 implementation
@@ -68,6 +72,21 @@ begin
   try
     if AContent <> '' then
       Fs.WriteBuffer(AContent[1], Length(AContent));
+  finally
+    Fs.Free;
+  end;
+end;
+
+function TChangesRevertTest.ReadBack(const AName: string): string;
+var
+  Fs: TFileStream;
+begin
+  Result := '';
+  Fs := TFileStream.Create(IncludeTrailingPathDelimiter(FDir) + AName, fmOpenRead);
+  try
+    SetLength(Result, Fs.Size);
+    if Fs.Size > 0 then
+      Fs.ReadBuffer(Result[1], Fs.Size);
   finally
     Fs.Free;
   end;
@@ -199,6 +218,72 @@ begin
   AssertTrue('ran', RevertRecord(FDir, R, FHasher.OfText, 3, Res));
   AssertEquals('refused', Ord(rvUnsafe), Ord(Res.Outcome));
   AssertTrue('says why: ' + Res.Detail, Pos('limit', Res.Detail) > 0);
+end;
+
+procedure TChangesRevertTest.TestRevertTurnRevertsEveryNetFile;
+var
+  BeforeA, AfterA, BeforeB, AfterB: string;
+  Rows: TChangeRecordArray;
+  Results: TRevertResultArray;
+begin
+  { A turn that wrote two files, both revertible, reverts both. }
+  BeforeA := 'a1'#10;
+  AfterA := 'a2'#10;
+  BeforeB := 'b1'#10;
+  AfterB := 'b2'#10;
+  WriteFile('a.txt', AfterA);
+  WriteFile('b.txt', AfterB);
+
+  SetLength(Rows, 2);
+  Rows[0] := RecordFor('a.txt', BeforeA, AfterA);
+  Rows[0].IsNet := True;
+  Rows[1] := RecordFor('b.txt', BeforeB, AfterB);
+  Rows[1].IsNet := True;
+
+  AssertTrue('ran', RevertTurn(FDir, Rows, FHasher.OfText, 0, Results));
+  AssertEquals('two results', 2, Length(Results));
+  AssertEquals('a reverted', Ord(rvReverted), Ord(Results[0].Outcome));
+  AssertEquals('b reverted', Ord(rvReverted), Ord(Results[1].Outcome));
+  AssertEquals('a on disk', BeforeA, ReadBack('a.txt'));
+  AssertEquals('b on disk', BeforeB, ReadBack('b.txt'));
+end;
+
+procedure TChangesRevertTest.TestRevertTurnWritesNothingWhenOneFileWouldBeRefused;
+var
+  BeforeA, AfterA, BeforeB, AfterB: string;
+  Rows: TChangeRecordArray;
+  Results: TRevertResultArray;
+  I: Integer;
+  SawMoved: Boolean;
+begin
+  { The invariant the turn-level revert exists for: a turn that cannot revert
+    ALL its files writes NONE of them, so the transcript and the workspace cannot
+    end up disagreeing. B moved since; A must stay untouched. }
+  BeforeA := 'a1'#10;
+  AfterA := 'a2'#10;
+  BeforeB := 'b1'#10;
+  AfterB := 'b2'#10;
+  WriteFile('a.txt', AfterA);
+  WriteFile('b.txt', 'b was edited by something else'#10);
+
+  SetLength(Rows, 2);
+  Rows[0] := RecordFor('a.txt', BeforeA, AfterA);
+  Rows[0].IsNet := True;
+  Rows[1] := RecordFor('b.txt', BeforeB, AfterB);
+  Rows[1].IsNet := True;
+
+  AssertTrue('ran', RevertTurn(FDir, Rows, FHasher.OfText, 0, Results));
+
+  SawMoved := False;
+  for I := 0 to High(Results) do
+    if Results[I].Outcome = rvMoved then
+      SawMoved := True;
+  AssertTrue('the moved file is reported', SawMoved);
+
+  { A was revertible, but the turn was refused - so A is still the after-text. }
+  AssertEquals('a was NOT written', AfterA, ReadBack('a.txt'));
+  AssertEquals('b was NOT written', 'b was edited by something else'#10,
+    ReadBack('b.txt'));
 end;
 
 initialization

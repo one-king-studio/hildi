@@ -34,6 +34,8 @@ type
     Detail: string;   // why, when not rvReverted
   end;
 
+  TRevertResultArray = array of TRevertResult;
+
 { Revert one record's change in the file it names, under ARoot.
 
   A record with no patch is SKIPPED rather than failed: the process tier captures
@@ -46,6 +48,22 @@ type
 function RevertRecord(const ARoot: string; const ARecord: TChangeRecord;
   AHasher: TChangeHasher; AMaxBytes: Integer;
   out AResult: TRevertResult): Boolean;
+
+{ Revert one TURN: every net row it wrote, one file at a time.
+
+  A turn is the unit `/undo` moves, and it must be all-or-nothing in spirit: if
+  any file would be refused, the whole turn is refused BEFORE anything is
+  written, so the transcript and the workspace cannot disagree. That pre-flight
+  is why this reads every file first and only then writes.
+
+  Only NET rows are reverted. Per-call rows include edits a later call in the
+  same turn undid; applying those in order would trample the net result.
+
+  Returns True when the turn reached a decision (reverted, or refused with a
+  reason), False only on a store failure. }
+function RevertTurn(const ARoot: string; const ARows: TChangeRecordArray;
+  AHasher: TChangeHasher; AMaxBytes: Integer;
+  out AResults: TRevertResultArray): Boolean;
 
 implementation
 
@@ -199,6 +217,114 @@ begin
   end;
 
   AResult.Outcome := rvReverted;
+  Result := True;
+end;
+
+function RevertTurn(const ARoot: string; const ARows: TChangeRecordArray;
+  AHasher: TChangeHasher; AMaxBytes: Integer;
+  out AResults: TRevertResultArray): Boolean;
+var
+  I, N: Integer;
+  R: TChangeRecord;
+  Res: TRevertResult;
+  Planned: array of TRevertResult;
+  Reverted: array of string;
+  Current, Text, Err: string;
+  TooLarge, Ok: Boolean;
+begin
+  { Two passes on purpose. The first decides for every file, with nothing
+    written; the second writes only if EVERY file was revertible. A turn that
+    reverted half its files and then refused the rest would leave the transcript
+    and the workspace disagreeing, which is worse than refusing outright. }
+  Result := False;
+  AResults := nil;
+  Planned := nil;
+  { 0 means "the caller did not care"; without this, every file reads as
+    oversized and the whole turn reports rvUnsafe. }
+  if AMaxBytes <= 0 then
+    AMaxBytes := DefaultMaxBytes;
+
+  for I := 0 to High(ARows) do
+  begin
+    R := ARows[I];
+    { Only net rows describe what the turn did. }
+    if not R.IsNet then
+      Continue;
+    Res := Default(TRevertResult);
+    Res.Path := R.Path;
+    if R.Patch = '' then
+    begin
+      Res.Outcome := rvSkipped;
+      Res.Detail := 'no patch was captured for this change';
+    end
+    else if not PhysicalContains(ARoot, R.Path) then
+    begin
+      Res.Outcome := rvUnsafe;
+      Res.Detail := 'the path is outside the workspace';
+    end
+    else if not SysReadText(IncludeTrailingPathDelimiter(ARoot) + R.Path,
+      AMaxBytes, Current, TooLarge, Err) then
+    begin
+      if TooLarge then
+        Res.Outcome := rvUnsafe
+      else
+        Res.Outcome := rvFailed;
+      Res.Detail := Err;
+    end
+    else if not RevertText(R.Patch, R.BeforeHash, R.AfterHash, Current, AHasher,
+      Text, Err) then
+    begin
+      if Pos('changed since', Err) > 0 then
+        Res.Outcome := rvMoved
+      else
+        Res.Outcome := rvFailed;
+      Res.Detail := Err;
+    end
+    else
+    begin
+      Res.Outcome := rvReverted;   // planned, not yet written
+      N := Length(Planned);
+      SetLength(Planned, N + 1);
+      Planned[N] := Res;
+      SetLength(Reverted, N + 1);
+      Reverted[N] := Text;
+      Continue;                    // nothing to record below
+    end;
+    { A refusal: the whole turn is refused, so record it and stop planning. }
+    SetLength(Planned, Length(Planned) + 1);
+    Planned[High(Planned)] := Res;
+  end;
+
+  { Any refusal fails the turn before a single byte is written. Skipped rows are
+    not refusals: they are files that cannot be reverted at all. }
+  for I := 0 to High(Planned) do
+    if (Planned[I].Outcome <> rvReverted) and
+      (Planned[I].Outcome <> rvSkipped) then
+    begin
+      AResults := Planned;
+      Exit(True);   { decided: refused, nothing written }
+    end;
+
+  { All clear: write. }
+  N := 0;
+  for I := 0 to High(Planned) do
+    if Planned[I].Outcome = rvReverted then
+    begin
+      Ok := SysWriteAtomic(
+        IncludeTrailingPathDelimiter(ARoot) + Planned[I].Path, Reverted[N], Err);
+      Inc(N);
+      if not Ok then
+      begin
+        { Half-written is the one outcome worth reporting as a hard failure: the
+          pre-flight said every file was safe, so this is an I/O fault. }
+        Planned[I].Outcome := rvFailed;
+        Planned[I].Detail := Err;
+        AResults := Planned;
+        Exit(True);
+      end;
+    end;
+
+  AResults := Planned;
   Result := True;
 end;
 
