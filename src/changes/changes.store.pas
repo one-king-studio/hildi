@@ -59,6 +59,17 @@ type
       a no-op returning True: it is a normal race, not a failure. }
     function SetMessageId(AWorkspaceId, AChangeId, AMessageId: Integer;
       out AError: string): Boolean;
+    { Mark every row belonging to a turn as no longer in effect.
+
+      An undone turn is soft-deleted: the turn row is marked tsUndone and its
+      messages stop being composed into the context. Its change rows must be
+      marked too, or the history dialog would offer a turn whose files are
+      already back at the pre-turn state - and reverting it again would be
+      refused by the CAS with a confusing conflict rather than "already undone".
+
+      Idempotent: marking an already-marked turn is a no-op returning True. }
+    function MarkReverted(AWorkspaceId, ATurnId: Integer;
+      out AError: string): Boolean;
     { The newest keyframe at or before AChangeId for a path. }
     function KeyframeBefore(AWorkspaceId: Integer; const APath: string;
       AChangeId: Integer; out AFrame: TKeyframe; out AFound: Boolean;
@@ -107,6 +118,8 @@ type
       const ASessionIds: TStringArrayLite; out ARows: TChangeRecordArray;
       out AError: string): Boolean;
     function SetMessageId(AWorkspaceId, AChangeId, AMessageId: Integer;
+      out AError: string): Boolean;
+    function MarkReverted(AWorkspaceId, ATurnId: Integer;
       out AError: string): Boolean;
     function KeyframeBefore(AWorkspaceId: Integer; const APath: string;
       AChangeId: Integer; out AFrame: TKeyframe; out AFound: Boolean;
@@ -293,6 +306,21 @@ begin
       Break;
     end;
   { A row that is gone is a race, not a failure. }
+  Result := True;
+end;
+
+function TMemoryChangeStore.MarkReverted(AWorkspaceId, ATurnId: Integer;
+  out AError: string): Boolean;
+var
+  I: Integer;
+begin
+  AError := '';
+  for I := 0 to High(FRecords) do
+    if (FRecords[I].WorkspaceId = AWorkspaceId) and
+      (FRecords[I].TurnId = ATurnId) then
+      FRecords[I].RevertedAt := Trunc((Now - EncodeDate(1970, 1, 1)) *
+        MSecsPerDay);
+  { A turn with no rows kept nothing to mark - not a failure. }
   Result := True;
 end;
 

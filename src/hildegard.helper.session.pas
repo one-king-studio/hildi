@@ -27,7 +27,13 @@ type
       Appended last so stored ordinals are unchanged. }
     mrAmbient);
 
-  TTurnStatus = (tsRunning, tsCompleted, tsFailed, tsCancelled);
+  { tsUndone is APPENDED, never inserted: the status is persisted as its
+    ordinal, so a new member in the middle would silently reinterpret every
+    existing turn row. tsUndone is distinct from tsCancelled because they answer
+    different questions - cancelled is "the turn was interrupted, it may be
+    partly in effect", undone is "the turn completed and its files were put
+    back". Only the second may be excluded from the current context. }
+  TTurnStatus = (tsRunning, tsCompleted, tsFailed, tsCancelled, tsUndone);
 
   TMessageRecord = record
     Id: Int64;

@@ -372,7 +372,7 @@ end;
 function DefaultMigrations: TMigrationArray;
 begin
   Result := nil;
-  SetLength(Result, 18);
+  SetLength(Result, 19);
   Result[0].Version := 1;
   Result[0].Name := 'session history';
   Result[0].Statements := [
@@ -778,6 +778,18 @@ begin
   Result[17].Statements := [
     'ALTER TABLE approvals ADD COLUMN bucket INTEGER NOT NULL DEFAULT 0',
     'CREATE INDEX idx_approvals_bucket ON approvals (bucket)'
+  ];
+
+  { v19: mark a turn's change rows as reverted. An undone turn is soft-deleted,
+    so its rows stay in the log; without a marker the history dialog would offer
+    a turn whose files are already back at the pre-turn state, and reverting it
+    again would fail the CAS with a conflict instead of reading "already
+    undone". Additive: 0 means "still in effect", which is every existing row. }
+  Result[18].Version := 19;
+  Result[18].Name := 'reverted change rows';
+  Result[18].Statements := [
+    'ALTER TABLE file_changes ADD COLUMN reverted_at INTEGER NOT NULL DEFAULT 0',
+    'CREATE INDEX idx_changes_turn_live ON file_changes (turn_id, reverted_at)'
   ];
 end;
 
@@ -3532,19 +3544,24 @@ begin
   try
     if not EnsureOpen(AError) then
       Exit(False);
-    { The last ALimit messages after the boundary, newest first, then reversed. }
+    { The last ALimit messages after the boundary, newest first, then reversed.
+      Undone turns are excluded here too: this feeds the transcript's first
+      frame, and it must agree with QueryMessagesAfter. }
     Stmt := TStmt.Create(FDb,
       'SELECT id, session_id, turn_id, request_id, seq, role, content, ' +
       'tool_call_id, tool_name, tool_arguments, tool_reason, tool_ok, ' +
       'created_at, duration_ms, ref_session_id, label, source, status ' +
       'FROM messages WHERE session_id = ? AND seq > ? ' +
+      'AND NOT EXISTS (SELECT 1 FROM turns t WHERE t.id = messages.turn_id ' +
+      'AND t.status = ?) ' +
       'ORDER BY seq DESC LIMIT ?');
     try
       if not Stmt.Valid then
         Exit(Fail(AError, seError, 'could not read messages', DbErrorText));
       Stmt.BindText(1, ASessionId);
       Stmt.BindInt64(2, Boundary);
-      Stmt.BindInt(3, ALimit);
+      Stmt.BindInt(3, Ord(tsUndone));
+      Stmt.BindInt(4, ALimit);
       N := 0;
       while Stmt.Step = SQLITE_ROW do
       begin
@@ -3605,12 +3622,21 @@ begin
       'SELECT id, session_id, turn_id, request_id, seq, role, content, ' +
       'tool_call_id, tool_name, tool_arguments, tool_reason, tool_ok, ' +
       'created_at, duration_ms, ref_session_id, label, source, status ' +
-      'FROM messages WHERE session_id = ? AND seq > ? ORDER BY seq ASC');
+      'FROM messages WHERE session_id = ? AND seq > ? ' +
+      { An undone turn is soft-deleted: it stays in the ledger, but it is no
+        longer part of the current context. Excluding it HERE rather than in
+        Compose is deliberate - this query feeds both the provider prompt (via
+        Compose) and the transcript (via QueryActiveMessages), and the spec
+        requires the two to move together. }
+      'AND NOT EXISTS (SELECT 1 FROM turns t WHERE t.id = messages.turn_id ' +
+      'AND t.status = ?) ' +
+      'ORDER BY seq ASC');
     try
       if not Stmt.Valid then
         Exit(Fail(AError, seError, 'could not read messages', DbErrorText));
       Stmt.BindText(1, ASessionId);
       Stmt.BindInt64(2, AAfterSeq);
+      Stmt.BindInt(3, Ord(tsUndone));
       N := 0;
       while Stmt.Step = SQLITE_ROW do
       begin

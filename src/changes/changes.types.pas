@@ -58,6 +58,10 @@ type
       reads only net rows; a call's drill-down reads only per-call rows. Never
       mixed, or the summary double-counts the net and its parts. }
     IsNet: Boolean;
+    { Non-zero once the turn this row belongs to was undone. The row is kept
+      (the record still shows the work happened) but it is no longer offered as
+      revertible: the files are already back at the pre-turn state. }
+    RevertedAt: Int64;
   end;
 
   TChangeRecordArray = array of TChangeRecord;

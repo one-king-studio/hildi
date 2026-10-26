@@ -13,6 +13,7 @@ uses
   hildegard.helper.store, hildegard.helper.workspace,
   hildegard.helper.recall.tool,
   hildegard.helper.harness.session, hildegard.helper.harness.view,
+  hildegard.helper.session.store,
   hildegard.helper.mcp.config,
   hildegard.helper.board, hildegard.helper.board.store,
   hildegard.helper.tasks, hildegard.helper.tasks.store,
@@ -60,6 +61,15 @@ type
     { Undo moves the files AND the transcript together, or neither. }
     procedure TestUndoTurnRestoresFilesAndRewindsMessages;
     procedure TestUndoTurnRefusesWhenAFileCannotBeRestored;
+    { An undone turn is soft-deleted as tsUndone - distinct from tsCancelled,
+      which means "interrupted, possibly still in effect" - and its change rows
+      are marked reverted so a dialog cannot offer them again. }
+    procedure TestUndoTurnMarksTheTurnAndItsChangeRowsUndone;
+    { Undoing a suffix that is already undone must say so, not report success. }
+    procedure TestUndoingAnAlreadyUndoneSuffixSaysSo;
+    { The transcript half: an undone turn's messages stop being composed into
+      the context, or the operator sees work that is no longer on disk. }
+    procedure TestUndoneTurnsAreExcludedFromTheContext;
     procedure TestTheTurnBoundaryReclaimsADeadSessionsClaim;
     procedure TestRecallToolAbsentWithoutStore;
     procedure TestLastTurnEmptyWithoutTurns;
@@ -498,6 +508,163 @@ begin
     AssertTrue('read messages', Session.View.Store.QueryMessages(
       Session.View.SessionId, Msgs, StoreErr));
     AssertEquals('the transcript is NOT rewound', 1, Length(Msgs));
+  finally
+    Session.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestUndoTurnMarksTheTurnAndItsChangeRowsUndone;
+var
+  Session: THarnessSession;
+  Err, Detail: string;
+  TurnId: Int64;
+  Turns: TTurnRecordArray;
+  Rows: TChangeRecordArray;
+  Changes: IChangeStore;
+  I: Integer;
+  Found, SawRow: Boolean;
+  StoreErr: TStoreError;
+begin
+  { Soft-delete has three halves and all three must happen: the turn is marked,
+    its change rows are marked, and the files are back. A turn marked tsUndone
+    whose rows still look revertible is exactly what would let a history dialog
+    offer a turn that has already been undone. }
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    Session.View.Store.BeginTurn(Session.View.SessionId, TurnId, StoreErr);
+    if TurnId <= 0 then
+      TurnId := 1;
+    Session.View.Store.FinishTurn(TurnId, tsCompleted, 'stop', 0, '', '',
+      StoreErr);
+
+    Detail := '';
+    WriteText('a.txt', 'one'#10'TWO'#10);
+    AssertTrue('row: ' + Detail, SeedChange(Session, Integer(TurnId), 'one'#10,
+      'one'#10'TWO'#10, Detail));
+    AssertTrue('message: ' + Detail, SeedMessage(Session, TurnId, Detail));
+
+    AssertTrue('undo: ' + Detail, Session.UndoTurn(TurnId, Detail));
+
+    { The turn is tsUndone, NOT tsCancelled. A cancelled turn was interrupted;
+      an undone one completed and then had its files put back. Only the second
+      may be dropped from the current context. }
+    Turns := Session.View.Turns;
+    Found := False;
+    for I := 0 to High(Turns) do
+      if Turns[I].Id = TurnId then
+      begin
+        Found := True;
+        AssertEquals('the turn is marked undone', Ord(tsUndone),
+          Ord(Turns[I].Status));
+      end;
+    AssertTrue('the turn is still in the ledger', Found);
+
+    { The rows are kept - the record still shows the work happened - but marked. }
+    Changes := TSqliteChangeStore.Create(Session.View.Store);
+    AssertTrue('rows: ' + Detail,
+      Changes.ForTurn(Session.View.WorkspaceId, Integer(TurnId), Rows, Detail));
+    SawRow := False;
+    for I := 0 to High(Rows) do
+      if Rows[I].IsNet then
+      begin
+        SawRow := True;
+        AssertTrue('the change row is marked reverted', Rows[I].RevertedAt > 0);
+      end;
+    AssertTrue('the net row survives its own undo', SawRow);
+  finally
+    Session.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestUndoingAnAlreadyUndoneSuffixSaysSo;
+var
+  Session: THarnessSession;
+  Err, Detail, Second: string;
+  TurnId: Int64;
+  StoreErr: TStoreError;
+begin
+  { An undo that moved nothing must not read as a success. The operator asked
+    to go back to a state and is owed an answer about what actually moved. }
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    Session.View.Store.BeginTurn(Session.View.SessionId, TurnId, StoreErr);
+    if TurnId <= 0 then
+      TurnId := 1;
+    Session.View.Store.FinishTurn(TurnId, tsCompleted, 'stop', 0, '', '',
+      StoreErr);
+
+    Detail := '';
+    WriteText('a.txt', 'one'#10'TWO'#10);
+    AssertTrue('row: ' + Detail, SeedChange(Session, Integer(TurnId), 'one'#10,
+      'one'#10'TWO'#10, Detail));
+
+    AssertTrue('first undo: ' + Detail, Session.UndoTurn(TurnId, Detail));
+
+    Second := '';
+    AssertFalse('second undo moves nothing', Session.UndoTurn(TurnId, Second));
+    AssertTrue('says it was already undone: ' + Second,
+      Pos('already undone', Second) > 0);
+  finally
+    Session.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestUndoneTurnsAreExcludedFromTheContext;
+var
+  Session: THarnessSession;
+  Err, Detail: string;
+  TurnId: Int64;
+  Convo: TSqliteConversationStore;
+  Composed: TChatMessageArray;
+  StoreErr: TStoreError;
+begin
+  { The transcript half of the invariant. Undo puts the files back; if the
+    turn's messages still reach the provider, the model is told about work that
+    is no longer on disk - the same lie as moving one without the other. }
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    Session.View.Store.BeginTurn(Session.View.SessionId, TurnId, StoreErr);
+    if TurnId <= 0 then
+      TurnId := 1;
+    Session.View.Store.FinishTurn(TurnId, tsCompleted, 'stop', 0, '', '',
+      StoreErr);
+
+    Detail := '';
+    WriteText('a.txt', 'one'#10'TWO'#10);
+    AssertTrue('row: ' + Detail, SeedChange(Session, Integer(TurnId), 'one'#10,
+      'one'#10'TWO'#10, Detail));
+    AssertTrue('message: ' + Detail, SeedMessage(Session, TurnId, Detail));
+
+    { Before the undo the turn IS in the context. Asserting this first is what
+      makes the exclusion below mean something: otherwise the test would pass
+      on a session that never had a message at all. }
+    Convo := TSqliteConversationStore.Create(Session.View.Store,
+      Session.View.SessionId, 0);
+    try
+      { Messages is the public face of Compose (it starts from the composed
+        list), and it is what the loop actually sends. }
+      Composed := Convo.Messages;
+      AssertEquals('the live turn is in the context', 1, Length(Composed));
+    finally
+      Convo.Free;
+    end;
+
+    AssertTrue('undo: ' + Detail, Session.UndoTurn(TurnId, Detail));
+
+    Convo := TSqliteConversationStore.Create(Session.View.Store,
+      Session.View.SessionId, 0);
+    try
+      { Messages is the public face of Compose (it starts from the composed
+        list), and it is what the loop actually sends. }
+      Composed := Convo.Messages;
+      AssertEquals('the undone turn is dropped from the context', 0,
+        Length(Composed));
+    finally
+      Convo.Free;
+    end;
   finally
     Session.Free;
   end;

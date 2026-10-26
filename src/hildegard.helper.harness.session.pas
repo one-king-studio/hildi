@@ -596,7 +596,9 @@ function THarnessSession.UndoTurn(ATurnId: Int64; out ADetail: string): Boolean;
 var
   Turns: TTurnRecordArray;
   I, First: Integer;
+  UndidCount, SkippedUndone: Integer;
   StoreErr: TStoreError;
+  MarkErr: string;
   Part: string;
 begin
   { CUMULATIVE undo: undoing turn N walks back every turn from the newest to N
@@ -637,26 +639,61 @@ begin
   { Walk newest down to the target. Any refusal stops the whole undo, but the
     turns already undone stay undone - each one is itself all-or-nothing, and
     re-reverting is refused by the CAS, so a retry cannot double-apply. }
+  UndidCount := 0;
+  SkippedUndone := 0;
   for I := High(Turns) downto First do
   begin
+    { A turn that is already undone is not silently passed over: the operator
+      asked to move to a state and is owed an answer about what actually moved.
+      Counted, and reported below. }
+    if Turns[I].Status = tsUndone then
+    begin
+      Inc(SkippedUndone);
+      Continue;
+    end;
     if Turns[I].Status <> tsCompleted then
-      Continue;   { already undone, failed, or running - nothing to move }
+      Continue;   { failed, or running - nothing to move }
     if not UndoOneTurn(Turns[I].Id, Part) then
     begin
       ADetail := Part;
       Exit;
     end;
+    { The change rows are marked reverted BEFORE the turn is marked, so a crash
+      between the two leaves rows pointing at a completed turn that the dialog
+      will still offer - recoverable. The reverse order could strand a tsUndone
+      turn whose rows still look revertible. }
+    if not FChangeStore.MarkReverted(FView.WorkspaceId, Integer(Turns[I].Id),
+      MarkErr) then
+    begin
+      ADetail := 'the files were restored but the change rows could not be '
+        + 'marked reverted: ' + MarkErr;
+      Exit;
+    end;
     { Soft-delete: the turn stays in the ledger so the record still shows it
       happened, but it is no longer part of the current context. The lifetime
       token totals keep counting it, because it did consume them. }
-    if not FView.Store.FinishTurn(Turns[I].Id, tsCancelled, 'undone', 0, '',
+    if not FView.Store.FinishTurn(Turns[I].Id, tsUndone, 'undone', 0, '',
       '', StoreErr) then
     begin
       ADetail := 'the files were restored but the turn could not be marked: '
         + StoreErr.Message;
       Exit;
     end;
+    Inc(UndidCount);
   end;
+
+  { Report what moved. An undo that did nothing must not read as a success. }
+  if UndidCount = 0 then
+  begin
+    if SkippedUndone > 0 then
+      ADetail := 'already undone'
+    else
+      ADetail := 'nothing to undo: no completed turn in that range';
+    Exit;
+  end;
+  if SkippedUndone > 0 then
+    ADetail := 'undid ' + IntToStr(UndidCount) + ' turn(s); '
+      + IntToStr(SkippedUndone) + ' was already undone';
   Result := True;
 end;
 
