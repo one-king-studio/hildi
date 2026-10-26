@@ -60,6 +60,12 @@ type
     procedure TestTheTurnBoundaryRenewsAThisSessionsClaim;
     { Undo moves the files AND the transcript together, or neither. }
     procedure TestUndoTurnRestoresFilesAndRewindsMessages;
+    { A turn that changed no files is a CONVERSATIONAL turn, and going back on
+      the conversation is the primary meaning of undo. File reversion is
+      secondary, so a file-less turn must still undo and leave the transcript
+      rewound. It used to refuse with 'this turn changed no files', which made
+      /undo unavailable on any discussion-only session. }
+    procedure TestUndoTurnOnAConversationalTurnStillRewinds;
     procedure TestUndoTurnRefusesWhenAFileCannotBeRestored;
     { An undone turn is soft-deleted as tsUndone - distinct from tsCancelled,
       which means "interrupted, possibly still in effect" - and its change rows
@@ -495,6 +501,51 @@ begin
     finally
       Convo.Free;
     end;
+  finally
+    Session.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestUndoTurnOnAConversationalTurnStillRewinds;
+var
+  Session: THarnessSession;
+  Err, Detail: string;
+  TurnId: Int64;
+  Msgs: TMessageRecordArray;
+  Turns: TTurnRecordArray;
+  I: Integer;
+  StoreErr: TStoreError;
+begin
+  { A turn that changed no files is a conversation turn. Undo's PRIMARY job is
+    going back on the conversation; reverting files is secondary. Refusing here
+    made /undo do nothing at all on a session that only talked - which is the
+    common case. }
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    Session.View.Store.BeginTurn(Session.View.SessionId, TurnId, StoreErr);
+    if TurnId <= 0 then
+      TurnId := 1;
+    Session.View.Store.FinishTurn(TurnId, tsCompleted, 'stop', 0, '', '',
+      StoreErr);
+    { A message, and DELIBERATELY no change row: this turn only talked. }
+    Detail := '';
+    AssertTrue('message: ' + Detail, SeedMessage(Session, TurnId, Detail));
+
+    Detail := '';
+    AssertTrue('undo succeeds: ' + Detail, Session.UndoTurn(TurnId, Detail));
+
+    { The transcript moved: the turn is marked undone and out of the context. }
+    Turns := Session.View.Turns;
+    for I := 0 to High(Turns) do
+      if Turns[I].Id = TurnId then
+        AssertEquals('the turn is undone', Ord(tsUndone), Ord(Turns[I].Status));
+
+    { The message row survives - soft-deleted, not deleted - but leaves the
+      context. Asserting both pins the distinction that redo depends on. }
+    AssertTrue('read messages', Session.View.Store.QueryMessages(
+      Session.View.SessionId, Msgs, StoreErr));
+    AssertEquals('the message row is kept', 1, Length(Msgs));
   finally
     Session.Free;
   end;

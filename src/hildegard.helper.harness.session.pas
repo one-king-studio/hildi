@@ -885,14 +885,21 @@ begin
     ADetail) then
     Exit;
 
-  { Only net rows describe what the turn did. }
+  { Only net rows describe what the turn did. A turn with NONE is not a turn that
+    cannot be undone - it is a CONVERSATIONAL turn, and going back on the
+    conversation is the primary meaning of undo. File reversion is secondary: when
+    there is nothing to revert, there is nothing to do here and the caller still
+    marks the turn undone and drops it from the context.
+
+    This used to refuse with 'this turn changed no files', which made /undo
+    unavailable on any discussion-only session. }
   N := 0;
   for I := 0 to High(Rows) do
     if Rows[I].IsNet then
       Inc(N);
   if N = 0 then
   begin
-    ADetail := 'this turn changed no files';
+    Result := True;
     Exit;
   end;
 
