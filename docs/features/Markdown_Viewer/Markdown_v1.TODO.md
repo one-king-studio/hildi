@@ -41,12 +41,29 @@ before the parser grows; do not treat it as done.
 
 ## Phase 2 — Setext headings
 
-- [ ] Block pass for `Title\n=====` → `mbHeading` level 1, `Title\n-----` → level 2.
+- [x] Block pass for `Title\n=====` → `mbHeading` level 1, `Title\n-----` → level 2.
       Position: **after** lists (so `- item` is consumed), **before** thematic breaks (so
       `---` is not eaten as a rule).
       *Tests:* setext under a paragraph; `---` under text is a heading not a rule;
       `- item\n---` is a list then a rule.
-- [ ] Streaming: a `---` under open text appends to the open segment.
+- [x] Streaming: a `---` under open text appends to the open segment.
+      *(Falls out of the design: the paragraph stays open, so the underline
+      arrives as a line inside it and the setext pass runs there. Pinned by
+      `TestIncrementalSetextMatchesFullParse`.)*
+
+**Two details settled by tests, not assumption:**
+
+- The underline is a **continuous run** (no internal spaces). That is what keeps
+  `- - -` a thematic break and `= =` ordinary text, so setext and rule never
+  compete for the same line.
+- The **whole open paragraph** becomes the heading, not just its last line:
+  `Foo / bar / ===` is one level-1 heading reading `Foo bar`. This is the
+  difference from the table pass, where only the last line is the header.
+
+`TestDelimiterWithoutPipeIsParagraph` was rewritten deliberately (its old input,
+`Header` + `---`, pinned the absence of setext). Its intent — a pipe-less
+delimiter is not a table — is kept with `- - -`, which is unambiguous under both
+readings.
 
 ## Phase 3 — Pass-order guard
 

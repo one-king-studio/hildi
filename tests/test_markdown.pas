@@ -74,6 +74,18 @@ type
     procedure TestTableHeaderAfterParagraph;
     procedure TestDelimiterWithoutPipeIsParagraph;
     procedure TestIncrementalTableMatchesFullParse;
+    { Setext headings: the one construct the parser never supported. The
+      underline position is load-bearing - after lists, before thematic breaks -
+      or `---` is eaten as a rule and a heading silently disappears. }
+    procedure TestSetextHeadingLevelOne;
+    procedure TestSetextHeadingLevelTwo;
+    procedure TestSetextUnderMultiLineParagraphJoinsLines;
+    procedure TestSetextUnderlineToleratesTrailingSpaces;
+    procedure TestTwoDashesUnderTextIsAHeadingNotARule;
+    procedure TestRuleAfterAnAtxHeadingStaysARule;
+    procedure TestRuleAfterAListItemStaysARule;
+    procedure TestSetextUnderlineWithSpacesIsLiteral;
+    procedure TestIncrementalSetextMatchesFullParse;
   end;
 
 implementation
@@ -628,12 +640,130 @@ end;
 
 procedure TMarkdownTest.TestDelimiterWithoutPipeIsParagraph;
 begin
-  { No pipe in the delimiter, so this stays a paragraph then a thematic break. }
-  FBlocks := Parse('Header' + #10 + '---');
+  { REWRITTEN deliberately when setext landed. The original input was
+    'Header' + '---', which this parser used to read as a paragraph then a rule
+    - an expectation that pinned the ABSENCE of setext. That input is now a
+    level-2 heading (see TestTwoDashesUnderTextIsAHeadingNotARule).
+
+    The intent is preserved with input that is unambiguous under both readings:
+    `- - -` has internal spaces, so it is a thematic break and not a setext
+    underline, and having no pipe it is certainly not a table. }
+  FBlocks := Parse('Header' + #10 + '- - -');
   AssertEquals('two blocks', 2, Length(FBlocks));
   AssertTrue('not a table', FBlocks[0].Kind <> mbTable);
   AssertTrue('a paragraph', FBlocks[0].Kind = mbParagraph);
   AssertTrue('a rule', FBlocks[1].Kind = mbRule);
+end;
+
+procedure TMarkdownTest.TestSetextHeadingLevelOne;
+begin
+  FBlocks := Parse('Title' + #10 + '=====');
+  AssertEquals('one block', 1, Length(FBlocks));
+  AssertTrue('a heading', FBlocks[0].Kind = mbHeading);
+  AssertEquals('level 1', 1, FBlocks[0].Level);
+  AssertEquals('text', 'Title', JoinedText(0));
+end;
+
+procedure TMarkdownTest.TestSetextHeadingLevelTwo;
+begin
+  FBlocks := Parse('Title' + #10 + '-----');
+  AssertEquals('one block', 1, Length(FBlocks));
+  AssertTrue('a heading', FBlocks[0].Kind = mbHeading);
+  AssertEquals('level 2', 2, FBlocks[0].Level);
+  AssertEquals('text', 'Title', JoinedText(0));
+end;
+
+procedure TMarkdownTest.TestSetextUnderMultiLineParagraphJoinsLines;
+begin
+  { CommonMark joins the whole paragraph, not just its last line. }
+  FBlocks := Parse('Foo' + #10 + 'bar' + #10 + '===');
+  AssertEquals('one block', 1, Length(FBlocks));
+  AssertTrue('a heading', FBlocks[0].Kind = mbHeading);
+  AssertEquals('level 1', 1, FBlocks[0].Level);
+  AssertEquals('both lines joined', 'Foo bar', JoinedText(0));
+end;
+
+procedure TMarkdownTest.TestSetextUnderlineToleratesTrailingSpaces;
+begin
+  FBlocks := Parse('Title' + #10 + '=====   ');
+  AssertEquals('one block', 1, Length(FBlocks));
+  AssertTrue('a heading', FBlocks[0].Kind = mbHeading);
+  AssertEquals('level 1', 1, FBlocks[0].Level);
+end;
+
+procedure TMarkdownTest.TestTwoDashesUnderTextIsAHeadingNotARule;
+begin
+  { This assertion was REWRITTEN deliberately when setext landed. It used to
+    expect a paragraph then a thematic break, because the parser had no setext
+    pass and `---` could only be a rule. CommonMark reads it as a level-2
+    heading, and the old expectation pinned the absence of a feature. The
+    original intent - "a delimiter row without a pipe is not a table" - is kept.
+  }
+  FBlocks := Parse('Title' + #10 + '--');
+  AssertEquals('one block', 1, Length(FBlocks));
+  AssertTrue('not a table', FBlocks[0].Kind <> mbTable);
+  AssertTrue('a heading', FBlocks[0].Kind = mbHeading);
+  AssertEquals('level 2', 2, FBlocks[0].Level);
+  AssertEquals('text', 'Title', JoinedText(0));
+end;
+
+procedure TMarkdownTest.TestRuleAfterAnAtxHeadingStaysARule;
+begin
+  { An ATX heading is finalised immediately, so the break below it is a rule -
+    the setext pass must not reach back past a closed block. }
+  FBlocks := Parse('# Foo' + #10 + '---');
+  AssertEquals('two blocks', 2, Length(FBlocks));
+  AssertTrue('heading first', FBlocks[0].Kind = mbHeading);
+  AssertEquals('level 1', 1, FBlocks[0].Level);
+  AssertTrue('rule second', FBlocks[1].Kind = mbRule);
+end;
+
+procedure TMarkdownTest.TestRuleAfterAListItemStaysARule;
+begin
+  { A list is not a paragraph, so the setext pass cannot claim this underline. }
+  FBlocks := Parse('- item' + #10 + '---');
+  AssertEquals('two blocks', 2, Length(FBlocks));
+  AssertTrue('list first', FBlocks[0].Kind = mbListItem);
+  AssertTrue('rule second', FBlocks[1].Kind = mbRule);
+end;
+
+procedure TMarkdownTest.TestSetextUnderlineWithSpacesIsLiteral;
+begin
+  { `= =` is neither a setext underline nor a rule: it continues the paragraph
+    as ordinary text, which is what a reader sees. }
+  FBlocks := Parse('Title' + #10 + '= =');
+  AssertEquals('one block', 1, Length(FBlocks));
+  AssertTrue('a paragraph', FBlocks[0].Kind = mbParagraph);
+  AssertEquals('text kept', 'Title = =', JoinedText(0));
+end;
+
+procedure TMarkdownTest.TestIncrementalSetextMatchesFullParse;
+const
+  Doc = 'Title' + #10 + '=====' + #10 + #10 + 'Body text.' + #10 + #10 +
+    'Sub' + #10 + '---' + #10;
+var
+  Full: TMarkdownParser;
+  FullBlocks, IncBlocks: TMdBlockArray;
+  I: Integer;
+begin
+  Full := TMarkdownParser.Create;
+  try
+    FullBlocks := Full.Parse(Doc);
+    Full.Reset;
+    for I := 1 to Length(Doc) do
+      Full.Append(Doc[I]);
+    Full.Finish;
+    IncBlocks := Full.Blocks;
+  finally
+    Full.Free;
+  end;
+  AssertEquals('same block count', Length(FullBlocks), Length(IncBlocks));
+  for I := 0 to High(FullBlocks) do
+  begin
+    AssertTrue('same kind at ' + IntToStr(I), FullBlocks[I].Kind = IncBlocks[I].Kind);
+    AssertEquals('same level at ' + IntToStr(I), FullBlocks[I].Level,
+      IncBlocks[I].Level);
+  end;
 end;
 
 procedure TMarkdownTest.TestIncrementalTableMatchesFullParse;

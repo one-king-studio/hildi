@@ -197,6 +197,44 @@ begin
   Result := Count >= 3;
 end;
 
+{ A setext underline: a line of nothing but '=' (level 1) or '-' (level 2),
+  spaces permitted around and between the marks. Two marks minimum, so `--` is
+  an underline but a lone '-' is not. }
+function SetextLevel(const ALine: UnicodeString; out ALevel: Integer): Boolean;
+var
+  I, Count: Integer;
+  Ch: Char;
+  S: UnicodeString;
+begin
+  ALevel := 0;
+  S := TrimU(ALine);
+  if S = '' then
+    Exit(False);
+  Ch := #0;
+  Count := 0;
+  { No internal spaces. CommonMark's underline is a continuous run, which is
+    exactly what distinguishes it from a thematic break (`- - -` is a rule,
+    `= =` is ordinary text) - so the two never compete for the same line. }
+  for I := 1 to Length(S) do
+    if S[I] in ['=', '-'] then
+    begin
+      if Ch = #0 then
+        Ch := S[I]
+      else if S[I] <> Ch then
+        Exit(False);
+      Inc(Count);
+    end
+    else
+      Exit(False);
+  if Count < 2 then
+    Exit(False);
+  if Ch = '=' then
+    ALevel := 1
+  else
+    ALevel := 2;
+  Result := True;
+end;
+
 function FenceOpen(const ALine: UnicodeString; out AChar: Char;
   out ALanguage: UnicodeString): Boolean;
 var
@@ -887,6 +925,39 @@ begin
     B.Spans := InlineSpans(CollapseWhitespace(Txt));
     AddBlock(B);
     Exit;
+  end;
+
+  { Setext: an underline directly beneath open paragraph text turns that text
+    into a heading. Position is load-bearing in both directions.
+
+    - It must run BEFORE the thematic-break pass, or `---` is claimed as a rule
+      and the heading silently disappears.
+    - It needs open PARAGRAPH text, so it cannot fire under a list, a quote, a
+      fence or a closed block. That is why `- item` followed by `---` is still a
+      list then a rule, and why `# Foo` followed by `---` is a heading then a
+      rule: an ATX heading is finalised immediately and leaves nothing open.
+    - A list marker line can never be all dashes, so running this before the
+      list pass would change nothing; running after it would be too late,
+      because the rule pass sits between them.
+
+    Only the LAST line of the open tail becomes the heading; any earlier lines
+    finalise as a paragraph first, which is what CommonMark does. }
+  if FOpen and (FKind = mbParagraph) and SetextLevel(ALine, Level) then
+  begin
+    { The ENTIRE open paragraph becomes the heading, not just its last line.
+      `Foo / bar / ===` is one level-1 heading reading "Foo bar" - the underline
+      applies to the paragraph it follows, which is the difference between this
+      pass and the table pass (where only the last line is the header). }
+    if TrimU(FTail) <> '' then
+    begin
+      B := Default(TMdBlock);
+      B.Kind := mbHeading;
+      B.Level := Level;
+      B.Spans := InlineSpans(CollapseWhitespace(FTail));
+      AddBlock(B);
+      ResetOpen;
+      Exit;
+    end;
   end;
 
   if IsRule(ALine) then
