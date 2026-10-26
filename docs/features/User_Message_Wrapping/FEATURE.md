@@ -7,9 +7,11 @@ context — the skills manifest, the current time, preferences — can never be
 mistaken for the user's own words. The persisted record stays plain; only the
 provider-visible form carries the wrapper.
 
-This is a port of `hildegard/main`'s message formatter
-(`src-backend/lib/main-agent/message-formatter.ts`), which `FormatAmbient` already
-follows for ambient messages.
+This is a port of the design in **a separate sibling project's** message
+formatter (`src-backend/lib/main-agent/message-formatter.ts`), which
+`FormatAmbient` already follows for ambient messages. That project is not a
+build dependency and is not vendored here; see `LOCAL_NOTES.md` for a local
+checkout path.
 
 ## Problem Statement
 
@@ -136,8 +138,9 @@ The shape:
 
 ## Notes
 
-- **Reference:** `hildegard/main/src-backend/lib/main-agent/message-formatter.ts`
+- **Reference:** the sibling project's `src-backend/lib/main-agent/message-formatter.ts`
   (`formatCurrentMessage`, `formatPastMessage`, `formatSystemEventMessage`).
+  Checkout path is machine-local: see `LOCAL_NOTES.md`.
 - **The existing vocabulary is already ours:** `FormatAmbient`
   (`hildegard.helper.ambient`) uses `<message>` + `<instructions>`, and escaping
   helpers exist. The user-message wrapper reuses that shape.

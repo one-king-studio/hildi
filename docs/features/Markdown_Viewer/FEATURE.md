@@ -134,11 +134,15 @@ message instead of an array dump.
 
 ## Notes
 
-- **The source of the design** is `/Users/johnrcui/Code/johnrcui/hildegard/main/docs/features/Markdown_Rendering/`
-  (TypeScript, ~12.8k lines). Its *architecture* transfers; its code does not — it produces
-  HTML for a DOM, and its sanitiser, URI allow-listing and node ids exist to serve that.
-  Read `SOLUTION_NOTES.md` §5 before changing the parser: the expensive lessons there
-  (one regex doing three jobs; a green suite proving nothing; declarations must not be
-  nodes) were paid for once and should not be paid for again.
+- **The source of the design** is a *separate* sibling project's markdown renderer
+  (TypeScript, ~12.8k lines), not part of this repository and not required to build
+  anything here. Its local checkout path is deliberately not recorded in source control;
+  see `LOCAL_NOTES.md` (gitignored) on a machine that has both. Its *architecture*
+  transfers; its code does not — it produces HTML for a DOM, and its sanitiser,
+  URI allow-listing and node ids exist to serve that.
+- **The lessons that transferred, restated here so they survive without the source:**
+  one regex doing three jobs is unauditable; a green suite can prove nothing if it only
+  exercises the path the app does not run; and a declaration must not become a node.
+  Those three were paid for once already.
 - **We already satisfy the biggest one.** Our inline scanner is hand-written and linear;
   the source's 6.8 s ReDoS on 200 characters is a failure mode we cannot have.

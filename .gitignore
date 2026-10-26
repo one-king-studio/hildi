@@ -29,6 +29,10 @@
 .env.local
 .env.*.local
 
+# Machine-specific notes (absolute paths, external checkout locations).
+# Never committed: this repo must not leak the operator's home directory.
+/LOCAL_NOTES.md
+
 # Lazarus / IDE
 backup/
 *.lps

@@ -255,15 +255,15 @@ cd /ws && HILDEGARD_API_KEY=dummy HILDEGARD_MODEL=dummy make test 2>&1 | grep -E
 HILDEGARD_API_KEY=dummy HILDEGARD_MODEL=dummy make test 2>&1 | grep -E "Number of"
 HILDEGARD_API_KEY=dummy HILDEGARD_MODEL=dummy make test 2>&1 | sed -n '/List of failures/,$p' | grep -E "Message:" | sed 's/.*Message: *//' | sort | uniq -c
 echo "== stray processes =="; ps aux | grep -i hildegard | grep -v grep | head; echo "== runtime dirs =="; ls -d /tmp/hildegard-helper-* 2>/dev/null | head; ls /tmp/hildegard-helper-*/ 2>/dev/null | head -20; echo "== open unix sockets in /tmp =="; ls -la /tmp/*.sock 2>/dev/null | head
-ls -la /home/me/Code/johnrcui/hildegard/main 2>&1 | head -50
-cd /home/me/Code/johnrcui/hildegard/main && grep -ril "ambient" src src-backend src-shared docs 2>/dev/null | head -40
-cd /home/me/Code/johnrcui/hildegard/main && grep -rilE "wrap.*(prompt|message)|(prompt|message).*wrap|dynamic.*message" src src-backend src-shared 2>/dev/null | head -40
-cd /home/me/Code/johnrcui/hildegard/main && cat src-backend/lib/main-agent/message-formatter.ts
-cd /home/me/Code/johnrcui/hildegard/main && grep -n "ambient\\|formatSystemEvent\\|formatCurrentMessage\\|formatPastMessage\\|system" src-backend/lib/main-agent/conversation-manager.ts | head -60
-cd /home/me/Code/johnrcui/hildegard/main && grep -n "ambient" src-backend/lib/main-agent/system-prompt.ts src-backend/lib/main-agent/index.ts src-backend/lib/main-agent/__tests__/message-formatter.test.ts
-cd /home/me/Code/johnrcui/hildegard/main && sed -n '1,80p' src-backend/lib/main-agent/__tests__/message-formatter.test.ts
-cd /home/me/Code/johnrcui/hildegard/main && grep -n "formatSystemEventMessage\\|formatCurrentMessage\\|systemEvent\\|role: 'system'\\|role: \\"system\\"" src-backend/services/agent-core/agentic-loop.ts src-backend/lib/main-agent/index.ts | head -40
-cd /home/me/Code/johnrcui/hildegard/main && sed -n '2420,2540p' src-backend/lib/main-agent/index.ts
+ls -la /home/me/Code/other-project 2>&1 | head -50
+cd /home/me/Code/other-project && grep -ril "ambient" src src-backend src-shared docs 2>/dev/null | head -40
+cd /home/me/Code/other-project && grep -rilE "wrap.*(prompt|message)|(prompt|message).*wrap|dynamic.*message" src src-backend src-shared 2>/dev/null | head -40
+cd /home/me/Code/other-project && cat src-backend/lib/main-agent/message-formatter.ts
+cd /home/me/Code/other-project && grep -n "ambient\\|formatSystemEvent\\|formatCurrentMessage\\|formatPastMessage\\|system" src-backend/lib/main-agent/conversation-manager.ts | head -60
+cd /home/me/Code/other-project && grep -n "ambient" src-backend/lib/main-agent/system-prompt.ts src-backend/lib/main-agent/index.ts src-backend/lib/main-agent/__tests__/message-formatter.test.ts
+cd /home/me/Code/other-project && sed -n '1,80p' src-backend/lib/main-agent/__tests__/message-formatter.test.ts
+cd /home/me/Code/other-project && grep -n "formatSystemEventMessage\\|formatCurrentMessage\\|systemEvent\\|role: 'system'\\|role: \\"system\\"" src-backend/services/agent-core/agentic-loop.ts src-backend/lib/main-agent/index.ts | head -40
+cd /home/me/Code/other-project && sed -n '2420,2540p' src-backend/lib/main-agent/index.ts
 mkdir -p .worktrees/subagents/docs/features/Subagents && echo created
 echo "== worktree build/bin =="; ls -la .worktrees/mcp/build/bin/ 2>/dev/null; echo "== main build/bin =="; ls -la build/bin/ 2>/dev/null | head; echo "== runtime discovery in driver =="; grep -rn "RUNTIME_BIN\\|hildegard-helper-agent\\|session-runtime\\|RuntimeBinary" src/hildegard.helper.harness.driver*.pas tests/test_harness_driver.pas | head -20
 cd .worktrees/mcp && echo "== worktree build/bin ==" && ls -la build/bin/ && echo "== git status ==" && git status -sb && echo "== runtime discovery ==" && grep -rn "RUNTIME_BIN\\|session-runtime\\|RuntimeBinary\\|GetCurrentDir\\|ExtractFilePath(ParamStr" tests/test_harness_driver.pas tests/test_session_runtime.pas src/hildegard.helper.harness.driver.local.pas 2>/dev/null | head -30
@@ -1543,7 +1543,7 @@ grep -n "TStreamOps" tests/test_async_operators.pas; echo "=== add a Pipe test d
 grep -n "procedure TAsyncOperatorsTest.MergeInterleaves" tests/test_async_operators.pas
 make test 2>&1 | grep -iE "error|fatal" | grep -v "returned an error\\|errors compiling\\|compilation aborted" | head -15; echo "=== result ==="; make test 2>&1 | grep -E "Number of|Failed:|TAsyncOperatorsTest" | head
 sed -n '530,534p' src/async/async.operators.pas
-cd /home/me/Code/johnrcui/helldegard-helper 2>/dev/null; cd /ws && sed -i '' \\\n  -e 's/TFilterOp\\b/TFilterOperator/g' \\\n  -e 's/TTakeOp\\b/TTakeOperator/g' \\\n  -e 's/TSkipOp\\b/TSkipOperator/g' \\\n  -e 's/TTakeWhileOp\\b/TTakeWhileOperator/g' \\\n  -e 's/TSkipWhileOp\\b/TSkipWhileOperator/g' \\\n  -e 's/TDistinctOp\\b/TDistinctOperator/g' \\\n  -e 's/TFirstOp\\b/TFirstOperator/g' \\\n  -e 's/TElementAtOp\\b/TElementAtOperator/g' \\\n  src/async/async.operators.pas && grep -c "Operator<T>" src/async/async.operators.pas
+cd /home/me/Code/this-project 2>/dev/null; cd /ws && sed -i '' \\\n  -e 's/TFilterOp\\b/TFilterOperator/g' \\\n  -e 's/TTakeOp\\b/TTakeOperator/g' \\\n  -e 's/TSkipOp\\b/TSkipOperator/g' \\\n  -e 's/TTakeWhileOp\\b/TTakeWhileOperator/g' \\\n  -e 's/TSkipWhileOp\\b/TSkipWhileOperator/g' \\\n  -e 's/TDistinctOp\\b/TDistinctOperator/g' \\\n  -e 's/TFirstOp\\b/TFirstOperator/g' \\\n  -e 's/TElementAtOp\\b/TElementAtOperator/g' \\\n  src/async/async.operators.pas && grep -c "Operator<T>" src/async/async.operators.pas
 make test 2>&1 | grep -iE "error|fatal" | grep -v "returned an error\\|errors compiling\\|compilation aborted" | head -10; echo "=== result ==="; make test 2>&1 | grep -E "Number of|Failed:|TAsyncOperatorsTest" | head
 cd /ws && sed -i '' \\\n  -e 's/TFilterOp</TFilterOperator</g' \\\n  -e 's/TTakeOp</TTakeOperator</g' \\\n  -e 's/TSkipOp</TSkipOperator</g' \\\n  -e 's/TTakeWhileOp</TTakeWhileOperator</g' \\\n  -e 's/TSkipWhileOp</TSkipWhileOperator</g' \\\n  -e 's/TDistinctOp</TDistinctOperator</g' \\\n  -e 's/TFirstOp</TFirstOperator</g' \\\n  -e 's/TElementAtOp</TElementAtOperator</g' \\\n  -e 's/ TFilterOp\\b/ TFilterOperator/g' \\\n  src/async/async.operators.pas && grep -n "TFilterOp<\\|TFilterOp " src/async/async.operators.pas | head
 sed -n '525,545p' src/async/async.operators.pas

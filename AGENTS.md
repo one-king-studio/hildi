@@ -13,7 +13,8 @@ New to the project? Start with `HANDOFF.md` for current state, decisions, and
 lessons learned.
 
 - Compiler: Free Pascal 3.3.1 (aarch64-darwin), configured via `~/.fpc.cfg`.
-- FPC source tree (for reading RTL/FCL/Packages units): `/Users/johnrcui/Code/fpc`.
+- FPC source tree (for reading RTL/FCL/Packages units): machine-local, not recorded
+  here. Set `FPCDIR` or see `LOCAL_NOTES.md` (gitignored) on a configured machine.
 - Language mode: `{$mode delphi}` (Object Pascal).
 
 ## Engineering Ethos: Ponytail

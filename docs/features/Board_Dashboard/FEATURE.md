@@ -103,7 +103,7 @@ must clear, and it is why v1 is deliberately read-mostly.
 │  # coordination    ││ [answer]   parent · 169s → 22s, and…  18h │
 │  # tui-split       ││ [status]   parent · #6 is committed … 18h │
 ╰────────────────────╯╰─ open questions 1 · decisions 0 · find… ─╯
- /Users/…/hildegard-helper        live  tab zone  arrows move  q quit
+ ~/code/example-project           live  tab zone  arrows move  q quit
 ```
 
 **Tasks on top, at 60% of the height.** The kanban is what an operator scans for
