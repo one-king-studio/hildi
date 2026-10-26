@@ -394,10 +394,17 @@ begin
       end;
     kkChar:
       begin
-        { The CTAs live in this box, so the keys must too. Only 'a', 'r' and 'p'
-          are claimed; anything else falls through, so an ordinary letter can
-          never be swallowed by the list. }
+        { The CTAs are CHORDED (ctrl+a/r/p), not bare letters. Bare 'a' and 'r'
+          are one stray keystroke from aborting or releasing a child that is
+          mid-work - and this list has focus while a child streams, which is
+          exactly when the operator is most likely to be typing at something
+          else. A chord costs one extra key and removes the accident entirely.
+
+          Only the three chords are claimed; everything else falls through, so
+          no ordinary keypress is swallowed. Ctrl+C and Ctrl+D are deliberately
+          NOT used here: the shell owns them for quit and mode toggle. }
         if Assigned(FOnAction) and (Length(E.Key.Ch) = 1) and
+          (moCtrl in E.Key.Mods) and
           (E.Key.Ch[1] in ['a', 'r', 'p']) then
         begin
           { Ch is a UnicodeString; the callback takes a Char, so convert

@@ -2572,7 +2572,7 @@ begin
   { The CTAs live in this box, so they are always visible while in subagent
     mode - that is the point of not switching to a separate actions bar. }
   if FSpyId <> '' then
-    FSidebar.SetHints('a abort · r release · p promote')
+    FSidebar.SetHints('ctrl+a abort · ctrl+r release · ctrl+p promote')
   else
     FSidebar.SetHints('enter spy');
 end;

@@ -2958,13 +2958,21 @@ begin
   AssertTrue('the list stays up while spying', FApp.SidebarVisible);
   AssertFalse('no separate actions bar', FApp.Panel.ActionsMode);
 
+  { The CTAs are CHORDED (ctrl+a/r/p). A bare letter must NOT trigger them: that
+    was the accident this change removes - one stray 'a' aborting a child that is
+    mid-work. Both halves are asserted, because "the chord works" and "the bare
+    key does nothing" are different properties. }
   FInput.Push(Ch('a'));
   FApp.Step;
-  AssertEquals('abort reached the driver', ChildId, FRecording.AbortedId);
+  AssertEquals('a bare letter does NOT abort', '', FRecording.AbortedId);
 
-  FInput.Push(Ch('r'));
+  FInput.Push(Ctrl('a'));
   FApp.Step;
-  AssertEquals('release reached the driver', ChildId, FRecording.ReleasedId);
+  AssertEquals('ctrl+a aborts', ChildId, FRecording.AbortedId);
+
+  FInput.Push(Ctrl('r'));
+  FApp.Step;
+  AssertEquals('ctrl+r releases', ChildId, FRecording.ReleasedId);
 end;
 
 { TUI Startup: the connect lifecycle. }
