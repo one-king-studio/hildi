@@ -371,6 +371,45 @@ turns, newest first, with each turn's file stats. What differs is what selection
 Sharing the dialog is deliberate: the operator is answering one question (*which
 turn?*) three times, and the difference is in the action, not the browsing.
 
+### Undo and redo are CUMULATIVE, and the wiped history is soft-deleted
+
+"Undo five turns" means *walk back five turns*, not five separate commands. So:
+
+- **`/undo` to turn N undoes the suffix**: every turn from the newest back to and
+  including N, in reverse order. The workspace ends at the state before N, and the
+  transcript ends before N. **This is the invariant**: the two move together over
+  a *range*, not a single turn. Undoing one turn in the middle while later turns
+  survive would leave the transcript claiming work that happened after a turn that
+  no longer exists, on top of files derived from reverted state.
+- **`/redo` to turn M re-applies the same suffix forward**, in order. Available
+  only after an undo, and only for turns that undo took away.
+
+**The wiped turns are soft-deleted, never erased.** A turn the operator undoes is
+marked (status `tsUndone`, with who and when), its messages are marked
+reverted rather than deleted, and its change rows are marked reverted. They are
+excluded from **the current context** (not sent to the provider, not drawn in the
+transcript) but they remain in the ledger.
+
+Two consequences that make the marking mandatory rather than tidy:
+
+1. **The record still shows what happened.** A reverted turn is a fact about the
+   session: it was done, then undone. Hard deletion would make the history claim
+   the work never occurred, which is the same class of lie as moving the files
+   without the transcript.
+2. **The aggregate stats must still count them.** The status bar's lifetime totals
+   (billed tokens in/out, cache hit, wall time, request count) are the cost of the
+   *session*, not of its current context. A turn that ran, consumed tokens, and was
+   later undone still consumed them. So `SessionTotals` sums over requests joined
+   to turns with **no status filter** — which it already does — and that must stay
+   true. The context filter and the totals filter are deliberately different
+   things: one asks "what does the model see?", the other "what did this session
+   cost?".
+
+Continuing from an undo **rewrites the future**: the operator who undoes five
+turns and then prompts has abandoned those five, and the new turn replaces them
+as the session's live tail. The abandoned turns keep their soft-deleted status.
+`/redo` closes at that moment, because "forward" is no longer unambiguous.
+
 ## Out of Scope
 
 - **Per-call anchoring** (`MessageId`) and diff-under-tool-block. Separate spec;
