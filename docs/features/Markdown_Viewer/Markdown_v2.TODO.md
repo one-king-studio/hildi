@@ -82,11 +82,27 @@ the linearity test written **first**.
 
 ## Phase 4 — Nesting (what the flat model could not express)
 
-- [ ] Recursive `list` / `listitem`: a list inside a list item inside a blockquote.
-- [ ] `table` as `table > table_header|table_body > table_row > table_cell > *`.
-- [ ] Recursive `blockquote`: a paragraph, a list, a fence, a table inside one.
-- [ ] Indented code blocks (4 spaces), reported as `codeblock` with `Fenced = False`.
-- [ ] Loose list items keep block structure: a second paragraph is a second child.
+- [x] Recursive `list` / `listitem`: a list inside a list item inside a blockquote.
+- [x] `table` as `table > table_header|table_body > table_row > table_cell > *`.
+- [x] Recursive `blockquote`: a paragraph, a list, a fence, a table inside one.
+- [x] Indented code blocks (4 spaces), reported as `codeblock` with `Fenced = False`.
+- [x] Loose list items keep block structure: a second paragraph is a second child.
+
+**What `list > quote` and `> list` now produce**, verified by a probe rather than
+assumed:
+
+```
+> - a / > - b        blockquote > list > 2 x (listitem > paragraph > text)
+- item / "  > q"     list > listitem > [paragraph, blockquote > paragraph]
+- a / <blank> / "  b" list > listitem > [paragraph(a), paragraph(b)]   <- loose
+"    code line"      document > codeblock (Fenced = False)
+```
+
+**One ordering trap worth recording.** A blank line before an indented continuation
+had to be claimed by the ITEM before the list loop's blank handling saw it,
+otherwise the blank closed the list and the second paragraph became a sibling of
+the list — structurally wrong while looking almost right. That is the third
+bug in this lane where the pass ORDER, not the code, was the defect.
 
 ## Phase 5 — New block syntax
 

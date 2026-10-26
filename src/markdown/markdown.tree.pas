@@ -473,6 +473,39 @@ begin
   Result := Copy(ALine, I, Length(ALine));
 end;
 
+{ An indented-code line: four spaces, or a tab, of indent. }
+function IsCodeIndent(const ALine: UnicodeString): Boolean;
+begin
+  if (Length(ALine) >= 1) and (ALine[1] = #9) then
+    Exit(True);
+  Result := (Length(ALine) >= 4) and (ALine[1] = ' ') and (ALine[2] = ' ') and
+    (ALine[3] = ' ') and (ALine[4] = ' ');
+end;
+
+function StripCodeIndent(const ALine: UnicodeString): UnicodeString;
+begin
+  if (Length(ALine) >= 1) and (ALine[1] = #9) then
+    Result := Copy(ALine, 2, Length(ALine))
+  else if (Length(ALine) >= 4) and (ALine[1] = ' ') and (ALine[2] = ' ') and
+    (ALine[3] = ' ') and (ALine[4] = ' ') then
+    Result := Copy(ALine, 5, Length(ALine))
+  else
+    Result := ALine;
+end;
+
+{ How many leading spaces a line has. }
+function IndentOf(const ALine: UnicodeString): Integer;
+begin
+  Result := 0;
+  while (Result < Length(ALine)) and (ALine[Result + 1] = ' ') do
+    Inc(Result);
+end;
+
+function StripIndent(const ALine: UnicodeString; ACount: Integer): UnicodeString;
+begin
+  Result := Copy(ALine, ACount + 1, Length(ALine));
+end;
+
 function HasUnescapedPipe(const ALine: UnicodeString): Boolean;
 var
   I: Integer;
@@ -859,6 +892,8 @@ var
   I, J, Id, ItemId, ParaId, SubId: Integer;
   Depth, Ordinal, Indent: Integer;
   Ordered: Boolean;
+  Cont: TStrArray;
+  ContFrom, ContTo: Integer;
   N: TMdNode;
   Styled: TMdListStyle;
   Nested: TStrArray;
@@ -916,6 +951,42 @@ begin
     ParseInlines(B, ParaId, TrimU(StripListMarker(ALines[I])));
     Inc(I);
 
+    { A blank line that is followed by an INDENTED, non-marker line belongs to
+      this item, not to the document: that is what makes an item "loose". The
+      check has to happen BEFORE the outer loop's blank handling, or the blank
+      closes the list and the continuation becomes a sibling paragraph. }
+    if (I <= ATo) and (TrimU(ALines[I]) = '') and (I + 1 <= ATo) and
+      (TrimU(ALines[I + 1]) <> '') and
+      not ListMarker(ALines[I + 1], Ordered, Ordinal, Depth, Indent) and
+      (IndentOf(ALines[I + 1]) > AIndent) then
+      Inc(I);
+
+    { Indented continuation lines that are not markers: the item's further blocks. }
+    while (I <= ATo) and (TrimU(ALines[I]) <> '') and
+      not ListMarker(ALines[I], Ordered, Ordinal, Depth, Indent) and
+      (IndentOf(ALines[I]) > AIndent) do
+    begin
+      ContFrom := I;
+      J := I;
+      while (J <= ATo) and (TrimU(ALines[J]) <> '') and
+        not ListMarker(ALines[J], Ordered, Ordinal, Depth, Indent) and
+        (IndentOf(ALines[J]) > AIndent) do
+        Inc(J);
+      SetLength(Cont, J - ContFrom);
+      for ContTo := ContFrom to J - 1 do
+        Cont[ContTo - ContFrom] := StripIndent(ALines[ContTo], AIndent + 2);
+      ParseBlocks(B, ItemId, Cont, 0, High(Cont));
+      I := J;
+      { A blank between the continuation and the next marker does not end the
+        item, but a blank followed by a non-indented line does end the list. }
+      if (I <= ATo) and (TrimU(ALines[I]) = '') and (I + 1 <= ATo) and
+        (IndentOf(ALines[I + 1]) <= AIndent) and
+        not ListMarker(ALines[I + 1], Ordered, Ordinal, Depth, Indent) then
+        Break;
+      if (I <= ATo) and (TrimU(ALines[I]) = '') then
+        Inc(I);
+    end;
+
     { Deeper markers belong to this item as a sublist. }
     if (I <= ATo) and ListMarker(ALines[I], Ordered, Ordinal, Depth, Indent) and
       (Indent > AIndent) then
@@ -942,7 +1013,7 @@ end;
 procedure ParseBlocks(var B: TBuilder; const AParent: Integer;
   const ALines: TStrArray; AFrom, ATo: Integer);
 var
-  I, J, Level, Depth, Ordinal, Indent, Id, Next: Integer;
+  I, J, K, Level, Depth, Ordinal, Indent, Id, Next: Integer;
   Ordered: Boolean;
   AChar: Char;
   Lang: UnicodeString;
@@ -1037,6 +1108,32 @@ begin
       B.Append(AParent, Id);
       ParseInlines(B, Id, TrimU(ALines[I]));
       Inc(I, 2);
+      Continue;
+    end;
+
+    { indented code: four spaces. NOT a fence, so Fenced stays False. }
+    if IsCodeIndent(ALines[I]) then
+    begin
+      J := I;
+      while (J <= ATo) and ((TrimU(ALines[J]) = '') or IsCodeIndent(ALines[J])) do
+        Inc(J);
+      N := Default(TMdNode);
+      N.Kind := mnCodeBlock;
+      N.Fenced := False;
+      N.Content := '';
+      { Trailing blank lines are not content. }
+      K := J - 1;
+      while (K >= I) and (TrimU(ALines[K]) = '') do
+        Dec(K);
+      for Level := I to K do
+      begin
+        if N.Content <> '' then
+          N.Content := N.Content + #10;
+        N.Content := N.Content + StripCodeIndent(ALines[Level]);
+      end;
+      B.Add(N, Id);
+      B.Append(AParent, Id);
+      I := J;
       Continue;
     end;
 
