@@ -188,11 +188,15 @@ begin
   if I >= 0 then
     Title := FTurnTitles.ValueFromIndex[I];
 
-  { Built as UnicodeString throughout: mixing an AnsiString accumulator with a
+  { `<label> - <title>`, the same separator the sessions list and the header
+    use. One format wherever a session identifies itself: an operator should not
+    have to learn a second one for this list.
+
+    Built as UnicodeString throughout: mixing an AnsiString accumulator with a
     UnicodeString literal is an implicit conversion, which -Sew rejects. }
   Line := StatusGlyph(AEntry.Status) + ' ' + UnicodeString(DisplayName(AEntry));
   if Title <> '' then
-    Line := Line + ' · ' + UnicodeString(Title);
+    Line := Line + ' - ' + UnicodeString(Title);
 
   Result := Line;
 
