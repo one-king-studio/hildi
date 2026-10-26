@@ -533,7 +533,7 @@ begin
     RegisterMcpSkills(Reg, McpCfg('playwright', StandardScript), Mgr);
     Manifest := Reg.Manifest;
     AssertTrue('the per-request fragment carries state only',
-      Pos('- mcp_playwright (unloaded)', Manifest) > 0);
+      Pos('<skill name="mcp_playwright" state="unloaded"/>', Manifest) > 0);
     { Curated metadata is STABLE text and lives in the system prompt now. }
     AssertTrue('curated description for a known service',
       Pos('Browser automation', Reg.StableText) > 0);

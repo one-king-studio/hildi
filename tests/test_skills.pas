@@ -178,8 +178,8 @@ begin
     { The per-request fragment carries STATE only: descriptions moved to the
       system prompt so they are not re-sent on every request. }
     M := R.Manifest;
-    AssertTrue('alpha listed with state', Pos('- alpha (unloaded)', M) > 0);
-    AssertTrue('beta listed with state', Pos('- beta (unloaded)', M) > 0);
+    AssertTrue('alpha listed with state', Pos('<skill name="alpha" state="unloaded"/>', M) > 0);
+    AssertTrue('beta listed with state', Pos('<skill name="beta" state="unloaded"/>', M) > 0);
     AssertTrue('alpha before beta', Pos('alpha', M) < Pos('beta', M));
     { The stable text carries the descriptions and when-to-use. }
     S := R.StableText;
@@ -211,9 +211,9 @@ begin
     Before := R.Manifest;
     R.LoadSkill('alpha', Err);
     After := R.Manifest;
-    AssertTrue('before: alpha unloaded', Pos('- alpha (unloaded)', Before) > 0);
-    AssertTrue('after: alpha loaded', Pos('- alpha (loaded)', After) > 0);
-    AssertTrue('beta unchanged', Pos('- beta (unloaded)', After) > 0);
+    AssertTrue('before: alpha unloaded', Pos('<skill name="alpha" state="unloaded"/>', Before) > 0);
+    AssertTrue('after: alpha loaded', Pos('<skill name="alpha" state="loaded"/>', After) > 0);
+    AssertTrue('beta unchanged', Pos('<skill name="beta" state="unloaded"/>', After) > 0);
   finally
     R.Free;
   end;

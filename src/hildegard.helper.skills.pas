@@ -119,9 +119,9 @@ const
     idle time, and that the state shown is honest). }
   { The per-request fragment is STATE ONLY and carries no prose: the explanation
     of what skills are and how to load them lives in the stable text (the system
-    prompt), where it is sent once and cached. This header exists only so a bare
-    list of states is not mistaken for something else. }
-  SkillStateHeader = 'Skills (state; see the system prompt):';
+    prompt), where it is sent once and cached. }
+  SkillStateHeader = '<skills>';
+  SkillStateFooter = '</skills>';
 
   { The explanation, once per session, alongside the descriptions. }
   SkillManifestHeader =
@@ -242,8 +242,10 @@ begin
       State := 'unloaded';
     { The STATE only. Descriptions live in the system prompt (StableText), so
       this fragment is small and changes only when activation does. }
-    Result := Result + '- ' + E.Skill.Key + ' (' + State + ')' + LineEnding;
+    Result := Result + '<skill name="' + E.Skill.Key + '" state="' + State +
+      '"/>' + LineEnding;
   end;
+  Result := Result + SkillStateFooter;
 end;
 
 function TSkillRegistry.StableText: string;
