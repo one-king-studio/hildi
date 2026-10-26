@@ -189,8 +189,6 @@ var
   E: TTurnEvent;
   Detail: string;
   Id: Int64;
-  Turns: TTurnRecordArray;
-  I: Integer;
 begin
   { The mirror of Undo, with the same two refusals for the same reasons. }
   if (FWorker <> nil) and (not FWorker.Finished) then
@@ -203,17 +201,10 @@ begin
   end;
   Id := ATurnId;
   if Id <= 0 then
-  begin
-    { The OLDEST undone turn: redo walks forward from there, so that restores
-      the largest suffix. }
-    Turns := FSession.View.Turns;
-    for I := 0 to High(Turns) do
-      if Turns[I].Status = tsUndone then
-      begin
-        Id := Turns[I].Id;
-        Break;
-      end;
-  end;
+    { The oldest REDOABLE turn: undone and above the redo floor. Resolved by the
+      session so this and the runtime cannot disagree - picking the oldest
+      undone turn without the floor would select one a later prompt abandoned. }
+    Id := FSession.OldestRedoableTurn;
   if Id <= 0 then
   begin
     E := Default(TTurnEvent);

@@ -76,6 +76,11 @@ type
     procedure TestRedoRestoresTheFilesAndTheContext;
     { Redoing turns that were never undone must say so, not silently succeed. }
     procedure TestRedoRefusesWhenNothingIsUndone;
+    { THE ABANDONED-WINDOW CASE. Undo five turns, prompt (abandoning them), undo
+      two more, then redo: the redo must not resurrect the original five. Status
+      alone cannot tell them apart, because abandoned turns keep tsUndone - so
+      the session carries a floor and a prompt raises it. }
+    procedure TestRedoDoesNotResurrectTurnsAbandonedByAPrompt;
     procedure TestTheTurnBoundaryReclaimsADeadSessionsClaim;
     procedure TestRecallToolAbsentWithoutStore;
     procedure TestLastTurnEmptyWithoutTurns;
@@ -777,6 +782,107 @@ begin
     Detail := '';
     AssertFalse('nothing to redo', Session.RedoTurn(TurnId, Detail));
     AssertTrue('and says why: ' + Detail, Pos('not undone', Detail) > 0);
+  finally
+    Session.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestRedoDoesNotResurrectTurnsAbandonedByAPrompt;
+var
+  Session: THarnessSession;
+  Err, Detail: string;
+  Turns: TTurnRecordArray;
+  Ids: array[1..7] of Int64;
+  I: Integer;
+  StoreErr: TStoreError;
+begin
+  { The scenario: undo five turns, PROMPT (abandoning them), undo two more, then
+    redo. A naive redo would scan for the oldest undone turn, find turn 1, and
+    walk forward re-applying all five the operator had walked away from.
+
+    Status cannot distinguish them, because abandoned turns keep tsUndone - the
+    record is supposed to still show that the work happened. So the session
+    carries a redo floor, and the prompt raises it to the newest turn that
+    existed at that moment. Everything at or below the floor is abandoned. }
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    { Turns 1-5: a chain, so each turn's before-text is the previous one's
+      after-text and the cumulative undo/redo can actually apply. }
+    for I := 1 to 5 do
+    begin
+      Session.View.Store.BeginTurn(Session.View.SessionId, Ids[I], StoreErr);
+      if Ids[I] <= 0 then
+        Ids[I] := I;
+      Session.View.Store.FinishTurn(Ids[I], tsCompleted, 'stop', 0, '', '',
+        StoreErr);
+      Detail := '';
+      WriteText('a.txt', 'v' + IntToStr(I) + #10);
+      AssertTrue('row ' + IntToStr(I) + ': ' + Detail,
+        SeedChange(Session, Integer(Ids[I]), 'v' + IntToStr(I - 1) + #10,
+          'v' + IntToStr(I) + #10, Detail));
+    end;
+
+    { Undo all five, newest-first, so the file lands back at v0. }
+    Detail := '';
+    AssertTrue('undo 5: ' + Detail, Session.UndoTurn(Ids[1], Detail));
+    AssertEquals('back to v0', 'v0'#10, ReadText('a.txt'));
+
+    { THE PROMPT. This is what abandons the window above. }
+    Session.View.Store.BeginTurn(Session.View.SessionId, Ids[6], StoreErr);
+    if Ids[6] <= 0 then
+      Ids[6] := 6;
+    Session.View.Store.FinishTurn(Ids[6], tsCompleted, 'stop', 0, '', '',
+      StoreErr);
+    Detail := '';
+    WriteText('a.txt', 'v6'#10);
+    AssertTrue('row 6: ' + Detail, SeedChange(Session, Integer(Ids[6]), 'v0'#10,
+      'v6'#10, Detail));
+
+    { Two more turns, then undo those two. }
+    Session.View.Store.BeginTurn(Session.View.SessionId, Ids[7], StoreErr);
+    if Ids[7] <= 0 then
+      Ids[7] := 7;
+    Session.View.Store.FinishTurn(Ids[7], tsCompleted, 'stop', 0, '', '',
+      StoreErr);
+    Detail := '';
+    WriteText('a.txt', 'v7'#10);
+    AssertTrue('row 7: ' + Detail, SeedChange(Session, Integer(Ids[7]), 'v6'#10,
+      'v7'#10, Detail));
+
+    Detail := '';
+    AssertTrue('undo the two: ' + Detail, Session.UndoTurn(Ids[6], Detail));
+    AssertEquals('back to v0', 'v0'#10, ReadText('a.txt'));
+
+    { The bare redo the operator would type. It must resolve to turn 6 - the
+      oldest REDOABLE turn - and not turn 1. }
+    AssertEquals('the oldest redoable turn is 6, not 1', Ids[6],
+      Session.OldestRedoableTurn);
+
+    { And asking for turn 1 explicitly is refused rather than silently clamped. }
+    Detail := '';
+    AssertFalse('the abandoned five are refused', Session.RedoTurn(Ids[1],
+      Detail));
+    AssertTrue('and say why: ' + Detail, Pos('abandoned', Detail) > 0);
+
+    Detail := '';
+    AssertTrue('redo the two: ' + Detail,
+      Session.RedoTurn(Session.OldestRedoableTurn, Detail));
+    AssertEquals('forward to v7', 'v7'#10, ReadText('a.txt'));
+
+    { The abandoned five are STILL undone: redoing the later pair must not have
+      dragged them back, and they keep that status because the record is meant to
+      show they happened and were undone. }
+    Turns := Session.View.Turns;
+    for I := 0 to High(Turns) do
+    begin
+      if Turns[I].Id = Ids[1] then
+        AssertEquals('turn 1 is still undone', Ord(tsUndone),
+          Ord(Turns[I].Status));
+      if Turns[I].Id = Ids[6] then
+        AssertEquals('turn 6 is live again', Ord(tsCompleted),
+          Ord(Turns[I].Status));
+    end;
   finally
     Session.Free;
   end;

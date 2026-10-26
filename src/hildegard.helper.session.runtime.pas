@@ -1133,8 +1133,6 @@ procedure TSessionRuntime.HandleRedo(AClient: TClientConn;
 var
   TurnId: Int64;
   Detail: string;
-  Turns: TTurnRecordArray;
-  I: Integer;
 begin
   { The mirror of HandleUndo, with the same two refusals for the same reasons. }
   if AClient.Role <> srDrive then
@@ -1149,18 +1147,11 @@ begin
   end;
   TurnId := ACommand.TurnId;
   if TurnId <= 0 then
-  begin
     { 0 means "the oldest one the operator could mean": the earliest turn that
-      is currently undone. Redo walks forward from there, so that is the turn
-      that restores the largest suffix. }
-    Turns := FSession.View.Turns;
-    for I := 0 to High(Turns) do
-      if Turns[I].Status = tsUndone then
-      begin
-        TurnId := Turns[I].Id;
-        Break;
-      end;
-  end;
+      is currently REDOABLE - undone and above the redo floor a later prompt
+      raised. Using the oldest undone turn instead would select one the operator
+      abandoned, and then refuse even when a later turn is genuinely redoable. }
+    TurnId := FSession.OldestRedoableTurn;
   if TurnId <= 0 then
   begin
     ReplyTo(AClient, ACommand.Id, False, 'nothing to redo');

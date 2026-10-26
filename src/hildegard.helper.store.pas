@@ -224,6 +224,21 @@ type
       const AFinishReason: string; AErrorCode: Integer;
       const AErrorMessage, AErrorDetail: string;
       out AError: TStoreError): Boolean;
+
+    { The redo window's floor: no turn with an id below this is redoable.
+
+      A new prompt ABANDONS the future an undo opened, and abandoned turns keep
+      their tsUndone status (the record still shows the work happened), so
+      "redoable" cannot be read off the status. The floor is recorded instead:
+      it is the highest turn id that existed when the operator last abandoned a
+      window. 0 means no floor - the window is open as far back as the undone
+      turns go, which is the state after an undo and before any prompt. }
+    function RedoFloor(const ASessionId: string; out AFloor: Int64;
+      out AError: TStoreError): Boolean;
+    { Raise the floor to AFloor. Never lowers it: an older abandonment must not
+      re-open a window a newer prompt already closed. }
+    function SetRedoFloor(const ASessionId: string; AFloor: Int64;
+      out AError: TStoreError): Boolean;
     function QueryTurns(const ASessionId: string; out ATurns: TTurnRecordArray;
       out AError: TStoreError): Boolean;
     { The session's latest turn; seNotFound when there are none. }
@@ -372,7 +387,7 @@ end;
 function DefaultMigrations: TMigrationArray;
 begin
   Result := nil;
-  SetLength(Result, 19);
+  SetLength(Result, 20);
   Result[0].Version := 1;
   Result[0].Name := 'session history';
   Result[0].Statements := [
@@ -790,6 +805,26 @@ begin
   Result[18].Statements := [
     'ALTER TABLE file_changes ADD COLUMN reverted_at INTEGER NOT NULL DEFAULT 0',
     'CREATE INDEX idx_changes_turn_live ON file_changes (turn_id, reverted_at)'
+  ];
+
+  { v20: the redo window's floor.
+
+    An undo opens a redo window over the suffix it took away. A NEW PROMPT
+    ABANDONS that future - the operator moved on - so the window must close.
+    Whether a turn is still redoable cannot be derived from its status, because
+    the spec says abandoned turns KEEP tsUndone (the record still shows the work
+    happened and that it was later undone). Without a recorded floor, a later
+    /redo would happily re-apply work the operator abandoned several prompts
+    ago: undo 5, prompt, undo 2, redo, and the redone suffix would begin at the
+    original 5.
+
+    So a session carries the id below which no undo is redoable. 0 means "no
+    floor", which is every existing session and is the correct default: a
+    session that never prompted after an undo has an open window. Additive. }
+  Result[19].Version := 20;
+  Result[19].Name := 'redo floor';
+  Result[19].Statements := [
+    'ALTER TABLE sessions ADD COLUMN redo_floor INTEGER NOT NULL DEFAULT 0'
   ];
 end;
 
@@ -2281,6 +2316,34 @@ begin
     if not FinalizeRunningTurnsLocked(ASessionId, 'superseded', Ignored,
       AError) then
       Exit(False);
+    { A NEW PROMPT ABANDONS THE FUTURE an undo opened, so the redo window closes
+      here - but ONLY when a window is actually open. Raising the floor
+      unconditionally would break the ordinary case: with turns 1-5 recorded, the
+      floor would sit at 4 from turn 5's own begin, so undoing all five and
+      redoing would restore only turn 5.
+
+      So the floor rises to the highest existing turn id only if some undone turn
+      sits ABOVE the current floor. That is precisely "there is a live redo window
+      and the operator just walked away from it". }
+    Stmt := TStmt.Create(FDb,
+      'UPDATE sessions SET redo_floor = ' +
+      '(SELECT COALESCE(MAX(t.id), 0) FROM turns t WHERE t.session_id = ?) ' +
+      'WHERE id = ? AND EXISTS (SELECT 1 FROM turns t ' +
+      'WHERE t.session_id = ? AND t.status = ? AND t.id > ' +
+      '(SELECT s.redo_floor FROM sessions s WHERE s.id = ?))');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not begin turn', DbErrorText));
+      Stmt.BindText(1, ASessionId);
+      Stmt.BindText(2, ASessionId);
+      Stmt.BindText(3, ASessionId);
+      Stmt.BindInt(4, Ord(tsUndone));
+      Stmt.BindText(5, ASessionId);
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not begin turn', DbErrorText));
+    finally
+      Stmt.Free;
+    end;
     Stmt := TStmt.Create(FDb,
       'INSERT INTO turns (session_id, seq, status, created_at) VALUES (' +
       '?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM turns WHERE session_id = ?), ' +
@@ -2358,6 +2421,71 @@ begin
       Stmt.Free;
     end;
     Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.RedoFloor(const ASessionId: string; out AFloor: Int64;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  { A session with no row, or a row that predates v20, reads as 0: no floor, so
+    the window is open. That is the right default - a session that never
+    prompted after an undo has nothing to close. }
+  Result := False;
+  AError := OkError;
+  AFloor := 0;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb,
+      'SELECT redo_floor FROM sessions WHERE id = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not read the redo floor', DbErrorText));
+      Stmt.BindText(1, ASessionId);
+      if Stmt.Step = SQLITE_ROW then
+        AFloor := Stmt.ColInt64(0);
+      Result := True;
+    finally
+      Stmt.Free;
+    end;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.SetRedoFloor(const ASessionId: string; AFloor: Int64;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  { MAX, not assignment: the floor only ever rises. An older abandonment must
+    not re-open a window that a newer prompt already closed. }
+  Result := False;
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    if ASessionId = '' then
+      Exit(Fail(AError, seInvalidArgument, 'session id is required', ''));
+    Stmt := TStmt.Create(FDb,
+      'UPDATE sessions SET redo_floor = MAX(redo_floor, ?) WHERE id = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not set the redo floor', DbErrorText));
+      Stmt.BindInt64(1, AFloor);
+      Stmt.BindText(2, ASessionId);
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not set the redo floor', DbErrorText));
+      Result := True;
+    finally
+      Stmt.Free;
+    end;
   finally
     FLock.Release;
   end;

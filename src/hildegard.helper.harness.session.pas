@@ -184,6 +184,12 @@ type
       work). This does not enforce that - it redoes the requested suffix - but
       the caller is expected to offer only that suffix. }
     function RedoTurn(ATurnId: Int64; out ADetail: string): Boolean;
+    { The oldest turn that is actually redoable: undone AND above the redo floor.
+      0 when the window is empty. This is what a bare `/redo` means, and it lives
+      here so the local driver and the runtime cannot disagree about it - picking
+      the oldest undone turn without the floor would select an abandoned turn and
+      then refuse, even when a later turn is genuinely redoable. }
+    function OldestRedoableTurn: Int64;
     { Notice any board entries this session has not seen, coalesced into ONE
       transient prompt item so ten agents posting is O(ticks), not O(entries).
       Called by the runtime on its tick. Returns the count noticed. }
@@ -719,6 +725,7 @@ var
   Turns: TTurnRecordArray;
   I, First: Integer;
   RedidCount, SkippedLive: Integer;
+  Floor: Int64;
   StoreErr: TStoreError;
   MarkErr: string;
   Part: string;
@@ -730,7 +737,13 @@ begin
   { CUMULATIVE redo, OLDEST first: redoing to turn N re-applies every undone turn
     from N forward. The order is the mirror of undo's and is required for the
     same reason - each apply compares the file against that turn's BeforeHash,
-    which only holds once every EARLIER turn has been re-applied. }
+    which only holds once every EARLIER turn has been re-applied.
+
+    The redo WINDOW is closed by a prompt: the operator who undoes five turns and
+    then prompts has abandoned those five, so redoing them later would resurrect
+    work they moved past. That cannot be read off the status - abandoned turns
+    keep tsUndone, because the record still shows the work happened - so the
+    session carries a floor, and nothing below it is redoable. }
   Result := False;
   ADetail := '';
   if FView.Store = nil then
@@ -741,6 +754,21 @@ begin
   if ATurnId <= 0 then
   begin
     ADetail := 'no turn to redo';
+    Exit;
+  end;
+
+  Floor := 0;
+  if not FView.Store.RedoFloor(FView.SessionId, Floor, StoreErr) then
+  begin
+    ADetail := 'could not read the redo window: ' + StoreErr.Message;
+    Exit;
+  end;
+  if (Floor > 0) and (ATurnId <= Floor) then
+  begin
+    { Refused rather than silently clamped: redoing "as much as still counts" is
+      not what the operator asked for, and a partial answer would be a different
+      change than the one requested. }
+    ADetail := 'that turn cannot be redone: a newer prompt abandoned it';
     Exit;
   end;
 
@@ -914,6 +942,30 @@ begin
     messages are "marked reverted rather than deleted" so the record still shows
     the work happened, and a deleted row is a row `/redo` can never bring back. }
   Result := True;
+end;
+
+function THarnessSession.OldestRedoableTurn: Int64;
+var
+  Turns: TTurnRecordArray;
+  Floor: Int64;
+  I: Integer;
+  StoreErr: TStoreError;
+begin
+  Result := 0;
+  if FView.Store = nil then
+    Exit;
+  { An unreadable floor must not read as "no floor": that would offer a turn the
+    operator abandoned. Treat it as the whole window being closed, which is the
+    conservative answer - the operator can always ask for a specific turn. }
+  if not FView.Store.RedoFloor(FView.SessionId, Floor, StoreErr) then
+    Exit;
+  Turns := FView.Turns;
+  for I := 0 to High(Turns) do
+    if (Turns[I].Status = tsUndone) and (Turns[I].Id > Floor) then
+    begin
+      Result := Turns[I].Id;
+      Exit;
+    end;
 end;
 
 function THarnessSession.TaskQuestionExists(AWorkspaceId, AId: Integer;
