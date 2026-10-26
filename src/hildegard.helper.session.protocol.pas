@@ -18,6 +18,10 @@ uses
   hildegard.helper.approval, hildegard.helper.llm;
 
 type
+  { The row ids a tool call's changes carry. The event transports these, never
+    the patches - the client reads diffs from the store by id. }
+  TChangeIdArray = array of Integer;
+
   TSessionRole = (srObserve, srDrive);
 
   TSessionCaps = set of TSessionRole;
@@ -40,7 +44,12 @@ type
     ekAmbient, ekSubagent, ekSubagentAsk,
     { Context checkpoint: a draft is ready (Text), and a checkpoint was committed
       (TurnSeq = the checkpoint boundary seq). Appended last. }
-    ekCheckpointCommitted);
+    ekCheckpointCommitted,
+    { A tool call's recorded file changes: the ROW IDS only, never the patches.
+      A patch on every event would put kilobytes of diff on the wire per call,
+      and the client already holds a store handle. Appended last so stored
+      ordinals are unchanged. }
+    ekChanges);
 
   { One streamed event. A flat record with optional fields, the same shape as
     TTurnEvent: only the fields named by Kind are meaningful. }
@@ -74,6 +83,11 @@ type
       roster status. }
     SubSessionId: string;
     SubStatus: string;
+    { ekChanges: the tool call whose changes these are, and the ids of its
+      recorded change rows. The patches are read from the store by id - they are
+      deliberately not on the wire. }
+    ChangeCallId: string;
+    ChangeIds: TChangeIdArray;
   end;
 
   TSessionCommandKind = (
@@ -172,6 +186,46 @@ implementation
 uses
   fpjson, jsonparser;
 
+{ A comma-joined list of row ids. The event carries ids, never patches: the
+  client reads the diffs from the store, so a big change costs one string of
+  numbers on the wire instead of kilobytes of diff. }
+function JoinIds(const AIds: array of Integer): string;
+var
+  I: Integer;
+begin
+  Result := '';
+  for I := 0 to High(AIds) do
+  begin
+    if I > 0 then
+      Result := Result + ',';
+    Result := Result + IntToStr(AIds[I]);
+  end;
+end;
+
+function SplitIds(const AText: string): TChangeIdArray;
+var
+  P, Start, N: Integer;
+  Part: string;
+begin
+  Result := nil;
+  N := 0;
+  Start := 1;
+  for P := 1 to Length(AText) + 1 do
+    if (P > Length(AText)) or (AText[P] = ',') then
+    begin
+      Part := Trim(Copy(AText, Start, P - Start));
+      Start := P + 1;
+      if Part = '' then
+        Continue;
+      SetLength(Result, N + 1);
+      Result[N] := StrToIntDef(Part, 0);
+      if Result[N] > 0 then
+        Inc(N)
+      else
+        SetLength(Result, N);
+    end;
+end;
+
 const
   EventKindNames: array[TSessionEventKind] of string = (
     'loop_started', 'turn_started', 'user_message',
@@ -181,7 +235,7 @@ const
     'drive_requested', 'drive_granted', 'drive_released',
     'turn_finished', 'error', 'gap', 'loop_exited', 'reasoning_done',
     'tool_output', 'ambient', 'subagent', 'subagent_ask',
-    'checkpoint_committed');
+    'checkpoint_committed', 'changes');
 
   MessageKindNames: array[TSessionMessageKind] of string = (
     'hello', 'attached', 'event', 'reply', 'detached', 'error',
@@ -594,6 +648,11 @@ begin
       end;
     ekCheckpointCommitted:
       PutInt(O, 'turn_seq', E.TurnSeq);
+    ekChanges:
+      begin
+        PutStr(O, 'tool_id', E.ChangeCallId);
+        PutStr(O, 'change_ids', JoinIds(E.ChangeIds));
+      end;
   end;
 end;
 
@@ -712,6 +771,11 @@ begin
       end;
     ekCheckpointCommitted:
       E.TurnSeq := OptInt64(O, 'turn_seq', 0);
+    ekChanges:
+      begin
+        E.ChangeCallId := OptStr(O, 'tool_id');
+        E.ChangeIds := SplitIds(OptStr(O, 'change_ids'));
+      end;
   end;
   Result := True;
 end;

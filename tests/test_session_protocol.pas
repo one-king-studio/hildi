@@ -167,6 +167,13 @@ begin
       end;
     ekCheckpointCommitted:
       AEvent.TurnSeq := 42;
+    ekChanges:
+      begin
+        AEvent.ChangeCallId := 'call_1';
+        SetLength(AEvent.ChangeIds, 2);
+        AEvent.ChangeIds[0] := 11;
+        AEvent.ChangeIds[1] := 12;
+      end;
   end;
 end;
 
