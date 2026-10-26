@@ -93,6 +93,9 @@ type
     { The messages panel's bounds, so the host can map a click on the left-border
       paginator to a page. }
     function MessagesBounds: TRect;
+    { The compose's bounds, so a host can put a panel IN the composer's place
+      (the subagent list) instead of floating it over the transcript. }
+    function ComposeBounds: TRect;
     { The left of the toolbar: what the run is doing. }
     procedure SetState(AKind: TPanelState; const ALabel: string);
     { The right of the toolbar: the interaction hints. }
@@ -399,6 +402,11 @@ end;
 function TChatPanel.MessagesBounds: TRect;
 begin
   Result := FMessages.Bounds;
+end;
+
+function TChatPanel.ComposeBounds: TRect;
+begin
+  Result := FCompose.Bounds;
 end;
 
 procedure TChatPanel.SetPageIndex(AIndex: Integer);

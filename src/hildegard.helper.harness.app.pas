@@ -2375,34 +2375,43 @@ begin
     LayoutSidebar;
   end
   else
+  begin
+    { The list borrowed the composer's place, so leaving subagent mode gives it
+      back. Without this the compose would stay hidden and the operator could
+      not type - the list would look like it had replaced the prompt for good. }
+    FPanel.Compose.Visible := True;
     FApp.Invalidate;
+  end;
 end;
 
 procedure THarnessApp.LayoutSidebar;
 var
   R: TRect;
-  W: Integer;
   Avail: TSize;
+  Compose: TRect;
 begin
   if not FSidebarShown then
     Exit;
+  { The list takes the COMPOSER's place rather than floating over the transcript.
+    A floating overlay covered the conversation it was describing, and the
+    operator asked for the list where the composer is - the natural place to
+    choose who you are talking to.
+
+    The composer is hidden while the list is up, and its bounds are reused, so
+    entering and leaving subagent mode does not shift the transcript at all. }
+  Compose := FPanel.ComposeBounds;
+  FPanel.Compose.Visible := False;
+  if (Compose.H <= 0) or (Compose.W <= 0) then
+    Exit;
   Avail := Default(TSize);
-  Avail.W := FSurface.Width;
-  Avail.H := FSurface.Height;
-  R := Default(TRect);
-  R.X := 2;
-  R.Y := 2;
-  W := FSidebar.Measure(Avail).W + 2;
-  if W < 16 then
-    W := 16;
-  if W > FSurface.Width - 4 then
-    W := FSurface.Width - 4;
-  R.W := W;
-  R.H := FRoster.Count + 2;
-  if R.H < 3 then
-    R.H := 3;
-  if R.H > FSurface.Height - 4 then
-    R.H := FSurface.Height - 4;
+  Avail.W := Compose.W;
+  Avail.H := Compose.H;
+  R := Compose;
+  R.H := FRoster.Count;
+  if R.H < 1 then
+    R.H := 1;
+  if R.H > Compose.H then
+    R.H := Compose.H;
   FSidebar.Arrange(R);
 end;
 
