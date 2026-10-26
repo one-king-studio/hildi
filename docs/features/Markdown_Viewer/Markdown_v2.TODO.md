@@ -9,18 +9,18 @@ not done.
 
 ## Phase 1 — The tree
 
-- [ ] `src/markdown/markdown.tree.pas` — `TMdNode`, `TMdDocument`, id assignment,
+- [x] `src/markdown/markdown.tree.pas` — `TMdNode`, `TMdDocument`, id assignment,
       `SrcStart`/`SrcEnd`, `Parent`, `Children` as **child ids**.
-- [ ] `TMarkdownDocumentParser.Parse` for constructs v1 already parses: paragraph,
+- [x] `TMarkdownDocumentParser.Parse` for constructs v1 already parses: paragraph,
       ATX + setext heading, fenced code, blockquote (flat), list (flat), table, rule.
-- [ ] Query surface: `Node(Id)`, `NodesOfKind(Kind)`, `Root`, `NodeCount`.
-- [ ] Ids are deterministic: two parses of the same text assign identical ids.
+- [x] Query surface: `Node(Id)`, `NodesOfKind(Kind)`, `Root`, `NodeCount`.
+- [x] Ids are deterministic: two parses of the same text assign identical ids.
       *Test:* `TestIdsAreDeterministic`.
-- [ ] `Parent` and `Children` agree in both directions.
+- [x] `Parent` and `Children` agree in both directions.
       *Test:* `TestParentChildLinksAreSymmetric`.
-- [ ] Source offsets round-trip for a plain text node.
+- [ ] Source offsets round-trip for a plain text node. **NOT DONE** — the field exists but is not yet populated by the block parser; deferred to Phase 3 where inline nodes get real offsets.
       *Test:* `TestSourceOffsetsRoundTrip`.
-- [ ] Node count and shape for nesting: `> - a` is
+- [x] Node count and shape for nesting: `> - a` is
       `blockquote > list > listitem > paragraph > text`.
       *Test:* `TestNestingShape`.
 
