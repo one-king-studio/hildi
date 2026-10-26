@@ -89,7 +89,7 @@ type
     function EnsureClient(out AError: string): Boolean;
     procedure SendCommand(AKind: TSessionCommandKind; const AText,
       AAskRef: string; const AChoice: TApprovalChoice;
-      const ASessionId: string);
+      const ASessionId: string; ATurnId: Int64 = 0);
     procedure PushError(const AText: string);
   public
     constructor Create(const AConfig: TSessionClientConfig);
@@ -317,7 +317,7 @@ end;
 
 procedure TRemoteDriver.SendCommand(AKind: TSessionCommandKind;
   const AText, AAskRef: string; const AChoice: TApprovalChoice;
-  const ASessionId: string);
+  const ASessionId: string; ATurnId: Int64);
 var
   Cmd: TSessionCommand;
   Err: string;
@@ -335,6 +335,7 @@ begin
   Cmd.AskId := AAskRef;
   Cmd.Choice := AChoice;
   Cmd.SessionId := ASessionId;
+  Cmd.TurnId := ATurnId;
   if not FClient.Send(Cmd) then
   begin
     FSink.Detached := True;
