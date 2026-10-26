@@ -155,6 +155,15 @@ type
     procedure TestHeaderTruncatesALongTitle;
     procedure TestHeaderRendersANonAsciiTitle;
     procedure TestRenamingTheCurrentSessionUpdatesTheHeader;
+    { EVERY command RunCommand dispatches must be listed in the palette. RunCommand
+      is reachable only through the palette, and with no match the palette declines
+      the key and the composer sends the text as a PROMPT - which is how /undo,
+      /redo and /revert were unreachable and got sent to the model verbatim. }
+    procedure TestEveryDispatchedCommandIsOfferedByThePalette;
+    { Escape dismisses the palette and leaves the typed '/' alone, so an ordinary
+      prompt may begin with a slash. It must STAY dismissed while the box holds a
+      lone '/token', or the list pops back on the next keystroke. }
+    procedure TestEscapeDismissesThePaletteSoSlashCanBeAPrompt;
     procedure TestStatusShowsWorkspaceAndConsumption;
     procedure TestStatusSumsTurns;
     procedure TestResumeHeaderMatchesLive;
@@ -1529,6 +1538,67 @@ begin
   for I := 1 to 8 do
     FApp.Step;
   AssertEquals('the rename reached the header', 'hi', FApp.Panel.HeaderLeft);
+end;
+
+procedure THarnessAppTest.TestEveryDispatchedCommandIsOfferedByThePalette;
+const
+  Dispatched: array[0..4] of string =
+    ('checkpoint', 'sessions', 'undo', 'redo', 'revert');
+var
+  I, J: Integer;
+  Found: Boolean;
+begin
+  { The invariant that keeps the bug from coming back. RunCommand is reachable
+    ONLY through the palette, and the palette runs only a name it was given: with
+    no match it declines the key, the composer takes Enter, and Submit sends the
+    text to the provider as a prompt. So a command dispatched in RunCommand but
+    missing from the palette is not merely undiscoverable - typing it messages the
+    model with "/undo". }
+  BuildWithStore;
+  for I := 0 to High(Dispatched) do
+  begin
+    { Filter to the exact name and check the palette actually resolves it. }
+    FApp.Panel.Palette.Filter('/' + Dispatched[I]);
+    Found := False;
+    for J := 0 to FApp.Panel.Palette.VisibleCount - 1 do
+      if FApp.Panel.Palette.VisibleAt(J).Name = Dispatched[I] then
+        Found := True;
+    AssertTrue('/' + Dispatched[I] + ' must be offered by the palette', Found);
+  end;
+end;
+
+procedure THarnessAppTest.TestEscapeDismissesThePaletteSoSlashCanBeAPrompt;
+var
+  I: Integer;
+begin
+  { '/' is a character as well as a command prefix. Escape closes the list and
+    must KEEP it closed while the box holds a lone '/token', because the composer
+    reports every keystroke and would otherwise reopen it immediately. }
+  BuildWithStore;
+  FInput.Push(Ch('/'));
+  FApp.Step;
+  AssertTrue('the palette opened on /', FApp.Panel.PaletteActive);
+
+  FInput.Push(Key(kkEscape));
+  FApp.Step;
+  AssertFalse('escape dismissed it', FApp.Panel.PaletteActive);
+
+  { Type a further character: still a lone token, so it must not reopen. }
+  FInput.Push(Ch('u'));
+  FApp.Step;
+  AssertFalse('it stays dismissed while the token is still lone',
+    FApp.Panel.PaletteActive);
+
+  { Once the text becomes a real prompt, the dismissal is spent and a fresh lone
+    '/' opens the palette again. Clearing the box is the honest way to get back
+    to a lone token - appending '/' to an existing prompt is NOT lone, and the
+    palette is right to stay shut in that case. }
+  FInput.Push(Ch(' '));
+  FApp.Step;
+  FApp.Panel.Compose.Clear;
+  FInput.Push(Ch('/'));
+  FApp.Step;
+  AssertTrue('a new slash opens it again', FApp.Panel.PaletteActive);
 end;
 
 procedure THarnessAppTest.TestResumeHeaderMatchesLive;

@@ -90,6 +90,12 @@ type
     { The /sessions modal (nil when closed) and its wrap. }
     FSessionsModal: TSessionsModal;
     FSessionsShown: Boolean;
+    { True once the operator has dismissed the command palette with Escape. It
+      stays down until the composer no longer holds a lone '/token', because
+      ComposeChanged reopens the palette on every keystroke - without this a
+      dismissed list would pop straight back and '/' could never be typed as an
+      ordinary prompt. }
+    FPaletteDismissed: Boolean;
     { A deferred close: the modal's Enter is dispatched from inside the modal, so
       popping the plane there would free the widget mid-dispatch. The swap runs
       inline; the pop waits for the next Step/OnLoop. }
@@ -826,13 +832,27 @@ function THarnessApp.DefaultCommands: TCommandArray;
 begin
   { One entry per command, no aliases: two names for one action reads as two
     actions in a list, and the palette's prefix filter already finds a command
-    from '/c' or '/ch'. }
+    from '/c' or '/ch'.
+
+    EVERY dispatched command must be listed here. RunCommand is reachable only
+    through the palette, and the palette only runs a name it was given: a command
+    missing from this array cannot be typed either, because with no match the
+    palette declines the key and the composer submits the text as a PROMPT. That
+    is how /undo, /redo and /revert were unreachable - they were dispatched in
+    RunCommand but never registered, so '/undo' was sent to the model as a
+    message. }
   Result := nil;
-  SetLength(Result, 2);
+  SetLength(Result, 5);
   Result[0].Name := 'checkpoint';
   Result[0].Description := 'create a checkpoint for this session';
   Result[1].Name := 'sessions';
   Result[1].Description := 'list and manage this workspace''s sessions';
+  Result[2].Name := 'undo';
+  Result[2].Description := 'revert the newest turn and rewind the transcript';
+  Result[3].Name := 'redo';
+  Result[3].Description := 're-apply the turns the last undo took away';
+  Result[4].Name := 'revert';
+  Result[4].Description := 'ask the agent to undo an earlier turn, going forwards';
 end;
 
 procedure THarnessApp.ComposeChanged(Sender: TObject);
@@ -842,14 +862,25 @@ begin
   UpdateCta;
   Text := string(FPanel.Compose.Text);
   { The palette shows while the box holds a lone '/command' token. }
+  { The palette shows while the box holds a lone '/command' token, unless the
+    operator has dismissed it with Escape: '/' is also just a character, and a
+    list that reopens on every keystroke makes that impossible to type. }
   if (Text <> '') and (Text[1] = '/') and (Pos(' ', Text) = 0) and
     (Pos(#10, Text) = 0) then
   begin
-    FPanel.Palette.Filter(Text);
-    FPanel.SetPaletteActive(True);
+    if not FPaletteDismissed then
+    begin
+      FPanel.Palette.Filter(Text);
+      FPanel.SetPaletteActive(True);
+    end;
   end
   else
+  begin
+    { No longer a lone token, so the dismissal has served its purpose and is
+      cleared: the next '/' opens the palette again. }
+    FPaletteDismissed := False;
     FPanel.SetPaletteActive(False);
+  end;
   FApp.Invalidate;
 end;
 
@@ -1023,7 +1054,17 @@ end;
 
 procedure THarnessApp.HandleEscape(Sender: TObject);
 begin
-  { Escape closes the /sessions modal first. }
+  { The command palette is the most transient thing on screen, so it goes first:
+    Escape dismisses it and leaves the typed '/' alone, so the operator can write
+    an ordinary prompt that happens to start with a slash. }
+  if FPanel.PaletteActive then
+  begin
+    FPanel.SetPaletteActive(False);
+    FPaletteDismissed := True;
+    FApp.Invalidate;
+    Exit;
+  end;
+  { Escape closes the /sessions modal next. }
   if FSessionsShown then
   begin
     CloseSessions;
