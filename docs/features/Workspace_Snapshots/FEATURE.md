@@ -22,22 +22,29 @@ What is **built**:
 - **One consumer.** The board's staleness check reads the log
   (`ChangedSince`), which is what makes a board entry call itself stale.
 
+What is **built** as of `88b0eef`: capture on every write path, patch storage with
+16-turn retention, the net fold, the turn summary block (per-file stats collapsed,
+diffs expanded), per-call anchoring end to end, the mechanical revert engine, and
+`/undo` + `/revert` dispatch.
+
 What is **not built**, and is the remaining work:
 
-- **The diff *viewer*.** A turn summary block now renders per-file stats
-  (collapsed) and the diffs (expanded), so the log is legible to an operator for
-  the first time. What does not exist yet is a dedicated viewer pane with per-file
-  selection — the block shows every diff at once rather than letting the operator
-  open one. See `Turn_Summary_v1.SPEC.md`.
-- **Per-call anchoring** (`MessageId`). `TChangeRecorder.Observe` still writes
-  `MessageId := 0`, because the tool-result row does not exist when the handler
-  runs, so a diff cannot yet sit *under the tool block that produced it*. The
-  turn summary groups by turn; per-call grouping needs the id stamped after the
-  row is written, plus an `ekChanges` event carrying row ids to the client.
-- **State revert**, and therefore `/undo`, `/redo` and `/revert`. The design is
-  recorded in the FEATURE; one thing gates it. Revert needs bytes, and a
-  process-tier record has none (it captures no before-text), so only
-  `Captured` rows are revertible and the UI must say which.
+- **The diff *viewer* pane.** The turn summary block shows per-file stats collapsed
+  and the diffs expanded, so the log is legible — but there is no dedicated pane
+  with per-file selection. Card #22. See `Turn_Summary_v1.SPEC.md`.
+- **The history dialog**, shared by `/undo`, `/redo` and `/revert`. It is what lets
+  the operator pick a turn rather than only the newest. Card #26 has the
+  prerequisites; do not wire it before they land.
+- **`/redo`.** The mechanical inverse of `/undo`: replay the suffix the undo took
+  away. Needs a redo buffer, closed when the operator prompts.
+- **Three integrity prerequisites for the dialog** (card #26): mark undone turns'
+  `file_changes` rows reverted so the dialog cannot offer a stale turn; report
+  "already undone" rather than skipping silently; exclude undone turns in
+  `Compose` so they no longer reach the provider.
+- **Process-tier records have no bytes.** A `csProcess` row captures the after-text
+  but not the before, so it carries no patch. `RevertTurn` reports those as
+  `rvSkipped` and `UndoTurn` refuses the turn rather than half-reverting it. The
+  dialog must say which turns are revertible.
 - **Subagent changes are attributed to the CHILD's turn, not the parent's.**
   (Correcting an earlier claim in this doc that said they landed with
   `TurnId = 0` — that was wrong.) A child runtime is spawned with the **same
