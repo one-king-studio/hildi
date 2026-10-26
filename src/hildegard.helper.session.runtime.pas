@@ -688,35 +688,67 @@ var
   M: TSessionMessage;
   E: TSessionEvent;
   Start: Int64;
+  Resolved: TStringList;
 begin
   if FReplayLen = 0 then
     Exit;
   Start := AFromSeq;
-  { AFromSeq = 0 means "the whole live turn" (the protocol's convention), so it
-    is never a gap. Only a positive FromSeq below the retained window is. }
-  if (Start > 0) and (Start < FReplayFirstSeq) then
-  begin
-    M := Default(TSessionMessage);
-    M.Kind := mkEvent;
-    M.Event := Default(TSessionEvent);
-    M.Event.Seq := FSeq;
-    M.Event.Ts := NowMs;
-    M.Event.Kind := ekGap;
-    M.Event.FromSeq := Start;
-    M.Event.ToSeq := FReplayFirstSeq - 1;
-    QueueLine(AClient, TSessionCodec.Encode(M));
-    Start := FReplayFirstSeq;
-  end;
-  for I := 0 to FReplayLen - 1 do
-  begin
-    Idx := (FReplayHead + I) mod FReplayCap;
-    if FReplay[Idx].Seq < Start then
-      Continue;
-    M := Default(TSessionMessage);
-    M.Kind := mkEvent;
-    M.Event := FReplay[Idx];
-    AClient.LastSentSeq := FReplay[Idx].Seq;
-    QueueLine(AClient, TSessionCodec.Encode(M));
+
+  { Which asks have been ANSWERED, collected first so ordering inside the ring
+    cannot matter (a resolution always follows its request, but the pre-pass
+    makes that an assumption we do not rely on).
+
+    Without this, a reattach with FromSeq = 0 - "the whole live turn" -
+    re-delivered every approval request the turn had already had, including ones
+    the operator had answered. They arrived indistinguishable from new asks, so
+    the client re-showed each dialog and re-sent each choice. That is the same
+    bug as switching subagents, one layer down: the spy and a session rejoin both
+    go through here. }
+  Resolved := TStringList.Create;
+  try
+    Resolved.Sorted := True;
+    Resolved.Duplicates := dupIgnore;
+    for I := 0 to FReplayLen - 1 do
+    begin
+      Idx := (FReplayHead + I) mod FReplayCap;
+      if (FReplay[Idx].Seq >= Start) and
+        (FReplay[Idx].Kind = ekApprovalResolved) and
+        (FReplay[Idx].AskId <> '') then
+        Resolved.Add(FReplay[Idx].AskId);
+    end;
+
+    if (Start > 0) and (Start < FReplayFirstSeq) then
+    begin
+      M := Default(TSessionMessage);
+      M.Kind := mkEvent;
+      M.Event := Default(TSessionEvent);
+      M.Event.Seq := FSeq;
+      M.Event.Ts := NowMs;
+      M.Event.Kind := ekGap;
+      M.Event.FromSeq := Start;
+      M.Event.ToSeq := FReplayFirstSeq - 1;
+      QueueLine(AClient, TSessionCodec.Encode(M));
+      Start := FReplayFirstSeq;
+    end;
+    for I := 0 to FReplayLen - 1 do
+    begin
+      Idx := (FReplayHead + I) mod FReplayCap;
+      if FReplay[Idx].Seq < Start then
+        Continue;
+      { A request whose ask is already resolved is HISTORY, not a live demand:
+        replaying it asks the operator to answer something they answered. }
+      if (FReplay[Idx].Kind = ekApprovalRequest) and
+        (FReplay[Idx].AskId <> '') and
+        (Resolved.IndexOf(FReplay[Idx].AskId) >= 0) then
+        Continue;
+      M := Default(TSessionMessage);
+      M.Kind := mkEvent;
+      M.Event := FReplay[Idx];
+      AClient.LastSentSeq := FReplay[Idx].Seq;
+      QueueLine(AClient, TSessionCodec.Encode(M));
+    end;
+  finally
+    Resolved.Free;
   end;
 end;
 
