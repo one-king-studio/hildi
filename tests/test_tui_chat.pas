@@ -21,7 +21,8 @@ type
     FScrolled: Integer;
     FClickedPath: string;
     procedure OnToggle(Sender: TObject);
-    procedure NoteFile(Sender: TObject; const APath: string);
+    procedure NoteFile(Sender: TObject; ATurnId: Int64;
+      const APath: string);
     procedure NoteNeedOlder(Sender: TObject);
     procedure NoteScrolled(Sender: TObject);
     function Rc(AX, AY, AW, AH: Integer): TRect;
@@ -115,7 +116,8 @@ begin
   Inc(FToggles);
 end;
 
-procedure TTuiChatTest.NoteFile(Sender: TObject; const APath: string);
+procedure TTuiChatTest.NoteFile(Sender: TObject; ATurnId: Int64;
+  const APath: string);
 begin
   FClickedPath := APath;
 end;

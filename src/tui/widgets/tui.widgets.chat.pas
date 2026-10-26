@@ -33,7 +33,8 @@ type
   { A turn-summary block's file row was clicked. APath is workspace-relative and
     already resolved through the block's body geometry, so the host can open that
     file's diff without knowing anything about the frame. }
-  TChatFileEvent = procedure(Sender: TObject; const APath: string) of object;
+  TChatFileEvent = procedure(Sender: TObject; ATurnId: Int64;
+    const APath: string) of object;
 
 const
   { The violet used for the ambient border. }
@@ -73,6 +74,10 @@ type
       to this array, which is why it is stored rather than re-parsed from the
       text - the text is display, this is what the path IS. }
     FFilePaths: array of string;
+    { The turn this block summarises, carried so a click can name the turn to the
+      host. Without it the host has only a path and opens the wrong turn's diff
+      the moment an older block is still on screen. }
+    FTurnId: Int64;
     { The absolute Y of the body's first row, recorded when the body is
       arranged. A click is relative to the block, but the file rows are relative
       to the body, and the two differ by the frame and any meta rows. }
@@ -168,6 +173,8 @@ type
       row can open that file's diff; every other kind leaves it empty and clicks
       keep their old meaning (toggle). }
     procedure SetFilePaths(const APaths: array of string);
+    { The turn this block summarises, so a click can name it to the host. }
+    property TurnId: Int64 read FTurnId write FTurnId;
     { The path a click at screen row AY would select, or '' when the row is not a
       file. Public so the host can resolve a click without knowing the frame
       geometry. }
@@ -258,7 +265,8 @@ type
     procedure ItemChanged(Sender: TObject);
     procedure ItemToggled(Sender: TObject);
     { A file row in a block was clicked; re-raised to the host with the path. }
-    procedure ItemFile(Sender: TObject; const APath: string);
+    procedure ItemFile(Sender: TObject; ATurnId: Int64;
+      const APath: string);
     procedure SetOnFile(AValue: TChatFileEvent);
     { An item's animation state changed; keep the running count. }
     procedure ItemAnimatingChanged(Sender: TObject; AAnimating: Boolean);
@@ -322,7 +330,8 @@ type
     procedure ItemChanged(Sender: TObject);
     procedure ItemToggled(Sender: TObject);
     { A file row was clicked in a block; re-raised to the host. }
-    procedure ItemFile(Sender: TObject; const APath: string);
+    procedure ItemFile(Sender: TObject; ATurnId: Int64;
+      const APath: string);
     procedure SetOnFile(AValue: TChatFileEvent);
   public
     constructor Create(const ATheme: TTheme);
@@ -1369,7 +1378,7 @@ begin
     if Hit <> '' then
     begin
       if Assigned(FOnFile) then
-        FOnFile(Self, Hit);
+        FOnFile(Self, FTurnId, Hit);
       Exit(True);
     end;
     { Not a file row (the `N more files` tail, or the frame): fall through to the
@@ -1530,10 +1539,11 @@ begin
     FItems[I].OnFile := ItemFile;
 end;
 
-procedure TChatStack.ItemFile(Sender: TObject; const APath: string);
+procedure TChatStack.ItemFile(Sender: TObject; ATurnId: Int64;
+  const APath: string);
 begin
   if Assigned(FOnFile) then
-    FOnFile(Self, APath);
+    FOnFile(Self, ATurnId, APath);
 end;
 
 procedure TChatStack.SetOnChange(AValue: TNotifyEvent);
@@ -1864,12 +1874,13 @@ begin
   FStack.SetOnFile(ItemFile);
 end;
 
-procedure TChatStream.ItemFile(Sender: TObject; const APath: string);
+procedure TChatStream.ItemFile(Sender: TObject; ATurnId: Int64;
+  const APath: string);
 begin
   { Unlike a toggle, this does not change any layout - it opens a modal - so the
     follow flag is left alone. }
   if Assigned(FOnFile) then
-    FOnFile(Self, APath);
+    FOnFile(Self, ATurnId, APath);
 end;
 
 procedure TChatStream.ItemToggled(Sender: TObject);

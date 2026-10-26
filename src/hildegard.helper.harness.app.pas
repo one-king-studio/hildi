@@ -218,7 +218,7 @@ type
       requested close, and clear a dangling pane after an unhandled Escape. }
     procedure SyncDiff;
     { The diff viewer: open one file's stored diff, and close it. }
-    procedure ShowDiff(const APath: string);
+    procedure ShowDiff(ATurnId: Int64; const APath: string);
     procedure CloseDiff;
     procedure DiffClosed(Sender: TObject);
     { Subagents: feed the roster, toggle/show the sidebar, spy on a child. }
@@ -321,7 +321,8 @@ type
     { The view scrolled: recompute which page the viewport is on. }
     procedure StreamScrolled(Sender: TObject);
     { A file row in a turn-summary block was clicked: open its diff. }
-    procedure StreamFileClicked(Sender: TObject; const APath: string);
+    procedure StreamFileClicked(Sender: TObject; ATurnId: Int64;
+      const APath: string);
     { The continuation page: one more than the session's checkpoint count. }
     function PageNumber: Integer;
     { The compose changed: show/hide and filter the command palette. }
@@ -2155,7 +2156,7 @@ begin
   SetState(psReady, 'ready');
 end;
 
-procedure THarnessApp.ShowDiff(const APath: string);
+procedure THarnessApp.ShowDiff(ATurnId: Int64; const APath: string);
 var
   Changes: IChangeStore;
   Rows: TChangeRecordArray;
@@ -2179,14 +2180,14 @@ begin
     AppendError('no store; cannot show a diff');
     Exit;
   end;
-  if FSession.LastTurn.Id = 0 then
+  if ATurnId <= 0 then
   begin
     AppendError('no turn to read a diff from');
     Exit;
   end;
   Changes := TSqliteChangeStore.Create(FSession.Store);
   if not Changes.ForTurn(FSession.WorkspaceId,
-    Integer(FSession.LastTurn.Id), Rows, Err) then
+    Integer(ATurnId), Rows, Err) then
   begin
     AppendError('could not read the change log: ' + Err);
     Exit;
@@ -2589,12 +2590,13 @@ begin
   Result := True;
 end;
 
-procedure THarnessApp.StreamFileClicked(Sender: TObject; const APath: string);
+procedure THarnessApp.StreamFileClicked(Sender: TObject; ATurnId: Int64;
+  const APath: string);
 begin
   { A click on a file row of a turn-summary block. The block resolved the row to
     a path; the app owns the store, so it resolves the path to a diff. }
   if APath <> '' then
-    ShowDiff(APath);
+    ShowDiff(ATurnId, APath);
 end;
 
 procedure THarnessApp.StreamScrolled(Sender: TObject);
