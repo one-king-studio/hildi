@@ -202,6 +202,9 @@ type
     procedure ShowQueued(const AText: string);
     procedure ToggleSidebar(Sender: TObject);
     procedure LayoutSidebar;
+    { Each subagent row shows what its child is currently working on, so the
+      list answers "which of these is doing the thing I care about". }
+    procedure RefreshSubagentTitles;
     procedure OnSidebarSelect(const ASessionId: string);
     procedure LeaveSpy;
     { The spied child's display name: its roster label, else its id prefix. }
@@ -2369,6 +2372,28 @@ begin
   FApp.Invalidate;
 end;
 
+procedure THarnessApp.RefreshSubagentTitles;
+var
+  Entries: TSubagentEntryArray;
+  I: Integer;
+  Title: string;
+  StoreErr: TStoreError;
+begin
+  { Each row shows what its child is WORKING ON, so the list answers "which of
+    these is doing the thing I care about" rather than "how many children do I
+    have". The title is the child's latest resolved one - the delegation reason
+    at spawn, then whatever its last finished reply extracted. }
+  if (FSession = nil) or (FSession.Store = nil) then
+    Exit;
+  Entries := FRoster.Entries;
+  for I := 0 to High(Entries) do
+  begin
+    Title := '';
+    if FSession.Store.SessionTitle(Entries[I].SessionId, Title, StoreErr) then
+      FSidebar.SetTurnTitle(Entries[I].SessionId, Title);
+  end;
+end;
+
 procedure THarnessApp.HandleSubagentEvent(const E: TTurnEvent);
 begin
   case E.Kind of
@@ -2377,7 +2402,10 @@ begin
         FRoster.Apply(E.SubSessionId, E.SubLabel, E.SubStatus,
           Int64(GetTickCount64));
         if FSidebarShown then
+        begin
+          RefreshSubagentTitles;
           FSidebar.Refresh;
+        end;
       end;
     teAmbient:
       { The ambient result, shown live as a violet box (title = label ·
@@ -2436,33 +2464,23 @@ end;
 
 procedure THarnessApp.LayoutSidebar;
 var
-  R: TRect;
-  Avail: TSize;
   Compose: TRect;
 begin
   if not FSidebarShown then
     Exit;
-  { The list takes the COMPOSER's place rather than floating over the transcript.
-    A floating overlay covered the conversation it was describing, and the
-    operator asked for the list where the composer is - the natural place to
-    choose who you are talking to.
-
-    The composer is hidden while the list is up, and its bounds are reused, so
-    entering and leaving subagent mode does not shift the transcript at all. }
+  { The list REPLACES the composer: it takes the composer's exact bounds and
+    draws the same box, so entering subagent mode does not move the transcript
+    or resize the bottom panel by a single row. An earlier version shrank the box
+    to the row count, which made it read as a floating panel again. }
   Compose := FPanel.ComposeBounds;
   FPanel.Compose.Visible := False;
   if (Compose.H <= 0) or (Compose.W <= 0) then
     Exit;
-  Avail := Default(TSize);
-  Avail.W := Compose.W;
-  Avail.H := Compose.H;
-  R := Compose;
-  R.H := FRoster.Count;
-  if R.H < 1 then
-    R.H := 1;
-  if R.H > Compose.H then
-    R.H := Compose.H;
-  FSidebar.Arrange(R);
+  FSidebar.Arrange(Compose);
+  { The two lines the composer shows, in the same places: the model at the lower
+    left, the action hints at the lower right. }
+  FSidebar.SetInfo('Hildegard · ' + FSession.Model);
+  FSidebar.SetHints('enter spy');
 end;
 
 procedure THarnessApp.OnSidebarSelect(const ASessionId: string);

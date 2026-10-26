@@ -1,9 +1,18 @@
 unit tui.widgets.sidebar;
-{ A floating list of a session's active subagents. Up/Down move the selection,
-  Enter spies on the selected child (OnSelect), Escape is left to the host. It
-  is not modal: the parent view stays visible behind it.
+{ The subagent list, drawn in the COMPOSER's place and in the composer's own
+  chrome: the same heavy-topped rounded box, the same raised background, the
+  same lower-left info line and lower-right CTAs. Two things differ on purpose:
 
-  The rows come from a TSubagentRoster; call Refresh when the roster changes. }
+  - the border is AMBER (FTheme.Warn) rather than the accent, so the operator
+    sees at a glance that this is not the prompt. The dashboard uses the same
+    amber for a CLAIMED lane heading: "work in flight, not yours to type into";
+  - where the prompt carries text, the list carries one row per child.
+
+  Each row is the child's label (or short session id) plus its current turn
+  title, so the list says what each agent is DOING, not just that it exists.
+
+  Up/Down move the selection and the host loads the selected child into the chat
+  stream (OnSelect). There is no prompt here, so the view is read-only. }
 
 {$mode delphi}{$H+}{$codepage utf8}
 
@@ -12,7 +21,7 @@ interface
 uses
   Classes, SysUtils, tui.base, tui.input,
   tui.surface, tui.widget,
-  tui.theme,
+  tui.grapheme, tui.theme,
   hildegard.helper.harness.subagent;
 
 type
@@ -24,12 +33,19 @@ type
     FRoster: TSubagentRoster;
     FSelected: Integer;
     FOnSelect: TSubagentSelectedEvent;
+    FInfo: string;             // lower-left, as the compose shows the model
+    FHints: string;            // lower-right CTAs
+    FTurnTitles: TStringList;  // session id -> its current turn title
     procedure Move(ADelta: Integer);
     function StatusGlyph(AStatus: TSubagentStatus): UnicodeString;
-    function RowText(const AEntry: TSubagentEntry): string;
+    { The label, or a short session id when there is no label - a row must always
+      be identifiable, and an empty label made every row look the same. }
+    function DisplayName(const AEntry: TSubagentEntry): string;
+    function RowText(const AEntry: TSubagentEntry; AWidth: Integer): UnicodeString;
   public
     constructor Create(const ATheme: TTheme; ARoster: TSubagentRoster);
-    { Rebuild from the roster; call when it changes. }
+    destructor Destroy; override;
+    { Rebuild from the roster; call when the roster changes. }
     procedure Refresh;
     function RowCount: Integer;
     function Measure(const AAvail: TSize): TSize; override;
@@ -37,6 +53,12 @@ type
     function HandleEvent(const E: TInputEvent): Boolean; override;
     property Selected: Integer read FSelected;
     property OnSelect: TSubagentSelectedEvent read FOnSelect write FOnSelect;
+    { The lower-left line: the session's model, exactly as the compose shows it. }
+    procedure SetInfo(const AText: string);
+    { The lower-right key hints. }
+    procedure SetHints(const AText: string);
+    { A child's current turn title, shown beside its name. '' clears it. }
+    procedure SetTurnTitle(const ASessionId, ATitle: string);
   end;
 
 implementation
@@ -47,6 +69,43 @@ begin
   FTheme := ATheme;
   FRoster := ARoster;
   FSelected := -1;
+  FInfo := '';
+  FHints := 'enter spy';
+  FTurnTitles := TStringList.Create;
+end;
+
+destructor TSidebar.Destroy;
+begin
+  FTurnTitles.Free;
+  inherited Destroy;
+end;
+
+procedure TSidebar.SetInfo(const AText: string);
+begin
+  FInfo := AText;
+end;
+
+procedure TSidebar.SetHints(const AText: string);
+begin
+  FHints := AText;
+end;
+
+procedure TSidebar.SetTurnTitle(const ASessionId, ATitle: string);
+var
+  I: Integer;
+begin
+  if ASessionId = '' then
+    Exit;
+  I := FTurnTitles.IndexOfName(ASessionId);
+  if I >= 0 then
+  begin
+    if ATitle = '' then
+      FTurnTitles.Delete(I)
+    else
+      FTurnTitles[I] := ASessionId + '=' + ATitle;
+  end
+  else if ATitle <> '' then
+    FTurnTitles.Add(ASessionId + '=' + ATitle);
 end;
 
 procedure TSidebar.Refresh;
@@ -105,65 +164,136 @@ begin
   end;
 end;
 
-function TSidebar.RowText(const AEntry: TSubagentEntry): string;
+function TSidebar.DisplayName(const AEntry: TSubagentEntry): string;
 begin
-  Result := string(StatusGlyph(AEntry.Status)) + ' ' + AEntry.LabelText;
+  if AEntry.LabelText <> '' then
+    Result := AEntry.LabelText
+  else if Length(AEntry.SessionId) > 8 then
+    Result := Copy(AEntry.SessionId, 1, 8)
+  else
+    Result := AEntry.SessionId;
+end;
+
+function TSidebar.RowText(const AEntry: TSubagentEntry;
+  AWidth: Integer): UnicodeString;
+var
+  Title: string;
+  Line: UnicodeString;
+  I: Integer;
+begin
+  { Which turn is this child on? The title is the point of the row: a list of
+    bare labels says who exists, not what anyone is doing. }
+  Title := '';
+  I := FTurnTitles.IndexOfName(AEntry.SessionId);
+  if I >= 0 then
+    Title := FTurnTitles.ValueFromIndex[I];
+
+  { Built as UnicodeString throughout: mixing an AnsiString accumulator with a
+    UnicodeString literal is an implicit conversion, which -Sew rejects. }
+  Line := StatusGlyph(AEntry.Status) + ' ' + UnicodeString(DisplayName(AEntry));
+  if Title <> '' then
+    Line := Line + ' · ' + UnicodeString(Title);
+
+  Result := Line;
+
+  { Truncate with an ellipsis rather than cutting silently: a row that is simply
+    short is indistinguishable from one that was clipped. }
+  if (AWidth > 1) and (Length(Result) > AWidth) then
+    Result := Copy(Result, 1, AWidth - 1) + '…';
 end;
 
 function TSidebar.Measure(const AAvail: TSize): TSize;
-var
-  Entries: TSubagentEntryArray;
-  I, W: Integer;
 begin
-  Result := Default(TSize);
-  if FRoster = nil then
-    Exit;
-  Entries := FRoster.Entries;
-  Result.H := Length(Entries);
-  for I := 0 to High(Entries) do
-  begin
-    W := Length(RowText(Entries[I]));
-    if W > Result.W then
-      Result.W := W;
-  end;
-  if Result.W > AAvail.W then
-    Result.W := AAvail.W;
+  { The list owns the composer's box now, so it has no intrinsic size of its
+    own - it takes what the layout gives it. }
+  Result := AAvail;
 end;
 
 procedure TSidebar.Render(const S: ISurface);
 var
+  L, R, T, B, X, Y, I, InnerW: Integer;
   Entries: TSubagentEntryArray;
-  I, J, X: Integer;
-  Line: string;
-  A: TAttr;
-  C: TCell;
+  SurfaceAttr, Border, RowAttr: TAttr;
+  Line: UnicodeString;
+  Key, Act: UnicodeString;
 begin
-  if (FBounds.W <= 0) or (FBounds.H <= 0) then
+  if (FBounds.W < 4) or (FBounds.H < 4) then
     Exit;
-  S.FillRect(FBounds, FTheme.Panel);
-  if FRoster = nil then
-    Exit;
-  Entries := FRoster.Entries;
+  L := FBounds.X;
+  R := FBounds.X + FBounds.W - 1;
+  T := FBounds.Y;
+  B := FBounds.Y + FBounds.H - 1;
+
+  { The composer's own chrome, with an amber border instead of the accent. Same
+    box, same background, same heavy top rule - so it reads as the same surface,
+    in a state that says "read only". }
+  SurfaceAttr := OnBg(FTheme.Text, FTheme.RaisedBg);
+  Border := OnBg(WithStyle(FTheme.Warn, [sfDim]), FTheme.RaisedBg);
+
+  S.FillRect(FBounds, SurfaceAttr);
+
+  { Heavy top, single bottom, light sides - identical to the compose. }
+  PutCh(S, L, T, '╭', Border);
+  PutCh(S, R, T, '╮', Border);
+  PutCh(S, L, B, '╰', Border);
+  PutCh(S, R, B, '╯', Border);
+  for X := L + 1 to R - 1 do
+  begin
+    PutCh(S, X, T, '═', Border);
+    PutCh(S, X, B, '─', Border);
+  end;
+  for Y := T + 1 to B - 1 do
+  begin
+    PutCh(S, L, Y, '│', Border);
+    PutCh(S, R, Y, '│', Border);
+  end;
+
+  InnerW := (R - 1) - (L + 2) + 1;
+
+  { Rows live between the top border and the info/CTA line. }
+  if FRoster <> nil then
+    Entries := FRoster.Entries
+  else
+    SetLength(Entries, 0);
+
+  Y := T + 1;
   for I := 0 to High(Entries) do
   begin
-    if I >= FBounds.H then
+    if Y > B - 2 then
       Break;
-    Line := RowText(Entries[I]);
-    A := FTheme.Text;
-    { Terminal rows are dimmed; the selected row uses the accent. }
-    if SubagentStatusIsTerminal(Entries[I].Status) then
-      A := FTheme.Muted;
+    Line := RowText(Entries[I], InnerW);
     if I = FSelected then
-      A := FTheme.Accent;
-    for J := 1 to Length(Line) do
+      RowAttr := OnBg(WithStyle(FTheme.Warn, [sfBold]), FTheme.RaisedBg)
+    else if SubagentStatusIsTerminal(Entries[I].Status) then
+      RowAttr := OnBg(FTheme.Muted, FTheme.RaisedBg)
+    else
+      RowAttr := OnBg(FTheme.Text, FTheme.RaisedBg);
+    if I = FSelected then
+      PutText(S, L + 1, Y, '▌', RowAttr);
+    PutText(S, L + 2, Y, Line, RowAttr);
+    Inc(Y);
+  end;
+
+  if Length(Entries) = 0 then
+    PutText(S, L + 2, T + 1, 'no subagents',
+      OnBg(FTheme.Muted, FTheme.RaisedBg));
+
+  { Info line at the lower left: the session's model, as the compose shows it. }
+  PutText(S, L + 2, B - 1, UnicodeString(FInfo),
+    OnBg(FTheme.Muted, FTheme.RaisedBg));
+
+  { CTAs at the lower right, the key dimmed and the action in the amber, so it
+    reads as the thing to press - the compose's own convention. }
+  if FHints <> '' then
+  begin
+    Key := 'enter';
+    Act := ' spy';
+    X := R - 1 - (StringWidth(Key) + StringWidth(Act));
+    if X > L + 3 + StringWidth(UnicodeString(FInfo)) then
     begin
-      X := FBounds.X + J - 1;
-      if X >= FBounds.X + FBounds.W then
-        Break;
-      C := Default(TCell);
-      C.Ch := UnicodeString(Line[J]);
-      C.Attr := A;
-      S.Put(X, FBounds.Y + I, C);
+      PutText(S, X, B - 1, Key, OnBg(FTheme.Muted, FTheme.RaisedBg));
+      PutText(S, X + StringWidth(Key), B - 1, Act,
+        OnBg(FTheme.Warn, FTheme.RaisedBg));
     end;
   end;
 end;
@@ -178,23 +308,50 @@ begin
     kkUp:
       begin
         Move(-1);
+        { Moving the selection LOADS that child into the stream: the list is a
+          picker, and a picker that needs Enter to preview is a picker you have
+          to operate twice. }
+        if Assigned(FOnSelect) and (FSelected >= 0) and (FRoster <> nil) then
+        begin
+          Entries := FRoster.Entries;
+          if FSelected <= High(Entries) then
+            FOnSelect(Entries[FSelected].SessionId);
+        end;
         Exit(True);
       end;
     kkDown:
       begin
         Move(1);
+        if Assigned(FOnSelect) and (FSelected >= 0) and (FRoster <> nil) then
+        begin
+          Entries := FRoster.Entries;
+          if FSelected <= High(Entries) then
+            FOnSelect(Entries[FSelected].SessionId);
+        end;
         Exit(True);
       end;
     kkHome:
       begin
         Refresh;
         FSelected := 0;
+        if Assigned(FOnSelect) and (FRoster <> nil) then
+        begin
+          Entries := FRoster.Entries;
+          if Length(Entries) > 0 then
+            FOnSelect(Entries[0].SessionId);
+        end;
         Exit(True);
       end;
     kkEnd:
       begin
         if RowCount > 0 then
           FSelected := RowCount - 1;
+        if Assigned(FOnSelect) and (FRoster <> nil) and (FSelected >= 0) then
+        begin
+          Entries := FRoster.Entries;
+          if FSelected <= High(Entries) then
+            FOnSelect(Entries[FSelected].SessionId);
+        end;
         Exit(True);
       end;
     kkEnter:
