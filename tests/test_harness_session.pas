@@ -70,6 +70,12 @@ type
     { The transcript half: an undone turn's messages stop being composed into
       the context, or the operator sees work that is no longer on disk. }
     procedure TestUndoneTurnsAreExcludedFromTheContext;
+    { Redo is the mechanical inverse: it re-applies the files AND brings the
+      turn's messages back into the context. Undo-then-redo must be an exact
+      round trip, or one direction is lying. }
+    procedure TestRedoRestoresTheFilesAndTheContext;
+    { Redoing turns that were never undone must say so, not silently succeed. }
+    procedure TestRedoRefusesWhenNothingIsUndone;
     procedure TestTheTurnBoundaryReclaimsADeadSessionsClaim;
     procedure TestRecallToolAbsentWithoutStore;
     procedure TestLastTurnEmptyWithoutTurns;
@@ -440,6 +446,7 @@ var
   Err, Detail, Before, After: string;
   TurnId: Int64;
   Msgs: TMessageRecordArray;
+  Convo: TSqliteConversationStore;
   StoreErr: TStoreError;
 begin
   { The invariant: undo moves the files AND the transcript together. Either half
@@ -467,9 +474,22 @@ begin
     AssertEquals('no detail on success', '', Detail);
     AssertEquals('the file is back', Before, ReadText('a.txt'));
 
+    { The transcript half is moved by STATUS, not deletion: the row survives (the
+      record still shows the work happened, and /redo needs it), but it no longer
+      reaches the context. Asserting the row count is 1 is what pins that - a
+      deleted row would read 0 and would also be unrecoverable. }
     AssertTrue('read messages', Session.View.Store.QueryMessages(
       Session.View.SessionId, Msgs, StoreErr));
-    AssertEquals('the transcript is rewound too', 0, Length(Msgs));
+    AssertEquals('the message row is kept, not deleted', 1, Length(Msgs));
+
+    Convo := TSqliteConversationStore.Create(Session.View.Store,
+      Session.View.SessionId, 0);
+    try
+      AssertEquals('but it is out of the context', 0,
+        Length(Convo.Messages));
+    finally
+      Convo.Free;
+    end;
   finally
     Session.Free;
   end;
@@ -665,6 +685,98 @@ begin
     finally
       Convo.Free;
     end;
+  finally
+    Session.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestRedoRestoresTheFilesAndTheContext;
+var
+  Session: THarnessSession;
+  Err, Detail, Before, After: string;
+  TurnId: Int64;
+  Convo: TSqliteConversationStore;
+  Composed: TChatMessageArray;
+  Turns: TTurnRecordArray;
+  Msgs: TMessageRecordArray;
+  I: Integer;
+  StoreErr: TStoreError;
+begin
+  { The round trip, and the reason /redo exists: undo moved the files back and
+    dropped the turn from the context, so redo must put BOTH back. A redo that
+    restored the file but left the turn out of the transcript would be the same
+    lie as the undo bug, in the other direction. }
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    Session.View.Store.BeginTurn(Session.View.SessionId, TurnId, StoreErr);
+    if TurnId <= 0 then
+      TurnId := 1;
+    Session.View.Store.FinishTurn(TurnId, tsCompleted, 'stop', 0, '', '',
+      StoreErr);
+
+    Detail := '';
+    Before := 'one'#10'two'#10;
+    After := 'one'#10'TWO'#10;
+    WriteText('a.txt', After);
+    AssertTrue('row: ' + Detail, SeedChange(Session, Integer(TurnId), Before,
+      After, Detail));
+    AssertTrue('message: ' + Detail, SeedMessage(Session, TurnId, Detail));
+
+    AssertTrue('undo: ' + Detail, Session.UndoTurn(TurnId, Detail));
+    AssertEquals('the file is back', Before, ReadText('a.txt'));
+
+    Detail := '';
+    AssertTrue('redo: ' + Detail, Session.RedoTurn(TurnId, Detail));
+    AssertEquals('the file is forward again', After, ReadText('a.txt'));
+
+    { The turn is live again, so its messages return to the context. }
+    Turns := Session.View.Turns;
+    for I := 0 to High(Turns) do
+      if Turns[I].Id = TurnId then
+        AssertEquals('the turn is completed again', Ord(tsCompleted),
+          Ord(Turns[I].Status));
+
+    { Unfiltered first: this separates "the row was lost" from "the filter still
+      excludes it", which are different bugs. }
+    AssertTrue('read messages', Session.View.Store.QueryMessages(
+      Session.View.SessionId, Msgs, StoreErr));
+    AssertEquals('the message row survived the round trip', 1, Length(Msgs));
+
+    Convo := TSqliteConversationStore.Create(Session.View.Store,
+      Session.View.SessionId, 0);
+    try
+      Composed := Convo.Messages;
+      AssertEquals('the turn is back in the context', 1, Length(Composed));
+    finally
+      Convo.Free;
+    end;
+  finally
+    Session.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestRedoRefusesWhenNothingIsUndone;
+var
+  Session: THarnessSession;
+  Err, Detail: string;
+  TurnId: Int64;
+  StoreErr: TStoreError;
+begin
+  { A redo that moved nothing must not read as a success, for the same reason
+    the undo's must not. }
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    Session.View.Store.BeginTurn(Session.View.SessionId, TurnId, StoreErr);
+    if TurnId <= 0 then
+      TurnId := 1;
+    Session.View.Store.FinishTurn(TurnId, tsCompleted, 'stop', 0, '', '',
+      StoreErr);
+
+    Detail := '';
+    AssertFalse('nothing to redo', Session.RedoTurn(TurnId, Detail));
+    AssertTrue('and says why: ' + Detail, Pos('not undone', Detail) > 0);
   finally
     Session.Free;
   end;

@@ -167,6 +167,23 @@ type
       compares against that turn's AfterHash and only holds once the later turns
       are already undone. }
     function UndoOneTurn(ATurnId: Int64; out ADetail: string): Boolean;
+    { Redo: re-apply the turns an undo took away, OLDEST first.
+
+      The mirror of UndoTurn, and the reason the order flips: undo walks newest
+      first so each revert finds the file at its AfterHash; redo walks oldest
+      first so each apply finds the file at its BeforeHash. Both directions rely
+      on the same trick - the turn you are moving is always the one whose
+      precondition currently holds.
+
+      A turn is redone by restoring its status to tsCompleted, which is what
+      brings its messages back into the context: the Compose filter excludes
+      tsUndone and nothing else, so redo needs no message surgery.
+
+      Redo is only meaningful for the turns the most recent undo took away, so a
+      prompt closes the window (the operator abandoned the future by doing new
+      work). This does not enforce that - it redoes the requested suffix - but
+      the caller is expected to offer only that suffix. }
+    function RedoTurn(ATurnId: Int64; out ADetail: string): Boolean;
     { Notice any board entries this session has not seen, coalesced into ONE
       transient prompt item so ten agents posting is O(ticks), not O(entries).
       Called by the runtime on its tick. Returns the count noticed. }
@@ -663,7 +680,7 @@ begin
       will still offer - recoverable. The reverse order could strand a tsUndone
       turn whose rows still look revertible. }
     if not FChangeStore.MarkReverted(FView.WorkspaceId, Integer(Turns[I].Id),
-      MarkErr) then
+      Trunc((Now - EncodeDate(1970, 1, 1)) * MSecsPerDay), MarkErr) then
     begin
       ADetail := 'the files were restored but the change rows could not be '
         + 'marked reverted: ' + MarkErr;
@@ -694,6 +711,124 @@ begin
   if SkippedUndone > 0 then
     ADetail := 'undid ' + IntToStr(UndidCount) + ' turn(s); '
       + IntToStr(SkippedUndone) + ' was already undone';
+  Result := True;
+end;
+
+function THarnessSession.RedoTurn(ATurnId: Int64; out ADetail: string): Boolean;
+var
+  Turns: TTurnRecordArray;
+  I, First: Integer;
+  RedidCount, SkippedLive: Integer;
+  StoreErr: TStoreError;
+  MarkErr: string;
+  Part: string;
+  Rows: TChangeRecordArray;
+  Results: TRevertResultArray;
+  Hasher: TSha256Hasher;
+  J: Integer;
+begin
+  { CUMULATIVE redo, OLDEST first: redoing to turn N re-applies every undone turn
+    from N forward. The order is the mirror of undo's and is required for the
+    same reason - each apply compares the file against that turn's BeforeHash,
+    which only holds once every EARLIER turn has been re-applied. }
+  Result := False;
+  ADetail := '';
+  if FView.Store = nil then
+  begin
+    ADetail := 'this session has no store, so it recorded no changes';
+    Exit;
+  end;
+  if ATurnId <= 0 then
+  begin
+    ADetail := 'no turn to redo';
+    Exit;
+  end;
+
+  Turns := FView.Turns;
+  First := -1;
+  for I := 0 to High(Turns) do
+    if Turns[I].Id = ATurnId then
+    begin
+      First := I;
+      Break;
+    end;
+  if First < 0 then
+  begin
+    ADetail := 'that turn is not in this session';
+    Exit;
+  end;
+
+  RedidCount := 0;
+  SkippedLive := 0;
+  for I := First to High(Turns) do
+  begin
+    if Turns[I].Status <> tsUndone then
+    begin
+      { A turn that is still live was never undone, so there is nothing to
+        re-apply. Counted rather than silently passed over. }
+      Inc(SkippedLive);
+      Continue;
+    end;
+
+    if not FChangeStore.ForTurn(FView.WorkspaceId, Integer(Turns[I].Id), Rows,
+      Part) then
+    begin
+      ADetail := Part;
+      Exit;
+    end;
+    Hasher := TSha256Hasher.Create;
+    try
+      if not ApplyTurn(FView.WorkspaceRoot, Rows, Hasher.OfText, 0, Results) then
+      begin
+        ADetail := 'could not read this turn''s changes';
+        Exit;
+      end;
+    finally
+      Hasher.Free;
+    end;
+    { All-or-nothing for the turn: a partial redo would leave the transcript and
+      the workspace disagreeing, the same lie in the other direction. }
+    for J := 0 to High(Results) do
+      if (Results[J].Outcome <> rvReverted) and
+        (Results[J].Outcome <> rvSkipped) then
+      begin
+        ADetail := 'could not redo ' + Results[J].Path + ': '
+          + Results[J].Detail;
+        Exit;
+      end;
+
+    { The rows are in effect again... }
+    if not FChangeStore.MarkReverted(FView.WorkspaceId, Integer(Turns[I].Id),
+      0, MarkErr) then
+    begin
+      ADetail := 'the files were reapplied but the change rows could not be '
+        + 'marked live: ' + MarkErr;
+      Exit;
+    end;
+    { ...and restoring tsCompleted is what brings the messages back: the context
+      filter excludes tsUndone and nothing else, so no message surgery is
+      needed. }
+    if not FView.Store.FinishTurn(Turns[I].Id, tsCompleted, 'redone', 0, '',
+      '', StoreErr) then
+    begin
+      ADetail := 'the files were reapplied but the turn could not be marked: '
+        + StoreErr.Message;
+      Exit;
+    end;
+    Inc(RedidCount);
+  end;
+
+  if RedidCount = 0 then
+  begin
+    if SkippedLive > 0 then
+      ADetail := 'nothing to redo: those turns are not undone'
+    else
+      ADetail := 'nothing to redo in that range';
+    Exit;
+  end;
+  if SkippedLive > 0 then
+    ADetail := 'redid ' + IntToStr(RedidCount) + ' turn(s); '
+      + IntToStr(SkippedLive) + ' was not undone';
   Result := True;
 end;
 
@@ -770,13 +905,14 @@ begin
     Exit;
   end;
 
-  { Files are back. Now move the transcript, so both halves agree. }
-  if not FView.Store.DeleteTurnMessages(ATurnId, StoreErr) then
-  begin
-    ADetail := 'the files were restored but the transcript could not be rewound: '
-      + StoreErr.Message;
-    Exit;
-  end;
+  { Files are back, so the two halves agree. The transcript is moved by STATUS,
+    not by deletion: the turn is marked tsUndone (by the caller) and the context
+    filters excludes it, so its messages stay in the ledger.
+
+    They used to be DELETED here, which was the pre-tsUndone way to keep them out
+    of the prompt. That was wrong twice over: the spec says an undone turn's
+    messages are "marked reverted rather than deleted" so the record still shows
+    the work happened, and a deleted row is a row `/redo` can never bring back. }
   Result := True;
 end;
 

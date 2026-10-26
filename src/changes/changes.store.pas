@@ -59,7 +59,8 @@ type
       a no-op returning True: it is a normal race, not a failure. }
     function SetMessageId(AWorkspaceId, AChangeId, AMessageId: Integer;
       out AError: string): Boolean;
-    { Mark every row belonging to a turn as no longer in effect.
+    { Mark every row belonging to a turn as no longer in effect, or (with
+      ARevertedAt = 0) back in effect.
 
       An undone turn is soft-deleted: the turn row is marked tsUndone and its
       messages stop being composed into the context. Its change rows must be
@@ -67,8 +68,13 @@ type
       already back at the pre-turn state - and reverting it again would be
       refused by the CAS with a confusing conflict rather than "already undone".
 
-      Idempotent: marking an already-marked turn is a no-op returning True. }
-    function MarkReverted(AWorkspaceId, ATurnId: Integer;
+      The timestamp is a parameter rather than read here so that a redo can
+      CLEAR the mark (pass 0): a redone turn's files are in effect again. One
+      member doing both keeps the two directions from disagreeing about what the
+      column means.
+
+      Idempotent in both directions. }
+    function MarkReverted(AWorkspaceId, ATurnId: Integer; ARevertedAt: Int64;
       out AError: string): Boolean;
     { The newest keyframe at or before AChangeId for a path. }
     function KeyframeBefore(AWorkspaceId: Integer; const APath: string;
@@ -119,7 +125,7 @@ type
       out AError: string): Boolean;
     function SetMessageId(AWorkspaceId, AChangeId, AMessageId: Integer;
       out AError: string): Boolean;
-    function MarkReverted(AWorkspaceId, ATurnId: Integer;
+    function MarkReverted(AWorkspaceId, ATurnId: Integer; ARevertedAt: Int64;
       out AError: string): Boolean;
     function KeyframeBefore(AWorkspaceId: Integer; const APath: string;
       AChangeId: Integer; out AFrame: TKeyframe; out AFound: Boolean;
@@ -310,7 +316,7 @@ begin
 end;
 
 function TMemoryChangeStore.MarkReverted(AWorkspaceId, ATurnId: Integer;
-  out AError: string): Boolean;
+  ARevertedAt: Int64; out AError: string): Boolean;
 var
   I: Integer;
 begin
@@ -318,8 +324,7 @@ begin
   for I := 0 to High(FRecords) do
     if (FRecords[I].WorkspaceId = AWorkspaceId) and
       (FRecords[I].TurnId = ATurnId) then
-      FRecords[I].RevertedAt := Trunc((Now - EncodeDate(1970, 1, 1)) *
-        MSecsPerDay);
+      FRecords[I].RevertedAt := ARevertedAt;
   { A turn with no rows kept nothing to mark - not a failure. }
   Result := True;
 end;

@@ -37,6 +37,9 @@ type
     { Undo a turn: the runtime reverts its files and rewinds its transcript.
       ATurnId 0 means the newest completed turn. }
     procedure Undo(ATurnId: Int64 = 0);
+    { Redo a turn: re-apply what an undo took away, oldest first. ATurnId 0
+      means the oldest undone turn. }
+    procedure Redo(ATurnId: Int64 = 0);
     procedure Checkpoint;
     { UI thread: pop the next event, if any. }
     function PopEvent(out AEvent: TTurnEvent): Boolean;
@@ -106,6 +109,9 @@ type
     { Undo a turn: the runtime reverts its files and rewinds its transcript.
       ATurnId 0 means the newest completed turn. }
     procedure Undo(ATurnId: Int64 = 0);
+    { Redo a turn: re-apply what an undo took away, oldest first. ATurnId 0
+      means the oldest undone turn. }
+    procedure Redo(ATurnId: Int64 = 0);
     procedure Checkpoint;
     function PopEvent(out AEvent: TTurnEvent): Boolean;
     function Dropped: Int64;
@@ -391,6 +397,12 @@ procedure TRemoteDriver.Undo(ATurnId: Int64);
 begin
   { One action: the runtime reverts the turn's files and rewinds its transcript. }
   SendCommand(scUndo, '', '', Default(TApprovalChoice), '', ATurnId);
+end;
+
+procedure TRemoteDriver.Redo(ATurnId: Int64);
+begin
+  { One action: the runtime re-applies the undone turns from ATurnId forward. }
+  SendCommand(scRedo, '', '', Default(TApprovalChoice), '', ATurnId);
 end;
 
 function TRemoteDriver.PopEvent(out AEvent: TTurnEvent): Boolean;

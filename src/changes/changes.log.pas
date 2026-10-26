@@ -69,6 +69,23 @@ function Summarize(const ARows: TChangeRecordArray; ACapChars: Integer): string;
 function RevertText(const APatch, ABeforeHash, AAfterHash, ACurrentText: string;
   AHasher: TChangeHasher; out AText, AError: string): Boolean;
 
+{ Apply a recorded change FORWARD to ACurrentText - the mirror of RevertText,
+  and the engine behind `/redo`.
+
+  The patch on a net row is a forward unified diff, so redo needs nothing the
+  log does not already hold: it is RevertText with the halves swapped. The file
+  must still hold the record's BEFORE-text (that is the compare, and it is what
+  makes a redo refuse when the file has moved on rather than clobber it), then
+  the patch is applied as-is, and the result must hash to the record's
+  AFTER-text. Verifying in that direction is what proves the redo reproduced the
+  change rather than merely applying something.
+
+  Returns False + AError when the current text is not the record's before-text,
+  when the patch does not apply, or when the result does not hash to the
+  after-hash. }
+function ApplyText(const APatch, ABeforeHash, AAfterHash, ACurrentText: string;
+  AHasher: TChangeHasher; out AText, AError: string): Boolean;
+
 { The id from which history should be pruned so that ARetentionTurns remain.
   Turn ids are ascending, so this is the id of the first change of the oldest
   turn worth keeping. 0 when there is nothing to prune. }
@@ -293,6 +310,44 @@ begin
   if (ABeforeHash <> '') and (AHasher(Applied) <> ABeforeHash) then
   begin
     AError := 'the revert did not restore the recorded original';
+    Exit;
+  end;
+  AText := Applied;
+  Result := True;
+end;
+
+function ApplyText(const APatch, ABeforeHash, AAfterHash, ACurrentText: string;
+  AHasher: TChangeHasher; out AText, AError: string): Boolean;
+var
+  Applied: string;
+begin
+  Result := False;
+  AText := '';
+  AError := '';
+  if not Assigned(AHasher) then
+  begin
+    AError := 'a redo needs a hasher';
+    Exit;
+  end;
+  { The compare half, and the mirror of the revert's: the file must still hold
+    the text this change started FROM. If it has moved on, re-applying would
+    discard whatever superseded it. }
+  if (ABeforeHash <> '') and (AHasher(ACurrentText) <> ABeforeHash) then
+  begin
+    AError := 'the file changed since this was recorded';
+    Exit;
+  end;
+  if not ApplyUnifiedDiff(ACurrentText, APatch, Applied, AError) then
+  begin
+    AError := 'the patch did not apply: ' + AError;
+    Exit;
+  end;
+  { Verify in the FORWARD direction: the result must be the recorded
+    after-text. That is what distinguishes "the redo reproduced the change" from
+    "some diff happened to apply". }
+  if (AAfterHash <> '') and (AHasher(Applied) <> AAfterHash) then
+  begin
+    AError := 'the redo did not reproduce the recorded change';
     Exit;
   end;
   AText := Applied;

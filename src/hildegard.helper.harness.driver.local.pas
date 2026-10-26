@@ -40,6 +40,9 @@ type
     procedure AbortSubagent(const ASessionId: string);
     procedure ReleaseSubagent(const ASessionId: string);
     procedure Undo(ATurnId: Int64 = 0);
+    { Redo what an undo took away, oldest first. ATurnId 0 means the oldest
+      undone turn. }
+    procedure Redo(ATurnId: Int64 = 0);
     procedure Checkpoint;
     function PopEvent(out AEvent: TTurnEvent): Boolean;
     function Dropped: Int64;
@@ -177,6 +180,53 @@ begin
     E := Default(TTurnEvent);
     E.Kind := teError;
     E.Text := 'undo refused: ' + Detail;
+    FSession.Queue.Push(E);
+  end;
+end;
+
+procedure TLocalDriver.Redo(ATurnId: Int64);
+var
+  E: TTurnEvent;
+  Detail: string;
+  Id: Int64;
+  Turns: TTurnRecordArray;
+  I: Integer;
+begin
+  { The mirror of Undo, with the same two refusals for the same reasons. }
+  if (FWorker <> nil) and (not FWorker.Finished) then
+  begin
+    E := Default(TTurnEvent);
+    E.Kind := teError;
+    E.Text := 'redo refused: a turn is in progress';
+    FSession.Queue.Push(E);
+    Exit;
+  end;
+  Id := ATurnId;
+  if Id <= 0 then
+  begin
+    { The OLDEST undone turn: redo walks forward from there, so that restores
+      the largest suffix. }
+    Turns := FSession.View.Turns;
+    for I := 0 to High(Turns) do
+      if Turns[I].Status = tsUndone then
+      begin
+        Id := Turns[I].Id;
+        Break;
+      end;
+  end;
+  if Id <= 0 then
+  begin
+    E := Default(TTurnEvent);
+    E.Kind := teError;
+    E.Text := 'redo refused: nothing is undone';
+    FSession.Queue.Push(E);
+    Exit;
+  end;
+  if not FSession.RedoTurn(Id, Detail) then
+  begin
+    E := Default(TTurnEvent);
+    E.Kind := teError;
+    E.Text := 'redo refused: ' + Detail;
     FSession.Queue.Push(E);
   end;
 end;

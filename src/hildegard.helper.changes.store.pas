@@ -43,7 +43,7 @@ type
       out AError: string): Boolean;
     function SetMessageId(AWorkspaceId, AChangeId, AMessageId: Integer;
       out AError: string): Boolean;
-    function MarkReverted(AWorkspaceId, ATurnId: Integer;
+    function MarkReverted(AWorkspaceId, ATurnId: Integer; ARevertedAt: Int64;
       out AError: string): Boolean;
     function KeyframeBefore(AWorkspaceId: Integer; const APath: string;
       AChangeId: Integer; out AFrame: TKeyframe; out AFound: Boolean;
@@ -479,7 +479,7 @@ begin
 end;
 
 function TSqliteChangeStore.MarkReverted(AWorkspaceId, ATurnId: Integer;
-  out AError: string): Boolean;
+  ARevertedAt: Int64; out AError: string): Boolean;
 var
   Stmt: Psqlite3_stmt;
   SQL: AnsiString;
@@ -489,9 +489,13 @@ begin
   if (FStore = nil) or (FStore.Db = nil) then
     Exit;
   { Zero rows updated is not a failure: a turn that changed no files has
-    nothing to mark, and marking twice must be a no-op. }
+    nothing to mark, and marking twice must be a no-op.
+
+    Dropping the "AND reverted_at = 0" guard is deliberate: the same statement
+    must be able to CLEAR the mark on a redo, so the predicate cannot assume the
+    row is unmarked. }
   SQL := AnsiString('UPDATE file_changes SET reverted_at = ? ' +
-    'WHERE workspace_id = ? AND turn_id = ? AND reverted_at = 0');
+    'WHERE workspace_id = ? AND turn_id = ?');
   FStore.Lock.Acquire;
   try
     Stmt := nil;
@@ -501,8 +505,7 @@ begin
       Exit;
     end;
     try
-      sqlite3_bind_int64(Stmt, 1, Trunc((Now - EncodeDate(1970, 1, 1)) *
-        MSecsPerDay));
+      sqlite3_bind_int64(Stmt, 1, ARevertedAt);
       sqlite3_bind_int(Stmt, 2, AWorkspaceId);
       sqlite3_bind_int(Stmt, 3, ATurnId);
       if sqlite3_step(Stmt) <> SQLITE_DONE then

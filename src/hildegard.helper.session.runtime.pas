@@ -153,6 +153,11 @@ type
       checkpoint. TurnId 0 means the newest completed turn. }
     procedure HandleUndo(AClient: TClientConn;
       const ACommand: TSessionCommand);
+    { Redo what an undo took away: re-apply the turns from ACommand.TurnId
+      forward, oldest first. TurnId 0 means the oldest undone turn. Driver-only,
+      and refused while a turn is running for the same reason undo is. }
+    procedure HandleRedo(AClient: TClientConn;
+      const ACommand: TSessionCommand);
     procedure HandlePrompt(AClient: TClientConn;
       const ACommand: TSessionCommand);
     procedure HandleApprove(AClient: TClientConn;
@@ -982,6 +987,8 @@ begin
       ReplyTo(AClient, ACommand.Id, True, '');
     scUndo:
       HandleUndo(AClient, ACommand);
+    scRedo:
+      HandleRedo(AClient, ACommand);
     scCheckpoint:
       HandleCheckpoint(AClient, ACommand);
     scShutdown:
@@ -1116,6 +1123,50 @@ begin
   { UndoTurn moves the files AND the transcript together, or neither. Its refusal
     reason is the operator's explanation, so it goes back verbatim. }
   if FSession.UndoTurn(TurnId, Detail) then
+    ReplyTo(AClient, ACommand.Id, True, '')
+  else
+    ReplyTo(AClient, ACommand.Id, False, Detail);
+end;
+
+procedure TSessionRuntime.HandleRedo(AClient: TClientConn;
+  const ACommand: TSessionCommand);
+var
+  TurnId: Int64;
+  Detail: string;
+  Turns: TTurnRecordArray;
+  I: Integer;
+begin
+  { The mirror of HandleUndo, with the same two refusals for the same reasons. }
+  if AClient.Role <> srDrive then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'not_driver');
+    Exit;
+  end;
+  if FWorker <> nil then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'busy');
+    Exit;
+  end;
+  TurnId := ACommand.TurnId;
+  if TurnId <= 0 then
+  begin
+    { 0 means "the oldest one the operator could mean": the earliest turn that
+      is currently undone. Redo walks forward from there, so that is the turn
+      that restores the largest suffix. }
+    Turns := FSession.View.Turns;
+    for I := 0 to High(Turns) do
+      if Turns[I].Status = tsUndone then
+      begin
+        TurnId := Turns[I].Id;
+        Break;
+      end;
+  end;
+  if TurnId <= 0 then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'nothing to redo');
+    Exit;
+  end;
+  if FSession.RedoTurn(TurnId, Detail) then
     ReplyTo(AClient, ACommand.Id, True, '')
   else
     ReplyTo(AClient, ACommand.Id, False, Detail);

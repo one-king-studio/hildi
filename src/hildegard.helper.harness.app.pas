@@ -880,6 +880,17 @@ begin
     FApp.Invalidate;
     Exit;
   end;
+  if (AName = 'redo') and (FDriver <> nil) then
+  begin
+    { The mechanical inverse of /undo: re-apply the suffix the undo took away,
+      oldest first. Available only while the undo still stands on screen - a new
+      prompt makes "forward" ambiguous, because the operator abandoned that
+      future. The runtime refuses when nothing is undone, so this stays a plain
+      ask. 0 means the oldest undone turn. }
+    FDriver.Redo(0);
+    FApp.Invalidate;
+    Exit;
+  end;
   if (AName = 'revert') and (FDriver <> nil) then
   begin
     { AGENTIC revert: unlike /undo this moves FORWARDS. The agent is asked to

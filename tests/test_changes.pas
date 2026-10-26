@@ -43,6 +43,11 @@ type
     { The revert: compare-and-swap, invert, apply, verify. }
     procedure TestRevertRestoresTheOriginal;
     procedure TestRevertRefusesWhenTheFileMovedSince;
+    { Redo is the mirror of revert: the same recorded change applied FORWARD,
+      which is what `/redo` replays. }
+    procedure TestApplyReplaysTheRecordedChange;
+    procedure TestApplyRefusesWhenTheFileMovedSince;
+    procedure TestApplyAndRevertRoundTrip;
     { The log. }
     procedure TestReplayWithoutKeyframeStartsEmpty;
     procedure TestReplayFromKeyframeIsBounded;
@@ -306,6 +311,71 @@ begin
       'something else entirely'#10, FHasher.OfText, Text, Err));
   AssertTrue('and says why: ' + Err, Pos('changed', Err) > 0);
   AssertEquals('nothing written', '', Text);
+end;
+
+procedure TChangesTest.TestApplyReplaysTheRecordedChange;
+var
+  Before, After, D, Text, Err: string;
+  Capped: Boolean;
+begin
+  { Redo end to end: a recorded change applied forward against the original
+    text lands exactly on the after-text, and the hash check proves it rather
+    than trusting the apply. }
+  Err := '';
+  Text := '';
+  Before := 'one'#10'two'#10'three'#10;
+  After := 'one'#10'TWO'#10'three'#10;
+  D := DiffText(Before, After, DefaultPatchCapBytes, Capped);
+  AssertTrue('replays: ' + Err,
+    ApplyText(D, FHasher.OfText(Before), FHasher.OfText(After), Before,
+      FHasher.OfText, Text, Err));
+  AssertEquals('forward to the recorded result', After, Text);
+end;
+
+procedure TChangesTest.TestApplyRefusesWhenTheFileMovedSince;
+var
+  Before, After, D, Text, Err: string;
+  Capped: Boolean;
+begin
+  { The mirror of the revert's guard, on the other hash: redo must not clobber a
+    file that no longer holds what this change started FROM. Both directions are
+    compare-and-swap or neither is. }
+  Err := '';
+  Text := '';
+  Before := 'one'#10'two'#10;
+  After := 'one'#10'TWO'#10;
+  D := DiffText(Before, After, DefaultPatchCapBytes, Capped);
+  AssertFalse('refuses',
+    ApplyText(D, FHasher.OfText(Before), FHasher.OfText(After),
+      'something else entirely'#10, FHasher.OfText, Text, Err));
+  AssertTrue('and says why: ' + Err, Pos('changed', Err) > 0);
+  AssertEquals('nothing written', '', Text);
+end;
+
+procedure TChangesTest.TestApplyAndRevertRoundTrip;
+var
+  Before, After, D, Reverted, Reapplied, Err: string;
+  Capped: Boolean;
+begin
+  { The property that makes `/redo` trustworthy without re-deriving anything:
+    applying the forward patch to the before-text and then reverting lands back
+    where it started, so the two directions are exact inverses of each other
+    over the same record. }
+  Before := 'alpha'#10'beta'#10'gamma'#10;
+  After := 'alpha'#10'BETA'#10'gamma'#10'delta'#10;
+  D := DiffText(Before, After, DefaultPatchCapBytes, Capped);
+
+  Err := '';
+  AssertTrue('apply: ' + Err,
+    ApplyText(D, FHasher.OfText(Before), FHasher.OfText(After), Before,
+      FHasher.OfText, Reapplied, Err));
+  AssertEquals('at the after-text', After, Reapplied);
+
+  Err := '';
+  AssertTrue('revert: ' + Err,
+    RevertText(D, FHasher.OfText(Before), FHasher.OfText(After), Reapplied,
+      FHasher.OfText, Reverted, Err));
+  AssertEquals('back at the before-text', Before, Reverted);
 end;
 
 { --- the log ----------------------------------------------------------- }
