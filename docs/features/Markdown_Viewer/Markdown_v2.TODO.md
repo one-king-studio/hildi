@@ -60,17 +60,25 @@ asserts lossiness for unparsed syntax passes for the wrong reason.
 The most likely place to reintroduce the source's ReDoS, so it is one unit of work with
 the linearity test written **first**.
 
-- [ ] `src/markdown/markdown.inline.pas` — a linear tokenizer: `text`, `codespan`,
+- [x] `src/markdown/markdown.inline.pas` — a linear tokenizer: `text`, `codespan`,
       `linebreak` (with `Soft`), `link`/`image` (with `Ref`), `hyperlink`, `html`,
       `mathspan`, `abbreviation`, `footnote_callout`, and 8 formats
       (`bold italic strike insert delete mark super sub`).
-- [ ] URI allow-list **at node creation**: `http`, `https`, `mailto`; everything else is
+- [x] URI allow-list **at node creation**: `http`, `https`, `mailto`; everything else is
       dropped to text.
       *Test:* `TestJavascriptUriIsDropped`.
-- [ ] **Linearity, written first:** `'['` × 8000 and `'[a]('` × 800 parse to a tree and
+- [x] **Linearity, written first:** `'['` × 8000 and `'[a]('` × 800 parse to a tree and
       complete. A completion assertion, not a timing one, so it cannot flake.
       *Test:* `TestAdversarialInputIsLinear`.
 - [ ] Escape/`html` nodes are marked raw and never interpreted by a consumer.
+
+**Still open in Phase 3**, recorded rather than ticked:
+- `html`, `mathspan`, `abbreviation`, `footnote_callout` tokens, and
+  superscript/subscript. The token vocabulary exists; the syntax does not yet.
+- Wiring the tokenizer into `markdown.tree`, so a parse emits these tokens as
+  nodes. Until then the tree keeps its minimal inline parser and this unit is
+  proven standalone. That wiring is what makes the two agree, and it is the next
+  unit of work.
 
 ## Phase 4 — Nesting (what the flat model could not express)
 
