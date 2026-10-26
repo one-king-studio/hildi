@@ -30,6 +30,11 @@ type
   TChatAnimatingEvent = procedure(Sender: TObject; AAnimating: Boolean)
     of object;
 
+  { A turn-summary block's file row was clicked. APath is workspace-relative and
+    already resolved through the block's body geometry, so the host can open that
+    file's diff without knowing anything about the frame. }
+  TChatFileEvent = procedure(Sender: TObject; const APath: string) of object;
+
 const
   { The violet used for the ambient border. }
   QueuedBorderFg = 135;
@@ -92,6 +97,7 @@ type
     FOnChange: TNotifyEvent;
     { Fires when the item's animation state changes (a live box starts or
       settles), so the stack can keep its animating count without scanning. }
+    FOnFile: TChatFileEvent;
     FOnAnimatingChanged: TChatAnimatingEvent;
     FSpark: UnicodeString;
     FLive: Boolean;
@@ -201,6 +207,9 @@ type
     property Failed: Boolean read FFailed write FFailed;
     property OnToggle: TNotifyEvent read FOnToggle write FOnToggle;
     property OnChange: TNotifyEvent read FOnChange write FOnChange;
+    { A click landed on a file row of a turn-summary block; APath is that file,
+      already resolved through the body geometry. }
+    property OnFile: TChatFileEvent read FOnFile write FOnFile;
     { Fires on an animation-state transition only (never per delta). }
     property OnAnimatingChanged: TChatAnimatingEvent read FOnAnimatingChanged
       write FOnAnimatingChanged;
@@ -1330,8 +1339,29 @@ begin
 end;
 
 function TChatItem.HandleEvent(const E: TInputEvent): Boolean;
+var
+  Hit: string;
 begin
   Result := False;
+  { A turn-summary block is a file LIST, not a disclosure: a click on a file row
+    opens that file's diff, and only a click elsewhere toggles it. This is why
+    ckTurnChanges is handled before the toggle kinds rather than with them. }
+  if (FKind = ckTurnChanges) and (not FLive) and (E.Kind = ikMouse) and
+    (E.Mouse.Button = mbLeft) and
+    (E.Mouse.X >= FBounds.X) and (E.Mouse.Y >= FBounds.Y) and
+    (E.Mouse.X < FBounds.X + FBounds.W) and (E.Mouse.Y < FBounds.Y + FBounds.H)
+  then
+  begin
+    Hit := FilePathAtRow(E.Mouse.Y);
+    if Hit <> '' then
+    begin
+      if Assigned(FOnFile) then
+        FOnFile(Self, Hit);
+      Exit(True);
+    end;
+    { Not a file row (the `N more files` tail, or the frame): fall through to the
+      toggle so a click on the block still expands it. }
+  end;
   if not (FKind in [ckThought, ckTool, ckAmbient, ckHandoff]) then
     Exit;
   if FLive then

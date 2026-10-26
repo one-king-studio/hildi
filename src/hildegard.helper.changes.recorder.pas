@@ -251,6 +251,11 @@ begin
     R.PatchBytes := Length(Patch);
     R.Capped := Capped;
     R.Source := csTier;
+    { Net rows are what the history reads, so they matter most here: without a
+      stamp every folded row would claim the epoch and a time-ordered history
+      would be meaningless. Stamped at the turn boundary, which is when this row
+      is written and therefore the best answer available for "when". }
+    R.CreatedAt := Trunc((Now - EncodeDate(1970, 1, 1)) * MSecsPerDay);
     if FStore.Append(R, Id, Err) then
       Inc(FNetRecords);
   end;
@@ -331,6 +336,15 @@ begin
     R.Capped := Capped;
     R.Source := csTier;
     R.CreatedAt := 0;
+    { The row's time. It was hardcoded to 0 and nothing ever filled it in, so
+      every recorded change carried the epoch: "recent changes" could not be
+      ordered at all, and a history dialog sorting by time would have shown the
+      whole log as simultaneous. Stamped here rather than by the store, because
+      the store has no idea when the WRITE happened - only when the row was
+      appended, which for a folded net row is the turn boundary.
+      The expression is the same unix-milliseconds idiom the stores use; this
+      unit deliberately does not depend on hildegard.helper.store for it. }
+    R.CreatedAt := Trunc((Now - EncodeDate(1970, 1, 1)) * MSecsPerDay);
     if not FStore.Append(R, Id, Err) then
       Continue;   // a failed append must not fail the tool call
     Inc(FRecords);

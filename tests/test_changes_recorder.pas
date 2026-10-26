@@ -56,6 +56,11 @@ type
     procedure TestTwoEditsToOnePathFoldIntoOneNetRow;
     procedure TestEditsThatCancelYieldAnEmptyNetPatch;
     procedure TestPerCallRowsAreStillWrittenAlongsideNetOnes;
+    { Every recorded row carries the time it was written. It was hardcoded to 0,
+      so "recent changes" could not be ordered at all. }
+    procedure TestAPerCallRowIsStampedWithATime;
+    { Net rows are what the history reads, so they need the stamp most. }
+    procedure TestANetRowIsStampedWithATime;
   end;
 
 implementation
@@ -515,6 +520,76 @@ begin
   AssertEquals('two per-call rows', 2, PerCall);
   AssertEquals('two net rows, one per path', 2, Net);
   AssertEquals('four rows total', 4, Length(Rows));
+end;
+
+procedure TChangesRecorderTest.TestAPerCallRowIsStampedWithATime;
+var
+  R: TChangeRecorder;
+  Set_: TFileChangeSet;
+  Rows: TChangeRecordArray;
+  Err: string;
+  I: Integer;
+  Before: Int64;
+begin
+  { The row's time was hardcoded to 0 and nothing ever filled it in, so every
+    recorded change claimed the epoch and "recent changes" could not be ordered.
+    Assert it is a plausible NOW, not merely non-zero: a stamp from the wrong
+    epoch would pass a "> 0" check and still be useless. }
+  Before := Trunc((Now - EncodeDate(1970, 1, 1)) * MSecsPerDay);
+  R := TChangeRecorder.Create(FStore, 1, 's1');
+  Set_ := TFileChangeSet.Create;
+  try
+    Set_.Add(Change('a.txt', fcCreated, '', 'one', False, True));
+    R.SetTurn(7);
+    R.Observe(Set_);
+  finally
+    Set_.Free;
+    R.Free;
+  end;
+
+  AssertTrue('read', FStore.ForTurn(1, 7, Rows, Err));
+  AssertEquals('one row', 1, Length(Rows));
+  AssertTrue('the stamp is not the epoch: ' + IntToStr(Rows[0].CreatedAt),
+    Rows[0].CreatedAt > 0);
+  { Within a generous window of the clock taken just before: this catches a
+    stamp in the wrong units (seconds vs milliseconds) as well as a zero. }
+  AssertTrue('and it is roughly now',
+    (Rows[0].CreatedAt >= Before) and (Rows[0].CreatedAt <= Before + 60000));
+end;
+
+procedure TChangesRecorderTest.TestANetRowIsStampedWithATime;
+var
+  R: TChangeRecorder;
+  Set_: TFileChangeSet;
+  Rows: TChangeRecordArray;
+  Err: string;
+  I: Integer;
+  Net: Integer;
+begin
+  { Net rows are what the history reads, so a missing stamp here is the one that
+    would break a time-ordered dialog even if per-call rows were fine. }
+  R := TChangeRecorder.Create(FStore, 1, 's1');
+  Set_ := TFileChangeSet.Create;
+  try
+    Set_.Add(Change('a.txt', fcModified, 'one', 'two', True, True));
+    R.SetTurn(9);
+    R.Observe(Set_);
+    R.FlushTurn;
+  finally
+    Set_.Free;
+    R.Free;
+  end;
+
+  AssertTrue('read', FStore.ForTurn(1, 9, Rows, Err));
+  Net := 0;
+  for I := 0 to High(Rows) do
+    if Rows[I].IsNet then
+    begin
+      Inc(Net);
+      AssertTrue('the net row is stamped: ' + IntToStr(Rows[I].CreatedAt),
+        Rows[I].CreatedAt > 0);
+    end;
+  AssertEquals('a net row was written', 1, Net);
 end;
 
 procedure TChangesRecorderTest.TestAnchorCallStampsOnlyThatCallsRows;
