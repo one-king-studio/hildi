@@ -114,6 +114,12 @@ type
     function MakeAsk: TApprovalAsk;
     function BlockCount: Integer;
     function BlockKind(AIndex: Integer): TChatKind;
+    { The workspace path the block's body row AY resolves to, for the file-row
+      selection tests. }
+    function BlockFileAt(AIndex, AY: Integer): string;
+    { Lay a block out as the stream would, so its body origin is known before a
+      click can land. }
+    procedure ArrangeBlock(AIndex, AWidth: Integer);
     function BlockLabel(AIndex: Integer): string;
     function BlockText(AIndex: Integer): string;
     function BlockLive(AIndex: Integer): Boolean;
@@ -592,6 +598,31 @@ end;
 function THarnessAppTest.BlockLabel(AIndex: Integer): string;
 begin
   Result := FApp.Panel.Stream.ItemAt(AIndex).Label_;
+end;
+
+function THarnessAppTest.BlockFileAt(AIndex, AY: Integer): string;
+begin
+  Result := FApp.Panel.Stream.ItemAt(AIndex).FilePathAtRow(AY);
+end;
+
+procedure THarnessAppTest.ArrangeBlock(AIndex, AWidth: Integer);
+var
+  R: TRect;
+  Sz: TSize;
+  Item: TChatItem;
+begin
+  Item := FApp.Panel.Stream.ItemAt(AIndex);
+  Item.Materialize;
+  Sz := Default(TSize);
+  Sz.W := AWidth;
+  Sz.H := 200;
+  Item.Measure(Sz);
+  R := Default(TRect);
+  R.X := 0;
+  R.Y := 0;
+  R.W := AWidth;
+  R.H := 20;
+  Item.Arrange(R);
 end;
 
 function THarnessAppTest.BlockText(AIndex: Integer): string;
@@ -1760,7 +1791,7 @@ end;
 
 procedure THarnessAppTest.TestTurnSummaryBlockListsTheChangedFiles;
 var
-  I: Integer;
+  I, Found: Integer;
   Text: string;
 
   { Seed one net change row for the turn the app is about to run. The recorder
@@ -1813,6 +1844,24 @@ begin
   AssertTrue('and its counts: ' + Text, Pos('+2', Text) > 0);
   AssertTrue('and the removal: ' + Text, Pos('-1', Text) > 0);
   AssertTrue('it names the created file too', Pos('build/out.txt', Text) > 0);
+
+  { And the block knows WHICH file each row is, in the same order the lines were
+    rendered - otherwise a click opens the neighbour's diff. The two orders are
+    computed separately (rendering sorts, selection sorts), so this is the test
+    that keeps them from drifting. }
+  AssertTrue('read back the block', I >= 0);
+  Found := -1;
+  for I := 0 to BlockCount - 1 do
+    if BlockKind(I) = ckTurnChanges then
+      Found := I;
+  AssertTrue('a block exists', Found >= 0);
+  { Arrange it first: FBodyTop is recorded when the body is laid out, which is
+    what the stream does before a click can land. Asserting without arranging
+    would test an unrendered block, not the operator's. }
+  ArrangeBlock(Found, 60);
+  AssertEquals('row 1 is the alphabetically first path', 'build/out.txt',
+    BlockFileAt(Found, 1));
+  AssertEquals('row 2 is the second', 'src/a.pas', BlockFileAt(Found, 2));
 end;
 
 procedure THarnessAppTest.TestTurnSummaryOmitsAFileWhoseEditsCancelled;

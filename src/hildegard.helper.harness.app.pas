@@ -1457,7 +1457,10 @@ var
   Block: TChatItem;
   Text: string;
   Err: string;
-  I: Integer;
+  I, J, Shown: Integer;
+  Sorted: TFileChangeStatArray;
+  Paths: array of string;
+  T: TFileChangeStat;
 begin
   { Nothing to read without a store, and a zero turn id is not a turn. }
   if (FSession.Store = nil) or (ATurnId = 0) then
@@ -1484,6 +1487,37 @@ begin
   Block := FPanel.Stream.Add(ckTurnChanges, 'turn changes', Text);
   Block.SetExpandedText(TurnSummaryDiffs(Rows, Summary));
   Block.Expanded := False;
+
+  { Tell the block WHICH file each collapsed row is, so a click can open that
+    file's diff. The paths must be in the same order SummaryLines emitted, or a
+    click would open its neighbour's diff - so this repeats the sort rather than
+    re-reading the rendered text, and the two are pinned together by a test.
+    A tail row (`- N more files`) maps to '' and selects nothing. }
+  Sorted := Copy(Summary.Files, 0, Length(Summary.Files));
+  for I := 1 to High(Sorted) do
+  begin
+    J := I;
+    while (J > 0) and (Sorted[J].Path < Sorted[J - 1].Path) do
+    begin
+      T := Sorted[J];
+      Sorted[J] := Sorted[J - 1];
+      Sorted[J - 1] := T;
+      Dec(J);
+    end;
+  end;
+  Shown := Length(Sorted);
+  if (TurnSummaryMaxFiles > 0) and (Shown > TurnSummaryMaxFiles) then
+    Shown := TurnSummaryMaxFiles;
+  SetLength(Paths, Shown);
+  for I := 0 to Shown - 1 do
+    Paths[I] := Sorted[I].Path;
+  if Length(Sorted) > Shown then
+  begin
+    { the `- N more files` tail: a real row, but not a file }
+    SetLength(Paths, Shown + 1);
+    Paths[Shown] := '';
+  end;
+  Block.SetFilePaths(Paths);
 end;
 
 function THarnessApp.TurnSummaryDiffs(const ARows: TChangeRecordArray;
