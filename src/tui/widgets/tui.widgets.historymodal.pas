@@ -67,6 +67,12 @@ type
     procedure MoveSelection(ADelta: Integer);
     procedure Choose;
     function IntentVerb: string;
+    { The row's position relative to the operator's current place: 0 is the
+      newest turn for an undo, and -1, -2 step backwards. A REDO list runs the
+      other way - +1, +2 forwards - because redoing walks into the future. The
+      operator is choosing a DISTANCE and a direction, not reading a database
+      sequence number they have never seen before. }
+    function RowOrdinal(AIndex: Integer): Integer;
   public
     constructor Create(const ATheme: TTheme);
     { Replace the row set (already resolved). Newest first, as given. }
@@ -129,6 +135,18 @@ begin
       FSelected := I;
       Break;
     end;
+end;
+
+function THistoryModal.RowOrdinal(AIndex: Integer): Integer;
+begin
+  { Undo walks backwards from the newest: 0, -1, -2. Redo walks forwards into the
+    turns an undo took away: +1, +2. Either way the operator reads a distance
+    from where they are, which is what the choice actually is - a raw turn
+    sequence number would be a database detail they have never seen. }
+  if FIntent = hiRedo then
+    Result := AIndex + 1
+  else
+    Result := -AIndex;
 end;
 
 function THistoryModal.IntentVerb: string;
@@ -207,7 +225,7 @@ var
   Bg, BorderAttr, TitleAttr, NormalAttr, MutedAttr, SelAttr, DimAttr,
     OkAttr, UndoneAttr: TAttr;
   Row: THistoryRow;
-  Line, Stats, Badge: string;
+  Line, Stats, Badge, Num: string;
 begin
   if (FBounds.W < 12) or (FBounds.H < HistoryChromeRows) then
     Exit;
@@ -271,7 +289,11 @@ begin
       else
         Badge := '';
 
-      Line := Format('%2d  %s  %s', [Row.Seq, Stats, Row.Title]);
+      if RowOrdinal(Index) < 0 then
+        Num := '-'+IntToStr(-RowOrdinal(Index))
+      else
+        Num := ' ' + IntToStr(RowOrdinal(Index));
+      Line := Format('%4s  %s  %s', [Num, Stats, Row.Title]);
       if Badge <> '' then
         Line := Line + '  [' + Badge + ']';
 

@@ -1606,8 +1606,11 @@ end;
 
 procedure THarnessAppTest.TestEveryDispatchedCommandIsOfferedByThePalette;
 const
-  Dispatched: array[0..4] of string =
-    ('checkpoint', 'sessions', 'undo', 'redo', 'revert');
+  { Commands offered unconditionally. /redo is deliberately absent: it appears
+    only when there is something to redo, and a test asserting it is always there
+    would forbid that. }
+  Dispatched: array[0..3] of string =
+    ('checkpoint', 'sessions', 'undo', 'revert');
 var
   I, J: Integer;
   Found: Boolean;

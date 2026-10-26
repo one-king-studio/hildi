@@ -346,6 +346,8 @@ type
     { Run a command from the palette. }
     procedure RunCommand(const AName: string);
     function DefaultCommands: TCommandArray;
+    { True when some undone turn sits above the redo floor, so /redo has work. }
+    function HasRedoableTurn: Boolean;
     function GetModalActive: Boolean;
     function GetPromptActive: Boolean;
     procedure Quit(Sender: TObject);
@@ -918,6 +920,28 @@ end;
 
 { The registered commands. The palette is the entry point; commands are not
   keybindings. }
+function THarnessApp.HasRedoableTurn: Boolean;
+var
+  Turns: TTurnRecordArray;
+  Floor: Int64;
+  I: Integer;
+  StoreErr: TStoreError;
+begin
+  { The same question the dialog asks, answered the same way: an undone turn above
+    the redo floor. Kept in one place so the palette and the list cannot disagree
+    about what is available. }
+  Result := False;
+  if (FSession = nil) or (FSession.Store = nil) then
+    Exit;
+  Floor := 0;
+  if not FSession.Store.RedoFloor(FSession.SessionId, Floor, StoreErr) then
+    Exit;
+  Turns := FSession.Turns;
+  for I := 0 to High(Turns) do
+    if (Turns[I].Status = tsUndone) and (Turns[I].Id > Floor) then
+      Exit(True);
+end;
+
 function THarnessApp.DefaultCommands: TCommandArray;
 begin
   { One entry per command, no aliases: two names for one action reads as two
@@ -939,8 +963,20 @@ begin
   Result[1].Description := 'list and manage this workspace''s sessions';
   Result[2].Name := 'undo';
   Result[2].Description := 'revert the newest turn and rewind the transcript';
-  Result[3].Name := 'redo';
-  Result[3].Description := 're-apply the turns the last undo took away';
+  { /redo is offered only when there is something to redo. An entry that can
+    only open an empty list is worse than absent: it invites the operator to try
+    something that cannot work. HasRedoableTurn asks the same question the
+    dialog does, so the two cannot disagree about what is available. }
+  if HasRedoableTurn then
+  begin
+    Result[3].Name := 'redo';
+    Result[3].Description := 're-apply the turns the last undo took away';
+  end
+  else
+  begin
+    Result[3].Name := '';
+    Result[3].Description := '';
+  end;
   Result[4].Name := 'revert';
   Result[4].Description := 'ask the agent to undo an earlier turn, going forwards';
 end;
@@ -1873,6 +1909,9 @@ begin
           prompt back, so re-read the turn to see which side of the line we are
           on. }
         RestorePromptAfterUndo(E.ElapsedMs);   { the turn id, on the wire as turn_id }
+        { The move may have opened or closed the redo window, so the palette's
+          command list is rebuilt: /redo appears or disappears with it. }
+        FPanel.Palette.SetCommands(DefaultCommands);
         FinishTurn(psReady, 'undone');
       end;
     teDone:
@@ -2371,7 +2410,10 @@ begin
       R.CountsKnown := Summary.UnknownCount = 0;
     end;
 
-    { Selectability is the host's call, because it depends on the intent. }
+    { Selectability is the host's call, because it depends on the intent. A row
+      that cannot be acted on is NOT ADDED AT ALL: a greyed line the operator can
+      never choose is noise, and it invites them to try. The list is what the
+      command can do, not a history of everything that exists. }
     case FHistoryIntent of
       hiUndo:
         { A suffix undo needs a completed turn; an undone one is already back. }
@@ -2385,6 +2427,8 @@ begin
         including one already undone, which the agent would find already done. }
       R.Selectable := Turns[I].Status = tsCompleted;
     end;
+    if not R.Selectable then
+      Continue;
 
     SetLength(Resolved, N + 1);
     Resolved[N] := R;
