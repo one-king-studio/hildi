@@ -208,6 +208,30 @@ const
     '(5) Gotchas - pitfalls, constraints, and things that bit us; ' +
     '(6) Open threads - what to do next.';
 
+  { The AGENTIC revert. Unlike /undo (which moves the workspace backwards), this
+    asks the agent to undo a turn's changes by moving FORWARDS - the way `git
+    revert` applies an inverse as new work rather than `git reset` erasing
+    history. The reverted turn stays in the ledger, so the record shows both what
+    was done and that it was later reverted.
+
+    The agent is the only party that can do this well: it must read what changed,
+    decide how to invert it in the CURRENT state (which may have moved on since),
+    and make a coherent change through its own gated tools. A patch inversion
+    proves a byte-exact restore is possible; a revert only needs the effect
+    undone, and only the agent can judge that. }
+  RevertInstruction =
+    'Revert the file changes made in an earlier turn of this session, by moving ' +
+    'FORWARDS: make a new change that undoes their effect. Do not rewrite ' +
+    'history or delete anything from the transcript. ' +
+    'Read what that turn actually changed first, using the change history ' +
+    'available to you. Then decide how to undo its EFFECT in the current state ' +
+    'of the files, which may have moved on since - the goal is that the work ' +
+    'that turn did is no longer in effect, not a byte-exact restore. Use your ' +
+    'normal tools so the change is recorded like any other. ' +
+    'If some of it cannot be undone coherently, undo what you can and say ' +
+    'plainly what you left and why. Finish with a one-line summary of what you ' +
+    'reverted.';
+
 implementation
 
 destructor THarnessSession.Destroy;
