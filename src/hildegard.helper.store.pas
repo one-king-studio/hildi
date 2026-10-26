@@ -2924,7 +2924,8 @@ begin
     if not EnsureOpen(AError) then
       Exit(False);
     Stmt := TStmt.Create(FDb,
-      'SELECT id, updated_at, pinned, archived, title, title_override ' +
+      'SELECT id, updated_at, pinned, archived, title, title_override, ' +
+      'parent_session_id, depth, label ' +
       'FROM sessions WHERE workspace_id = ? ' +
       'ORDER BY pinned DESC, updated_at DESC, rowid DESC');
     try
@@ -2948,6 +2949,10 @@ begin
           Row.Title := Override
         else
           Row.Title := Title;
+        { Lineage: a delegated child carries its parent, so a list can nest it. }
+        Row.ParentSessionId := Stmt.ColText(6);
+        Row.Depth := Stmt.ColInt(7);
+        Row.LabelText := Stmt.ColText(8);
         SetLength(ARows, N + 1);
         ARows[N] := Row;
         Inc(N);

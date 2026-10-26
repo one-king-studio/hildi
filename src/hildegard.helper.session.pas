@@ -133,6 +133,12 @@ type
     Pinned: Boolean;
     Archived: Boolean;
     UpdatedAtMs: Int64;
+    { Lineage. A root session has ParentSessionId='' and Depth=0; a delegated
+      child carries the session that spawned it, so a list can render it UNDER
+      its parent instead of as a peer. }
+    ParentSessionId: string;
+    Depth: Integer;
+    LabelText: string;
   end;
 
   TSessionRowArray = array of TSessionRow;
