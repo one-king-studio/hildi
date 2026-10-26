@@ -103,6 +103,16 @@ begin
     Cfg.SessionId := ASessionId;
     Cfg.Role := srObserve;   // a spy never drives
     Cfg.Spawn := False;      // the child already runs
+    { NO REPLAY. FromSeq = 0 normally means "replay the whole live turn", and the
+      spy ALSO renders the child's stored history - so every message in the
+      current turn arrived twice, from two sources, with nothing to deduplicate
+      them. That was the doubling the operator saw right after switching, and it
+      vanished on scroll-down because the re-render path reads only the store.
+
+      Attaching past the end of the ring replays nothing while LIVE events still
+      arrive (Broadcast is independent of ReplayTo), so history comes from the
+      store and streaming continues. One source of truth. }
+    Cfg.FromSeq := High(Int64);
     Spy.FSessionId := ASessionId;
     Spy.FQueue := TTurnQueue.Create;
     Spy.FSink := TSpySink.Create(Spy.FQueue);

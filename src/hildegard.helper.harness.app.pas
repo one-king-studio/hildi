@@ -2689,6 +2689,20 @@ begin
   Cfg.WorkspacePath := FSession.WorkspaceRoot;
   Cfg.Spawn := False;
   Cfg.Role := srObserve;
+  { NO REPLAY. FromSeq = 0 normally means "replay the whole live turn", and
+    RenderSpyHistory ALSO renders the child's stored history - so every message
+    in the current turn arrived twice, from two sources, with nothing to
+    deduplicate. That was the doubling the operator saw right after switching,
+    and it disappeared on scroll-down because the re-render reads only the store.
+
+    Attaching past the end of the ring replays nothing while LIVE events still
+    arrive (Broadcast is independent of ReplayTo), so history comes from the
+    store and streaming continues. One source of truth.
+
+    Set here rather than in the spy's Open so the decision belongs to the caller
+    that also owns RenderSpyHistory - the two must agree, and this is where that
+    agreement is visible. }
+  Cfg.FromSeq := High(Int64);
   if Assigned(FSpyFactory) then
     FSpy := FSpyFactory(ASessionId, Cfg, Err)
   else

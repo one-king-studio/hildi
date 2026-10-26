@@ -96,6 +96,9 @@ type
       the queue the test pushes child events onto. }
     FSpyOpens: Integer;
     FSpyQueue: TTurnQueue;
+    { The config the app asked the spy factory for, so a test can assert HOW the
+      spy was asked to attach (e.g. that it does not request a replay). }
+    FSpyConfig: TSessionClientConfig;
     FRecording: TRecordingDriver;
     function OpenStubSpy(const ASessionId: string;
       const AConfig: TSessionClientConfig; out AError: string): TSubagentSpy;
@@ -190,6 +193,12 @@ type
       Enter on a row must open that child's spy. This is the one behaviour I
       shipped without proof. }
     procedure TestSidebarRoutesKeysAndEntersTheSpy;
+    { Attaching a spy mid-turn replays the child's turn from the ring, while
+      RenderSpyHistory separately loads the same messages from the store. The
+      transcript must contain each message ONCE - doubled content is what the
+      operator saw right after switching, and it is the suspected cause of the
+      crash that followed. }
+    procedure TestSpyTranscriptIsNotDoubled;
     procedure TestSpyEnterShowsChildAndIndicator;
     procedure TestSpyCtrlDReturnsToParent;
     { Escape is now a two-step CANCEL, not an exit: the first press arms, the
@@ -408,6 +417,7 @@ begin
   { A detached spy over a queue the test owns, so entering spy mode needs no
     live child socket. An unknown id fails, exercising the error path. }
   Inc(FSpyOpens);
+  FSpyConfig := AConfig;
   if Copy(ASessionId, 1, 8) = 'no-such-' then
   begin
     AError := 'no runtime for session ' + ASessionId;
@@ -2544,6 +2554,56 @@ begin
   FApp.Step;
   FApp.Step;
   AssertEquals('enter opened the child spy', ChildId, FApp.SpiedSessionId);
+end;
+
+procedure THarnessAppTest.TestSpyTranscriptIsNotDoubled;
+var
+  Store: TSqliteStore;
+  StoreCfg: TStoreConfig;
+  StoreErr: TStoreError;
+  WorkspaceId: Integer;
+  ChildId: string;
+begin
+  { The bug the operator hit: right after switching to a child, messages appeared
+    twice and then vanished on scroll-down, and it eventually crashed.
+
+    Two sources fill the same transcript: RenderSpyHistory reads the child's
+    messages from the store, and the spy's attach REPLAYED the live turn from the
+    runtime ring (FromSeq = 0 means "the whole live turn"). Nothing
+    deduplicated them.
+
+    The fix is that the app asks for NO replay, so the store is the single source
+    for history while LIVE events still stream in. That decision is what this
+    pins - asserting the transcript contents would only re-test RenderSpyHistory,
+    which was never wrong. }
+  BuildWithStore;
+  StoreCfg := Default(TStoreConfig);
+  StoreCfg.DatabasePath := FStorePath;
+  StoreCfg.BusyTimeoutMs := 5000;
+  Store := TSqliteStore.Create(StoreCfg);
+  try
+    AssertTrue('open store', Store.Open(StoreErr));
+    Store.EnsureWorkspace(FDir, WorkspaceId, StoreErr);
+    Store.CreateChildSession(WorkspaceId, FSession.View.SessionId, 1, 'child',
+      ChildId, StoreErr);
+  finally
+    Store.Free;
+  end;
+
+  FApp.OnSpyFactory := OpenStubSpy;
+  FSpyQueue := TTurnQueue.Create;
+  FApp.ShowSpy(ChildId);
+  FApp.Step;
+
+  { The app must attach past the end of the replay ring. FromSeq = 0 is the
+    documented "replay the whole live turn" sentinel, and it is exactly what
+    doubled the transcript. }
+  AssertTrue('the spy attaches without a replay: FromSeq=' +
+    IntToStr(FSpyConfig.FromSeq), FSpyConfig.FromSeq > 0);
+  AssertTrue('and past any seq the ring can hold',
+    FSpyConfig.FromSeq > 1000000000);
+  AssertEquals('the spy is still observe-only', Ord(srObserve),
+    Ord(FSpyConfig.Role));
 end;
 
 procedure THarnessAppTest.TestSpyEnterShowsChildAndIndicator;
