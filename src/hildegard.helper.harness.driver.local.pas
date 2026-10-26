@@ -11,6 +11,7 @@ interface
 uses
   hildegard.helper.approval, hildegard.helper.harness.turn,
   hildegard.helper.harness.driver, hildegard.helper.harness.session,
+  hildegard.helper.session,
   hildegard.helper.store;
 
 { The in-process driver over a session that has a built loop. }
@@ -38,6 +39,7 @@ type
     procedure AnswerAsk(const AAskRef: string; const AChoice: TApprovalChoice);
     procedure AbortSubagent(const ASessionId: string);
     procedure ReleaseSubagent(const ASessionId: string);
+    procedure Undo(ATurnId: Int64 = 0);
     procedure Checkpoint;
     function PopEvent(out AEvent: TTurnEvent): Boolean;
     function Dropped: Int64;
@@ -136,6 +138,47 @@ begin
   FWorker := TTurnWorker.CreateAmbient(FSession.Loop, FSession.Queue,
     FSession.TurnPool);
   FWorker.Start;
+end;
+
+procedure TLocalDriver.Undo(ATurnId: Int64);
+var
+  E: TTurnEvent;
+  Detail: string;
+  Id: Int64;
+begin
+  { In-process, the session is right here, so this acts directly rather than
+    sending a command. Same rules as the runtime handler: refuse a busy turn, and
+    surface UndoTurn's refusal reason as an error event so the operator sees WHY
+    rather than a silent no-op. }
+  if (FWorker <> nil) and (not FWorker.Finished) then
+  begin
+    E := Default(TTurnEvent);
+    E.Kind := teError;
+    E.Text := 'undo refused: a turn is in progress';
+    FSession.Queue.Push(E);
+    Exit;
+  end;
+  Id := ATurnId;
+  if Id <= 0 then
+  begin
+    if FSession.View.LastTurn.Status = tsCompleted then
+      Id := FSession.View.LastTurn.Id;
+  end;
+  if Id <= 0 then
+  begin
+    E := Default(TTurnEvent);
+    E.Kind := teError;
+    E.Text := 'undo refused: no completed turn to undo';
+    FSession.Queue.Push(E);
+    Exit;
+  end;
+  if not FSession.UndoTurn(Id, Detail) then
+  begin
+    E := Default(TTurnEvent);
+    E.Kind := teError;
+    E.Text := 'undo refused: ' + Detail;
+    FSession.Queue.Push(E);
+  end;
 end;
 
 function TLocalDriver.PopEvent(out AEvent: TTurnEvent): Boolean;

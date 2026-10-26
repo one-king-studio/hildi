@@ -34,6 +34,9 @@ type
     { Release a subagent by its session id (detach without aborting). }
     procedure ReleaseSubagent(const ASessionId: string);
     { Context checkpoint: ask the runtime to draft and commit a checkpoint. }
+    { Undo a turn: the runtime reverts its files and rewinds its transcript.
+      ATurnId 0 means the newest completed turn. }
+    procedure Undo(ATurnId: Int64 = 0);
     procedure Checkpoint;
     { UI thread: pop the next event, if any. }
     function PopEvent(out AEvent: TTurnEvent): Boolean;
@@ -100,6 +103,9 @@ type
     procedure AnswerAsk(const AAskRef: string; const AChoice: TApprovalChoice);
     procedure AbortSubagent(const ASessionId: string);
     procedure ReleaseSubagent(const ASessionId: string);
+    { Undo a turn: the runtime reverts its files and rewinds its transcript.
+      ATurnId 0 means the newest completed turn. }
+    procedure Undo(ATurnId: Int64 = 0);
     procedure Checkpoint;
     function PopEvent(out AEvent: TTurnEvent): Boolean;
     function Dropped: Int64;
@@ -379,6 +385,12 @@ procedure TRemoteDriver.Checkpoint;
 begin
   { One action: the runtime drafts the checkpoint and records the checkpoint. }
   SendCommand(scCheckpoint, '', '', Default(TApprovalChoice), '');
+end;
+
+procedure TRemoteDriver.Undo(ATurnId: Int64);
+begin
+  { One action: the runtime reverts the turn's files and rewinds its transcript. }
+  SendCommand(scUndo, '', '', Default(TApprovalChoice), '', ATurnId);
 end;
 
 function TRemoteDriver.PopEvent(out AEvent: TTurnEvent): Boolean;

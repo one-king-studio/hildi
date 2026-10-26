@@ -69,6 +69,7 @@ type
     procedure AbortSubagent(const ASessionId: string);
     procedure ReleaseSubagent(const ASessionId: string);
     procedure Checkpoint;
+    procedure Undo(ATurnId: Int64 = 0);
     function PopEvent(out AEvent: TTurnEvent): Boolean;
     function Dropped: Int64;
     procedure Close;
@@ -281,6 +282,12 @@ end;
 
 procedure TRecordingDriver.Checkpoint;
 begin
+end;
+
+procedure TRecordingDriver.Undo(ATurnId: Int64);
+begin
+  { The mock records nothing; it exists so the app can be driven without a
+    runtime. A test that needs to observe an undo asserts on the real driver. }
 end;
 
 function TRecordingDriver.PopEvent(out AEvent: TTurnEvent): Boolean;
