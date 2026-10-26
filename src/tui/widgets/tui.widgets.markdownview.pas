@@ -11,7 +11,8 @@ unit tui.widgets.markdownview;
 interface
 
 uses
-  hildegard.helper.markdown,
+  markdown.types, markdown.parse,
+  tui.widgets.mdtheme,
   tui.base, tui.widget,
   tui.widgets.text, tui.surface,
   tui.grapheme;
@@ -311,7 +312,7 @@ begin
   if AStyles = [] then
     Result := ABase
   else
-    Result := StyleFor(AStyles, ATheme);
+    Result := MdAttrFor(AStyles, ATheme);
 end;
 
 function ConvertSpans(const ASpans: TMdSpanArray; const ABase: TAttr;
@@ -419,7 +420,7 @@ begin
       end;
     mbHeading:
       Text.SetSpans(ConvertSpans(ABlock.Spans,
-        BlockAttr(mbHeading, ABlock.Level, FTheme), FTheme));
+        MdBlockAttr(mbHeading, ABlock.Level, FTheme), FTheme));
   else
     Text.SetSpans(ConvertSpans(ABlock.Spans, FTheme.Paragraph, FTheme));
   end;

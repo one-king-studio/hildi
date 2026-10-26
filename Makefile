@@ -91,6 +91,7 @@ ASYNC_SRCS := $(wildcard $(SRC)/async/*.pas)
 SHELL_SRCS := $(wildcard $(SRC)/shell/*.pas)
 TUILIB_SRCS := $(wildcard $(SRC)/tui/core/*.pas) $(wildcard $(SRC)/tui/widgets/*.pas)
 CHANGES_SRCS := $(wildcard $(SRC)/changes/*.pas)
+MARKDOWN_SRCS := $(wildcard $(SRC)/markdown/*.pas)
 FILEIGNORE_SRCS := $(wildcard $(SRC)/fileignore/*.pas)
 TEST_SRCS := $(wildcard $(TESTS)/*.pas)
 
@@ -227,7 +228,7 @@ headless-agent: libsqlite libmbedtls $(BIN)/hildegard-helper-agent
 
 $(BIN)/hildegard-helper-agent: $(EXAMPLES)/headless_agent.pas $(LIB_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/fileignore -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Full-screen agent harness (conversation + approvals + sessions). Builds and
 # runs; Ctrl-C quits. Drives the headless agent. A pure client: no engine.
@@ -237,7 +238,7 @@ tui-agent: headless-agent $(BIN)/hildegard-helper-tui
 $(BIN)/hildegard-helper-tui: $(EXAMPLES)/tui_agent.pas $(LIB_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	@# The TUI is a pure client: no agent, loop, tool or runtime unit links here.
-	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/fileignore -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Printable wall-clock benchmark. `make bench ARGS=--real` measures the real
 # terminal; `make perf` asserts the budgets and is not part of `make check`.
@@ -289,6 +290,15 @@ changes-standalone: $(CHANGES_SRCS)
 	$(FPC) $(DEBUG) -Fu$(SRC)/changes -FU$(DBGUNITS) -FE$(BIN) -o$(BIN)/changes-standalone $(EXAMPLES)/changes_standalone.pas
 	$(BIN)/changes-standalone
 
+# The same gate for the Markdown library: compile and run a program that uses
+# ONLY src/markdown, with neither a harness unit nor `tui.*` on the search path.
+# A dependency on either fails the build here - this is the feature's central
+# claim (docs/features/Markdown_Viewer/Markdown_v1.SPEC.md 4.4).
+markdown-standalone: $(MARKDOWN_SRCS)
+	@mkdir -p $(BIN) $(DBGUNITS)
+	$(FPC) $(DEBUG) -Fu$(SRC)/markdown -FU$(DBGUNITS) -FE$(BIN) -o$(BIN)/markdown-standalone $(EXAMPLES)/markdown_standalone.pas
+	$(BIN)/markdown-standalone
+
 # A developer demo: parse sample scripts and print the AST the library built.
 # Pass a script to dump just that one: make shell-ast SCRIPT='echo hi | cat'
 shell-ast: $(SHELL_SRCS)
@@ -322,9 +332,9 @@ async-examples: $(ASYNC_SRCS)
 	$(FPC) $(DEBUG) -Fu$(SRC)/async -FU$(DBGUNITS) -FE$(BIN) -o$(BIN)/async-examples $(EXAMPLES)/async_examples.pas
 	$(BIN)/async-examples
 
-$(BIN)/hildegard-helper-tests: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(TUILIB_SRCS) $(ASYNC_SRCS) $(SHELL_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
+$(BIN)/hildegard-helper-tests: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(TUILIB_SRCS) $(ASYNC_SRCS) $(SHELL_SRCS) $(CHANGES_SRCS) $(MARKDOWN_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/fileignore -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 test-leak: libsqlite libmbedtls $(BIN)/hildegard-helper-tests-leak
 	HEAPTRC=$(HEAPTRC) $(BIN)/hildegard-helper-tests-leak $(TESTARGS)
@@ -342,9 +352,9 @@ test-leak-parallel: libsqlite libmbedtls $(BIN)/hildegard-helper-tests-leak \
 watch:
 	@scripts/watch.sh $(TARGET)
 
-$(BIN)/hildegard-helper-tests-leak: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(TUILIB_SRCS) $(ASYNC_SRCS) $(SHELL_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
+$(BIN)/hildegard-helper-tests-leak: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(TUILIB_SRCS) $(ASYNC_SRCS) $(SHELL_SRCS) $(CHANGES_SRCS) $(MARKDOWN_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
 	@mkdir -p $(BIN) $(LEAKUNITS)
-	$(FPC) $(LEAKFLAGS) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/fileignore -Fu$(TESTS) -FU$(LEAKUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(LEAKFLAGS) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -Fu$(TESTS) -FU$(LEAKUNITS) -FE$(BIN) -o$@ $<
 
 # Live smoke: drive the REAL headless runtime through a scripted turn against a
 # loopback fake provider. Hermetic (loopback only, ephemeral port, temp store);
@@ -365,7 +375,7 @@ $(BIN)/hildegard-smoke: $(EXAMPLES)/smoke.pas $(TESTS)/smoke_runner.pas $(TESTS)
 # scripts/test-parallel.sh): ~21 s each instead of ~169 s and ~103 s, and the
 # isolation also removes the intra-process state pollution that makes a
 # single-process run of the whole suite report failures that are not real.
-check: test-parallel test-leak-parallel shell-standalone
+check: test-parallel test-leak-parallel shell-standalone markdown-standalone
 
 # The same functional suite, one process per suite, in parallel. Measured on a
 # 10-core machine: ~169 s and 36 spurious failures as one process, ~22 s and 0
@@ -454,4 +464,5 @@ help:
 	@echo "  make shell-flags              corpus tallies for the builtin tier's coverage"
 	@echo "  make shell-standalone         build & run the shell library with no harness unit"
 	@echo "  make changes-standalone       build & run the changes library with no harness unit"
+	@echo "  make markdown-standalone      build & run the markdown library with no harness or tui unit"
 	@echo "  make clean                    remove build artifacts"

@@ -8,7 +8,8 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.markdown,
+  markdown.types, markdown.parse,
+  tui.widgets.mdtheme,
   tui.base, tui.widget,
   tui.surface, tui.widgets.markdownview;
 

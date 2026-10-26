@@ -1,4 +1,4 @@
-unit hildegard.helper.markdown;
+unit markdown.parse;
 { A small markdown subset parsed into typed blocks of styled spans, plus a theme
   mapping. Pure: no UI, no I/O, and never raises on malformed input.
 
@@ -11,83 +11,28 @@ unit hildegard.helper.markdown;
   Deviations from CommonMark, accepted for v1: lazy continuation is not
   supported (an unindented line after a list item closes the list), any ordered
   number may interrupt a paragraph, and underscore emphasis is only recognised
-  at word boundaries. }
+  at word boundaries.
+
+  This is the pure module's parser: it depends on markdown.types and the RTL
+  only (SysUtils), never on tui.* or hildegard.helper.*. `make markdown-standalone`
+  compiles it with nothing else on the search path, and that is the feature's
+  central claim. The theme that used to live here moved to
+  tui.widgets.mdtheme; width measurement and wrapping are the renderer's job,
+  so nothing here measures a terminal cell.
+
+  Split pending: the block scanner, the inline scanner and the segmenter share
+  this unit today because they share helpers (CollapseWhitespace, SplitCells).
+  They are meant to become markdown.blocks / markdown.inline / markdown.stream,
+  in separate commits, as the units are touched. }
 
 {$mode delphi}{$H+}
 
 interface
 
 uses
-  tui.base;
+  markdown.types;
 
 type
-  TMdBlockKind = (
-    mbBlank,       { a run of blank lines separates blocks; v1 does not emit it }
-    mbParagraph,
-    mbHeading,
-    mbListItem,
-    mbCodeFence,
-    mbQuote,
-    mbRule,
-    mbTable);      { a GFM pipe table }
-
-  TMdInlineStyle = (misBold, misItalic, misCode, misStrike, misLink);
-  TMdInlineStyles = set of TMdInlineStyle;
-
-  { A run of text with inline styling. Link carries the target for misLink. }
-  TMdSpan = record
-    Text: UnicodeString;
-    Styles: TMdInlineStyles;
-    Link: UnicodeString;
-  end;
-
-  TMdSpanArray = array of TMdSpan;
-
-  { A table column's alignment, from the delimiter row. }
-  TMdAlign = (maNone, maLeft, maCenter, maRight);
-  TMdAlignArray = array of TMdAlign;
-
-  { One table row: a run of spans per column. }
-  TMdTableRow = array of TMdSpanArray;
-  TMdTableRows = array of TMdTableRow;
-
-  { A parsed block. Level is the heading level (1..6), list depth, or quote
-    depth as applicable. Language is the code fence info string. Ordered and
-    Ordinal record an ordered list item's marker so it renders as written. Head,
-    Align, and Rows are set for mbTable only; every row carries exactly
-    Length(Align) cells. }
-  TMdBlock = record
-    Kind: TMdBlockKind;
-    Level: Integer;
-    Language: UnicodeString;
-    Ordered: Boolean;
-    Ordinal: Integer;
-    Spans: TMdSpanArray;
-    Head: TMdTableRow;
-    Align: TMdAlignArray;
-    Rows: TMdTableRows;
-  end;
-
-  TMdBlockArray = array of TMdBlock;
-
-  { Block kinds and inline styles mapped to cell attributes. Bold, Italic, and
-    Strike carry the emphasis colour; Code carries the chip foreground (its
-    background comes from CodeBackdrop). }
-  TMdTheme = record
-    Heading: array[1..6] of TAttr;
-    Paragraph: TAttr;
-    ListBullet: TAttr;
-    Quote: TAttr;
-    Code: TAttr;         { inline code foreground; the chip bg is CodeBackdrop }
-    CodeBackdrop: TAttr; { fenced code surface, and the inline code chip }
-    Link: TAttr;
-    Rule: TAttr;
-    Bold: TAttr;
-    Italic: TAttr;
-    Strike: TAttr;
-    Muted: TAttr;        { code fence language, and other quiet chrome }
-  end;
-
   { The parser. Create once; Reset before a new document. }
   TMarkdownParser = class
   private
@@ -124,14 +69,9 @@ type
     function TailText: UnicodeString;
   end;
 
-{ The default theme (no terminal dependency; caller may override). }
-function DefaultMdTheme: TMdTheme;
-
-{ Resolve a span's attributes from its inline styles and the theme. }
-function StyleFor(const AStyles: TMdInlineStyles; const ATheme: TMdTheme): TAttr;
-
-{ Resolve the base attributes for a block kind and level. }
-function BlockAttr(AKind: TMdBlockKind; ALevel: Integer; const ATheme: TMdTheme): TAttr;
+{ The batch form: one call, same tree. Equivalence with the streamed form is
+  asserted over a corpus (tests/test_markdown_equivalence.pas), not assumed. }
+function ParseMarkdown(const AText: string): TMdBlockArray;
 
 implementation
 
@@ -761,92 +701,6 @@ begin
       Result[I] := nil;
 end;
 
-{ --- theme --------------------------------------------------------------- }
-
-function MdAttr(AFg: Byte; AStyle: TStyle): TAttr;
-begin
-  Result := DefaultAttr;
-  Result.Fg := AFg;
-  Result.Style := AStyle + [sfScreenBg];
-end;
-
-function DefaultMdTheme: TMdTheme;
-begin
-  Result := Default(TMdTheme);
-  { Emphasis carries a colour so it survives a terminal that ignores italic or
-    maps bold to the bright colour: bold is gold, italic cyan, and bold+italic
-    takes the cool cyan in bold. Headings use the bold gold. Inline code is a
-    violet chip on the sunken surface; the tan is the list marker. }
-  Result.Heading[1] := MdAttr(222, [sfBold]);
-  Result.Heading[2] := MdAttr(222, [sfBold]);
-  Result.Heading[3] := MdAttr(222, [sfBold]);
-  Result.Heading[4] := MdAttr(222, [sfBold]);
-  Result.Heading[5] := MdAttr(222, [sfBold]);
-  Result.Heading[6] := MdAttr(222, [sfBold]);
-  Result.Paragraph := MdAttr(250, []);
-  Result.ListBullet := MdAttr(180, []);
-  Result.Quote := MdAttr(245, [sfDim]);
-  Result.Code := MdAttr(140, []);
-  Result.CodeBackdrop := MdAttr(252, []);
-  Result.CodeBackdrop.Bg := 233;
-  Exclude(Result.CodeBackdrop.Style, sfScreenBg);
-  Result.Link := MdAttr(75, [sfUnderline]);
-  Result.Rule := MdAttr(240, []);
-  Result.Bold := MdAttr(222, [sfBold]);
-  Result.Italic := MdAttr(116, [sfItalic]);
-  Result.Strike := MdAttr(250, [sfStrike]);
-  Result.Muted := MdAttr(245, []);
-end;
-
-function StyleFor(const AStyles: TMdInlineStyles; const ATheme: TMdTheme): TAttr;
-begin
-  { Code and link replace the colour; code also carries the chip background.
-    Bold+italic takes the cool (italic) colour in bold, so it stays distinct
-    from plain bold even when the italic rendition is not available. }
-  if misCode in AStyles then
-  begin
-    Result := ATheme.Code;
-    Result.Bg := ATheme.CodeBackdrop.Bg;
-    Exclude(Result.Style, sfScreenBg);
-  end
-  else if misLink in AStyles then
-    Result := ATheme.Link
-  else if misItalic in AStyles then
-    Result := ATheme.Italic
-  else if misBold in AStyles then
-    Result := ATheme.Bold
-  else
-    Result := ATheme.Paragraph;
-  if misBold in AStyles then
-    Result.Style := Result.Style + [sfBold];
-  if misItalic in AStyles then
-    Result.Style := Result.Style + [sfItalic];
-  if misStrike in AStyles then
-    Result.Style := Result.Style + [sfStrike];
-end;
-
-function BlockAttr(AKind: TMdBlockKind; ALevel: Integer;
-  const ATheme: TMdTheme): TAttr;
-begin
-  case AKind of
-    mbHeading:
-      if (ALevel >= 1) and (ALevel <= 6) then
-        Result := ATheme.Heading[ALevel]
-      else
-        Result := ATheme.Heading[1];
-    mbQuote:
-      Result := ATheme.Quote;
-    mbCodeFence:
-      Result := ATheme.CodeBackdrop;
-    mbRule:
-      Result := ATheme.Rule;
-    mbListItem:
-      Result := ATheme.ListBullet;
-  else
-    Result := ATheme.Paragraph;
-  end;
-end;
-
 { --- TMarkdownParser ----------------------------------------------------- }
 
 constructor TMarkdownParser.Create;
@@ -1214,6 +1068,18 @@ begin
       Result := Result + #10 + FPartial
     else
       Result := FPartial;
+end;
+
+function ParseMarkdown(const AText: string): TMdBlockArray;
+var
+  Parser: TMarkdownParser;
+begin
+  Parser := TMarkdownParser.Create;
+  try
+    Result := Parser.Parse(AText);
+  finally
+    Parser.Free;
+  end;
 end;
 
 end.

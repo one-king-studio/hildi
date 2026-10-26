@@ -6,9 +6,9 @@ Ordered so each phase leaves the tree green. Nothing here is started.
 
 ## Phase 0 — Baseline
 
-- [ ] Record the current gate: `make test-parallel` count, and `tests/test_markdown.pas`
+- [x] Record the current gate: `make test-parallel` count, and `tests/test_markdown.pas`
       passing. This is the number every later phase is measured against.
-- [ ] Add the equivalence corpus as a **failing-capable** test against the *existing*
+- [x] Add the equivalence corpus as a **failing-capable** test against the *existing*
       parser: ~12 documents, batch vs chunked, asserting identical trees.
       *Files:* `tests/test_markdown_equivalence.pas`, `tests/data/md_corpus/*.md`
       *Why first:* it will find real bugs in what we already ship, before any move makes
@@ -16,21 +16,28 @@ Ordered so each phase leaves the tree green. Nothing here is started.
 
 ## Phase 1 — Extract the module (mechanical, behaviour-preserving)
 
-- [ ] `src/markdown/markdown.types.pas` — move `TMdBlock`, `TMdSpan`, kinds, alignment
+- [x] `src/markdown/markdown.types.pas` — move `TMdBlock`, `TMdSpan`, kinds, alignment
       verbatim. No `uses tui.*`.
-- [ ] `src/markdown/markdown.parse.pas` — move `TMarkdownParser` and its block/inline
+- [x] `src/markdown/markdown.parse.pas` — move `TMarkdownParser` and its block/inline
       scanners. Split into `markdown.inline` / `markdown.blocks` / `markdown.stream` as
       the units are touched, not in one commit.
-- [ ] `src/markdown/markdown.render.pas` — `RenderPlain`.
-- [ ] `markdown-standalone` make target: `-Fu$(SRC)/markdown` only.
+- [x] `src/markdown/markdown.render.pas` — `RenderPlain`.
+- [x] `markdown-standalone` make target: `-Fu$(SRC)/markdown` only.
       *Test:* `TestMarkdownModuleLinksNoTui` — grep the module for `tui.` and fail.
-- [ ] `src/tui/widgets/tui.widgets.mdtheme.pas` — theme, `DefaultMdTheme`, `MdAttrFor`,
+- [x] `src/tui/widgets/tui.widgets.mdtheme.pas` — theme, `DefaultMdTheme`, `MdAttrFor`,
       `MdBlockAttr` moved out.
-- [ ] Point `tui.widgets.markdownview` at the new units.
-- [ ] Delete `src/hildegard.helper.markdown.pas`. No alias.
-- [ ] `tests/test_markdown.pas` compiles against the new units with import changes only —
+- [x] Point `tui.widgets.markdownview` at the new units.
+- [x] Delete `src/hildegard.helper.markdown.pas`. No alias.
+- [x] `tests/test_markdown.pas` compiles against the new units with import changes only —
       **zero assertion changes**. Any assertion that must change is a regression; justify
       it in the commit.
+
+**Deviation, deliberate:** `markdown.parse` is not yet split into
+`markdown.inline` / `.blocks` / `.stream`. The inline scanner and the block
+builders share `CollapseWhitespace` and `SplitCells`, so the split needs a
+fourth home for them (or duplication) — a design choice, not a mechanical move.
+Purity is by directory, so the feature's central claim already holds. Revisit
+before the parser grows; do not treat it as done.
 
 ## Phase 2 — Setext headings
 

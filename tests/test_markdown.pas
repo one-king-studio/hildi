@@ -8,7 +8,8 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.markdown,
+  markdown.types, markdown.parse,
+  tui.widgets.mdtheme,
   tui.base, tui.widget,
   tui.widgets.text, tui.surface;
 
@@ -314,12 +315,12 @@ var
   Theme: TMdTheme;
 begin
   Theme := DefaultMdTheme;
-  AssertEquals('plain', Theme.Paragraph.Fg, StyleFor([], Theme).Fg);
-  AssertEquals('code', Theme.Code.Fg, StyleFor([misCode], Theme).Fg);
-  AssertEquals('link', Theme.Link.Fg, StyleFor([misLink], Theme).Fg);
-  AssertTrue('bold', sfBold in StyleFor([misBold], Theme).Style);
-  AssertTrue('italic', sfItalic in StyleFor([misItalic], Theme).Style);
-  AssertTrue('strike', sfStrike in StyleFor([misStrike], Theme).Style);
+  AssertEquals('plain', Theme.Paragraph.Fg, MdAttrFor([], Theme).Fg);
+  AssertEquals('code', Theme.Code.Fg, MdAttrFor([misCode], Theme).Fg);
+  AssertEquals('link', Theme.Link.Fg, MdAttrFor([misLink], Theme).Fg);
+  AssertTrue('bold', sfBold in MdAttrFor([misBold], Theme).Style);
+  AssertTrue('italic', sfItalic in MdAttrFor([misItalic], Theme).Style);
+  AssertTrue('strike', sfStrike in MdAttrFor([misStrike], Theme).Style);
 end;
 
 procedure TMarkdownTest.TestStyleForBoldItalicTakesTheCoolColour;
@@ -328,13 +329,13 @@ var
   Attr: TAttr;
 begin
   Theme := DefaultMdTheme;
-  Attr := StyleFor([misBold, misItalic], Theme);
+  Attr := MdAttrFor([misBold, misItalic], Theme);
   { Bold+italic takes the italic (cool) colour, in bold, so it stays distinct
     from plain bold when the italic rendition is unavailable. }
   AssertEquals('the cool colour', Theme.Italic.Fg, Attr.Fg);
   AssertTrue('in bold', sfBold in Attr.Style);
   AssertEquals('plain bold is the warm colour', Theme.Bold.Fg,
-    StyleFor([misBold], Theme).Fg);
+    MdAttrFor([misBold], Theme).Fg);
 end;
 
 procedure TMarkdownTest.TestStyleForCodeCarriesTheChipBackground;
@@ -343,7 +344,7 @@ var
   Attr: TAttr;
 begin
   Theme := DefaultMdTheme;
-  Attr := StyleFor([misCode], Theme);
+  Attr := MdAttrFor([misCode], Theme);
   AssertEquals('the chip foreground', Theme.Code.Fg, Attr.Fg);
   AssertEquals('the chip background', Theme.CodeBackdrop.Bg, Attr.Bg);
   AssertFalse('the chip paints its own background',
@@ -355,13 +356,13 @@ var
   Theme: TMdTheme;
 begin
   Theme := DefaultMdTheme;
-  AssertEquals('paragraph', Theme.Paragraph.Fg, BlockAttr(mbParagraph, 0, Theme).Fg);
-  AssertEquals('quote', Theme.Quote.Fg, BlockAttr(mbQuote, 1, Theme).Fg);
+  AssertEquals('paragraph', Theme.Paragraph.Fg, MdBlockAttr(mbParagraph, 0, Theme).Fg);
+  AssertEquals('quote', Theme.Quote.Fg, MdBlockAttr(mbQuote, 1, Theme).Fg);
   AssertEquals('code', Theme.CodeBackdrop.Fg,
-    BlockAttr(mbCodeFence, 0, Theme).Fg);
-  AssertEquals('rule', Theme.Rule.Fg, BlockAttr(mbRule, 0, Theme).Fg);
-  AssertEquals('list', Theme.ListBullet.Fg, BlockAttr(mbListItem, 1, Theme).Fg);
-  AssertEquals('heading 2', Theme.Heading[2].Fg, BlockAttr(mbHeading, 2, Theme).Fg);
+    MdBlockAttr(mbCodeFence, 0, Theme).Fg);
+  AssertEquals('rule', Theme.Rule.Fg, MdBlockAttr(mbRule, 0, Theme).Fg);
+  AssertEquals('list', Theme.ListBullet.Fg, MdBlockAttr(mbListItem, 1, Theme).Fg);
+  AssertEquals('heading 2', Theme.Heading[2].Fg, MdBlockAttr(mbHeading, 2, Theme).Fg);
 end;
 
 procedure TMarkdownTest.TestHeadingAttrUsesTheLevel;
@@ -369,8 +370,8 @@ var
   Theme: TMdTheme;
 begin
   Theme := DefaultMdTheme;
-  AssertEquals('h1', Theme.Heading[1].Fg, BlockAttr(mbHeading, 1, Theme).Fg);
-  AssertEquals('h3', Theme.Heading[3].Fg, BlockAttr(mbHeading, 3, Theme).Fg);
+  AssertEquals('h1', Theme.Heading[1].Fg, MdBlockAttr(mbHeading, 1, Theme).Fg);
+  AssertEquals('h3', Theme.Heading[3].Fg, MdBlockAttr(mbHeading, 3, Theme).Fg);
 end;
 
 procedure TMarkdownTest.TestOpenTailIsPlainText;
@@ -465,7 +466,7 @@ begin
   begin
     Spans[I] := Default(TSpan);
     Spans[I].Text := FBlocks[0].Spans[I].Text;
-    Spans[I].Attr := StyleFor(FBlocks[0].Spans[I].Styles, Theme);
+    Spans[I].Attr := MdAttrFor(FBlocks[0].Spans[I].Styles, Theme);
   end;
 
   Blk := TTextBlock.Create(Spans, wmWord);
