@@ -42,6 +42,11 @@ type
     procedure TestInlineStrike;
     procedure TestInlineLinkTargetCaptured;
     procedure TestMalformedMarkupRendersLiterally;
+    { A front-end project puts raw HTML in the reply. Tags must survive intact -
+      an attribute containing a markdown special character must NOT be read as
+      inline markup, because that silently corrupts the visible text. }
+    procedure TestHtmlAttributeUnderscoreIsNotEmphasis;
+    procedure TestHtmlTagsRenderAsText;
     procedure TestWhitespaceCollapsedInParagraph;
     procedure TestCodeBlocksCarryNoInlineStyles;
     procedure TestStyleForMapsEachInlineStyle;
@@ -258,6 +263,37 @@ begin
   AssertEquals('text preserved', '**unclosed', JoinedText(0));
   AssertEquals('one span', 1, Length(FBlocks[0].Spans));
   AssertTrue('no styles', FBlocks[0].Spans[0].Styles = []);
+end;
+
+procedure TMarkdownTest.TestHtmlAttributeUnderscoreIsNotEmphasis;
+begin
+  { The reported bug: a front-end reply carries HTML, and an attribute with two
+    underscores in it (`class="my_class_name"`) was being read as EMPHASIS by the
+    inline scanner. The visible text then lost the underscores and gained bold,
+    so the reply rendered as corrupted markup rather than as the code the model
+    wrote.
+
+    The parser has no HTML mode by design - it is a Markdown parser - but it must
+    not INVENT markup out of attribute names. Underscore emphasis is already
+    word-boundary-aware (so snake_case is safe); this pins the same guarantee for
+    a tag body. }
+  FBlocks := Parse('Click <span class="my_class_name">here</span>');
+  AssertTrue('the attribute text survives verbatim: ' + JoinedText(0),
+    Pos('my_class_name', JoinedText(0)) > 0);
+end;
+
+procedure TMarkdownTest.TestHtmlTagsRenderAsText;
+begin
+  { A raw tag is TEXT: it must reach the view intact so the operator sees what
+    the model actually wrote. Stripping or dropping tags would hide the fact
+    that the reply was HTML rather than Markdown. }
+  FBlocks := Parse('<div class="row">hello</div>');
+  AssertTrue('the opening tag survives: ' + JoinedText(0),
+    Pos('<div', JoinedText(0)) > 0);
+  AssertTrue('the text between tags survives: ' + JoinedText(0),
+    Pos('hello', JoinedText(0)) > 0);
+  AssertTrue('the closing tag survives: ' + JoinedText(0),
+    Pos('</div>', JoinedText(0)) > 0);
 end;
 
 procedure TMarkdownTest.TestWhitespaceCollapsedInParagraph;
