@@ -862,7 +862,7 @@ end;
   any dependency on the node model.
 
   A formatted run becomes a wrapper `text` node carrying the format set, with the
-  actual text as its child. markdown.compat relies on that shape. }
+  actual text as its child. }
 procedure ParseInlines(var B: TBuilder; const AParent: Integer;
   const AText: UnicodeString); forward;
 

@@ -12,7 +12,8 @@ program markdown_standalone;
 
 uses
   SysUtils,
-  markdown.types, markdown.parse, markdown.tree, markdown.render;
+  markdown.types, markdown.parse, markdown.tree, markdown.stream,
+  markdown.render;
 
 var
   Doc, BatchTree, StreamTree: string;
@@ -22,7 +23,8 @@ var
   Lines: TMdLineArray;
   I, J, K, ChunkSize: Integer;
   SawParagraph, SawHeading, SawList, SawFence, SawQuote, SawRule, SawTable: Boolean;
-  D2: TMdDocument;
+  D2, BatchD: TMdDocument;
+  Str: TMarkdownStream;
 
 function IsFrontmatterNode(const ANode: TMdNode): Boolean;
 begin
@@ -196,7 +198,25 @@ begin
     Length(FootnotesOf(ParseTree('a[^x]' + #10 + #10 + '[^x]: n'))) = 1,
     'no footnote');
 
-  { 7. No wrapping when asked for none: one line per logical line at worst. }
+  { 7. STREAMING is built in: the same document fed in small chunks yields the
+       same block kinds as one batch parse, and the open tail stays raw. }
+  Str := TMarkdownStream.Create;
+  try
+    Str.Append('# H' + #10 + #10 + '- a' + #10 + '- b' + #10 + #10 + '> q' + #10);
+    Check('a block was finalised mid-stream', Str.FinalizedCount >= 1, 'none');
+    Str.Append('```' + #10 + 'code' + #10 + '```' + #10);
+    Str.Finish;
+    BatchD := ParseTree('# H' + #10 + #10 + '- a' + #10 + '- b' + #10 + #10 +
+      '> q' + #10 + '```' + #10 + 'code' + #10 + '```' + #10);
+    Check('streamed and batch agree on block count',
+      Str.FinalizedCount = Length(NodeOf(BatchD, BatchD.Root).Children),
+      IntToStr(Str.FinalizedCount));
+    Check('no tail after Finish', Str.TailText = '', 'tail remained');
+  finally
+    Str.Free;
+  end;
+
+  { 8. No wrapping when asked for none: one line per logical line at worst. }
   Lines := RenderPlain(BatchBlocks, 0);
   Check('unwrapped rendering produced lines', Length(Lines) > 0, 'none');
 
