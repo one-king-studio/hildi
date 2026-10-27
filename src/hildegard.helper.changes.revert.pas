@@ -301,9 +301,16 @@ begin
 
   if Absent then
   begin
-    { Moving to ABSENT: the file must currently be at the recorded far end, so
-      the same compare-before-acting rule applies. Reading it is also how we
-      prove it exists at all. }
+    { Already gone is the desired end state. Idempotent on purpose: reverting
+      two turns that both created a path (or retrying after a partial undo) must
+      not fail just because the file is already absent. }
+    if not FileExists(Full) then
+    begin
+      AResult.Outcome := rvReverted;
+      Exit(True);
+    end;
+    { Reading it is how we prove it exists and, for a modification, that it is
+      still what the record expects. }
     if not SysReadText(Full, AMaxBytes, Current, TooLarge, Err) then
     begin
       if TooLarge then
@@ -313,15 +320,25 @@ begin
       AResult.Detail := Err;
       Exit(True);
     end;
-    if (ARecord.AfterHash <> '') and AForward and
+    { The compare differs by KIND, because the kind is what the turn means.
+
+      A MODIFICATION is undone by matching its far hash - that is the CAS.
+
+      A CREATION is undone by removing the file, and its content is NOT the
+      thing being reverted: the turn's whole contribution was the file existing.
+      Comparing content here refused the undo whenever anything had touched the
+      file since - including writes the log never captured - and because the
+      suffix walk stops at the first refusal, that silently turned "undo these
+      five turns" into "undo the newest one". }
+    if (ARecord.Kind <> ckCreated) and (ARecord.AfterHash <> '') and AForward and
       (AHasher(Current) <> ARecord.AfterHash) then
     begin
       AResult.Outcome := rvMoved;
       AResult.Detail := 'the file changed since this was recorded';
       Exit(True);
     end;
-    if (ARecord.BeforeHash <> '') and (not AForward) and
-      (AHasher(Current) <> ARecord.BeforeHash) then
+    if (ARecord.Kind <> ckCreated) and (ARecord.BeforeHash <> '') and
+      (not AForward) and (AHasher(Current) <> ARecord.BeforeHash) then
     begin
       AResult.Outcome := rvMoved;
       AResult.Detail := 'the file changed since this was recorded';

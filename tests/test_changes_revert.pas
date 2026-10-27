@@ -39,6 +39,7 @@ type
       leaves a file the operator never had, and redo then has nothing sensible to
       apply against. }
     procedure TestRevertOfACreationDeletesTheFile;
+    procedure TestRevertOfACreationIgnoresLaterContent;
     { Reverting a DELETION must recreate it - the mirror of the above. }
     procedure TestRevertOfADeletionRecreatesTheFile;
     { Turn-level revert: all files or none. }
@@ -229,6 +230,35 @@ begin
   AssertTrue('revert ran', RevertRecord(FDir, R, FHasher.OfText, 0, Res));
   AssertEquals('outcome', Ord(rvReverted), Ord(Res.Outcome));
   AssertFalse('the file is gone, not emptied',
+    FileExists(IncludeTrailingPathDelimiter(FDir) + 'a.txt'));
+end;
+
+procedure TChangesRevertTest.TestRevertOfACreationIgnoresLaterContent;
+var
+  R: TChangeRecord;
+  Res: TRevertResult;
+  Capped: Boolean;
+begin
+  { A creation's contribution was the file EXISTING. If something later touched
+    it - including a write the log never captured, which the process tier
+    guarantees - the content no longer matches the record, but the file is still
+    the one the turn created and undoing that turn must still remove it.
+
+    This used to compare content, refuse with rvMoved, and because the suffix
+    walk stops at the first refusal, "undo five turns" silently became "undo the
+    newest one". }
+  WriteFile('a.txt', 'created'#10'and then edited by something untracked'#10);
+  R := Default(TChangeRecord);
+  R.Path := 'a.txt';
+  R.Kind := ckCreated;
+  R.BeforeHash := '';
+  R.AfterHash := FHasher.OfText('created'#10);
+  R.Patch := DiffText('', 'created'#10, DefaultPatchCapBytes, Capped);
+
+  AssertTrue('revert ran', RevertRecord(FDir, R, FHasher.OfText, 0, Res));
+  AssertEquals('reverted despite the content differing', Ord(rvReverted),
+    Ord(Res.Outcome));
+  AssertFalse('the file is gone',
     FileExists(IncludeTrailingPathDelimiter(FDir) + 'a.txt'));
 end;
 
