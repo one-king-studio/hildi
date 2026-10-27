@@ -980,6 +980,14 @@ begin
           B.Add(N, Id);
           B.Append(CurrentParent, Id);
         end;
+      tkFootnoteCallout:
+        begin
+          N := Default(TMdNode);
+          N.Kind := mnFootnoteCallout;
+          N.RefLabel := Toks[I].Text;
+          B.Add(N, Id);
+          B.Append(CurrentParent, Id);
+        end;
     end;
   end;
 end;

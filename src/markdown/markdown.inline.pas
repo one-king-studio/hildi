@@ -45,6 +45,7 @@ type
     tkClose,       { the matching emphasis run closes }
     tkLinkOpen,    { a link opens (Uri allow-listed); Text is the label }
     tkImageOpen,   { an image opens; Text is the alt text }
+    tkFootnoteCallout, { `[^label]`: Text is the label }
     tkAutolink,    { an autolink; Uri and Text both set }
     tkSoftBreak,   { a newline inside a block's text }
     tkHardBreak);  { two trailing spaces, or a backslash, before a newline }
@@ -411,6 +412,21 @@ begin
       Continue;
     end;
 
+    { footnote callout: `[^label]`, which is brace-shaped like a link but has no
+      `(uri)` after it. Checked BEFORE the link branch for that reason. }
+    if (AText[I] = '[') and (I + 1 <= Length(AText)) and (AText[I + 1] = '^') then
+    begin
+      CloseBracket := Brackets[I];
+      if CloseBracket > 0 then
+      begin
+        FlushPlain;
+        Push(Result, tkFootnoteCallout,
+          Copy(AText, I + 2, CloseBracket - I - 2), [], '');
+        I := CloseBracket + 1;
+        Continue;
+      end;
+    end;
+
     { link: the label is tokenized normally, so it closes at its `]` }
     if AText[I] = '[' then
     begin
@@ -528,6 +544,8 @@ begin
     case ATokens[I].Kind of
       tkText, tkCode, tkAutolink, tkImageOpen:
         Result := Result + ATokens[I].Text;
+      tkFootnoteCallout:
+        Result := Result + '[^' + ATokens[I].Text + ']';
       tkLinkOpen:
         Result := Result + '';
       tkSoftBreak, tkHardBreak:

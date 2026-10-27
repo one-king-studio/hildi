@@ -55,6 +55,12 @@ type
     procedure TestColonInPathIsNotAScheme;
     procedure TestAutolinkIsAllowListed;
     procedure TestImageAltAndUri;
+    { Footnote callouts: `[^label]` is brace-shaped like a link, so it must be
+      recognised BEFORE the link branch or it would be swallowed. }
+    procedure TestFootnoteCalloutIsAToken;
+    procedure TestFootnoteCalloutIsNotALink;
+    procedure TestFootnoteDefinitionLineIsNotACallout;
+    procedure TestCalloutSurvivesInProse;
   end;
 
 implementation
@@ -67,8 +73,8 @@ end;
 function TMdInlineTest.Kinds(const AText: string): string;
 const
   Names: array[TMdTokKind] of string = (
-    'text', 'code', 'open', 'close', 'linkopen', 'imageopen', 'autolink',
-    'softbreak', 'hardbreak');
+    'text', 'code', 'open', 'close', 'linkopen', 'imageopen', 'footnote',
+    'autolink', 'softbreak', 'hardbreak');
 var
   T: TMdTokenArray;
   I: Integer;
@@ -406,6 +412,60 @@ begin
   T := Tok('<javascript:alert(1)>');
   AssertTrue('not an autolink',
     (Length(T) = 0) or (T[0].Kind <> tkAutolink));
+end;
+
+procedure TMdInlineTest.TestFootnoteCalloutIsAToken;
+var
+  T: TMdTokenArray;
+begin
+  T := Tok('see[^n] here');
+  AssertEquals('three tokens', 3, Length(T));
+  AssertTrue('text first', T[0].Kind = tkText);
+  AssertTrue('then the callout', T[1].Kind = tkFootnoteCallout);
+  AssertEquals('carrying the label', 'n', string(T[1].Text));
+  AssertTrue('then more text', T[2].Kind = tkText);
+end;
+
+procedure TMdInlineTest.TestFootnoteCalloutIsNotALink;
+var
+  T: TMdTokenArray;
+  I: Integer;
+begin
+  { The regression this guards: `[^x]` has the shape of a link label, so a
+    tokenizer that checks links first would emit a link open and never close it. }
+  T := Tok('[^x]');
+  AssertEquals('one token', 1, Length(T));
+  AssertTrue('a callout, not a link', T[0].Kind = tkFootnoteCallout);
+  for I := 0 to High(T) do
+    AssertTrue('no link token', T[I].Kind <> tkLinkOpen);
+end;
+
+procedure TMdInlineTest.TestFootnoteDefinitionLineIsNotACallout;
+var
+  T: TMdTokenArray;
+begin
+  { `[^x]: note` is a DEFINITION, a block-level construct the tree handles. At
+    token level the `[^x]` part is still a callout and the `: note` follows as
+    text; the block pass consumes the whole line before this level is reached.
+
+    Asserted on TOKENS, not through Marked: Marked renders emphasis and code and
+    drops every other token kind, so my first version of this test was checking
+    the helper rather than the tokenizer. Assert the token stream directly. }
+  T := Tok('[^x]');
+  AssertEquals('one token', 1, Length(T));
+  AssertTrue('a callout', T[0].Kind = tkFootnoteCallout);
+  AssertEquals('label', 'x', string(T[0].Text));
+end;
+
+procedure TMdInlineTest.TestCalloutSurvivesInProse;
+var
+  T: TMdTokenArray;
+begin
+  T := Tok('as shown[^note], the value is 3');
+  AssertEquals('the label', 'note',
+    string(T[1].Text));
+  AssertTrue('and no text was lost',
+    Pos('the value is 3', string(TokenText(T))) > 0);
 end;
 
 procedure TMdInlineTest.TestImageAltAndUri;

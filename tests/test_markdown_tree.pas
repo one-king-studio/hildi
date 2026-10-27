@@ -598,21 +598,21 @@ procedure TMdTreeTest.TestFootnoteCalloutsAreAggregated;
 var
   Ids: TMdIntArray;
 begin
-  { GAP, recorded rather than faked. The inline tokenizer does not yet emit a
-    callout token, so `[^x]` in a body arrives as plain text and there is nothing
-    to aggregate. The QUERY works - QueryNodes over mnFootnoteCallout is the
-    mechanism - but the producer does not exist yet.
-
-    Asserting "two callouts" here would have been a test that fails until Phase 5
-    lands rather than one that describes today. When callouts are tokenized, this
-    test should assert the two labels; the no-callouts assertion below stays
-    valid either way. }
+  { The gap this test used to record is CLOSED: the inline tokenizer now emits a
+    callout token, so `[^x]` in a body is a node and aggregating it works. The
+    earlier version asserted "0 callouts, because none exist yet"; that assertion
+    is inverted here rather than deleted, so the change is visible. }
   Parse('a[^x] b[^y]' + #10 + #10 + '[^x]: first');
   Ids := FootnoteCalloutsOf(FDoc);
-  AssertEquals('no callout nodes exist yet, so none are aggregated',
-    0, Length(Ids));
-  { The DEFINITIONS are real, and they are what a footnote table needs first. }
-  AssertEquals('but the definition is aggregated', 1, Length(FootnotesOf(FDoc)));
+  AssertEquals('two callouts in the body', 2, Length(Ids));
+  AssertEquals('first label', 'x', string(NodeOf(FDoc, Ids[0]).RefLabel));
+  AssertEquals('second label', 'y', string(NodeOf(FDoc, Ids[1]).RefLabel));
+  AssertEquals('the definition is aggregated too', 1, Length(FootnotesOf(FDoc)));
+  { A callout is inline, so it lives INSIDE a paragraph, not beside it. }
+  AssertTrue('the callout is a child of a paragraph',
+    NodeOf(FDoc, Ids[0]).Parent > 0);
+  AssertTrue('and that parent is a paragraph',
+    NodeOf(FDoc, NodeOf(FDoc, Ids[0]).Parent).Kind = mnParagraph);
 end;
 
 procedure TMdTreeTest.TestFootnoteForLooksUpByLabel;
