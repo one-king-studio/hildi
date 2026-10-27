@@ -299,6 +299,15 @@ markdown-standalone: $(MARKDOWN_SRCS)
 	$(FPC) $(DEBUG) -Fu$(SRC)/markdown -FU$(DBGUNITS) -FE$(BIN) -o$(BIN)/markdown-standalone $(EXAMPLES)/markdown_standalone.pas
 	$(BIN)/markdown-standalone
 
+# A visible demo of the STREAMING parser: feed a document a few characters at a
+# time and watch finalised blocks accumulate while the open tail stays raw text.
+#   make markdown-stream-demo
+#   make markdown-stream-demo ARGS='docs/features/FEATURES.md 7'
+markdown-stream-demo: $(MARKDOWN_SRCS)
+	@mkdir -p $(BIN) $(DBGUNITS)
+	$(FPC) $(DEBUG) -Fu$(SRC)/markdown -FU$(DBGUNITS) -FE$(BIN) -o$(BIN)/markdown-stream-demo $(EXAMPLES)/markdown_stream_demo.pas
+	$(BIN)/markdown-stream-demo $(ARGS)
+
 # A developer demo: parse sample scripts and print the AST the library built.
 # Pass a script to dump just that one: make shell-ast SCRIPT='echo hi | cat'
 shell-ast: $(SHELL_SRCS)
@@ -465,4 +474,5 @@ help:
 	@echo "  make shell-standalone         build & run the shell library with no harness unit"
 	@echo "  make changes-standalone       build & run the changes library with no harness unit"
 	@echo "  make markdown-standalone      build & run the markdown library with no harness or tui unit"
+	@echo "  make markdown-stream-demo     watch the streaming parser finalise blocks
 	@echo "  make clean                    remove build artifacts"
