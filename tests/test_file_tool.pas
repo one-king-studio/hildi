@@ -71,6 +71,10 @@ type
       capture path at all, so file_write and file_edit were invisible to undo, the
       turn summary, the diff viewer and revert. }
     procedure TestWriteFileReportsItsChange;
+    { An append is a modification of the whole file: its before-text is the prior
+      content and its after-text is that plus the appended bytes. Without the
+      before-side the diff would show the entire file as added. }
+    procedure TestAppendFileReportsItsChange;
     procedure TestRefusedWriteLeavesNoFile;
     procedure TestEditFileSingleReplace;
     procedure TestEditFileAmbiguous;
@@ -366,6 +370,33 @@ begin
   AssertEquals('the path is workspace-relative', 'sub/b.txt', FChangePath);
   AssertEquals('a new file is a creation', Ord(fcCreated), Ord(FChangeKind));
   AssertEquals('the after-text is the content', 'hello'#10'world', FAfter);
+end;
+
+procedure TFileToolTest.TestAppendFileReportsItsChange;
+var
+  Res, Err: string;
+  Cfg2: TFileToolConfig;
+  Tool2: TFileTool;
+begin
+  { An append must reach the change log too. Its before-text is the prior
+    content, which is exactly why the read happens before the write: with no
+    before-side the diff would show the whole file as added. }
+  WriteRaw(Full('a.txt'), 'one'#10);
+  FChanges := 0;
+  Cfg2 := Cfg;
+  Cfg2.OnChanges := NoteChanges;
+  Tool2 := TFileTool.Create(Cfg2, FApproval);
+  try
+    AssertTrue('ok', Tool2.AppendFile(
+      Args(['path', 'a.txt', 'content', 'two'#10, 'reason', 'r']), Res, Err));
+  finally
+    Tool2.Free;
+  end;
+  AssertEquals('one change reported', 1, FChanges);
+  AssertEquals('a path', 'a.txt', FChangePath);
+  AssertEquals('an append modifies', Ord(fcModified), Ord(FChangeKind));
+  AssertEquals('the before-text is the prior content', 'one'#10, FBefore);
+  AssertEquals('and the after-text is both', 'one'#10'two'#10, FAfter);
 end;
 
 procedure TFileToolTest.TestRefusedWriteLeavesNoFile;

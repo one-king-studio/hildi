@@ -1113,8 +1113,10 @@ function TFileTool.AppendFile(const AArgumentsJson: string;
 var
   Data: TJSONData;
   Root: TJSONObject;
-  Rel, Abs, PathArg, Content: string;
+  Rel, Abs, PathArg, Content, Before, ReadErr: string;
   FS: TFileStream;
+  BeforeKind: TFileChangeKind;
+  BeforeOk, Truncated, Binary: Boolean;
 begin
   AResult := '';
   AError := '';
@@ -1139,6 +1141,18 @@ begin
       ToolReasonOf(AArgumentsJson), Rel, [Rel], AError) then
       Exit(False);
     ForceDirectories(ExtractFileDir(Abs));
+    { The prior text, read before the append: an append's "before" is the whole
+      file, so without it the record could only carry a size and the diff would
+      show the entire file as added. }
+    BeforeKind := fcCreated;
+    Before := '';
+    BeforeOk := False;
+    if FileExists(Abs) then
+    begin
+      BeforeKind := fcModified;
+      if ReadTextFile(Abs, MaxRead, Before, Truncated, Binary, ReadErr) then
+        BeforeOk := not Binary;
+    end;
     try
       if FileExists(Abs) then
         FS := TFileStream.Create(Abs, fmOpenReadWrite or fmShareDenyNone)
@@ -1158,6 +1172,14 @@ begin
         Exit(False);
       end;
     end;
+    { The change log sees an append as a modification of the whole file, which is
+      what it actually is - the after-text is the old text plus the appended
+      bytes, and that is what the diff must compare against. }
+    if AObserver <> nil then
+      ReportWrite(Rel, Before, Before + Content, BeforeKind,
+        AObserver.ToolCallId)
+    else
+      ReportWrite(Rel, Before, Before + Content, BeforeKind, '');
     AResult := 'appended ' + IntToStr(Length(Content)) + ' bytes to ' + Rel;
     Result := True;
   finally
@@ -1713,6 +1735,12 @@ begin
     begin
       if not WriteAtomic(Abs, NewText, AError) then
         Exit(False);
+      { Both texts are in hand: ReadRawFile gave the before, RegexReplace the
+        after. Reporting here is what keeps a regex-replace visible to undo. }
+      if AObserver <> nil then
+        ReportWrite(Rel, Text, NewText, fcModified, AObserver.ToolCallId)
+      else
+        ReportWrite(Rel, Text, NewText, fcModified, '');
     end;
     AResult := '{"replaced":' + IntToStr(Count) + ',"path":"' + Rel + '"}';
     Result := True;
@@ -1791,6 +1819,13 @@ begin
       begin
         if not WriteAtomic(Files[I], NewText, AError) then
           Exit(False);
+        { A dry run writes nothing, so it reports nothing - which is why this
+          sits inside the guard. }
+        if AObserver <> nil then
+          ReportWrite(RelOf(Files[I]), Text, NewText, fcModified,
+            AObserver.ToolCallId)
+        else
+          ReportWrite(RelOf(Files[I]), Text, NewText, fcModified, '');
       end;
     end;
     AResult := '{"files":[' + Paths + '],"replacements":' + IntToStr(Total) +
