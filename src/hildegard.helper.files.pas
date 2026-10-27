@@ -15,13 +15,31 @@ interface
 uses
   Classes, SysUtils, fpjson, regexpr,
   hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.approval,
-  hildegard.helper.workspace, hildegard.helper.yaml, hildegard.helper.patch;
+  hildegard.helper.workspace, hildegard.helper.workspace.changes,
+  hildegard.helper.yaml, hildegard.helper.patch;
 
 type
+  { Reports what a file tool wrote, so the change log can record it.
+
+    The file tools had NO capture path at all: TFileToolConfig carried only Root
+    and two size caps, and every write went through WriteAtomic with nothing
+    telling the recorder. So file_write and file_edit - the commonest way an
+    agent edits - were invisible to undo, the turn summary, the diff viewer and
+    revert. run_command was captured (its executor wraps the shell's FS seam in
+    TChangeCollector); the file tools were not.
+
+    Same signature as TCommandChangesEvent so the session wires one handler to
+    both. }
+  TFileChangesEvent = procedure(const AChanges: TFileChangeSet;
+    const AToolCallId: string) of object;
+
   TFileToolConfig = record
     Root: string;             // workspace root; '' => process cwd
     MaxReadBytes: Integer;    // 0 => DefaultMaxReadBytes
     MaxOutputBytes: Integer;  // 0 => DefaultMaxOutputBytes (list/glob/grep)
+    { nil => nobody tracks writes, which is the honest default for a caller that
+      has no change log. }
+    OnChanges: TFileChangesEvent;
   end;
 
   TFileTool = class(TInterfacedObject)
@@ -30,6 +48,9 @@ type
     FService: IApprovalService;
     FWorkspace: TWorkspace;
     function RelOf(const AAbs: string): string;
+    { Report one write to the change log, if a handler is configured. }
+    procedure ReportWrite(const ARel, ABefore, AAfter: string;
+      AKind: TFileChangeKind; const AToolCallId: string);
     function ResolveChecked(const ARel: string; out AAbs, AErr: string): Boolean;
     function Approve(const ARef, ASummary, AReason, APath: string;
       const AParams: TApprovalParams; out AError: string): Boolean;
@@ -388,6 +409,45 @@ begin
   Result := Copy(AAbs, Length(FWorkspace.Root) + 2, MaxInt);
 end;
 
+procedure TFileTool.ReportWrite(const ARel, ABefore, AAfter: string;
+  AKind: TFileChangeKind; const AToolCallId: string);
+var
+  Set_: TFileChangeSet;
+  C: TFileChange;
+begin
+  { A file write must reach the change log, or undo, the turn summary, the diff
+    viewer and revert all silently ignore it. This unit had NO reporting path
+    before: only run_command was captured, via its executor's collector.
+
+    The two texts are in hand at every caller, which is exactly what the patch
+    needs - a hash alone could not produce a diff. Captured is true only when the
+    after-side is readable text; BeforeCaptured only when the before-side is, and
+    they are independent because a creation has no before and a deletion no
+    after. }
+  if not Assigned(FConfig.OnChanges) then
+    Exit;
+  Set_ := TFileChangeSet.Create;
+  try
+    C := Default(TFileChange);
+    C.Path := ARel;
+    C.Kind := AKind;
+    C.IsDir := False;
+    C.Before := ABefore;
+    C.After := AAfter;
+    C.BeforeSize := Length(ABefore);
+    C.AfterSize := Length(AAfter);
+    { A side is 'captured' when the caller passed real text for it. An empty
+      string is ambiguous for a creation vs a truncated read, so the caller's
+      KIND decides: a creation has no before by definition, a deletion no after. }
+    C.BeforeCaptured := AKind <> fcCreated;
+    C.Captured := AKind <> fcDeleted;
+    Set_.Add(C);
+    FConfig.OnChanges(Set_, AToolCallId);
+  finally
+    Set_.Free;
+  end;
+end;
+
 function TFileTool.ResolveChecked(const ARel: string;
   out AAbs, AErr: string): Boolean;
 var
@@ -679,7 +739,9 @@ function TFileTool.WriteFile(const AArgumentsJson: string;
 var
   Data: TJSONData;
   Root: TJSONObject;
-  Rel, Abs, PathArg, Content: string;
+  Rel, Abs, PathArg, Content, Before, ReadErr: string;
+  BeforeKind: TFileChangeKind;
+  BeforeOk, Truncated, Binary: Boolean;
 begin
   AResult := '';
   AError := '';
@@ -704,8 +766,30 @@ begin
       Rel, [Rel], AError) then
       Exit(False);
     ForceDirectories(ExtractFileDir(Abs));
+    { The prior text is read BEFORE writing, so the record can carry a real diff:
+      a hash alone cannot produce one, and afterwards the old bytes are gone. A
+      missing file is a creation, not a failed read. }
+    BeforeKind := fcCreated;
+    Before := '';
+    BeforeOk := False;
+    if FileExists(Abs) then
+    begin
+      BeforeKind := fcModified;
+      if ReadTextFile(Abs, MaxRead, Before, Truncated, Binary, ReadErr) then
+        BeforeOk := not Binary
+      else
+        Before := '';
+    end;
     if not WriteAtomic(Abs, Content, AError) then
       Exit(False);
+    { A file that was not there is a creation; one that was is a modification. }
+    if BeforeOk or FileExists(Abs) then
+    begin
+      if AObserver <> nil then
+        ReportWrite(Rel, Before, Content, BeforeKind, AObserver.ToolCallId)
+      else
+        ReportWrite(Rel, Before, Content, BeforeKind, '');
+    end;
     AResult := 'wrote ' + IntToStr(Length(Content)) + ' bytes to ' + Rel;
     Result := True;
   finally
@@ -802,6 +886,12 @@ begin
     end;
     if not WriteAtomic(Abs, Updated, AError) then
       Exit(False);
+    { Both texts are already in hand here - the whole point of an edit is that it
+      read the old text to replace in. No re-read needed. }
+    if AObserver <> nil then
+      ReportWrite(Rel, Text, Updated, fcModified, AObserver.ToolCallId)
+    else
+      ReportWrite(Rel, Text, Updated, fcModified, '');
     AResult := 'replaced ' + IntToStr(Count) + ' occurrence(s) in ' + Rel;
     Result := True;
   finally

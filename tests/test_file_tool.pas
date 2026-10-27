@@ -11,7 +11,8 @@ uses
   Classes, SysUtils, fpcunit, testregistry,
   {$ifdef unix}BaseUnix,{$endif}
   hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.approval,
-  hildegard.helper.workspace, hildegard.helper.files;
+  hildegard.helper.workspace, hildegard.helper.workspace.changes,
+  hildegard.helper.files;
 
 {$ifdef unix}
 function c_symlink(ATarget, ALinkPath: PAnsiChar): cint; cdecl;
@@ -44,7 +45,15 @@ type
     FDir: string;
     FApproval: TFakeApproval;
     FTool: TFileTool;
+    { Capture what a write reports, so the test can assert the change log would
+      have seen it. }
+    FChanges: Integer;
+    FChangePath: string;
+    FChangeKind: TFileChangeKind;
+    FBefore, FAfter: string;
     function Cfg: TFileToolConfig;
+    procedure NoteChanges(const AChanges: TFileChangeSet;
+      const AToolCallId: string);
     function Str(const AKey, AValue: string): string;
     function Args(const APairs: array of string): string;
     procedure WriteRaw(const APath, AText: string);
@@ -58,6 +67,10 @@ type
     procedure TestReadFileOffsetLimit;
     procedure TestReadErrors;
     procedure TestWriteFileCreatesAndReports;
+    { A file write must reach the change log. It did not: the file tools had no
+      capture path at all, so file_write and file_edit were invisible to undo, the
+      turn summary, the diff viewer and revert. }
+    procedure TestWriteFileReportsItsChange;
     procedure TestRefusedWriteLeavesNoFile;
     procedure TestEditFileSingleReplace;
     procedure TestEditFileAmbiguous;
@@ -191,6 +204,22 @@ begin
     RemoveTree(FDir);
 end;
 
+procedure TFileToolTest.NoteChanges(const AChanges: TFileChangeSet;
+  const AToolCallId: string);
+var
+  C: TFileChange;
+begin
+  Inc(FChanges);
+  if AChanges.Count > 0 then
+  begin
+    C := AChanges[0];
+    FChangePath := C.Path;
+    FChangeKind := C.Kind;
+    FBefore := C.Before;
+    FAfter := C.After;
+  end;
+end;
+
 function TFileToolTest.Cfg: TFileToolConfig;
 begin
   Result := Default(TFileToolConfig);
@@ -312,6 +341,31 @@ begin
   AssertEquals('content written', 'hello'#10'world', ReadRaw(Full('sub/a.txt')));
   AssertTrue('reports', Pos('wrote', Res) > 0);
   AssertEquals('asked for write', 'file:write', FApproval.LastRef);
+end;
+
+procedure TFileToolTest.TestWriteFileReportsItsChange;
+var
+  Res, Err: string;
+  Cfg2: TFileToolConfig;
+  Tool2: TFileTool;
+begin
+  { The change must reach the log, or undo, the turn summary, the diff viewer and
+    revert are all blind to the commonest way an agent edits files. }
+  FChanges := 0;
+  Cfg2 := Cfg;
+  Cfg2.OnChanges := NoteChanges;
+  Tool2 := TFileTool.Create(Cfg2, FApproval);
+  try
+    AssertTrue('ok', Tool2.WriteFile(
+      Args(['path', 'sub/b.txt', 'content', 'hello'#10'world', 'reason', 'r']),
+      Res, Err));
+  finally
+    Tool2.Free;
+  end;
+  AssertEquals('one change reported', 1, FChanges);
+  AssertEquals('the path is workspace-relative', 'sub/b.txt', FChangePath);
+  AssertEquals('a new file is a creation', Ord(fcCreated), Ord(FChangeKind));
+  AssertEquals('the after-text is the content', 'hello'#10'world', FAfter);
 end;
 
 procedure TFileToolTest.TestRefusedWriteLeavesNoFile;

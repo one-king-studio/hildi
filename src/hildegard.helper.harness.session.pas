@@ -1276,6 +1276,12 @@ begin
 
   FileConfig := Default(TFileToolConfig);
   FileConfig.Root := FView.WorkspaceRoot;
+  { The same handler the command tool uses. Without this the file tools write
+    with no record at all - undo, the turn summary, the diff viewer and revert
+    would all be blind to file_write and file_edit, which is how an agent most
+    often edits. }
+  if FRecorder <> nil then
+    FileConfig.OnChanges := RecordChanges;
   FFileTool := TFileTool.Create(FileConfig, ApprovalService);
   FFileTool.Register(FTools);
 
