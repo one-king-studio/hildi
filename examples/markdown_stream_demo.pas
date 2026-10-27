@@ -47,6 +47,37 @@ const
     '| - | - |' + #10 +
     '| 1 | 2 |' + #10;
 
+type
+  { A SINK that prints as blocks close. This is the shape a renderer wants: it is
+    TOLD when a block is final, so it appends one widget and never revisits it.
+    No observables, no Subscribe, no teardown - one consumer, caller-owned. }
+  TPrintingSink = class(TInterfacedObject, IMdStreamSink)
+  public
+    Enabled: Boolean;
+    procedure OnBlockClosed(const AId: Integer);
+    procedure OnTailChanged(const ATail: UnicodeString);
+    procedure OnCompleted;
+  end;
+
+procedure TPrintingSink.OnBlockClosed(const AId: Integer);
+begin
+  if Enabled then
+    WriteLn('      sink: block ' + IntToStr(AId) + ' closed');
+end;
+
+procedure TPrintingSink.OnTailChanged(const ATail: UnicodeString);
+begin
+  { Left empty on purpose: a polling renderer reads TailText on its own clock, and
+    a sink that repainted would want to coalesce this. Implement it only if the
+    consumer is event-driven. }
+end;
+
+procedure TPrintingSink.OnCompleted;
+begin
+  if Enabled then
+    WriteLn('      sink: stream completed');
+end;
+
 function Sha1Short(const S: string): string;
 var
   I: Integer;
@@ -119,6 +150,7 @@ var
   Chunk: string;
   BatchKinds, StreamKinds: string;
   Batch: TMdDocument;
+  Sink: TPrintingSink;
   Root: TMdNode;
   J: Integer;
 
@@ -142,7 +174,10 @@ var
 begin
   WriteLn('streaming ', Length(AText), ' chars, ', AChunkSize, ' at a time');
   WriteLn(StringOfChar('-', 72));
-  S := TMarkdownStream.Create;
+  { Every 4th chunk, show the sink being told rather than the demo polling. }
+  Sink := TPrintingSink.Create;
+  Sink.Enabled := False;
+  S := TMarkdownStream.Create(Sink);
   try
     I := 1;
     Step := 0;
@@ -157,6 +192,11 @@ begin
         Inc(Step);
         ShowState(S, Step, '''' + StringReplace(Chunk, #10, '\n',
           [rfReplaceAll]) + '''', True);
+        { Enable the sink for the whole run: gating it on "every 4th chunk" was
+          fragile, because a block may not close on one of those steps and the
+          demo then showed no sink output at all - a demo that silently
+          demonstrates nothing. }
+        Sink.Enabled := True;
       end;
       S.Append(Chunk);
       Inc(I, N);

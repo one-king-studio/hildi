@@ -1633,7 +1633,11 @@ begin
   { The segment's own document root is at Base (=1), so the copy STARTS AT
     Base + 1. Starting at 1 copied the segment's document node into ADoc, which
     is where the duplicate `document` nodes came from. }
-  Offset := Length(ADoc.Nodes) - 1;
+  { Length - 2, not Length - 1: index 0 is the unused slot, so with real nodes
+    1..N the length is N+1 and the next free index is N+1. A segment id of 2 must
+    land on N+1, so the offset is N-1. Using Length - 1 pushed every streamed id
+    one past the end, and NodeOf returned a zeroed node for a real block. }
+  Offset := Length(ADoc.Nodes) - 2;
   for I := Base + 1 to B.Count - 1 do
   begin
     N := B.Nodes[I];

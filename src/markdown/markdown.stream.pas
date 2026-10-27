@@ -28,11 +28,35 @@ unit markdown.stream;
 interface
 
 uses
+  Classes,   { TStream, for FeedFrom. RTL/FCL, so the module stays pure. }
   markdown.types, markdown.tree;
 
 type
   TMdOpenKind = (okNone, okFence, okCustom, okMath, okText, okList, okTable,
     okQuote);
+
+  { A SINK: the receiving end of a stream, the way an IObserver is the receiving
+    end of an observable - but without the observable machinery (no Subscribe, no
+    multicast, no teardown, no operators), because a parse has exactly one
+    consumer and its lifetime is the caller's.
+
+    Deliberately NOT a TStream: TStream is a byte buffer you Read/Write, and has
+    no way to say "block 7 closed". The payload here is structural events, not
+    bytes. Where TStream does help is the INPUT side - see FeedFrom below.
+
+    All methods are optional: implement what you need and leave the rest empty
+    (a sink that only wants completion overrides OnCompleted alone). }
+  IMdStreamSink = interface
+    { A block finished and will never be re-parsed. AId is its node id in the
+      document being built. This is the event a renderer needs: it can append one
+      widget and never touch it again. }
+    procedure OnBlockClosed(const AId: Integer);
+    { The open tail changed (more characters arrived). A polling renderer can
+      ignore this and read TailText on its own clock. }
+    procedure OnTailChanged(const ATail: UnicodeString);
+    { The stream ended. No further notifications follow. }
+    procedure OnCompleted;
+  end;
 
   { The open segment's lines. Local to this unit: markdown.tree's equivalent is
     private to it. }
@@ -48,11 +72,17 @@ type
     FOpen: TMdOpenKind;
     FMarker: UnicodeString;  { the opening fence marker, for okFence }
     FStarted: Boolean;       { whether the document root exists }
+    FSink: IMdStreamSink;    { optional; not owned }
+    FTailNotified: UnicodeString;
+    FCompleted: Boolean;
     procedure EnsureRoot;
+    procedure NotifyBlocksClosed(const AFromId: Integer);
+    procedure NotifyTail;
     procedure AddLine(const ALine: UnicodeString);
     procedure CloseSegment;
   public
-    constructor Create;
+    { ASink is optional and NOT owned: the caller decides its lifetime. }
+    constructor Create(const ASink: IMdStreamSink = nil);
     { Append a chunk. Lines complete inside the chunk are processed now. }
     procedure Append(const AChunk: string);
     { End of stream: close the open segment. Idempotent. }
@@ -66,10 +96,12 @@ type
     function FinalizedCount: Integer;
     { The kind currently open, for a caller that wants to know. }
     function OpenKind: TMdOpenKind;
+    { Feed every remaining byte of AStream through Append, then Finish. This is
+      the convenience TStream is genuinely FOR: a file or socket is bytes, the
+      parser wants chunks, and this bridges them without the caller writing a
+      read loop. }
+    procedure FeedFrom(AStream: TStream; ABufSize: Integer = 8192);
   end;
-
-{ Append ASrc's nodes to ADest, renumbering ids. Exposed for tests. }
-procedure MergeInto(var ADest: TMdDocument; const ASrc: TMdDocument);
 
 implementation
 
@@ -253,7 +285,7 @@ end;
 
 { --- TMarkdownStream ------------------------------------------------------- }
 
-constructor TMarkdownStream.Create;
+constructor TMarkdownStream.Create(const ASink: IMdStreamSink);
 begin
   inherited Create;
   FDoc := Default(TMdDocument);
@@ -262,6 +294,37 @@ begin
   FOpen := okNone;
   FMarker := '';
   FStarted := False;
+  FSink := ASink;
+  FTailNotified := '';
+  FCompleted := False;
+end;
+
+{ Tell the sink which blocks newly closed. Ids are contiguous and monotonic, so
+  the range [AFromId .. count-1] is exactly the new blocks. }
+procedure TMarkdownStream.NotifyBlocksClosed(const AFromId: Integer);
+var
+  I: Integer;
+begin
+  if not Assigned(FSink) then
+    Exit;
+  EnsureRoot;
+  for I := AFromId to Length(FDoc.Nodes[FDoc.Root].Children) - 1 do
+    FSink.OnBlockClosed(FDoc.Nodes[FDoc.Root].Children[I]);
+end;
+
+{ Notify on an ACTUAL change: a sink that repaints would otherwise be told the
+  same tail thousands of times for a long block. }
+procedure TMarkdownStream.NotifyTail;
+var
+  T: UnicodeString;
+begin
+  if not Assigned(FSink) then
+    Exit;
+  T := TailText;
+  if T = FTailNotified then
+    Exit;
+  FTailNotified := T;
+  FSink.OnTailChanged(T);
 end;
 
 procedure TMarkdownStream.EnsureRoot;
@@ -284,7 +347,7 @@ end;
 procedure TMarkdownStream.CloseSegment;
 var
   Text: UnicodeString;
-  I, NewCount: Integer;
+  I, NewCount, Before: Integer;
 begin
   if Length(FBuffer) = 0 then
   begin
@@ -316,6 +379,7 @@ begin
   SetLength(Text, NewCount);
 
   EnsureRoot;
+  Before := Length(FDoc.Nodes[FDoc.Root].Children);
   { Parse the segment INTO this document. No temporary TMdDocument, no MergeInto,
     no OffsetMap: ids continue from where this document left off, which removes
     the per-block allocation burst the streaming requirement is about. }
@@ -323,6 +387,7 @@ begin
   FBuffer := nil;
   FOpen := okNone;
   FMarker := '';
+  NotifyBlocksClosed(Before);
 end;
 
 procedure TMarkdownStream.AddLine(const ALine: UnicodeString);
@@ -417,6 +482,7 @@ begin
     P := Pos(#10, S);
   end;
   FPartial := S;
+  NotifyTail;
 end;
 
 procedure TMarkdownStream.Finish;
@@ -427,6 +493,30 @@ begin
     FPartial := '';
   end;
   CloseSegment;
+  NotifyTail;
+  { Exactly once: Finish is documented as idempotent, so a second call must not
+    report a second completion. }
+  if Assigned(FSink) and not FCompleted then
+  begin
+    FCompleted := True;
+    FSink.OnCompleted;
+  end;
+end;
+
+procedure TMarkdownStream.FeedFrom(AStream: TStream; ABufSize: Integer);
+var
+  Buf: AnsiString;
+  Got: Integer;
+begin
+  if (AStream = nil) or (ABufSize < 1) then
+    Exit;
+  SetLength(Buf, ABufSize);
+  repeat
+    Got := AStream.Read(Buf[1], ABufSize);
+    if Got > 0 then
+      Append(Copy(Buf, 1, Got));
+  until Got <= 0;
+  Finish;
 end;
 
 function TMarkdownStream.Document: TMdDocument;

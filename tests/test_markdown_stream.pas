@@ -42,9 +42,50 @@ type
     procedure TestFinalizedCountGrowsMonotonically;
     procedure TestEmptyStream;
     procedure TestOpenKindIsReported;
+    { The SINK: the receiving end, without observable machinery. }
+    procedure TestSinkIsNotifiedOfEachClosedBlock;
+    procedure TestSinkTailIsNotifiedOnlyOnChange;
+    procedure TestSinkCompletedOnce;
+    procedure TestNoSinkIsFine;
+    { TStream is the INPUT side. }
+    procedure TestFeedFromAStreamMatchesAppend;
   end;
 
 implementation
+
+type
+  { Local: markdown.tree's TMdIntArray is exported, but a plain int array keeps
+    this test independent of the tree's naming. }
+  TIntArray = array of Integer;
+
+  { A sink that records what it was told. }
+  TRecordingSink = class(TInterfacedObject, IMdStreamSink)
+  public
+    Blocks: TIntArray;
+    Tails: Integer;
+    LastTail: UnicodeString;
+    Completed: Integer;
+    procedure OnBlockClosed(const AId: Integer);
+    procedure OnTailChanged(const ATail: UnicodeString);
+    procedure OnCompleted;
+  end;
+
+procedure TRecordingSink.OnBlockClosed(const AId: Integer);
+begin
+  SetLength(Blocks, Length(Blocks) + 1);
+  Blocks[High(Blocks)] := AId;
+end;
+
+procedure TRecordingSink.OnTailChanged(const ATail: UnicodeString);
+begin
+  Inc(Tails);
+  LastTail := ATail;
+end;
+
+procedure TRecordingSink.OnCompleted;
+begin
+  Inc(Completed);
+end;
 
 function TMdStreamTest.KindsOf(const ADoc: TMdDocument): string;
 var
@@ -371,6 +412,119 @@ begin
     AssertTrue('closed', S.OpenKind = okNone);
   finally
     S.Free;
+  end;
+end;
+
+procedure TMdStreamTest.TestSinkIsNotifiedOfEachClosedBlock;
+var
+  Sink: TRecordingSink;
+  S: TMarkdownStream;
+begin
+  Sink := TRecordingSink.Create;
+  S := TMarkdownStream.Create(Sink);
+  try
+    S.Append('# one' + #10 + #10 + '# two' + #10 + #10);
+    S.Finish;
+    { Two headings closed, so two notifications - and the ids are real node ids
+      the caller could hand to NodeOf. }
+    AssertEquals('two blocks announced', 2, Length(Sink.Blocks));
+    AssertTrue('a usable id', Sink.Blocks[0] > 0);
+    AssertTrue('and it is in the document',
+      NodeOf(S.Document, Sink.Blocks[0]).Kind = mnHeading);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TMdStreamTest.TestSinkTailIsNotifiedOnlyOnChange;
+var
+  Sink: TRecordingSink;
+  S: TMarkdownStream;
+  Before: Integer;
+begin
+  Sink := TRecordingSink.Create;
+  S := TMarkdownStream.Create(Sink);
+  try
+    S.Append('abc');
+    Before := Sink.Tails;
+    AssertTrue('the tail was announced', Before >= 1);
+    { Appending nothing new must not re-announce: a repainting sink would
+      otherwise be told the same tail on every tick. }
+    S.Append('');
+    AssertEquals('no spurious notification', Before, Sink.Tails);
+    S.Append('def');
+    AssertTrue('a real change is announced', Sink.Tails > Before);
+    AssertEquals('and the tail is current', 'abcdef', string(Sink.LastTail));
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TMdStreamTest.TestSinkCompletedOnce;
+var
+  Sink: TRecordingSink;
+  S: TMarkdownStream;
+begin
+  Sink := TRecordingSink.Create;
+  S := TMarkdownStream.Create(Sink);
+  try
+    S.Append('a' + #10);
+    S.Finish;
+    S.Finish;
+    { Completion is not deduplicated and not repeatable: exactly once. }
+    AssertEquals('one completion', 1, Sink.Completed);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TMdStreamTest.TestNoSinkIsFine;
+var
+  S: TMarkdownStream;
+begin
+  { The sink is optional, so the polling caller needs no boilerplate. }
+  S := TMarkdownStream.Create;
+  try
+    S.Append('# h' + #10 + #10);
+    S.Finish;
+    AssertEquals('it still parsed', 1, S.FinalizedCount);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TMdStreamTest.TestFeedFromAStreamMatchesAppend;
+var
+  Mem: TMemoryStream;
+  Text: string;
+  A, B: TMarkdownStream;
+begin
+  { TStream belongs on the INPUT side: a file or socket is bytes, and FeedFrom
+    bridges them to a chunk parser without the caller writing a read loop. }
+  Text := '# h' + #10 + #10 + '- a' + #10 + '- b' + #10 + #10 + '> q' + #10;
+  Mem := TMemoryStream.Create;
+  try
+    Mem.Write(Text[1], Length(Text));
+    Mem.Position := 0;
+
+    A := TMarkdownStream.Create;
+    try
+      A.FeedFrom(Mem, 5);
+      Mem.Position := 0;
+      B := TMarkdownStream.Create;
+      try
+        B.Append(Text);
+        B.Finish;
+        AssertEquals('same block count', B.FinalizedCount, A.FinalizedCount);
+        AssertEquals('same kinds', KindsOf(B.Document), KindsOf(A.Document));
+      finally
+        B.Free;
+      end;
+    finally
+      A.Free;
+    end;
+  finally
+    Mem.Free;
   end;
 end;
 
