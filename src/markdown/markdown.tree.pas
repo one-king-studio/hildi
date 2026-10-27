@@ -1447,6 +1447,34 @@ end;
   One `key: value` per line; a `#` comment and a blank line are skipped; a line
   with no colon is kept as a key with an empty value rather than dropped, so a
   malformed entry is visible instead of silently vanishing. }
+{ True when the candidate block carries a METADATA KEY. Presence is the signal,
+  not a non-empty value: `title:` with an empty value is still frontmatter.
+  This mirrors hildegard.helper.replymeta.BlockCarriesMeta on purpose - the
+  response layer decides whether a reply HAS frontmatter, and the parser must
+  agree with it about what frontmatter looks like, or one of them will silently
+  disagree with the other about the same bytes. }
+function BlockCarriesMeta(const ALines: TStrArray; AClose: Integer): Boolean;
+var
+  I, C: Integer;
+  Line, Key: UnicodeString;
+begin
+  Result := False;
+  for I := 1 to AClose - 1 do
+  begin
+    Line := TrimU(ALines[I]);
+    if (Line = '') or (Line[1] = '-') or (Line[1] = '#') then
+      Continue;
+    C := Pos(':', Line);
+    if C <= 0 then
+      Continue;
+    { UTF8Decode, not an implicit conversion: the implicit form is a
+      warning-as-error here, and LowerCase works on the string bytes. }
+    Key := UnicodeString(LowerCase(UTF8Encode(TrimU(Copy(Line, 1, C - 1)))));
+    if (Key = 'title') or (Key = 'keywords') then
+      Exit(True);
+  end;
+end;
+
 procedure SplitMetadata(const ALines: TStrArray; AClose: Integer;
   out AMeta: TMdMetaArray; out ARaw: UnicodeString);
 var
@@ -1491,9 +1519,18 @@ begin
   Result.Root := RootId;
   Lines := SplitLines(UnicodeString(AText));
 
-  { Frontmatter: only when the document STARTS with `---` and a closing `---`
-    line exists. A leading `---` with no closing line is a thematic break, not an
-    unterminated frontmatter block, and treating it as one would eat the document. }
+  { Frontmatter, following the SAME rule the response layer uses
+    (hildegard.helper.replymeta): a fence block is frontmatter only when it
+    carries a `title` or `keywords` key. Two consequences, both deliberate:
+
+    - a leading `---` with no closing fence is a thematic break, not an
+      unterminated block, so it cannot eat the document;
+    - a `---` fence carrying NO metadata key is ordinary markdown (a rule, or a
+      table separator), which is what it looks like to a reader.
+
+    This parser does not ENFORCE that a reply has frontmatter - that is the
+    response protocol's job, and it already owns it in replymeta behind the
+    prompt contract. Here we only follow the rules for recognising it. }
   BodyFrom := 0;
   if (Length(Lines) > 1) and (TrimU(Lines[0]) = '---') then
   begin
@@ -1504,7 +1541,7 @@ begin
         CloseAt := K;
         Break;
       end;
-    if CloseAt > 0 then
+    if (CloseAt > 0) and BlockCarriesMeta(Lines, CloseAt) then
     begin
       SplitMetadata(Lines, CloseAt, Result.Metadata, Result.MetadataRaw);
       BodyFrom := CloseAt + 1;

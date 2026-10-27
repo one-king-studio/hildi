@@ -54,6 +54,11 @@ type
     procedure TestFrontmatterWithACommentAndBlankLine;
     procedure TestFrontmatterRawIsPreserved;
     procedure TestNoFrontmatterLeavesMetadataEmpty;
+    { The parser FOLLOWS the frontmatter rules; it does not enforce presence.
+      These pin the recognition rule it shares with the response layer. }
+    procedure TestAFenceWithoutAMetadataKeyIsABreak;
+    procedure TestFrontmatterKeyPresenceIsTheSignalNotItsValue;
+    procedure TestBodyWithoutFrontmatterParsesNormally;
   end;
 
 implementation
@@ -404,9 +409,52 @@ end;
 
 procedure TMdTreeTest.TestFrontmatterRawIsPreserved;
 begin
-  Parse('---' + #10 + 'a: 1' + #10 + 'b: 2' + #10 + '---' + #10 + 'body');
-  AssertEquals('raw keeps both lines', 'a: 1' + #10 + 'b: 2',
+  { The block must carry a metadata KEY to be frontmatter at all, so this uses
+    real keys. `a: 1` / `b: 2` alone is NOT frontmatter under the shared rule -
+    see TestAFenceWithoutAMetadataKeyIsABreak. }
+  Parse('---' + #10 + 'title: T' + #10 + 'extra: 2' + #10 + '---' + #10 + 'body');
+  AssertEquals('raw keeps every line', 'title: T' + #10 + 'extra: 2',
     string(FDoc.MetadataRaw));
+  AssertEquals('two entries parsed', 2, Length(FDoc.Metadata));
+end;
+
+procedure TMdTreeTest.TestAFenceWithoutAMetadataKeyIsABreak;
+begin
+  { A `---` fence with nothing but prose between the fences carries no `title`
+    or `keywords`, so it is ordinary markdown: a rule, text, then a rule. This is
+    the SAME rule hildegard.helper.replymeta uses, which is the point - the
+    parser and the response layer must not disagree about what frontmatter is. }
+  Parse('---' + #10 + 'just some prose' + #10 + '---');
+  AssertEquals('no metadata', 0, Length(FDoc.Metadata));
+  { My first expectation here - "two rules" - was wrong, and the failure was
+    correct: the leading `---` is a rule, and the SECOND `---` sits directly under
+    `just some prose`, which is a SETEXT heading underline. So the right shape is
+    a rule then a level-2 heading. Asserting two rules would have pinned a
+    misunderstanding of our own setext pass. }
+  AssertEquals('one rule', 1, CountOf(mnHorizontalRule));
+  AssertEquals('one heading', 1, CountOf(mnHeading));
+  AssertEquals('at level 2', 2, NodeOf(FDoc,
+    NodesOfKind(FDoc, mnHeading)[0]).Level);
+end;
+
+procedure TMdTreeTest.TestFrontmatterKeyPresenceIsTheSignalNotItsValue;
+begin
+  { `title:` with an EMPTY value is still frontmatter: the model wrote a header.
+    Presence of the key is the signal, not a non-empty value. }
+  Parse('---' + #10 + 'title:' + #10 + '---' + #10 + 'body');
+  AssertEquals('one entry', 1, Length(FDoc.Metadata));
+  AssertEquals('key', 'title', string(FDoc.Metadata[0].Key));
+  AssertEquals('empty value', '', string(FDoc.Metadata[0].Value));
+end;
+
+procedure TMdTreeTest.TestBodyWithoutFrontmatterParsesNormally;
+begin
+  { The parser does not REQUIRE frontmatter. Enforcement is the response
+    protocol's job; a body with none must parse exactly as it always did. }
+  Parse('# Heading' + #10 + #10 + 'A paragraph.');
+  AssertEquals('no metadata', 0, Length(FDoc.Metadata));
+  AssertEquals('a heading', 1, CountOf(mnHeading));
+  AssertEquals('a paragraph', 1, CountOf(mnParagraph));
 end;
 
 procedure TMdTreeTest.TestNoFrontmatterLeavesMetadataEmpty;

@@ -294,6 +294,19 @@ does not support it either).
 2. **Does `markdown.compat` ship in the library, or live under `src/tui/`?** It is pure, so
    it belongs in `src/markdown/`, but it exists for a TUI. Recommendation: keep it pure and
    in `src/markdown/`, so `markdown-standalone` proves it too.
-3. **Frontmatter: node or document field?** Recommendation: a `metadata` field on
-   `TMdDocument`, not a node, because it is not part of the document body and a renderer
-   should never walk it as content.
+3. ~~**Frontmatter: node or document field?**~~ **Decided: a document field.**
+   Metadata is not body, so a renderer must never walk it as content.
+
+   **And an ownership boundary the operator set, which is the more important
+   half: enforcing that a reply HAS frontmatter is not the parser's job.** The
+   response protocol already owns that (`hildegard.helper.replymeta` extracts the
+   block at the turn boundary, and the prompt contract asks for it). The parser
+   only FOLLOWS the rules for recognising frontmatter — the same rules replymeta
+   uses, so the two cannot disagree about the same bytes:
+
+   - a fence block is frontmatter only when it carries a `title` or `keywords`
+     key (presence of the key, not a non-empty value);
+   - a leading `---` with no closing fence is a thematic break;
+   - a fence carrying no metadata key is ordinary markdown.
+
+   The parser never refuses a document for lacking frontmatter.
