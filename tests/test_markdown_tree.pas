@@ -39,6 +39,14 @@ type
     procedure TestNodeCount;
     procedure TestNodesOfKindIsInDocumentOrder;
     procedure TestUnknownIdIsAZeroNode;
+    { v2 block syntax }
+    procedure TestFootnoteDefinitionAndCallout;
+    procedure TestLinkReferenceDefinition;
+    procedure TestMathBlock;
+    procedure TestCustomBlockContainsBlocks;
+    procedure TestHtmlBlockIsRawAndVerbatim;
+    procedure TestDescriptionList;
+    procedure TestIndentedCodeIsNotFenced;
   end;
 
 implementation
@@ -261,6 +269,99 @@ begin
   AssertTrue('ascending ids', (Heads[0] < Heads[1]) and (Heads[1] < Heads[2]));
   AssertTrue('first reads one', Pos('one', TextOf(FDoc, Heads[0])) > 0);
   AssertTrue('last reads three', Pos('three', TextOf(FDoc, Heads[2])) > 0);
+end;
+
+procedure TMdTreeTest.TestFootnoteDefinitionAndCallout;
+var
+  N: TMdNode;
+  Ids: TMdIntArray;
+begin
+  Parse('see[^n]' + #10 + #10 + '[^n]: the note');
+  AssertEquals('one footnote', 1, CountOf(mnFootnote));
+  Ids := NodesOfKind(FDoc, mnFootnote);
+  N := NodeOf(FDoc, Ids[0]);
+  AssertEquals('label', 'n', string(N.RefLabel));
+  { The body is a paragraph child, so a footnote can grow into blocks. }
+  AssertEquals('one child', 1, Length(N.Children));
+  AssertTrue('the body is a paragraph',
+    NodeOf(FDoc, N.Children[0]).Kind = mnParagraph);
+end;
+
+procedure TMdTreeTest.TestLinkReferenceDefinition;
+var
+  N: TMdNode;
+  Ids: TMdIntArray;
+begin
+  Parse('[shared]: https://example.com/a "Title"');
+  AssertEquals('one reference', 1, CountOf(mnReference));
+  Ids := NodesOfKind(FDoc, mnReference);
+  N := NodeOf(FDoc, Ids[0]);
+  AssertEquals('label', 'shared', string(N.RefLabel));
+  AssertEquals('uri', 'https://example.com/a', string(N.Uri));
+  AssertEquals('title', 'Title', string(N.Title));
+end;
+
+procedure TMdTreeTest.TestMathBlock;
+var
+  N: TMdNode;
+begin
+  Parse('$$' + #10 + 'x = 1' + #10 + '$$');
+  AssertEquals('one math block', 1, CountOf(mnMathBlock));
+  N := NodeOf(FDoc, NodesOfKind(FDoc, mnMathBlock)[0]);
+  AssertEquals('content verbatim', 'x = 1', string(N.Content));
+end;
+
+procedure TMdTreeTest.TestCustomBlockContainsBlocks;
+var
+  N: TMdNode;
+begin
+  Parse(':::note' + #10 + '- a' + #10 + ':::');
+  AssertEquals('one custom block', 1, CountOf(mnCustomBlock));
+  N := NodeOf(FDoc, NodesOfKind(FDoc, mnCustomBlock)[0]);
+  AssertEquals('name', 'note', string(N.RefLabel));
+  { A custom block's body is real markdown, not text. }
+  AssertEquals('a list inside', 1, CountOf(mnList));
+  AssertTrue('and the list is its child',
+    NodeOf(FDoc, N.Children[0]).Kind = mnList);
+end;
+
+procedure TMdTreeTest.TestHtmlBlockIsRawAndVerbatim;
+var
+  N: TMdNode;
+begin
+  Parse('<div class="x">' + #10 + '  <p>raw</p>' + #10 + '</div>');
+  AssertEquals('one html block', 1, CountOf(mnHtmlBlock));
+  N := NodeOf(FDoc, NodesOfKind(FDoc, mnHtmlBlock)[0]);
+  { Preserved byte for byte, and never parsed into nodes: a consumer must not
+    interpret it. }
+  AssertEquals('verbatim', '<div class="x">' + #10 + '  <p>raw</p>' + #10 +
+    '</div>', string(N.Content));
+  AssertEquals('no children', 0, Length(N.Children));
+end;
+
+procedure TMdTreeTest.TestDescriptionList;
+var
+  N: TMdNode;
+begin
+  Parse('Term' + #10 + ': the definition');
+  AssertEquals('one list', 1, CountOf(mnDescriptionList));
+  AssertEquals('one term', 1, CountOf(mnDescriptionTerm));
+  AssertEquals('one description', 1, CountOf(mnDescription));
+  N := NodeOf(FDoc, NodesOfKind(FDoc, mnDescriptionList)[0]);
+  AssertEquals('two children', 2, Length(N.Children));
+  AssertEquals('chain', 'document > description_list > description_term > text',
+    Chain(FDoc));
+end;
+
+procedure TMdTreeTest.TestIndentedCodeIsNotFenced;
+var
+  N: TMdNode;
+begin
+  Parse('    code');
+  AssertEquals('one code block', 1, CountOf(mnCodeBlock));
+  N := NodeOf(FDoc, NodesOfKind(FDoc, mnCodeBlock)[0]);
+  AssertFalse('not fenced', N.Fenced);
+  AssertEquals('content', 'code', string(N.Content));
 end;
 
 procedure TMdTreeTest.TestUnknownIdIsAZeroNode;

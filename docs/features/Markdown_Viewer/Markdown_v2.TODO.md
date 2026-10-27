@@ -108,12 +108,25 @@ bug in this lane where the pass ORDER, not the code, was the defect.
 
 Each is one pass added to `MdBlockPassOrder`, or `TestBlockPassOrderIsPinned` fails.
 
-- [ ] `footnote` definitions (`[^label]: …`) and `footnote_callout` (`[^label]`).
-- [ ] `reference` definitions (`[label]: uri "title"`) + reference links/images.
-- [ ] `mathblock` (`$$ … $$`) and `mathspan` (`$…$`).
-- [ ] `html_block`.
-- [ ] `description_list` / `description_term` / `description`.
-- [ ] `custom_block` (`:::name … :::`).
+- [x] `footnote` definitions (`[^label]: …`) and `footnote_callout` (`[^label]`).
+- [x] `reference` definitions (`[label]: uri "title"`) + reference links/images.
+- [x] `mathblock` (`$$ … $$`). **`mathspan` still open** — the inline tokenizer has the token kind but not the syntax yet.
+- [x] `html_block`.
+- [x] `description_list` / `description_term` / `description`.
+- [x] `custom_block` (`:::name … :::`).
+
+**Corpus got split by era, deliberately.** `tests/data/md_corpus/13_v2_blocks.md`
+exercises every v2-only construct, so `TestCompatIsLosslessForV1Corpus` had to
+learn the difference: documents `01`-`12` must project **losslessly**, and `13+`
+must report **lossy**, because that is the adapter's honest signal working. An
+adapter that claimed losslessness for a footnote would be lying.
+
+**A deferral guard was inverted rather than deleted.**
+`TestUnmodelledSyntaxIsNotClaimedAsParsed` was written in Phase 2 to assert that
+footnotes and math were *not* lossy, because they were not parsed at all. Phase 5
+made them real, so the assertion inverted: six constructs must now each report
+loss. Left as it was, it would have been a test that passes while the adapter
+silently eats every footnote.
 
 ## Phase 6 — Frontmatter
 

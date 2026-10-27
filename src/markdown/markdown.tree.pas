@@ -473,6 +473,114 @@ begin
   Result := Copy(ALine, I, Length(ALine));
 end;
 
+{ `[^label]: ...` - a footnote DEFINITION. The callout is `[^label]`. }
+function FootnoteDef(const ALine: UnicodeString; out ALabel,
+  AContent: UnicodeString): Boolean;
+var
+  S: UnicodeString;
+  P, Q: Integer;
+begin
+  ALabel := '';
+  AContent := '';
+  S := TrimU(ALine);
+  if (Length(S) < 5) or (S[1] <> '[') or (S[2] <> '^') then
+    Exit(False);
+  P := Pos(']:', S);
+  if P < 4 then
+    Exit(False);
+  ALabel := Copy(S, 3, P - 3);
+  Q := P + 2;
+  AContent := TrimU(Copy(S, Q, Length(S)));
+  Result := ALabel <> '';
+end;
+
+{ `[label]: uri "title"` - a link reference DEFINITION. }
+function ReferenceDef(const ALine: UnicodeString; out ALabel, AUri,
+  ATitle: UnicodeString): Boolean;
+var
+  S, Rest: UnicodeString;
+  P, Q: Integer;
+begin
+  ALabel := '';
+  AUri := '';
+  ATitle := '';
+  S := TrimU(ALine);
+  if (Length(S) < 4) or (S[1] <> '[') then
+    Exit(False);
+  P := Pos(']:', S);
+  if P < 3 then
+    Exit(False);
+  ALabel := Copy(S, 2, P - 2);
+  { A `[^...]` label is a footnote, not a reference. }
+  if (ALabel <> '') and (ALabel[1] = '^') then
+    Exit(False);
+  Rest := TrimU(Copy(S, P + 2, Length(S)));
+  if Rest = '' then
+    Exit(False);
+  { A trailing quoted title. }
+  Q := Pos(' "', Rest);
+  if Q > 0 then
+  begin
+    ATitle := TrimU(Copy(Rest, Q + 1, Length(Rest)));
+    if (Length(ATitle) >= 2) and (ATitle[1] = '"') and
+      (ATitle[Length(ATitle)] = '"') then
+      ATitle := Copy(ATitle, 2, Length(ATitle) - 2)
+    else
+      ATitle := '';
+    Rest := TrimU(Copy(Rest, 1, Q - 1));
+  end;
+  AUri := Rest;
+  Result := (ALabel <> '') and (AUri <> '');
+end;
+
+function IsMathFence(const ALine: UnicodeString): Boolean;
+begin
+  Result := TrimU(ALine) = '$$';
+end;
+
+{ `:::name` opens a custom block; `:::` closes it. }
+function CustomFenceOpen(const ALine: UnicodeString; out AName: UnicodeString): Boolean;
+var
+  S: UnicodeString;
+begin
+  AName := '';
+  S := TrimU(ALine);
+  if (Length(S) < 4) or (Copy(S, 1, 3) <> ':::') then
+    Exit(False);
+  AName := TrimU(Copy(S, 4, Length(S)));
+  Result := AName <> '';
+end;
+
+function IsCustomFenceClose(const ALine: UnicodeString): Boolean;
+begin
+  Result := TrimU(ALine) = ':::';
+end;
+
+{ <tag ...> or a closing </tag> - a raw HTML block line. }
+function IsHtmlLine(const ALine: UnicodeString): Boolean;
+var
+  S: UnicodeString;
+  I: Integer;
+begin
+  S := TrimU(ALine);
+  if (S = '') or (S[1] <> '<') then
+    Exit(False);
+  I := 2;
+  if (I <= Length(S)) and (S[I] = '/') then
+    Inc(I);
+  Result := (I <= Length(S)) and (S[I] in ['a'..'z', 'A'..'Z']);
+end;
+
+{ `term` on one line, `: definition` on the next - a description list entry. }
+function IsDescriptionMarker(const ALine: UnicodeString): Boolean;
+var
+  S: UnicodeString;
+begin
+  S := TrimU(ALine);
+  Result := (Length(S) >= 2) and (S[1] = ':') and
+    ((S[2] = ' ') or (Length(S) = 1));
+end;
+
 { An indented-code line: four spaces, or a tab, of indent. }
 function IsCodeIndent(const ALine: UnicodeString): Boolean;
 begin
@@ -1014,6 +1122,8 @@ procedure ParseBlocks(var B: TBuilder; const AParent: Integer;
   const ALines: TStrArray; AFrom, ATo: Integer);
 var
   I, J, K, Level, Depth, Ordinal, Indent, Id, Next: Integer;
+  ParaId2, TermId, DescId: Integer;
+  Label1, Text1, Text2: UnicodeString;
   Ordered: Boolean;
   AChar: Char;
   Lang: UnicodeString;
@@ -1175,6 +1285,131 @@ begin
     begin
       ParseListRun(B, AParent, ALines, I, ATo, Indent, Ordered, Ordinal, Next);
       I := Next;
+      Continue;
+    end;
+
+    { footnote definition: `[^label]: text` }
+    if FootnoteDef(ALines[I], Label1, Text1) then
+    begin
+      N := Default(TMdNode);
+      N.Kind := mnFootnote;
+      N.RefLabel := Label1;
+      B.Add(N, Id);
+      B.Append(AParent, Id);
+      { The definition's body is a paragraph child, so a multi-block footnote can
+        grow without changing the shape. }
+      N := Default(TMdNode);
+      N.Kind := mnParagraph;
+      B.Add(N, ParaId2);
+      B.Append(Id, ParaId2);
+      ParseInlines(B, ParaId2, Text1);
+      Inc(I);
+      Continue;
+    end;
+
+    { link reference definition: `[label]: uri "title"` }
+    if ReferenceDef(ALines[I], Label1, Text1, Text2) then
+    begin
+      N := Default(TMdNode);
+      N.Kind := mnReference;
+      N.RefLabel := Label1;
+      N.Uri := Text1;
+      N.Title := Text2;
+      B.Add(N, Id);
+      B.Append(AParent, Id);
+      Inc(I);
+      Continue;
+    end;
+
+    { math block: `$$` fenced }
+    if IsMathFence(ALines[I]) then
+    begin
+      J := I + 1;
+      while (J <= ATo) and not IsMathFence(ALines[J]) do
+        Inc(J);
+      N := Default(TMdNode);
+      N.Kind := mnMathBlock;
+      N.Content := '';
+      for Level := I + 1 to J - 1 do
+      begin
+        if N.Content <> '' then
+          N.Content := N.Content + #10;
+        N.Content := N.Content + ALines[Level];
+      end;
+      B.Add(N, Id);
+      B.Append(AParent, Id);
+      if J <= ATo then
+        I := J + 1
+      else
+        I := J;
+      Continue;
+    end;
+
+    { custom block: `:::name` ... `:::` }
+    if CustomFenceOpen(ALines[I], Text1) then
+    begin
+      J := I + 1;
+      while (J <= ATo) and not IsCustomFenceClose(ALines[J]) do
+        Inc(J);
+      N := Default(TMdNode);
+      N.Kind := mnCustomBlock;
+      N.RefLabel := Text1;
+      B.Add(N, Id);
+      B.Append(AParent, Id);
+      if J > I + 1 then
+        ParseBlocks(B, Id, ALines, I + 1, J - 1);
+      if J <= ATo then
+        I := J + 1
+      else
+        I := J;
+      Continue;
+    end;
+
+    { raw HTML block: a run of tag lines, preserved verbatim, NEVER interpreted }
+    if IsHtmlLine(ALines[I]) then
+    begin
+      J := I;
+      while (J <= ATo) and (TrimU(ALines[J]) <> '') and IsHtmlLine(ALines[J]) do
+        Inc(J);
+      N := Default(TMdNode);
+      N.Kind := mnHtmlBlock;
+      N.Content := '';
+      for Level := I to J - 1 do
+      begin
+        if N.Content <> '' then
+          N.Content := N.Content + #10;
+        N.Content := N.Content + ALines[Level];
+      end;
+      B.Add(N, Id);
+      B.Append(AParent, Id);
+      I := J;
+      Continue;
+    end;
+
+    { description list: a term line immediately followed by `: definition` }
+    if (I < ATo) and IsDescriptionMarker(ALines[I + 1]) then
+    begin
+      N := Default(TMdNode);
+      N.Kind := mnDescriptionList;
+      B.Add(N, Id);
+      B.Append(AParent, Id);
+      J := I;
+      while (J < ATo) and IsDescriptionMarker(ALines[J + 1]) do
+      begin
+        N := Default(TMdNode);
+        N.Kind := mnDescriptionTerm;
+        B.Add(N, TermId);
+        B.Append(Id, TermId);
+        ParseInlines(B, TermId, TrimU(ALines[J]));
+        N := Default(TMdNode);
+        N.Kind := mnDescription;
+        B.Add(N, DescId);
+        B.Append(Id, DescId);
+        ParseInlines(B, DescId, TrimU(Copy(TrimU(ALines[J + 1]), 2,
+          Length(ALines[J + 1]))));
+        Inc(J, 2);
+      end;
+      I := J;
       Continue;
     end;
 

@@ -33,7 +33,7 @@ type
     procedure TestQuoteCarriesItsDepth;
     procedure TestTableHeadAlignAndRows;
     procedure TestSecondParagraphInAnItemIsLossy;
-    procedure TestUnmodelledSyntaxIsNotClaimedAsParsed;
+    procedure TestV2OnlySyntaxIsReportedLossy;
     procedure TestEmptyDocumentHasNoBlocks;
   end;
 
@@ -110,11 +110,20 @@ begin
     for I := 0 to Docs.Count - 1 do
     begin
       Blocks := Project(LoadDoc(Docs[I]), Lossy);
-      if Lossy then
-        Fail(ExtractFileName(Docs[I]) +
-          ' projected lossily: the adapter cannot express it');
-      AssertTrue(ExtractFileName(Docs[I]) + ' produced no blocks',
-        Length(Blocks) > 0);
+      { Documents 01-12 predate v2 and must project losslessly. Documents 13+
+        exist to exercise v2-only constructs, so the adapter is required to
+        report THEM lossy - that is the honest signal working, not a failure. }
+      if ExtractFileName(Docs[I]) < '13' then
+      begin
+        if Lossy then
+          Fail(ExtractFileName(Docs[I]) +
+            ' projected lossily: the adapter cannot express it');
+        AssertTrue(ExtractFileName(Docs[I]) + ' produced no blocks',
+          Length(Blocks) > 0);
+      end
+      else
+        AssertTrue(ExtractFileName(Docs[I]) +
+          ' contains v2-only nodes, so it must report lossy', Lossy);
     end;
   finally
     Docs.Free;
@@ -264,23 +273,41 @@ begin
   AssertTrue('and the text is not silently dropped', Length(Blocks) >= 1);
 end;
 
-procedure TMdCompatTest.TestUnmodelledSyntaxIsNotClaimedAsParsed;
+procedure TMdCompatTest.TestV2OnlySyntaxIsReportedLossy;
 var
   Lossy: Boolean;
   Doc: TMdDocument;
 begin
-  { A guard against a test that passes for the wrong reason. Footnote and math
-    syntax are NOT parsed yet, so no such node exists and the projection cannot
-    be "lossy" for them. What must hold now is only that the adapter does not
-    crash and does not claim loss - see Markdown_v2.TODO.md Phases 4/5, where the
-    real lossy assertions belong. }
+  { This test began as a DEFERRAL GUARD in Phase 2, when footnotes and math were
+    not parsed at all: it asserted that nothing was discarded, because no such
+    node could exist. Phase 5 made them real, so the deferral is over and the
+    assertion inverts. Keeping the old form would have been a test that passes
+    while the adapter silently ate every footnote.
+
+    Each of these has no v1 equivalent and MUST report loss. }
   Doc := ParseTree('text[^1]' + #10 + #10 + '[^1]: note');
   BlocksForTui(Doc, Lossy);
-  AssertFalse('no footnote node exists yet, so nothing is discarded', Lossy);
+  AssertTrue('a footnote is lossy', Lossy);
 
   Doc := ParseTree('$$' + #10 + 'x = 1' + #10 + '$$');
   BlocksForTui(Doc, Lossy);
-  AssertFalse('no math node exists yet, so nothing is discarded', Lossy);
+  AssertTrue('a math block is lossy', Lossy);
+
+  Doc := ParseTree('[a]: https://example.com/x');
+  BlocksForTui(Doc, Lossy);
+  AssertTrue('a link reference definition is lossy', Lossy);
+
+  Doc := ParseTree('<div>raw</div>');
+  BlocksForTui(Doc, Lossy);
+  AssertTrue('a raw HTML block is lossy', Lossy);
+
+  Doc := ParseTree('Term' + #10 + ': def');
+  BlocksForTui(Doc, Lossy);
+  AssertTrue('a description list is lossy', Lossy);
+
+  Doc := ParseTree(':::n' + #10 + '- a' + #10 + ':::');
+  BlocksForTui(Doc, Lossy);
+  AssertTrue('a custom block is lossy', Lossy);
 end;
 
 procedure TMdCompatTest.TestEmptyDocumentHasNoBlocks;
