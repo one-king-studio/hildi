@@ -47,19 +47,8 @@ type
     procedure TestHtmlBlockIsRawAndVerbatim;
     procedure TestDescriptionList;
     procedure TestIndentedCodeIsNotFenced;
-    { frontmatter }
-    procedure TestFrontmatterIsADocumentField;
-    procedure TestFrontmatterIsNotABodyNode;
-    procedure TestFrontmatterWithoutClosingFenceIsARule;
-    procedure TestFrontmatterWithACommentAndBlankLine;
-    procedure TestFrontmatterRawIsPreserved;
-    procedure TestNoFrontmatterLeavesMetadataEmpty;
-    { The parser FOLLOWS the frontmatter rules; it does not enforce presence.
-      These pin the recognition rule it shares with the response layer. }
-    procedure TestAFenceWithoutAMetadataKeyIsABreak;
-    procedure TestFrontmatterMustBeTheFirstBlock;
-    procedure TestFrontmatterKeyPresenceIsTheSignalNotItsValue;
-    procedure TestBodyWithoutFrontmatterParsesNormally;
+    { The parser does NOT know about frontmatter: a leading fence is a rule. }
+    procedure TestAParserSeesNoFrontmatterAtAll;
   end;
 
 implementation
@@ -366,120 +355,17 @@ begin
     Chain(FDoc));
 end;
 
-procedure TMdTreeTest.TestFrontmatterIsADocumentField;
+procedure TMdTreeTest.TestAParserSeesNoFrontmatterAtAll;
 begin
-  Parse('---' + #10 + 'title: Hello' + #10 + 'draft: true' + #10 + '---' +
-    #10 + #10 + 'body');
-  AssertEquals('two entries', 2, Length(FDoc.Metadata));
-  AssertEquals('key 1', 'title', string(FDoc.Metadata[0].Key));
-  AssertEquals('value 1', 'Hello', string(FDoc.Metadata[0].Value));
-  AssertEquals('key 2', 'draft', string(FDoc.Metadata[1].Key));
-  AssertEquals('value 2', 'true', string(FDoc.Metadata[1].Value));
-end;
-
-procedure TMdTreeTest.TestFrontmatterIsNotABodyNode;
-begin
-  { SPEC 10.3: metadata is NOT a node, so a renderer walking the tree never sees
-    it and cannot accidentally paint it into the document. }
-  Parse('---' + #10 + 'title: Hello' + #10 + '---' + #10 + #10 + 'body');
-  AssertEquals('one paragraph of body', 1, CountOf(mnParagraph));
-  AssertEquals('chain', 'document > paragraph > text', Chain(FDoc));
-  AssertEquals('the body text is just the body', 'body',
-    string(NodeOf(FDoc, FirstChild(FirstChild(FDoc.Root))).Content));
-  AssertEquals('no rule was emitted for the fences', 0, CountOf(mnHorizontalRule));
-end;
-
-procedure TMdTreeTest.TestFrontmatterWithoutClosingFenceIsARule;
-begin
-  { A leading `---` with no closing line is a THEMATIC BREAK, not an unterminated
-    frontmatter block. Treating it as frontmatter would swallow the document. }
-  Parse('---' + #10 + #10 + 'body');
-  AssertEquals('no metadata', 0, Length(FDoc.Metadata));
-  AssertEquals('a rule', 1, CountOf(mnHorizontalRule));
-  AssertEquals('and the body survives', 1, CountOf(mnParagraph));
-end;
-
-procedure TMdTreeTest.TestFrontmatterWithACommentAndBlankLine;
-begin
-  Parse('---' + #10 + '# a comment' + #10 + '' + #10 + 'title: X' + #10 +
-    '---' + #10 + 'body');
-  { A comment and a blank line are not entries, but they are kept in the raw. }
-  AssertEquals('one entry', 1, Length(FDoc.Metadata));
-  AssertEquals('key', 'title', string(FDoc.Metadata[0].Key));
-end;
-
-procedure TMdTreeTest.TestFrontmatterRawIsPreserved;
-begin
-  { The block must carry a metadata KEY to be frontmatter at all, so this uses
-    real keys. `a: 1` / `b: 2` alone is NOT frontmatter under the shared rule -
-    see TestAFenceWithoutAMetadataKeyIsABreak. }
-  Parse('---' + #10 + 'title: T' + #10 + 'extra: 2' + #10 + '---' + #10 + 'body');
-  AssertEquals('raw keeps every line', 'title: T' + #10 + 'extra: 2',
-    string(FDoc.MetadataRaw));
-  AssertEquals('two entries parsed', 2, Length(FDoc.Metadata));
-end;
-
-procedure TMdTreeTest.TestAFenceWithoutAMetadataKeyIsABreak;
-begin
-  { RENAMED AND INVERTED deliberately. The operator's rule: frontmatter is
-    structural - THE FIRST BLOCK of the document - and the parser stays pure, so
-    it must NOT inspect keys. This test used to assert the old key-based rule
-    ("no title/keywords key, so it is ordinary markdown"), which was harness
-    knowledge leaking into the parser.
-
-    Under the structural rule a leading fence pair IS frontmatter, and what the
-    lines mean is the consumer's business. `just some prose` carries no colon, so
-    it becomes a key with an empty value - reported, not interpreted.
-
-    The one thing the parser still refuses to do is let a fence with no closing
-    fence eat the document; see TestFrontmatterWithoutClosingFenceIsARule. }
-  Parse('---' + #10 + 'just some prose' + #10 + '---');
-  AssertEquals('treated as frontmatter: it is the first block',
-    1, Length(FDoc.Metadata));
-  AssertEquals('the line is reported, not interpreted', 'just some prose',
-    string(FDoc.Metadata[0].Key));
-  AssertEquals('with no value, because it has no colon', '',
-    string(FDoc.Metadata[0].Value));
-  AssertEquals('and no body was invented', 0, CountOf(mnHorizontalRule));
-end;
-
-procedure TMdTreeTest.TestFrontmatterMustBeTheFirstBlock;
-begin
-  { Derived from the same rule: a fence pair that is NOT first is ordinary
-    markdown, never metadata. This is what "the first block of a document"
-    actually buys the parser - it can tell frontmatter apart without knowing
-    anything about keys. }
-  Parse('A paragraph.' + #10 + #10 + '---' + #10 + 'title: X' + #10 + '---');
-  AssertEquals('not the first block, so no metadata', 0, Length(FDoc.Metadata));
-  AssertEquals('a body paragraph', 1, CountOf(mnParagraph));
-  AssertEquals('and a rule', 1, CountOf(mnHorizontalRule));
-end;
-
-procedure TMdTreeTest.TestFrontmatterKeyPresenceIsTheSignalNotItsValue;
-begin
-  { `title:` with an EMPTY value is still frontmatter: the model wrote a header.
-    Presence of the key is the signal, not a non-empty value. }
-  Parse('---' + #10 + 'title:' + #10 + '---' + #10 + 'body');
-  AssertEquals('one entry', 1, Length(FDoc.Metadata));
-  AssertEquals('key', 'title', string(FDoc.Metadata[0].Key));
-  AssertEquals('empty value', '', string(FDoc.Metadata[0].Value));
-end;
-
-procedure TMdTreeTest.TestBodyWithoutFrontmatterParsesNormally;
-begin
-  { The parser does not REQUIRE frontmatter. Enforcement is the response
-    protocol's job; a body with none must parse exactly as it always did. }
-  Parse('# Heading' + #10 + #10 + 'A paragraph.');
-  AssertEquals('no metadata', 0, Length(FDoc.Metadata));
-  AssertEquals('a heading', 1, CountOf(mnHeading));
-  AssertEquals('a paragraph', 1, CountOf(mnParagraph));
-end;
-
-procedure TMdTreeTest.TestNoFrontmatterLeavesMetadataEmpty;
-begin
-  Parse('# just a heading');
-  AssertEquals('no metadata', 0, Length(FDoc.Metadata));
-  AssertEquals('no raw', '', string(FDoc.MetadataRaw));
+  { THE OPERATOR'S RULE, asserted directly: recognising that a document HAS
+    frontmatter is the harness's job, so the parser must not signal it. A leading
+    `---` is a thematic break like any other, and the entries are body text. See
+    tests/test_markdown_frontmatter.pas for the utility that does detect it. }
+  Parse('---' + #10 + 'title: X' + #10 + '---' + #10 + #10 + 'body');
+  { A rule, then the entries as body content, then the body. No metadata anywhere
+    in the document record - there is no field to carry it. }
+  AssertEquals('the leading fence is a rule', 1, CountOf(mnHorizontalRule));
+  AssertTrue('the entries are body text', CountOf(mnParagraph) >= 1);
 end;
 
 procedure TMdTreeTest.TestIndentedCodeIsNotFenced;

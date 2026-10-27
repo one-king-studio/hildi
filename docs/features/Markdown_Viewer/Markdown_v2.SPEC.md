@@ -297,12 +297,18 @@ does not support it either).
 3. ~~**Frontmatter: node or document field?**~~ **Decided: a document field.**
    Metadata is not body, so a renderer must never walk it as content.
 
-   **And an ownership boundary the operator set, which is the more important
-   half: enforcing that a reply HAS frontmatter is not the parser's job.** The
-   response protocol already owns that (`hildegard.helper.replymeta` extracts the
-   block at the turn boundary, and the prompt contract asks for it). The parser
-   only FOLLOWS the rules for recognising frontmatter — the same rules replymeta
-   uses, so the two cannot disagree about the same bytes:
+   **And the ownership boundary the operator set, which is the more important
+   half: identifying that a document HAS frontmatter is the HARNESS's job.** The
+   parser must not detect it, extract it, or signal it — a field on the document
+   record would itself be the signal. What the parser does is plain GFM: a
+   leading `---` is a thematic break like any other.
+
+   The harness asks, via a pure utility (`markdown.frontmatter`) that carries the
+   knowledge instead:
+
+   `HasFrontmatter`, `ExtractFrontmatter` (entries + raw), `StripFrontmatter`.
+
+   Rules the utility implements:
 
    - **frontmatter is structurally the FIRST BLOCK of a document** — a `---`
      fence on line 0 closed by a later `---` fence line, and nothing else;
@@ -313,5 +319,7 @@ does not support it either).
      the document;
    - a fence pair that is **not** first is ordinary markdown.
 
-   The parser never refuses a document for lacking frontmatter. Interpreting the
-   entries — deciding what `title` is for — belongs to the consumer.
+   Neither the parser nor the utility refuses a document for lacking frontmatter.
+   Interpreting the entries — deciding what `title` is for — belongs to the
+   consumer (`hildegard.helper.replymeta`, which already does exactly that at the
+   turn boundary).

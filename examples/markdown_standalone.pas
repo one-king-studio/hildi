@@ -12,7 +12,8 @@ program markdown_standalone;
 
 uses
   SysUtils,
-  markdown.types, markdown.parse, markdown.tree, markdown.render;
+  markdown.types, markdown.parse, markdown.tree, markdown.render,
+  markdown.frontmatter;
 
 var
   Doc, BatchTree, StreamTree: string;
@@ -21,8 +22,9 @@ var
   Parser: TMarkdownParser;
   Lines: TMdLineArray;
   I, J, K, ChunkSize: Integer;
-  SawParagraph, SawHeading, SawList, SawFence, SawQuote, SawRule, SawTable,
-  SawTitle: Boolean;
+  SawParagraph, SawHeading, SawList, SawFence, SawQuote, SawRule, SawTable: Boolean;
+  Entries: TMdFrontEntries;
+  Raw: UnicodeString;
 
 procedure Check(const AName: string; AOk: Boolean; const ADetail: string);
 begin
@@ -168,21 +170,36 @@ begin
     WriteLn('  |', UTF8Decode(Lines[I]));
   WriteLn('  --------------------------------');
 
-  { 5. The v2 tree renders too, and its frontmatter is NOT painted into the body:
-       metadata is not content (v2 SPEC 10.3). }
+  { 5. The v2 tree renders, and the PARSER knows nothing about frontmatter: a
+       leading fence is an ordinary thematic break, rendered like any other. }
   Lines := RenderTree(ParseTree('---' + #10 + 'title: T' + #10 + '---' + #10 +
     #10 + '# H' + #10 + #10 + '- a' + #10 + '  - b'), 40);
   Check('the tree renderer produced lines', Length(Lines) > 0, 'none');
-  SawTitle := False;
-  for I := 0 to High(Lines) do
-    if Pos('title:', Lines[I]) > 0 then
-      SawTitle := True;
-  Check('frontmatter is not rendered as body', not SawTitle, 'title: leaked');
   Check('the nested list is indented',
     (Length(Lines) > 3) and (Pos('- b', Lines[High(Lines)]) > 0),
     'no nested item');
 
-  { 6. No wrapping when asked for none: one line per logical line at worst. }
+  { 6. Frontmatter detection is the UTILITY's job, not the parser's - the harness
+       asks, the parser never tells. }
+  Check('the utility finds a leading block',
+    HasFrontmatter('---' + #10 + 'title: T' + #10 + '---' + #10 + 'body'),
+    'not found');
+  Check('the utility refuses a fence with no close',
+    not HasFrontmatter('---' + #10 + 'body'), 'wrongly accepted');
+  Check('the utility strips the block',
+    StripFrontmatter('---' + #10 + 'title: T' + #10 + '---' + #10 + 'body') =
+      'body', 'not stripped');
+  Entries := nil;
+  Raw := '';
+  Check('entries are extracted',
+    ExtractFrontmatter('---' + #10 + 'title: T' + #10 + '---' + #10 + 'b',
+      Entries, Raw), 'not extracted');
+  Check('and carry the key', (Length(Entries) = 1) and
+    (Entries[0].Key = 'title'), 'wrong entries');
+  Check('with the body left alone',
+    StripFrontmatter('no block here') = 'no block here', 'changed');
+
+  { 7. No wrapping when asked for none: one line per logical line at worst. }
   Lines := RenderPlain(BatchBlocks, 0);
   Check('unwrapped rendering produced lines', Length(Lines) > 0, 'none');
 

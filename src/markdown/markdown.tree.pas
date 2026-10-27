@@ -78,23 +78,15 @@ type
 
   TMdNodeArray = array of TMdNode;
 
-  { One frontmatter entry. Flat key/value on purpose: a nested YAML tree is a
-    different feature, and `hildegard.helper.yaml` already exists for a caller who
-    needs one. }
-  TMdMeta = record
-    Key: UnicodeString;
-    Value: UnicodeString;
-  end;
-  TMdMetaArray = array of TMdMeta;
-
   TMdDocument = record
     Nodes: TMdNodeArray;        { index 0 is unused; real ids start at 1 }
     Root: Integer;              { always 1 for a parsed document }
-    { Leading `---` fenced frontmatter, as key/value pairs. Deliberately NOT a
-      node (SPEC 10.3): it is not body, so a renderer must never walk it. }
-    Metadata: TMdMetaArray;
-    { The raw frontmatter block, for a caller that wants to parse it itself. }
-    MetadataRaw: UnicodeString;
+    { NO frontmatter field, deliberately. This parser does not detect, extract
+      or signal frontmatter at all: it parses the document as plain GFM, where a
+      leading `---` is a thematic break and nothing more. Recognising that a
+      document HAS frontmatter is the HARNESS's responsibility - see
+      markdown.frontmatter for the pure utility that does it, and
+      hildegard.helper.replymeta for the harness side that acts on it. }
   end;
 
 { Parse a complete document into a tree. }
@@ -1447,41 +1439,12 @@ end;
   One `key: value` per line; a `#` comment and a blank line are skipped; a line
   with no colon is kept as a key with an empty value rather than dropped, so a
   malformed entry is visible instead of silently vanishing. }
-procedure SplitMetadata(const ALines: TStrArray; AClose: Integer;
-  out AMeta: TMdMetaArray; out ARaw: UnicodeString);
-var
-  I, P: Integer;
-  Line: UnicodeString;
-begin
-  AMeta := nil;
-  ARaw := '';
-  for I := 1 to AClose - 1 do
-  begin
-    if ARaw <> '' then
-      ARaw := ARaw + #10;
-    ARaw := ARaw + ALines[I];
-    Line := TrimU(ALines[I]);
-    if (Line = '') or (Line[1] = '#') then
-      Continue;
-    SetLength(AMeta, Length(AMeta) + 1);
-    AMeta[High(AMeta)] := Default(TMdMeta);
-    P := Pos(':', Line);
-    if P > 0 then
-    begin
-      AMeta[High(AMeta)].Key := TrimU(Copy(Line, 1, P - 1));
-      AMeta[High(AMeta)].Value := TrimU(Copy(Line, P + 1, Length(Line)));
-    end
-    else
-      AMeta[High(AMeta)].Key := Line;
-  end;
-end;
-
 function ParseTree(const AText: string): TMdDocument;
 var
   B: TBuilder;
   Root: TMdNode;
   Lines: TStrArray;
-  RootId, BodyFrom, CloseAt, K: Integer;
+  RootId: Integer;
 begin
   Result := Default(TMdDocument);
   B.Init;
@@ -1491,37 +1454,12 @@ begin
   Result.Root := RootId;
   Lines := SplitLines(UnicodeString(AText));
 
-  { Frontmatter is structurally THE FIRST BLOCK of a document: a `---` fence on
-    line 0 closed by a later `---` fence line. Nothing else qualifies.
-
-    Deliberately STRUCTURAL. The parser does not look at keys, does not know that
-    `title` or `keywords` mean anything, and does not require that any particular
-    key be present - those are the response protocol's concerns, and knowing them
-    here would put harness knowledge inside a pure module. A caller that wants to
-    interpret the entries gets them as key/value pairs and decides for itself.
-
-    The one guard that IS needed is structural: a leading `---` with no closing
-    fence is a thematic break, not an unterminated frontmatter block, so it
-    cannot eat the document. }
-  BodyFrom := 0;
-  if (Length(Lines) > 1) and (TrimU(Lines[0]) = '---') then
-  begin
-    CloseAt := 0;
-    for K := 1 to High(Lines) do
-      if TrimU(Lines[K]) = '---' then
-      begin
-        CloseAt := K;
-        Break;
-      end;
-    if CloseAt > 0 then
-    begin
-      SplitMetadata(Lines, CloseAt, Result.Metadata, Result.MetadataRaw);
-      BodyFrom := CloseAt + 1;
-    end;
-  end;
-
-  if BodyFrom <= High(Lines) then
-    ParseBlocks(B, RootId, Lines, BodyFrom, High(Lines));
+  { No frontmatter handling here, on purpose. The parser is plain GFM: a leading
+    `---` is a thematic break like any other. Whether a document HAS frontmatter,
+    and what its entries mean, is the harness's business - the parser neither
+    detects it nor signals it. See markdown.frontmatter for the pure utility. }
+  if Length(Lines) > 0 then
+    ParseBlocks(B, RootId, Lines, 0, High(Lines));
   Result.Nodes := B.Nodes;
 end;
 
