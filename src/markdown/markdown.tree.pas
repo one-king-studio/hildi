@@ -78,9 +78,23 @@ type
 
   TMdNodeArray = array of TMdNode;
 
+  { One frontmatter entry. Flat key/value on purpose: a nested YAML tree is a
+    different feature, and `hildegard.helper.yaml` already exists for a caller who
+    needs one. }
+  TMdMeta = record
+    Key: UnicodeString;
+    Value: UnicodeString;
+  end;
+  TMdMetaArray = array of TMdMeta;
+
   TMdDocument = record
     Nodes: TMdNodeArray;        { index 0 is unused; real ids start at 1 }
     Root: Integer;              { always 1 for a parsed document }
+    { Leading `---` fenced frontmatter, as key/value pairs. Deliberately NOT a
+      node (SPEC 10.3): it is not body, so a renderer must never walk it. }
+    Metadata: TMdMetaArray;
+    { The raw frontmatter block, for a caller that wants to parse it itself. }
+    MetadataRaw: UnicodeString;
   end;
 
 { Parse a complete document into a tree. }
@@ -1429,12 +1443,45 @@ begin
   end;
 end;
 
+{ Fill AMeta from the lines strictly BETWEEN the two `---` fences (0 and AClose).
+  One `key: value` per line; a `#` comment and a blank line are skipped; a line
+  with no colon is kept as a key with an empty value rather than dropped, so a
+  malformed entry is visible instead of silently vanishing. }
+procedure SplitMetadata(const ALines: TStrArray; AClose: Integer;
+  out AMeta: TMdMetaArray; out ARaw: UnicodeString);
+var
+  I, P: Integer;
+  Line: UnicodeString;
+begin
+  AMeta := nil;
+  ARaw := '';
+  for I := 1 to AClose - 1 do
+  begin
+    if ARaw <> '' then
+      ARaw := ARaw + #10;
+    ARaw := ARaw + ALines[I];
+    Line := TrimU(ALines[I]);
+    if (Line = '') or (Line[1] = '#') then
+      Continue;
+    SetLength(AMeta, Length(AMeta) + 1);
+    AMeta[High(AMeta)] := Default(TMdMeta);
+    P := Pos(':', Line);
+    if P > 0 then
+    begin
+      AMeta[High(AMeta)].Key := TrimU(Copy(Line, 1, P - 1));
+      AMeta[High(AMeta)].Value := TrimU(Copy(Line, P + 1, Length(Line)));
+    end
+    else
+      AMeta[High(AMeta)].Key := Line;
+  end;
+end;
+
 function ParseTree(const AText: string): TMdDocument;
 var
   B: TBuilder;
   Root: TMdNode;
   Lines: TStrArray;
-  RootId: Integer;
+  RootId, BodyFrom, CloseAt, K: Integer;
 begin
   Result := Default(TMdDocument);
   B.Init;
@@ -1443,8 +1490,29 @@ begin
   B.Add(Root, RootId);
   Result.Root := RootId;
   Lines := SplitLines(UnicodeString(AText));
-  if Length(Lines) > 0 then
-    ParseBlocks(B, RootId, Lines, 0, High(Lines));
+
+  { Frontmatter: only when the document STARTS with `---` and a closing `---`
+    line exists. A leading `---` with no closing line is a thematic break, not an
+    unterminated frontmatter block, and treating it as one would eat the document. }
+  BodyFrom := 0;
+  if (Length(Lines) > 1) and (TrimU(Lines[0]) = '---') then
+  begin
+    CloseAt := 0;
+    for K := 1 to High(Lines) do
+      if TrimU(Lines[K]) = '---' then
+      begin
+        CloseAt := K;
+        Break;
+      end;
+    if CloseAt > 0 then
+    begin
+      SplitMetadata(Lines, CloseAt, Result.Metadata, Result.MetadataRaw);
+      BodyFrom := CloseAt + 1;
+    end;
+  end;
+
+  if BodyFrom <= High(Lines) then
+    ParseBlocks(B, RootId, Lines, BodyFrom, High(Lines));
   Result.Nodes := B.Nodes;
 end;
 

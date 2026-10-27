@@ -42,6 +42,13 @@ implementation
 const
   CorpusDir = 'tests/data/md_corpus';
 
+{ The documents that deliberately exercise nodes with no v1 equivalent. Listed
+  explicitly so adding a corpus file cannot silently change what this test means. }
+function IsV2OnlyDoc(const AName: string): Boolean;
+begin
+  Result := (AName = '13_v2_blocks.md');
+end;
+
 procedure TMdCompatTest.CollectDocs(AList: TStringList);
 var
   SR: TSearchRec;
@@ -110,20 +117,21 @@ begin
     for I := 0 to Docs.Count - 1 do
     begin
       Blocks := Project(LoadDoc(Docs[I]), Lossy);
-      { Documents 01-12 predate v2 and must project losslessly. Documents 13+
-        exist to exercise v2-only constructs, so the adapter is required to
-        report THEM lossy - that is the honest signal working, not a failure. }
-      if ExtractFileName(Docs[I]) < '13' then
+      { Naming which documents are v2-only, rather than comparing filenames:
+        a name-based split was too crude, and it wrongly demanded that a
+        frontmatter document report lossy when frontmatter is a DOCUMENT FIELD
+        and discards nothing at all. }
+      if IsV2OnlyDoc(ExtractFileName(Docs[I])) then
+        AssertTrue(ExtractFileName(Docs[I]) +
+          ' contains v2-only nodes, so it must report lossy', Lossy)
+      else
       begin
         if Lossy then
           Fail(ExtractFileName(Docs[I]) +
             ' projected lossily: the adapter cannot express it');
         AssertTrue(ExtractFileName(Docs[I]) + ' produced no blocks',
           Length(Blocks) > 0);
-      end
-      else
-        AssertTrue(ExtractFileName(Docs[I]) +
-          ' contains v2-only nodes, so it must report lossy', Lossy);
+      end;
     end;
   finally
     Docs.Free;

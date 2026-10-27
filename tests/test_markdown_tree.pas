@@ -47,6 +47,13 @@ type
     procedure TestHtmlBlockIsRawAndVerbatim;
     procedure TestDescriptionList;
     procedure TestIndentedCodeIsNotFenced;
+    { frontmatter }
+    procedure TestFrontmatterIsADocumentField;
+    procedure TestFrontmatterIsNotABodyNode;
+    procedure TestFrontmatterWithoutClosingFenceIsARule;
+    procedure TestFrontmatterWithACommentAndBlankLine;
+    procedure TestFrontmatterRawIsPreserved;
+    procedure TestNoFrontmatterLeavesMetadataEmpty;
   end;
 
 implementation
@@ -351,6 +358,62 @@ begin
   AssertEquals('two children', 2, Length(N.Children));
   AssertEquals('chain', 'document > description_list > description_term > text',
     Chain(FDoc));
+end;
+
+procedure TMdTreeTest.TestFrontmatterIsADocumentField;
+begin
+  Parse('---' + #10 + 'title: Hello' + #10 + 'draft: true' + #10 + '---' +
+    #10 + #10 + 'body');
+  AssertEquals('two entries', 2, Length(FDoc.Metadata));
+  AssertEquals('key 1', 'title', string(FDoc.Metadata[0].Key));
+  AssertEquals('value 1', 'Hello', string(FDoc.Metadata[0].Value));
+  AssertEquals('key 2', 'draft', string(FDoc.Metadata[1].Key));
+  AssertEquals('value 2', 'true', string(FDoc.Metadata[1].Value));
+end;
+
+procedure TMdTreeTest.TestFrontmatterIsNotABodyNode;
+begin
+  { SPEC 10.3: metadata is NOT a node, so a renderer walking the tree never sees
+    it and cannot accidentally paint it into the document. }
+  Parse('---' + #10 + 'title: Hello' + #10 + '---' + #10 + #10 + 'body');
+  AssertEquals('one paragraph of body', 1, CountOf(mnParagraph));
+  AssertEquals('chain', 'document > paragraph > text', Chain(FDoc));
+  AssertEquals('the body text is just the body', 'body',
+    string(NodeOf(FDoc, FirstChild(FirstChild(FDoc.Root))).Content));
+  AssertEquals('no rule was emitted for the fences', 0, CountOf(mnHorizontalRule));
+end;
+
+procedure TMdTreeTest.TestFrontmatterWithoutClosingFenceIsARule;
+begin
+  { A leading `---` with no closing line is a THEMATIC BREAK, not an unterminated
+    frontmatter block. Treating it as frontmatter would swallow the document. }
+  Parse('---' + #10 + #10 + 'body');
+  AssertEquals('no metadata', 0, Length(FDoc.Metadata));
+  AssertEquals('a rule', 1, CountOf(mnHorizontalRule));
+  AssertEquals('and the body survives', 1, CountOf(mnParagraph));
+end;
+
+procedure TMdTreeTest.TestFrontmatterWithACommentAndBlankLine;
+begin
+  Parse('---' + #10 + '# a comment' + #10 + '' + #10 + 'title: X' + #10 +
+    '---' + #10 + 'body');
+  { A comment and a blank line are not entries, but they are kept in the raw. }
+  AssertEquals('one entry', 1, Length(FDoc.Metadata));
+  AssertEquals('key', 'title', string(FDoc.Metadata[0].Key));
+end;
+
+procedure TMdTreeTest.TestFrontmatterRawIsPreserved;
+begin
+  Parse('---' + #10 + 'a: 1' + #10 + 'b: 2' + #10 + '---' + #10 + 'body');
+  AssertEquals('raw keeps both lines', 'a: 1' + #10 + 'b: 2',
+    string(FDoc.MetadataRaw));
+end;
+
+procedure TMdTreeTest.TestNoFrontmatterLeavesMetadataEmpty;
+begin
+  Parse('# just a heading');
+  AssertEquals('no metadata', 0, Length(FDoc.Metadata));
+  AssertEquals('no raw', '', string(FDoc.MetadataRaw));
 end;
 
 procedure TMdTreeTest.TestIndentedCodeIsNotFenced;

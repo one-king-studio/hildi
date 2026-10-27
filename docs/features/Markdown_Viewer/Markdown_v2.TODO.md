@@ -130,7 +130,21 @@ silently eats every footnote.
 
 ## Phase 6 — Frontmatter
 
-- [ ] `TMdDocument.Metadata` (not a node — see SPEC §10.3), parsed before the first block.
+- [x] `TMdDocument.Metadata` (not a node — see SPEC §10.3), parsed before the first block.
+      Also `MetadataRaw` for a caller that wants to parse it itself. Flat
+      `key: value` only; a nested YAML tree is a separate feature, and
+      `hildegard.helper.yaml` already exists for that.
+
+**The boundary case that matters.** A leading `---` with **no closing fence** is a
+thematic break, not an unterminated frontmatter block. Treating it as frontmatter
+would swallow the whole document — the test `TestFrontmatterWithoutClosingFenceIsARule`
+pins that, and asserts the body survives.
+
+**A filename-comparison bug I introduced and then removed.** My first compat guard
+split the corpus with `ExtractFileName < '13'`, which wrongly demanded that the new
+frontmatter document report *lossy*. Frontmatter is a document field and discards
+nothing, so it must be lossless. Replaced with an explicit `IsV2OnlyDoc` list, so
+adding a corpus file can no longer silently change what the guard means.
 
 ## Phase 7 — Rendering and deletion
 
