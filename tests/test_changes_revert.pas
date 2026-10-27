@@ -35,6 +35,12 @@ type
     procedure TestRevertSkipsARecordWithNoPatch;
     procedure TestRevertRefusesAPathOutsideTheWorkspace;
     procedure TestRevertRefusesAFileAboveTheReadLimit;
+    { Reverting a CREATION must delete the file. Writing an empty one instead
+      leaves a file the operator never had, and redo then has nothing sensible to
+      apply against. }
+    procedure TestRevertOfACreationDeletesTheFile;
+    { Reverting a DELETION must recreate it - the mirror of the above. }
+    procedure TestRevertOfADeletionRecreatesTheFile;
     { Turn-level revert: all files or none. }
     procedure TestRevertTurnRevertsEveryNetFile;
     procedure TestRevertTurnWritesNothingWhenOneFileWouldBeRefused;
@@ -199,6 +205,57 @@ begin
   AssertTrue('ran', RevertRecord(FDir, R, FHasher.OfText, 0, Res));
   AssertEquals('refused', Ord(rvUnsafe), Ord(Res.Outcome));
   AssertTrue('says why', Pos('outside', Res.Detail) > 0);
+end;
+
+procedure TChangesRevertTest.TestRevertOfACreationDeletesTheFile;
+var
+  R: TChangeRecord;
+  Res: TRevertResult;
+  Capped: Boolean;
+begin
+  { A creation's before-side is empty, so applying the inverse would write an
+    EMPTY file - leaving behind a path the operator never had. Reverting a
+    creation must remove the file entirely. }
+  WriteFile('a.txt', 'created'#10);
+  R := Default(TChangeRecord);
+  R.Path := 'a.txt';
+  R.Kind := ckCreated;
+  R.BeforeHash := '';                       { nothing existed before }
+  R.AfterHash := FHasher.OfText('created'#10);
+  R.Patch := DiffText('', 'created'#10, DefaultPatchCapBytes, Capped);
+  R.PatchBytes := Length(R.Patch);
+  R.Capped := Capped;
+
+  AssertTrue('revert ran', RevertRecord(FDir, R, FHasher.OfText, 0, Res));
+  AssertEquals('outcome', Ord(rvReverted), Ord(Res.Outcome));
+  AssertFalse('the file is gone, not emptied',
+    FileExists(IncludeTrailingPathDelimiter(FDir) + 'a.txt'));
+end;
+
+procedure TChangesRevertTest.TestRevertOfADeletionRecreatesTheFile;
+var
+  R: TChangeRecord;
+  Res: TRevertResult;
+  Capped: Boolean;
+  Got: string;
+begin
+  { The mirror: a deletion's after-side is empty, so the file is absent on disk.
+    Reverting it must put the content back, not fail on a missing read. }
+  R := Default(TChangeRecord);
+  R.Path := 'a.txt';
+  R.Kind := ckDeleted;
+  R.BeforeHash := FHasher.OfText('gone'#10);
+  R.AfterHash := '';                        { nothing exists after }
+  R.Patch := DiffText('gone'#10, '', DefaultPatchCapBytes, Capped);
+  R.PatchBytes := Length(R.Patch);
+  R.Capped := Capped;
+
+  AssertTrue('revert ran', RevertRecord(FDir, R, FHasher.OfText, 0, Res));
+  AssertEquals('outcome', Ord(rvReverted), Ord(Res.Outcome));
+  AssertTrue('the file is back',
+    FileExists(IncludeTrailingPathDelimiter(FDir) + 'a.txt'));
+  Got := ReadBack('a.txt');
+  AssertEquals('with its content', 'gone'#10, Got);
 end;
 
 procedure TChangesRevertTest.TestRevertRefusesAFileAboveTheReadLimit;

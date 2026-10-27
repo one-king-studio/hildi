@@ -146,6 +146,28 @@ begin
   Result := True;
 end;
 
+function SysDeleteFile(const APath: string; out AError: string): Boolean;
+begin
+  { Reverting a creation means the file must be GONE, not empty. A refusal here
+    is reported like any other failure: the caller has already verified the
+    content, so a delete that fails is a real problem worth surfacing. }
+  Result := False;
+  AError := '';
+  if not FileExists(APath) then
+  begin
+    { Already absent: the desired end state. Idempotent on purpose, so a retry
+      after a partial undo does not report a spurious failure. }
+    Result := True;
+    Exit;
+  end;
+  if not DeleteFile(APath) then
+  begin
+    AError := 'could not delete the file';
+    Exit;
+  end;
+  Result := True;
+end;
+
 function SysWriteAtomic(const APath, AContent: string;
   out AError: string): Boolean;
 var
@@ -181,205 +203,60 @@ begin
   Result := True;
 end;
 
-function RevertRecord(const ARoot: string; const ARecord: TChangeRecord;
-  AHasher: TChangeHasher; AMaxBytes: Integer;
-  out AResult: TRevertResult): Boolean;
-var
-  Full, Current, Reverted, Err: string;
-  TooLarge: Boolean;
-  Ok: Boolean;
-begin
-  Result := False;
-  AResult := Default(TRevertResult);
-  AResult.Path := ARecord.Path;
-  if AMaxBytes <= 0 then
-    AMaxBytes := DefaultMaxBytes;
+{ RevertText and ApplyText are deliberately signature-identical: one inverts the
+  patch and verifies against the before-hash, the other applies it and verifies
+  against the after-hash. Passing the transform in is what makes redo PROVABLY
+  the mirror of revert rather than a second copy that can drift out of step with
+  the refusal rules.
 
-  { Nothing to undo: the process tier records sizes with no patch. }
-  if ARecord.Patch = '' then
-  begin
-    AResult.Outcome := rvSkipped;
-    AResult.Detail := 'no patch was captured for this change';
-    Exit(True);
-  end;
-
-  { Confinement, before reading anything: a record names a relative path, but a
-    corrupted or hand-edited row must not be able to write outside the root. }
-  if not PhysicalContains(ARoot, ARecord.Path) then
-  begin
-    AResult.Outcome := rvUnsafe;
-    AResult.Detail := 'the path is outside the workspace';
-    Exit(True);
-  end;
-  Full := IncludeTrailingPathDelimiter(ARoot) + ARecord.Path;
-
-  if not SysReadText(Full, AMaxBytes, Current, TooLarge, Err) then
-  begin
-    if TooLarge then
-    begin
-      AResult.Outcome := rvUnsafe;
-      AResult.Detail := Err;
-    end
-    else
-    begin
-      AResult.Outcome := rvFailed;
-      AResult.Detail := Err;
-    end;
-    Exit(True);
-  end;
-
-  Ok := RevertText(ARecord.Patch, ARecord.BeforeHash, ARecord.AfterHash,
-    Current, AHasher, Reverted, Err);
-  if not Ok then
-  begin
-    { A compare failure means the file moved on; anything else means the record
-      will not invert. The two are different problems and the operator needs to
-      tell them apart. }
-    if Pos('changed since', Err) > 0 then
-      AResult.Outcome := rvMoved
-    else
-      AResult.Outcome := rvFailed;
-    AResult.Detail := Err;
-    Exit(True);
-  end;
-
-  if not SysWriteAtomic(Full, Reverted, Err) then
-  begin
-    AResult.Outcome := rvFailed;
-    AResult.Detail := Err;
-    Exit(True);
-  end;
-
-  AResult.Outcome := rvReverted;
-  Result := True;
-end;
-
-function RevertTurn(const ARoot: string; const ARows: TChangeRecordArray;
-  AHasher: TChangeHasher; AMaxBytes: Integer;
-  out AResults: TRevertResultArray): Boolean;
-var
-  I, N: Integer;
-  R: TChangeRecord;
-  Res: TRevertResult;
-  Planned: array of TRevertResult;
-  Reverted: array of string;
-  Current, Text, Err: string;
-  TooLarge, Ok: Boolean;
-begin
-  { Two passes on purpose. The first decides for every file, with nothing
-    written; the second writes only if EVERY file was revertible. A turn that
-    reverted half its files and then refused the rest would leave the transcript
-    and the workspace disagreeing, which is worse than refusing outright. }
-  Result := False;
-  AResults := nil;
-  Planned := nil;
-  { 0 means "the caller did not care"; without this, every file reads as
-    oversized and the whole turn reports rvUnsafe. }
-  if AMaxBytes <= 0 then
-    AMaxBytes := DefaultMaxBytes;
-
-  for I := 0 to High(ARows) do
-  begin
-    R := ARows[I];
-    { Only net rows describe what the turn did. }
-    if not R.IsNet then
-      Continue;
-    Res := Default(TRevertResult);
-    Res.Path := R.Path;
-    if R.Patch = '' then
-    begin
-      Res.Outcome := rvSkipped;
-      Res.Detail := 'no patch was captured for this change';
-    end
-    else if not PhysicalContains(ARoot, R.Path) then
-    begin
-      Res.Outcome := rvUnsafe;
-      Res.Detail := 'the path is outside the workspace';
-    end
-    else if not SysReadText(IncludeTrailingPathDelimiter(ARoot) + R.Path,
-      AMaxBytes, Current, TooLarge, Err) then
-    begin
-      if TooLarge then
-        Res.Outcome := rvUnsafe
-      else
-        Res.Outcome := rvFailed;
-      Res.Detail := Err;
-    end
-    else if not RevertText(R.Patch, R.BeforeHash, R.AfterHash, Current, AHasher,
-      Text, Err) then
-    begin
-      if Pos('changed since', Err) > 0 then
-        Res.Outcome := rvMoved
-      else
-        Res.Outcome := rvFailed;
-      Res.Detail := Err;
-    end
-    else
-    begin
-      Res.Outcome := rvReverted;   // planned, not yet written
-      N := Length(Planned);
-      SetLength(Planned, N + 1);
-      Planned[N] := Res;
-      SetLength(Reverted, N + 1);
-      Reverted[N] := Text;
-      Continue;                    // nothing to record below
-    end;
-    { A refusal: the whole turn is refused, so record it and stop planning. }
-    SetLength(Planned, Length(Planned) + 1);
-    Planned[High(Planned)] := Res;
-  end;
-
-  { Any refusal fails the turn before a single byte is written. Skipped rows are
-    not refusals: they are files that cannot be reverted at all. }
-  for I := 0 to High(Planned) do
-    if (Planned[I].Outcome <> rvReverted) and
-      (Planned[I].Outcome <> rvSkipped) then
-    begin
-      AResults := Planned;
-      Exit(True);   { decided: refused, nothing written }
-    end;
-
-  { All clear: write. }
-  N := 0;
-  for I := 0 to High(Planned) do
-    if Planned[I].Outcome = rvReverted then
-    begin
-      Ok := SysWriteAtomic(
-        IncludeTrailingPathDelimiter(ARoot) + Planned[I].Path, Reverted[N], Err);
-      Inc(N);
-      if not Ok then
-      begin
-        { Half-written is the one outcome worth reporting as a hard failure: the
-          pre-flight said every file was safe, so this is an I/O fault. }
-        Planned[I].Outcome := rvFailed;
-        Planned[I].Detail := Err;
-        AResults := Planned;
-        Exit(True);
-      end;
-    end;
-
-  AResults := Planned;
-  Result := True;
-end;
-
-{ --- redo: the same engine, run forwards -------------------------------- }
-
+  Declared HERE because both directions now go through the same worker. Revert
+  used to carry its own copy of the read/transform/write logic, and that copy is
+  precisely why reverting a CREATION wrote an empty file instead of deleting one:
+  a fix applied to the shared worker never reached the duplicate. }
 type
-  { RevertText and ApplyText are deliberately signature-identical: one inverts
-    the patch and verifies against the before-hash, the other applies it and
-    verifies against the after-hash. Passing the transform in is what makes redo
-    PROVABLY the mirror of revert rather than a second copy that can drift out
-    of step with the refusal rules. }
   TTextTransform = function(const APatch, ABeforeHash, AAfterHash,
     ACurrentText: string; AHasher: TChangeHasher; out AText,
     AError: string): Boolean;
 
 function RunRecord(const ARoot: string; const ARecord: TChangeRecord;
   AHasher: TChangeHasher; AMaxBytes: Integer; AOp: TTextTransform;
+  AForward: Boolean; out AResult: TRevertResult): Boolean; forward;
+
+function RunTurn(const ARoot: string; const ARows: TChangeRecordArray;
+  AHasher: TChangeHasher; AMaxBytes: Integer; AOp: TTextTransform;
+  AForward: Boolean; out AResults: TRevertResultArray): Boolean; forward;
+
+function RevertRecord(const ARoot: string; const ARecord: TChangeRecord;
+  AHasher: TChangeHasher; AMaxBytes: Integer;
   out AResult: TRevertResult): Boolean;
+begin
+  { BACKWARDS: a creation becomes deleted, a deletion becomes re-created, a
+    modification is patched back. All three live in RunRecord so the two
+    directions cannot disagree about what a change means. }
+  Result := RunRecord(ARoot, ARecord, AHasher, AMaxBytes, RevertText, False,
+    AResult);
+end;
+
+function RevertTurn(const ARoot: string; const ARows: TChangeRecordArray;
+  AHasher: TChangeHasher; AMaxBytes: Integer;
+  out AResults: TRevertResultArray): Boolean;
+begin
+  { BACKWARDS, and through the shared worker for the same reason as RevertRecord:
+    the duplicate this replaced is why a created file was emptied instead of
+    deleted. The turn-level all-or-nothing pre-flight is in RunTurn, so both
+    directions get it. }
+  Result := RunTurn(ARoot, ARows, AHasher, AMaxBytes, RevertText, False,
+    AResults);
+end;
+
+{ --- the shared worker: both directions -------------------------------- }
+
+function RunRecord(const ARoot: string; const ARecord: TChangeRecord;
+  AHasher: TChangeHasher; AMaxBytes: Integer; AOp: TTextTransform;
+  AForward: Boolean; out AResult: TRevertResult): Boolean;
 var
   Full, Current, Produced, Err: string;
-  TooLarge, Ok: Boolean;
+  TooLarge, Ok, Absent: Boolean;
 begin
   Result := False;
   AResult := Default(TRevertResult);
@@ -405,7 +282,67 @@ begin
   end;
   Full := IncludeTrailingPathDelimiter(ARoot) + ARecord.Path;
 
-  if not SysReadText(Full, AMaxBytes, Current, TooLarge, Err) then
+  { A FILE'S EXISTENCE IS PART OF ITS STATE, and the text path alone cannot
+    express it. A creation reverted must DELETE the file; a deletion reverted
+    must CREATE one. Treating both as "read, transform, write" wrote an empty
+    file where a delete was needed, and failed to read an absent file where a
+    create was needed - which is why undo left created files behind.
+
+    So the kind decides the existence of the two ends:
+      ckCreated  - absent before, present after
+      ckDeleted  - present before, absent after
+      ckModified - present at both
+    and the operation being run (AForward) says which end we are moving TO. }
+  Absent := False;
+  if ARecord.Kind = ckCreated then
+    Absent := not AForward          { reverting to "absent"; redoing to present }
+  else if ARecord.Kind = ckDeleted then
+    Absent := AForward;             { redoing to "absent"; reverting to present }
+
+  if Absent then
+  begin
+    { Moving to ABSENT: the file must currently be at the recorded far end, so
+      the same compare-before-acting rule applies. Reading it is also how we
+      prove it exists at all. }
+    if not SysReadText(Full, AMaxBytes, Current, TooLarge, Err) then
+    begin
+      if TooLarge then
+        AResult.Outcome := rvUnsafe
+      else
+        AResult.Outcome := rvFailed;
+      AResult.Detail := Err;
+      Exit(True);
+    end;
+    if (ARecord.AfterHash <> '') and AForward and
+      (AHasher(Current) <> ARecord.AfterHash) then
+    begin
+      AResult.Outcome := rvMoved;
+      AResult.Detail := 'the file changed since this was recorded';
+      Exit(True);
+    end;
+    if (ARecord.BeforeHash <> '') and (not AForward) and
+      (AHasher(Current) <> ARecord.BeforeHash) then
+    begin
+      AResult.Outcome := rvMoved;
+      AResult.Detail := 'the file changed since this was recorded';
+      Exit(True);
+    end;
+    if not SysDeleteFile(Full, Err) then
+    begin
+      AResult.Outcome := rvFailed;
+      AResult.Detail := Err;
+      Exit(True);
+    end;
+    AResult.Outcome := rvReverted;
+    Exit(True);
+  end;
+
+  { Moving to PRESENT from an absent end: there is nothing on disk to read, and
+    the transform's "current text" is genuinely empty rather than missing. }
+  if ((ARecord.Kind = ckCreated) and AForward) or
+     ((ARecord.Kind = ckDeleted) and (not AForward)) then
+    Current := ''
+  else if not SysReadText(Full, AMaxBytes, Current, TooLarge, Err) then
   begin
     if TooLarge then
       AResult.Outcome := rvUnsafe
@@ -442,6 +379,7 @@ end;
 
 function RunTurn(const ARoot: string; const ARows: TChangeRecordArray;
   AHasher: TChangeHasher; AMaxBytes: Integer; AOp: TTextTransform;
+  AForward: Boolean;
   out AResults: TRevertResultArray): Boolean;
 var
   I, N: Integer;
@@ -541,14 +479,16 @@ function ApplyRecord(const ARoot: string; const ARecord: TChangeRecord;
   AHasher: TChangeHasher; AMaxBytes: Integer;
   out AResult: TRevertResult): Boolean;
 begin
-  Result := RunRecord(ARoot, ARecord, AHasher, AMaxBytes, ApplyText, AResult);
+  { Redo runs FORWARDS: a creation is re-created, a deletion re-deleted. }
+  Result := RunRecord(ARoot, ARecord, AHasher, AMaxBytes, ApplyText, True,
+    AResult);
 end;
 
 function ApplyTurn(const ARoot: string; const ARows: TChangeRecordArray;
   AHasher: TChangeHasher; AMaxBytes: Integer;
   out AResults: TRevertResultArray): Boolean;
 begin
-  Result := RunTurn(ARoot, ARows, AHasher, AMaxBytes, ApplyText, AResults);
+  Result := RunTurn(ARoot, ARows, AHasher, AMaxBytes, ApplyText, True, AResults);
 end;
 
 end.
