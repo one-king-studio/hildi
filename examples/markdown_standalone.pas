@@ -12,7 +12,7 @@ program markdown_standalone;
 
 uses
   SysUtils,
-  markdown.types, markdown.parse, markdown.render;
+  markdown.types, markdown.parse, markdown.tree, markdown.render;
 
 var
   Doc, BatchTree, StreamTree: string;
@@ -21,7 +21,8 @@ var
   Parser: TMarkdownParser;
   Lines: TMdLineArray;
   I, J, K, ChunkSize: Integer;
-  SawParagraph, SawHeading, SawList, SawFence, SawQuote, SawRule, SawTable: Boolean;
+  SawParagraph, SawHeading, SawList, SawFence, SawQuote, SawRule, SawTable,
+  SawTitle: Boolean;
 
 procedure Check(const AName: string; AOk: Boolean; const ADetail: string);
 begin
@@ -167,7 +168,21 @@ begin
     WriteLn('  |', UTF8Decode(Lines[I]));
   WriteLn('  --------------------------------');
 
-  { 5. No wrapping when asked for none: one line per logical line at worst. }
+  { 5. The v2 tree renders too, and its frontmatter is NOT painted into the body:
+       metadata is not content (v2 SPEC 10.3). }
+  Lines := RenderTree(ParseTree('---' + #10 + 'title: T' + #10 + '---' + #10 +
+    #10 + '# H' + #10 + #10 + '- a' + #10 + '  - b'), 40);
+  Check('the tree renderer produced lines', Length(Lines) > 0, 'none');
+  SawTitle := False;
+  for I := 0 to High(Lines) do
+    if Pos('title:', Lines[I]) > 0 then
+      SawTitle := True;
+  Check('frontmatter is not rendered as body', not SawTitle, 'title: leaked');
+  Check('the nested list is indented',
+    (Length(Lines) > 3) and (Pos('- b', Lines[High(Lines)]) > 0),
+    'no nested item');
+
+  { 6. No wrapping when asked for none: one line per logical line at worst. }
   Lines := RenderPlain(BatchBlocks, 0);
   Check('unwrapped rendering produced lines', Length(Lines) > 0, 'none');
 
