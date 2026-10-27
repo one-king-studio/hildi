@@ -47,8 +47,19 @@ type
     procedure TestHtmlBlockIsRawAndVerbatim;
     procedure TestDescriptionList;
     procedure TestIndentedCodeIsNotFenced;
-    { The parser does NOT know about frontmatter: a leading fence is a rule. }
+    { Frontmatter is an EXTENSION handled as a BLOCK, so it is a node. }
     procedure TestAParserSeesNoFrontmatterAtAll;
+    procedure TestFrontmatterIsTheFirstChild;
+    procedure TestFrontmatterRequiresAClosingFence;
+    procedure TestFrontmatterAnywhereInTheDocument;
+    procedure TestALoneFenceIsStillARule;
+    procedure TestFrontmatterNodeCarriesNoInterpretation;
+    procedure TestNoFrontmatterMeansNoNode;
+    procedure TestFrontmatterWithACrLfBlock;
+    { The node is QUERYABLE FROM THE ROOT, which is what makes it an AST node
+      rather than a document field. }
+    procedure TestFrontmatterIsQueryableFromTheRoot;
+    procedure TestNoFrontmatterQueryReturnsZero;
   end;
 
 implementation
@@ -357,15 +368,131 @@ end;
 
 procedure TMdTreeTest.TestAParserSeesNoFrontmatterAtAll;
 begin
-  { THE OPERATOR'S RULE, asserted directly: recognising that a document HAS
-    frontmatter is the harness's job, so the parser must not signal it. A leading
-    `---` is a thematic break like any other, and the entries are body text. See
-    tests/test_markdown_frontmatter.pas for the utility that does detect it. }
+  { RENAMED AND INVERTED again, deliberately - the third and final shape of this
+    rule. Frontmatter is an EXTENSION, not CommonMark or GFM, so it is ours to
+    define, and the operator's call is a BLOCK HANDLER: frontmatter becomes a
+    NODE, addressable like any other block, rather than a field on the document
+    record.
+
+    What this test now guards is the boundary that survived: the parser reports
+    the block's TEXT and knows nothing about what the entries mean. There is still
+    no `title`/`keywords` policy anywhere in the parser. }
   Parse('---' + #10 + 'title: X' + #10 + '---' + #10 + #10 + 'body');
-  { A rule, then the entries as body content, then the body. No metadata anywhere
-    in the document record - there is no field to carry it. }
-  AssertEquals('the leading fence is a rule', 1, CountOf(mnHorizontalRule));
-  AssertTrue('the entries are body text', CountOf(mnParagraph) >= 1);
+  AssertEquals('one frontmatter node', 1, CountOf(mnFrontmatter));
+  AssertEquals('and a body paragraph', 1, CountOf(mnParagraph));
+  AssertEquals('no rule was invented for the fence', 0, CountOf(mnHorizontalRule));
+  { The block's content is verbatim text: no parsing of keys, no interpretation. }
+  AssertEquals('content is the inner lines, verbatim', 'title: X',
+    string(NodeOf(FDoc, NodesOfKind(FDoc, mnFrontmatter)[0]).Content));
+end;
+
+procedure TMdTreeTest.TestFrontmatterIsTheFirstChild;
+var
+  Root: TMdNode;
+begin
+  Parse('---' + #10 + 'title: X' + #10 + '---' + #10 + #10 + 'body');
+  Root := NodeOf(FDoc, FDoc.Root);
+  AssertTrue('the root has children', Length(Root.Children) > 0);
+  { Addressable: the consumer finds it by walking, or by NodesOfKind, exactly as
+    it would any other block. This is what a node buys over a document field. }
+  AssertTrue('the first child is the frontmatter',
+    NodeOf(FDoc, Root.Children[0]).Kind = mnFrontmatter);
+  AssertEquals('the chain', 'document > frontmatter', Chain(FDoc));
+end;
+
+procedure TMdTreeTest.TestFrontmatterRequiresAClosingFence;
+begin
+  { A leading `---` with no closing fence is a THEMATIC BREAK, so a stray rule
+    cannot swallow the document. }
+  Parse('---' + #10 + #10 + 'body');
+  AssertEquals('no frontmatter node', 0, CountOf(mnFrontmatter));
+  AssertEquals('a rule instead', 1, CountOf(mnHorizontalRule));
+  AssertEquals('and the body survives', 1, CountOf(mnParagraph));
+end;
+
+procedure TMdTreeTest.TestFrontmatterAnywhereInTheDocument;
+begin
+  { INVERTED deliberately: the operator's rule is that frontmatter is a CONTENT
+    TYPE (YAML inside a `---` fence), not a position. "It doesn't matter where it
+    arrives in the document, it becomes document metadata when the yaml is
+    extracted." So a fence pair in the MIDDLE is frontmatter too, and this test
+    used to assert the opposite. }
+  Parse('A paragraph.' + #10 + #10 + '---' + #10 + 'title: X' + #10 + '---');
+  AssertEquals('a frontmatter node mid-document', 1, CountOf(mnFrontmatter));
+  AssertEquals('the paragraph before it', 1, CountOf(mnParagraph));
+  { Consumed as one block: no rule was emitted for the fences. }
+  AssertEquals('no rule', 0, CountOf(mnHorizontalRule));
+end;
+
+procedure TMdTreeTest.TestALoneFenceIsStillARule;
+begin
+  { The other side of the same rule: a `---` with no partner IS a rule. That is
+    what stops the handler swallowing the document. }
+  Parse('text' + #10 + #10 + '---' + #10 + #10 + 'more');
+  AssertEquals('no frontmatter node', 0, CountOf(mnFrontmatter));
+  AssertEquals('a rule', 1, CountOf(mnHorizontalRule));
+  AssertEquals('both paragraphs survive', 2, CountOf(mnParagraph));
+end;
+
+procedure TMdTreeTest.TestFrontmatterNodeCarriesNoInterpretation;
+var
+  N: TMdNode;
+begin
+  { The parser does not know that `title` means anything. Every line is reported
+    verbatim, including a comment and a line with no colon. }
+  Parse('---' + #10 + '# a comment' + #10 + 'just prose' + #10 + 'title: X' +
+    #10 + '---');
+  AssertEquals('one node', 1, CountOf(mnFrontmatter));
+  N := NodeOf(FDoc, NodesOfKind(FDoc, mnFrontmatter)[0]);
+  AssertEquals('verbatim, comments and all',
+    '# a comment' + #10 + 'just prose' + #10 + 'title: X', string(N.Content));
+  AssertEquals('no children: it is a leaf', 0, Length(N.Children));
+end;
+
+procedure TMdTreeTest.TestNoFrontmatterMeansNoNode;
+begin
+  Parse('# Heading' + #10 + #10 + 'A paragraph.');
+  AssertEquals('no frontmatter node', 0, CountOf(mnFrontmatter));
+  AssertEquals('a heading', 1, CountOf(mnHeading));
+end;
+
+procedure TMdTreeTest.TestFrontmatterWithACrLfBlock;
+var
+  N: TMdNode;
+begin
+  { SplitLines strips CR, so a CRLF document yields CR-free content. }
+  Parse('---' + #13 + #10 + 'title: X' + #13 + #10 + '---' + #13 + #10 + 'body');
+  AssertEquals('one node', 1, CountOf(mnFrontmatter));
+  N := NodeOf(FDoc, NodesOfKind(FDoc, mnFrontmatter)[0]);
+  AssertEquals('CR is a line ending, not content', 'title: X', string(N.Content));
+end;
+
+procedure TMdTreeTest.TestFrontmatterIsQueryableFromTheRoot;
+var
+  Id: Integer;
+  N: TMdNode;
+begin
+  Parse('---' + #10 + 'title: X' + #10 + 'keywords: [a, b]' + #10 + '---' +
+    #10 + #10 + 'body');
+  { One call on the document, no walking. }
+  Id := FrontmatterOf(FDoc);
+  AssertTrue('the root answers with an id', Id > 0);
+  N := NodeOf(FDoc, Id);
+  AssertTrue('and it is a frontmatter node', N.Kind = mnFrontmatter);
+  AssertTrue('whose parent is the root', N.Parent = FDoc.Root);
+  AssertEquals('and its text comes back verbatim',
+    'title: X' + #10 + 'keywords: [a, b]', string(FrontmatterText(FDoc)));
+  { Also reachable the general way, like any other node: the two must agree. }
+  AssertEquals('NodesOfKind agrees', Id, NodesOfKind(FDoc, mnFrontmatter)[0]);
+end;
+
+procedure TMdTreeTest.TestNoFrontmatterQueryReturnsZero;
+begin
+  Parse('# Just a heading');
+  AssertEquals('no frontmatter id', 0, FrontmatterOf(FDoc));
+  AssertEquals('and no text', '', string(FrontmatterText(FDoc)));
+  { A zero node, not a crash - the same contract as NodeOf. }
+  AssertEquals('a zero node for id 0', 0, NodeOf(FDoc, 0).Id);
 end;
 
 procedure TMdTreeTest.TestIndentedCodeIsNotFenced;

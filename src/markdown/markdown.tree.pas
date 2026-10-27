@@ -38,6 +38,9 @@ type
     mnTableCell, mnHorizontalRule, mnHtmlBlock, mnMathBlock,
     mnDescriptionList, mnDescriptionTerm, mnDescription, mnFootnote,
     mnCustomBlock, mnReference,
+    { an EXTENSION, not CommonMark or GFM: a leading `---` fenced block. It is a
+      node so a consumer can address it like any other block. }
+    mnFrontmatter,
     { inline }
     mnText, mnCodeSpan, mnLineBreak, mnHyperlink, mnLink, mnImage,
     mnHtml, mnMathSpan, mnFootnoteCallout, mnAbbreviation);
@@ -94,6 +97,17 @@ function ParseTree(const AText: string): TMdDocument;
 
 { A copy of one node, or a zeroed node when AId is out of range. }
 function NodeOf(const ADoc: TMdDocument; AId: Integer): TMdNode;
+
+{ The document's frontmatter node id, or 0 when it has none. A NAMED QUERY so a
+  consumer asks the root for it rather than walking the tree hoping to find it.
+  Frontmatter is an extension (not CommonMark or GFM) and may appear anywhere; this
+  returns the first in document order, which is the one a harness treats as the
+  document's metadata. }
+function FrontmatterOf(const ADoc: TMdDocument): Integer;
+
+{ The frontmatter block's text verbatim, or '' when there is none. The parser does
+  NOT parse it as YAML - interpreting it is the consumer's job. }
+function FrontmatterText(const ADoc: TMdDocument): UnicodeString;
 
 { Every node id of one kind, in document order. }
 function NodesOfKind(const ADoc: TMdDocument; AKind: TMdNodeKind): TMdIntArray;
@@ -170,7 +184,8 @@ const
     'listitem', 'table', 'table_row', 'table_header', 'table_body',
     'table_cell', 'horizontal_rule', 'html_block', 'mathblock',
     'description_list', 'description_term', 'description', 'footnote',
-    'custom_block', 'reference', 'text', 'codespan', 'linebreak', 'hyperlink',
+    'custom_block', 'reference', 'frontmatter',
+    'text', 'codespan', 'linebreak', 'hyperlink',
     'link', 'image', 'html', 'mathspan', 'footnote_callout', 'abbreviation');
 begin
   Result := Names[AKind];
@@ -585,6 +600,30 @@ begin
   S := TrimU(ALine);
   Result := (Length(S) >= 2) and (S[1] = ':') and
     ((S[2] = ' ') or (Length(S) = 1));
+end;
+
+{ Is AFrom the opening of a frontmatter fence? True when the line is a thematic
+  break AND a later line in the same block is also a thematic break, which is its
+  closing partner. A `---` with no partner is a plain rule. }
+function FrontCloses(const ALines: TStrArray; AFrom, ATo: Integer;
+  out AClose: Integer): Boolean;
+var
+  I: Integer;
+begin
+  AClose := 0;
+  if not IsRule(ALines[AFrom]) then
+    Exit(False);
+  { Only a bare fence line can open or close: `---` with other content is a rule
+    like any other and must not pair. }
+  if TrimU(ALines[AFrom]) <> '---' then
+    Exit(False);
+  for I := AFrom + 1 to ATo do
+    if (TrimU(ALines[I]) = '---') then
+    begin
+      AClose := I;
+      Exit(True);
+    end;
+  Result := False;
 end;
 
 { An indented-code line: four spaces, or a tab, of indent. }
@@ -1128,7 +1167,7 @@ procedure ParseBlocks(var B: TBuilder; const AParent: Integer;
   const ALines: TStrArray; AFrom, ATo: Integer);
 var
   I, J, K, Level, Depth, Ordinal, Indent, Id, Next: Integer;
-  ParaId2, TermId, DescId: Integer;
+  ParaId2, TermId, DescId, FrontAt: Integer;
   Label1, Text1, Text2: UnicodeString;
   Ordered: Boolean;
   AChar: Char;
@@ -1250,6 +1289,37 @@ begin
       B.Add(N, Id);
       B.Append(AParent, Id);
       I := J;
+      Continue;
+    end;
+
+    { FRONTMATTER: a `---` fence enclosing YAML. An EXTENSION - neither
+      CommonMark nor GFM has it, so the rule is ours to set.
+
+      It is a BLOCK, so it may appear ANYWHERE in the document: position is not
+      part of the rule, the content type is. A consumer decides what to do with
+      it (the harness treats it as document metadata when the YAML is extracted).
+
+      The parser reports the block's inner text VERBATIM and interprets nothing -
+      no key sniffing, no `title` policy, no YAML parse. That boundary is the
+      whole reason this can live in a pure module.
+
+      It must precede the thematic-break pass: a `---` with a LATER `---` is a
+      fence pair, and only a `---` with no partner is a rule. Requiring the
+      closing fence is also what stops a stray rule swallowing the document. }
+    if IsRule(ALines[I]) and FrontCloses(ALines, I, ATo, FrontAt) then
+    begin
+      N := Default(TMdNode);
+      N.Kind := mnFrontmatter;
+      N.Content := '';
+      for Level := I + 1 to FrontAt - 1 do
+      begin
+        if N.Content <> '' then
+          N.Content := N.Content + #10;
+        N.Content := N.Content + ALines[Level];
+      end;
+      B.Add(N, Id);
+      B.Append(AParent, Id);
+      I := FrontAt + 1;
       Continue;
     end;
 
@@ -1454,10 +1524,9 @@ begin
   Result.Root := RootId;
   Lines := SplitLines(UnicodeString(AText));
 
-  { No frontmatter handling here, on purpose. The parser is plain GFM: a leading
-    `---` is a thematic break like any other. Whether a document HAS frontmatter,
-    and what its entries mean, is the harness's business - the parser neither
-    detects it nor signals it. See markdown.frontmatter for the pure utility. }
+  { Frontmatter is handled as a BLOCK in ParseBlocks, not here: it is a content
+    TYPE (YAML inside a `---` fence), so it may appear anywhere in the document
+    rather than only at the top. See the bpFrontmatter pass. }
   if Length(Lines) > 0 then
     ParseBlocks(B, RootId, Lines, 0, High(Lines));
   Result.Nodes := B.Nodes;
@@ -1477,6 +1546,28 @@ begin
     Result := 0
   else
     Result := Length(ADoc.Nodes) - 1;
+end;
+
+function FrontmatterOf(const ADoc: TMdDocument): Integer;
+var
+  Ids: TMdIntArray;
+begin
+  Ids := NodesOfKind(ADoc, mnFrontmatter);
+  if Length(Ids) = 0 then
+    Result := 0
+  else
+    Result := Ids[0];
+end;
+
+function FrontmatterText(const ADoc: TMdDocument): UnicodeString;
+var
+  N: TMdNode;
+begin
+  N := NodeOf(ADoc, FrontmatterOf(ADoc));
+  if N.Id = 0 then
+    Result := ''
+  else
+    Result := N.Content;
 end;
 
 function NodesOfKind(const ADoc: TMdDocument; AKind: TMdNodeKind): TMdIntArray;

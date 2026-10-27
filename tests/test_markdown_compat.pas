@@ -46,7 +46,11 @@ const
   explicitly so adding a corpus file cannot silently change what this test means. }
 function IsV2OnlyDoc(const AName: string): Boolean;
 begin
-  Result := (AName = '13_v2_blocks.md');
+  { 14_frontmatter.md qualifies now that frontmatter is an AST NODE: the v1 flat
+    block model has no way to represent it, so the adapter must report loss. This
+    line is why the list is explicit - adding a corpus document cannot silently
+    change what the guard means. }
+  Result := (AName = '13_v2_blocks.md') or (AName = '14_frontmatter.md');
 end;
 
 procedure TMdCompatTest.CollectDocs(AList: TStringList);
