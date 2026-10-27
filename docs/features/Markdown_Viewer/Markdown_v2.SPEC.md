@@ -304,9 +304,14 @@ does not support it either).
    only FOLLOWS the rules for recognising frontmatter — the same rules replymeta
    uses, so the two cannot disagree about the same bytes:
 
-   - a fence block is frontmatter only when it carries a `title` or `keywords`
-     key (presence of the key, not a non-empty value);
-   - a leading `---` with no closing fence is a thematic break;
-   - a fence carrying no metadata key is ordinary markdown.
+   - **frontmatter is structurally the FIRST BLOCK of a document** — a `---`
+     fence on line 0 closed by a later `---` fence line, and nothing else;
+   - the parser does **not inspect keys**. It does not know that `title` or
+     `keywords` mean anything, and it requires no particular key. Knowing them
+     would be harness knowledge inside a pure module;
+   - a leading `---` with no closing fence is a thematic break, so it cannot eat
+     the document;
+   - a fence pair that is **not** first is ordinary markdown.
 
-   The parser never refuses a document for lacking frontmatter.
+   The parser never refuses a document for lacking frontmatter. Interpreting the
+   entries — deciding what `title` is for — belongs to the consumer.

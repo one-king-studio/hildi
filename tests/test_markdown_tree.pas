@@ -57,6 +57,7 @@ type
     { The parser FOLLOWS the frontmatter rules; it does not enforce presence.
       These pin the recognition rule it shares with the response layer. }
     procedure TestAFenceWithoutAMetadataKeyIsABreak;
+    procedure TestFrontmatterMustBeTheFirstBlock;
     procedure TestFrontmatterKeyPresenceIsTheSignalNotItsValue;
     procedure TestBodyWithoutFrontmatterParsesNormally;
   end;
@@ -420,21 +421,38 @@ end;
 
 procedure TMdTreeTest.TestAFenceWithoutAMetadataKeyIsABreak;
 begin
-  { A `---` fence with nothing but prose between the fences carries no `title`
-    or `keywords`, so it is ordinary markdown: a rule, text, then a rule. This is
-    the SAME rule hildegard.helper.replymeta uses, which is the point - the
-    parser and the response layer must not disagree about what frontmatter is. }
+  { RENAMED AND INVERTED deliberately. The operator's rule: frontmatter is
+    structural - THE FIRST BLOCK of the document - and the parser stays pure, so
+    it must NOT inspect keys. This test used to assert the old key-based rule
+    ("no title/keywords key, so it is ordinary markdown"), which was harness
+    knowledge leaking into the parser.
+
+    Under the structural rule a leading fence pair IS frontmatter, and what the
+    lines mean is the consumer's business. `just some prose` carries no colon, so
+    it becomes a key with an empty value - reported, not interpreted.
+
+    The one thing the parser still refuses to do is let a fence with no closing
+    fence eat the document; see TestFrontmatterWithoutClosingFenceIsARule. }
   Parse('---' + #10 + 'just some prose' + #10 + '---');
-  AssertEquals('no metadata', 0, Length(FDoc.Metadata));
-  { My first expectation here - "two rules" - was wrong, and the failure was
-    correct: the leading `---` is a rule, and the SECOND `---` sits directly under
-    `just some prose`, which is a SETEXT heading underline. So the right shape is
-    a rule then a level-2 heading. Asserting two rules would have pinned a
-    misunderstanding of our own setext pass. }
-  AssertEquals('one rule', 1, CountOf(mnHorizontalRule));
-  AssertEquals('one heading', 1, CountOf(mnHeading));
-  AssertEquals('at level 2', 2, NodeOf(FDoc,
-    NodesOfKind(FDoc, mnHeading)[0]).Level);
+  AssertEquals('treated as frontmatter: it is the first block',
+    1, Length(FDoc.Metadata));
+  AssertEquals('the line is reported, not interpreted', 'just some prose',
+    string(FDoc.Metadata[0].Key));
+  AssertEquals('with no value, because it has no colon', '',
+    string(FDoc.Metadata[0].Value));
+  AssertEquals('and no body was invented', 0, CountOf(mnHorizontalRule));
+end;
+
+procedure TMdTreeTest.TestFrontmatterMustBeTheFirstBlock;
+begin
+  { Derived from the same rule: a fence pair that is NOT first is ordinary
+    markdown, never metadata. This is what "the first block of a document"
+    actually buys the parser - it can tell frontmatter apart without knowing
+    anything about keys. }
+  Parse('A paragraph.' + #10 + #10 + '---' + #10 + 'title: X' + #10 + '---');
+  AssertEquals('not the first block, so no metadata', 0, Length(FDoc.Metadata));
+  AssertEquals('a body paragraph', 1, CountOf(mnParagraph));
+  AssertEquals('and a rule', 1, CountOf(mnHorizontalRule));
 end;
 
 procedure TMdTreeTest.TestFrontmatterKeyPresenceIsTheSignalNotItsValue;
