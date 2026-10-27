@@ -1267,7 +1267,9 @@ var
   Block: TChatItem;
 
   { The divider a completed turn leaves after its messages; nothing for a turn
-    that failed, was cancelled, or is unknown. }
+    that failed, was cancelled, or is unknown. The turn's change summary follows
+    it, exactly as the live path emits it - a resumed or rebuilt transcript must
+    show the same blocks as the one that was streamed. }
   procedure DrawTurnDivider(const ATurns: TTurnRecordArray; ATurnId: Int64);
   var
     J: Integer;
@@ -1276,6 +1278,7 @@ var
       if (ATurns[J].Id = ATurnId) and (ATurns[J].Status = tsCompleted) then
       begin
         FPanel.Stream.Add(ckTurn, '', FormatTurnStats(ATurns[J]));
+        AddTurnChanges(ATurnId);
         Exit;
       end;
   end;
@@ -1912,6 +1915,11 @@ begin
         { The move may have opened or closed the redo window, so the palette's
           command list is rebuilt: /redo appears or disappears with it. }
         FPanel.Palette.SetCommands(DefaultCommands);
+        { The stream was cleared and rebuilt, so the screen must be repainted.
+          Without this the operator keeps looking at the old transcript - the
+          ledger moved but the display did not, which reads as "undo did
+          nothing". }
+        FApp.Invalidate;
         FinishTurn(psReady, 'undone');
       end;
     teDone:
