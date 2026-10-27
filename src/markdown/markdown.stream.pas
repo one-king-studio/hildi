@@ -284,8 +284,7 @@ end;
 procedure TMarkdownStream.CloseSegment;
 var
   Text: UnicodeString;
-  I: Integer;
-  Parsed: TMdDocument;
+  I, NewCount: Integer;
 begin
   if Length(FBuffer) = 0 then
   begin
@@ -293,16 +292,34 @@ begin
     FMarker := '';
     Exit;
   end;
-  Text := '';
+  { ONE buffer for the whole segment, sized up front. The previous version built
+    the text with `Text := Text + #10; Text := Text + Line` in a loop, which is
+    O(n^2) in the segment and allocates a new string per line. }
+  NewCount := 0;
+  for I := 0 to High(FBuffer) do
+    Inc(NewCount, Length(FBuffer[I]) + 1);
+  SetLength(Text, NewCount);
+  NewCount := 0;
   for I := 0 to High(FBuffer) do
   begin
     if I > 0 then
-      Text := Text + #10;
-    Text := Text + FBuffer[I];
+    begin
+      Inc(NewCount);
+      Text[NewCount] := #10;
+    end;
+    if FBuffer[I] <> '' then
+    begin
+      Move(FBuffer[I][1], Text[NewCount + 1], Length(FBuffer[I]) * SizeOf(UnicodeChar));
+      Inc(NewCount, Length(FBuffer[I]));
+    end;
   end;
+  SetLength(Text, NewCount);
+
   EnsureRoot;
-  Parsed := ParseTree(UTF8Encode(Text));
-  MergeInto(FDoc, Parsed);
+  { Parse the segment INTO this document. No temporary TMdDocument, no MergeInto,
+    no OffsetMap: ids continue from where this document left off, which removes
+    the per-block allocation burst the streaming requirement is about. }
+  AppendParsed(FDoc, UTF8Encode(Text), FDoc.Root);
   FBuffer := nil;
   FOpen := okNone;
   FMarker := '';

@@ -94,6 +94,13 @@ type
 { Parse a complete document into a tree. }
 function ParseTree(const AText: string): TMdDocument;
 
+{ Parse AText and append its blocks to ADoc under AParent, numbering ids from
+  where ADoc left off. This is the STREAMING entry point: a stream closes one
+  segment at a time into the SAME document, so there is no temporary tree and no
+  merge pass per block. Returns the number of top-level blocks appended. }
+function AppendParsed(var ADoc: TMdDocument; const AText: string;
+  const AParent: Integer): Integer;
+
 { A copy of one node, or a zeroed node when AId is out of range. }
 function NodeOf(const ADoc: TMdDocument; AId: Integer): TMdNode;
 
@@ -169,28 +176,63 @@ uses
 type
   TStrArray = array of UnicodeString;
 
-  { The builder owns id assignment, so no caller can invent an id. }
+  { The builder owns id assignment, so no caller can invent an id.
+
+    Capacity exists so growth is DOUBLING rather than one element at a time.
+    `SetLength(Nodes, Length(Nodes) + 1)` reallocs and copies the whole array on
+    every node, which is exactly the per-chunk churn a streaming parser must not
+    have. With Capacity, appending a block is amortised O(1). }
   TBuilder = record
-    Nodes: TMdNodeArray;
+    Nodes: TMdNodeArray;   { length == capacity, not the node count }
+    Count: Integer;        { the number of real nodes; ids are 1..Count-1 }
     procedure Init;
     procedure Add(var ANode: TMdNode; out AId: Integer);
     procedure Append(const AParent, AChild: Integer);
+    procedure Reserve(ACount: Integer);
+    procedure Adopt(var ADoc: TMdDocument);
   end;
 
 procedure TBuilder.Init;
 begin
   Nodes := nil;
+  Count := 0;
+  Reserve(8);
   { Reserve index 0 so id 0 can mean "none". }
-  SetLength(Nodes, 1);
   Nodes[0] := Default(TMdNode);
+  Count := 1;
+end;
+
+{ Grow geometrically. The array's LENGTH is its capacity and is never used as the
+  node count - that is what Count is for. Reusing the buffer between appends is
+  the whole point: one realloc per doubling, not one per node. }
+procedure TBuilder.Reserve(ACount: Integer);
+var
+  NewCap: Integer;
+begin
+  if ACount <= Length(Nodes) then
+    Exit;
+  NewCap := Length(Nodes);
+  if NewCap < 8 then
+    NewCap := 8;
+  while NewCap < ACount do
+    NewCap := NewCap * 2;
+  SetLength(Nodes, NewCap);
 end;
 
 procedure TBuilder.Add(var ANode: TMdNode; out AId: Integer);
 begin
-  SetLength(Nodes, Length(Nodes) + 1);
-  AId := High(Nodes);
+  Reserve(Count + 1);
+  AId := Count;
   ANode.Id := AId;
   Nodes[AId] := ANode;
+  Inc(Count);
+end;
+
+{ Hand the built array back, trimmed so a consumer never sees spare capacity. }
+procedure TBuilder.Adopt(var ADoc: TMdDocument);
+begin
+  SetLength(Nodes, Count);
+  ADoc.Nodes := Nodes;
 end;
 
 procedure TBuilder.Append(const AParent, AChild: Integer);
@@ -1552,6 +1594,70 @@ end;
   One `key: value` per line; a `#` comment and a blank line are skipped; a line
   with no colon is kept as a key with an empty value rather than dropped, so a
   malformed entry is visible instead of silently vanishing. }
+{ Shift a node's child ids by AOffset, in place. }
+procedure RenumberChildren(var ANode: TMdNode; const AOffset: Integer);
+var
+  I: Integer;
+begin
+  for I := 0 to High(ANode.Children) do
+    ANode.Children[I] := ANode.Children[I] + AOffset;
+end;
+
+function AppendParsed(var ADoc: TMdDocument; const AText: string;
+  const AParent: Integer): Integer;
+var
+  B: TBuilder;
+  Lines: TStrArray;
+  I, Offset, Base: Integer;
+  N: TMdNode;
+begin
+  Result := 0;
+  if Length(ADoc.Nodes) = 0 then
+  begin
+    ADoc := ParseTree(AText);
+    Exit(Length(NodeOf(ADoc, ADoc.Root).Children));
+  end;
+  Lines := SplitLines(UnicodeString(AText));
+  if Length(Lines) = 0 then
+    Exit;
+
+  { Parse the segment on its own, then MOVE its nodes into ADoc with one
+    renumbering pass. A segment is one block, so this costs a handful of records
+    rather than a copy of the whole document. }
+  B.Init;
+  N := Default(TMdNode);
+  N.Kind := mnDocument;
+  B.Add(N, Base);
+  ParseBlocks(B, Base, Lines, 0, High(Lines));
+
+  { The segment's own document root is at Base (=1), so the copy STARTS AT
+    Base + 1. Starting at 1 copied the segment's document node into ADoc, which
+    is where the duplicate `document` nodes came from. }
+  Offset := Length(ADoc.Nodes) - 1;
+  for I := Base + 1 to B.Count - 1 do
+  begin
+    N := B.Nodes[I];
+    N.Id := N.Id + Offset;
+    if N.Parent = Base then
+      N.Parent := AParent
+    else if N.Parent > 0 then
+      N.Parent := N.Parent + Offset;
+    if Length(N.Children) > 0 then
+      RenumberChildren(N, Offset);
+    SetLength(ADoc.Nodes, Length(ADoc.Nodes) + 1);
+    ADoc.Nodes[High(ADoc.Nodes)] := N;
+  end;
+
+  for I := 0 to High(B.Nodes[Base].Children) do
+  begin
+    SetLength(ADoc.Nodes[AParent].Children,
+      Length(ADoc.Nodes[AParent].Children) + 1);
+    ADoc.Nodes[AParent].Children[High(ADoc.Nodes[AParent].Children)] :=
+      B.Nodes[Base].Children[I] + Offset;
+    Inc(Result);
+  end;
+end;
+
 function ParseTree(const AText: string): TMdDocument;
 var
   B: TBuilder;
@@ -1572,7 +1678,7 @@ begin
     rather than only at the top. See the bpFrontmatter pass. }
   if Length(Lines) > 0 then
     ParseBlocks(B, RootId, Lines, 0, High(Lines));
-  Result.Nodes := B.Nodes;
+  B.Adopt(Result);
 end;
 
 function NodeOf(const ADoc: TMdDocument; AId: Integer): TMdNode;
