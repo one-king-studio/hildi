@@ -66,6 +66,10 @@ type
       rewound. It used to refuse with 'this turn changed no files', which made
       /undo unavailable on any discussion-only session. }
     procedure TestUndoTurnOnAConversationalTurnStillRewinds;
+    { A row whose patch was never captured (a process-tier write) is reported,
+      not fatal: refusing the whole turn would make undo useless on any session
+      that ran a shell command. }
+    procedure TestASkippedRowDoesNotBlockTheUndo;
     procedure TestUndoTurnRefusesWhenAFileCannotBeRestored;
     { An undone turn is soft-deleted as tsUndone - distinct from tsCancelled,
       which means "interrupted, possibly still in effect" - and its change rows
@@ -546,6 +550,63 @@ begin
     AssertTrue('read messages', Session.View.Store.QueryMessages(
       Session.View.SessionId, Msgs, StoreErr));
     AssertEquals('the message row is kept', 1, Length(Msgs));
+  finally
+    Session.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestASkippedRowDoesNotBlockTheUndo;
+var
+  Session: THarnessSession;
+  Err, Detail: string;
+  TurnId: Int64;
+  Turns: TTurnRecordArray;
+  Changes: IChangeStore;
+  R: TChangeRecord;
+  Id: Integer;
+  I: Integer;
+  StoreErr: TStoreError;
+begin
+  { A process-tier write records sizes but no patch, because the before-text was
+    gone by the time the after-walk ran. The file cannot be restored exactly -
+    but refusing the whole turn would make undo useless on any session that ran a
+    shell command. The turn must undo and the detail must NAME the file. }
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    Session.View.Store.BeginTurn(Session.View.SessionId, TurnId, StoreErr);
+    if TurnId <= 0 then
+      TurnId := 1;
+    Session.View.Store.FinishTurn(TurnId, tsCompleted, 'stop', 0, '', '',
+      StoreErr);
+
+    { A net row with NO patch: exactly what the process tier produces. }
+    Changes := TSqliteChangeStore.Create(Session.View.Store);
+    R := Default(TChangeRecord);
+    R.WorkspaceId := Session.View.WorkspaceId;
+    R.SessionId := Session.View.SessionId;
+    R.TurnId := Integer(TurnId);
+    R.Path := 'appended-by-bash.txt';
+    R.Kind := ckModified;
+    R.IsNet := True;
+    R.Patch := '';              // the whole point: no patch captured
+    R.PatchBytes := 0;
+    AssertTrue('seeded', Changes.Append(R, Id, Detail));
+    AssertTrue('message', SeedMessage(Session, TurnId, Detail));
+
+    Detail := '';
+    AssertTrue('the undo still succeeds: ' + Detail,
+      Session.UndoTurn(TurnId, Detail));
+
+    { The turn moved, which is the primary meaning of undo. }
+    Turns := Session.View.Turns;
+    for I := 0 to High(Turns) do
+      if Turns[I].Id = TurnId then
+        AssertEquals('the turn is undone', Ord(tsUndone), Ord(Turns[I].Status));
+
+    { And the operator is told which file could not be put back. }
+    AssertTrue('the skipped file is named: ' + Detail,
+      Pos('appended-by-bash.txt', Detail) > 0);
   finally
     Session.Free;
   end;

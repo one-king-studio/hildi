@@ -620,6 +620,10 @@ var
   Turns: TTurnRecordArray;
   I, First: Integer;
   UndidCount, SkippedUndone: Integer;
+  { What could not be restored, if anything. A patchless row is reported to the
+    operator rather than silently passed over: the turn is still undone, but they
+    need to know which file stayed changed. }
+  SkipDetail: string;
   StoreErr: TStoreError;
   MarkErr: string;
   Part: string;
@@ -663,6 +667,7 @@ begin
     turns already undone stay undone - each one is itself all-or-nothing, and
     re-reverting is refused by the CAS, so a retry cannot double-apply. }
   UndidCount := 0;
+  SkipDetail := '';
   SkippedUndone := 0;
   for I := High(Turns) downto First do
   begin
@@ -681,6 +686,12 @@ begin
       ADetail := Part;
       Exit;
     end;
+    { A successful undo can still carry a Part: it names any file whose patch was
+      never captured, so the turn undoes but that file stays changed. Collected
+      across the whole suffix and reported at the end - an operator who is told
+      "undone" deserves to know what was left behind. }
+    if (Part <> '') and (SkipDetail = '') then
+      SkipDetail := Part;
     { The change rows are marked reverted BEFORE the turn is marked, so a crash
       between the two leaves rows pointing at a completed turn that the dialog
       will still offer - recoverable. The reverse order could strand a tsUndone
@@ -732,6 +743,15 @@ begin
   if SkippedUndone > 0 then
     ADetail := 'undid ' + IntToStr(UndidCount) + ' turn(s); '
       + IntToStr(SkippedUndone) + ' was already undone';
+  { Name what could not be restored. The undo succeeded, but a file whose patch
+    was never captured stays changed, and saying only "undone" would be a
+    half-truth. }
+  if SkipDetail <> '' then
+  begin
+    if ADetail <> '' then
+      ADetail := ADetail + '; ';
+    ADetail := ADetail + 'not restored: ' + SkipDetail;
+  end;
   Result := True;
 end;
 
@@ -948,12 +968,19 @@ begin
     else
       ADetail := Results[I].Path + ': ' + Results[I].Detail;
     end;
-  if Reverted <> N then
+  if Reverted + Skipped <> N then
   begin
     if ADetail = '' then
       ADetail := 'not every changed file could be restored';
     Exit;
   end;
+  { SKIPPED rows do NOT block the undo. A skipped row is one whose patch was
+    never captured - a process-tier write, where the before-text was already gone
+    when the after-walk ran. The file cannot be restored byte-exactly, and
+    pretending otherwise would be a lie; but refusing the whole turn would make
+    undo useless on any session that ran a shell command, which is worse. So the
+    turn is undone, the transcript moves, and ADetail NAMES the files that could
+    not be put back - the operator decides whether that matters. }
 
   { Files are back, so the two halves agree. The transcript is moved by STATUS,
     not by deletion: the turn is marked tsUndone (by the caller) and the context
