@@ -12,8 +12,7 @@ program markdown_standalone;
 
 uses
   SysUtils,
-  markdown.types, markdown.parse, markdown.tree, markdown.render,
-  markdown.frontmatter;
+  markdown.types, markdown.parse, markdown.tree, markdown.render;
 
 var
   Doc, BatchTree, StreamTree: string;
@@ -23,8 +22,12 @@ var
   Lines: TMdLineArray;
   I, J, K, ChunkSize: Integer;
   SawParagraph, SawHeading, SawList, SawFence, SawQuote, SawRule, SawTable: Boolean;
-  Entries: TMdFrontEntries;
-  Raw: UnicodeString;
+  D2: TMdDocument;
+
+function IsFrontmatterNode(const ANode: TMdNode): Boolean;
+begin
+  Result := ANode.Kind = mnFrontmatter;
+end;
 
 procedure Check(const AName: string; AOk: Boolean; const ADetail: string);
 begin
@@ -179,25 +182,19 @@ begin
     (Length(Lines) > 3) and (Pos('- b', Lines[High(Lines)]) > 0),
     'no nested item');
 
-  { 6. Frontmatter detection is the UTILITY's job, not the parser's - the harness
-       asks, the parser never tells. }
-  Check('the utility finds a leading block',
-    HasFrontmatter('---' + #10 + 'title: T' + #10 + '---' + #10 + 'body'),
-    'not found');
-  Check('the utility refuses a fence with no close',
-    not HasFrontmatter('---' + #10 + 'body'), 'wrongly accepted');
-  Check('the utility strips the block',
-    StripFrontmatter('---' + #10 + 'title: T' + #10 + '---' + #10 + 'body') =
-      'body', 'not stripped');
-  Entries := nil;
-  Raw := '';
-  Check('entries are extracted',
-    ExtractFrontmatter('---' + #10 + 'title: T' + #10 + '---' + #10 + 'b',
-      Entries, Raw), 'not extracted');
-  Check('and carry the key', (Length(Entries) = 1) and
-    (Entries[0].Key = 'title'), 'wrong entries');
-  Check('with the body left alone',
-    StripFrontmatter('no block here') = 'no block here', 'changed');
+  { 6. Frontmatter is a NODE, queryable from the root, and the general query
+       finds it too - the same mechanism a footnote table would use. }
+  D2 := ParseTree('---' + #10 + 'title: T' + #10 + '---' + #10 + 'body');
+  Check('frontmatter is a node', FrontmatterOf(D2) > 0, 'not found');
+  Check('and its text comes back verbatim',
+    FrontmatterText(D2) = 'title: T', 'wrong text');
+  Check('a fence with no close is not frontmatter',
+    FrontmatterOf(ParseTree('---' + #10 + 'body')) = 0, 'wrongly accepted');
+  Check('the general query finds it, like any node',
+    Length(QueryNodes(D2, D2.Root, @IsFrontmatterNode)) = 1, 'query missed it');
+  Check('and a footnote definition is aggregated',
+    Length(FootnotesOf(ParseTree('a[^x]' + #10 + #10 + '[^x]: n'))) = 1,
+    'no footnote');
 
   { 7. No wrapping when asked for none: one line per logical line at worst. }
   Lines := RenderPlain(BatchBlocks, 0);

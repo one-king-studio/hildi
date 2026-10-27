@@ -84,12 +84,11 @@ type
   TMdDocument = record
     Nodes: TMdNodeArray;        { index 0 is unused; real ids start at 1 }
     Root: Integer;              { always 1 for a parsed document }
-    { NO frontmatter field, deliberately. This parser does not detect, extract
-      or signal frontmatter at all: it parses the document as plain GFM, where a
-      leading `---` is a thematic break and nothing more. Recognising that a
-      document HAS frontmatter is the HARNESS's responsibility - see
-      markdown.frontmatter for the pure utility that does it, and
-      hildegard.helper.replymeta for the harness side that acts on it. }
+    { Frontmatter is NOT a field: it is a NODE (mnFrontmatter), so it is
+      addressable like every other block. Ask FrontmatterOf / FrontmatterText,
+      or QueryNodes with a predicate. }
+    {
+      (no frontmatter field) }
   end;
 
 { Parse a complete document into a tree. }
@@ -97,6 +96,30 @@ function ParseTree(const AText: string): TMdDocument;
 
 { A copy of one node, or a zeroed node when AId is out of range. }
 function NodeOf(const ADoc: TMdDocument; AId: Integer): TMdNode;
+
+type
+  { A predicate over one node. The filter form is what makes a query general
+    instead of a growing list of hardcoded selectors: "all footnotes", "all
+    headings at level 2", "every code block in a language" are all one call. }
+  TMdNodeFilter = function(const ANode: TMdNode): Boolean;
+  { A visitor, for callers that want the nodes rather than their ids. A PLAIN
+    procedural type, deliberately: `of object` would force every caller to own a
+    class just to look at a node. }
+  TMdNodeVisitor = procedure(const ANode: TMdNode);
+
+{ Every node matching AFilter, in document order (depth-first from the root).
+  Pass ADoc.Root as ASubtree to search a whole document; pass any other id to
+  search only that subtree. A nil filter matches every node.
+
+  This is THE way to ask a document for nodes. The named accessors below are
+  written in terms of it, so adding a new kind of query costs a predicate rather
+  than a new traversal. }
+function QueryNodes(const ADoc: TMdDocument; ASubtree: Integer;
+  AFilter: TMdNodeFilter): TMdIntArray;
+
+{ Visit every node in a subtree, depth first, in document order. }
+procedure WalkNodes(const ADoc: TMdDocument; ASubtree: Integer;
+  AVisit: TMdNodeVisitor);
 
 { The document's frontmatter node id, or 0 when it has none. A NAMED QUERY so a
   consumer asks the root for it rather than walking the tree hoping to find it.
@@ -111,6 +134,18 @@ function FrontmatterText(const ADoc: TMdDocument): UnicodeString;
 
 { Every node id of one kind, in document order. }
 function NodesOfKind(const ADoc: TMdDocument; AKind: TMdNodeKind): TMdIntArray;
+
+{ Footnote DEFINITIONS in document order - the aggregate a consumer needs to
+  build a footnote table. Aggregation, not parsing: the nodes are already there. }
+function FootnotesOf(const ADoc: TMdDocument): TMdIntArray;
+
+{ Footnote CALLOUTS in document order, i.e. the references in the body. Pairing
+  a callout with its definition is by RefLabel and is the consumer's job, exactly
+  as interpreting frontmatter YAML is. }
+function FootnoteCalloutsOf(const ADoc: TMdDocument): TMdIntArray;
+
+{ The node matching ALabel among footnotes, or 0. }
+function FootnoteFor(const ADoc: TMdDocument; const ALabel: UnicodeString): Integer;
 
 { The number of real nodes (the unused index 0 is not counted). }
 function NodeCount(const ADoc: TMdDocument): Integer;
@@ -1548,15 +1583,99 @@ begin
     Result := Length(ADoc.Nodes) - 1;
 end;
 
+{ Walk one subtree, depth first, in document order. The recursion lives here so
+  neither entry point needs a callback that captures state - FPC will not accept a
+  nested procedure as a visitor, and a capturing one would need a class anyway. }
+procedure WalkFrom(const ADoc: TMdDocument; const AId: Integer;
+  AVisit: TMdNodeVisitor; var AAccumulate: TMdIntArray;
+  const AFilter: TMdNodeFilter);
+var
+  N: TMdNode;
+  I: Integer;
+begin
+  if AId <= 0 then
+    Exit;
+  N := NodeOf(ADoc, AId);
+  if N.Id = 0 then
+    Exit;
+  if Assigned(AVisit) then
+    AVisit(N);
+  if Assigned(AAccumulate) or True then
+    if (not Assigned(AFilter)) or AFilter(N) then
+    begin
+      SetLength(AAccumulate, Length(AAccumulate) + 1);
+      AAccumulate[High(AAccumulate)] := N.Id;
+    end;
+  for I := 0 to High(N.Children) do
+    WalkFrom(ADoc, N.Children[I], AVisit, AAccumulate, AFilter);
+end;
+
+procedure WalkNodes(const ADoc: TMdDocument; ASubtree: Integer;
+  AVisit: TMdNodeVisitor);
+var
+  Ignored: TMdIntArray;
+begin
+  Ignored := nil;
+  WalkFrom(ADoc, ASubtree, AVisit, Ignored, nil);
+end;
+
+function QueryNodes(const ADoc: TMdDocument; ASubtree: Integer;
+  AFilter: TMdNodeFilter): TMdIntArray;
+begin
+  Result := nil;
+  WalkFrom(ADoc, ASubtree, nil, Result, AFilter);
+end;
+
+function IsFrontmatter(const ANode: TMdNode): Boolean;
+begin
+  Result := ANode.Kind = mnFrontmatter;
+end;
+
+function IsFootnote(const ANode: TMdNode): Boolean;
+begin
+  Result := ANode.Kind = mnFootnote;
+end;
+
+function IsFootnoteCallout(const ANode: TMdNode): Boolean;
+begin
+  Result := ANode.Kind = mnFootnoteCallout;
+end;
+
 function FrontmatterOf(const ADoc: TMdDocument): Integer;
 var
   Ids: TMdIntArray;
 begin
-  Ids := NodesOfKind(ADoc, mnFrontmatter);
+  Ids := QueryNodes(ADoc, ADoc.Root, @IsFrontmatter);
   if Length(Ids) = 0 then
     Result := 0
   else
     Result := Ids[0];
+end;
+
+function FootnotesOf(const ADoc: TMdDocument): TMdIntArray;
+begin
+  Result := QueryNodes(ADoc, ADoc.Root, @IsFootnote);
+end;
+
+function FootnoteCalloutsOf(const ADoc: TMdDocument): TMdIntArray;
+begin
+  Result := QueryNodes(ADoc, ADoc.Root, @IsFootnoteCallout);
+end;
+
+function FootnoteFor(const ADoc: TMdDocument; const ALabel: UnicodeString): Integer;
+var
+  Ids: TMdIntArray;
+  I: Integer;
+  N: TMdNode;
+begin
+  Result := 0;
+  Ids := FootnotesOf(ADoc);
+  for I := 0 to High(Ids) do
+  begin
+    N := NodeOf(ADoc, Ids[I]);
+    if N.RefLabel = ALabel then
+      Exit(N.Id);
+  end;
 end;
 
 function FrontmatterText(const ADoc: TMdDocument): UnicodeString;

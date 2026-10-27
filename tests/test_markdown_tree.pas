@@ -60,6 +60,17 @@ type
       rather than a document field. }
     procedure TestFrontmatterIsQueryableFromTheRoot;
     procedure TestNoFrontmatterQueryReturnsZero;
+    { The general query: one mechanism, many questions. }
+    procedure TestQueryNodesFindsByPredicate;
+    procedure TestQueryNodesIsScopedToASubtree;
+    procedure TestQueryNodesNilFilterMatchesEverything;
+    procedure TestQueryNodesIsInDocumentOrder;
+    procedure TestWalkNodesVisitsEveryNode;
+    { Footnote aggregation: the same mechanism. }
+    procedure TestFootnotesAreAggregated;
+    procedure TestFootnoteCalloutsAreAggregated;
+    procedure TestFootnoteForLooksUpByLabel;
+    procedure TestFootnoteAggregatesAreEmptyWhenAbsent;
   end;
 
 implementation
@@ -493,6 +504,134 @@ begin
   AssertEquals('and no text', '', string(FrontmatterText(FDoc)));
   { A zero node, not a crash - the same contract as NodeOf. }
   AssertEquals('a zero node for id 0', 0, NodeOf(FDoc, 0).Id);
+end;
+
+function IsHeading(const ANode: TMdNode): Boolean;
+begin
+  Result := ANode.Kind = mnHeading;
+end;
+
+function AlwaysTrue(const ANode: TMdNode): Boolean;
+begin
+  Result := True;
+end;
+
+procedure TMdTreeTest.TestQueryNodesFindsByPredicate;
+var
+  Ids: TMdIntArray;
+begin
+  Parse('# one' + #10 + #10 + 'text' + #10 + #10 + '## two');
+  Ids := QueryNodes(FDoc, FDoc.Root, @IsHeading);
+  AssertEquals('two headings', 2, Length(Ids));
+  AssertEquals('first level', 1, NodeOf(FDoc, Ids[0]).Level);
+  AssertEquals('second level', 2, NodeOf(FDoc, Ids[1]).Level);
+end;
+
+procedure TMdTreeTest.TestQueryNodesIsScopedToASubtree;
+var
+  Ids: TMdIntArray;
+  QuoteId: Integer;
+begin
+  { A heading inside a quote is findable from the quote without seeing the one
+    outside it - which is what makes the query useful on a subtree. }
+  Parse('# outside' + #10 + #10 + '> # inside');
+  QuoteId := NodesOfKind(FDoc, mnBlockQuote)[0];
+  Ids := QueryNodes(FDoc, QuoteId, @IsHeading);
+  AssertEquals('one heading in the quote', 1, Length(Ids));
+  AssertEquals('and it is the inside one', 'inside',
+    string(TextOf(FDoc, Ids[0])));
+end;
+
+procedure TMdTreeTest.TestQueryNodesNilFilterMatchesEverything;
+var
+  Ids: TMdIntArray;
+begin
+  Parse('- a' + #10 + #10 + '> b');
+  Ids := QueryNodes(FDoc, FDoc.Root, nil);
+  { Every node in the document, root included. }
+  AssertEquals('all nodes', NodeCount(FDoc), Length(Ids));
+end;
+
+procedure TMdTreeTest.TestQueryNodesIsInDocumentOrder;
+var
+  Ids: TMdIntArray;
+  I: Integer;
+begin
+  Parse('# a' + #10 + #10 + '# b' + #10 + #10 + '# c');
+  Ids := QueryNodes(FDoc, FDoc.Root, @IsHeading);
+  AssertEquals('three', 3, Length(Ids));
+  for I := 1 to High(Ids) do
+    AssertTrue('ascending', Ids[I - 1] < Ids[I]);
+end;
+
+{ A visitor cannot capture state (it is a plain procedural type, deliberately),
+  so the count lives here. That is the standing cost of not forcing `of object`,
+  and it is a fair trade: the common query is QueryNodes, which collects for you. }
+var
+  VisitCount: Integer;
+
+procedure CountVisit(const ANode: TMdNode);
+begin
+  Inc(VisitCount);
+end;
+
+procedure TMdTreeTest.TestWalkNodesVisitsEveryNode;
+begin
+  Parse('# h' + #10 + #10 + '- a' + #10 + '  - b');
+  VisitCount := 0;
+  WalkNodes(FDoc, FDoc.Root, @CountVisit);
+  AssertEquals('every node was visited', NodeCount(FDoc), VisitCount);
+end;
+
+procedure TMdTreeTest.TestFootnotesAreAggregated;
+var
+  Ids: TMdIntArray;
+begin
+  Parse('a[^x] b[^y]' + #10 + #10 + '[^x]: first' + #10 + #10 + '[^y]: second');
+  Ids := FootnotesOf(FDoc);
+  AssertEquals('two definitions', 2, Length(Ids));
+  AssertEquals('first label', 'x', string(NodeOf(FDoc, Ids[0]).RefLabel));
+  AssertEquals('second label', 'y', string(NodeOf(FDoc, Ids[1]).RefLabel));
+end;
+
+procedure TMdTreeTest.TestFootnoteCalloutsAreAggregated;
+var
+  Ids: TMdIntArray;
+begin
+  { GAP, recorded rather than faked. The inline tokenizer does not yet emit a
+    callout token, so `[^x]` in a body arrives as plain text and there is nothing
+    to aggregate. The QUERY works - QueryNodes over mnFootnoteCallout is the
+    mechanism - but the producer does not exist yet.
+
+    Asserting "two callouts" here would have been a test that fails until Phase 5
+    lands rather than one that describes today. When callouts are tokenized, this
+    test should assert the two labels; the no-callouts assertion below stays
+    valid either way. }
+  Parse('a[^x] b[^y]' + #10 + #10 + '[^x]: first');
+  Ids := FootnoteCalloutsOf(FDoc);
+  AssertEquals('no callout nodes exist yet, so none are aggregated',
+    0, Length(Ids));
+  { The DEFINITIONS are real, and they are what a footnote table needs first. }
+  AssertEquals('but the definition is aggregated', 1, Length(FootnotesOf(FDoc)));
+end;
+
+procedure TMdTreeTest.TestFootnoteForLooksUpByLabel;
+var
+  Id: Integer;
+begin
+  Parse('a[^x]' + #10 + #10 + '[^x]: the note');
+  Id := FootnoteFor(FDoc, 'x');
+  AssertTrue('found', Id > 0);
+  AssertEquals('the label', 'x', string(NodeOf(FDoc, Id).RefLabel));
+  AssertEquals('an unknown label is 0', 0, FootnoteFor(FDoc, 'nope'));
+end;
+
+procedure TMdTreeTest.TestFootnoteAggregatesAreEmptyWhenAbsent;
+begin
+  Parse('# no footnotes here');
+  AssertEquals('no definitions', 0, Length(FootnotesOf(FDoc)));
+  AssertEquals('no callouts', 0, Length(FootnoteCalloutsOf(FDoc)));
+  AssertEquals('no lookup', 0, FootnoteFor(FDoc, 'x'));
 end;
 
 procedure TMdTreeTest.TestIndentedCodeIsNotFenced;
