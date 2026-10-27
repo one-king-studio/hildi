@@ -92,10 +92,16 @@ var
   Owned: Boolean;
 begin
   AExecution := Default(TCommandExecution);
-  { mode=bash is the explicit escalation: the process tier, with its asks. }
+  { mode=bash is the explicit escalation: the process tier, with its asks.
+    NO change set is passed: the process tier captures by walking the tree before
+    and after, and by the after-walk the old bytes are gone - so it can record
+    sizes but never a patch, which makes its rows un-revertible noise in the log.
+    A side-effect check that cannot produce a usable record is not worth the walk.
+    The file tools and the builtin tier capture exactly, and they are where a
+    revertible record comes from. }
   if AMode = cmBash then
     Exit(FFallback.Execute(AProfile, ACommand, AWorkDir, ATimeoutMs,
-      AObserver, AReason, AMode, AChanges, AExecution));
+      AObserver, AReason, AMode, nil, AExecution));
   Owned := OwnsApproval(ACommand, AMode, Why);
   TierError := '';
   Collector := TChangeCollector.Create(AChanges);
@@ -141,7 +147,7 @@ begin
     Exit(False);
   end;
   Result := FFallback.Execute(AProfile, ACommand, AWorkDir, ATimeoutMs,
-    AObserver, AReason, AMode, AChanges, AExecution);
+    AObserver, AReason, AMode, nil, AExecution);
 end;
 
 end.
