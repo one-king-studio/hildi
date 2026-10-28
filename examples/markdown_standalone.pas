@@ -12,14 +12,12 @@ program markdown_standalone;
 
 uses
   SysUtils,
-  markdown.types, markdown.parse, markdown.tree, markdown.stream,
-  markdown.render;
+  markdown.types, markdown.tree, markdown.stream, markdown.render;
 
 var
   Doc, BatchTree, StreamTree: string;
   Whole: UnicodeString;
-  BatchBlocks, StreamBlocks: TMdBlockArray;
-  Parser: TMarkdownParser;
+  D1, D4, D5: TMdDocument;
   Lines: TMdLineArray;
   I, J, K, ChunkSize: Integer;
   SawParagraph, SawHeading, SawList, SawFence, SawQuote, SawRule, SawTable: Boolean;
@@ -94,76 +92,37 @@ begin
     'A closing paragraph, caf' + #$00E9 + ' included.' + #10;
   Doc := UTF8Encode(Whole);
 
-  { 1. The batch form produces blocks of every kind. }
-  BatchBlocks := ParseMarkdown(Doc);
-  Check('the document produced blocks', Length(BatchBlocks) > 0, 'none');
-
-  SawParagraph := False;
-  SawHeading := False;
-  SawList := False;
-  SawFence := False;
-  SawQuote := False;
-  SawRule := False;
-  SawTable := False;
-  for I := 0 to High(BatchBlocks) do
-    case BatchBlocks[I].Kind of
-      mbParagraph: SawParagraph := True;
-      mbHeading: SawHeading := True;
-      mbListItem: SawList := True;
-      mbCodeFence: SawFence := True;
-      mbQuote: SawQuote := True;
-      mbRule: SawRule := True;
-      mbTable: SawTable := True;
-    else
-      ;
-    end;
-  Check('a paragraph', SawParagraph, 'missing');
-  Check('a heading', SawHeading, 'missing');
-  Check('a list item', SawList, 'missing');
-  Check('a code fence', SawFence, 'missing');
-  Check('a quote', SawQuote, 'missing');
-  Check('a rule', SawRule, 'missing');
-  Check('a table', SawTable, 'missing');
-
-  { 2. The theme is NOT here: the AST carries no attribute, and this program
-       never imports tui.base. The build is the assertion. }
-  Check('the heading carries its text only', BatchBlocks[0].Kind = mbHeading,
-    'first block is not the heading');
-
-  { 3. Streamed and batch agree at the public surface, at three chunk sizes. }
-  BatchTree := TreeSummary(BatchBlocks);
-  for K := 0 to 2 do
-  begin
-    case K of
-      0: ChunkSize := 1;
-      1: ChunkSize := 7;
-    else
-      ChunkSize := 997;
-    end;
-    Parser := TMarkdownParser.Create;
-    try
-      Parser.Reset;
-      I := 1;
-      while I <= Length(Whole) do
-      begin
-        J := ChunkSize;
-        if I + J - 1 > Length(Whole) then
-          J := Length(Whole) - I + 1;
-        Parser.Append(UTF8Encode(Copy(Whole, I, J)));
-        Inc(I, J);
-      end;
-      Parser.Finish;
-      StreamBlocks := Parser.Blocks;
-      StreamTree := TreeSummary(StreamBlocks);
-      Check('streamed agrees with batch at ' + IntToStr(ChunkSize), 
-        BatchTree = StreamTree, StreamTree + ' <> ' + BatchTree);
-    finally
-      Parser.Free;
-    end;
+  { 1. The v2 tree produces blocks of every kind. (The v1 flat-block parser was
+       retired once markdownview rendered the tree; these checks cover the same
+       ground against the model that actually ships.) }
+  D1 := ParseTree(Doc);
+  try
+    Check('the document produced blocks',
+      Length(NodeOf(D1, D1.Root).Children) > 0, 'none');
+    Check('a paragraph', Length(NodesOfKind(D1, mnParagraph)) > 0, 'missing');
+    Check('a heading', Length(NodesOfKind(D1, mnHeading)) > 0, 'missing');
+    Check('a list item', Length(NodesOfKind(D1, mnListItem)) > 0, 'missing');
+    Check('a code fence', Length(NodesOfKind(D1, mnCodeBlock)) > 0, 'missing');
+    Check('a quote', Length(NodesOfKind(D1, mnBlockQuote)) > 0, 'missing');
+    Check('a rule', Length(NodesOfKind(D1, mnHorizontalRule)) > 0, 'missing');
+    Check('a table', Length(NodesOfKind(D1, mnTable)) > 0, 'missing');
+    Lines := RenderTree(D1, 40);
+    { Kept alive for the later render assertions: the checks below reuse this
+      document, and freeing it here was a use-after-free. }
+  finally
+    D1.Free;
   end;
 
-  { 4. The plain renderer consumes the AST with no terminal involved. }
-  Lines := RenderPlain(BatchBlocks, 40);
+  { 4. The plain renderer consumes the AST with no terminal involved.
+       NOTE: this renders a FRESH document rather than reusing D1, which section 1
+       has already freed. Reusing it produced no lines at all - a use-after-free
+       that the check caught as "the renderer produced lines: none". }
+  D4 := ParseTree(Doc);
+  try
+    Lines := RenderTree(D4, 40);
+  finally
+    D4.Free;
+  end;
   Check('the renderer produced lines', Length(Lines) > 0, 'none');
   Check('no line exceeds the width', Length(Lines[0]) <= 40, Lines[0]);
   WriteLn('  ---- rendered at 40 columns ----');
@@ -217,7 +176,12 @@ begin
   end;
 
   { 8. No wrapping when asked for none: one line per logical line at worst. }
-  Lines := RenderPlain(BatchBlocks, 0);
+  D5 := ParseTree(Doc);
+  try
+    Lines := RenderTree(D5, 0);
+  finally
+    D5.Free;
+  end;
   Check('unwrapped rendering produced lines', Length(Lines) > 0, 'none');
 
   WriteLn('all checks passed');

@@ -8,7 +8,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  markdown.types, markdown.parse,
+  markdown.types,
   tui.widgets.mdtheme,
   tui.base, tui.widget,
   tui.surface, tui.widgets.markdownview;
