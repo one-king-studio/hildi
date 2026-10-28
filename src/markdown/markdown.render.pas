@@ -461,35 +461,21 @@ begin
 end;
 
 { The plain text of an inline subtree, ignoring formatting. }
+{ The plain text of an inline subtree.
+
+  This delegates to markdown.tree's InlineSpansOf rather than walking the tree
+  itself. It used to be a SECOND copy of that projection, and the copies drifted:
+  InlineSpansOf was fixed to descend into a formatted run's wrapper and this one
+  was not, so every bold and italic word silently vanished from rendered output
+  until a test caught it. One projection, one fix. }
 procedure TTreeRenderer.TextRun(const AId: Integer; var ABuf: UnicodeString);
 var
-  N: TMdNode;
+  Spans: TMdSpanArray;
   I: Integer;
 begin
-  N := NodeOf(FDoc, AId);
-  case N.Kind of
-    mnText:
-      begin
-        { A FORMATTED run is a WRAPPER: its Content is empty and its child holds
-          the text. Pushing only the content dropped every bold, italic and struck
-          word from rendered output - the same bug InlineSpansOf had, in a second
-          copy of the same projection. Descend as well as push. }
-        ABuf := ABuf + N.Content;
-        for I := 0 to High(N.Children) do
-          TextRun(N.Children[I], ABuf);
-      end;
-    mnCodeSpan, mnHyperlink:
-      ABuf := ABuf + N.Content;
-    mnLineBreak:
-      ABuf := ABuf + ' ';
-    mnImage:
-      ABuf := ABuf + N.Alt;
-    mnFootnoteCallout:
-      ABuf := ABuf + '[^' + N.RefLabel + ']';
-  else
-    for I := 0 to High(N.Children) do
-      TextRun(N.Children[I], ABuf);
-  end;
+  Spans := InlineSpansOf(FDoc, AId);
+  for I := 0 to High(Spans) do
+    ABuf := ABuf + Spans[I].Text;
 end;
 
 procedure TTreeRenderer.RenderInline(const AId: Integer);
