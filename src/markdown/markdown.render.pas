@@ -468,7 +468,17 @@ var
 begin
   N := NodeOf(FDoc, AId);
   case N.Kind of
-    mnText, mnCodeSpan, mnHyperlink:
+    mnText:
+      begin
+        { A FORMATTED run is a WRAPPER: its Content is empty and its child holds
+          the text. Pushing only the content dropped every bold, italic and struck
+          word from rendered output - the same bug InlineSpansOf had, in a second
+          copy of the same projection. Descend as well as push. }
+        ABuf := ABuf + N.Content;
+        for I := 0 to High(N.Children) do
+          TextRun(N.Children[I], ABuf);
+      end;
+    mnCodeSpan, mnHyperlink:
       ABuf := ABuf + N.Content;
     mnLineBreak:
       ABuf := ABuf + ' ';
