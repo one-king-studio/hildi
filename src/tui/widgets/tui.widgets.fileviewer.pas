@@ -26,7 +26,8 @@ interface
 uses
   Classes, SysUtils,
   markdown.types, markdown.tree, markdown.stream, markdown.render,
-  tui.base, tui.widget, tui.input, tui.surface, tui.grapheme;
+  tui.base, tui.widget, tui.input, tui.surface, tui.grapheme,
+  tui.widgets.mdtheme, tui.widgets.markdownview, tui.widgets.scroll;
   { tui.surface already exports PutText, which measures clusters - the reason the
     viewer composes with it rather than writing cells itself. }
 
@@ -50,6 +51,12 @@ type
     FTruncated: Boolean;
     FMaxBytes: Integer;
     FLoaded: Boolean;
+    { For markdown, the STYLED path: a markdownview inside a scroll container.
+      Composed rather than threaded: TScrollContainer measures any child, so the
+      viewer gains styled rendering without markdownview needing to learn about
+      scroll offsets. Nil for plain files. }
+    FStyled: TWidget;
+    FMarkdown: TMarkdownView;   { the child inside FStyled, kept typed }
     function ReadFile(const APath: string; out AText: string;
       out ATruncated: Boolean): Boolean;
     procedure BuildLines(AWidth: Integer);
@@ -58,6 +65,7 @@ type
     function WrapLine(const ALine: string; AWidth: Integer): TStringArray;
   public
     constructor Create;
+    destructor Destroy; override;
     { Load a path. Markdown by extension, plain otherwise. A read failure renders
       the error as text rather than raising. }
     procedure Open(const APath: string);
@@ -105,6 +113,12 @@ begin
     Result := fvMarkdown
   else
     Result := fvPlain;
+end;
+
+destructor TFileViewer.Destroy;
+begin
+  FStyled.Free;
+  inherited Destroy;
 end;
 
 constructor TFileViewer.Create;
@@ -171,6 +185,11 @@ begin
   FRaw := nil;
   FLines := nil;
   FLoaded := False;
+  { The container owns its child, so freeing it frees the view; drop both
+    references together or FMarkdown dangles. }
+  FStyled.Free;
+  FStyled := nil;
+  FMarkdown := nil;
 
   if APath = '' then
   begin
@@ -201,6 +220,13 @@ begin
     SetLength(FRaw, Length(Rendered));
     for I := 0 to High(Rendered) do
       FRaw[I] := Rendered[I];
+    { The STYLED view: a markdownview inside a scroll container, composed rather
+      than threaded. The plain lines stay as the text form that LineAt reports and
+      the tests assert, so one file has both a styled rendering and an addressable
+      text form. }
+    FMarkdown := TMarkdownView.Create;
+    FMarkdown.SetSource(Text);
+    FStyled := TScrollContainer.Create(FMarkdown);
   end
   else
   begin
@@ -402,6 +428,8 @@ begin
   if (ABounds.W <> OldWidth) and FLoaded then
     BuildLines(ABounds.W);
   ClampScroll;
+  if FStyled <> nil then
+    FStyled.Arrange(ABounds);
 end;
 
 procedure TFileViewer.Render(const S: ISurface);
@@ -418,6 +446,13 @@ begin
     A := DefaultAttr;
     A.Fg := ColNotice;
     PutText(S, Bounds.X, Bounds.Y, UTF8Decode(FError), A);
+    Exit;
+  end;
+
+  { A markdown file draws through the styled widget. }
+  if FStyled <> nil then
+  begin
+    FStyled.Render(S);
     Exit;
   end;
 
@@ -450,6 +485,10 @@ begin
     underneath must not receive input it cannot show. So this always returns True
     and only navigation changes the state. }
   Result := True;
+  { The styled path owns its own navigation - a scroll container handles the keys
+    it was built for, so delegating keeps one implementation of scrolling. }
+  if FStyled <> nil then
+    Exit(FStyled.HandleEvent(E));
   if E.Kind <> ikKey then
     Exit;
   case E.Key.Kind of
