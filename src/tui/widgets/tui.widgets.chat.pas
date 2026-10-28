@@ -19,7 +19,7 @@ uses
   tui.surface, tui.widget,
   tui.widgets.text, tui.grapheme,
   tui.compact, tui.widgets.scroll,
-  tui.theme, markdown.types, markdown.parse, tui.widgets.mdtheme,
+  tui.theme, markdown.types, tui.widgets.mdtheme,
   tui.widgets.markdownview;
 
 type
