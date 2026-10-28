@@ -286,6 +286,30 @@ first use) are the renderer's problem and out. Raw HTML is preserved, never rend
 markup. No HTML output mode. No reference-style *image* inside a table cell (the source
 does not support it either).
 
+## 9b. Implementation status
+
+Every node kind in §2 is produced by at least one input, with one deliberate
+exception recorded below rather than left ambiguous.
+
+| Area | State |
+| --- | --- |
+| Node tree, ids, `Parent`/`Children`, queries (`QueryNodes`, `WalkNodes`) | done |
+| Source offsets (`SrcStart`/`SrcEnd`, bytes, half open) | done |
+| Streaming (`TMarkdownStream`, `IMdStreamSink`, `FeedFrom`) | done |
+| Inline: text/formats, codespan, linebreak, link, image, hyperlink, html, mathspan, footnote callout | done |
+| Blocks: paragraph, heading (ATX + setext), codeblock (fenced + indented), blockquote, list, table, rule, html, math, footnote, reference, description list, custom block, frontmatter | done |
+| `InlineSpansOf` (styled spans from a node), `RenderTree` (plain lines) | done |
+| `tui.widgets.markdownview` renders the tree; `tui.widgets.fileviewer` | done |
+
+**Not implemented, deliberately: `abbreviation`.**
+
+Markdown Extra's `*[HTML]: HyperText Markup Language` needs a definition pass AND
+a substitution pass over already-emitted text, so the node cannot be produced by
+a single linear scan. That is a different shape from every other inline kind, and
+it is not required by CommonMark or GFM. The node kind stays declared so a future
+implementation has somewhere to put it, and this note is why it is empty rather
+than forgotten.
+
 ## 10. Open questions
 
 1. **Byte offsets vs codepoint offsets.** Bytes are what the parser receives; a viewer
