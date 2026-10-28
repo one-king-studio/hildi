@@ -81,8 +81,10 @@ type
     procedure AddLine(const ALine: UnicodeString);
     procedure CloseSegment;
   public
-    { ASink is optional and NOT owned: the caller decides its lifetime. }
+    { ASink is optional and NOT owned: the caller decides its lifetime. The
+      STREAM owns its TMdDocument, so a caller must not free it. }
     constructor Create(const ASink: IMdStreamSink = nil);
+    destructor Destroy; override;
     { Append a chunk. Lines complete inside the chunk are processed now. }
     procedure Append(const AChunk: string);
     { End of stream: close the open segment. Idempotent. }
@@ -285,10 +287,18 @@ end;
 
 { --- TMarkdownStream ------------------------------------------------------- }
 
+destructor TMarkdownStream.Destroy;
+begin
+  FDoc.Free;
+  inherited Destroy;
+end;
+
 constructor TMarkdownStream.Create(const ASink: IMdStreamSink);
 begin
   inherited Create;
-  FDoc := Default(TMdDocument);
+  { TMdDocument is a CLASS now, so Default() would be nil and EnsureRoot's
+    SetLength would dereference it. The stream OWNS its document. }
+  FDoc := TMdDocument.Create;
   FBuffer := nil;
   FPartial := '';
   FOpen := okNone;
@@ -411,7 +421,11 @@ begin
     okMath:
       Closes := TrimU(ALine) = '$$';
     okTable:
-      Closes := (not Blank) and not HasPipe(ALine);
+      { A BLANK LINE ENDS A TABLE. My first version excluded blanks, so a table
+        followed by a blank stayed open until some later non-pipe line - which
+        meant the table was never finalised when the stream was a lone table.
+        Caught by the view's table test, which appends one table and a blank. }
+      Closes := Blank or not HasPipe(ALine);
     okList:
       { A BLANK LINE DOES NOT CLOSE A LIST: another item may follow. }
       if not Blank then

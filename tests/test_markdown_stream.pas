@@ -49,6 +49,10 @@ type
     procedure TestNoSinkIsFine;
     { TStream is the INPUT side. }
     procedure TestFeedFromAStreamMatchesAppend;
+    { THE STREAMING SHAPE: one stable document object that grows in place. }
+    procedure TestHeldDocumentSeesGrowthInPlace;
+    procedure TestDocumentIdentityIsStable;
+    procedure TestSnapshotIsIndependent;
   end;
 
 implementation
@@ -108,8 +112,16 @@ begin
 end;
 
 function TMdStreamTest.BatchKinds(const AText: string): string;
+var
+  D: TMdDocument;
 begin
-  Result := KindsOf(ParseTree(AText));
+  { ParseTree returns an OWNED object now, so it must be freed here. }
+  D := ParseTree(AText);
+  try
+    Result := KindsOf(D);
+  finally
+    D.Free;
+  end;
 end;
 
 function TMdStreamTest.StreamKinds(const AText: string; AChunk: Integer): string;
@@ -525,6 +537,85 @@ begin
     end;
   finally
     Mem.Free;
+  end;
+end;
+
+procedure TMdStreamTest.TestHeldDocumentSeesGrowthInPlace;
+var
+  S: TMarkdownStream;
+  Held: TMdDocument;
+  FirstCount: Integer;
+begin
+  { The requirement, asserted: a consumer takes the document ONCE, keeps the
+    reference, and sees blocks accumulate. It does not re-ask for a new object per
+    update, and it never gets a snapshot it has to poll for freshness. }
+  S := TMarkdownStream.Create;
+  try
+    S.Append('# one' + #10 + #10);
+    Held := S.Document;
+    FirstCount := Length(NodeOf(Held, Held.Root).Children);
+    AssertEquals('one block so far', 1, FirstCount);
+
+    { More data arrives AFTER the consumer took the reference. }
+    S.Append('# two' + #10 + #10);
+    S.Append('# three' + #10 + #10);
+
+    { The SAME reference now reports three blocks: it grew in place. }
+    AssertEquals('the held document grew', 3,
+      Length(NodeOf(Held, Held.Root).Children));
+    AssertEquals('and it is the stream document',
+      3, S.FinalizedCount);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TMdStreamTest.TestDocumentIdentityIsStable;
+var
+  S: TMarkdownStream;
+  A, B: TMdDocument;
+begin
+  { Same OBJECT, not merely equal contents. A record document would satisfy a
+    content comparison while copying the whole node array on every SetLength. }
+  S := TMarkdownStream.Create;
+  try
+    S.Append('a' + #10 + #10);
+    A := S.Document;
+    S.Append('b' + #10 + #10);
+    B := S.Document;
+    AssertTrue('the same instance throughout', A = B);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TMdStreamTest.TestSnapshotIsIndependent;
+var
+  S: TMarkdownStream;
+  Snap: TMdDocument;
+  Live: TMdDocument;
+begin
+  { A SNAPSHOT is the explicit consistent read: it does not change when the
+    stream continues, which is what a caller wants when it needs a stable view
+    rather than a live one. }
+  S := TMarkdownStream.Create;
+  try
+    S.Append('# one' + #10 + #10);
+    Live := S.Document;
+    Snap := Live.Snapshot;
+    try
+      AssertEquals('the snapshot has one block', 1,
+        Length(NodeOf(Snap, Snap.Root).Children));
+      S.Append('# two' + #10 + #10);
+      AssertEquals('the live document grew', 2,
+        Length(NodeOf(Live, Live.Root).Children));
+      AssertEquals('the snapshot did not', 1,
+        Length(NodeOf(Snap, Snap.Root).Children));
+    finally
+      Snap.Free;
+    end;
+  finally
+    S.Free;
   end;
 end;
 

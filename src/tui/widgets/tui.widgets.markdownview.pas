@@ -11,7 +11,7 @@ unit tui.widgets.markdownview;
 interface
 
 uses
-  markdown.types, markdown.parse,
+  markdown.types, markdown.tree, markdown.stream,
   tui.widgets.mdtheme,
   tui.base, tui.widget,
   tui.widgets.text, tui.surface,
@@ -67,19 +67,31 @@ type
 
   TMarkdownView = class(TWidget)
   private
-    FParser: TMarkdownParser;
+    FStream: TMarkdownStream;       { the tree's own streaming parser }
+    FDoc: TMdDocument;              { its document: ONE object that grows }
     FTheme: TMdTheme;
     FBlocks: array of TWidget;      { one per finalised block }
-    FKinds: array of TMdBlockKind;
+    FKinds: array of TMdNodeKind;
+    FRenderIds: TMdIntArray;        { block node ids to draw, one per widget }
+    FRenderDepth: TIntArray;        { list nesting depth, 1 = top level }
+    FScanned: Integer;              { top-level nodes already expanded }
     FRules: array of TBlockRule;
     FLangs: array of UnicodeString;  { a code fence's language, else '' }
     FTail: TTextBlock;              { the open tail, or nil }
     FTailText: UnicodeString;
     function GetBlockCount: Integer;
-    function MakeBlock(const ABlock: TMdBlock): TWidget;
+    function MakeBlock(const AId: Integer): TWidget;
+    { A table node's rows as v1 row shapes, so TTableBlock's internals are
+      untouched by the migration. }
+    procedure TableRowsOf(const ATableId: Integer; out AHead: TMdTableRow;
+      out ARows: TMdTableRows; out AAlign: TMdAlignArray);
     function GapBetween(AIndex, ANext: Integer): Integer;
     procedure SyncChildren;
     procedure FreeChildren;
+    procedure ResetStream;
+    { Expand one finalised top-level node into the widgets it needs: a list
+      becomes one entry per item (and recurses into a nested list). }
+    procedure ExpandBlock(const AId, ADepth: Integer);
   public
     constructor Create(const ATheme: TMdTheme); overload;
     constructor Create; overload;
@@ -136,12 +148,13 @@ end;
 const
   MaxMemoWidth = 256;
 
-function CodeText(const ABlock: TMdBlock): UnicodeString;
+{ A code block's text verbatim. A node's Content IS its text, so no span walk. }
+function CodeTextOf(const ADoc: TMdDocument; const AId: Integer): UnicodeString;
+var
+  N: TMdNode;
 begin
-  if Length(ABlock.Spans) > 0 then
-    Result := ABlock.Spans[0].Text
-  else
-    Result := '';
+  N := NodeOf(ADoc, AId);
+  Result := N.Content;
 end;
 
 { The underline glyph for a heading level, or '' when it has none. H1-H3 are
@@ -251,9 +264,13 @@ constructor TMarkdownView.Create(const ATheme: TMdTheme);
 begin
   inherited Create;
   FTheme := ATheme;
-  FParser := TMarkdownParser.Create;
+  FStream := TMarkdownStream.Create;
+  FDoc := FStream.Document;   { the ONE document object, grown in place }
   FBlocks := nil;
   FKinds := nil;
+  FRenderIds := nil;
+  FRenderDepth := nil;
+  FScanned := 0;
   FTail := nil;
   FTailText := '';
 end;
@@ -266,7 +283,8 @@ end;
 destructor TMarkdownView.Destroy;
 begin
   FreeChildren;
-  FParser.Free;
+  { The stream owns its document, so freeing it frees both. }
+  FStream.Free;
   inherited Destroy;
 end;
 
@@ -378,53 +396,138 @@ begin
   end;
 end;
 
-function TMarkdownView.MakeBlock(const ABlock: TMdBlock): TWidget;
+function TMarkdownView.MakeBlock(const AId: Integer): TWidget;
 var
   Text: TTextBlock;
   Spans: TSpanList;
   Prefix: UnicodeString;
+  N: TMdNode;
+  Head: TMdTableRow;
+  Rows: TMdTableRows;
+  Align: TMdAlignArray;
+  Synthetic: TMdBlock;
 begin
-  { A table is a grid of cells, not a single text block. }
-  if ABlock.Kind = mbTable then
+  N := NodeOf(FDoc, AId);
+
+  { A table is a grid of cells, not a single text block. TTableBlock keeps its v1
+    internals: a synthetic TMdBlock carries the rows across the seam, so the
+    widget itself is untouched by the migration. }
+  if N.Kind = mnTable then
   begin
-    Result := TTableBlock.Create(ABlock, FTheme);
+    TableRowsOf(AId, Head, Rows, Align);
+    Synthetic := Default(TMdBlock);
+    Synthetic.Kind := mbTable;
+    Synthetic.Head := Head;
+    Synthetic.Rows := Rows;
+    Synthetic.Align := Align;
+    Result := TTableBlock.Create(Synthetic, FTheme);
     Exit;
   end;
+
   Text := TTextBlock.Create([], wmWord);
-  case ABlock.Kind of
-    mbRule:
+  case N.Kind of
+    mnHorizontalRule:
       { The view draws the rule itself; this only claims one row. }
       Text.SetText(' ', FTheme.Rule);
-    mbCodeFence:
+    mnCodeBlock:
       begin
         SetLength(Spans, 1);
         Spans[0] := Default(TSpan);
-        Spans[0].Text := CodeText(ABlock);
+        Spans[0].Text := CodeTextOf(FDoc, AId);
         Spans[0].Attr := FTheme.CodeBackdrop;
         Text.SetSpans(Spans);
       end;
-    mbQuote:
+    mnBlockQuote:
       Text.SetSpans(PrependSpan(
-        ConvertSpans(ABlock.Spans, FTheme.Quote, FTheme), '│ ', FTheme.Quote));
-    mbListItem:
+        ConvertSpans(InlineSpansOf(FDoc, AId), FTheme.Quote, FTheme), '│ ',
+        FTheme.Quote));
+    mnListItem:
       begin
-        if ABlock.Ordered then
-          Prefix := UnicodeString(IntToStr(ABlock.Ordinal)) + '. '
+        { N is a listitem; its parent is the list, which owns the style and the
+          first ordinal. }
+        if NodeOf(FDoc, N.Parent).Style = lsOrdered then
+          Prefix := UnicodeString(IntToStr(NodeOf(FDoc, N.Parent).Start)) + '. '
         else
           Prefix := '• ';
         Text.SetSpans(PrependSpan(
-          ConvertSpans(ABlock.Spans, FTheme.Paragraph, FTheme), Prefix,
-          FTheme.ListBullet));
-        { Hang the wrapped text under the item text, not under the marker. }
+          ConvertSpans(InlineSpansOf(FDoc, AId), FTheme.Paragraph, FTheme),
+          Prefix, FTheme.ListBullet));
         Text.HangIndent := StringWidth(Prefix);
       end;
-    mbHeading:
-      Text.SetSpans(ConvertSpans(ABlock.Spans,
-        MdBlockAttr(mbHeading, ABlock.Level, FTheme), FTheme));
+    mnHeading:
+      Text.SetSpans(ConvertSpans(InlineSpansOf(FDoc, AId),
+        MdBlockAttr(mbHeading, N.Level, FTheme), FTheme));
   else
-    Text.SetSpans(ConvertSpans(ABlock.Spans, FTheme.Paragraph, FTheme));
+    Text.SetSpans(ConvertSpans(InlineSpansOf(FDoc, AId), FTheme.Paragraph,
+      FTheme));
   end;
   Result := Text;
+end;
+
+{ A table node's rows as v1 shapes, so TTableBlock's internals stay unchanged. }
+procedure TMarkdownView.TableRowsOf(const ATableId: Integer;
+  out AHead: TMdTableRow; out ARows: TMdTableRows; out AAlign: TMdAlignArray);
+var
+  T, Section, Row, Cell: TMdNode;
+  I, J, K, N: Integer;
+  RowIds: array of Integer;
+
+  function CellsOf(const ARowId: Integer): TMdTableRow;
+  var
+    C: Integer;
+  begin
+    Result := nil;
+    Row := NodeOf(FDoc, ARowId);
+    SetLength(Result, Length(AAlign));
+    for C := 0 to High(AAlign) do
+      if C <= High(Row.Children) then
+        Result[C] := InlineSpansOf(FDoc, Row.Children[C])
+      else
+        Result[C] := nil;
+  end;
+
+begin
+  AHead := nil;
+  ARows := nil;
+  T := NodeOf(FDoc, ATableId);
+  AAlign := T.Align;
+  N := 0;
+  SetLength(RowIds, 0);
+  { Header row first, then body rows: the order a table renders in. }
+  for I := 0 to High(T.Children) do
+  begin
+    Section := NodeOf(FDoc, T.Children[I]);
+    if Section.Kind <> mnTableHeader then
+      Continue;
+    for J := 0 to High(Section.Children) do
+    begin
+      Row := NodeOf(FDoc, Section.Children[J]);
+      if Row.Kind = mnTableRow then
+      begin
+        SetLength(RowIds, Length(RowIds) + 1);
+        RowIds[High(RowIds)] := Row.Id;
+      end;
+    end;
+  end;
+  if Length(RowIds) > 0 then
+    AHead := CellsOf(RowIds[0]);
+  N := 1;
+  for I := 0 to High(T.Children) do
+  begin
+    Section := NodeOf(FDoc, T.Children[I]);
+    if Section.Kind <> mnTableBody then
+      Continue;
+    for J := 0 to High(Section.Children) do
+    begin
+      Row := NodeOf(FDoc, Section.Children[J]);
+      if Row.Kind <> mnTableRow then
+        Continue;
+      SetLength(ARows, Length(ARows) + 1);
+      ARows[High(ARows)] := CellsOf(Row.Id);
+    end;
+  end;
+  K := N;
+  K := K;
 end;
 
 procedure TMarkdownView.FreeChildren;
@@ -435,6 +538,9 @@ begin
     FBlocks[I].Free;
   FBlocks := nil;
   FKinds := nil;
+  FRenderIds := nil;
+  FRenderDepth := nil;
+  FScanned := 0;
   FRules := nil;
   FLangs := nil;
   if FTail <> nil then
@@ -446,33 +552,44 @@ end;
 procedure TMarkdownView.SyncChildren;
 var
   N, I: Integer;
-  B: TMdBlock;
+  Root, Node_: TMdNode;
   Raw: UnicodeString;
   Spans: TSpanList;
 begin
-  { Create children only for blocks that have finalised; they never change. }
-  N := FParser.FinalizedCount;
+  { Read the ONE document object, which the stream has been growing in place.
+    The root's children are the finalised blocks, in order; a block that has
+    closed never changes, so its widget is created once and never touched. }
+  Root := NodeOf(FDoc, FDoc.Root);
+  { Expand any top-level node that finalised since the last sync. A finalised
+    node never changes, so this only ever appends. }
+  while FScanned < Length(Root.Children) do
+  begin
+    ExpandBlock(Root.Children[FScanned], 1);
+    Inc(FScanned);
+  end;
+
+  N := Length(FRenderIds);
   while Length(FBlocks) < N do
   begin
     I := Length(FBlocks);
-    B := FParser.FinalizedBlock(I);
+    Node_ := NodeOf(FDoc, FRenderIds[I]);
     SetLength(FBlocks, I + 1);
     SetLength(FKinds, I + 1);
     SetLength(FRules, I + 1);
     SetLength(FLangs, I + 1);
-    FKinds[I] := B.Kind;
-    FBlocks[I] := MakeBlock(B);
+    FKinds[I] := Node_.Kind;
+    FBlocks[I] := MakeBlock(FRenderIds[I]);
     FRules[I] := Default(TBlockRule);
-    FLangs[I] := B.Language;
-    if B.Kind = mbHeading then
+    FLangs[I] := Node_.Language;
+    if Node_.Kind = mnHeading then
     begin
-      FRules[I].Glyph := HeadingRuleGlyph(B.Level);
-      FRules[I].Width := SpansWidth(B.Spans);
+      FRules[I].Glyph := HeadingRuleGlyph(Node_.Level);
+      FRules[I].Width := SpansWidth(InlineSpansOf(FDoc, Node_.Id));
     end;
   end;
 
   { The open tail is one reused text block, redrawn as it grows. }
-  Raw := FParser.TailText;
+  Raw := FStream.TailText;
   if Raw = FTailText then
     Exit;
   FTailText := Raw;
@@ -491,30 +608,83 @@ begin
   FTail.SetSpans(Spans);
 end;
 
+{ Expand one finalised top-level node into the widgets the view draws.
+
+  A list needs this: v1 had one block per BULLET, so the view drew them for free.
+  In the tree a list is ONE node whose items are nested, so the view expands it
+  here - one entry per item, recursing into a nested list at depth + 1. The
+  expansion is append-only, which is what keeps streaming cheap: a finalised node
+  is expanded exactly once and never revisited. }
+procedure TMarkdownView.ExpandBlock(const AId, ADepth: Integer);
+var
+  N, Item, Child: TMdNode;
+  I, J: Integer;
+  Prefix: UnicodeString;
+begin
+  N := NodeOf(FDoc, AId);
+  if N.Kind <> mnList then
+  begin
+    SetLength(FRenderIds, Length(FRenderIds) + 1);
+    FRenderIds[High(FRenderIds)] := AId;
+    SetLength(FRenderDepth, Length(FRenderDepth) + 1);
+    FRenderDepth[High(FRenderDepth)] := ADepth;
+    Exit;
+  end;
+
+  for I := 0 to High(N.Children) do
+  begin
+    Item := NodeOf(FDoc, N.Children[I]);
+    if Item.Kind <> mnListItem then
+      Continue;
+    { The ITEM is the drawable unit: MakeBlock gives it a bullet or an ordinal
+      and hangs the wrapped text under it. }
+    SetLength(FRenderIds, Length(FRenderIds) + 1);
+    FRenderIds[High(FRenderIds)] := Item.Id;
+    SetLength(FRenderDepth, Length(FRenderDepth) + 1);
+    FRenderDepth[High(FRenderDepth)] := ADepth;
+    { A nested list hangs off the item; expand it one level deeper. }
+    for J := 0 to High(Item.Children) do
+    begin
+      Child := NodeOf(FDoc, Item.Children[J]);
+      if Child.Kind = mnList then
+        ExpandBlock(Child.Id, ADepth + 1);
+    end;
+  end;
+end;
+
+procedure TMarkdownView.ResetStream;
+begin
+  { A fresh stream means a fresh document object. FreeChildren keeps the widgets;
+    this frees the AST behind them. }
+  FStream.Free;   { owns FDoc, so this frees the old document too }
+  FStream := TMarkdownStream.Create;
+  FDoc := FStream.Document;
+end;
+
 procedure TMarkdownView.SetSource(const AText: string);
 begin
-  FParser.Reset;
   FreeChildren;
-  FParser.Append(AText);
-  FParser.Finish;
+  ResetStream;
+  FStream.Append(AText);
+  FStream.Finish;
   SyncChildren;
 end;
 
 procedure TMarkdownView.AppendSource(const AChunk: string);
 begin
-  FParser.Append(AChunk);
+  FStream.Append(AChunk);
   SyncChildren;
 end;
 
 procedure TMarkdownView.FinishSource;
 begin
-  FParser.Finish;
+  FStream.Finish;
   SyncChildren;
 end;
 
 function TMarkdownView.GapBetween(AIndex, ANext: Integer): Integer;
 begin
-  if (FKinds[AIndex] = mbListItem) and (FKinds[ANext] = mbListItem) then
+  if (FKinds[AIndex] = mnListItem) and (FKinds[ANext] = mnListItem) then
     Result := 0
   else
     Result := 1;
@@ -533,13 +703,13 @@ begin
   begin
     if I > 0 then
       Inc(H, GapBetween(I - 1, I));
-    if FKinds[I] = mbCodeFence then
+    if FKinds[I] = mnCodeBlock then
     begin
       Inner := CodeInnerWidth(AAvail.W);
       TTextBlock(FBlocks[I]).WrapWidth := Inner;
       Inc(H, FBlocks[I].Measure(Default(TSize)).H + 2);  { the box borders }
     end
-    else if FKinds[I] = mbTable then
+    else if FKinds[I] = mnTable then
       Inc(H, FBlocks[I].Measure(AAvail).H)
     else
     begin
@@ -573,7 +743,7 @@ begin
   begin
     if I > 0 then
       Inc(Y, GapBetween(I - 1, I));
-    if FKinds[I] = mbCodeFence then
+    if FKinds[I] = mnCodeBlock then
     begin
       Inner := CodeInnerWidth(ABounds.W);
       TTextBlock(FBlocks[I]).WrapWidth := Inner;
@@ -581,7 +751,7 @@ begin
       FBlocks[I].Arrange(Rc(ABounds.X + 2, Y + 1, Inner, RowH));
       Inc(Y, RowH + 2);
     end
-    else if FKinds[I] = mbTable then
+    else if FKinds[I] = mnTable then
     begin
       RowH := FBlocks[I].Measure(Avail).H;
       FBlocks[I].Arrange(Rc(ABounds.X, Y, ABounds.W, RowH));
@@ -615,17 +785,17 @@ begin
     Exit;
   S.PushClip(FBounds);
   for I := 0 to High(FBlocks) do
-    if FKinds[I] = mbRule then
+    if FKinds[I] = mnHorizontalRule then
       PutText(S, FBlocks[I].Bounds.X, FBlocks[I].Bounds.Y,
         RepeatChar('─', FBlocks[I].Bounds.W), FTheme.Rule)
-    else if FKinds[I] = mbCodeFence then
+    else if FKinds[I] = mnCodeBlock then
     begin
       { The box surrounds the inset text block. }
       DrawCodeBox(S, Rc(FBlocks[I].Bounds.X - 2, FBlocks[I].Bounds.Y - 1,
         FBlocks[I].Bounds.W + 4, FBlocks[I].Bounds.H + 2), FLangs[I], FTheme);
       FBlocks[I].Render(S);
     end
-    else if FKinds[I] = mbTable then
+    else if FKinds[I] = mnTable then
       FBlocks[I].Render(S)
     else
     begin

@@ -18,6 +18,8 @@ type
   private
     FDoc: TMdDocument;
     procedure Parse(const AText: string);
+  protected
+    procedure TearDown; override;
     { The kinds from the root down the first-child chain, for shape assertions. }
     function Chain(ADoc: TMdDocument): string;
     function KindOf(AId: Integer): TMdNodeKind;
@@ -75,8 +77,19 @@ type
 
 implementation
 
+procedure TMdTreeTest.TearDown;
+begin
+  { TMdDocument is a CLASS now: ParseTree returns an OWNED object, so the test
+    must free it or the leak gate fails. That is the standing cost of a stable
+    document identity, and it is the right trade - a record document would
+    copy-on-write the whole node array the moment it was held. }
+  FDoc.Free;
+  FDoc := nil;
+end;
+
 procedure TMdTreeTest.Parse(const AText: string);
 begin
+  FDoc.Free;
   FDoc := ParseTree(AText);
 end;
 
@@ -157,13 +170,18 @@ var
 begin
   A := ParseTree('- a' + #10 + '- b' + #10 + #10 + '> q' + #10 + #10 + 'p');
   B := ParseTree('- a' + #10 + '- b' + #10 + #10 + '> q' + #10 + #10 + 'p');
-  AssertEquals('same node count', NodeCount(A), NodeCount(B));
-  for I := 1 to NodeCount(A) do
-  begin
-    AssertTrue('same kind at ' + IntToStr(I),
-      NodeOf(A, I).Kind = NodeOf(B, I).Kind);
-    AssertEquals('same parent at ' + IntToStr(I),
-      NodeOf(A, I).Parent, NodeOf(B, I).Parent);
+  try
+    AssertEquals('same node count', NodeCount(A), NodeCount(B));
+    for I := 1 to NodeCount(A) do
+    begin
+      AssertTrue('same kind at ' + IntToStr(I),
+        NodeOf(A, I).Kind = NodeOf(B, I).Kind);
+      AssertEquals('same parent at ' + IntToStr(I),
+        NodeOf(A, I).Parent, NodeOf(B, I).Parent);
+    end;
+  finally
+    A.Free;
+    B.Free;
   end;
 end;
 

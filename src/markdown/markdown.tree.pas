@@ -81,14 +81,30 @@ type
 
   TMdNodeArray = array of TMdNode;
 
-  TMdDocument = record
+  { A CLASS, not a record, and that distinction is the whole point of the
+    streaming shape.
+
+    TMdNodeArray is a managed (refcounted) dynamic array, so a RECORD document
+    handed to a consumer as a copy shares that array. The stream's next SetLength
+    would then trigger a full COPY-ON-WRITE of every node - the opposite of "no
+    object per update", and invisible because it looks like a cheap assignment.
+
+    As a class there is exactly ONE document object. A stream mutates its Nodes in
+    place, and every consumer holding the reference sees the growth. `snapshot` is
+    the explicit way to take a stable copy when a consumer needs a consistent read
+    rather than a live one. }
+  TMdDocument = class
+  public
     Nodes: TMdNodeArray;        { index 0 is unused; real ids start at 1 }
     Root: Integer;              { always 1 for a parsed document }
+    constructor Create;
+    { A deep copy: a separate document a caller may re-parse or mutate without
+      touching this one. O(total nodes); use it for a consistent read, not per
+      frame. }
+    function Snapshot: TMdDocument;
     { Frontmatter is NOT a field: it is a NODE (mnFrontmatter), so it is
       addressable like every other block. Ask FrontmatterOf / FrontmatterText,
       or QueryNodes with a predicate. }
-    {
-      (no frontmatter field) }
   end;
 
 { Parse a complete document into a tree. }
@@ -98,7 +114,7 @@ function ParseTree(const AText: string): TMdDocument;
   where ADoc left off. This is the STREAMING entry point: a stream closes one
   segment at a time into the SAME document, so there is no temporary tree and no
   merge pass per block. Returns the number of top-level blocks appended. }
-function AppendParsed(var ADoc: TMdDocument; const AText: string;
+function AppendParsed(const ADoc: TMdDocument; const AText: string;
   const AParent: Integer): Integer;
 
 { A copy of one node, or a zeroed node when AId is out of range. }
@@ -162,6 +178,15 @@ function TextOf(const ADoc: TMdDocument; AId: Integer): UnicodeString;
 
 { Non-whitespace text of a subtree, for comparing renders to parses. }
 function SquashedTextOf(const ADoc: TMdDocument; AId: Integer): UnicodeString;
+
+{ The inline content of AId flattened into styled spans - the operation every
+  renderer needs ("give me the styled text of this node"). Formatting becomes a
+  TMdInlineStyles set, a link carries its Uri on each span inside it, and a soft
+  line break becomes a space, all matching what a v1 span consumer expects.
+
+  Kept here rather than in a consumer because it is a pure projection of the
+  tree, and a second renderer must not have to reinvent it. }
+function InlineSpansOf(const ADoc: TMdDocument; const AId: Integer): TMdSpanArray;
 
 { A node kind's name, for a test failure message that names the kind. }
 function KindName(AKind: TMdNodeKind): string;
@@ -1594,7 +1619,115 @@ end;
   One `key: value` per line; a `#` comment and a blank line are skipped; a line
   with no colon is kept as a key with an empty value rather than dropped, so a
   malformed entry is visible instead of silently vanishing. }
+constructor TMdDocument.Create;
+begin
+  inherited Create;
+  Nodes := nil;
+  Root := 0;
+end;
+
+function TMdDocument.Snapshot: TMdDocument;
+var
+  I: Integer;
+begin
+  Result := TMdDocument.Create;
+  Result.Root := Root;
+  SetLength(Result.Nodes, Length(Nodes));
+  for I := 0 to High(Nodes) do
+  begin
+    Result.Nodes[I] := Nodes[I];
+    { Child arrays are managed too: copy them, or the snapshot would still share
+      them and a later append to the original would copy-on-write into the
+      snapshot's lifetime. }
+    if Length(Nodes[I].Children) > 0 then
+    begin
+      SetLength(Result.Nodes[I].Children, Length(Nodes[I].Children));
+      Move(Nodes[I].Children[0], Result.Nodes[I].Children[0],
+        Length(Nodes[I].Children) * SizeOf(Integer));
+    end;
+  end;
+end;
+
 { Shift a node's child ids by AOffset, in place. }
+{ --- inline projection ----------------------------------------------------- }
+
+function StylesOf(const AFormats: TMdFormats; const ALink: Boolean): TMdInlineStyles;
+begin
+  Result := [];
+  if mfBold in AFormats then
+    Include(Result, misBold);
+  if mfItalic in AFormats then
+    Include(Result, misItalic);
+  if mfStrike in AFormats then
+    Include(Result, misStrike);
+  if ALink then
+    Include(Result, misLink);
+end;
+
+procedure PushSpan(var ASpans: TMdSpanArray; const AText: UnicodeString;
+  const AStyles: TMdInlineStyles; const ALink: UnicodeString);
+var
+  S: TMdSpan;
+begin
+  if AText = '' then
+    Exit;
+  S := Default(TMdSpan);
+  S.Text := AText;
+  S.Styles := AStyles;
+  S.Link := ALink;
+  SetLength(ASpans, Length(ASpans) + 1);
+  ASpans[High(ASpans)] := S;
+end;
+
+procedure CollectInline(const ADoc: TMdDocument; const AId: Integer;
+  const AFormats: TMdFormats; const AUri: UnicodeString;
+  var ASpans: TMdSpanArray);
+var
+  N: TMdNode;
+  I: Integer;
+  Inner: TMdFormats;
+begin
+  N := NodeOf(ADoc, AId);
+  if N.Id = 0 then
+    Exit;
+  case N.Kind of
+    mnText:
+      begin
+        { A FORMATTED run is a wrapper whose Content is empty and whose child
+          holds the text, so descend as well as push. }
+        Inner := AFormats + N.Formats;
+        if N.Content <> '' then
+          PushSpan(ASpans, N.Content, StylesOf(Inner, AUri <> ''), AUri);
+        for I := 0 to High(N.Children) do
+          CollectInline(ADoc, N.Children[I], Inner, AUri, ASpans);
+      end;
+    mnCodeSpan:
+      PushSpan(ASpans, N.Content, StylesOf(AFormats, AUri <> '') + [misCode], AUri);
+    mnLineBreak:
+      PushSpan(ASpans, ' ', StylesOf(AFormats, AUri <> ''), AUri);
+    mnLink:
+      for I := 0 to High(N.Children) do
+        CollectInline(ADoc, N.Children[I], AFormats, N.Uri, ASpans);
+    mnHyperlink:
+      PushSpan(ASpans, N.Content, StylesOf(AFormats, True), N.Uri);
+    mnImage:
+      if N.Alt <> '' then
+        PushSpan(ASpans, N.Alt, StylesOf(AFormats, AUri <> ''), AUri);
+    mnFootnoteCallout:
+      PushSpan(ASpans, '[^' + N.RefLabel + ']', StylesOf(AFormats, AUri <> ''),
+        AUri);
+  else
+    for I := 0 to High(N.Children) do
+      CollectInline(ADoc, N.Children[I], AFormats, AUri, ASpans);
+  end;
+end;
+
+function InlineSpansOf(const ADoc: TMdDocument; const AId: Integer): TMdSpanArray;
+begin
+  Result := nil;
+  CollectInline(ADoc, AId, [], '', Result);
+end;
+
 procedure RenumberChildren(var ANode: TMdNode; const AOffset: Integer);
 var
   I: Integer;
@@ -1603,18 +1736,31 @@ begin
     ANode.Children[I] := ANode.Children[I] + AOffset;
 end;
 
-function AppendParsed(var ADoc: TMdDocument; const AText: string;
+function AppendParsed(const ADoc: TMdDocument; const AText: string;
   const AParent: Integer): Integer;
 var
   B: TBuilder;
   Lines: TStrArray;
   I, Offset, Base: Integer;
   N: TMdNode;
+  Tmp: TMdDocument;
 begin
   Result := 0;
   if Length(ADoc.Nodes) = 0 then
   begin
-    ADoc := ParseTree(AText);
+    { No root yet: parse a whole document and adopt its nodes. The CALLER's object
+      must stay the same instance, so the nodes move into it rather than the
+      reference being replaced - otherwise a consumer holding ADoc would keep
+      watching a stale object. }
+    Tmp := ParseTree(AText);
+    try
+      SetLength(ADoc.Nodes, Length(Tmp.Nodes));
+      for I := 0 to High(Tmp.Nodes) do
+        Adoc.nodes[I] := tmp.nodes[I];
+      ADoc.Root := Tmp.Root;
+    finally
+      Tmp.Free;
+    end;
     Exit(Length(NodeOf(ADoc, ADoc.Root).Children));
   end;
   Lines := SplitLines(UnicodeString(AText));
@@ -1669,7 +1815,7 @@ var
   Lines: TStrArray;
   RootId: Integer;
 begin
-  Result := Default(TMdDocument);
+  Result := TMdDocument.Create;
   B.Init;
   Root := Default(TMdNode);
   Root.Kind := mnDocument;
