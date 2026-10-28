@@ -334,6 +334,60 @@ begin
     end;
 end;
 
+type
+  { One source line with its byte span in the original UTF-8 text, half open and
+    EXCLUDING the line ending. This is what makes SrcStart/SrcEnd real: a node's
+    span is its first line's start to its last line's end. }
+  TLineSpan = record
+    StartByte: Integer;
+    EndByte: Integer;
+  end;
+  TLineSpanArray = array of TLineSpan;
+
+{ Split into lines AND record each line's byte span. Byte offsets are what the
+  parser receives, so a consumer can slice the original text. }
+procedure SplitLinesEx(const S: UnicodeString; out ALines: TStrArray;
+  out ASpans: TLineSpanArray);
+var
+  P, I, BytePos, LineBytes: Integer;
+  Rest, Line: UnicodeString;
+  Enc: UTF8String;
+begin
+  ALines := nil;
+  ASpans := nil;
+  Rest := S;
+  BytePos := 0;
+  while True do
+  begin
+    P := Pos(#10, Rest);
+    if P = 0 then
+      Line := Rest
+    else
+      Line := Copy(Rest, 1, P - 1);
+    { Tolerate CRLF: the CR is line-ending, not content. }
+    if (Length(Line) > 0) and (Line[Length(Line)] = #13) then
+      SetLength(Line, Length(Line) - 1);
+    SetLength(ALines, Length(ALines) + 1);
+    ALines[High(ALines)] := Line;
+    { Encoded ONCE per line and summed, so this stays O(total bytes) rather than
+      re-encoding the remaining text per line. }
+    Enc := UTF8Encode(Line);
+    LineBytes := Length(Enc);
+    SetLength(ASpans, Length(ASpans) + 1);
+    ASpans[High(ASpans)].StartByte := BytePos;
+    ASpans[High(ASpans)].EndByte := BytePos + LineBytes;
+    { Advance past the line and its #10 (and the #13 that rode along with it). }
+    BytePos := BytePos + LineBytes;
+    if P = 0 then
+      Break;
+    if P <= Length(Rest) then
+      Inc(BytePos);   { the #10 }
+    Rest := Copy(Rest, P + 1, Length(Rest));
+  end;
+  I := 0;
+  I := I;
+end;
+
 function SplitLines(const S: UnicodeString): TStrArray;
 var
   P, I: Integer;
@@ -1069,8 +1123,14 @@ end;
 
 { --- block parser --------------------------------------------------------- }
 
+{ Stamp a node's byte span from the source lines it came from. Declared here
+  because ParseBlocks stamps as it emits. }
+procedure StampAt(var B: TBuilder; const AId: Integer;
+  const ASpans: TLineSpanArray; const AFrom, ATo: Integer); forward;
+
 procedure ParseBlocks(var B: TBuilder; const AParent: Integer;
-  const ALines: TStrArray; AFrom, ATo: Integer); forward;
+  const ALines: TStrArray; const ASpans: TLineSpanArray;
+  AFrom, ATo: Integer); forward;
 
 { A paragraph or heading's inline content from its raw lines. }
 procedure EmitJoined(var B: TBuilder; const AParent: Integer;
@@ -1157,7 +1217,8 @@ end;
 { A run of list items at the same indent. Deeper markers become a nested list
   attached to the item that precedes them - the nesting v1 could not express. }
 procedure ParseListRun(var B: TBuilder; const AParent: Integer;
-  const ALines: TStrArray; AFrom, ATo, AIndent: Integer;
+  const ALines: TStrArray; const ASpans: TLineSpanArray;
+  AFrom, ATo, AIndent: Integer;
   const AOrdered: Boolean; const AOrdinal: Integer; out ANext: Integer);
 var
   I, J, Id, ItemId, ParaId, SubId: Integer;
@@ -1165,6 +1226,8 @@ var
   Ordered: Boolean;
   Cont: TStrArray;
   ContFrom, ContTo: Integer;
+  CountSpans: TLineSpanArray;
+  ListId, LastItemLine: Integer;
   N: TMdNode;
   Styled: TMdListStyle;
   Nested: TStrArray;
@@ -1179,6 +1242,7 @@ begin
     AIndent := Indent;
   end;
 
+  ListId := 0;
   N := Default(TMdNode);
   N.Kind := mnList;
   if AOrdered then
@@ -1190,6 +1254,11 @@ begin
   N.Start := AOrdinal;
   B.Add(N, Id);
   B.Append(AParent, Id);
+  { Stamped AFTER the loop, from its first line to its last ITEM's line. Stamping
+    it here with ATo swallowed the blank line that separates the list from what
+    follows, so a slice of the span included a separator that is not part of the
+    node. }
+  ListId := Id;
 
   I := AFrom;
   while I <= ATo do
@@ -1215,6 +1284,7 @@ begin
     N.Kind := mnListItem;
     B.Add(N, ItemId);
     B.Append(Id, ItemId);
+    StampAt(B, ItemId, ASpans, I, I);
     N := Default(TMdNode);
     N.Kind := mnParagraph;
     B.Add(N, ParaId);
@@ -1246,7 +1316,14 @@ begin
       SetLength(Cont, J - ContFrom);
       for ContTo := ContFrom to J - 1 do
         Cont[ContTo - ContFrom] := StripIndent(ALines[ContTo], AIndent + 2);
-      ParseBlocks(B, ItemId, Cont, 0, High(Cont));
+      CountSpans := nil;
+      for ContTo := ContFrom to J - 1 do
+      begin
+        SetLength(CountSpans, Length(CountSpans) + 1);
+        if ContTo <= High(ASpans) then
+          CountSpans[High(CountSpans)] := ASpans[ContTo];
+      end;
+      ParseBlocks(B, ItemId, Cont, CountSpans, 0, High(Cont));
       I := J;
       { A blank between the continuation and the next marker does not end the
         item, but a blank followed by a non-indented line does end the list. }
@@ -1273,20 +1350,25 @@ begin
         SetLength(Nested, Length(Nested) + 1);
         Nested[High(Nested)] := ALines[NestedTo];
       end;
-      ParseListRun(B, ItemId, Nested, 0, High(Nested), -1, Ordered, Ordinal,
-        NestedNext);
+      ParseListRun(B, ItemId, Nested, nil, 0, High(Nested), -1, Ordered,
+        Ordinal, NestedNext);
       Inc(I, J - NestedFrom);
     end;
+    LastItemLine := I - 1;
   end;
+  if (ListId > 0) and (LastItemLine >= AFrom) then
+    StampAt(B, ListId, ASpans, AFrom, LastItemLine);
   ANext := I;
 end;
 
 procedure ParseBlocks(var B: TBuilder; const AParent: Integer;
-  const ALines: TStrArray; AFrom, ATo: Integer);
+  const ALines: TStrArray; const ASpans: TLineSpanArray;
+  AFrom, ATo: Integer);
 var
   I, J, K, Level, Depth, Ordinal, Indent, Id, Next: Integer;
   ParaId2, TermId, DescId, FrontAt: Integer;
   Label1, Text1, Text2: UnicodeString;
+  CountSpans, QuoteSpans: TLineSpanArray;
   Ordered: Boolean;
   AChar: Char;
   Lang: UnicodeString;
@@ -1336,6 +1418,8 @@ begin
       end;
       B.Add(N, Id);
       B.Append(AParent, Id);
+      { A fence spans its opener through its closer. }
+      StampAt(B, Id, ASpans, I, J);
       I := J + 1;
       Continue;
     end;
@@ -1348,6 +1432,7 @@ begin
       N.Level := Level;
       B.Add(N, Id);
       B.Append(AParent, Id);
+    StampAt(B, Id, ASpans, I, I);
       J := 1;
       while (J <= Length(ALines[I])) and ((ALines[I][J] = ' ') or
         (ALines[I][J] = '#')) do
@@ -1366,6 +1451,8 @@ begin
         HasUnescapedPipe(ALines[J]) do
         Inc(J);
       EmitTable(B, AParent, ALines, I, J - 1, Align);
+      { The table node spans header through last body row. }
+      StampAt(B, Id, ASpans, I, J - 1);
       I := J;
       Continue;
     end;
@@ -1379,6 +1466,7 @@ begin
       N.Level := Level;
       B.Add(N, Id);
       B.Append(AParent, Id);
+    StampAt(B, Id, ASpans, I, I);
       ParseInlines(B, Id, TrimU(ALines[I]));
       Inc(I, 2);
       Continue;
@@ -1406,6 +1494,7 @@ begin
       end;
       B.Add(N, Id);
       B.Append(AParent, Id);
+    StampAt(B, Id, ASpans, I, I);
       I := J;
       Continue;
     end;
@@ -1437,6 +1526,7 @@ begin
       end;
       B.Add(N, Id);
       B.Append(AParent, Id);
+    StampAt(B, Id, ASpans, I, I);
       I := FrontAt + 1;
       Continue;
     end;
@@ -1448,6 +1538,7 @@ begin
       N.Kind := mnHorizontalRule;
       B.Add(N, Id);
       B.Append(AParent, Id);
+    StampAt(B, Id, ASpans, I, I);
       Inc(I);
       Continue;
     end;
@@ -1464,12 +1555,17 @@ begin
       B.Add(N, QuoteId);
       B.Append(AParent, QuoteId);
       Stripped := nil;
+      QuoteSpans := nil;
       for Level := I to J - 1 do
       begin
         SetLength(Stripped, Length(Stripped) + 1);
         Stripped[High(Stripped)] := StripQuote(ALines[Level]);
+        SetLength(QuoteSpans, Length(QuoteSpans) + 1);
+        if Level <= High(ASpans) then
+          QuoteSpans[High(QuoteSpans)] := ASpans[Level];
       end;
-      ParseBlocks(B, QuoteId, Stripped, 0, High(Stripped));
+      ParseBlocks(B, QuoteId, Stripped, QuoteSpans, 0, High(Stripped));
+      StampAt(B, QuoteId, ASpans, I, J - 1);
       I := J;
       Continue;
     end;
@@ -1477,7 +1573,8 @@ begin
     { list }
     if ListMarker(ALines[I], Ordered, Ordinal, Depth, Indent) then
     begin
-      ParseListRun(B, AParent, ALines, I, ATo, Indent, Ordered, Ordinal, Next);
+      ParseListRun(B, AParent, ALines, ASpans, I, ATo, Indent, Ordered, Ordinal,
+        Next);
       I := Next;
       Continue;
     end;
@@ -1490,6 +1587,7 @@ begin
       N.RefLabel := Label1;
       B.Add(N, Id);
       B.Append(AParent, Id);
+    StampAt(B, Id, ASpans, I, I);
       { The definition's body is a paragraph child, so a multi-block footnote can
         grow without changing the shape. }
       N := Default(TMdNode);
@@ -1511,6 +1609,7 @@ begin
       N.Title := Text2;
       B.Add(N, Id);
       B.Append(AParent, Id);
+    StampAt(B, Id, ASpans, I, I);
       Inc(I);
       Continue;
     end;
@@ -1532,6 +1631,7 @@ begin
       end;
       B.Add(N, Id);
       B.Append(AParent, Id);
+    StampAt(B, Id, ASpans, I, I);
       if J <= ATo then
         I := J + 1
       else
@@ -1550,8 +1650,9 @@ begin
       N.RefLabel := Text1;
       B.Add(N, Id);
       B.Append(AParent, Id);
+    StampAt(B, Id, ASpans, I, I);
       if J > I + 1 then
-        ParseBlocks(B, Id, ALines, I + 1, J - 1);
+        ParseBlocks(B, Id, ALines, ASpans, I + 1, J - 1);
       if J <= ATo then
         I := J + 1
       else
@@ -1576,6 +1677,7 @@ begin
       end;
       B.Add(N, Id);
       B.Append(AParent, Id);
+    StampAt(B, Id, ASpans, I, I);
       I := J;
       Continue;
     end;
@@ -1587,6 +1689,7 @@ begin
       N.Kind := mnDescriptionList;
       B.Add(N, Id);
       B.Append(AParent, Id);
+    StampAt(B, Id, ASpans, I, I);
       J := I;
       while (J < ATo) and IsDescriptionMarker(ALines[J + 1]) do
       begin
@@ -1618,6 +1721,9 @@ begin
     N.Kind := mnParagraph;
     B.Add(N, Id);
     B.Append(AParent, Id);
+    { A paragraph spans its FIRST line to its LAST: the blanket stamp used I..I,
+      which covers one line of a multi-line paragraph. }
+    StampAt(B, Id, ASpans, ParaFrom, J);
     EmitJoined(B, Id, ALines, ParaFrom, J);
     I := J + 1;
   end;
@@ -1654,6 +1760,29 @@ begin
         Length(Nodes[I].Children) * SizeOf(Integer));
     end;
   end;
+end;
+
+{ Stamp AId's byte span from the source lines it came from.
+
+  Offsets are BYTES into the UTF-8 text the parser was given, half open, and they
+  EXCLUDE the trailing newline - so Copy(Source, SrcStart, SrcEnd-SrcStart) is the
+  node's own text, without its line ending. A consumer that needs "where did this
+  come from" (click a cell, find its source) has nothing else to go on: ids are
+  document order and do not survive an edit. }
+procedure StampAt(var B: TBuilder; const AId: Integer;
+  const ASpans: TLineSpanArray; const AFrom, ATo: Integer);
+begin
+  if (AId < 0) or (AId >= Length(B.Nodes)) then
+    Exit;
+  if Length(ASpans) = 0 then
+    Exit;
+  if (AFrom < 0) or (AFrom > High(ASpans)) then
+    Exit;
+  B.Nodes[AId].SrcStart := ASpans[AFrom].StartByte;
+  if (ATo >= 0) and (ATo <= High(ASpans)) then
+    B.Nodes[AId].SrcEnd := ASpans[ATo].EndByte
+  else
+    B.Nodes[AId].SrcEnd := ASpans[AFrom].EndByte;
 end;
 
 { Shift a node's child ids by AOffset, in place. }
@@ -1751,6 +1880,7 @@ function AppendParsed(const ADoc: TMdDocument; const AText: string;
 var
   B: TBuilder;
   Lines: TStrArray;
+  LineSpans: TLineSpanArray;
   I, Offset, Base: Integer;
   N: TMdNode;
   Tmp: TMdDocument;
@@ -1773,7 +1903,7 @@ begin
     end;
     Exit(Length(NodeOf(ADoc, ADoc.Root).Children));
   end;
-  Lines := SplitLines(UnicodeString(AText));
+  SplitLinesEx(UnicodeString(AText), Lines, LineSpans);
   if Length(Lines) = 0 then
     Exit;
 
@@ -1784,7 +1914,7 @@ begin
   N := Default(TMdNode);
   N.Kind := mnDocument;
   B.Add(N, Base);
-  ParseBlocks(B, Base, Lines, 0, High(Lines));
+  ParseBlocks(B, Base, Lines, LineSpans, 0, High(Lines));
 
   { The segment's own document root is at Base (=1), so the copy STARTS AT
     Base + 1. Starting at 1 copied the segment's document node into ADoc, which
@@ -1823,6 +1953,7 @@ var
   B: TBuilder;
   Root: TMdNode;
   Lines: TStrArray;
+  LineSpans: TLineSpanArray;
   RootId: Integer;
 begin
   Result := TMdDocument.Create;
@@ -1831,13 +1962,13 @@ begin
   Root.Kind := mnDocument;
   B.Add(Root, RootId);
   Result.Root := RootId;
-  Lines := SplitLines(UnicodeString(AText));
+  SplitLinesEx(UnicodeString(AText), Lines, LineSpans);
 
   { Frontmatter is handled as a BLOCK in ParseBlocks, not here: it is a content
     TYPE (YAML inside a `---` fence), so it may appear anywhere in the document
     rather than only at the top. See the bpFrontmatter pass. }
   if Length(Lines) > 0 then
-    ParseBlocks(B, RootId, Lines, 0, High(Lines));
+    ParseBlocks(B, RootId, Lines, LineSpans, 0, High(Lines));
   B.Adopt(Result);
 end;
 

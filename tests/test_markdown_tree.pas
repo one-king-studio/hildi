@@ -50,6 +50,13 @@ type
     procedure TestDescriptionList;
     procedure TestIndentedCodeIsNotFenced;
     { Frontmatter is an EXTENSION handled as a BLOCK, so it is a node. }
+    { Source offsets: byte spans into the original text. }
+    procedure TestHeadingSpanSlicesTheSource;
+    procedure TestParagraphSpanSlicesTheSource;
+    procedure TestFenceSpanCoversTheWholeFence;
+    procedure TestListSpanEndsAtItsLastItem;
+    procedure TestSpansAreMonotonicAndInsideTheSource;
+    procedure TestSpansAreBytesNotCodepoints;
     procedure TestAParserSeesNoFrontmatterAtAll;
     procedure TestFrontmatterIsTheFirstChild;
     procedure TestFrontmatterRequiresAClosingFence;
@@ -393,6 +400,100 @@ begin
   AssertEquals('two children', 2, Length(N.Children));
   AssertEquals('chain', 'document > description_list > description_term > text',
     Chain(FDoc));
+end;
+
+{ The original text a node's span was promised against. }
+var
+  SrcText: string;
+
+function Slice(const N: TMdNode; const ASrc: string): string;
+begin
+  if N.SrcEnd <= N.SrcStart then
+    Exit('');
+  Result := Copy(ASrc, N.SrcStart + 1, N.SrcEnd - N.SrcStart);
+end;
+
+procedure TMdTreeTest.TestHeadingSpanSlicesTheSource;
+var
+  N: TMdNode;
+begin
+  SrcText := '# Heading' + #10 + #10 + 'body';
+  Parse(SrcText);
+  N := NodeOf(FDoc, NodesOfKind(FDoc, mnHeading)[0]);
+  { The span is the node's OWN bytes: no leading blank, no trailing newline. }
+  AssertEquals('the heading text', '# Heading', Slice(N, SrcText));
+end;
+
+procedure TMdTreeTest.TestParagraphSpanSlicesTheSource;
+var
+  N: TMdNode;
+begin
+  SrcText := 'first line' + #10 + 'second line';
+  Parse(SrcText);
+  N := NodeOf(FDoc, NodesOfKind(FDoc, mnParagraph)[0]);
+  AssertEquals('the whole paragraph', SrcText, Slice(N, SrcText));
+end;
+
+procedure TMdTreeTest.TestFenceSpanCoversTheWholeFence;
+var
+  N: TMdNode;
+begin
+  SrcText := '```p' + #10 + 'code' + #10 + '```';
+  Parse(SrcText);
+  N := NodeOf(FDoc, NodesOfKind(FDoc, mnCodeBlock)[0]);
+  { Opener through closer: a fence's span is all three lines. }
+  AssertEquals('the whole fence', SrcText, Slice(N, SrcText));
+end;
+
+procedure TMdTreeTest.TestListSpanEndsAtItsLastItem;
+var
+  N: TMdNode;
+begin
+  { The blank line after a list is a SEPARATOR, not part of the node: a span that
+    swallowed it would make a "select this node" gesture take the next block's
+    leading newline too. }
+  SrcText := '- a' + #10 + '- b' + #10 + #10 + 'after';
+  Parse(SrcText);
+  N := NodeOf(FDoc, NodesOfKind(FDoc, mnList)[0]);
+  AssertEquals('the list only', '- a' + #10 + '- b', Slice(N, SrcText));
+end;
+
+procedure TMdTreeTest.TestSpansAreMonotonicAndInsideTheSource;
+var
+  Ids: TMdIntArray;
+  I: Integer;
+  N: TMdNode;
+begin
+  SrcText := '# H' + #10 + #10 + 'para' + #10 + #10 + '- a' + #10 + #10 +
+    '> q' + #10 + #10 + '```' + #10 + 'c' + #10 + '```';
+  Parse(SrcText);
+  Ids := QueryNodes(FDoc, FDoc.Root, nil);
+  for I := 0 to High(Ids) do
+  begin
+    N := NodeOf(FDoc, Ids[I]);
+    if N.SrcEnd <= N.SrcStart then
+      Continue;
+    AssertTrue('start inside the source', N.SrcStart >= 0);
+    AssertTrue('end inside the source', N.SrcEnd <= Length(SrcText));
+    AssertTrue('start before end', N.SrcStart < N.SrcEnd);
+  end;
+end;
+
+procedure TMdTreeTest.TestSpansAreBytesNotCodepoints;
+var
+  N: TMdNode;
+begin
+  { `café` is FOUR codepoints but FIVE UTF-8 bytes. The span is bytes, because
+    bytes are what the parser receives and what a consumer slices with - so
+    Length(SrcText) (5) is the right expectation, and a codepoint-count
+    implementation would report 4. My first version asserted 4 and was simply
+    wrong about the arithmetic. }
+  SrcText := 'caf' + #$00C3 + #$00A9;
+  Parse(SrcText);
+  N := NodeOf(FDoc, NodesOfKind(FDoc, mnParagraph)[0]);
+  AssertEquals('the span is measured in bytes', Length(SrcText),
+    N.SrcEnd - N.SrcStart);
+  AssertTrue('not codepoints', N.SrcEnd - N.SrcStart = 5);
 end;
 
 procedure TMdTreeTest.TestAParserSeesNoFrontmatterAtAll;
