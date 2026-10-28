@@ -1117,6 +1117,15 @@ begin
           B.Add(N, Id);
           B.Append(CurrentParent, Id);
         end;
+      tkHtml:
+        begin
+          { Raw, never interpreted: a consumer must not act on this content. }
+          N := Default(TMdNode);
+          N.Kind := mnHtml;
+          N.Content := Toks[I].Text;
+          B.Add(N, Id);
+          B.Append(CurrentParent, Id);
+        end;
     end;
   end;
 end;

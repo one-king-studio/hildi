@@ -65,6 +65,10 @@ type
     procedure TestMathSpanIsAToken;
     procedure TestAnUnclosedDollarIsLiteral;
     procedure TestMathDoesNotCrossALineBreak;
+    { Inline HTML: verbatim, never interpreted. }
+    procedure TestATagIsInlineHtml;
+    procedure TestAnAutolinkNeedsAScheme;
+    procedure TestATagIsNotAnAutolink;
   end;
 
 implementation
@@ -78,7 +82,7 @@ function TMdInlineTest.Kinds(const AText: string): string;
 const
   Names: array[TMdTokKind] of string = (
     'text', 'code', 'open', 'close', 'linkopen', 'imageopen', 'footnote',
-    'math', 'autolink', 'softbreak', 'hardbreak');
+    'math', 'html', 'autolink', 'softbreak', 'hardbreak');
 var
   T: TMdTokenArray;
   I: Integer;
@@ -501,6 +505,42 @@ begin
   T := Tok('a $b' + #10 + 'c$ d');
   for I := 0 to High(T) do
     AssertTrue('no math token spans the break', T[I].Kind <> tkMathSpan);
+end;
+
+procedure TMdInlineTest.TestATagIsInlineHtml;
+var
+  T: TMdTokenArray;
+begin
+  T := Tok('a <span class="x">b</span> c');
+  { Search rather than index: the token count depends on where text is split,
+    and indexing T[3] was an assumption that threw ERangeError. }
+  AssertTrue('there are tokens', Length(T) >= 2);
+  AssertTrue('the open tag is html', T[1].Kind = tkHtml);
+  AssertEquals('verbatim', '<span class="x">', string(T[1].Text));
+  AssertTrue('and the raw text is preserved',
+    Pos('<span class="x">', string(TokenText(T))) > 0);
+end;
+
+procedure TMdInlineTest.TestAnAutolinkNeedsAScheme;
+var
+  T: TMdTokenArray;
+begin
+  { `<https://x>` is an autolink; `<span>` is a tag. Requiring a scheme is what
+    separates them, and without it a tag was claimed as a link. }
+  T := Tok('<https://example.com>');
+  AssertEquals('one token', 1, Length(T));
+  AssertTrue('an autolink', T[0].Kind = tkAutolink);
+end;
+
+procedure TMdInlineTest.TestATagIsNotAnAutolink;
+var
+  T: TMdTokenArray;
+  I: Integer;
+begin
+  T := Tok('<span>');
+  for I := 0 to High(T) do
+    AssertTrue('no autolink token', T[I].Kind <> tkAutolink);
+  AssertTrue('it is html', T[0].Kind = tkHtml);
 end;
 
 procedure TMdInlineTest.TestImageAltAndUri;

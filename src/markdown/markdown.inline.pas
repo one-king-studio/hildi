@@ -47,6 +47,7 @@ type
     tkImageOpen,   { an image opens; Text is the alt text }
     tkFootnoteCallout, { `[^label]`: Text is the label }
     tkMathSpan,    { `$...$`: Text is the content, verbatim }
+    tkHtml,        { a literal `<tag>`: Text is the raw tag, never interpreted }
     tkAutolink,    { an autolink; Uri and Text both set }
     tkSoftBreak,   { a newline inside a block's text }
     tkHardBreak);  { two trailing spaces, or a backslash, before a newline }
@@ -366,17 +367,43 @@ begin
     { autolink }
     if AText[I] = '<' then
     begin
+      { Scan to `>`, ALLOWING spaces: a tag may carry attributes, so
+        `<span class="x">` is one tag. This scan used to stop at a space, so a
+        tag with an attribute never reached its `>` and fell through to plain
+        text - which is why the test saw only the closing `</span>`. The scheme
+        test below is what distinguishes an autolink from a tag, not a space. }
       J := I + 1;
       while (J <= Length(AText)) and (AText[J] <> '>') and
-        (AText[J] <> ' ') and (AText[J] <> #10) do
+        (AText[J] <> #10) do
         Inc(J);
       if (J <= Length(AText)) and (AText[J] = '>') and (J > I + 1) then
       begin
         Uri := Copy(AText, I + 1, J - I - 1);
-        if UriAllowed(Uri) then
+        if UriAllowed(Uri) and (Pos(':', Uri) > 0) then
         begin
+          { An autolink needs a SCHEME: `<https://x>`. Without this guard a tag
+            like `<span>` was claimed as an autolink, because `UriAllowed` accepts
+            a schemeless relative reference. }
           FlushPlain;
           Push(Result, tkAutolink, Uri, [], Uri);
+          I := J + 1;
+          Continue;
+        end
+        else if (Uri <> '') and
+          ((Uri[1] in ['a'..'z', 'A'..'Z']) or
+           ((Length(Uri) > 1) and (Uri[1] = '/') and
+            (Uri[2] in ['a'..'z', 'A'..'Z']))) then
+          { A tag may carry ATTRIBUTES, so its body can contain spaces -
+            `<span class="x">` is one tag, not a failed autolink. The scheme test
+            above is what separates the two cases, not a space test: my first
+            attempt rejected any space, which rejected every tag with an
+            attribute. `Pos` also returns 0 when NOT found, so a `< 0` test would
+            have been impossible and silently dead. }
+        begin
+          { A tag: inline HTML, kept VERBATIM and never interpreted - a consumer
+            must not act on it. This is why the node exists. }
+          FlushPlain;
+          Push(Result, tkHtml, '<' + Uri + '>', [], '');
           I := J + 1;
           Continue;
         end;
@@ -566,7 +593,7 @@ begin
         Result := Result + ATokens[I].Text;
       tkFootnoteCallout:
         Result := Result + '[^' + ATokens[I].Text + ']';
-      tkMathSpan:
+      tkMathSpan, tkHtml:
         Result := Result + ATokens[I].Text;
       tkLinkOpen:
         Result := Result + '';
