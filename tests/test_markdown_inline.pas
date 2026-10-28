@@ -61,6 +61,10 @@ type
     procedure TestFootnoteCalloutIsNotALink;
     procedure TestFootnoteDefinitionLineIsNotACallout;
     procedure TestCalloutSurvivesInProse;
+    { Inline math: `$...$` }
+    procedure TestMathSpanIsAToken;
+    procedure TestAnUnclosedDollarIsLiteral;
+    procedure TestMathDoesNotCrossALineBreak;
   end;
 
 implementation
@@ -74,7 +78,7 @@ function TMdInlineTest.Kinds(const AText: string): string;
 const
   Names: array[TMdTokKind] of string = (
     'text', 'code', 'open', 'close', 'linkopen', 'imageopen', 'footnote',
-    'autolink', 'softbreak', 'hardbreak');
+    'math', 'autolink', 'softbreak', 'hardbreak');
 var
   T: TMdTokenArray;
   I: Integer;
@@ -466,6 +470,37 @@ begin
     string(T[1].Text));
   AssertTrue('and no text was lost',
     Pos('the value is 3', string(TokenText(T))) > 0);
+end;
+
+procedure TMdInlineTest.TestMathSpanIsAToken;
+var
+  T: TMdTokenArray;
+begin
+  T := Tok('so $E = mc^2$ holds');
+  AssertEquals('three tokens', 3, Length(T));
+  AssertTrue('the middle one is math', T[1].Kind = tkMathSpan);
+  AssertEquals('content verbatim', 'E = mc^2', string(T[1].Text));
+end;
+
+procedure TMdInlineTest.TestAnUnclosedDollarIsLiteral;
+var
+  T: TMdTokenArray;
+begin
+  { A lone `$` is money, not an unterminated formula. }
+  T := Tok('it costs $5 total');
+  AssertTrue('no math token', Length(T) = 1);
+  AssertEquals('the text is intact', 'it costs $5 total', string(TokenText(T)));
+end;
+
+procedure TMdInlineTest.TestMathDoesNotCrossALineBreak;
+var
+  T: TMdTokenArray;
+  I: Integer;
+begin
+  { A `$` with no closer on the same line must not swallow the rest of the block. }
+  T := Tok('a $b' + #10 + 'c$ d');
+  for I := 0 to High(T) do
+    AssertTrue('no math token spans the break', T[I].Kind <> tkMathSpan);
 end;
 
 procedure TMdInlineTest.TestImageAltAndUri;

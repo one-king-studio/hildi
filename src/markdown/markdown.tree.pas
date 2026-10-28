@@ -1055,6 +1055,14 @@ begin
           B.Add(N, Id);
           B.Append(CurrentParent, Id);
         end;
+      tkMathSpan:
+        begin
+          N := Default(TMdNode);
+          N.Kind := mnMathSpan;
+          N.Content := Toks[I].Text;
+          B.Add(N, Id);
+          B.Append(CurrentParent, Id);
+        end;
     end;
   end;
 end;
@@ -1703,6 +1711,8 @@ begin
       end;
     mnCodeSpan:
       PushSpan(ASpans, N.Content, StylesOf(AFormats, AUri <> '') + [misCode], AUri);
+    mnMathSpan:
+      PushSpan(ASpans, N.Content, StylesOf(AFormats, AUri <> ''), AUri);
     mnLineBreak:
       PushSpan(ASpans, ' ', StylesOf(AFormats, AUri <> ''), AUri);
     mnLink:

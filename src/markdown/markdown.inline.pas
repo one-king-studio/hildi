@@ -46,6 +46,7 @@ type
     tkLinkOpen,    { a link opens (Uri allow-listed); Text is the label }
     tkImageOpen,   { an image opens; Text is the alt text }
     tkFootnoteCallout, { `[^label]`: Text is the label }
+    tkMathSpan,    { `$...$`: Text is the content, verbatim }
     tkAutolink,    { an autolink; Uri and Text both set }
     tkSoftBreak,   { a newline inside a block's text }
     tkHardBreak);  { two trailing spaces, or a backslash, before a newline }
@@ -479,6 +480,25 @@ begin
       Continue;
     end;
 
+    { inline math: `$...$`. Checked before emphasis because `$` is not a
+      delimiter, and the closer must be found on the same run of text. }
+    if (AText[I] = '$') and (I < Length(AText)) then
+    begin
+      J := I + 1;
+      while (J <= Length(AText)) and (AText[J] <> '$') and (AText[J] <> #10) do
+        Inc(J);
+      if (J <= Length(AText)) and (AText[J] = '$') and (J > I + 1) then
+      begin
+        FlushPlain;
+        Push(Result, tkMathSpan, Copy(AText, I + 1, J - I - 1), [], '');
+        I := J + 1;
+        Continue;
+      end;
+      Plain := Plain + AText[I];
+      Inc(I);
+      Continue;
+    end;
+
     { emphasis, by flanking rather than by search }
     if DelimiterAt(AText, I, Len, Fmts) then
     begin
@@ -546,6 +566,8 @@ begin
         Result := Result + ATokens[I].Text;
       tkFootnoteCallout:
         Result := Result + '[^' + ATokens[I].Text + ']';
+      tkMathSpan:
+        Result := Result + ATokens[I].Text;
       tkLinkOpen:
         Result := Result + '';
       tkSoftBreak, tkHardBreak:
