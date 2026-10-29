@@ -180,11 +180,17 @@ shortcut with a `ponytail:` comment naming its ceiling and upgrade path.
 - **Untestable requirements** - if you cannot express an acceptance criterion as
   a test, the spec is not finished.
 
-## Commands
+## Templates
 
-- `/feature <description>` - draft or update a `FEATURE.md`
-- `/spec <feature>` - draft a `<Component>_v1.SPEC.md` from a feature
-- `/implement <spec>` - implement a SPEC test-first
+The artifacts are defined by templates, not by a tool. Copy the relevant one
+from `docs/templates/`:
+
+- `FEATURE.md` — the problem, the user stories, the acceptance criteria.
+- `<Component>_v1.SPEC.md` — the technical design and its testable requirements.
+- `<Component>_v1.TODO.md` — the ordered tasks, marked done as they land.
+
+Any agent or editor may produce them. The artifact chain is the contract;
+whatever wrote it is an implementation detail.
 
 ## Related
 

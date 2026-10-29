@@ -118,11 +118,14 @@ This project uses spec-driven development; see
 `docs/guidelines/spec-driven-development.md`. **No implementation without a
 specification.**
 
-1. Define the feature: `docs/features/<Feature_Name>/FEATURE.md` (`/feature`)
-2. Write the technical spec: `<Component>_v1.SPEC.md` (`/spec`)
+1. Define the feature: `docs/features/<Feature_Name>/FEATURE.md`
+2. Write the technical spec: `<Component>_v1.SPEC.md`
 3. Plan the tasks: `<Component>_v1.TODO.md`
-4. Implement TDD-first (`/implement`), marking tasks done as you go
+4. Implement TDD-first, marking tasks done as you go
 5. On completion, rename the TODO to `<Component>_v1.DONE.md`
+
+The templates for each artifact are in `docs/templates/`. Any agent may be used
+to produce them; the artifacts are the contract, not the tool that wrote them.
 
 ### TDD loop
 
