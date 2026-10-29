@@ -1,16 +1,21 @@
-# hildi
+# Hildi
 
-A headless agent harness written in Free Pascal (FPC), developed locally with a
-heavy emphasis on test-driven development.
+A small, portable coding agent written in Free Pascal (FPC), developed with a
+heavy emphasis on spec-first, test-driven work.
 
-The goal is to install this on a remote device, register it to a Hildegard
-account, and let an AI agent act on that machine through tools. Today it provides
-the execution core (shell commands via a bounded-concurrency pool), an embedded
-SQLite store, and a single-threaded OpenAI-compatible agent loop with tools and
-an interactive CLI.
+The goal is an agent harness that is small, portable, and dependency-free: one
+compiled binary with no runtime, package manager, or installer, gated by an
+approval dialog that shows exactly what it proposes to run. Today it provides the
+execution core (55+ builtin shell commands classified by effect), an embedded
+SQLite store, a change log with revert, subagents, an MCP client, and both a
+terminal UI (`hildi`) and a headless runtime (`hildi-agent`).
 
-New to the project? Start with `HANDOFF.md` for current state, decisions, and
-lessons learned.
+Hildi is the product. **Hildegard** is the separate platform a device registers
+to; capitalized "Hildegard" in `docs/` means that service, not this codebase, and
+the spelling is deliberate.
+
+New to the project? Start with `docs/features/FEATURES.md` for what exists, and
+`HANDOFF.md` for current state, decisions, and lessons learned.
 
 - Compiler: Free Pascal 3.3.1 (aarch64-darwin), configured via `~/.fpc.cfg`.
 - FPC source tree (for reading RTL/FCL/Packages units): machine-local, not recorded

@@ -1,0 +1,27 @@
+# Normalise line endings on checkout so a fork on Windows does not produce a
+# whole-tree diff, and so shell scripts keep working.
+* text=auto eol=lf
+
+# Pascal source
+*.pas text eol=lf
+*.pp  text eol=lf
+*.inc text eol=lf
+*.lpr text eol=lf
+
+# C shim
+*.c   text eol=lf
+*.h   text eol=lf
+
+# Shell scripts must stay executable and LF
+*.sh  text eol=lf
+
+# Docs and config
+*.md  text eol=lf
+Makefile text eol=lf
+*.example text eol=lf
+
+# Binary-ish
+*.a   binary
+*.o   binary
+*.ppu binary
+*.db  binary
