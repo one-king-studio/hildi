@@ -143,13 +143,13 @@ $(TLS_TEST_SERVER_OBJ): $(TESTS)/tls_test_server.c $(TESTS)/tls_test_server.h
 
 store-demo: libsqlite $(BIN)/hildegard-helper-store-demo
 
-$(BIN)/hildegard-helper-store-demo: $(EXAMPLES)/store_demo.pas $(LIB_SRCS) $(SQLITE_AR)
+$(BIN)/hildegard-helper-store-demo: $(EXAMPLES)/store_demo.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 agent-cli: libsqlite libmbedtls $(BIN)/hildegard-helper-agent-cli
 
-$(BIN)/hildegard-helper-agent-cli: $(EXAMPLES)/agent_cli.pas $(LIB_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
+$(BIN)/hildegard-helper-agent-cli: $(EXAMPLES)/agent_cli.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
@@ -159,18 +159,18 @@ $(BIN)/hildegard-helper-agent-cli: $(EXAMPLES)/agent_cli.pas $(LIB_SRCS) $(SQLIT
 mcp-smoke: libsqlite libmbedtls $(BIN)/mcp-smoke
 	$(BIN)/mcp-smoke
 
-$(BIN)/mcp-smoke: $(EXAMPLES)/mcp_smoke.pas $(LIB_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ)
+$(BIN)/mcp-smoke: $(EXAMPLES)/mcp_smoke.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Optimized, self-contained production binary (static SQLite, no runtime libs).
 release-agent-cli: libsqlite libmbedtls $(BIN)/hildegard-helper-agent-cli-release
 
-$(BIN)/hildegard-helper-agent-cli-release: $(EXAMPLES)/agent_cli.pas $(LIB_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
+$(BIN)/hildegard-helper-agent-cli-release: $(EXAMPLES)/agent_cli.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(BIN) $(RELUNITS)
 	$(FPC) $(RELEASE) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(RELUNITS) -FE$(BIN) -o$@ $<
 
-$(BIN)/hildegard-helper-demo: $(EXAMPLES)/demo_harness.pas $(LIB_SRCS)
+$(BIN)/hildegard-helper-demo: $(EXAMPLES)/demo_harness.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
@@ -178,7 +178,7 @@ $(BIN)/hildegard-helper-demo: $(EXAMPLES)/demo_harness.pas $(LIB_SRCS)
 tui-demo: $(BIN)/hildegard-helper-tui-demo
 	$(BIN)/hildegard-helper-tui-demo
 
-$(BIN)/hildegard-helper-tui-demo: $(EXAMPLES)/tui_demo.pas $(LIB_SRCS)
+$(BIN)/hildegard-helper-tui-demo: $(EXAMPLES)/tui_demo.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
@@ -187,7 +187,7 @@ $(BIN)/hildegard-helper-tui-demo: $(EXAMPLES)/tui_demo.pas $(LIB_SRCS)
 widgets-demo: $(BIN)/hildegard-helper-tui-widgets-demo
 	$(BIN)/hildegard-helper-tui-widgets-demo
 
-$(BIN)/hildegard-helper-tui-widgets-demo: $(EXAMPLES)/tui_widgets_demo.pas $(LIB_SRCS)
+$(BIN)/hildegard-helper-tui-widgets-demo: $(EXAMPLES)/tui_widgets_demo.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
@@ -197,7 +197,7 @@ $(BIN)/hildegard-helper-tui-widgets-demo: $(EXAMPLES)/tui_widgets_demo.pas $(LIB
 dashboard-mock: $(BIN)/hildegard-helper-dashboard-mock
 	$(BIN)/hildegard-helper-dashboard-mock
 
-$(BIN)/hildegard-helper-dashboard-mock: $(EXAMPLES)/dashboard_mock.pas $(LIB_SRCS)
+$(BIN)/hildegard-helper-dashboard-mock: $(EXAMPLES)/dashboard_mock.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
@@ -207,7 +207,7 @@ $(BIN)/hildegard-helper-dashboard-mock: $(EXAMPLES)/dashboard_mock.pas $(LIB_SRC
 dashboard: libsqlite libmbedtls $(BIN)/hildegard-helper-dashboard
 	$(BIN)/hildegard-helper-dashboard
 
-$(BIN)/hildegard-helper-dashboard: $(EXAMPLES)/dashboard.pas $(LIB_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP)
+$(BIN)/hildegard-helper-dashboard: $(EXAMPLES)/dashboard.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
@@ -218,7 +218,7 @@ $(BIN)/hildegard-helper-dashboard: $(EXAMPLES)/dashboard.pas $(LIB_SRCS) $(SQLIT
 layout-demo: $(BIN)/hildegard-helper-tui-layout-demo
 	$(BIN)/hildegard-helper-tui-layout-demo
 
-$(BIN)/hildegard-helper-tui-layout-demo: $(EXAMPLES)/tui_layout_demo.pas $(LIB_SRCS)
+$(BIN)/hildegard-helper-tui-layout-demo: $(EXAMPLES)/tui_layout_demo.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
@@ -226,7 +226,7 @@ $(BIN)/hildegard-helper-tui-layout-demo: $(EXAMPLES)/tui_layout_demo.pas $(LIB_S
 # CLI. No terminal. A client finds it as a sibling (or via HILDEGARD_RUNTIME_BIN).
 headless-agent: libsqlite libmbedtls $(BIN)/hildegard-helper-agent
 
-$(BIN)/hildegard-helper-agent: $(EXAMPLES)/headless_agent.pas $(LIB_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
+$(BIN)/hildegard-helper-agent: $(EXAMPLES)/headless_agent.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
@@ -235,7 +235,7 @@ $(BIN)/hildegard-helper-agent: $(EXAMPLES)/headless_agent.pas $(LIB_SRCS) $(ASYN
 tui-agent: headless-agent $(BIN)/hildegard-helper-tui
 	$(BIN)/hildegard-helper-tui $(ARGS)
 
-$(BIN)/hildegard-helper-tui: $(EXAMPLES)/tui_agent.pas $(LIB_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
+$(BIN)/hildegard-helper-tui: $(EXAMPLES)/tui_agent.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	@# The TUI is a pure client: no agent, loop, tool or runtime unit links here.
 	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
@@ -248,7 +248,7 @@ bench: $(BIN)/hildegard-helper-tui-bench
 perf: $(BIN)/hildegard-helper-tui-bench
 	$(BIN)/hildegard-helper-tui-bench --assert
 
-$(BIN)/hildegard-helper-tui-bench: $(EXAMPLES)/tui_bench.pas $(LIB_SRCS)
+$(BIN)/hildegard-helper-tui-bench: $(EXAMPLES)/tui_bench.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
@@ -341,7 +341,7 @@ async-examples: $(ASYNC_SRCS)
 	$(FPC) $(DEBUG) -Fu$(SRC)/async -FU$(DBGUNITS) -FE$(BIN) -o$(BIN)/async-examples $(EXAMPLES)/async_examples.pas
 	$(BIN)/async-examples
 
-$(BIN)/hildegard-helper-tests: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(TUILIB_SRCS) $(ASYNC_SRCS) $(SHELL_SRCS) $(CHANGES_SRCS) $(MARKDOWN_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
+$(BIN)/hildegard-helper-tests: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(ASYNC_SRCS) $(SHELL_SRCS) $(CHANGES_SRCS) $(MARKDOWN_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
@@ -361,7 +361,7 @@ test-leak-parallel: libsqlite libmbedtls $(BIN)/hildegard-helper-tests-leak \
 watch:
 	@scripts/watch.sh $(TARGET)
 
-$(BIN)/hildegard-helper-tests-leak: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(TUILIB_SRCS) $(ASYNC_SRCS) $(SHELL_SRCS) $(CHANGES_SRCS) $(MARKDOWN_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
+$(BIN)/hildegard-helper-tests-leak: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(ASYNC_SRCS) $(SHELL_SRCS) $(CHANGES_SRCS) $(MARKDOWN_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
 	@mkdir -p $(BIN) $(LEAKUNITS)
 	$(FPC) $(LEAKFLAGS) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -Fu$(TESTS) -FU$(LEAKUNITS) -FE$(BIN) -o$@ $<
 
@@ -375,7 +375,7 @@ smoke: libsqlite libmbedtls headless-agent $(BIN)/hildegard-smoke
 smoke-list: libsqlite libmbedtls $(BIN)/hildegard-smoke
 	$(BIN)/hildegard-smoke --list
 
-$(BIN)/hildegard-smoke: $(EXAMPLES)/smoke.pas $(TESTS)/smoke_runner.pas $(TESTS)/smoke_provider.pas $(LIB_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ)
+$(BIN)/hildegard-smoke: $(EXAMPLES)/smoke.pas $(TESTS)/smoke_runner.pas $(TESTS)/smoke_provider.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
@@ -398,7 +398,7 @@ test-parallel: libsqlite libmbedtls $(BIN)/hildegard-helper-tests \
 
 release: $(BIN)/hildegard-helper-demo-release
 
-$(BIN)/hildegard-helper-demo-release: $(EXAMPLES)/demo_harness.pas $(LIB_SRCS)
+$(BIN)/hildegard-helper-demo-release: $(EXAMPLES)/demo_harness.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
 	@mkdir -p $(BIN) $(RELUNITS)
 	$(FPC) $(RELEASE) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(RELUNITS) -FE$(BIN) -o$@ $<
 
