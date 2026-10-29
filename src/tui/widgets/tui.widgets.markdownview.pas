@@ -86,6 +86,8 @@ type
     procedure TableRowsOf(const ATableId: Integer; out AHead: TMdTableRow;
       out ARows: TMdTableRows; out AAlign: TMdAlignArray);
     function GapBetween(AIndex, ANext: Integer): Integer;
+    function GapBefore(AIndex: Integer): Integer;
+    function HeadingLevelAt(AIndex: Integer): Integer;
     procedure SyncChildren;
     procedure FreeChildren;
     procedure ResetStream;
@@ -682,12 +684,65 @@ begin
   SyncChildren;
 end;
 
-function TMarkdownView.GapBetween(AIndex, ANext: Integer): Integer;
+{ A heading's LEVEL, read from the node. FKinds caches only the kind, and h1/h2
+  are spaced differently from h3-h6. }
+function TMarkdownView.HeadingLevelAt(AIndex: Integer): Integer;
+var
+  N: TMdNode;
 begin
-  if (FKinds[AIndex] = mnListItem) and (FKinds[ANext] = mnListItem) then
-    Result := 0
+  Result := 0;
+  if (AIndex < 0) or (AIndex > High(FRenderIds)) then
+    Exit;
+  N := NodeOf(FDoc, FRenderIds[AIndex]);
+  if N.Kind = mnHeading then
+    Result := N.Level;
+end;
+
+{ The blank rows BEFORE the block at AIndex, including a document's first block.
+
+  A major heading (h1/h2) gets TWO blank rows above it and one below, which is
+  asymmetric on purpose:
+
+      2 blank
+      # Heading
+      ━━━━━━━━━        the underline
+      1 blank
+
+  Above-only, and one row below. An earlier attempt put 2 on BOTH sides and read
+  as too loose; 1 everywhere lost the separation entirely. The asymmetry is what
+  the operator specified, and it mirrors how a printed heading sits under its
+  space rather than centred in it.
+
+  A non-heading first block keeps no leading blank - the margin belongs above a
+  major heading, not above a document. }
+function TMarkdownView.GapBefore(AIndex: Integer): Integer;
+var
+  PrevLevel: Integer;
+begin
+  if AIndex <= 0 then
+  begin
+    { The first block: only a major heading opens a gap. }
+    if HeadingLevelAt(AIndex) in [1, 2] then
+      Result := 2
+    else
+      Result := 0;
+    Exit;
+  end;
+  if (FKinds[AIndex - 1] = mnListItem) and (FKinds[AIndex] = mnListItem) then
+    Exit(0);
+  PrevLevel := HeadingLevelAt(AIndex);
+  if PrevLevel in [1, 2] then
+    Result := 2
   else
     Result := 1;
+end;
+
+{ Kept for the existing call shape; the gap before a block is what matters. }
+function TMarkdownView.GapBetween(AIndex, ANext: Integer): Integer;
+begin
+  Result := GapBefore(ANext);
+  if (AIndex >= 0) and (AIndex = ANext - 1) then
+    Exit;
 end;
 
 function TMarkdownView.Measure(const AAvail: TSize): TSize;
@@ -701,8 +756,7 @@ begin
   H := 0;
   for I := 0 to High(FBlocks) do
   begin
-    if I > 0 then
-      Inc(H, GapBetween(I - 1, I));
+    Inc(H, GapBefore(I));
     if FKinds[I] = mnCodeBlock then
     begin
       Inner := CodeInnerWidth(AAvail.W);
@@ -741,8 +795,7 @@ begin
   Y := ABounds.Y;
   for I := 0 to High(FBlocks) do
   begin
-    if I > 0 then
-      Inc(Y, GapBetween(I - 1, I));
+    Inc(Y, GapBefore(I));
     if FKinds[I] = mnCodeBlock then
     begin
       Inner := CodeInnerWidth(ABounds.W);

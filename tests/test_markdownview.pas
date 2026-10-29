@@ -34,6 +34,11 @@ type
     procedure TestInlineCodeIsAPaddedChip;
     procedure TestBlocksAreSeparatedByABlankRow;
     procedure TestTightListHasNoGap;
+    procedure TestH1HasTwoRowsAboveAndOneBelow;
+    procedure TestH2HasTwoRowsAboveAndOneBelow;
+    procedure TestH3KeepsASingleRowGap;
+    procedure TestALeadingH1GetsItsTwoRowsAbove;
+    procedure TestALeadingParagraphHasNoGap;
     procedure TestStreamingTailIsPlainText;
     procedure TestFinalisedBlocksAreNotRebuilt;
     procedure TestFinishPromotesTheTail;
@@ -131,9 +136,10 @@ var
   Theme: TMdTheme;
 begin
   Theme := DefaultMdTheme;
-  S := RenderSource('# Title', 20, 2);
+  { A leading h1 sits 2 rows down (its top margin). }
+  S := RenderSource('# Title', 20, 5);
   try
-    AssertEquals('heading colour', Theme.Heading[1].Fg, S.CellAt(0, 0).Attr.Fg);
+    AssertEquals('heading colour', Theme.Heading[1].Fg, S.CellAt(0, 2).Attr.Fg);
   finally
     S.Free;
   end;
@@ -287,6 +293,113 @@ begin
   end;
 end;
 
+{ The row a character first appears on, or -1. Asserting the DISTANCE between
+  the paragraph and the heading is the real property; asserting fixed row indices
+  was my first attempt and it was wrong about the layout. }
+function RowOfChar(S: TSurfaceMemory; AWidth, AHeight: Integer;
+  const ACh: UnicodeString): Integer;
+var
+  R, C: Integer;
+begin
+  Result := -1;
+  for R := 0 to AHeight - 1 do
+    for C := 0 to AWidth - 1 do
+      if S.CellAt(C, R).Ch = ACh then
+        Exit(R);
+end;
+
+procedure TMarkdownViewTest.TestH1HasTwoRowsAboveAndOneBelow;
+var
+  S: TSurfaceMemory;
+  TxtRow, HeadRow, AfterRow: Integer;
+begin
+  { The specified shape: 2 blank, heading, underline, 1 blank. Asymmetric on
+    purpose - an earlier version put 2 on both sides and read too loose, and one
+    everywhere lost the separation. }
+  S := RenderSource('text' + #10 + #10 + '# Head' + #10 + #10 + 'zzz', 14, 14);
+  try
+    TxtRow := RowOfChar(S, 14, 14, 'x');
+    HeadRow := RowOfChar(S, 14, 14, 'H');
+    AfterRow := RowOfChar(S, 14, 14, 'z');
+    AssertTrue('the paragraph is drawn', TxtRow >= 0);
+    AssertTrue('the heading is drawn', HeadRow >= 0);
+    AssertTrue('the following text is drawn', AfterRow >= 0);
+    AssertEquals('two blank rows above the h1', 2, HeadRow - TxtRow - 1);
+    { head text, then the underline row, then one blank, then the text. }
+    AssertEquals('one blank row below (after the underline)',
+      1, AfterRow - HeadRow - 2);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TMarkdownViewTest.TestH2HasTwoRowsAboveAndOneBelow;
+var
+  S: TSurfaceMemory;
+  TxtRow, HeadRow, AfterRow: Integer;
+begin
+  S := RenderSource('text' + #10 + #10 + '## Head' + #10 + #10 + 'zzz', 14, 14);
+  try
+    TxtRow := RowOfChar(S, 14, 14, 'x');
+    HeadRow := RowOfChar(S, 14, 14, 'H');
+    AfterRow := RowOfChar(S, 14, 14, 'z');
+    AssertEquals('two blank rows above the h2', 2, HeadRow - TxtRow - 1);
+    AssertEquals('one blank row below', 1, AfterRow - HeadRow - 2);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TMarkdownViewTest.TestH3KeepsASingleRowGap;
+var
+  S: TSurfaceMemory;
+  TxtRow, HeadRow: Integer;
+begin
+  { Only the top two levels get the extra row: a uniform margin would flatten the
+    hierarchy it exists to express. }
+  S := RenderSource('text' + #10 + #10 + '### Head', 14, 12);
+  try
+    TxtRow := RowOfChar(S, 14, 12, 'x');
+    HeadRow := RowOfChar(S, 14, 12, 'H');
+    AssertEquals('a single blank row above the h3', 1, HeadRow - TxtRow - 1);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TMarkdownViewTest.TestALeadingH1GetsItsTwoRowsAbove;
+var
+  S: TSurfaceMemory;
+  HeadRow, AfterRow: Integer;
+begin
+  { The case the operator actually looks at: a reply OPENS with its title. The
+    margin must be there even with no preceding block, or there is no gap above at
+    all - which is what the earlier revert caused. }
+  S := RenderSource('# Title' + #10 + #10 + 'zzz', 14, 14);
+  try
+    HeadRow := RowOfChar(S, 14, 14, 'T');
+    AfterRow := RowOfChar(S, 14, 14, 'z');
+    AssertEquals('the title starts after two blank rows', 2, HeadRow);
+    AssertEquals('one blank row below', 1, AfterRow - HeadRow - 2);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TMarkdownViewTest.TestALeadingParagraphHasNoGap;
+var
+  S: TSurfaceMemory;
+begin
+  { The gap belongs above a major HEADING, not above a document. }
+  S := RenderSource('first' + #10 + #10 + 'second', 12, 8);
+  try
+    AssertEquals('the first paragraph starts at row 0', 0,
+      RowOfChar(S, 12, 8, 'f'));
+  finally
+    S.Free;
+  end;
+end;
+
 procedure TMarkdownViewTest.TestTightListHasNoGap;
 var
   S: TSurfaceMemory;
@@ -382,10 +495,11 @@ var
   Theme: TMdTheme;
 begin
   Theme := DefaultMdTheme;
-  S := RenderSource('# Title', 20, 3);
+  { A leading h1 sits 2 rows down, so the text is at row 2. }
+  S := RenderSource('# Title', 20, 5);
   try
-    AssertTrue('bold', sfBold in S.CellAt(0, 0).Attr.Style);
-    AssertEquals('bright', Theme.Heading[1].Fg, S.CellAt(0, 0).Attr.Fg);
+    AssertTrue('bold', sfBold in S.CellAt(0, 2).Attr.Style);
+    AssertEquals('bright', Theme.Heading[1].Fg, S.CellAt(0, 2).Attr.Fg);
   finally
     S.Free;
   end;
@@ -397,11 +511,11 @@ var
   Theme: TMdTheme;
 begin
   Theme := DefaultMdTheme;
-  S := RenderSource('# Title', 20, 3);
+  S := RenderSource('# Title', 20, 5);
   try
-    AssertTrue('heavy underline drawn', S.CellAt(0, 1).Ch = '━');
+    AssertTrue('heavy underline drawn', S.CellAt(0, 3).Ch = '━');
     AssertEquals('the underline is the dim colour', Theme.Rule.Fg,
-      S.CellAt(0, 1).Attr.Fg);
+      S.CellAt(0, 3).Attr.Fg);
   finally
     S.Free;
   end;
@@ -411,9 +525,9 @@ procedure TMarkdownViewTest.TestH2Underline;
 var
   S: TSurfaceMemory;
 begin
-  S := RenderSource('## Title', 20, 3);
+  S := RenderSource('## Title', 20, 5);
   try
-    AssertTrue('double underline drawn', S.CellAt(0, 1).Ch = '═');
+    AssertTrue('double underline drawn', S.CellAt(0, 3).Ch = '═');
   finally
     S.Free;
   end;
@@ -460,12 +574,13 @@ procedure TMarkdownViewTest.TestUnderlineMatchesTextWidth;
 var
   S: TSurfaceMemory;
 begin
-  { 'Title' is five columns, so the underline covers 0..4 and stops. }
-  S := RenderSource('# Title', 20, 3);
+  { 'Title' is five columns, so the underline covers 0..4 and stops. The leading
+    h1's 2-row top margin puts the text on row 2 and the rule on row 3. }
+  S := RenderSource('# Title', 20, 5);
   try
-    AssertTrue('starts under the text', S.CellAt(0, 1).Ch = '━');
-    AssertTrue('ends under the text', S.CellAt(4, 1).Ch = '━');
-    AssertTrue('stops at the text', S.CellAt(5, 1).Ch <> '━');
+    AssertTrue('starts under the text', S.CellAt(0, 3).Ch = '━');
+    AssertTrue('ends under the text', S.CellAt(4, 3).Ch = '━');
+    AssertTrue('stops at the text', S.CellAt(5, 3).Ch <> '━');
   finally
     S.Free;
   end;
