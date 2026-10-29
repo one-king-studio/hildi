@@ -11,7 +11,8 @@ SQLite store, a change log with revert, subagents, an MCP client, and both a
 terminal UI (`hildi`) and a headless runtime (`hildi-agent`).
 
 New to the project? Start with `docs/features/FEATURES.md` for what exists, and
-`HANDOFF.md` for current state, decisions, and lessons learned.
+`docs/research/` for the investigations, post-mortems, and lessons learned behind
+the design decisions.
 
 - Compiler: Free Pascal 3.3.1 (aarch64-darwin), configured via `~/.fpc.cfg`.
 - FPC source tree (for reading RTL/FCL/Packages units): machine-local, not recorded
