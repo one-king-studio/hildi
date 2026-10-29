@@ -10,7 +10,7 @@ interface
 
 uses
   Classes, SysUtils, fpjson, jsonparser,
-  hildi.llm, hildi.agent, hildi.approval,
+  HildiLLM, HildiAgent, HildiApproval,
   hildi.script;
 
 type

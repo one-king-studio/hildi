@@ -10,7 +10,7 @@ program async_standalone;
 
 uses
   {$ifdef unix}cthreads,{$endif}
-  SysUtils, async.base, async.scheduler, async.future, async.queue, async.timers;
+  SysUtils, AsyncBase, AsyncScheduler, AsyncFuture, AsyncQueue, AsyncTimers;
 
 type
   TCounter = class

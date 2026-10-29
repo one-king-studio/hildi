@@ -11,8 +11,8 @@ program mcp_http_call;
 uses
   {$ifdef unix}cthreads, cwstring,{$endif}
   SysUtils,
-  hildi.agent, hildi.llm, hildi.approval,
-  hildi.mcp.client, hildi.mcp.config;
+  HildiAgent, HildiLLM, HildiApproval,
+  HildiMCPClient, HildiMCPConfig;
 
 type
   TAllowAll = class(TInterfacedObject, IApprovalService)

@@ -9,7 +9,7 @@ program store_demo;
 
 uses
   {$ifdef unix}cthreads,{$endif}   // must come first on Unix
-  SysUtils, hildi.store, hildi.session;
+  SysUtils, HildiStore, HildiSession;
 
 var
   Cfg: TStoreConfig;

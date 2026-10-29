@@ -1,7 +1,7 @@
 program dashboard_mock;
 { A MOCK of the Board Dashboard: the same widget, rendered over static data.
 
-  The widget itself lives in hildi.dashboard.panel, so this program
+  The widget itself lives in HildiDashboardPanel, so this program
   carries no drawing code at all - it fills the panel's globals with the shape
   of a real workspace and runs it. That is the point of the split: the mock and
   the real binary (examples/dashboard.pas) draw through one implementation, so
@@ -18,9 +18,9 @@ program dashboard_mock;
 uses
   {$ifdef unix}cthreads, cwstring,{$endif}   // cthreads first; cwstring for Unicode
   SysUtils,
-  tui.base, tui.theme, tui.app, tui.surface, tui.surface.video,
-  tui.input, tui.input.terminal, tui.widget,
-  hildi.dashboard.panel;
+  TUIBase, TUITheme, TUIApp, TUISurface, TUISurfaceVideo,
+  TUIInput, TUIInputTerminal, TUIWidget,
+  HildiDashboardPanel;
 
 var
   Theme: TTheme;

@@ -15,7 +15,7 @@ program shell_flag_report;
 {$mode delphi}{$H+}
 
 uses
-  SysUtils, Classes, shell.types, shell.ast, shell.parser;
+  SysUtils, Classes, ShellTypes, ShellAST, ShellParser;
 
 type
   TTally = class

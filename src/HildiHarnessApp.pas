@@ -1,0 +1,3443 @@
+unit HildiHarnessApp;
+{ The Harness UI application: it builds the widget tree (conversation, status,
+  prompt), drains the turn queue each Step, routes approval asks to a modal, and
+  runs one worker per submitted prompt. It is the only unit besides the example
+  that knows both the harness layer and the widgets; it does not link a terminal.
+
+  The UI thread never blocks on the worker except during teardown. }
+
+{$mode delphi}{$H+}
+
+interface
+
+uses
+  Classes, SysUtils, DateUtils, Generics.Collections,
+  HildiLLM, HildiApproval,
+  TUIBase, TUIInput,
+  TUISurface, TUIWidget,
+  TUIWidgetsText, TUIWidgetsChat,
+  TUIWidgetsCompose, TUIWidgetsChatPanel,
+  TUIWidgetsPalette,
+  TUIWidgetsApprovalModal,
+  TUIWidgetsPanel, TUITheme,
+  TUIApp, HildiHarnessTurn,
+  HildiHarnessDriver, HildiHarnessView,
+  HildiStore,
+  HildiBoard, HildiBoardStore,
+  HildiHarnessStats, HildiSession,
+  HildiReplyMeta,
+  TUIWidgetsSessionsModal,
+  TUIWidgetsDiffviewer,
+  TUIWidgetsHistorymodal,
+  TUIWidgetsActions,
+  HildiHarnessSubagent, HildiHarnessSubagentSpy,
+  TUIWidgetsSidebar, TUIWidgetsList,
+  HildiSessionProtocol, HildiSessionClient,
+  HildiChangesStore, ChangesTypes, ChangesStore, ChangesSummary,
+  HildiUTF8;
+
+type
+  { Where the app is in the startup sequence. csIdle waits for the first prompt
+    (no session/runtime yet); csConnecting draws a frame while a connect is in
+    progress; csConnected is the normal live state; csFailed shows an in-app
+    error and stays usable. }
+  TConnState = (csIdle, csConnecting, csConnected, csFailed);
+
+  { Fired when the app is idle (no session/runtime) and the operator submits the
+    first prompt: the composition root creates the session, spawns the runtime,
+    and calls Attach (or FailConnect). Set by the launcher that wants a lazy
+    start; when unset, an idle app cannot send. }
+  TConnectEvent = procedure of object;
+
+  { Opens a different session for the app: returns its view and driver, or False
+    + AError. The callback retains ownership of both (the app holds references
+    only). Wired by the composition root, which can spawn a runtime. }
+  TSwitchSessionEvent = function(const ASessionId: string;
+    out ASession: TSessionView; out ADriver: ISessionDriver;
+    out AError: string): Boolean of object;
+
+  { Opens a spy over a child session. Defaults to TSubagentSpy.Open; overridable
+    so a test can enter spy mode without a live child socket. }
+  TSpyFactoryEvent = function(const ASessionId: string;
+    const AConfig: TSessionClientConfig; out AError: string): TSubagentSpy
+    of object;
+
+  { Builds the tree and owns the TTuiApp and the current worker. The session is
+    owned by the caller and must outlive the app. }
+  THarnessApp = class
+  private
+    FSurface: ISurface;
+    FInput: IInputSource;
+    FSession: TSessionView;
+    FDriver: ISessionDriver;
+    { The startup lifecycle. While csConnecting there is no driver; the app draws
+      a connecting frame and refuses commands. Attach moves to csConnected;
+      FailConnect to csFailed (an in-app error, still quittable). }
+    FConnState: TConnState;
+    FConnectPhase: string;
+    FConnectError: string;
+    FOnNeedConnect: TConnectEvent;
+    { Open a different session (the /sessions modal's Enter): the composition
+      root's hook. Unset => switching is refused with a status line. }
+    FOnSwitchSession: TSwitchSessionEvent;
+    { Opens a spy over a child session; nil => TSubagentSpy.Open. }
+    FSpyFactory: TSpyFactoryEvent;
+    { A prompt submitted while idle, held until Attach delivers the driver. }
+    FPendingSubmit: string;
+    FApp: TTuiApp;
+    FTheme: TTheme;
+    FPanel: TChatPanel;
+    FBusy: Boolean;
+    FModal: TApprovalModal;
+    { The /sessions modal (nil when closed) and its wrap. }
+    FSessionsModal: TSessionsModal;
+    FSessionsShown: Boolean;
+    { The diff viewer pane (nil when closed). One file's stored diff, opened by
+      clicking a file row in a turn-summary block. }
+    FDiffViewer: TDiffViewer;
+    { The shared history dialog (/undo, /redo, /revert): the same list, three
+      actions. nil when closed. }
+    FHistoryModal: THistoryModal;
+    FHistoryShown: Boolean;
+    FHistoryIntent: THistoryIntent;
+    FDiffShown: Boolean;
+    { A deferred close, for the same reason as FCloseSessions: the pane's Escape
+      is dispatched from inside the pane, so the plane pop waits for the next
+      Step rather than freeing the widget mid-call. }
+    FCloseDiff: Boolean;
+    { True once the operator has dismissed the command palette with Escape. It
+      stays down until the composer no longer holds a lone '/token', because
+      ComposeChanged reopens the palette on every keystroke - without this a
+      dismissed list would pop straight back and '/' could never be typed as an
+      ordinary prompt. }
+    FPaletteDismissed: Boolean;
+    { A deferred close: the modal's Enter is dispatched from inside the modal, so
+      popping the plane there would free the widget mid-dispatch. The swap runs
+      inline; the pop waits for the next Step/OnLoop. }
+    FCloseSessions: Boolean;
+    FPendingAskRef: string;
+    { Ask refs already answered this session. A spy re-attaches on every switch
+      with FromSeq=0, which means "replay the whole live turn" - so a child's ask
+      that was already answered is delivered AGAIN as if it were new, and the
+      operator sees the same dialog on every switch. Replay is not evidence the
+      ask is still open. }
+    FAnsweredAsks: TStringList;
+    FCloseModal: Boolean;
+    FAskQueue: array of TTurnEvent;
+    FStatusText: string;
+    FStatsText: string;
+    FHintsText: string;
+    FStateLabel: string;
+    FInterruptPending: Boolean;
+    FInterruptAt: Int64;
+    { The two-step cancel while spying: first Escape arms, the second cancels.
+      Separate from the turn interrupt so the two windows cannot arm each other. }
+    FSpyCancelPending: Boolean;
+    FSpyCancelAt: Int64;
+    { The blocks of the turn in flight, so deltas land in the right one. }
+    FAssistant: TChatItem;
+    { The assistant reply's raw text and the streaming frontmatter suppressor,
+      so a leading block is withheld from the display until it closes (the body
+      then renders normally). }
+    FAssistantRaw: string;
+    FAssistantSupp: TFrontMatterSuppressor;
+    FThought: TChatItem;
+    { Live tool blocks keyed by tool-call id, so a parallel batch's streamed
+      output lands in the right block. Non-owning: the stream owns the items. }
+    FToolBlocks: TDictionary<string, TChatItem>;
+    { Streamed tool output buffered per call and appended once per frame, so a
+      chatty command costs one layout, not one per chunk. Flushed by
+      FlushToolOutput. }
+    FToolPending: TDictionary<string, string>;
+    { The reasoning phase's duration for the live thought block, set by
+      teReasoningDone and consumed when the block settles. }
+    FThoughtMs: Int64;
+    { The submitted prompt and its block, so an early cancel can undo them. }
+    FUserPrompt: string;
+    FUserBlock: TChatItem;
+    { Subagents: the roster (fed from ekSubagent), the sidebar plane, and — in
+      spy mode — the spied child and its observer. }
+    FRoster: TSubagentRoster;
+    FSidebar: TSidebar;
+    FSidebarShown: Boolean;
+    FSpy: TSubagentSpy;
+    FSpyId: string;
+    { A child the list asked to spy, honoured after dispatch returns rather than
+      from inside the list's own key handler. }
+    FPendingSelect: string;
+    FAskRefIsChild: Boolean;
+    { Back-pagination: how many archived pages are shown above the boundary. The
+      scroll anchor is held by the stream itself (PreserveAnchor), so the visible
+      content does not shift when a page is prepended. }
+    FOlderPages: Integer;
+    { True once the window has reached the head of the session: no older page
+      exists, so the scroll-to-top trigger must not fire again (no endless
+      "loading older messages"). Reset when the window is rebuilt from a fresh
+      tail. }
+    FAtHead: Boolean;
+    { The 0-based index of the first message the window currently holds (0 when
+      the whole session is loaded), so the coarse scrubber can map a session
+      fraction to a row within the loaded window. }
+    FWindowStart: Integer;
+    { Passive trim: the monotonic ms of the last scroll. When the operator has
+      not scrolled for TrimIdleMs and the viewport is at the bottom, older loaded
+      pages are unloaded so a long session's memory stays bounded. }
+    FLastScrollMs: Int64;
+    { The left-border paginator (coarse scroll) drag: the last hit row. }
+    FPageDragging: Boolean;
+    FPageDragRow: Integer;
+    FPageCount: Integer;
+    { The checkpoint's ambient block, so the app can find the page boundary (the
+      block sits exactly at the boundary between the archived and current pages).
+      Nil when there is no checkpoint. }
+    FCheckpointBlock: TChatItem;
+    { Queued prompts shown as 'Queued' boxes at the end of the stream, removed
+      when they are injected as a real user turn. }
+    FQueuedBlocks: array of TChatItem;
+    { The driver's dropped-event count at the last check, so the app warns the
+      operator once when streamed output was dropped (the mailbox bound). }
+    FLastDropped: Int64;
+    function BuildTree: TWidget;
+    function GetSessionId: string;
+    procedure ResetWindow;
+    procedure Submit(const AText: string);
+    procedure DrainQueue;
+    procedure FlushToolOutput;
+    procedure HandleTurnEvent(const E: TTurnEvent);
+    procedure EnqueueAsk(const E: TTurnEvent);
+    procedure ShowNextAsk;
+    procedure ShowApproval(const E: TTurnEvent);
+    procedure OnApprovalChosen(const AChoice: TApprovalChoice);
+    procedure CloseModal;
+    { The /sessions modal: open it (load the rows), refresh after an action, and
+      close it. }
+    procedure ShowSessions;
+    procedure RefreshSessions;
+    procedure CloseSessions;
+    procedure OnSessionAction(const ASessionId: string; AAction: TSessionAction);
+    procedure OnSessionRename(const ASessionId, ANewTitle: string);
+    { Reconcile the app's modal state with the plane state: pop a requested close,
+      and clear FSessionsModal when the plane is gone (an unhandled Escape pops
+      it in TTuiApp). Called each Step/OnLoop, like CloseModal. }
+    procedure SyncSessionsModal;
+    { Reconcile the diff pane with the plane, like SyncSessionsModal: pop a
+      requested close, and clear a dangling pane after an unhandled Escape. }
+    procedure SyncDiff;
+    { The diff viewer: open one file's stored diff, and close it. }
+    procedure ShowDiff(ATurnId: Int64; const APath: string);
+    { The shared history dialog: open it for an intent, resolve a choice, close. }
+    procedure ShowHistory(AIntent: THistoryIntent);
+    { After an undo, hand the turn's prompt back to the composer - the cancel
+      behaviour - and drop any queued prompt belonging to a turn now gone. }
+    procedure RestorePromptAfterUndo(ATurnId: Int64);
+    procedure RemoveUndoneQueued;
+    procedure RefreshHistory;
+    procedure CloseHistory;
+    procedure OnHistoryChoose(const ATurnId: Int64);
+    procedure SyncHistory;
+    procedure CloseDiff;
+    procedure DiffClosed(Sender: TObject);
+    { Subagents: feed the roster, toggle/show the sidebar, spy on a child. }
+    procedure HandleSubagentEvent(const E: TTurnEvent);
+    { Show a queued prompt (a violet 'Queued' box) at the end of the stream. }
+    procedure ShowQueued(const AText: string);
+    procedure ToggleSidebar(Sender: TObject);
+    procedure LayoutSidebar;
+    { Each subagent row shows what its child is currently working on, so the
+      list answers "which of these is doing the thing I care about". }
+    procedure RefreshSubagentTitles;
+    procedure OnSidebarSelect(const ASessionId: string);
+    { An action key from the list: 'a' abort, 'r' release, 'p' promote. }
+    procedure OnSidebarAction(const AAction: Char);
+    { Honour a selection the list requested during dispatch. }
+    procedure ConsumePendingSelect;
+    procedure LeaveSpy;
+    { Leave subagent mode entirely: back to the parent's tail AND the composer.
+      Ctrl+D. Distinct from LeaveSpy, which returns to the LIST. }
+    procedure LeaveSubagentMode;
+    { The spied child's display name: its roster label, else its id prefix. }
+    function SpyLabel: string;
+    { Render the child's transcript tail into the panel (the spy view). }
+    procedure RenderSpyHistory(const ASessionId: string);
+    { The spy's CTA actions bar (abort / release / leave). }
+    procedure SetupSpyActions;
+    procedure OnSpyAction(AIndex: Integer);
+    { Tell the PARENT that an operator took one of its children over, and detach
+      the child so it is no longer the parent's. A takeover the parent cannot see
+      is worse than no takeover: the parent would keep issuing instructions to a
+      session the operator now drives. }
+    procedure AnnounceTakeover(const AChildId, AWhat: string);
+    procedure DrainSpy;
+    procedure SendSubagentCommand(AKind: TSessionCommandKind;
+      const ASessionId: string);
+    function SidebarShown: Boolean;
+    function SpyId: string;
+    procedure FinishTurn(AState: TPanelState; const ALabel: string);
+    procedure SetState(AKind: TPanelState; const ALabel: string);
+    { The compose's primary-action hint, from the run state and the box. }
+    procedure UpdateCta;
+    { Settle the streaming thinking block into a persisted "Thought" block. }
+    procedure FinalizeThinking;
+    { End the streamed assistant body: the open markdown tail becomes the final
+      block, so the last block is parsed and styled like the rest. Called
+      wherever the live assistant block stops growing. }
+    procedure FinalizeAssistant;
+    { Append a tool result to its block; no leading gap when the block has no
+      body yet. The result speaks for itself (a tool adds its own call context
+      when that helps), so no [ok]/[failed] prefix is added. }
+    procedure AppendToolResult(ABlock: TChatItem; const AText: string);
+    { A tool call whose result never arrived (interrupted, or a crash on resume)
+      still gets an acknowledgement, so no tool block is ever blank. }
+    procedure SettleOpenTool;
+    { End a completed loop with its metrics; a zero/absent turn draws nothing. }
+    procedure AddTurnDivider;
+    { The turn summary: what this turn wrote, as one block under the divider.
+      Reads the NET rows only, so a file edited twice shows its net change and a
+      file edited then reverted shows nothing at all. }
+    procedure AddTurnChanges(ATurnId: Int64);
+    { The expanded body for a turn-summary block: each file's diff, in the same
+      order the stat lines use. Built once when the block is created, so
+      expanding is a rendering change rather than a store read. }
+    function TurnSummaryDiffs(const ARows: TChangeRecordArray;
+      const ASummary: TTurnChangeSummary): string;
+    { Add a stored assistant reply to the stream: strip a leading frontmatter
+      block and draw it as the title/keyword header (a resume path, so a
+      previously-stored malformed block is still cleaned up). }
+    procedure AddAssistantBlock(const AContent: string);
+    { Put text at the front of the compose box, keeping whatever is typed. }
+    procedure PrependCompose(const AText: string);
+    { Undo the current turn's UI after an early cancel and restore the prompt. }
+    procedure RollBackEarlyCancel;
+    { Drop the in-flight assistant/thinking blocks of a pending response that was
+      never persisted, so the live view matches a resumed session. }
+    procedure RollBackPendingResponse;
+    { Show a user prompt (the turn's own, or a queued one that superseded the
+      response that was streaming), dropping the response it superseded. }
+    procedure HandleUserMessage(const AText: string);
+    { The messages panel's top border: the session id (left) and the session
+      stats (right). }
+    procedure UpdateHeader;
+    procedure UpdateStats;
+    procedure HandleEscape(Sender: TObject);
+    function ComposeIsEmpty: Boolean;
+    procedure InterruptTurn;
+    procedure CheckInterruptWindow;
+    procedure AppendError(const AText: string);
+    procedure RenderHistory;
+    procedure SyncBusy;
+    procedure OnLoop;
+    procedure Invalidate(Sender: TObject);
+    { The transcript reached the top: prepend the next archived page. }
+    procedure NeedOlderHistory(Sender: TObject);
+    { Passive trim: unload the older loaded pages once the operator has been away
+      from them (see TrimIdleMs), so a long session stays bounded. }
+    procedure TrimHistory;
+    { The left-border paginator: a press or drag scrolls to that page. }
+    function PageScrub(const E: TInputEvent): Boolean;
+    { The view scrolled: recompute which page the viewport is on. }
+    procedure StreamScrolled(Sender: TObject);
+    { A file row in a turn-summary block was clicked: open its diff. }
+    procedure StreamFileClicked(Sender: TObject; ATurnId: Int64;
+      const APath: string);
+    { The continuation page: one more than the session's checkpoint count. }
+    function PageNumber: Integer;
+    { The compose changed: show/hide and filter the command palette. }
+    procedure ComposeChanged(Sender: TObject);
+    { Run a command from the palette. }
+    procedure RunCommand(const AName: string);
+    function DefaultCommands: TCommandArray;
+    { True when some undone turn sits above the redo floor, so /redo has work. }
+    function HasRedoableTurn: Boolean;
+    function GetModalActive: Boolean;
+    function GetPromptActive: Boolean;
+    procedure Quit(Sender: TObject);
+    { Draw the frame for the current connect state (connecting / failed). }
+    procedure RenderConnState;
+    function GetConnState: TConnState;
+  public
+    constructor Create(const ASurface: ISurface; const AInput: IInputSource;
+      ASession: TSessionView; ADriver: ISessionDriver;
+      AMode: TThemeMode = tmAuto; ALightDetected: Boolean = False);
+    destructor Destroy; override;
+
+    { One iteration: drain the queue, resolve any answered approval modal, then
+      run TTuiApp.Step. Returns False once stopped. }
+    function Step: Boolean;
+    { One per-frame body, shared by Step (tests) and OnLoop (the app), so the two
+      cannot drift apart. Five subagent bugs shipped from that drift. }
+    procedure Tick;
+    { Clock-driven loop: wait on input, drain the queue each iteration, and render
+      on the frame cadence while a turn is in flight. }
+    procedure Run(ACheckStop: TStopCheck = nil);
+    procedure Stop;
+
+    { Quit mid-turn: deny pending approvals, join the worker, restore state. }
+    procedure CancelTurn;
+
+    { Hand the app its session and driver after the connect succeeded; moves
+      csConnecting -> csConnected and renders the transcript tail. }
+    procedure Attach(const ASession: TSessionView; const ADriver: ISessionDriver);
+    { Report a failed connect; moves to csFailed and shows AError. }
+    procedure FailConnect(const AError: string);
+    { Enter the idle state: no session/runtime yet, waiting for the first prompt.
+      The launcher sets OnNeedConnect so a submit can trigger the connect. }
+    procedure BeginIdle;
+    { A phase label for the connecting frame (e.g. 'connecting', 'loading
+      history'), so the wait is honest. }
+    procedure SetConnectPhase(const APhase: string);
+    { Enter on a /sessions row: open that session. Refuses when busy, when there
+      is no hook, or when the hook fails. The swap happens inline; the modal is
+      popped on the next Step (it is the caller). }
+    procedure SwitchSession(const ASessionId: string);
+    { Enter spy mode on a child session: rebuild the panel to show the child's
+      transcript and its live stream, mark the header, and hide the composer.
+      Escape leaves. Public so the composition root and tests can drive it. }
+    procedure ShowSpy(const ASessionId: string);
+
+    property ConnState: TConnState read GetConnState;
+    { The lazy-start hook: called on the first submit when idle. }
+    property OnNeedConnect: TConnectEvent read FOnNeedConnect
+      write FOnNeedConnect;
+    { The open-a-session hook (the /sessions modal's Enter). }
+    property OnSwitchSession: TSwitchSessionEvent read FOnSwitchSession
+      write FOnSwitchSession;
+    { The spy-open hook; unset uses TSubagentSpy.Open. }
+    property OnSpyFactory: TSpyFactoryEvent read FSpyFactory write FSpyFactory;
+    { The active session's id, '' when there is none (an idle lazy app). }
+    property SessionId: string read GetSessionId;
+
+    property Busy: Boolean read FBusy;
+    property PromptActive: Boolean read GetPromptActive;
+    property ModalActive: Boolean read GetModalActive;
+    { The stream, for tests: block count, kinds and text. }
+    property Panel: TChatPanel read FPanel;
+    { The status bar's left part (the workspace). }
+    property StatusText: string read FStatusText;
+    { The status bar's right part (the latest turn's metrics). }
+    property StatsText: string read FStatsText;
+    { The toolbar's left part: the run state's label. }
+    property StateText: string read FStateLabel;
+    { The toolbar's right part: the interaction hints. }
+    property HintsText: string read FHintsText;
+    { True once the first Escape has armed the interrupt. }
+    property InterruptArmed: Boolean read FInterruptPending;
+    { Whether the subagent sidebar is shown. }
+    property SidebarVisible: Boolean read SidebarShown;
+    { The spied child's session id, '' when not spying. }
+    property SpiedSessionId: string read SpyId;
+    function ConversationText: string;
+  end;
+
+{ The coarse-scroll target: the message index (0-based, oldest = 0) a scrubber
+  segment points to in a session of AMessageCount messages. Segment 0 is the
+  oldest, ASegCount-1 the newest. Pure, so the mapping is testable without the
+  widgets. }
+function CoarseScrollTarget(ASeg, ASegCount, AMessageCount: Integer): Integer;
+
+{ Whether the passive trim should run: older pages are loaded, the operator has
+  not scrolled for ATickMs since ALastScrollMs, and the viewport is at the
+  bottom (AScrollY >= AMaxScroll - 2). Pure, so the policy is testable. }
+function ShouldTrimHistory(AOlderPages: Integer; ANowMs, ALastScrollMs: Int64;
+  AScrollY, AMaxScroll: Integer): Boolean;
+
+{ How a session identifies itself anywhere it is shown: `<label> - <title>`,
+  where the label is the operator's stored label, or the short session id when
+  there is none. A session is an agent, so what identifies it is the name plus
+  what it is currently doing - not one or the other.
+
+  Empty parts are dropped rather than leaving a dangling separator: a session
+  with no title shows just its label, and one with neither shows the id. Pure,
+  so the format is testable without a widget. }
+function SessionDisplayName(const ALabel, ATitle, ASessionId: string): string;
+
+{ The composer's hint line: the base hints, plus the ctrl+d segment only when the
+  session has subagents to show. Pure, so the policy is testable without a widget
+  - and so nobody re-introduces an inert key hint by hardcoding it. }
+function ComposerHints(AHasSubagents: Boolean): string;
+
+{ Order session rows so each delegated child follows its parent, indenting the
+  child's title. Pure, so the nesting policy is testable without a modal. }
+procedure OrderByLineage(var ARows: TSessionRowArray);
+
+implementation
+
+const
+  { How many files a collapsed turn summary names before it tails off. }
+  TurnSummaryMaxFiles = 8;
+
+  { The interaction hints live in the CTA strip, which acts as a context
+    toolbar; the status bar is reserved for the workspace and the metrics. }
+  { The toolbar hints, right-aligned above the composer. The ctrl+d segment is
+    only present when the session actually HAS subagents: advertising a key that
+    can only open an empty list is noise, and the operator asked for it to be
+    absent rather than inert. }
+  CtaHintsBase = 'shift+enter newline';
+  CtaHintsSubagents = ' · ctrl+d subagents';
+  { How long the first Escape stays armed before the interrupt prompt expires. }
+  InterruptWindowMs = 2000;
+  { The first frame loads at most this many messages of the active window (the
+    tail). Older messages load on scroll-up (the window), so the first paint is
+    bounded by the window, not the session. }
+  StartupTailCount = 200;
+  { A back-pagination page size, in messages. }
+  HistoryPageSize = 200;
+  { Passive trim: after this long without a scroll, unload the older pages that
+    the operator has left behind, so a long session's TUI memory stays bounded.
+    Only trims when the viewport is at the bottom (the operator is not reading
+    the older region). }
+  TrimIdleMs = 30000;
+
+type
+  { A yes/no query, e.g. "may I quit?". }
+  TQueryEvent = function: Boolean of object;
+
+  { Wraps the root so global keys (Ctrl-C/Ctrl-D quit, Escape interrupts) are
+    handled before the prompt, which otherwise consumes every printable
+    character. Ctrl-C is refused while the compose holds text, so it can never
+    discard typed input. Extends TSingleChild so Advance/Animating reach the
+    tree. }
+  TAppShell = class(TSingleChild)
+  private
+    FOnQuit: TNotifyEvent;
+    FOnEscape: TNotifyEvent;
+    FCanQuit: TQueryEvent;
+    FOnToggleSidebar: TNotifyEvent;
+  public
+    constructor Create(AChild: TWidget; AOnQuit, AOnEscape: TNotifyEvent;
+      ACanQuit: TQueryEvent);
+    procedure SetSidebarToggle(AHandler: TNotifyEvent);
+    function HandleEvent(const E: TInputEvent): Boolean; override;
+  end;
+
+  { Composites the floating sidebar over the app: the base (the chat panel) is
+    drawn first, the sidebar on top when it is visible. Input goes to the sidebar
+    while it is shown (it is the focused overlay); otherwise to the base. Extends
+    TSingleChild so the base's Advance/Animating reach the app loop. }
+  TSidebarOverlay = class(TSingleChild)
+  private
+    FSidebar: TWidget;
+  public
+    constructor Create(AChild, ASidebar: TWidget);
+    procedure Render(const S: ISurface); override;
+    function HandleEvent(const E: TInputEvent): Boolean; override;
+  end;
+
+function RoleLabel(ARole: TChatRole): string;
+begin
+  case ARole of
+    crUser:
+      Result := '> ';
+    crTool:
+      Result := '[tool result] ';
+    crSystem:
+      Result := '[system] ';
+  else
+    Result := '';
+  end;
+end;
+
+function CoarseScrollTarget(ASeg, ASegCount, AMessageCount: Integer): Integer;
+begin
+  { The coarse scrubber has one segment per page (the checkpoint count, read
+    from the store). This maps a segment to a 0-based message index in a session
+    of AMessageCount messages: segment 0 is the oldest message, ASegCount-1 the
+    newest. The counts are exact (the store), so no row-height estimate is
+    needed. Pure, so the mapping is unit-testable. }
+  Result := 0;
+  if AMessageCount <= 1 then
+    Exit;
+  if ASeg <= 0 then
+    Exit(0);
+  if (ASegCount <= 1) or (ASeg >= ASegCount - 1) then
+    Exit(AMessageCount - 1);
+  Result := (ASeg * (AMessageCount - 1)) div (ASegCount - 1);
+end;
+
+function ShouldTrimHistory(AOlderPages: Integer; ANowMs, ALastScrollMs: Int64;
+  AScrollY, AMaxScroll: Integer): Boolean;
+begin
+  { ALastScrollMs = 0 means the operator has NEVER scrolled, which is not the
+    same as "idle for a long time". GetTickCount64 is system uptime, so treating
+    0 as a timestamp made the trim fire instantly on any machine up longer than
+    TrimIdleMs - and it unloaded pages the operator was still reading. No scroll
+    yet is evidence of nothing, so it is not evidence of idleness. }
+  if ALastScrollMs <= 0 then
+    Exit(False);
+  Result := (AOlderPages > 0) and
+    (ANowMs - ALastScrollMs >= TrimIdleMs) and
+    (AScrollY >= AMaxScroll - 2);
+end;
+
+{ TAppShell }
+
+constructor TAppShell.Create(AChild: TWidget; AOnQuit, AOnEscape: TNotifyEvent;
+  ACanQuit: TQueryEvent);
+begin
+  inherited Create(AChild);
+  FOnQuit := AOnQuit;
+  FOnEscape := AOnEscape;
+  FCanQuit := ACanQuit;
+end;
+
+procedure TAppShell.SetSidebarToggle(AHandler: TNotifyEvent);
+begin
+  FOnToggleSidebar := AHandler;
+end;
+
+function TAppShell.HandleEvent(const E: TInputEvent): Boolean;
+begin
+  if (E.Kind = ikKey) and (E.Key.Kind = kkChar) and (moCtrl in E.Key.Mods) then
+  begin
+    { Ctrl+D toggles the subagent sidebar, NOT Ctrl+B: an integrated terminal
+      (VSCode's) claims Ctrl+B for its own sidebar and never passes it to the
+      pty, so the shortcut was unreachable in the editor most operators use.
+      Ctrl+D reaches us as a raw byte; it only means EOF to a shell. }
+    if (E.Key.Ch = 'd') or (E.Key.Ch = 'D') then
+    begin
+      if Assigned(FOnToggleSidebar) then
+        FOnToggleSidebar(Self);
+      Exit(True);
+    end;
+    if (E.Key.Ch = 'c') or (E.Key.Ch = 'C') then
+    begin
+      { Ctrl-C clears a non-empty compose; only an empty one quits. }
+      if Assigned(FCanQuit) and not FCanQuit() then
+      begin
+        inherited HandleEvent(E);
+        Exit(True);
+      end;
+      if Assigned(FOnQuit) then
+        FOnQuit(Self);
+      Exit(True);
+    end;
+    { Ctrl+D is no longer a quit key: it now toggles the subagent sidebar. Quit
+      stays on Ctrl-C, which is context-aware and standard. Two quit bindings
+      for one action was part of how the sidebar became unreachable. }
+  end;
+  if (E.Kind = ikKey) and (E.Key.Kind = kkEscape) then
+  begin
+    if Assigned(FOnEscape) then
+      FOnEscape(Self);
+    Exit(True);
+  end;
+  Result := inherited HandleEvent(E);
+end;
+
+{ TSidebarOverlay }
+
+constructor TSidebarOverlay.Create(AChild, ASidebar: TWidget);
+begin
+  inherited Create(AChild);
+  FSidebar := ASidebar;
+end;
+
+procedure TSidebarOverlay.Render(const S: ISurface);
+begin
+  inherited Render(S);
+  if (FSidebar <> nil) and FSidebar.Visible then
+    FSidebar.Render(S);
+end;
+
+function TSidebarOverlay.HandleEvent(const E: TInputEvent): Boolean;
+begin
+  { While the sidebar is shown it is the focused overlay, but global keys
+    (Ctrl+B/Ctrl+C, Escape) still fall through to the base shell. }
+  if (FSidebar <> nil) and FSidebar.Visible and FSidebar.HandleEvent(E) then
+    Exit(True);
+  Result := inherited HandleEvent(E);
+end;
+
+constructor THarnessApp.Create(const ASurface: ISurface; const AInput: IInputSource;
+  ASession: TSessionView; ADriver: ISessionDriver; AMode: TThemeMode;
+  ALightDetected: Boolean);
+begin
+  inherited Create;
+  FSurface := ASurface;
+  FInput := AInput;
+  FSession := ASession;
+  FDriver := ADriver;
+  FTheme := SelectTheme(AMode, ALightDetected);
+  FRoster := TSubagentRoster.Create;
+  FAnsweredAsks := TStringList.Create;
+  FAnsweredAsks.Sorted := True;
+  FAnsweredAsks.Duplicates := dupIgnore;
+  FToolBlocks := TDictionary<string, TChatItem>.Create;
+  FToolPending := TDictionary<string, string>.Create;
+  FApp := TTuiApp.Create(ASurface, AInput, BuildTree);
+  FApp.InputHook := PageScrub;
+  FApp.ScreenBg := FTheme.Bg;
+  { With no driver: if there is a session (named/resumed) we are connecting and
+    wait for Attach; if there is no session, the app is idle and waits for the
+    first prompt (the launcher wires OnNeedConnect). With a driver it is live
+    from the first frame (the old behaviour). }
+  if FDriver <> nil then
+  begin
+    FConnState := csConnected;
+    RenderHistory;
+    SetState(psReady, 'ready');
+    UpdateStats;
+  end
+  else if (FSession <> nil) and FSession.HasSession then
+  begin
+    FConnState := csConnecting;
+    FConnectPhase := 'connecting';
+    RenderConnState;
+  end
+  else
+  begin
+    FConnState := csIdle;
+    RenderConnState;
+  end;
+end;
+
+function THarnessApp.GetConnState: TConnState;
+begin
+  Result := FConnState;
+end;
+
+procedure THarnessApp.SetConnectPhase(const APhase: string);
+begin
+  if FConnState <> csConnecting then
+    Exit;
+  FConnectPhase := APhase;
+  RenderConnState;
+end;
+
+procedure THarnessApp.RenderConnState;
+begin
+  { Replace the stream with the state's frame. While connecting the panel is
+    otherwise empty, so this is the first frame the operator sees. }
+  FPanel.Stream.Clear;
+  case FConnState of
+    csIdle:
+      begin
+        FPanel.Stream.Add(ckThinking, '',
+          'type a prompt to start a session');
+        SetState(psReady, 'idle');
+      end;
+    csConnecting:
+      begin
+        FPanel.Stream.Add(ckThinking, '', FConnectPhase + '…');
+        SetState(psThinking, FConnectPhase);
+      end;
+    csFailed:
+      begin
+        FPanel.Stream.Add(ckError, '',
+          'connection failed: ' + FConnectError);
+        SetState(psError, 'failed');
+      end;
+  else
+    ;
+  end;
+  FApp.Invalidate;
+end;
+
+procedure THarnessApp.Attach(const ASession: TSessionView;
+  const ADriver: ISessionDriver);
+var
+  Pending: string;
+begin
+  FSession := ASession;
+  FDriver := ADriver;
+  FConnState := csConnected;
+  { A fresh window for this session: no older pages, not at head, no stale live
+    blocks. Shared with SwitchSession, which rebuilds the transcript the same
+    way. }
+  ResetWindow;
+  RenderHistory;
+  SetState(psReady, 'ready');
+  UpdateStats;
+  { Flush a prompt submitted while idle: it is the prompt the operator typed to
+    trigger this connect. }
+  Pending := FPendingSubmit;
+  FPendingSubmit := '';
+  if Pending <> '' then
+    Submit(Pending);
+end;
+
+procedure THarnessApp.ResetWindow;
+begin
+  { Replace the transcript with a fresh window for the active session. }
+  FAtHead := False;
+  FOlderPages := 0;
+  FWindowStart := 0;
+  FAssistant := nil;
+  FAssistantRaw := '';
+  FAssistantSupp := Default(TFrontMatterSuppressor);
+  FThought := nil;
+  FThoughtMs := 0;
+  FToolBlocks.Clear;
+  FToolPending.Clear;
+  FCheckpointBlock := nil;
+  FQueuedBlocks := nil;
+  FUserBlock := nil;
+  FPanel.Stream.Clear;
+end;
+
+function THarnessApp.GetSessionId: string;
+begin
+  if FSession <> nil then
+    Result := FSession.SessionId
+  else
+    Result := '';
+end;
+
+procedure THarnessApp.SwitchSession(const ASessionId: string);
+var
+  NewSession: TSessionView;
+  NewDriver: ISessionDriver;
+  Err: string;
+begin
+  if ASessionId = '' then
+    Exit;
+  { Activating the current session is a no-op beyond closing the modal. }
+  if (FSession <> nil) and (ASessionId = FSession.SessionId) then
+  begin
+    if FSessionsShown then
+      FCloseSessions := True;
+    Exit;
+  end;
+  { A turn in flight does not block the switch: closing the old driver DETACHES
+    from its runtime (which keeps the turn running and persists it), so switching
+    away loses only the live view, not the work. The new session starts fresh. }
+  NewSession := nil;
+  NewDriver := nil;
+  if not Assigned(FOnSwitchSession) then
+  begin
+    AppendError('this build cannot switch sessions');
+    Exit;
+  end;
+  if not FOnSwitchSession(ASessionId, NewSession, NewDriver, Err) then
+  begin
+    AppendError('could not open session: ' + Err);
+    Exit;
+  end;
+  { Swap the active session and driver. The callback retains ownership of both,
+    so the app holds references only; it closes the old driver (detaching from
+    the old runtime, whose turn keeps running) before adopting the new one.
+    CancelTurn also clears the busy state, since the old turn is no longer ours
+    to show. }
+  CancelTurn;
+  FSession := NewSession;
+  FDriver := NewDriver;
+  FConnState := csConnected;
+  ResetWindow;
+  RenderHistory;
+  SetState(psReady, 'ready');
+  UpdateStats;
+  { The modal raised this from inside its own event dispatch, so pop it on the
+    next Step rather than freeing it mid-dispatch. }
+  if FSessionsShown then
+    FCloseSessions := True;
+end;
+
+procedure THarnessApp.BeginIdle;
+begin
+  { No session/runtime yet: the operator can quit without any side effect. }
+  FConnState := csIdle;
+  RenderConnState;
+end;
+
+procedure THarnessApp.FailConnect(const AError: string);
+begin
+  FConnState := csFailed;
+  FConnectError := AError;
+  RenderConnState;
+end;
+
+destructor THarnessApp.Destroy;
+begin
+  CancelTurn;
+  FSpy.Free;
+  FSidebar.Free;
+  FRoster.Free;
+  FAnsweredAsks.Free;
+  FToolBlocks.Free;
+  FToolPending.Free;
+  FApp.Free;
+  inherited Destroy;
+end;
+
+procedure THarnessApp.CancelTurn;
+begin
+  { Releasing the driver detaches from the runtime (which keeps the turn) or, on
+    the local driver, cancels and joins the worker. }
+  if FDriver <> nil then
+    FDriver.Close;
+  FBusy := False;
+end;
+
+function THarnessApp.BuildTree: TWidget;
+var
+  Shell: TAppShell;
+  Title: string;
+begin
+  { While connecting there may be no session yet; use a placeholder title and an
+    empty status until Attach supplies them. }
+  if FSession <> nil then
+    Title := 'Hildi · ' + FSession.Model
+  else
+    Title := 'Hildi';
+  FPanel := TChatPanel.Create(FTheme, Title, ComposerHints(FRoster.Count > 0));
+  FPanel.Stream.OnToggle := Invalidate;
+  FPanel.Stream.OnFile := StreamFileClicked;
+  FPanel.Stream.OnChange := Invalidate;
+  FPanel.Stream.OnNeedOlder := NeedOlderHistory;
+  FPanel.Stream.OnScroll := StreamScrolled;
+  FPanel.Compose.OnSubmit := Submit;
+  FPanel.Compose.OnChange := ComposeChanged;
+  { The command palette: registered commands, shown when the compose starts
+    with '/'. }
+  FPanel.Palette.SetCommands(DefaultCommands);
+  FPanel.Palette.OnRun := RunCommand;
+  { The session id and stats live on the messages panel's top border; the status
+    bar keeps the workspace. The toolbar holds the run state and the hints. }
+  FStatusText := FSession.WorkspaceRoot;
+  FPanel.SetStatus(FStatusText);
+  FHintsText := ComposerHints(FRoster.Count > 0);
+  FPanel.SetHints(FHintsText);
+  UpdateCta;
+  FSidebar := TSidebar.Create(FTheme, FRoster);
+  FSidebar.OnSelect := OnSidebarSelect;
+  { The CTAs live in the warm box now, so the box reads the keys too. }
+  FSidebar.OnAction := OnSidebarAction;
+  FSidebar.Visible := False;
+  Shell := TAppShell.Create(FPanel, Quit, HandleEscape, ComposeIsEmpty);
+  Shell.SetSidebarToggle(ToggleSidebar);
+  Result := TSidebarOverlay.Create(Shell, FSidebar);
+end;
+
+procedure THarnessApp.Quit(Sender: TObject);
+begin
+  FApp.Stop;
+end;
+
+procedure THarnessApp.Invalidate(Sender: TObject);
+begin
+  UpdateCta;
+  FApp.Invalidate;
+end;
+
+{ The registered commands. The palette is the entry point; commands are not
+  keybindings. }
+function THarnessApp.HasRedoableTurn: Boolean;
+var
+  Turns: TTurnRecordArray;
+  Floor: Int64;
+  I: Integer;
+  StoreErr: TStoreError;
+begin
+  { The same question the dialog asks, answered the same way: an undone turn above
+    the redo floor. Kept in one place so the palette and the list cannot disagree
+    about what is available. }
+  Result := False;
+  if (FSession = nil) or (FSession.Store = nil) then
+    Exit;
+  Floor := 0;
+  if not FSession.Store.RedoFloor(FSession.SessionId, Floor, StoreErr) then
+    Exit;
+  Turns := FSession.Turns;
+  for I := 0 to High(Turns) do
+    if (Turns[I].Status = tsUndone) and (Turns[I].Id > Floor) then
+      Exit(True);
+end;
+
+function THarnessApp.DefaultCommands: TCommandArray;
+begin
+  { One entry per command, no aliases: two names for one action reads as two
+    actions in a list, and the palette's prefix filter already finds a command
+    from '/c' or '/ch'.
+
+    EVERY dispatched command must be listed here. RunCommand is reachable only
+    through the palette, and the palette only runs a name it was given: a command
+    missing from this array cannot be typed either, because with no match the
+    palette declines the key and the composer submits the text as a PROMPT. That
+    is how /undo, /redo and /revert were unreachable - they were dispatched in
+    RunCommand but never registered, so '/undo' was sent to the model as a
+    message. }
+  Result := nil;
+  SetLength(Result, 5);
+  Result[0].Name := 'checkpoint';
+  Result[0].Description := 'create a checkpoint for this session';
+  Result[1].Name := 'sessions';
+  Result[1].Description := 'list and manage this workspace''s sessions';
+  Result[2].Name := 'undo';
+  Result[2].Description := 'revert the newest turn and rewind the transcript';
+  { /redo is offered only when there is something to redo. An entry that can
+    only open an empty list is worse than absent: it invites the operator to try
+    something that cannot work. HasRedoableTurn asks the same question the
+    dialog does, so the two cannot disagree about what is available. }
+  if HasRedoableTurn then
+  begin
+    Result[3].Name := 'redo';
+    Result[3].Description := 're-apply the turns the last undo took away';
+  end
+  else
+  begin
+    Result[3].Name := '';
+    Result[3].Description := '';
+  end;
+  Result[4].Name := 'revert';
+  Result[4].Description := 'ask the agent to undo an earlier turn, going forwards';
+end;
+
+procedure THarnessApp.ComposeChanged(Sender: TObject);
+var
+  Text: string;
+begin
+  UpdateCta;
+  Text := string(FPanel.Compose.Text);
+  { The palette shows while the box holds a lone '/command' token. }
+  { The palette shows while the box holds a lone '/command' token, unless the
+    operator has dismissed it with Escape: '/' is also just a character, and a
+    list that reopens on every keystroke makes that impossible to type. }
+  if (Text <> '') and (Text[1] = '/') and (Pos(' ', Text) = 0) and
+    (Pos(#10, Text) = 0) then
+  begin
+    if not FPaletteDismissed then
+    begin
+      FPanel.Palette.Filter(Text);
+      FPanel.SetPaletteActive(True);
+    end;
+  end
+  else
+  begin
+    { No longer a lone token, so the dismissal has served its purpose and is
+      cleared: the next '/' opens the palette again. }
+    FPaletteDismissed := False;
+    FPanel.SetPaletteActive(False);
+  end;
+  FApp.Invalidate;
+end;
+
+procedure THarnessApp.RunCommand(const AName: string);
+begin
+  FPanel.SetPaletteActive(False);
+  FPanel.Compose.Clear;
+  { /sessions reads the store, not the runtime, so it works while connecting. }
+  if (AName = 'sessions') or (AName = 'ss') then
+  begin
+    ShowSessions;
+    Exit;
+  end;
+  { While connecting or failed, other commands have no driver; refuse cleanly. }
+  if FConnState <> csConnected then
+  begin
+    AppendError('not connected yet');
+    Exit;
+  end;
+  if (AName = 'undo') and (FDriver <> nil) then
+  begin
+    { The spec's shared dialog: /undo opens the "go back to here" list, and
+      selecting a turn undoes the suffix back to and including it. Bare undo with
+      no dialog is still what the newest-turn case does, but choosing is the
+      point of the dialog, so every undo goes through it now. }
+    ShowHistory(hiUndo);
+    Exit;
+  end;
+  if (AName = 'redo') and (FDriver <> nil) then
+  begin
+    { The same list, the other direction: only the turns an undo took away are
+      selectable. 0 means the oldest redoable turn, which the runtime resolves
+      through the redo floor so abandoned work cannot come back. }
+    ShowHistory(hiRedo);
+    Exit;
+  end;
+  if (AName = 'revert') and (FDriver <> nil) then
+  begin
+    { AGENTIC revert, and the SAME dialog as undo: the operator picks a turn,
+      but here nothing is rewound. Selecting a turn injects a prompt asking the
+      agent to undo that turn's EFFECT going forwards - the git-revert model -
+      so the reverted turn stays in the ledger and the record shows both what was
+      done and that it was later undone. The instruction is client-side on
+      purpose: the runtime needs only a prompt, and the client may not link
+      harness.session. }
+    ShowHistory(hiRevert);
+    Exit;
+  end;
+  if (AName = 'checkpoint') and (FDriver <> nil) then
+  begin
+    { The runtime drafts synchronously; show the state now so the operator sees
+      the checkpoint is in progress (and not a silent freeze). }
+    SetState(psThinking, 'checkpointing');
+    FBusy := True;
+    SyncBusy;
+    FDriver.Checkpoint;
+  end;
+  FApp.Invalidate;
+end;
+
+procedure THarnessApp.AppendError(const AText: string);
+begin
+  FPanel.Stream.Add(ckError, '', AText);
+  FApp.Invalidate;
+end;
+
+procedure THarnessApp.SetState(AKind: TPanelState; const ALabel: string);
+begin
+  { The state is context, so it lives at the left of the CTA toolbar; the hints
+    are at its right and the status bar keeps the workspace and the metrics. }
+  FStateLabel := ALabel;
+  FPanel.SetState(AKind, ALabel);
+  UpdateCta;
+  FApp.Invalidate;
+end;
+
+procedure THarnessApp.UpdateCta;
+begin
+  if not ComposeIsEmpty then
+    FPanel.SetCta(ckSend)
+  else if FBusy then
+    FPanel.SetCta(ckCancel)
+  else
+    FPanel.SetCta(ckNone);
+end;
+
+function THarnessApp.PageNumber: Integer;
+var
+  Snaps: TCheckpointArray;
+  Err: TStoreError;
+begin
+  { A checkpoint starts a new page; the session begins on page 1. }
+  Result := 1;
+  if (FSession.Store <> nil) and
+    FSession.Store.ListCheckpoints(FSession.SessionId, Snaps, Err) then
+    Result := Length(Snaps) + 1;
+end;
+
+procedure THarnessApp.UpdateHeader;
+var
+  Context, Title, Left, Lbl, Parent: string;
+  Depth: Integer;
+  StoreErr: TStoreError;
+  MaxW: Integer;
+begin
+  { Read the persisted session, so a live session and a resumed one show the
+    same header. The header carries only the context; the consumption is on the
+    status bar. }
+  Context := FormatContextUsage(FSession.SessionTotals.ContextTokens,
+    FSession.MaxContextTokens);
+  { The session identifies itself as `<label> - <latest turn title>`: the label
+    names the AGENT (the operator's, else the short id), the title says what it
+    is doing. The title override is deprecated - a rename writes the label - but
+    SessionTitle still honours an old override so a pre-existing rename is not
+    silently lost. }
+  Left := '';
+  Title := '';
+  Lbl := '';
+  if (FSession.Store <> nil) then
+  begin
+    FSession.Store.SessionTitle(FSession.SessionId, Title, StoreErr);
+    FSession.Store.SessionLineage(FSession.SessionId, Parent, Depth, Lbl,
+      StoreErr);
+    Left := SessionDisplayName(Lbl, Title, FSession.SessionId);
+  end;
+  if Left = '' then
+    Left := Copy(FSession.SessionId, 1, 12);
+  { Keep the title within the border: reserve room for the right-aligned context
+    (and the corners), so a long title cannot push the usage off the border.
+    TruncateTitle returns a UnicodeString; encode it to a UTF-8 `string`
+    explicitly, because the RTL's implicit UnicodeString->string conversion is
+    lossy here (it writes '?' for non-ASCII). }
+  MaxW := FSurface.Width - 30;
+  if MaxW < 8 then
+    MaxW := 8;
+  FPanel.SetHeader(UTF8Encode(TruncateTitle(UnicodeString(Left), MaxW)), Context);
+  { A continuation session runs on pages (one per checkpoint): the messages
+    panel's left border is the gauge, the current page heavy, and a click on it
+    scrolls (the coarse scroll; the right scrollbar is the fine one). }
+  FPageCount := PageNumber;
+  FPanel.SetPage(FPageCount, FPageCount - 1);
+end;
+
+procedure THarnessApp.UpdateStats;
+var
+  Context: Int64;
+begin
+  { The session's consumption sits on the status bar's right; the header carries
+    the context. Read the persisted session, so live and resumed match. }
+  FStatsText := FormatSessionStats(FSession.SessionTotals);
+  FPanel.SetStats(FStatsText);
+  UpdateHeader;
+  { The checkpoint nudge: advisory only. }
+  Context := FSession.SessionTotals.ContextTokens;
+  if CheckpointNudgeNeeded(Context, FSession.MaxContextTokens) then
+    FHintsText := ComposerHints(FRoster.Count > 0) + ' · /checkpoint to continue'
+  else
+    FHintsText := ComposerHints(FRoster.Count > 0);
+  FPanel.SetHints(FHintsText);
+  FApp.Invalidate;
+end;
+
+function THarnessApp.ComposeIsEmpty: Boolean;
+begin
+  Result := FPanel.Compose.Text = '';
+end;
+
+procedure THarnessApp.HandleEscape(Sender: TObject);
+begin
+  { The command palette is the most transient thing on screen, so it goes first:
+    Escape dismisses it and leaves the typed '/' alone, so the operator can write
+    an ordinary prompt that happens to start with a slash. }
+  if FPanel.PaletteActive then
+  begin
+    FPanel.SetPaletteActive(False);
+    FPaletteDismissed := True;
+    FApp.Invalidate;
+    Exit;
+  end;
+  { Escape closes the /sessions modal next. }
+  if FSessionsShown then
+  begin
+    CloseSessions;
+    Exit;
+  end;
+  { While spying, Escape is a two-step cancel: the first press arms, the second
+    within the window cancels the child (and tells the parent). Leaving the spy
+    is Ctrl+D's job, so Escape is free to be the destructive-but-recoverable one.
+    A single Escape is not enough for a cancel - the same key must not both back
+    out and kill work.
+
+    This check comes BEFORE the sidebar branch because subagent mode now keeps
+    the list visible while spying: both flags are true at once, and the list must
+    not swallow Escape while a child is selected. }
+  if FSpyId <> '' then
+  begin
+    if FSpyCancelPending and
+      (GetTickCount64 - FSpyCancelAt < InterruptWindowMs) then
+    begin
+      FSpyCancelPending := False;
+      AnnounceTakeover(FSpyId, 'cancelled');
+      SendSubagentCommand(scAbortSubagent, FSpyId);
+      LeaveSpy;
+      SetState(psReady, 'subagent cancelled; parent notified');
+      Exit;
+    end;
+    FSpyCancelPending := True;
+    FSpyCancelAt := GetTickCount64;
+    SetState(psInterrupt, 'esc again to cancel this subagent');
+    Exit;
+  end;
+  if not FBusy then
+    Exit;
+  if FInterruptPending then
+  begin
+    FInterruptPending := False;
+    InterruptTurn;
+  end
+  else
+  begin
+    { Arm the interrupt; a second Escape within the window cancels the turn. }
+    FInterruptPending := True;
+    FInterruptAt := GetTickCount64;
+    SetState(psInterrupt, 'press esc again to cancel');
+  end;
+end;
+
+procedure THarnessApp.InterruptTurn;
+begin
+  if FDriver <> nil then
+  begin
+    FDriver.Interrupt;
+    SetState(psThinking, 'cancelling');
+  end;
+end;
+
+procedure THarnessApp.CheckInterruptWindow;
+begin
+  if not FInterruptPending then
+    Exit;
+  if GetTickCount64 - FInterruptAt < InterruptWindowMs then
+    Exit;
+  FInterruptPending := False;
+  if FBusy then
+    SetState(psThinking, 'thinking');
+end;
+
+procedure THarnessApp.RenderHistory;
+var
+  History: TMessageRecordArray;
+  Turns: TTurnRecordArray;
+  Checkpoint: TCheckpointRecord;
+  Archived: TMessageRecordArray;
+  StoreErr: TStoreError;
+  I, Head, CurrentTurn: Integer;
+  Rec: TMessageRecord;
+  ToolBlocks: array of TChatItem;
+  Block: TChatItem;
+
+  { The divider a completed turn leaves after its messages; nothing for a turn
+    that failed, was cancelled, or is unknown. The turn's change summary follows
+    it, exactly as the live path emits it - a resumed or rebuilt transcript must
+    show the same blocks as the one that was streamed. }
+  procedure DrawTurnDivider(const ATurns: TTurnRecordArray; ATurnId: Int64);
+  var
+    J: Integer;
+  begin
+    for J := 0 to High(ATurns) do
+      if (ATurns[J].Id = ATurnId) and (ATurns[J].Status = tsCompleted) then
+      begin
+        FPanel.Stream.Add(ckTurn, '', FormatTurnStats(ATurns[J]));
+        AddTurnChanges(ATurnId);
+        Exit;
+      end;
+  end;
+
+begin
+  { A bounded tail, not the whole session: the first frame is O(window), and the
+    window grows as the operator scrolls up (FOlderPages). Ephemeral/no-store
+    sessions have no history. }
+  if FSession <> nil then
+    History := FSession.HistoryTail(StartupTailCount +
+      FOlderPages * HistoryPageSize)
+  else
+    History := nil;
+  { The window's start index in the whole session, for the coarse scrubber: the
+    session's message count minus what is loaded (0 when all is loaded). }
+  if FSession <> nil then
+    FWindowStart := FSession.MessageCount - Length(History)
+  else
+    FWindowStart := 0;
+  if FWindowStart < 0 then
+    FWindowStart := 0;
+  Turns := FSession.Turns;
+  Head := 0;
+  CurrentTurn := 0;
+  ToolBlocks := nil;
+  { The active window starts at the latest checkpoint. Render the archived prefix
+    (back-pagination), the boundary marker, then the document as the segment's
+    opening block, so the operator sees what the agent was briefed with. }
+  Checkpoint := Default(TCheckpointRecord);
+  FCheckpointBlock := nil;
+  if (FSession.Store <> nil) and
+    FSession.Store.LatestCheckpoint(FSession.SessionId, Checkpoint, StoreErr) then
+  begin
+    if FOlderPages > 0 then
+    begin
+      Archived := nil;
+      if FSession.Store.QueryMessagesBefore(FSession.SessionId, Checkpoint.Seq,
+        FOlderPages * 20, Archived, StoreErr) then
+        for I := 0 to High(Archived) do
+          FPanel.Stream.Add(ckAssistant, '', Archived[I].Content);
+    end;
+    { The checkpoint document is the segment's opening block: a handoff box
+      whose title carries the label (the box render pads it with a leading
+      space). No separate "— checkpoint —" marker is drawn: the box itself is
+      the boundary, and it immediately follows the archived page. The kind is
+      its own so a distinct handoff presentation can fork from the ambient one. }
+    FPanel.Stream.Add(ckHandoff, 'checkpoint', Checkpoint.Summary);
+    FCheckpointBlock := FPanel.Stream.Last;
+  end;
+  for I := 0 to High(History) do
+  begin
+    Rec := History[I];
+    { Messages are grouped by turn in order, so a change of turn means the
+      previous one ended: draw its divider before the next turn's first block. }
+    if Rec.TurnId <> CurrentTurn then
+    begin
+      if CurrentTurn <> 0 then
+        DrawTurnDivider(Turns, CurrentTurn);
+      CurrentTurn := Rec.TurnId;
+    end;
+    case Rec.Role of
+      mrUser:
+        { A user row is never empty in practice; skip one that is rather than
+          draw a blank block. }
+        if Rec.Content <> '' then
+          FPanel.Stream.Add(ckUser, '', Rec.Content);
+      mrAssistant:
+        { An intermediate assistant row can be empty (it only carried tool
+          calls), so do not draw an empty bubble. A substantive reply's leading
+          frontmatter is stripped and drawn as the title/keyword header. }
+        AddAssistantBlock(Rec.Content);
+      mrReasoning:
+        FPanel.Stream.Add(ckThought, FormatThoughtLabel(Rec.DurationMs),
+          Rec.Content);
+      mrToolCall:
+        begin
+          { The reason is the title; the raw call is not shown, so a resumed
+            session matches the live one. }
+          if Rec.ToolReason <> '' then
+            Block := FPanel.Stream.Add(ckTool, Rec.ToolReason, '')
+          else
+            Block := FPanel.Stream.Add(ckTool, Rec.ToolName, '');
+          Block.Expanded := False;
+          SetLength(ToolBlocks, Length(ToolBlocks) + 1);
+          ToolBlocks[High(ToolBlocks)] := Block;
+        end;
+      mrTool:
+        { Results follow their calls in order; pair them, and fall back to a
+          standalone block when the call was trimmed from the history. }
+        if Head <= High(ToolBlocks) then
+        begin
+          Block := ToolBlocks[Head];
+          Inc(Head);
+          AppendToolResult(Block, Rec.Content);
+        end
+        else
+          FPanel.Stream.Add(ckTool, Rec.ToolName, Rec.Content);
+      mrError:
+        { The detail is stored in the tool_arguments column (see the store's
+          AppendError); show it, so a resumed session reads like the live one. }
+        FPanel.Stream.Add(ckError, '', ErrorText(Rec.Content, Rec.ToolArguments));
+      mrSystem:
+        { The system prompt is never drawn live, so it is not drawn on resume
+          either; live and resume stay identical. }
+        ;
+      mrAmbient:
+        { A subagent result: a user-style box with a violet border, titled with
+          the task label and status. }
+        if Rec.Content <> '' then
+          FPanel.Stream.Add(ckAmbient, Rec.LabelText + ' · ' + Rec.Status,
+            Rec.Content);
+    end;
+  end;
+  { The final turn's divider. }
+  if CurrentTurn <> 0 then
+    DrawTurnDivider(Turns, CurrentTurn);
+  { A tool call whose result was never recorded (a crash mid-tool) still gets an
+    acknowledgement, so no tool block is blank. }
+  for I := Head to High(ToolBlocks) do
+    if ToolBlocks[I].Text = '' then
+      ToolBlocks[I].SetText('(no result)');
+  { A full rebuild (first load, a resume, or a checkpoint reload) shows the
+    newest content; a back-pagination prepend restores its anchor in the
+    stream's Arrange instead. }
+  if not FPanel.Stream.AnchorPending then
+    FPanel.Stream.FollowBottom;
+end;
+
+procedure THarnessApp.Submit(const AText: string);
+begin
+  { Idle: no session/runtime yet. The first prompt triggers the connect via the
+    launcher's hook; the prompt is remembered and submitted once connected. }
+  if FConnState = csIdle then
+  begin
+    if Assigned(FOnNeedConnect) then
+    begin
+      FPendingSubmit := AText;
+      FOnNeedConnect();
+    end
+    else
+      AppendError('no session; cannot send');
+    Exit;
+  end;
+  { While connecting or failed there is no driver to submit to; refuse cleanly. }
+  if FConnState <> csConnected then
+  begin
+    AppendError('not connected yet');
+    Exit;
+  end;
+  if FBusy then
+  begin
+    { A turn is in flight: hand the prompt to the driver, which injects it at
+      the runtime's next boundary, and show it as a 'Queued' box now. }
+    if FDriver <> nil then
+      FDriver.QueuePrompt(AText);
+    ShowQueued(AText);
+    Exit;
+  end;
+  FUserPrompt := AText;
+  FUserBlock := nil;
+  { The compose stays active while a turn runs, so the operator can type the
+    next prompt to inject mid-flight. The user block is added when the prompt is
+    echoed (teUserMessage), so live and replayed turns render identically. }
+  FBusy := True;
+  SyncBusy;
+  SetState(psThinking, 'thinking');
+  FAssistant := nil;
+  FThought := nil;
+  FlushToolOutput;
+  FToolBlocks.Clear;
+  FToolPending.Clear;
+  if FDriver <> nil then
+    FDriver.StartTurn(AText);
+end;
+
+procedure THarnessApp.FinalizeThinking;
+begin
+  if (FThought <> nil) and FThought.Live then
+  begin
+    { The reasoning has finished streaming; it is about to be persisted, so it
+      becomes a normal, collapsed thought block carrying its duration. }
+    FThought.Live := False;
+    FThought.Label_ := FormatThoughtLabel(FThoughtMs);
+    FThought.Expanded := False;
+    FThought := nil;
+  end;
+  FThoughtMs := 0;
+end;
+
+procedure THarnessApp.FinalizeAssistant;
+var
+  Meta: TReplyMeta;
+  Tail: string;
+begin
+  if FAssistant <> nil then
+  begin
+    { Flush anything the suppressor still withheld: a block that never closed
+      (no fence, no blank line) is not frontmatter, so its bytes are body and
+      must be shown. Without this, an unterminated block left the reply blank. }
+    if FlushFrontMatter(FAssistantSupp, Tail) and (Tail <> '') then
+      FAssistant.AppendText(Tail);
+    FAssistant.Finalize;
+    { The reply's frontmatter is metadata: strip it from the displayed body and
+      draw the title/keyword header instead. The block was already withheld
+      while streaming; this also covers a reply that streamed without one. }
+    Meta := ExtractReplyMeta(FAssistantRaw);
+    if Meta.HasMeta then
+    begin
+      FAssistant.SetText(Meta.Body);
+      FAssistant.SetMeta(Meta.Title, Meta.Keywords);
+    end;
+    FAssistant := nil;
+  end;
+  FAssistantRaw := '';
+end;
+
+procedure THarnessApp.AddTurnDivider;
+var
+  Turn: TTurnRecord;
+  Stats: string;
+begin
+  { Only a completed loop ends with a divider, matching the restore; a failed or
+    cancelled turn (and a store-less session, whose zero record is tsRunning)
+    draws none. }
+  Turn := FSession.LastTurn;
+  if Turn.Status <> tsCompleted then
+    Exit;
+  Stats := FormatTurnStats(Turn);
+  if Stats <> '' then
+    FPanel.Stream.Add(ckTurn, '', Stats);
+end;
+
+procedure THarnessApp.AddTurnChanges(ATurnId: Int64);
+var
+  Changes: IChangeStore;
+  Rows: TChangeRecordArray;
+  Summary: TTurnChangeSummary;
+  Lines: TStringArray;
+  Block: TChatItem;
+  Text: string;
+  Err: string;
+  I, J, Shown: Integer;
+  Sorted: TFileChangeStatArray;
+  Paths: array of string;
+  T: TFileChangeStat;
+begin
+  { Nothing to read without a store, and a zero turn id is not a turn. }
+  if (FSession.Store = nil) or (ATurnId = 0) then
+    Exit;
+  Changes := TSqliteChangeStore.Create(FSession.Store);
+  if not Changes.ForTurn(FSession.WorkspaceId, Integer(ATurnId), Rows, Err) then
+    Exit;
+  Summary := SummarizeTurn(Rows);
+  { A turn that changed nothing renders NO block: an empty summary is noise, and
+    its absence already says the tree is untouched. }
+  Lines := SummaryLines(Summary, TurnSummaryMaxFiles);
+  if Length(Lines) = 0 then
+    Exit;
+  Text := '';
+  for I := 0 to High(Lines) do
+  begin
+    if I > 0 then
+      Text := Text + LineEnding;
+    Text := Text + Lines[I];
+  end;
+  { One collapsed block: the stat lines are visible, the per-file diffs open on
+    demand. It rides the stream after the divider, so a resumed session shows it
+    in the same place from the same rows. }
+  Block := FPanel.Stream.Add(ckTurnChanges, 'turn changes', Text);
+  Block.SetExpandedText(TurnSummaryDiffs(Rows, Summary));
+  Block.Expanded := False;
+
+  { Tell the block WHICH file each collapsed row is, so a click can open that
+    file's diff. The paths must be in the same order SummaryLines emitted, or a
+    click would open its neighbour's diff - so this repeats the sort rather than
+    re-reading the rendered text, and the two are pinned together by a test.
+    A tail row (`- N more files`) maps to '' and selects nothing. }
+  Sorted := Copy(Summary.Files, 0, Length(Summary.Files));
+  for I := 1 to High(Sorted) do
+  begin
+    J := I;
+    while (J > 0) and (Sorted[J].Path < Sorted[J - 1].Path) do
+    begin
+      T := Sorted[J];
+      Sorted[J] := Sorted[J - 1];
+      Sorted[J - 1] := T;
+      Dec(J);
+    end;
+  end;
+  Shown := Length(Sorted);
+  if (TurnSummaryMaxFiles > 0) and (Shown > TurnSummaryMaxFiles) then
+    Shown := TurnSummaryMaxFiles;
+  SetLength(Paths, Shown);
+  for I := 0 to Shown - 1 do
+    Paths[I] := Sorted[I].Path;
+  if Length(Sorted) > Shown then
+  begin
+    { the `- N more files` tail: a real row, but not a file }
+    SetLength(Paths, Shown + 1);
+    Paths[Shown] := '';
+  end;
+  Block.SetFilePaths(Paths);
+end;
+
+function THarnessApp.TurnSummaryDiffs(const ARows: TChangeRecordArray;
+  const ASummary: TTurnChangeSummary): string;
+var
+  I, J: Integer;
+  R: TChangeRecord;
+  V: TDiffView;
+  Kind: TDiffLineKind;
+  Line: string;
+  Part: string;
+begin
+  { The expanded body: every file's diff, in the same order the stat lines use
+    (by path). Built once, when the block is created - expanding is a rendering
+    change, not a store read. }
+  Result := '';
+  for I := 0 to High(ASummary.Files) do
+  begin
+    { Find the net row for this path. The summary already tells us which paths
+      are worth showing, so this walks the summary, not the rows. }
+    R := Default(TChangeRecord);
+    for J := 0 to High(ARows) do
+      if ARows[J].IsNet and (ARows[J].Path = ASummary.Files[I].Path) then
+      begin
+        R := ARows[J];
+        Break;
+      end;
+    if Result <> '' then
+      Result := Result + LineEnding + LineEnding;
+    Part := ChangeKindCode(ASummary.Files[I].Kind) + ' ' + ASummary.Files[I].Path;
+    Result := Result + Part;
+    V := TDiffView.FromRecord(R);
+    try
+      if V.NotCaptured then
+        Result := Result + LineEnding + '  (not captured: no before-text)'
+      else if V.LineCount = 0 then
+        Result := Result + LineEnding + '  (no change)'
+      else
+      begin
+        if V.Capped then
+          Result := Result + LineEnding + '  (capped at the patch limit)';
+        for J := 0 to V.LineCount - 1 do
+          if V.Line(J, Kind, Line) then
+            Result := Result + LineEnding + '  ' + Line;
+      end;
+    finally
+      V.Free;
+    end;
+  end;
+end;
+
+procedure THarnessApp.AddAssistantBlock(const AContent: string);
+var
+  Meta: TReplyMeta;
+  Block: TChatItem;
+begin
+  if AContent = '' then
+    Exit;
+  { A stored reply may open with a frontmatter block (from before the model
+    learned to close it, or a malformed one). Extract it here too, so a resumed
+    session renders the same as the live one: the block is stripped and drawn as
+    the title/keyword header. }
+  Meta := ExtractReplyMeta(AContent);
+  if Meta.HasMeta then
+  begin
+    Block := FPanel.Stream.Add(ckAssistant, '', Meta.Body);
+    Block.SetMeta(Meta.Title, Meta.Keywords);
+  end
+  else
+    FPanel.Stream.Add(ckAssistant, '', AContent);
+end;
+
+procedure THarnessApp.AppendToolResult(ABlock: TChatItem; const AText: string);
+var
+  Text: string;
+begin
+  { A tool that produced nothing still ran; show a marker rather than a blank. }
+  Text := AText;
+  if Text = '' then
+    Text := '(no output)';
+  if ABlock.Live then
+  begin
+    { The block streamed live; settle it and replace the streamed body with the
+      authoritative result, so the live view and a resumed view match. }
+    ABlock.Live := False;
+    ABlock.SetText(Text);
+  end
+  else if ABlock.Text = '' then
+    ABlock.SetText(Text)
+  else
+    ABlock.AppendText(#10 + #10 + Text);
+end;
+
+procedure THarnessApp.SettleOpenTool;
+var
+  Pair: TPair<string, TChatItem>;
+begin
+  FlushToolOutput;
+  for Pair in FToolBlocks do
+  begin
+    Pair.Value.Live := False;
+    if Pair.Value.Text = '' then
+      Pair.Value.SetText('(no result)');
+  end;
+  FToolBlocks.Clear;
+end;
+
+procedure THarnessApp.PrependCompose(const AText: string);
+var
+  Existing: UnicodeString;
+begin
+  if AText = '' then
+    Exit;
+  Existing := FPanel.Compose.Edit.Text;
+  if Existing = '' then
+    FPanel.Compose.Edit.SetText(UnicodeString(AText))
+  else
+    FPanel.Compose.Edit.SetText(UnicodeString(AText) + #10 + Existing);
+end;
+
+procedure THarnessApp.RollBackEarlyCancel;
+begin
+  if FAssistant <> nil then
+  begin
+    FPanel.Stream.Remove(FAssistant);
+    FAssistant := nil;
+  end;
+  if FThought <> nil then
+  begin
+    FPanel.Stream.Remove(FThought);
+    FThought := nil;
+  end;
+  if FUserBlock <> nil then
+  begin
+    FPanel.Stream.Remove(FUserBlock);
+    FUserBlock := nil;
+  end;
+  PrependCompose(FUserPrompt);
+  FApp.Invalidate;
+end;
+
+procedure THarnessApp.RollBackPendingResponse;
+begin
+  { The pending response was streamed but never persisted (it was truncated and
+    then failed, or superseded). Removing its blocks keeps the live view equal
+    to a resumed session. Committed tool rounds are not touched. }
+  if FAssistant <> nil then
+  begin
+    FPanel.Stream.Remove(FAssistant);
+    FAssistant := nil;
+  end;
+  if FThought <> nil then
+  begin
+    FPanel.Stream.Remove(FThought);
+    FThought := nil;
+  end;
+  FApp.Invalidate;
+end;
+
+procedure THarnessApp.HandleUserMessage(const AText: string);
+var
+  Block: TChatItem;
+  I: Integer;
+begin
+  { An empty user message carries no information (and a mis-mapped event can
+    produce one); never draw a blank user block. }
+  if AText = '' then
+    Exit;
+  { A queued prompt supersedes whatever was streaming: drop those blocks and
+    show the prompt as the next user turn. }
+  if FAssistant <> nil then
+  begin
+    FPanel.Stream.Remove(FAssistant);
+    FAssistant := nil;
+  end;
+  if FThought <> nil then
+  begin
+    FPanel.Stream.Remove(FThought);
+    FThought := nil;
+  end;
+  SettleOpenTool;
+  { A queued box is superseded by the real user turn; drop the oldest. }
+  if Length(FQueuedBlocks) > 0 then
+  begin
+    FPanel.Stream.Remove(FQueuedBlocks[0]);
+    for I := 1 to High(FQueuedBlocks) do
+      FQueuedBlocks[I - 1] := FQueuedBlocks[I];
+    SetLength(FQueuedBlocks, Length(FQueuedBlocks) - 1);
+  end;
+  Block := FPanel.Stream.Add(ckUser, '', AText);
+  { The turn's first user message is the one an early cancel restores; a queued
+    prompt leaves the first block in place. }  if FUserBlock = nil then
+    FUserBlock := Block;
+  FApp.Invalidate;
+end;
+
+procedure THarnessApp.HandleTurnEvent(const E: TTurnEvent);
+var
+  Suppressed: string;
+  Block: TChatItem;
+  Pending: string;
+begin
+  { Anything that is not more reasoning (or the reasoning-end marker, which
+    carries its duration) means the reasoning stream has ended. }
+  if not (E.Kind in [teReasoningDelta, teReasoningDone]) then
+    FinalizeThinking;
+  case E.Kind of
+    teUserMessage:
+      HandleUserMessage(E.Text);
+    teAssistantDelta:
+      begin
+        if FAssistant = nil then
+        begin
+          FAssistant := FPanel.Stream.Add(ckAssistant, '', '');
+          FAssistantRaw := '';
+          FAssistantSupp := Default(TFrontMatterSuppressor);
+        end;
+        { Accumulate the raw reply; suppress a leading frontmatter block so its
+          bytes are not shown as they stream. }
+        FAssistantRaw := FAssistantRaw + E.Text;
+        SuppressFrontMatter(FAssistantSupp, E.Text, Suppressed);
+        if Suppressed <> '' then
+          FAssistant.AppendText(Suppressed);
+      end;
+    teReasoningDelta:
+      begin
+        if FThought = nil then
+        begin
+          FThought := FPanel.Stream.Add(ckThought, 'Thinking...', '');
+          FThought.Live := True;
+        end;
+        FThought.AppendText(E.Text);
+      end;
+    teReasoningDone:
+      { The reasoning phase ended; settle the thought block with its duration
+        when the next event arrives. }
+      FThoughtMs := E.ElapsedMs;
+    teToolCall:
+      begin
+        { A tool is running; the sparkle keeps animating because the turn is
+          still in flight. Blocks are keyed by call id, so a parallel batch's
+          calls each get their own block, created here in call order. }
+        SetState(psTool, 'running ' + E.ToolName);
+        { The reason is the block's title, so collapsed tool lines read as the
+          story of the agent's decisions. The raw call is not shown: the result
+          is the body, visible when the block is expanded. }
+        if E.ToolReason <> '' then
+          FToolBlocks.AddOrSetValue(E.ToolId,
+            FPanel.Stream.Add(ckTool, E.ToolReason, ''))
+        else
+          FToolBlocks.AddOrSetValue(E.ToolId,
+            FPanel.Stream.Add(ckTool, E.ToolName, ''));
+        FToolBlocks[E.ToolId].Expanded := False;
+      end;
+    teToolResult:
+      begin
+        FlushToolOutput;
+        if FToolBlocks.TryGetValue(E.ToolId, Block) then
+        begin
+          { The ok flag is already on the wire; use it so a failed call is
+            visibly an error and not just text that happens to say so. }
+          Block.Failed := not E.ToolOk;
+          AppendToolResult(Block, E.Text);
+          FToolBlocks.Remove(E.ToolId);
+        end
+        else
+        begin
+          Block := FPanel.Stream.Add(ckTool, E.ToolName, '');
+          Block.Failed := not E.ToolOk;
+          AppendToolResult(Block, E.Text);
+        end;
+        FToolPending.Remove(E.ToolId);
+        { The tools are done, so the next deltas belong to the following message:
+          start fresh blocks, after the tool lines. The turn is still in flight,
+          so the state returns to thinking. }
+        SetState(psThinking, 'thinking');
+        FinalizeAssistant;
+        FThought := nil;
+      end;
+    teToolOutput:
+      begin
+        { Live shows the tail and auto-expands, so the operator can watch a long
+          command; the block settles back to collapsed when the result arrives.
+          The text is buffered per call and appended once per frame
+          (FlushToolOutput), so parallel calls do not interleave. }
+        if not FToolBlocks.TryGetValue(E.ToolId, Block) then
+        begin
+          Block := FPanel.Stream.Add(ckTool, E.ToolName, '');
+          FToolBlocks.AddOrSetValue(E.ToolId, Block);
+        end;
+        Block.Live := True;
+        { Append to the call's buffer; the getter is strict, so read it safely
+          (a missing key would raise rather than yield ''). }
+        if FToolPending.TryGetValue(E.ToolId, Pending) then
+          FToolPending[E.ToolId] := Pending + E.Text
+        else
+          FToolPending.AddOrSetValue(E.ToolId, E.Text);
+      end;
+    teApprovalAsk:
+      begin
+        FAskRefIsChild := False;
+        EnqueueAsk(E);
+      end;
+    teSubagent, teSubagentAsk, teAmbient:
+      HandleSubagentEvent(E);
+    teCheckpointCommitted:
+      begin
+        { A checkpoint was recorded: the active window is now the document plus
+          everything after the boundary. Rebuild the transcript from it. }
+        FPanel.Stream.Clear;
+        RenderHistory;
+        FApp.Invalidate;
+      end;
+    teUndone:
+      begin
+        { An undo (or redo) moved the transcript. Rebuild it from the ledger, so
+          the stream shows exactly the turns still in the context - the undone
+          ones are filtered out by the store, not deleted.
+
+          Then behave like a CANCEL: the operator went back to before their
+          prompt, so the prompt returns to the composer for editing rather than
+          being lost. They can rewrite and resend, which is the point of undoing
+          a conversational turn. A REDO restores the turn and must NOT put the
+          prompt back - the turn is live again. }
+        FPanel.Stream.Clear;
+        RenderHistory;
+        RemoveUndoneQueued;
+        { ElapsedMs carries the turn the undo moved to; only an undo hands the
+          prompt back, so re-read the turn to see which side of the line we are
+          on. }
+        RestorePromptAfterUndo(E.ElapsedMs);   { the turn id, on the wire as turn_id }
+        { The move may have opened or closed the redo window, so the palette's
+          command list is rebuilt: /redo appears or disappears with it. }
+        FPanel.Palette.SetCommands(DefaultCommands);
+        { The stream was cleared and rebuilt, so the screen must be repainted.
+          Without this the operator keeps looking at the old transcript - the
+          ledger moved but the display did not, which reads as "undo did
+          nothing". }
+        FApp.Invalidate;
+        FinishTurn(psReady, 'undone');
+      end;
+    teDone:
+      begin
+        { A successful loop ends with its metrics, then its change summary. The
+          summary is a block under the divider, and is absent entirely when the
+          turn wrote nothing - an empty summary would be noise. }
+        AddTurnDivider;
+        if FSession.LastTurn.Status = tsCompleted then
+          AddTurnChanges(FSession.LastTurn.Id);
+        FinishTurn(psReady, 'ready');
+      end;
+    teError:
+      if E.ErrorCode = leCancelled then
+      begin
+        { A user interrupt is not an error; do not draw an error block. An
+          early cancel also drops the prompt from the transcript and gives it
+          back to the operator. }
+        if E.Dropped then
+          RollBackEarlyCancel;
+        FinishTurn(psReady, 'cancelled');
+      end
+      else
+      begin
+        { The pending response was dropped by the loop, so drop its blocks here
+          too, then show the error. }
+        RollBackPendingResponse;
+        AppendError(ErrorText(E.Text, E.Detail));
+        FinishTurn(psError, 'error');
+      end;
+  else
+    ;
+  end;
+end;
+
+procedure THarnessApp.EnqueueAsk(const E: TTurnEvent);
+begin
+  { One modal at a time. A batch (a compound run_command, or the next tool call)
+    can queue several asks; show them in order as each is answered. }
+  if FApp.ModalActive then
+  begin
+    SetLength(FAskQueue, Length(FAskQueue) + 1);
+    FAskQueue[High(FAskQueue)] := E;
+    Exit;
+  end;
+  ShowApproval(E);
+end;
+
+procedure THarnessApp.ShowNextAsk;
+var
+  E: TTurnEvent;
+  I: Integer;
+begin
+  if Length(FAskQueue) = 0 then
+    Exit;
+  E := FAskQueue[0];
+  for I := 1 to High(FAskQueue) do
+    FAskQueue[I - 1] := FAskQueue[I];
+  SetLength(FAskQueue, Length(FAskQueue) - 1);
+  ShowApproval(E);
+end;
+
+procedure THarnessApp.ShowApproval(const E: TTurnEvent);
+var
+  Wrap: TContainer;
+  R: TRect;
+begin
+  FModal := TApprovalModal.Create(E.Ask, FTheme);
+  FModal.OnChoose := OnApprovalChosen;
+  FPendingAskRef := E.AskRef;
+  Wrap := TContainer.Create([Fill(1), Auto, Fill(1)], [Fill(1), Auto, Fill(1)]);
+  Wrap.Add(FModal, 1, 1);
+  R := Default(TRect);
+  R.W := FSurface.Width;
+  R.H := FSurface.Height;
+  Wrap.Arrange(R);
+  FApp.PushPlane(TPlane.Create(Wrap, True, True));
+  SetState(psApproval, 'approval needed');
+end;
+
+procedure THarnessApp.OnApprovalChosen(const AChoice: TApprovalChoice);
+begin
+  { A child's ask is answered with the namespaced ref (<child>/<ask>); the
+    runtime routes it down to the child. A parent's own ask answers the gate. }
+  if FDriver <> nil then
+    FDriver.AnswerAsk(FPendingAskRef, AChoice);
+  { Remember it, so a later spy re-attach replaying the same turn does not offer
+    the identical dialog again. Answered once, ignored thereafter. }
+  if (FPendingAskRef <> '') and (FAnsweredAsks <> nil) then
+    FAnsweredAsks.Add(FPendingAskRef);
+  FAskRefIsChild := False;
+  { Defer popping: we are inside the modal's own event handler. }
+  FCloseModal := True;
+end;
+
+procedure THarnessApp.CloseModal;
+begin
+  if not FCloseModal then
+    Exit;
+  if FApp.ModalActive then
+    FApp.PopPlane;
+  FModal := nil;
+  FCloseModal := False;
+  { The turn resumes once the ask is answered - but a CHILD's ask arrives while
+    the parent is NOT in a turn, so `if FBusy` left the parent stuck on
+    "approval needed" forever after answering one. The state must always be
+    restored when the modal closes; FBusy only decides which state to restore. }
+  if FBusy then
+    SetState(psThinking, 'thinking')
+  else if FSpyId <> '' then
+    SetState(psReady, 'spying')
+  else
+    SetState(psReady, 'ready');
+  ShowNextAsk;
+end;
+
+{ Order session rows so a delegated child follows its parent, and indent its
+  title. The sessions modal draws the rows in the order it is given, so the
+  nesting lives here rather than in the modal - which keeps this file the only
+  one that has to know about lineage.
+
+  Roots keep the query's order (pinned, then most recently updated). Children
+  are emitted directly after their parent, recursively, so a grandchild nests
+  under its own parent rather than being flattened to the top. A child whose
+  parent is absent from the list (archived, or filtered out) is treated as a
+  root rather than dropped: losing a session silently is worse than showing it
+  flat. }
+function ComposerHints(AHasSubagents: Boolean): string;
+begin
+  { The ctrl+d segment is present only when there is something to show. A hint
+    for a key that can only open an empty list is noise, and the operator asked
+    for it to be absent rather than inert. }
+  Result := CtaHintsBase;
+  if AHasSubagents then
+    Result := Result + CtaHintsSubagents;
+end;
+
+function SessionDisplayName(const ALabel, ATitle, ASessionId: string): string;
+var
+  Name: string;
+begin
+  { The label names the agent: the operator's stored label, else the short id.
+    The title says what it is doing. Both, when both exist. }
+  Name := ALabel;
+  if Name = '' then
+  begin
+    if Length(ASessionId) > 12 then
+      Name := Copy(ASessionId, 1, 12)
+    else
+      Name := ASessionId;
+  end;
+
+  if ATitle = '' then
+    Result := Name
+  else if Name = '' then
+    Result := ATitle
+  else
+    Result := Name + ' - ' + ATitle;
+end;
+
+procedure OrderByLineage(var ARows: TSessionRowArray);
+var
+  i, j, N, W: Integer;
+  Roots: TIntArray;
+  Kids: array of TIntArray;
+  Emitted: array of Boolean;
+  Claimed: array of Boolean;
+  OutRows: TSessionRowArray;
+
+  function IndexOfId(const AId: string): Integer;
+  var
+    K: Integer;
+  begin
+    Result := -1;
+    for K := 0 to N - 1 do
+      if ARows[K].Id = AId then
+        Exit(K);
+  end;
+
+  procedure AddKid(AParent, AChild: Integer);
+  begin
+    SetLength(Kids[AParent], Length(Kids[AParent]) + 1);
+    Kids[AParent][High(Kids[AParent])] := AChild;
+    Claimed[AChild] := True;
+  end;
+
+  procedure Emit(AIndex, ADepth: Integer);
+  var
+    K: Integer;
+    Prefix: string;
+  begin
+    if Emitted[AIndex] then
+      Exit;
+    Emitted[AIndex] := True;
+    SetLength(OutRows, Length(OutRows) + 1);
+    OutRows[High(OutRows)] := ARows[AIndex];
+    { Two spaces per level, and a marker so a child is visibly not a root even
+      when its title is the only thing on the row. }
+    if ADepth > 0 then
+    begin
+      Prefix := '';
+      for K := 1 to ADepth do
+        Prefix := Prefix + '  ';
+      OutRows[High(OutRows)].Title := Prefix + '└ ' + ARows[AIndex].Title;
+    end;
+    for K := 0 to High(Kids[AIndex]) do
+      Emit(Kids[AIndex][K], ADepth + 1);
+  end;
+
+begin
+  N := Length(ARows);
+  if N < 2 then
+    Exit;
+  SetLength(Kids, N);
+  SetLength(Emitted, N);
+  SetLength(Claimed, N);
+  SetLength(Roots, 0);
+
+  { Link parent -> children. }
+  for i := 0 to N - 1 do
+    if ARows[i].ParentSessionId <> '' then
+    begin
+      W := IndexOfId(ARows[i].ParentSessionId);
+      if W >= 0 then
+        AddKid(W, i);
+    end;
+
+  { Anything not claimed by a parent in this list is a root. }
+  for i := 0 to N - 1 do
+    if not Claimed[i] then
+    begin
+      SetLength(Roots, Length(Roots) + 1);
+      Roots[High(Roots)] := i;
+    end;
+
+  SetLength(OutRows, 0);
+  for j := 0 to High(Roots) do
+    Emit(Roots[j], 0);
+  { A cycle would leave rows unemitted; append them flat rather than lose them. }
+  for i := 0 to N - 1 do
+    if not Emitted[i] then
+      Emit(i, 0);
+
+  ARows := OutRows;
+end;
+
+procedure THarnessApp.RefreshSessions;
+var
+  Rows: TSessionRowArray;
+  StoreErr: TStoreError;
+  I: Integer;
+begin
+  if (FSessionsModal = nil) or (FSession = nil) or (FSession.Store = nil) then
+    Exit;
+  if FSession.Store.ListSessionRows(FSession.WorkspaceId,
+    FSessionsModal.ShowArchived, Rows, StoreErr) then
+  begin
+    { Every row identifies its session the same way the header does:
+      `<label> - <latest turn title>`, the label falling back to the short id.
+      Applied BEFORE the lineage ordering, which indents whatever it finds. }
+    for I := 0 to High(Rows) do
+      Rows[I].Title := SessionDisplayName(Rows[I].LabelText, Rows[I].Title,
+        Rows[I].Id);
+    OrderByLineage(Rows);
+    FSessionsModal.SetRows(Rows);
+  end;
+end;
+
+procedure THarnessApp.ShowSessions;
+var
+  Wrap: TContainer;
+  R: TRect;
+begin
+  if (FSession = nil) or (FSession.Store = nil) then
+  begin
+    AppendError('no store; /sessions needs a session store');
+    Exit;
+  end;
+  FSessionsModal := TSessionsModal.Create(FTheme);
+  FSessionsModal.SetCurrent(FSession.SessionId);
+  FSessionsModal.OnAction := OnSessionAction;
+  FSessionsModal.OnRename := OnSessionRename;
+  { Enter opens the selected session (SwitchSession closes the modal on swap). }
+  FSessionsModal.OnActivate := SwitchSession;
+  RefreshSessions;
+  Wrap := TContainer.Create([Fill(1), Auto, Fill(1)], [Fill(1), Auto, Fill(1)]);
+  Wrap.Add(FSessionsModal, 1, 1);
+  R := Default(TRect);
+  R.W := FSurface.Width;
+  R.H := FSurface.Height;
+  Wrap.Arrange(R);
+  FApp.PushPlane(TPlane.Create(Wrap, True, True));
+  FSessionsShown := True;
+  SetState(psReady, 'sessions');
+end;
+
+procedure THarnessApp.CloseSessions;
+begin
+  if not FSessionsShown then
+    Exit;
+  if FApp.ModalActive then
+    FApp.PopPlane;
+  FSessionsModal := nil;
+  FSessionsShown := False;
+  SetState(psReady, 'ready');
+end;
+
+procedure THarnessApp.ShowDiff(ATurnId: Int64; const APath: string);
+var
+  Changes: IChangeStore;
+  Rows: TChangeRecordArray;
+  Row: TChangeRecord;
+  V: TDiffView;
+  Kind: TDiffLineKind;
+  Lines: TDiffPaneLineArray;
+  Wrap: TContainer;
+  R: TRect;
+  Err, Line: string;
+  I, N: Integer;
+  Found: Boolean;
+begin
+  { One file's diff, from the LAST turn's recorded rows. The path arrived from a
+    click on a specific summary block, but the block does not carry its turn id
+    through the event, so this searches the newest turn's net rows for the path.
+    A path that is not found is reported rather than shown empty: "no diff" and
+    "no such row" are different answers. }
+  if (FSession = nil) or (FSession.Store = nil) then
+  begin
+    AppendError('no store; cannot show a diff');
+    Exit;
+  end;
+  if ATurnId <= 0 then
+  begin
+    AppendError('no turn to read a diff from');
+    Exit;
+  end;
+  Changes := TSqliteChangeStore.Create(FSession.Store);
+  if not Changes.ForTurn(FSession.WorkspaceId,
+    Integer(ATurnId), Rows, Err) then
+  begin
+    AppendError('could not read the change log: ' + Err);
+    Exit;
+  end;
+
+  Found := False;
+  Row := Default(TChangeRecord);
+  for I := 0 to High(Rows) do
+    if Rows[I].IsNet and (Rows[I].Path = APath) then
+    begin
+      Row := Rows[I];
+      Found := True;
+      Break;
+    end;
+  if not Found then
+  begin
+    AppendError('no recorded change for ' + APath + ' in the last turn');
+    Exit;
+  end;
+
+  V := TDiffView.FromRecord(Row);
+  try
+    Lines := nil;
+    if V.NotCaptured then
+    begin
+      SetLength(Lines, 1);
+      Lines[0].Kind := dpContext;
+      Lines[0].Text := 'not captured: this change stored no before-text';
+      Lines[0].Caveat := True;
+    end
+    else
+    begin
+      if V.Capped then
+      begin
+        SetLength(Lines, 1);
+        Lines[0].Kind := dpContext;
+        Lines[0].Text := 'capped: this diff is a prefix of a larger change';
+        Lines[0].Caveat := True;
+      end;
+      N := Length(Lines);
+      SetLength(Lines, N + V.LineCount);
+      for I := 0 to V.LineCount - 1 do
+        if V.Line(I, Kind, Line) then
+        begin
+          case Kind of
+            dkAdded: Lines[N + I].Kind := dpAdded;
+            dkRemoved: Lines[N + I].Kind := dpRemoved;
+            dkHunk: Lines[N + I].Kind := dpHunk;
+            dkFile: Lines[N + I].Kind := dpFile;
+          else
+            Lines[N + I].Kind := dpContext;
+          end;
+          Lines[N + I].Text := Line;
+          Lines[N + I].Caveat := False;
+        end;
+    end;
+  finally
+    V.Free;
+  end;
+
+  FDiffViewer := TDiffViewer.Create(FTheme);
+  FDiffViewer.OnClose := DiffClosed;
+  FDiffViewer.Show(APath, Lines);
+  Wrap := TContainer.Create([Fill(1), Auto, Fill(1)], [Fill(1), Auto, Fill(1)]);
+  Wrap.Add(FDiffViewer, 1, 1);
+  R := Default(TRect);
+  R.W := FSurface.Width;
+  R.H := FSurface.Height;
+  Wrap.Arrange(R);
+  FApp.PushPlane(TPlane.Create(Wrap, True, True));
+  FDiffShown := True;
+  SetState(psReady, 'diff: ' + APath);
+end;
+
+procedure THarnessApp.CloseDiff;
+begin
+  if not FDiffShown then
+    Exit;
+  if FApp.ModalActive then
+    FApp.PopPlane;
+  FDiffViewer := nil;
+  FDiffShown := False;
+  SetState(psReady, 'ready');
+end;
+
+procedure THarnessApp.ShowHistory(AIntent: THistoryIntent);
+var
+  Wrap: TContainer;
+  R: TRect;
+begin
+  if FSession = nil then
+  begin
+    AppendError('no session; history needs one');
+    Exit;
+  end;
+  FHistoryIntent := AIntent;
+  FHistoryModal := THistoryModal.Create(FTheme);
+  FHistoryModal.Intent := AIntent;
+  FHistoryModal.OnChoose := OnHistoryChoose;
+  RefreshHistory;
+  Wrap := TContainer.Create([Fill(1), Auto, Fill(1)], [Fill(1), Auto, Fill(1)]);
+  Wrap.Add(FHistoryModal, 1, 1);
+  R := Default(TRect);
+  R.W := FSurface.Width;
+  R.H := FSurface.Height;
+  Wrap.Arrange(R);
+  FApp.PushPlane(TPlane.Create(Wrap, True, True));
+  FHistoryShown := True;
+  SetState(psReady, 'history');
+end;
+
+procedure THarnessApp.RefreshHistory;
+var
+  Turns: TTurnRecordArray;
+  Changes: IChangeStore;
+  Rows: TChangeRecordArray;
+  Summary: TTurnChangeSummary;
+  Resolved: THistoryRowArray;
+  Err: string;
+  I, N: Integer;
+  Floor: Int64;
+  StoreErr: TStoreError;
+  R: THistoryRow;
+begin
+  if (FHistoryModal = nil) or (FSession = nil) or (FSession.Store = nil) then
+    Exit;
+  Turns := FSession.Turns;
+  Changes := TSqliteChangeStore.Create(FSession.Store);
+  { The redo floor decides which turns a REDO may act on. Reading it here rather
+    than in the widget keeps the dialog free of the store entirely, and keeps the
+    one rule that matters in one place: an abandoned turn is not redoable. }
+  Floor := 0;
+  FSession.Store.RedoFloor(FSession.SessionId, Floor, StoreErr);
+
+  Resolved := nil;
+  N := 0;
+  { Newest first: the operator's most likely target is the most recent turn. }
+  for I := High(Turns) downto 0 do
+  begin
+    R := Default(THistoryRow);
+    R.TurnId := Turns[I].Id;
+    R.Seq := Turns[I].Seq;
+    R.Title := Turns[I].Prompt;
+    if R.Title = '' then
+      R.Title := '(no prompt recorded)';
+    R.Undone := (Turns[I].Status = tsUndone);
+
+    { The stats come from the turn's NET rows, the same source the summary block
+      reads, so the dialog and the transcript never disagree. }
+    R.Files := 0;
+    if Changes.ForTurn(FSession.WorkspaceId, Integer(Turns[I].Id), Rows, Err) then
+    begin
+      Summary := SummarizeTurn(Rows);
+      R.Files := Length(Summary.Files);
+      R.Added := Summary.TotalAdded;
+      R.Removed := Summary.TotalRemoved;
+      R.CountsKnown := Summary.UnknownCount = 0;
+    end;
+
+    { Selectability is the host's call, because it depends on the intent. A row
+      that cannot be acted on is NOT ADDED AT ALL: a greyed line the operator can
+      never choose is noise, and it invites them to try. The list is what the
+      command can do, not a history of everything that exists. }
+    case FHistoryIntent of
+      hiUndo:
+        { A suffix undo needs a completed turn; an undone one is already back. }
+        R.Selectable := Turns[I].Status = tsCompleted;
+      hiRedo:
+        { Only what an undo took away, and only above the floor: a prompt
+          abandons the turns above it. }
+        R.Selectable := (Turns[I].Status = tsUndone) and (Turns[I].Id > Floor);
+    else
+      { Revert is agentic and moves forward, so any completed turn is fair game -
+        including one already undone, which the agent would find already done. }
+      R.Selectable := Turns[I].Status = tsCompleted;
+    end;
+    if not R.Selectable then
+      Continue;
+
+    SetLength(Resolved, N + 1);
+    Resolved[N] := R;
+    Inc(N);
+  end;
+  FHistoryModal.SetRows(Resolved);
+end;
+
+procedure THarnessApp.CloseHistory;
+begin
+  if not FHistoryShown then
+    Exit;
+  if FApp.ModalActive then
+    FApp.PopPlane;
+  FHistoryModal := nil;
+  FHistoryShown := False;
+  SetState(psReady, 'ready');
+end;
+
+procedure THarnessApp.RestorePromptAfterUndo(ATurnId: Int64);
+var
+  Turns: TTurnRecordArray;
+  I: Integer;
+begin
+  { Undo behaves like a CANCEL: the operator went back to before their prompt, so
+    the prompt belongs in the composer for editing rather than being thrown away.
+    They can rewrite it and resend - which is the whole point of undoing a
+    conversational turn.
+
+    A REDO must not do this: the turn is live again, so handing its prompt back
+    would duplicate it. The two are distinguished by the turn's own status after
+    the move, not by which command ran - the event carries only the turn.
+
+    Matched by ID, not Seq: the runtime puts the turn's database id on the wire
+    (the field is named turn_id), and the seq is a different number entirely.
+    Comparing the wrong one silently restored nothing - a bug that fails quietly,
+    which is the worst kind here. }
+  if ATurnId <= 0 then
+    Exit;
+  Turns := FSession.Turns;
+  for I := 0 to High(Turns) do
+    if Turns[I].Id = ATurnId then
+    begin
+      { Undone: put the prompt back. Anything else (a redo restored
+        tsCompleted) leaves the composer alone. }
+      if Turns[I].Status = tsUndone then
+        PrependCompose(Turns[I].Prompt);
+      Exit;
+    end;
+end;
+
+procedure THarnessApp.RemoveUndoneQueued;
+begin
+  { The stream was just cleared and rebuilt from the ledger, so every queued box
+    that was drawn is already gone. What remains is the app's array of pointers
+    to those freed blocks - keep them and the next removal would touch freed
+    memory. A prompt queued for a turn the operator undid past must not fire
+    later either, and clearing the array is what stops the app treating it as
+    still in flight. }
+  FQueuedBlocks := nil;
+end;
+
+procedure THarnessApp.OnHistoryChoose(const ATurnId: Int64);
+var
+  Intent: THistoryIntent;
+begin
+  { The dialog rendered and reported a choice; the ACTION is entirely the
+    host's, which is what lets one list serve three commands. }
+  Intent := FHistoryIntent;
+  CloseHistory;
+  if FDriver = nil then
+    Exit;
+  case Intent of
+    hiUndo:
+      FDriver.Undo(ATurnId);
+    hiRedo:
+      FDriver.Redo(ATurnId);
+  else
+    { Agentic: nothing is rewound. The agent is asked to undo that turn's effect
+      as new work, naming the turn so it reads the right one. }
+    FDriver.QueuePrompt(Format(
+      'Revert the file changes made in turn %d, by moving FORWARDS: make a new ' +
+      'change that undoes their effect. Do not rewrite history or delete ' +
+      'anything from the transcript. Read what that turn changed first, then undo ' +
+      'its EFFECT in the current state of the files, which may have moved on ' +
+      'since - the goal is that the work is no longer in effect, not a ' +
+      'byte-exact restore. Use your normal tools so the change is recorded like ' +
+      'any other. If some of it cannot be undone coherently, undo what you can ' +
+      'and say plainly what you left and why.', [ATurnId]));
+  end;
+  FApp.Invalidate;
+end;
+
+procedure THarnessApp.DiffClosed(Sender: TObject);
+begin
+  { Escape inside the pane. Deferred like the sessions modal's close: the modal's
+    own handler is dispatching here, so popping the plane now would free the
+    widget mid-call. }
+  FCloseDiff := True;
+end;
+
+procedure THarnessApp.SyncSessionsModal;
+begin
+  if FCloseSessions then
+  begin
+    { A deferred close (Enter, or the modal's own Escape): the caller is not
+      dispatching, so it is safe to pop now. }
+    FCloseSessions := False;
+    CloseSessions;
+    Exit;
+  end;
+  { An unhandled key (Escape) pops the plane in TTuiApp without telling the app;
+    clear the dangling widget and the shown flag so the state does not lie. }
+  if FSessionsShown and (not FApp.ModalActive) then
+  begin
+    FSessionsModal := nil;
+    FSessionsShown := False;
+    SetState(psReady, 'ready');
+  end;
+end;
+
+procedure THarnessApp.SyncDiff;
+begin
+  if FCloseDiff then
+  begin
+    { Escape inside the pane: the pane's own handler is dispatching, so the pop
+      waits until here. Same discipline as the sessions modal's deferred close. }
+    FCloseDiff := False;
+    CloseDiff;
+    Exit;
+  end;
+  { An unhandled Escape pops the plane in TTuiApp without telling the app; clear
+    the dangling widget and the flag so the state does not lie. }
+  if FDiffShown and (not FApp.ModalActive) then
+  begin
+    FDiffViewer := nil;
+    FDiffShown := False;
+    SetState(psReady, 'ready');
+  end;
+end;
+
+procedure THarnessApp.SyncHistory;
+begin
+  { The dialog has no deferred close of its own - its Enter is dispatched from
+    inside the widget, so OnHistoryChoose closes through this same drain rather
+    than popping the plane mid-dispatch. An unhandled Escape pops the plane in
+    TTuiApp without telling the app, so clear the dangling widget here. }
+  if FHistoryShown and (not FApp.ModalActive) then
+  begin
+    FHistoryModal := nil;
+    FHistoryShown := False;
+    SetState(psReady, 'ready');
+  end;
+end;
+
+procedure THarnessApp.OnSessionAction(const ASessionId: string;
+  AAction: TSessionAction);
+var
+  Err: TStoreError;
+  I: Integer;
+  Rows: TSessionRowArray;
+  Pinned, Archived: Boolean;
+begin
+  if (FSession = nil) or (FSession.Store = nil) or (ASessionId = '') then
+    Exit;
+  { Find the row's current flags, then toggle. }
+  Pinned := False;
+  Archived := False;
+  if FSession.Store.ListSessionRows(FSession.WorkspaceId, True, Rows, Err) then
+    for I := 0 to High(Rows) do
+      if Rows[I].Id = ASessionId then
+      begin
+        Pinned := Rows[I].Pinned;
+        Archived := Rows[I].Archived;
+        Break;
+      end;
+  case AAction of
+    saTogglePin:
+      FSession.Store.SetSessionPinned(ASessionId, not Pinned, Err);
+    saToggleArchive:
+      FSession.Store.SetSessionArchived(ASessionId, not Archived, Err);
+  else
+    ;
+  end;
+  RefreshSessions;
+  FApp.Invalidate;
+end;
+
+procedure THarnessApp.OnSessionRename(const ASessionId, ANewTitle: string);
+var
+  Err: TStoreError;
+begin
+  if (FSession = nil) or (FSession.Store = nil) or (ASessionId = '') then
+    Exit;
+  { A rename names the AGENT, so it writes the label - not the title override.
+    The extracted title keeps tracking the latest turn; the label is the
+    operator's own handle. Clearing it falls back to the short session id. }
+  FSession.Store.SetSessionLabel(ASessionId, ANewTitle, Err);
+  { A rename of the current session renames the header too. }
+  if (FSession <> nil) and (ASessionId = FSession.SessionId) then
+    UpdateHeader;
+  RefreshSessions;
+  FApp.Invalidate;
+end;
+
+procedure THarnessApp.FinishTurn(AState: TPanelState; const ALabel: string);
+begin
+  FBusy := False;
+  FInterruptPending := False;
+  FinalizeAssistant;
+  FThought := nil;
+  SettleOpenTool;
+  FUserBlock := nil;
+  FPanel.SetComposeActive(True);
+  SetState(AState, ALabel);
+  UpdateStats;
+  SyncBusy;
+end;
+
+procedure THarnessApp.DrainQueue;
+const
+  { A per-frame budget: drain at most this many events, then return so the loop
+    can render and poll input. An unbounded drain starves both when a producer
+    streams faster than the UI consumes. }
+  DrainBudget = 256;
+var
+  E: TTurnEvent;
+  I: Integer;
+begin
+  if FDriver = nil then
+    Exit;
+  for I := 0 to DrainBudget - 1 do
+  begin
+    if not FDriver.PopEvent(E) then
+      Break;
+    { While spying, the parent's events are consumed but not drawn: its turn
+      keeps running and is persisted, and its transcript is rebuilt on leave. Only
+      the state (busy / roster) is updated, so the two streams never interleave.
+
+      APPROVAL ASKS ARE THE EXCEPTION, and dropping them was a deadlock. An ask
+      is not transcript - it is a blocking demand for operator action. Suppressing
+      it while spying left the child waiting forever: the supervisor only
+      auto-denies when NO client is attached, and the TUI is attached, so
+      TickAutoDeny exits early and nobody ever answers. The modal must still
+      appear over the spy view. }
+    if FSpyId <> '' then
+    begin
+      case E.Kind of
+        teDone, teError:
+          FBusy := False;
+        teSubagent:
+          HandleSubagentEvent(E);
+        teApprovalAsk, teSubagentAsk:
+          HandleTurnEvent(E);
+      else
+        ;
+      end;
+    end
+    else
+      HandleTurnEvent(E);
+  end;
+  { Surface a dropped-output warning once, the first frame the bound was hit. }
+  if (FLastDropped = 0) and (FDriver.Dropped > 0) then
+    AppendError('streamed output was dropped: the UI could not keep up ' +
+      '(the tool output above is incomplete)');
+  FLastDropped := FDriver.Dropped;
+end;
+
+procedure THarnessApp.FlushToolOutput;
+const
+  { The live block keeps only its tail; a huge command must not grow it without
+    limit. Older text is trimmed, with a marker naming how much went. }
+  MaxLiveChars = 65536;
+var
+  Pair: TPair<string, string>;
+  Block: TChatItem;
+  Text: string;
+  Excess: Integer;
+begin
+  if FToolPending.Count = 0 then
+    Exit;
+  for Pair in FToolPending do
+  begin
+    if (Pair.Value = '') or
+      (not FToolBlocks.TryGetValue(Pair.Key, Block)) then
+      Continue;
+    Block.AppendText(Pair.Value);
+    Text := Block.Text;
+    if Length(Text) > MaxLiveChars then
+    begin
+      Excess := Length(Text) - MaxLiveChars;
+      Block.SetText('[' + IntToStr(Excess) + ' earlier chars trimmed]' + #10 +
+        Utf8From(Text, Excess));
+    end;
+  end;
+  FToolPending.Clear;
+end;
+
+procedure THarnessApp.SyncBusy;
+begin
+  FApp.Busy := FBusy;
+end;
+
+procedure THarnessApp.NeedOlderHistory(Sender: TObject);
+begin
+  { At the head already: nothing older exists; do not re-fire (no endless
+    "loading older messages"). }
+  if FAtHead then
+    Exit;
+  { Prepend one more page, holding the scroll so the visible content stays put
+    (the stream applies the anchor on its next layout). }
+  FPanel.Stream.PreserveAnchor;
+  Inc(FOlderPages);
+  FPanel.Stream.Clear;
+  { While spying, the messages panel holds the CHILD's transcript, so paging must
+    re-render the child - RenderHistory reads the parent's session and would
+    swap the operator onto the wrong history mid-scroll. }
+  if FSpyId <> '' then
+    RenderSpyHistory(FSpyId)
+  else
+    RenderHistory;
+  { RenderHistory sets FWindowStart to the window's start index in the session;
+    0 means the window now holds everything, so the head is reached. (Content
+    height is stale until the next layout, so it is not the signal.) }
+  if FWindowStart <= 0 then
+    FAtHead := True;
+  FApp.Invalidate;
+end;
+
+procedure THarnessApp.TrimHistory;
+begin
+  { Unload older loaded pages once the operator has not scrolled for TrimIdleMs
+    and is at the bottom (not reading the older region). This keeps a long
+    session's TUI memory bounded: the pages scrolled past are released. The
+    viewport is not moved (it is at the bottom; dropping content above it leaves
+    the visible rows unchanged). }
+  if FOlderPages <= 0 then
+    Exit;
+  if FBusy then
+    Exit;                       { a turn is streaming; do not churn the stream }
+  if not ShouldTrimHistory(FOlderPages, GetTickCount64, FLastScrollMs,
+    FPanel.Stream.ScrollOffset, FPanel.Stream.MaxScroll) then
+    Exit;
+  { Drop every older page: back to the tail window. }
+  FOlderPages := 0;
+  FAtHead := False;
+  FPanel.Stream.Clear;
+  RenderHistory;
+  FApp.Invalidate;
+end;
+
+function THarnessApp.PageScrub(const E: TInputEvent): Boolean;
+var
+  B: TRect;
+  H, I, Seg, Target, SessionIndex: Integer;
+begin
+  { The left border of the messages panel is a coarse scrollbar: one segment per
+    page, the current page heavy. A press or drag on it scrolls to that segment's
+    fraction of the content; the last segment reaches the end. }
+  Result := False;
+  if (E.Kind <> ikMouse) or (FPageCount < 2) then
+    Exit;
+  if FPageDragging then
+  begin
+    if E.Mouse.Button = mbNone then
+    begin
+      FPageDragging := False;
+      Exit(True);
+    end;
+    FPageDragRow := E.Mouse.Y;
+  end
+  else
+  begin
+    if E.Mouse.Button <> mbLeft then
+      Exit;
+    B := FPanel.MessagesBounds;
+    if (B.W < 2) or (B.H < 2) or (E.Mouse.X <> B.X) or
+      (E.Mouse.Y <= B.Y) or (E.Mouse.Y >= B.Y + B.H - 1) then
+      Exit;
+    FPageDragging := True;
+    FPageDragRow := E.Mouse.Y;
+  end;
+  B := FPanel.MessagesBounds;
+  H := B.H - 2;
+  if H < 1 then
+    H := 1;
+  I := FPageDragRow - (B.Y + 1);
+  if I < 0 then
+    I := 0;
+  if I >= H then
+    I := H - 1;
+  Seg := (I * FPageCount) div H;
+  if Seg > FPageCount - 1 then
+    Seg := FPageCount - 1;
+  { The segment points to a message index in the whole session (real counts from
+    the store, not an estimate). If that is older than the loaded window, grow
+    the window to cover it first (a coarse jump loads); then scroll within. }
+  SessionIndex := CoarseScrollTarget(Seg, FPageCount, FSession.MessageCount);
+  while (not FAtHead) and (FWindowStart > SessionIndex) and
+    (FOlderPages * HistoryPageSize < FSession.MessageCount) do
+  begin
+    FPanel.Stream.PreserveAnchor;
+    Inc(FOlderPages);
+    FPanel.Stream.Clear;
+    RenderHistory;
+    if FWindowStart = 0 then
+      FAtHead := True;
+  end;
+  { Within the loaded window: the fraction of the way from its start to the
+    session's end. ScrollY = 0 is the window top, MaxScroll the bottom. }
+  Target := 0;
+  if FSession.MessageCount > 1 then
+    Target := (FPanel.Stream.MaxScroll * (SessionIndex - FWindowStart)) div
+      (FSession.MessageCount - 1 - FWindowStart);
+  if Target < 0 then
+    Target := 0;
+  if Target > FPanel.Stream.MaxScroll then
+    Target := FPanel.Stream.MaxScroll;
+  FPanel.Stream.ScrollTo(Target);
+  FPanel.SetPageIndex(Seg);
+  FApp.Invalidate;
+  Result := True;
+end;
+
+procedure THarnessApp.StreamFileClicked(Sender: TObject; ATurnId: Int64;
+  const APath: string);
+begin
+  { A click on a file row of a turn-summary block. The block resolved the row to
+    a path; the app owns the store, so it resolves the path to a diff. }
+  if APath <> '' then
+    ShowDiff(ATurnId, APath);
+end;
+
+procedure THarnessApp.StreamScrolled(Sender: TObject);
+var
+  Boundary: Integer;
+  BoundaryPage: Integer;
+begin
+  { The active page is discrete: it changes only when the viewport crosses the
+    checkpoint boundary. Above the boundary is the archived (earlier) page; at or
+    below it is the current page. }
+  FLastScrollMs := GetTickCount64;
+  if FPageCount < 2 then
+    Exit;
+  if FCheckpointBlock = nil then
+  begin
+    FPanel.SetPageIndex(FPageCount - 1);
+    Exit;
+  end;
+  Boundary := FPanel.Stream.OffsetOf(FCheckpointBlock);
+  if Boundary < 0 then
+    Exit;
+  { The page the boundary sits on: pageCount - 1 pages are archived before it,
+    the boundary is the start of the current page. }
+  BoundaryPage := FPageCount - 1;
+  if FPanel.Stream.ScrollOffset < Boundary then
+    FPanel.SetPageIndex(BoundaryPage - 1)
+  else
+    FPanel.SetPageIndex(BoundaryPage);
+end;
+
+procedure THarnessApp.OnLoop;
+begin
+  Tick;
+  { THE PRODUCTION PATH for a deferred selection. It lived only in Step - which
+    is the TEST loop - so arrows moved the list's selection and the transcript
+    never changed. It stays outside Tick because it must run after dispatch,
+    which Tick cannot see; both loops call it for the same reason. }
+  ConsumePendingSelect;
+  { The caret is steady while the terminal is unfocused (DECSET 1004). }
+  FPanel.Compose.Edit.Blinking := FApp.TerminalFocused;
+end;
+
+{ One per-frame body, called by BOTH Step (tests) and OnLoop (the app). They had
+  drifted apart - Step drained the spy and OnLoop trimmed history and synced the
+  busy state - so a behaviour could work in the suite and be absent in the app.
+  Five subagent bugs shipped that way. Anything that must happen once per frame
+  belongs HERE, not in one of the two callers. }
+procedure THarnessApp.Tick;
+begin
+  { Pop an answered modal (and show the next queued ask) before draining, so a
+    fresh ask is never stacked on top of one still being answered. }
+  CloseModal;
+  SyncSessionsModal;
+  SyncDiff;
+  SyncHistory;
+  CheckInterruptWindow;
+  DrainQueue;
+  FlushToolOutput;
+  DrainSpy;
+  TrimHistory;
+  SyncBusy;
+end;
+
+function THarnessApp.Step: Boolean;
+begin
+  Tick;
+  Result := FApp.Step;
+  { A selection the list requested DURING dispatch is honoured HERE, after every
+    widget has finished handling the key. ShowSpy closes one client, opens
+    another, rebuilds the transcript and re-lays out - doing that from inside
+    TSidebar.HandleEvent re-enters the widget being dispatched and crashed. }
+  ConsumePendingSelect;
+end;
+
+procedure THarnessApp.Run(ACheckStop: TStopCheck);
+begin
+  FApp.Run(ACheckStop, OnLoop);
+end;
+
+procedure THarnessApp.Stop;
+begin
+  FApp.Stop;
+end;
+
+function THarnessApp.GetModalActive: Boolean;
+begin
+  Result := FApp.ModalActive;
+end;
+
+function THarnessApp.GetPromptActive: Boolean;
+begin
+  Result := FPanel.Compose.Edit.Active;
+end;
+
+function THarnessApp.ConversationText: string;
+var
+  I: Integer;
+begin
+  Result := '';
+  for I := 0 to FPanel.Stream.Count - 1 do
+    Result := Result + FPanel.Stream.ItemAt(I).Text + #10;
+end;
+
+{ --- subagents ---------------------------------------------------------- }
+
+procedure THarnessApp.ShowQueued(const AText: string);
+var
+  Block: TChatItem;
+begin
+  Block := FPanel.Stream.Add(ckQueued, 'Queued', AText);
+  SetLength(FQueuedBlocks, Length(FQueuedBlocks) + 1);
+  FQueuedBlocks[High(FQueuedBlocks)] := Block;
+  FApp.Invalidate;
+end;
+
+procedure THarnessApp.RefreshSubagentTitles;
+var
+  Entries: TSubagentEntryArray;
+  I: Integer;
+  Title: string;
+  StoreErr: TStoreError;
+begin
+  { Each row shows what its child is WORKING ON, so the list answers "which of
+    these is doing the thing I care about" rather than "how many children do I
+    have". The title is the child's latest resolved one - the delegation reason
+    at spawn, then whatever its last finished reply extracted. }
+  if (FSession = nil) or (FSession.Store = nil) then
+    Exit;
+  Entries := FRoster.Entries;
+  for I := 0 to High(Entries) do
+  begin
+    Title := '';
+    if FSession.Store.SessionTitle(Entries[I].SessionId, Title, StoreErr) then
+      FSidebar.SetTurnTitle(Entries[I].SessionId, Title);
+  end;
+end;
+
+procedure THarnessApp.HandleSubagentEvent(const E: TTurnEvent);
+begin
+  case E.Kind of
+    teSubagent:
+      begin
+        FRoster.Apply(E.SubSessionId, E.SubLabel, E.SubStatus,
+          Int64(GetTickCount64));
+        { The composer's hints depend on whether there are subagents, so a roster
+          change must refresh them. Without this the ctrl+d segment never
+          appeared after the first child spawned - the hint was computed once at
+          build time, when the roster was empty. }
+        FHintsText := ComposerHints(FRoster.Count > 0);
+        FPanel.SetHints(FHintsText);
+        if FSidebarShown then
+        begin
+          RefreshSubagentTitles;
+          FSidebar.Refresh;
+        end;
+      end;
+    teAmbient:
+      { The ambient result, shown live as a violet box (title = label ·
+        status). }
+      if E.Text <> '' then
+      begin
+        FPanel.Stream.Add(ckAmbient, E.SubLabel + ' · ' + E.SubStatus, E.Text);
+        FApp.Invalidate;
+      end;
+    teSubagentAsk:
+      begin
+        { A spy re-attaches on every switch with FromSeq=0 - "replay the whole
+          live turn" - so an ask the operator ALREADY answered is delivered
+          again as if it were new. That is the repeated-dialog bug: replay is not
+          evidence the ask is still open. Skip any ref already answered. }
+        if FAnsweredAsks.IndexOf(E.AskRef) >= 0 then
+          Exit;
+        FAskRefIsChild := True;
+        EnqueueAsk(E);
+      end;
+  else
+    ;
+  end;
+end;
+
+function THarnessApp.SidebarShown: Boolean;
+begin
+  Result := FSidebarShown;
+end;
+
+function THarnessApp.SpyId: string;
+begin
+  Result := FSpyId;
+end;
+
+procedure THarnessApp.ToggleSidebar(Sender: TObject);
+var
+  Entries: TSubagentEntryArray;
+begin
+  { Ctrl+D is one key with two states: it enters subagent mode from the parent,
+    and exits it from anywhere inside - list or child tail. No third behaviour
+    to remember. }
+  if FSidebarShown or (FSpyId <> '') then
+  begin
+    LeaveSubagentMode;
+    Exit;
+  end;
+
+  FSidebarShown := True;
+  FSidebar.Visible := True;
+  FSidebar.Refresh;
+  LayoutSidebar;
+
+  { Spy the first child immediately. Entering the mode should show something,
+    not a list beside an empty transcript waiting for a second keypress. }
+  if FRoster <> nil then
+  begin
+    Entries := FRoster.Entries;
+    if Length(Entries) > 0 then
+      ShowSpy(Entries[0].SessionId)
+    else
+      FApp.Invalidate;
+  end
+  else
+    FApp.Invalidate;
+end;
+
+procedure THarnessApp.LayoutSidebar;
+var
+  Compose: TRect;
+begin
+  if not FSidebarShown then
+    Exit;
+  { The list REPLACES the composer: it takes the composer's exact bounds and
+    draws the same box, so entering subagent mode does not move the transcript
+    or resize the bottom panel by a single row. An earlier version shrank the box
+    to the row count, which made it read as a floating panel again. }
+  Compose := FPanel.ComposeBounds;
+  { The two lines come BEFORE the composer is hidden. Hiding it can make
+    ComposeBounds return an empty rect, and the guard below would then exit
+    without ever setting them - which is why the box kept showing "enter spy"
+    after a child was already selected. State first, geometry second. }
+  FSidebar.SetInfo('Hildegard · ' + FSession.Model);
+  { The CTAs live in this box, so they are always visible while in subagent
+    mode - that is the point of not switching to a separate actions bar. Once a
+    child is selected "enter spy" is wrong: it is already spying. }
+  if FSpyId <> '' then
+    FSidebar.SetHints('ctrl+a abort · ctrl+r release · ctrl+p promote')
+  else if FRoster.Count > 0 then
+    FSidebar.SetHints('enter spy')
+  else
+    FSidebar.SetHints('');
+  FPanel.Compose.Visible := False;
+  if (Compose.H <= 0) or (Compose.W <= 0) then
+    Exit;
+  FSidebar.Arrange(Compose);
+end;
+
+procedure THarnessApp.OnSidebarSelect(const ASessionId: string);
+begin
+  { DEFER. This fires from inside TSidebar.HandleEvent, and ShowSpy closes a
+    client, opens another, rebuilds the transcript and re-lays out the list -
+    re-entering the widget mid-dispatch, which crashed. Record the request and
+    let Step honour it once every widget has finished with the key. }
+  FPendingSelect := ASessionId;
+end;
+
+procedure THarnessApp.ConsumePendingSelect;
+var
+  Id: string;
+begin
+  if FPendingSelect = '' then
+    Exit;
+  Id := FPendingSelect;
+  FPendingSelect := '';
+  { Already looking at it: nothing to do, and re-opening would close and reopen
+    the spy on every keystroke that re-selected the current row. }
+  if Id = FSpyId then
+    Exit;
+  ShowSpy(Id);
+end;
+
+procedure THarnessApp.OnSidebarAction(const AAction: Char);
+begin
+  { Routed through OnSpyAction so the list and the old action bar share ONE
+    implementation of abort/release/promote - including the takeover notice that
+    detaches the child. Two copies would drift, and the notice is the part that
+    must never be missed. }
+  if FSpyId = '' then
+    Exit;
+  case AAction of
+    'a': OnSpyAction(0);
+    'r': OnSpyAction(1);
+    'p': OnSpyAction(2);
+  end;
+end;
+
+procedure THarnessApp.ShowSpy(const ASessionId: string);
+var
+  Cfg: TSessionClientConfig;
+  Err: string;
+begin
+  LeaveSpy;
+  Cfg := Default(TSessionClientConfig);
+  Cfg.WorkspacePath := FSession.WorkspaceRoot;
+  Cfg.Spawn := False;
+  Cfg.Role := srObserve;
+  { NO REPLAY. FromSeq = 0 normally means "replay the whole live turn", and
+    RenderSpyHistory ALSO renders the child's stored history - so every message
+    in the current turn arrived twice, from two sources, with nothing to
+    deduplicate. That was the doubling the operator saw right after switching,
+    and it disappeared on scroll-down because the re-render reads only the store.
+
+    Attaching past the end of the ring replays nothing while LIVE events still
+    arrive (Broadcast is independent of ReplayTo), so history comes from the
+    store and streaming continues. One source of truth.
+
+    Set here rather than in the spy's Open so the decision belongs to the caller
+    that also owns RenderSpyHistory - the two must agree, and this is where that
+    agreement is visible. }
+  Cfg.FromSeq := High(Int64);
+  if Assigned(FSpyFactory) then
+    FSpy := FSpyFactory(ASessionId, Cfg, Err)
+  else
+    FSpy := TSubagentSpy.Open(ASessionId, Cfg, Err);
+  if FSpy = nil then
+  begin
+    AppendError('could not open the child session: ' + Err);
+    Exit;
+  end;
+  FSpyId := ASessionId;
+  { The list STAYS UP: subagent mode is one state, not a list that hands off to
+    a spy view. Hiding the list and switching to the actions bar is what put the
+    teal composer back on screen the moment the operator pressed Enter, which is
+    the bug. The warm box remains, and only the messages panel swaps to this
+    child's tail. }
+  FSidebarShown := True;
+  FSidebar.Visible := True;
+  FSidebar.Refresh;
+  LayoutSidebar;
+  FPanel.SetComposeActive(False);
+  { Rebuild the panel to show the child's transcript (history tail, then its live
+    stream), and mark the header so the operator knows whose session this is. }
+  ResetWindow;
+  RenderSpyHistory(ASessionId);
+  FPanel.SetHeader(
+    UTF8Encode(TruncateTitle(UnicodeString('spying · ' + SpyLabel), 40)), '');
+end;
+
+procedure THarnessApp.SetupSpyActions;
+var
+  Hints: TActionHintArray;
+begin
+  SetLength(Hints, 4);
+  Hints[0].Key := 'a';
+  Hints[0].Action := ' abort';
+  Hints[1].Key := 'r';
+  Hints[1].Action := ' release';
+  { Promote: keep the work, but make it the operator's own session. }
+  Hints[2].Key := 'p';
+  Hints[2].Action := ' promote';
+  Hints[3].Key := 'esc';
+  Hints[3].Action := ' leave';
+  FPanel.Actions.SetHints(Hints);
+  FPanel.Actions.Label_ := 'subagent';
+  FPanel.Actions.OnAction := OnSpyAction;
+  FPanel.SetActionsMode(True);
+end;
+
+procedure THarnessApp.AnnounceTakeover(const AChildId, AWhat: string);
+var
+  Board: IBoardStore;
+  Entry: TBoardEntry;
+  Id: Integer;
+  Err: string;
+  Parent, Depth, Lbl: string;
+  StoreErr: TStoreError;
+  D: Integer;
+begin
+  { Best-effort throughout: a takeover must not fail because a notice could not
+    be written. The operator has already taken control; refusing to complete the
+    detachment would leave the parent believing it still owns the child, which is
+    the exact state this exists to prevent. }
+  if (FSession.Store = nil) then
+    Exit;
+
+  if not FSession.Store.SessionLineage(AChildId, Parent, D, Lbl, StoreErr) then
+    Exit;
+
+  { Detach FIRST: after this the child is nobody's, and a parent that missed the
+    notice still cannot issue it further instructions through the supervisor. }
+  FSession.Store.DetachSession(AChildId, StoreErr);
+
+  Board := TSqliteBoardStore.Create(FSession.Store);
+  Entry := Default(TBoardEntry);
+  Entry.WorkspaceId := FSession.WorkspaceId;
+  { A STATUS entry: it is a fact about what is happening now, and the board's
+    retention prunes status by count and age rather than keeping it forever. }
+  Entry.Kind := bkStatus;
+  Entry.Topic := 'coordination';
+  Entry.Title := 'Operator took over subagent ' + Copy(AChildId, 1, 8) + ': ' +
+    AWhat;
+  Entry.Body := 'The operator ' + AWhat + ' on this subagent and detached it ' +
+    'from its parent. It is now an ordinary session and is no longer yours to ' +
+    'direct; do not message or abort it.' + LineEnding + LineEnding +
+    'Session: ' + AChildId;
+  Entry.FromSession := '';
+  { No session: this is the OPERATOR acting, not an agent. '' means "not from a
+    session", the same convention Transition uses for operator moves. }
+  Entry.FromLabel := 'operator';
+  Entry.CreatedAt := DateTimeToUnix(Now);
+  Board.Append(Entry, Id, Err);
+end;
+
+procedure THarnessApp.OnSpyAction(AIndex: Integer);
+begin
+  { Index matches SetupSpyActions: 0 abort, 1 release, 2 promote, 3 leave (esc is
+    the global handler's, so it never reaches here). }
+  case AIndex of
+    0:
+      begin
+        { An abort the parent cannot see is a silent takeover: the parent would
+          keep waiting on, and messaging, a task the operator just killed. }
+        AnnounceTakeover(FSpyId, 'cancelled');
+        SendSubagentCommand(scAbortSubagent, FSpyId);
+        SetState(psReady, 'subagent cancelled; parent notified');
+      end;
+    1:
+      begin
+        SendSubagentCommand(scReleaseSubagent, FSpyId);
+        SetState(psReady, 'subagent released');
+      end;
+    2:
+      begin
+        { Promote: the child keeps running, but as the OPERATOR's session. The
+          parent must stop treating it as its own. }
+        AnnounceTakeover(FSpyId, 'promoted');
+        LeaveSpy;
+        SetState(psReady, 'subagent promoted to its own session');
+      end;
+  else
+    ;
+  end;
+end;
+
+function THarnessApp.SpyLabel: string;
+var
+  I: Integer;
+  Entries: TSubagentEntryArray;
+begin
+  { The child's label from the roster when known, else its id prefix. }
+  Result := '';
+  Entries := FRoster.Entries;
+  for I := 0 to High(Entries) do
+    if Entries[I].SessionId = FSpyId then
+    begin
+      Result := Entries[I].LabelText;
+      Break;
+    end;
+  if Result = '' then
+    Result := Copy(FSpyId, 1, 12);
+end;
+
+procedure THarnessApp.RenderSpyHistory(const ASessionId: string);
+var
+  History: TMessageRecordArray;
+  StoreErr: TStoreError;
+  I: Integer;
+  Rec: TMessageRecord;
+begin
+  { The child's transcript: a bounded tail from the store (a child has no
+    checkpoints in v1). The live stream is appended by DrainSpy. }
+  History := nil;
+  if (FSession <> nil) and (FSession.Store <> nil) then
+    FSession.Store.QueryActiveMessagesTail(ASessionId, StartupTailCount,
+      History, StoreErr);
+  for I := 0 to High(History) do
+  begin
+    Rec := History[I];
+    case Rec.Role of
+      mrUser:
+        if Rec.Content <> '' then
+          FPanel.Stream.Add(ckUser, '', Rec.Content);
+      mrAssistant:
+        AddAssistantBlock(Rec.Content);
+      mrReasoning:
+        FPanel.Stream.Add(ckThought, FormatThoughtLabel(Rec.DurationMs),
+          Rec.Content);
+      mrToolCall:
+        FPanel.Stream.Add(ckTool, Rec.ToolReason, '');
+      mrTool:
+        FPanel.Stream.Add(ckTool, Rec.ToolName, Rec.Content);
+      mrError:
+        FPanel.Stream.Add(ckError, '', Rec.Content);
+      mrAmbient:
+        if Rec.Content <> '' then
+          FPanel.Stream.Add(ckAmbient, Rec.LabelText + ' · ' + Rec.Status,
+            Rec.Content);
+    else
+      ;
+    end;
+  end;
+  FPanel.Stream.FollowBottom;
+end;
+
+procedure THarnessApp.LeaveSpy;
+begin
+  if FSpy <> nil then
+  begin
+    FSpy.Close;
+    FSpy.Free;
+    FSpy := nil;
+  end;
+  if FSpyId <> '' then
+  begin
+    FSpyId := '';
+    { The list stays exactly where it is: subagent mode is one state, so leaving
+      a child returns to the LIST, not to the composer. It also must not be
+      re-arranged here - this runs from inside the list's own key handler, and
+      arranging a widget mid-dispatch is what crashed. }
+    if FSidebarShown then
+      LayoutSidebar
+    else
+    begin
+      FPanel.SetActionsMode(False);
+      FPanel.SetComposeActive(True);
+      FPanel.Compose.Visible := True;
+    end;
+    UpdateCta;
+    { Restore the parent's transcript and header. }
+    ResetWindow;
+    RenderHistory;
+    UpdateStats;
+    UpdateHeader;
+  end;
+  FApp.Invalidate;
+end;
+
+procedure THarnessApp.LeaveSubagentMode;
+begin
+  { The one way out of subagent mode: back to the parent's tail and the composer.
+    Ctrl+D. Undoes everything entering the mode did, in one place. }
+  LeaveSpy;
+  FSidebarShown := False;
+  FSidebar.Visible := False;
+  FPanel.SetActionsMode(False);
+  FPanel.SetComposeActive(True);
+  FPanel.Compose.Visible := True;
+  ResetWindow;
+  RenderHistory;
+  UpdateStats;
+  UpdateHeader;
+  UpdateCta;
+  FApp.Invalidate;
+end;
+
+procedure THarnessApp.DrainSpy;
+var
+  E: TTurnEvent;
+begin
+  if FSpy = nil then
+    Exit;
+  while FSpy.PopEvent(E) do
+    HandleTurnEvent(E);
+end;
+
+procedure THarnessApp.SendSubagentCommand(AKind: TSessionCommandKind;
+  const ASessionId: string);
+begin
+  if FDriver = nil then
+    Exit;
+  if AKind = scAbortSubagent then
+    FDriver.AbortSubagent(ASessionId)
+  else if AKind = scReleaseSubagent then
+    FDriver.ReleaseSubagent(ASessionId);
+end;
+
+end.

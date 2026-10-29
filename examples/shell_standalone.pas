@@ -11,7 +11,7 @@ program shell_standalone;
 uses
   SysUtils, Classes,
   {$ifdef unix}BaseUnix,{$endif}   // fpSymlink/fpReadlink/fpChmod for the host FS
-  shell.types, shell.ast, shell.parser, shell.fs, shell.registry, shell.interpreter;
+  ShellTypes, ShellAST, ShellParser, ShellFs, ShellRegistry, ShellInterpreter;
 
 type
   THostFs = class(TInterfacedObject, IShellFileSystem)

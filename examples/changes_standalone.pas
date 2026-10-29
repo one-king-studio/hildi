@@ -11,7 +11,7 @@ program changes_standalone;
 
 uses
   SysUtils,
-  changes.types, changes.text, changes.store, changes.log;
+  ChangesTypes, ChangesText, ChangesStore, ChangesLog;
 
 type
   THash = class

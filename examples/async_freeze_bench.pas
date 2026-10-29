@@ -13,7 +13,7 @@ program async_freeze_bench;
 
 uses
   {$ifdef unix}cthreads,{$endif}
-  SysUtils, async.base, async.queue;
+  SysUtils, AsyncBase, AsyncQueue;
 
 const
   Burst = 1000000;   { one chatty command's worth of streamed events }

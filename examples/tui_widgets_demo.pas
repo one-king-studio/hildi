@@ -11,14 +11,14 @@ program tui_widgets_demo;
 uses
   {$ifdef unix}cthreads, cwstring,{$endif}   // cthreads first; cwstring for Unicode
   SysUtils, Classes,
-  tui.base, tui.input,
-  tui.surface, tui.widget,
-  tui.widgets.text, tui.app,
-  tui.surface.video, tui.input.terminal,
-  tui.theme, tui.widgets.panel,
-  tui.widgets.focus, tui.widgets.button,
-  tui.widgets.list, tui.widgets.spinner,
-  tui.widgets.progress;
+  TUIBase, TUIInput,
+  TUISurface, TUIWidget,
+  TUIWidgetsText, TUIApp,
+  TUISurfaceVideo, TUIInputTerminal,
+  TUITheme, TUIWidgetsPanel,
+  TUIWidgetsFocus, TUIWidgetsButton,
+  TUIWidgetsList, TUIWidgetsSpinner,
+  TUIWidgetsProgress;
 
 var
   QuitRequested: Boolean = False;

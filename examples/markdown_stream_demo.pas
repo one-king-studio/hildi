@@ -24,7 +24,7 @@ program markdown_stream_demo;
 
 uses
   SysUtils, Classes,
-  markdown.types, markdown.tree, markdown.stream;
+  MarkdownTypes, MarkdownTree, MarkdownStream;
 
 const
   Tour =

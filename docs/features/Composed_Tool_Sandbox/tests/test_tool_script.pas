@@ -9,8 +9,8 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildi.llm, hildi.agent, hildi.approval,
-  hildi.workspace, hildi.files, hildi.script,
+  HildiLLM, HildiAgent, HildiApproval,
+  HildiWorkspace, HildiFiles, hildi.script,
   hildi.tool.script;
 
 type

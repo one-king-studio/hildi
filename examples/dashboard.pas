@@ -4,7 +4,7 @@ program dashboard;
   channel list with a live feed.
 
   A VIEWER. It reads the store and draws; it posts nothing yet. The panel itself
-  lives in hildi.dashboard.panel, so the layout can be exercised by
+  lives in HildiDashboardPanel, so the layout can be exercised by
   the mock (examples/dashboard_mock.pas) without a store.
 
   It links no agent-loop unit: the same closure discipline the TUI client is
@@ -18,12 +18,12 @@ program dashboard;
 uses
   {$ifdef unix}cthreads, cwstring,{$endif}   // cthreads first; cwstring for Unicode
   SysUtils, DateUtils,
-  hildi.store, hildi.board, hildi.board.store,
-  hildi.tasks, hildi.tasks.store,
-  hildi.workspace,
-  hildi.dashboard.panel,
-  tui.base, tui.theme, tui.app, tui.surface, tui.surface.video,
-  tui.input, tui.input.terminal, tui.widget;
+  HildiStore, HildiBoard, HildiBoardStore,
+  HildiTasks, HildiTasksStore,
+  HildiWorkspace,
+  HildiDashboardPanel,
+  TUIBase, TUITheme, TUIApp, TUISurface, TUISurfaceVideo,
+  TUIInput, TUIInputTerminal, TUIWidget;
 
 { The middot separator as UTF-8 bytes. Holder is an AnsiString, so a
   UnicodeString literal cannot be concatenated into it without an implicit

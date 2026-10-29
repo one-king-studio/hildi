@@ -12,7 +12,7 @@ program markdown_standalone;
 
 uses
   SysUtils,
-  markdown.types, markdown.tree, markdown.stream, markdown.render;
+  MarkdownTypes, MarkdownTree, MarkdownStream, MarkdownRender;
 
 var
   Doc, BatchTree, StreamTree: string;

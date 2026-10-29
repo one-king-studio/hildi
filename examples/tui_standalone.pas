@@ -19,7 +19,7 @@ program tui_standalone;
 uses
   {$ifdef unix}cthreads, cwstring,{$endif}   // cthreads first; cwstring for Unicode
   SysUtils,
-  tui.base, tui.grapheme, tui.surface, tui.theme, tui.widget, tui.clock;
+  TUIBase, TUIGrapheme, TUISurface, TUITheme, TUIWidget, TUIClock;
 
 var
   Failures: Integer;

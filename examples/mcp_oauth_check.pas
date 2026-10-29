@@ -12,7 +12,7 @@ program mcp_oauth_check;
 uses
   {$ifdef unix}cthreads, cwstring,{$endif}
   SysUtils, Classes, fphttpclient,
-  hildi.mcp.oauth, hildi.mcp.oauth.flow;
+  HildiMCPOAUTH, HildiMCPOAUTHFlow;
 
 type
   { Fetches a URL on a background thread, so Open returns immediately (like a

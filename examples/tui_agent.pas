@@ -16,13 +16,13 @@ program tui_agent;
 uses
   {$ifdef unix}cthreads, cwstring,{$endif}   // cthreads first; cwstring for Unicode
   Classes, Contnrs, SysUtils,
-  hildi.cli,
-  tui.base, tui.input,
-  tui.surface, tui.surface.video,
-  tui.input.terminal, tui.theme,
-  hildi.harness.view, hildi.harness.driver,
-  hildi.harness.app, hildi.session.protocol,
-  hildi.session.client;
+  HildiCLI,
+  TUIBase, TUIInput,
+  TUISurface, TUISurfaceVideo,
+  TUIInputTerminal, TUITheme,
+  HildiHarnessView, HildiHarnessDriver,
+  HildiHarnessApp, HildiSessionProtocol,
+  HildiSessionClient;
 
 type
   { The lazy-connect hook: on the first prompt, create the session and spawn its

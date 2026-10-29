@@ -1,5 +1,5 @@
 program mcp_smoke;
-{ Live calibration smoke: drives hildi.mcp.client against a REAL MCP
+{ Live calibration smoke: drives HildiMCPClient against a REAL MCP
   server (the Playwright container over stdio). Not a test — it needs Docker and
   the network, so it lives outside the hermetic suite. Run it by hand:
 
@@ -11,8 +11,8 @@ program mcp_smoke;
 
 uses
   SysUtils, Classes,
-  hildi.agent, hildi.approval,
-  hildi.mcp.client, hildi.mcp.config;
+  HildiAgent, HildiApproval,
+  HildiMCPClient, HildiMCPConfig;
 
 type
   { Allows every ask, so the smoke isolates the transport, not the approval UI. }

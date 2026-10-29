@@ -17,8 +17,8 @@ program async_examples;
 uses
   {$ifdef unix}cthreads,{$endif}
   SysUtils,
-  async.base, async.scheduler, async.future, async.observable,
-  async.operators, async.timers, async.time, async.concurrency;
+  AsyncBase, AsyncScheduler, AsyncFuture, AsyncObservable,
+  AsyncOperators, AsyncTimers, AsyncTime, AsyncConcurrency;
 
 { 1. CLI Await: a future runs on the asap scheduler; Await blocks the calling
   thread and drives the microtask queue until the value is delivered. }

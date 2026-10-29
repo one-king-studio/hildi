@@ -14,8 +14,8 @@ program smoke;
 uses
   {$ifdef unix}cthreads, cwstring,{$endif}   // cthreads first; cwstring for Unicode
   SysUtils,
-  hildi.session.client,
-  smoke_runner;
+  HildiSessionClient,
+  SmokeRunner;
 
 var
   Names: TStringArray;

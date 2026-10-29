@@ -20,18 +20,18 @@ uses
   {$ifdef unix}cthreads, cwstring,{$endif}   // cthreads first; cwstring for Unicode
   SysUtils, Classes, ctypes, DateUtils, SyncObjs, Process,
   {$ifdef unix}BaseUnix,{$endif}
-  hildi.ansi, hildi.env, hildi.cli,
-  hildi.transcript, hildi.llm, hildi.agent,
-  hildi.command.policy, hildi.command.tool,
-  hildi.files,
-  hildi.approval, hildi.approval.store,
-  hildi.session, hildi.session.store,
-  hildi.session.protocol, hildi.session.client,
-  hildi.recall.tool,
-  hildi.mcp.cli, hildi.mcp.config,
-  hildi.mcp.client,
-  hildi.mcp.oauth, hildi.mcp.oauth.flow,
-  hildi.store, hildi.workspace;
+  HildiANSI, HildiEnv, HildiCLI,
+  HildiTranscript, HildiLLM, HildiAgent,
+  HildiCommandPolicy, HildiCommandTool,
+  HildiFiles,
+  HildiApproval, HildiApprovalStore,
+  HildiSession, HildiSessionStore,
+  HildiSessionProtocol, HildiSessionClient,
+  HildiRecallTool,
+  HildiMCPCLI, HildiMCPConfig,
+  HildiMCPClient,
+  HildiMCPOAUTH, HildiMCPOAUTHFlow,
+  HildiStore, HildiWorkspace;
 
 {$ifdef unix}
 function c_isatty(Fd: cint): cint; cdecl; external 'c' name 'isatty';

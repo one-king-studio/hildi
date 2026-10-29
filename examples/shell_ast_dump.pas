@@ -11,7 +11,7 @@ program shell_ast_dump;
 
 uses
   SysUtils, Classes, StrUtils,
-  shell.types, shell.ast, shell.parser;
+  ShellTypes, ShellAST, ShellParser;
 
 var
   Rendered: TStringList;

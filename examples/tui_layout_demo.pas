@@ -37,14 +37,14 @@ program tui_layout_demo;
 uses
   {$ifdef unix}cthreads, cwstring,{$endif}   // cthreads first; cwstring for Unicode
   SysUtils, Classes,
-  tui.base, tui.input,
-  tui.surface, tui.widget,
-  tui.widgets.text, tui.app,
-  tui.surface.video, tui.input.terminal,
-  tui.theme, tui.widgets.panel,
-  tui.widgets.list, tui.widgets.scroll,
-  tui.widgets.chat, tui.widgets.compose,
-  tui.widgets.chatpanel;
+  TUIBase, TUIInput,
+  TUISurface, TUIWidget,
+  TUIWidgetsText, TUIApp,
+  TUISurfaceVideo, TUIInputTerminal,
+  TUITheme, TUIWidgetsPanel,
+  TUIWidgetsList, TUIWidgetsScroll,
+  TUIWidgetsChat, TUIWidgetsCompose,
+  TUIWidgetsChatPanel;
 
 const
   WideThreshold = 180;     // two columns appear above this width
@@ -381,8 +381,8 @@ begin
 
   Files := TListView.Create(Theme);
   Files.AddItem('src/');
-  Files.AddItem('  tui.app.pas');
-  Files.AddItem('  tui.widget.pas');
+  Files.AddItem('  TUIApp.pas');
+  Files.AddItem('  TUIWidget.pas');
   Files.AddItem('  tui.text.pas');
   Files.AddItem('  tui.panel.pas');
   Files.AddItem('examples/');
@@ -395,7 +395,7 @@ begin
 
   EditorText := TTextBlock.Create([], wmNone);
   EditorText.SetText(
-    'unit tui.app;' + #10 +
+    'unit TUIApp;' + #10 +
     '' + #10 +
     'procedure TTuiApp.Tick(const ANowMs: Int64);' + #10 +
     'begin' + #10 +

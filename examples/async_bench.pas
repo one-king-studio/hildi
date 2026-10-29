@@ -8,9 +8,9 @@ program async_bench;
 uses
   {$ifdef unix}cthreads,{$endif}
   SysUtils, SyncObjs,
-  async.base, async.scheduler, async.queue, async.future,
-  async.observable, async.operators, async.timers, async.time,
-  async.concurrency;
+  AsyncBase, AsyncScheduler, AsyncQueue, AsyncFuture,
+  AsyncObservable, AsyncOperators, AsyncTimers, AsyncTime,
+  AsyncConcurrency;
 
 type
   TCounter = class

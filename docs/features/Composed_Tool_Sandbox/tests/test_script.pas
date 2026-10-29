@@ -9,7 +9,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildi.llm, hildi.agent, hildi.script;
+  HildiLLM, HildiAgent, hildi.script;
 
 type
   { Records each injected call; Allow toggles fulfilment vs rejection. }
