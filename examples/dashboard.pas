@@ -18,7 +18,7 @@ program dashboard;
 uses
   {$ifdef unix}cthreads, cwstring,{$endif}   // cthreads first; cwstring for Unicode
   SysUtils, DateUtils,
-  HildiStore, HildiBoard, HildiBoardStore,
+  HildiStore, HildiEnv, HildiBoard, HildiBoardStore,
   HildiTasks, HildiTasksStore,
   HildiWorkspace,
   HildiDashboardPanel,
@@ -222,10 +222,7 @@ begin
 end;
 
 begin
-  StorePath := GetEnvironmentVariable('HILDI_STORE_PATH');
-  if StorePath = '' then
-    StorePath := IncludeTrailingPathDelimiter(GetUserDir) +
-      '.hildi' + PathDelim + 'store.db';
+  StorePath := DefaultStorePath;
   ForceDirectories(ExtractFileDir(StorePath));
   Cfg := Default(TStoreConfig);
   Cfg.DatabasePath := StorePath;

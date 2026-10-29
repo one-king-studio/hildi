@@ -16,7 +16,7 @@ program tui_agent;
 uses
   {$ifdef unix}cthreads, cwstring,{$endif}   // cthreads first; cwstring for Unicode
   Classes, Contnrs, SysUtils,
-  HildiCLI,
+  HildiCLI, HildiEnv,
   TUIBase, TUIInput,
   TUISurface, TUISurfaceVideo,
   TUIInputTerminal, TUITheme,
@@ -208,10 +208,7 @@ begin
     Halt(0);
   end;
 
-  StorePath := GetEnvironmentVariable('HILDI_STORE_PATH');
-  if StorePath = '' then
-    StorePath := IncludeTrailingPathDelimiter(GetUserDir) +
-      '.hildi' + PathDelim + 'store.db';
+  StorePath := DefaultStorePath;
 
   { The TUI process only needs the store/workspace/session handle; the runtime
     owns the loop. With no explicit session or --continue, defer creating one

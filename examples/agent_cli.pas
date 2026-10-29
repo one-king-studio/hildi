@@ -635,10 +635,7 @@ begin
     Exit(0);
   end;
 
-  StorePath := GetEnvironmentVariable('HILDI_STORE_PATH');
-  if StorePath = '' then
-    StorePath := IncludeTrailingPathDelimiter(GetUserDir) +
-      '.hildi' + PathDelim + 'store.db';
+  StorePath := DefaultStorePath;
   ForceDirectories(ExtractFileDir(StorePath));
   Cfg := Default(TStoreConfig);
   Cfg.DatabasePath := StorePath;
@@ -1020,10 +1017,7 @@ begin
 
   if Opts.Mode = cmListSessions then
   begin
-    StorePath := GetEnvironmentVariable('HILDI_STORE_PATH');
-    if StorePath = '' then
-      StorePath := IncludeTrailingPathDelimiter(GetUserDir) +
-        '.hildi' + PathDelim + 'store.db';
+    StorePath := DefaultStorePath;
     ForceDirectories(ExtractFileDir(StorePath));
     StoreConfig := Default(TStoreConfig);
     StoreConfig.DatabasePath := StorePath;
@@ -1051,10 +1045,7 @@ begin
 
   if Opts.Mode = cmAttach then
   begin
-    StorePath := GetEnvironmentVariable('HILDI_STORE_PATH');
-    if StorePath = '' then
-      StorePath := IncludeTrailingPathDelimiter(GetUserDir) +
-        '.hildi' + PathDelim + 'store.db';
+    StorePath := DefaultStorePath;
     ForceDirectories(ExtractFileDir(StorePath));
     RunAttach(Opts.AttachSession, Workspace.Root, StorePath, Opts.AttachDrive,
       (Opts.Reasoning = tsOn) or (Opts.Reasoning = tsDefault), Opts.ShowTools);
@@ -1105,10 +1096,7 @@ begin
   ApprovalStore := nil;
   SqliteStore := nil;
   WorkspaceId := 0;
-  StorePath := GetEnvironmentVariable('HILDI_STORE_PATH');
-  if StorePath = '' then
-    StorePath := IncludeTrailingPathDelimiter(GetUserDir) + '.hildi' +
-      PathDelim + 'store.db';
+  StorePath := DefaultStorePath;
   ForceDirectories(ExtractFileDir(StorePath));
   StoreConfig := Default(TStoreConfig);
   StoreConfig.DatabasePath := StorePath;

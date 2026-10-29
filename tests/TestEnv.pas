@@ -21,6 +21,13 @@ type
     procedure TestApplySkipsExistingEnvironment;
     procedure TestLoadMissingFileIsNoOp;
     procedure TestLoadAppliesNewVariable;
+
+    { The rename moves the default store; without a fallback every existing
+      session looks lost. These pin the decision, not the filesystem. }
+    procedure TestStorePathPrefersEnvOverride;
+    procedure TestStorePathPrefersNewWhenPresent;
+    procedure TestStorePathFallsBackToLegacyWhenNewIsAbsent;
+    procedure TestStorePathUsesNewWhenNeitherExists;
   end;
 
 implementation
@@ -148,6 +155,33 @@ begin
     ClearTestVar;
     DeleteFile(FileName);
   end;
+end;
+
+procedure TEnvTest.TestStorePathPrefersEnvOverride;
+begin
+  AssertEquals('env wins over everything', '/custom/store.db',
+    ResolveStorePath('/custom/store.db', '/home/u', False, True));
+end;
+
+procedure TEnvTest.TestStorePathPrefersNewWhenPresent;
+begin
+  AssertEquals('new store wins once it exists',
+    '/home/u/.hildi/store.db',
+    ResolveStorePath('', '/home/u', True, True));
+end;
+
+procedure TEnvTest.TestStorePathFallsBackToLegacyWhenNewIsAbsent;
+begin
+  AssertEquals('legacy store is still addressed',
+    '/home/u/.hildegard-helper/store.db',
+    ResolveStorePath('', '/home/u', False, True));
+end;
+
+procedure TEnvTest.TestStorePathUsesNewWhenNeitherExists;
+begin
+  AssertEquals('a fresh install uses the new path',
+    '/home/u/.hildi/store.db',
+    ResolveStorePath('', '/home/u', False, False));
 end;
 
 initialization

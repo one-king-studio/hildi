@@ -28,6 +28,20 @@ function LoadDotEnvFile(const APath: string): Integer;
   which lets a setting be migrated one variable at a time. }
 function GetEnvLegacy(const AName: string): string;
 
+{ The default store path: HILDI_STORE_PATH when set, else the per-user database.
+  Falls back to the pre-rename ~/.hildegard-helper store when the new directory
+  has no database yet but the old one does. Without that fallback the rename
+  silently opens an empty store and every existing session looks lost -- data
+  that is still on disk but no longer addressed. The new location wins as soon
+  as it holds a database, so copying the file across completes the migration. }
+function DefaultStorePath: string;
+
+{ The store-path decision with every input explicit, so it is testable without
+  touching $HOME or the filesystem. ANewExists/AOldExists say whether each
+  candidate location already holds a database. }
+function ResolveStorePath(const AEnvValue, AHome: string;
+  ANewExists, AOldExists: Boolean): string;
+
 implementation
 
 uses
@@ -150,6 +164,35 @@ begin
     Exit;
   Legacy := 'HILDEGARD_' + Copy(AName, 7, MaxInt);
   Result := GetEnvironmentVariable(Legacy);
+end;
+
+function ResolveStorePath(const AEnvValue, AHome: string;
+  ANewExists, AOldExists: Boolean): string;
+var
+  Home: string;
+begin
+  if AEnvValue <> '' then
+    Exit(AEnvValue);
+  Home := IncludeTrailingPathDelimiter(AHome);
+  if ANewExists then
+    Exit(Home + '.hildi' + PathDelim + 'store.db');
+  { Prefer the old store while the new one holds no database, so the rename
+    does not present an empty database as a lost history. }
+  if AOldExists then
+    Exit(Home + '.hildegard-helper' + PathDelim + 'store.db');
+  Result := Home + '.hildi' + PathDelim + 'store.db';
+end;
+
+function DefaultStorePath: string;
+var
+  Home, NewPath, OldPath: string;
+begin
+  Home := GetUserDir;
+  NewPath := IncludeTrailingPathDelimiter(Home) + '.hildi' + PathDelim + 'store.db';
+  OldPath := IncludeTrailingPathDelimiter(Home) + '.hildegard-helper' +
+    PathDelim + 'store.db';
+  Result := ResolveStorePath(GetEnvLegacy('HILDI_STORE_PATH'), Home,
+    FileExists(NewPath), FileExists(OldPath));
 end;
 
 end.
