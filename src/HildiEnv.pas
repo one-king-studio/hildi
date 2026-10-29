@@ -28,19 +28,23 @@ function LoadDotEnvFile(const APath: string): Integer;
   which lets a setting be migrated one variable at a time. }
 function GetEnvLegacy(const AName: string): string;
 
-{ The default store path: HILDI_STORE_PATH when set, else the per-user database.
-  Falls back to the pre-rename ~/.hildegard-helper store when the new directory
-  has no database yet but the old one does. Without that fallback the rename
-  silently opens an empty store and every existing session looks lost -- data
-  that is still on disk but no longer addressed. The new location wins as soon
-  as it holds a database, so copying the file across completes the migration. }
+{ The default store path: HILDI_STORE_PATH when set, else the user's data
+  directory (XDG_DATA_HOME, defaulting to ~/.local/share/hildi). Falls back to
+  the two older locations -- ~/.hildi and the pre-rename ~/.hildegard-helper --
+  while the new one holds no database, so a move never presents an empty store
+  as a lost history. }
 function DefaultStorePath: string;
 
+{ The XDG data directory, with a trailing delimiter: AXdgDataHome when it is an
+  absolute path (the spec requires absolute; a relative value is ignored), else
+  AHome + '/.local/share/'. A pure function so the policy is testable. }
+function DataHome(const AXdgDataHome, AHome: string): string;
+
 { The store-path decision with every input explicit, so it is testable without
-  touching $HOME or the filesystem. ANewExists/AOldExists say whether each
-  candidate location already holds a database. }
-function ResolveStorePath(const AEnvValue, AHome: string;
-  ANewExists, AOldExists: Boolean): string;
+  touching $HOME or the filesystem. The three booleans say whether the new, the
+  ~/.hildi, and the pre-rename store already exist. }
+function ResolveStorePath(const AEnvValue, AXdgDataHome, AHome: string;
+  ANewExists, AHildiExists, ALegacyExists: Boolean): string;
 
 implementation
 
@@ -166,33 +170,53 @@ begin
   Result := GetEnvironmentVariable(Legacy);
 end;
 
-function ResolveStorePath(const AEnvValue, AHome: string;
-  ANewExists, AOldExists: Boolean): string;
+function DataHome(const AXdgDataHome, AHome: string): string;
+begin
+  { XDG requires an absolute path; a relative value is ignored per the spec,
+    which is what stops `XDG_DATA_HOME=foo` scattering stores per-cwd. }
+  if (AXdgDataHome <> '') and (AXdgDataHome[1] = PathDelim) then
+    Exit(IncludeTrailingPathDelimiter(AXdgDataHome));
+  Result := IncludeTrailingPathDelimiter(AHome) + '.local' + PathDelim +
+    'share' + PathDelim;
+end;
+
+function ResolveStorePath(const AEnvValue, AXdgDataHome, AHome: string;
+  ANewExists, AHildiExists, ALegacyExists: Boolean): string;
 var
-  Home: string;
+  NewPath, HildiPath, LegacyPath: string;
 begin
   if AEnvValue <> '' then
     Exit(AEnvValue);
-  Home := IncludeTrailingPathDelimiter(AHome);
+  NewPath := DataHome(AXdgDataHome, AHome) + 'hildi' + PathDelim + 'store.db';
+  HildiPath := IncludeTrailingPathDelimiter(AHome) + '.hildi' + PathDelim +
+    'store.db';
+  LegacyPath := IncludeTrailingPathDelimiter(AHome) + '.hildegard-helper' +
+    PathDelim + 'store.db';
+  { Newest first, then each older home in turn, so moving the store is always
+    "copy the file" and never "discover your history is gone". }
   if ANewExists then
-    Exit(Home + '.hildi' + PathDelim + 'store.db');
-  { Prefer the old store while the new one holds no database, so the rename
-    does not present an empty database as a lost history. }
-  if AOldExists then
-    Exit(Home + '.hildegard-helper' + PathDelim + 'store.db');
-  Result := Home + '.hildi' + PathDelim + 'store.db';
+    Exit(NewPath);
+  if AHildiExists then
+    Exit(HildiPath);
+  if ALegacyExists then
+    Exit(LegacyPath);
+  Result := NewPath;
 end;
 
 function DefaultStorePath: string;
 var
-  Home, NewPath, OldPath: string;
+  Home, HildiPath, LegacyPath: string;
 begin
   Home := GetUserDir;
-  NewPath := IncludeTrailingPathDelimiter(Home) + '.hildi' + PathDelim + 'store.db';
-  OldPath := IncludeTrailingPathDelimiter(Home) + '.hildegard-helper' +
+  HildiPath := IncludeTrailingPathDelimiter(Home) + '.hildi' + PathDelim +
+    'store.db';
+  LegacyPath := IncludeTrailingPathDelimiter(Home) + '.hildegard-helper' +
     PathDelim + 'store.db';
-  Result := ResolveStorePath(GetEnvLegacy('HILDI_STORE_PATH'), Home,
-    FileExists(NewPath), FileExists(OldPath));
+  Result := ResolveStorePath(GetEnvLegacy('HILDI_STORE_PATH'),
+    GetEnvLegacy('XDG_DATA_HOME'), Home,
+    FileExists(DataHome(GetEnvLegacy('XDG_DATA_HOME'), Home) + 'hildi' +
+      PathDelim + 'store.db'),
+    FileExists(HildiPath), FileExists(LegacyPath));
 end;
 
 end.

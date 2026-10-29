@@ -175,7 +175,7 @@ HANDOFF.md                          (unit map, state)
   approvals persist as `=<argv>` (so a no-argument command is distinct from
   `<executable> *`). Persisted patterns are argument-aware (policy v1.1).
 - Deviations: the CLI uses `HILDI_STORE_PATH` (default
-  `~/.hildi/store.db`); if the store opens it persists policy and
+  `~/.local/share/hildi/store.db`, or `$XDG_DATA_HOME/hildi/store.db`); if the store opens it persists policy and
   audit, otherwise the tool is still registered with
   `TMemoryCommandPolicySource` and `DefaultCommandPolicy` (ask everything,
   session-only approvals). Test doubles derive from `TNoRefCountObject` so the

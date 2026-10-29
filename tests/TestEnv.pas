@@ -22,12 +22,15 @@ type
     procedure TestLoadMissingFileIsNoOp;
     procedure TestLoadAppliesNewVariable;
 
-    { The rename moves the default store; without a fallback every existing
-      session looks lost. These pin the decision, not the filesystem. }
+    { The store has moved twice; each move must keep addressing the old file. }
     procedure TestStorePathPrefersEnvOverride;
     procedure TestStorePathPrefersNewWhenPresent;
-    procedure TestStorePathFallsBackToLegacyWhenNewIsAbsent;
-    procedure TestStorePathUsesNewWhenNeitherExists;
+    procedure TestStorePathUsesHildiWhenXdGIsAbsent;
+    procedure TestStorePathFallsBackToLegacyWhenOthersAbsent;
+    procedure TestStorePathUsesNewWhenNothingExists;
+    procedure TestDataHomeUsesXdgWhenAbsolute;
+    procedure TestDataHomeIgnoresRelativeXdg;
+    procedure TestDataHomeDefaultsToLocalShare;
   end;
 
 implementation
@@ -160,28 +163,55 @@ end;
 procedure TEnvTest.TestStorePathPrefersEnvOverride;
 begin
   AssertEquals('env wins over everything', '/custom/store.db',
-    ResolveStorePath('/custom/store.db', '/home/u', False, True));
+    ResolveStorePath('/custom/store.db', '', '/home/u', False, True, True));
 end;
 
 procedure TEnvTest.TestStorePathPrefersNewWhenPresent;
 begin
   AssertEquals('new store wins once it exists',
-    '/home/u/.hildi/store.db',
-    ResolveStorePath('', '/home/u', True, True));
+    '/home/u/.local/share/hildi/store.db',
+    ResolveStorePath('', '', '/home/u', True, True, True));
 end;
 
-procedure TEnvTest.TestStorePathFallsBackToLegacyWhenNewIsAbsent;
+procedure TEnvTest.TestStorePathUsesHildiWhenXdGIsAbsent;
 begin
-  AssertEquals('legacy store is still addressed',
+  AssertEquals('~/.hildi is still addressed after the XDG move',
+    '/home/u/.hildi/store.db',
+    ResolveStorePath('', '', '/home/u', False, True, True));
+end;
+
+procedure TEnvTest.TestStorePathFallsBackToLegacyWhenOthersAbsent;
+begin
+  AssertEquals('the pre-rename store is still addressed',
     '/home/u/.hildegard-helper/store.db',
-    ResolveStorePath('', '/home/u', False, True));
+    ResolveStorePath('', '', '/home/u', False, False, True));
 end;
 
-procedure TEnvTest.TestStorePathUsesNewWhenNeitherExists;
+procedure TEnvTest.TestStorePathUsesNewWhenNothingExists;
 begin
-  AssertEquals('a fresh install uses the new path',
-    '/home/u/.hildi/store.db',
-    ResolveStorePath('', '/home/u', False, False));
+  AssertEquals('a fresh install uses the XDG path',
+    '/home/u/.local/share/hildi/store.db',
+    ResolveStorePath('', '', '/home/u', False, False, False));
+end;
+
+procedure TEnvTest.TestDataHomeUsesXdgWhenAbsolute;
+begin
+  AssertEquals('xdg wins when absolute', '/xdg/',
+    DataHome('/xdg', '/home/u'));
+end;
+
+procedure TEnvTest.TestDataHomeIgnoresRelativeXdg;
+begin
+  { XDG requires an absolute path. Honouring a relative one would scatter the
+    store per working directory, which is worse than ignoring it. }
+  AssertEquals('relative xdg is ignored', '/home/u/.local/share/',
+    DataHome('relative/dir', '/home/u'));
+end;
+
+procedure TEnvTest.TestDataHomeDefaultsToLocalShare;
+begin
+  AssertEquals('the documented fallback', '/home/u/.local/share/',
+    DataHome('', '/home/u'));
 end;
 
 initialization
