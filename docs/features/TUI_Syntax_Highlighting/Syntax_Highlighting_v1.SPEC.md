@@ -49,7 +49,7 @@ SynEdit's highlighters, not their code (see Prior Art).
 - [ ] Pure and total: never raises, never loops unboundedly (a single
       left-to-right scan with a documented length cap).
 
-**Theme** (`hildegard.helper.markdown`)
+**Theme** (`tui.widgets.mdtheme`)
 
 - [ ] `TMdTheme` gains code-token roles: `CodeComment`, `CodeString`,
       `CodeNumber`, `CodeKeyword`, `CodeBuiltin`. `stPlain` uses the existing
@@ -128,7 +128,7 @@ function SynLanguage(const AName: UnicodeString): TSynLang;
 function SynLanguageKnown(const AName: UnicodeString): Boolean;
 ```
 
-Theme additions (`hildegard.helper.markdown`):
+Theme additions (`tui.widgets.mdtheme`):
 
 ```pascal
 type
@@ -184,7 +184,7 @@ function CodeTokenAttr(const AToken: TSynToken;
   store (`TSynHighlighterRangeList`) — built to restart a highlighter
   mid-document; our blocks are immutable and scanned once. The
   attribute-modifier/priority merge — unneeded against a fixed palette.
-- **Reuse `hildegard.helper.markdown.TMdTheme`** for the roles and
+- **Reuse `tui.widgets.mdtheme.TMdTheme`** for the roles and
   `hildegard.helper.tui.text.TTextBlock` for drawing; the tokenizer feeds the
   existing span pipeline and adds no renderer.
 - **Reuse the RTL** (`SysUtils`, `UnicodeString`, a sorted `TStringList` for the
@@ -199,7 +199,7 @@ mapping.
 - **Responsibilities:** rule tables; lexical scanning; token-kind output; the
   theme mapping.
 - **Dependencies:** the syntax unit is standalone (RTL only); the theme mapping
-  lives in `hildegard.helper.markdown`; the view wires them.
+  lives in `tui.widgets.mdtheme`; the view wires them.
 - **Side effects:** none; no I/O, no terminal.
 
 ### Data Flow

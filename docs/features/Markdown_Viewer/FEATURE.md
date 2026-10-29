@@ -17,10 +17,13 @@ Two things, one direction of dependency:
 2. **A file viewer** in the TUI that reads a workspace file and renders it, using the
    existing styled-cell look for markdown and raw text for everything else.
 
-Today the parser and the renderer are the same unit: `hildegard.helper.markdown` produces
-`TMdBlock` but also owns `TMdTheme`, `StyleFor`, `BlockAttr` and `MdAttr`, and `uses
-tui.base` for `TAttr`. The AST is therefore not a contract anyone else can consume — it is
-a private intermediate that happens to be a record.
+> **Shipped.** Both goals are met and the old unit is gone. In the original code the
+> parser and the renderer were one unit: `hildegard.helper.markdown` produced
+> `TMdBlock` but also owned `TMdTheme` and `uses tui.base` for `TAttr`, so the AST
+> was a private intermediate rather than a contract. `src/markdown/` now holds a
+> pure node tree, `tui.widgets.mdtheme` owns the theme, `tui.widgets.markdownview`
+> renders it and `fileviewer` draws a file. What shipped, and the three decisions
+> revisited mid-build, are in [Markdown_v2.DONE.md](Markdown_v2.DONE.md).
 
 ## The problem
 
@@ -102,9 +105,11 @@ message instead of an array dump.
 ## Constraints
 
 - Free Pascal 3.3.1, `{$mode delphi}`; `cthreads` first, `cwstring` next.
-- Public names take the module prefix (`markdown.parse`), like `shell.*` and `async.*`.
-- The existing `hildegard.helper.markdown` is **replaced**, not kept alongside: two parsers
-  is the state this feature exists to end.
+- Public names take the module prefix (`markdown.tree`, `markdown.stream`), like `shell.*`
+  and `async.*`.
+- The existing `hildegard.helper.markdown` was **replaced, not kept alongside**. Both it
+  and its successor `markdown.parse` are now deleted: two parsers was the state this
+  feature existed to end, and one model is the outcome.
 
 ## Out of scope
 

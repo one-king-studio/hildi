@@ -49,7 +49,7 @@ real time. Landing order: Pascal and shell first, then Python/JSON/SQL.
 
 - [ ] **Test**: `TestCodeTokenAttrUsesTheSurface` (roles, bg, no `sfScreenBg`)
 - [ ] **Implement**: the `Code*` roles in `TMdTheme`/`DefaultMdTheme` and
-      `CodeTokenAttr` in `hildegard.helper.markdown`
+      `CodeTokenAttr` in `tui.widgets.mdtheme`
 - [ ] **Test**: `TestCodeFenceIsHighlighted`, `TestUntaggedFenceIsUnchanged`,
       `TestCodeFenceHighlightIsBuiltOnce`
 - [ ] **Implement**: `MakeBlock` for `mbCodeFence` runs `HighlightCode` and maps
@@ -81,7 +81,7 @@ tests/test_syntax.pas
 ### Modified Files
 
 ```
-src/hildegard.helper.markdown.pas          (Code* roles + CodeTokenAttr)
+src/tui/widgets/tui.widgets.mdtheme.pas   (Code* roles + CodeTokenAttr)
 src/hildegard.helper.tui.markdownview.pas  (highlight the fence)
 tests/hildegard_helper_tests.pas           (add the test unit)
 tests/test_markdown.pas                    (theme mapping)

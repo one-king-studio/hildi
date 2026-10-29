@@ -1,7 +1,13 @@
 # Markdown v1 — Specification
 
 **Feature:** [Markdown Viewer](FEATURE.md)
-**Status:** Specified, not implemented.
+**Status:** Superseded — see [Markdown_v2.DONE.md](Markdown_v2.DONE.md).
+
+> v1 shipped, and its plan (`Markdown_v1.TODO.md`) was deleted rather than closed
+> out: its last open items — the file viewer, scroll, and wrapping — were
+> delivered by v2, and a TODO reading "nothing here is started" beside shipped
+> code is worse than no TODO. This SPEC stays as the record of the flat-block
+> model and what it could not express.
 
 ## 1. Purpose and boundary
 

@@ -219,9 +219,15 @@ one commit, and must not leave two parsers for good (the v1 risk table already f
 
 ```
 markdown.tree     the node model + parser      (pure)
-markdown.compat   TMdDocument -> TMdBlockArray  (pure, temporary)
-markdown.render   RenderPlain over the tree     (pure)
+markdown.render   RenderTree over the tree      (pure)
 ```
+
+> **Historical note.** This section originally specified `markdown.compat`, a
+> projection from the tree back to v1 flat blocks, as a migration bridge. It was
+> built, proved the tree could express everything v1 could, and was then
+> **deleted**: streaming made its premise false and it had zero production
+> consumers. `RenderPlain` — the v1 flat-block renderer — went with it. See
+> [Markdown_v2.DONE.md](Markdown_v2.DONE.md).
 
 `markdown.compat` projects the tree onto the v1 flat blocks **for nodes that have a v1
 equivalent**, and reports which nodes it cannot represent:
