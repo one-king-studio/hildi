@@ -214,7 +214,7 @@ Persistence
 - The session ledger and message restore (Sessions/Ledger feature).
 - Workspace discovery and access rules beyond the active workspace (Workspaces
   feature).
-- Approval propagation to a Hildegard account or across devices (Remote Agent
+- Approval propagation to a peer agent or across devices (Remote Agent
   Link, later).
 - Rich rule editing UIs (a CLI list/remove command may come later).
 
@@ -224,7 +224,7 @@ Persistence
 - Per-tool default scopes (for example "read commands default global").
 - Approval expiry or one-time-per-day rules.
 - Export/import of the whitelist for provisioning.
-- Server-side approval mirroring via Remote Agent Link.
+- Server-side approval mirroring via Agent to Agent (A2A).
 
 ## Notes
 

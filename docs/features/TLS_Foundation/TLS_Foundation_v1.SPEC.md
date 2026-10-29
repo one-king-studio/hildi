@@ -350,10 +350,10 @@ The handler does not introduce a new error type: it reports through FPC's
 
 ## Future Considerations
 
-- **Client certificates / mTLS** for Remote Agent Link (the `CertificateData`
+- **Client certificates / mTLS** for Agent to Agent (A2A) (the `CertificateData`
   slots and the shim already leave room).
 - **TLS session resumption** for long-lived links.
-- **Certificate pinning** (belongs to the Remote Agent Link threat model).
+- **Certificate pinning** (belongs to the Agent to Agent (A2A) threat model).
 - **Trimming the mbedTLS config** to shrink the binary.
 - **A second backend** (for example FPC's `gnutls` package) behind the same
   seam, should mbedTLS prove unsuitable.

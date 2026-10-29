@@ -18,7 +18,7 @@ SQLite version rather than depending on whatever the host happens to provide.
 The execution core is effectively stateless. Everything the helper must remember
 across a restart - which account a device belongs to, what requests it has run,
 what work is still waiting - currently has nowhere to live. Without a store, the
-upcoming Remote Agent Link feature would have to invent ad-hoc file formats for
+upcoming Agent to Agent (A2A) feature would have to invent ad-hoc file formats for
 credentials, logs, and a queue, and each would lose data on crash or restart.
 
 Applying the first rung of the Ponytail ladder (`docs/guidelines/ponytail.md`):
@@ -52,7 +52,7 @@ does **not** define tables for features that have not been specified yet.
   restarts, so I only pair a device once.
 - As an **operator**, I want a durable record of what requests the device has run
   and how they turned out, so I can audit its activity after the fact.
-- As the **Hildegard agent**, I want requests that arrive when no worker is free
+- As an **external agent**, I want requests that arrive when no worker is free
   (or while the helper is restarting) to be queued durably, so work is not
   silently dropped.
 - As a **harness author**, I want a typed access layer rather than raw SQL in
@@ -180,7 +180,7 @@ Concurrency
 
 ### Business / Time
 
-- This feature should land before or alongside Remote Agent Link, which depends
+- This feature should land before or alongside Agent to Agent (A2A), which depends
   on it for credentials, history, and the queue.
 
 ## Dependencies
@@ -189,7 +189,7 @@ Concurrency
 
 - A new `hildi.*` store unit (plus a small migration list) - exact
   boundaries decided in the SPEC.
-- Consumers: Remote Agent Link (credentials, history, queue) and future features
+- Consumers: Agent to Agent (A2A) (credentials, history, queue) and future features
   that need settings.
 
 ### External
@@ -245,7 +245,7 @@ Concurrency
   Agent Link depends on durable state. Confidence is high: SQLite is
   ubiquitous and FPC's SQLDB is standard. Ease is moderate: vendoring the
   library, migrations, and thread-safe access all add real work.
-- Sequencing: this is a building block for Remote Agent Link. It can be
+- Sequencing: this is a building block for Agent to Agent (A2A). It can be
   implemented first and tested entirely on its own.
 - Reuse note (Ponytail): SQLite and SQLDB exist and are already reachable through
   FPC; the only new code is the access layer and migrations. A custom file format

@@ -250,7 +250,7 @@ keep by being *used*, so each step is proven by a real consumer before the next:
    the proof.**
 3. **Observables and `Scan`** — the TUI's state-as-a-stream (v2).
 4. **The executor** — when a consumer needs work off the calling thread (the
-   Remote Agent Link, or parallel tools); it then subsumes the hand-rolled
+   Agent to Agent (A2A), or parallel tools); it then subsumes the hand-rolled
    `TAgentPool`.
 5. **The operator surface** — the long tail, added as consumers need it. Full
    parity is the target, not the entry price.
@@ -314,7 +314,7 @@ or engine units; asserted by a test) so it can be lifted into the other apps.
 - An event-loop thread as the default execution model (an optional real-time
   scheduler only).
 - Backpressure / pull-based streams.
-- Distributed or process-boundary async (that is the harness's Remote Agent Link).
+- Distributed or process-boundary async (that is the harness's Agent to Agent (A2A)).
 - Any dependency on the harness, the JS engine, or a network stack.
 
 ## Future Considerations

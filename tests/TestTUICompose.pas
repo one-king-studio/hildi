@@ -216,7 +216,7 @@ var
 begin
   S := TSurfaceMemory.Create(40, 5);
   try
-    C := TComposeBox.Create(FTheme, 'Hildegard');
+    C := TComposeBox.Create(FTheme, 'Hildi');
     try
       C.Arrange(Rc(0, 0, 40, 5));
 
@@ -249,12 +249,12 @@ var
 begin
   S := TSurfaceMemory.Create(30, 5);
   try
-    C := TComposeBox.Create(FTheme, 'Hildegard');
+    C := TComposeBox.Create(FTheme, 'Hildi');
     try
       C.Arrange(Rc(0, 0, 30, 5));
       C.Render(S);
       AssertTrue('info line shown',
-        Pos('Hildegard', S.RowText(3, 0, 30)) > 0);
+        Pos('Hildi', S.RowText(3, 0, 30)) > 0);
       AssertEquals('heavy top border', '═', S.CellAt(1, 0).Ch);
       AssertEquals('single bottom border', '─', S.CellAt(1, 4).Ch);
     finally

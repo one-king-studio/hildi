@@ -10,10 +10,6 @@ execution core (55+ builtin shell commands classified by effect), an embedded
 SQLite store, a change log with revert, subagents, an MCP client, and both a
 terminal UI (`hildi`) and a headless runtime (`hildi-agent`).
 
-Hildi is the product. **Hildegard** is the separate platform a device registers
-to; capitalized "Hildegard" in `docs/` means that service, not this codebase, and
-the spelling is deliberate.
-
 New to the project? Start with `docs/features/FEATURES.md` for what exists, and
 `HANDOFF.md` for current state, decisions, and lessons learned.
 

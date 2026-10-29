@@ -33,7 +33,7 @@ Two transports, two phases:
   HTTPS with OAuth 2.0: Protected Resource Metadata discovery, Dynamic
   Client Registration, PKCE authorization-code flow with RFC 8707
   `resource` parameters, and token lifecycle. This is *the same problem* as
-  Remote Agent Link's outbound auth — **but the link feature as written does
+  Agent to Agent (A2A)'s outbound auth — **but the link feature as written does
   not yet specify it**: it pairs a device with a short-lived code and a
   bearer token, with OAuth explicitly out of scope. "One auth pipeline,
   three consumers" is therefore a goal to reconcile, not an existing fact:
@@ -112,7 +112,7 @@ stack.
 - As a **developer**, I want the JSON-RPC client to be unit-testable
   against in-process fakes over real pipes, so the protocol core needs no
   real servers in the suite.
-- As the **Remote Agent Link designer**, I want MCP v2's OAuth and the
+- As the **A2A designer**, I want MCP v2's OAuth and the
   link's outbound auth to be *one* implementation rather than two, so there
   is a single credential/token lifecycle — resolving whether that pipeline
   lives in the link (and MCP consumes it) or is shared.
@@ -230,7 +230,7 @@ Security and trust
 - The v2 transport (HTTP + OAuth) can be added by implementing one
   transport interface, with the JSON-RPC and adapter layers unchanged —
   verified by the SPEC's interface review, not hoped for. The OAuth pipeline
-  itself is shared with (or owned alongside) Remote Agent Link; which is
+  itself is shared with (or owned alongside) Agent to Agent (A2A); which is
   decided before v2 is specified.
 
 ### Qualitative
@@ -275,7 +275,7 @@ Security and trust
   capabilities — tools only, in both directions of the client relationship.
   Server→client requests for these are answered with a JSON-RPC error.
 - No v2 transport in v1: no HTTP, no OAuth, no Dynamic Client Registration.
-  The OAuth pipeline is shared with (or owned alongside) Remote Agent Link
+  The OAuth pipeline is shared with (or owned alongside) Agent to Agent (A2A)
   and is resolved before v2 is specified.
 - No MCP server auto-discovery or marketplace; servers are operator config.
 
@@ -290,7 +290,7 @@ Security and trust
 - Sequencing: v1 (stdio) is independent of TLS and the link. Natural after
   Headless Sessions (child-process patterns) and alongside Approval Path
   Scoping (session-scoped MCP grants are the per-agent mechanism).
-- **v2 auth is unresolved and cross-feature.** Remote Agent Link today
+- **v2 auth is unresolved and cross-feature.** Agent to Agent (A2A) today
   specifies device pairing with a bearer token, not OAuth. The PRM discovery
   (RFC 9728), AS metadata, DCR (RFC 7591), PKCE (RFC 8707), and token-store
   pipeline this doc cites as "one pipeline, three consumers" must be built

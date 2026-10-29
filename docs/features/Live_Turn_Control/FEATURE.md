@@ -153,7 +153,7 @@ Compose: submit, paste, CTA
       so a pasted multi-line block is inserted as text and never submits.
 - [ ] A pasted block is inserted literally (newlines preserved) at the caret.
 - [ ] A primary-action CTA is drawn at the bottom right of the compose box,
-      opposite the `Hildegard · model` label.
+      opposite the `Hildi · model` label.
 - [ ] The CTA uses the approval dialog's keybinding styling: the key muted, the
       action in the highlight colour as the primary call to action.
 - [ ] CTA states: idle with no text shows no CTA; idle with text shows

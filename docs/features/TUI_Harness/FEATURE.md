@@ -372,7 +372,7 @@ Persistence and configuration
 - Editing files, an editor buffer, or syntax highlighting.
 - Multiple concurrent turns or subagent panes.
 - Horizontal scrolling in the conversation.
-- The Remote Agent Link.
+- The Agent to Agent (A2A).
 
 ## Future Considerations
 

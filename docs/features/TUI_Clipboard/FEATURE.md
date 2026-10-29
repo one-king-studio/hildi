@@ -153,7 +153,7 @@ library, no native framework binding, no selection engine.
   the emit machinery exists, the risk is terminal support spread, which
   graceful degradation absorbs.
 - Sequencing: small enough to slot after the paste-bug fix and before or
-  parallel with Session Handoff; nothing here blocks the Remote Agent Link,
+  parallel with Session Handoff; nothing here blocks the Agent to Agent (A2A),
   but the SSH story makes the two feel like siblings.
 - Related open item: `TUI_Harness/PASTE_BUG.md` (paste-*in* path); this
   feature is copy-*out* and independent of it.

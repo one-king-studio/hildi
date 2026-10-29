@@ -290,7 +290,7 @@ Cost
   (the message-formatter pattern).
 - **Scope creep into a supervisor daemon.** A general session supervisor is
   tempting. Mitigation: supervision stays inside the per-session runtime for v1
-  (a marked `ponytail:` ceiling); the daemon remains Remote Agent Link's work.
+  (a marked `ponytail:` ceiling); the daemon remains Agent to Agent (A2A)'s work.
 
 ## Out of Scope
 

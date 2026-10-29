@@ -364,7 +364,7 @@ None. No new dependency; no network.
 - **Chat.** The dashboard does not drive a session. Driving stays in the TUI.
 - **Write access to the workspace.** No file tools, no shell.
 - **Remote / network.** Local only, same as everything before
-  [Remote Agent Link](../Remote_Agent_Link/FEATURE.md).
+  [Agent to Agent (A2A)](../Agent_To_Agent/FEATURE.md).
 - **Multi-workspace.** One workspace per process in v1.
 
 ## Future Considerations

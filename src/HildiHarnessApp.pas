@@ -3105,7 +3105,7 @@ begin
     ComposeBounds return an empty rect, and the guard below would then exit
     without ever setting them - which is why the box kept showing "enter spy"
     after a child was already selected. State first, geometry second. }
-  FSidebar.SetInfo('Hildegard · ' + FSession.Model);
+  FSidebar.SetInfo('Hildi · ' + FSession.Model);
   { The CTAs live in this box, so they are always visible while in subagent
     mode - that is the point of not switching to a separate actions bar. Once a
     child is selected "enter spy" is wrong: it is already spying. }

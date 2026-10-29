@@ -7,7 +7,7 @@
 The wire contract between a headless session runtime and its clients: how a
 client attaches, replays the live turn, receives typed events, and sends
 commands — over a local Unix socket, with a schema that a later network
-transport (Remote Agent Link) and other codecs (JSON-RPC, SSE) can re-bind.
+transport (A2A) and other codecs (JSON-RPC, SSE) can re-bind.
 
 The *schema* is the durable asset. The envelope and the transport are bindings;
 this spec fixes the schema and the one binding v1 ships (NDJSON over

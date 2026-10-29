@@ -97,7 +97,7 @@ Sub-decisions, each load-bearing:
   scratchpad could not.
 - As a **reviewer**, I want a script that is the answer — a codemod, a migration —
   to be persisted and re-runnable, not a wall of pseudocode.
-- As the **Remote Agent Link designer**, I want the engine's snapshot-in / diff-out
+- As the **A2A designer**, I want the engine's snapshot-in / diff-out
   execution and layered capability model available as prior art for the link's
   request scoping.
 
@@ -165,7 +165,7 @@ Sub-decisions, each load-bearing:
 
 ### Business / Time
 
-- No deadline. Sequenced behind the critical path (Remote Agent Link, Session
+- No deadline. Sequenced behind the critical path (Agent to Agent (A2A), Session
   Handoff); picked up when a concrete composition need appears.
 
 ## The VM tool surface (`tools.*`)
@@ -363,7 +363,7 @@ Design points to pin:
 - `recall` in the sandbox — a harness-internal, ungated retrieval primitive.
 - File or network *capabilities of the engine itself* — the injected tools are the
   only path to the world.
-- The Remote Agent Link `run script` action — this feature provides the local tier;
+- The Agent to Agent (A2A) `run script` action — this feature provides the local tier;
   the link consumes it later.
 - A JavaScript REPL or editor for the operator.
 
@@ -376,7 +376,7 @@ Design points to pin:
   Scoping and is prior art for Remote Link writeback.
 - **`run script` over the link**, reusing the same tool and approval class.
 - **The engine's capability model** (immutable sets, deny-wins, nested contexts only
-  narrow, auditable denials) as a cited reference in the Remote Agent Link SPEC's
+  narrow, auditable denials) as a cited reference in the Agent to Agent (A2A) SPEC's
   request-scoping design.
 
 ## Notes

@@ -349,7 +349,7 @@ Store integration
 - Closing the Windows foundation gap: a platform shell profile in the runner,
   cross-platform process/group and output-reading paths, cross-platform CLI
   terminal/env handling, and a Windows SQLite build.
-- Remote approval through the Hildegard service (the Remote Agent Link feature
+- Remote approval through a peer agent (the Agent to Agent (A2A) feature
   will define its own approval transport).
 - Policy rule syntax richer than exact/glob on executable names (for example
   argument constraints, per-rule allowed roots).
@@ -368,7 +368,7 @@ Store integration
   is moderate: the parser is bounded and pure, execution and storage already
   exist, and v1 is Unix-only; the care is in the policy's edge cases and tests.
   Windows would lower both confidence and ease and is deferred.
-- **Sequencing:** independent of Remote Agent Link, but it is the natural first
+- **Sequencing:** independent of Agent to Agent (A2A), but it is the natural first
   consumer of that link's approval/audit model. It should land before the link so
   the remote path has a vetted command tool to expose. Unix (POSIX) ships first
   behind the shell/syntax seam; Windows is a later follow-on once its foundation

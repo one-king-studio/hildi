@@ -178,7 +178,7 @@ Store API
 
 ### Business / Time
 
-- This is the durability and metrics foundation the Remote Agent Link, a stats
+- This is the durability and metrics foundation the Agent to Agent (A2A), a stats
   view, and context budgeting build on.
 
 ## Dependencies
@@ -215,7 +215,7 @@ Store API
 - Displaying the metrics beyond the status line (per-block durations, a full
   stats view).
 - Context budgeting, output spilling, and a recall tool (see below).
-- Server-side session sync (Remote Agent Link, later).
+- Server-side session sync (Agent to Agent (A2A), later).
 - Compaction, retention, or summarization of old records.
 - Full-text search over the history.
 - Multi-user or concurrent sessions (single-threaded, one session per process).

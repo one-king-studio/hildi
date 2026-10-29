@@ -50,11 +50,10 @@ We adopt that shape and extend it with two things we need:
 - **MCP is wired as a startup subsystem** rather than an on-demand capability, so
   it costs startup latency and can fail a launch (`Lazy_MCP`).
 
-Prior art: the Hildegard main project (`src-backend/lib/main-agent/skills.ts`,
-`tools.ts`) — a `SKILL_CATALOG`, a manifest injected as a system message,
-`load_skill`, and tools scoped to one agentic loop. And this repo's
-`Turn_Injection` already specifies the contributor seam (tools + prompt per turn)
-that skills plug into.
+Prior art: an earlier, private iteration of this project — a `SKILL_CATALOG`, a
+manifest injected as a system message, `load_skill`, and tools scoped to one
+agentic loop. And this repo's `Turn_Injection` already specifies the contributor
+seam (tools + prompt per turn) that skills plug into.
 
 ## Decision
 

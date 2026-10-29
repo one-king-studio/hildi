@@ -126,7 +126,7 @@ The link doc is not changed here; that reconciliation is recorded, not assumed.
 
 ## Out of Scope
 
-- **The Remote Agent Link consuming this pipeline** — recorded as the intended
+- **The Agent to Agent (A2A) consuming this pipeline** — recorded as the intended
   reconciliation, not done here.
 - **Non-OAuth auth** (mTLS, SAML).
 - **Device-code flow** (a headless-friendly alternative) — a future variant.

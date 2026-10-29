@@ -89,8 +89,8 @@ exists in the code.**
   shared truth; the in-memory copies are the client's render state and the loop's
   current request, which are different representations with different lifetimes.
 - Removing the TUI's direct store access. It still reads history and stats from
-  SQLite; streaming the ledger over the wire is Remote Agent Link's territory.
-- The daemon/supervisor and the network transport (Remote Agent Link).
+  SQLite; streaming the ledger over the wire is Agent to Agent (A2A)'s territory.
+- The daemon/supervisor and the network transport (A2A).
 - Windows.
 
 ## User Stories
@@ -222,7 +222,7 @@ Chat windowing
   the binaries.
 - Streaming history over the wire, which would let the TUI drop its store
   dependency entirely.
-- A single supervisor that spawns and reaps runtimes (Remote Agent Link).
+- A single supervisor that spawns and reaps runtimes (A2A).
 
 ## Notes
 

@@ -51,7 +51,7 @@ that and nothing more: no IPC layer, no session server, no remote sessions.
 - Give non-holders a safe way to **watch** a live session (observe mode).
 - Detect dead holders (crash, kill -9) and let a new process recover the
   session cleanly.
-- Lay the **driver abstraction** that Remote Agent Link will later plug into:
+- Lay the **driver abstraction** that Agent to Agent (A2A) will later plug into:
   a session has one driver (this TUI, a headless runner, later the outbound
   link) plus any number of observers.
 
@@ -282,7 +282,7 @@ Multi-instance safety
 
 ## Out of Scope
 
-- Remote sessions over the network - that is Remote Agent Link, which should
+- Remote sessions over the network - that is Agent to Agent (A2A), which should
   adopt the driver abstraction this feature introduces (one driver per
   session, observers read-only).
 - Multiple concurrent writers to one session, and any merge of divergent
@@ -295,7 +295,7 @@ Multi-instance safety
 ## Future Considerations
 
 - Push notification instead of polling (a store trigger or a lighter channel).
-- Cross-device handoff once Remote Agent Link exists.
+- Cross-device handoff once Agent to Agent (A2A) exists.
 - A richer observer view (the full chat panel in read-only observe mode).
 - OS-keychain-backed holder identity.
 
@@ -308,7 +308,7 @@ Multi-instance safety
   lease, heartbeat, handoff state machine, event feed, and a headless entrypoint
   are all new.
 - **Sequencing:** the driver abstraction (one driver, many observers) is
-  introduced here and adopted by Remote Agent Link, so this lands before the
+  introduced here and adopted by Agent to Agent (A2A), so this lands before the
   link. It is independent of TLS Foundation.
 - **Reuse note (Ponytail):** the store, the ledger and restore path, the turn
   worker with interrupt, and the approval modal all exist. The new pieces are

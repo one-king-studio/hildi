@@ -28,7 +28,7 @@ ownership becomes a role on a socket rather than a lease on a process.
 ## Decision
 
 **Committed: a per-session headless process with a bidirectional typed socket.**
-Not a daemon (that waits for Remote Agent Link), not a subprocess per turn, not
+Not a daemon (that waits for Agent to Agent (A2A)), not a subprocess per turn, not
 an in-process observer feed.
 
 - **Per-session process.** A session's loop runs in its own process, alive while
@@ -88,7 +88,7 @@ roles         observe (default) | drive (exclusive)
 - Support many observers and exactly one driver per session.
 - Give subagents a home: independent sessions that run on their own and are
   observable by the session that spawned them.
-- Introduce the transport Remote Agent Link will reuse over the network.
+- Introduce the transport that A2A will reuse over the network.
 
 ## User Stories
 
@@ -104,7 +104,7 @@ roles         observe (default) | drive (exclusive)
   run, so I can decompose work without losing sight of it.
 - As a **web client**, I want the same event stream, so a browser can render the
   session without a new backend.
-- As the **Remote Agent Link designer**, I want the socket protocol to be
+- As the **A2A designer**, I want the socket protocol to be
   transport-agnostic, so the link tunnels it instead of inventing a second one.
 
 ## Acceptance Criteria
@@ -177,7 +177,7 @@ Subagents
 
 ### Business / Time
 
-- No deadline. The daemon and the network transport wait for Remote Agent Link.
+- No deadline. The daemon and the network transport wait for Agent to Agent (A2A).
 
 ## Dependencies
 
@@ -214,11 +214,11 @@ Subagents
 - **Idle-exit tuning.** Too eager kills a session mid-thought; too lazy strands
   processes. Mitigation: a documented timeout, measured in the spike.
 - **Scope creep into a daemon.** A supervisor is tempting. Mitigation: it is
-  explicitly Remote Agent Link's work; v1 is process-per-session, no supervisor.
+  explicitly Agent to Agent (A2A)'s work; v1 is process-per-session, no supervisor.
 
 ## Out of Scope
 
-- The daemon / supervisor and the network transport — Remote Agent Link.
+- The daemon / supervisor and the network transport — Agent to Agent (A2A).
 - Additional bindings (JSON-RPC, WebSocket, SSE/HTTP) — derivable later, not v1.
 - Multiple concurrent drivers for one session.
 - Cross-machine observation.

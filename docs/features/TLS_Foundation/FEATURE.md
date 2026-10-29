@@ -13,7 +13,7 @@ library — mbedTLS — a decision the operator has committed to** — following
 exact pattern the project already uses for SQLite (`deps/` + fetch script +
 static archive in the Makefile). When it ships, the release binary's "static, no runtime libs"
 claim in the Makefile becomes fully true, and every future network feature —
-Remote Agent Link above all — inherits a TLS story that survives a clean
+Agent to Agent (A2A) above all — inherits a TLS story that survives a clean
 install.
 
 This is recorded as a **critical feature** because it is a prerequisite for
@@ -34,7 +34,7 @@ openssl package — the binary fails its first HTTPS call, and the error surface
 as an inscrutable runtime failure far from the cause.
 
 Every planned feature that talks to a network leans on the same latent gap:
-Remote Agent Link holds an *authenticated, long-lived* TLS connection, where
+Agent to Agent (A2A) holds an *authenticated, long-lived* TLS connection, where
 the blast radius is larger still. Fixing the foundation once — behind the
 existing transport seam — is cheaper than discovering the hole per feature.
 
@@ -76,7 +76,7 @@ the transport, and how CA trust is provided.
   from a fresh clone.
 - As a **developer**, I want existing transport tests and fakes to keep
   passing unchanged, so the swap is provably behaviour-preserving.
-- As the **Remote Agent Link designer**, I want a TLS foundation that
+- As the **A2A designer**, I want a TLS foundation that
   supports client certificates and long-lived connections, so the link spec
   consumes the foundation instead of reopening it.
 - As a **debugger**, when a TLS handshake fails on a device, I want a typed,
@@ -154,7 +154,7 @@ the transport, and how CA trust is provided.
 
 ### Business / Time
 
-- No external deadline. The work is gated by Remote Agent Link's need for a
+- No external deadline. The work is gated by Agent to Agent (A2A)'s need for a
   deployable transport, not by a date.
 
 ## Dependencies
@@ -204,10 +204,10 @@ the transport, and how CA trust is provided.
 
 ## Out of Scope
 
-- Remote Agent Link protocol work — this feature only makes the transport
+- Agent to Agent (A2A) protocol work — this feature only makes the transport
   foundation deployable; the link consumes it later.
 - Server-side TLS, certificate issuance, and certificate pinning in v1
-  (pinning belongs to the Remote Agent Link spec if the threat model wants it).
+  (pinning belongs to the Agent to Agent (A2A) spec if the threat model wants it).
 - Windows targets.
 - Replacing `TFPHTTPClient` itself unless the vendored stack makes it
   impossible; the SPEC decides transport composition and records why.
@@ -215,7 +215,7 @@ the transport, and how CA trust is provided.
 
 ## Future Considerations
 
-- Client certificates / mTLS for Remote Agent Link.
+- Client certificates / mTLS for Agent to Agent (A2A).
 - Certificate pinning.
 - TLS session resumption for long-lived links.
 - A second backend (for example the FPC `gnutls` package) behind the same seam,

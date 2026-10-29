@@ -288,4 +288,4 @@ naming the ask summary and the rule reason.
 
 - Richer rule display and a `policy list`/`remove` CLI.
 - Rule expiry and per-tool defaults.
-- Server-side mirroring via Remote Agent Link.
+- Server-side mirroring via Agent to Agent (A2A).

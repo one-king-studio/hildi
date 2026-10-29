@@ -108,4 +108,4 @@ These were resolved during implementation; the specs were reconciled.
 
 - **The TUI adopts `TSessionClient`** (the next slice): `THarnessApp` becomes a
   sink and its worker/queue move into the runtime.
-- The daemon (**Session Host**) and the network transport (Remote Agent Link).
+- The daemon (**Session Host**) and the network transport (A2A).
