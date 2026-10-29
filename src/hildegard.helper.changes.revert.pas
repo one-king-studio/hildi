@@ -404,11 +404,12 @@ var
   Res: TRevertResult;
   Planned: array of TRevertResult;
   Produced: array of string;
+  Deletes: array of Boolean;
   Current, Text, Err: string;
-  TooLarge, Ok: Boolean;
+  TooLarge, Ok, ToAbsent: Boolean;
 begin
-  { Two passes, for the same reason as the revert: decide every file with
-    nothing written, then write only if every file was safe. }
+  { Two passes, for the same reason as the single-record path: decide every file
+    with nothing written, then write only if every file was safe. }
   Result := False;
   AResults := nil;
   Planned := nil;
@@ -422,6 +423,19 @@ begin
       Continue;
     Res := Default(TRevertResult);
     Res.Path := R.Path;
+
+    { A file's EXISTENCE is part of its state, and the text path cannot express
+      it. This loop used to read, transform and write every row regardless of
+      kind - so undoing a CREATION applied its inverse to the file and wrote back
+      EMPTY TEXT, leaving an emptied file where a delete was owed. The single
+      record path was fixed for this; the TURN path, which is the one undo and
+      redo actually call, was not. }
+    ToAbsent := False;
+    if R.Kind = ckCreated then
+      ToAbsent := not AForward
+    else if R.Kind = ckDeleted then
+      ToAbsent := AForward;
+
     if R.Patch = '' then
     begin
       Res.Outcome := rvSkipped;
@@ -432,32 +446,61 @@ begin
       Res.Outcome := rvUnsafe;
       Res.Detail := 'the path is outside the workspace';
     end
-    else if not SysReadText(IncludeTrailingPathDelimiter(ARoot) + R.Path,
-      AMaxBytes, Current, TooLarge, Err) then
+    else if ToAbsent then
     begin
-      if TooLarge then
-        Res.Outcome := rvUnsafe
-      else
-        Res.Outcome := rvFailed;
-      Res.Detail := Err;
-    end
-    else if not AOp(R.Patch, R.BeforeHash, R.AfterHash, Current, AHasher, Text,
-      Err) then
-    begin
-      if Pos('changed since', Err) > 0 then
-        Res.Outcome := rvMoved
-      else
-        Res.Outcome := rvFailed;
-      Res.Detail := Err;
+      { Moving to ABSENT: remove the file. Already gone is the desired end state,
+        so it is a success rather than a failure. No content compare for a
+        creation - the turn's contribution was the file existing, and later edits
+        (including uncaptured ones) are not what it did. }
+      Res.Outcome := rvReverted;
+      N := Length(Planned);
+      SetLength(Planned, N + 1);
+      Planned[N] := Res;
+      SetLength(Produced, N + 1);
+      Produced[N] := '';
+      SetLength(Deletes, N + 1);
+      Deletes[N] := True;
+      Continue;
     end
     else
     begin
+      { Moving to PRESENT. From an absent end there is nothing to read and the
+        transform's current text is genuinely empty. }
+      if ((R.Kind = ckCreated) and AForward) or
+         ((R.Kind = ckDeleted) and (not AForward)) then
+        Current := ''
+      else if not SysReadText(IncludeTrailingPathDelimiter(ARoot) + R.Path,
+        AMaxBytes, Current, TooLarge, Err) then
+      begin
+        if TooLarge then
+          Res.Outcome := rvUnsafe
+        else
+          Res.Outcome := rvFailed;
+        Res.Detail := Err;
+        SetLength(Planned, Length(Planned) + 1);
+        Planned[High(Planned)] := Res;
+        Continue;
+      end;
+      if not AOp(R.Patch, R.BeforeHash, R.AfterHash, Current, AHasher, Text,
+        Err) then
+      begin
+        if Pos('changed since', Err) > 0 then
+          Res.Outcome := rvMoved
+        else
+          Res.Outcome := rvFailed;
+        Res.Detail := Err;
+        SetLength(Planned, Length(Planned) + 1);
+        Planned[High(Planned)] := Res;
+        Continue;
+      end;
       Res.Outcome := rvReverted;   // planned, not yet written
       N := Length(Planned);
       SetLength(Planned, N + 1);
       Planned[N] := Res;
       SetLength(Produced, N + 1);
       Produced[N] := Text;
+      SetLength(Deletes, N + 1);
+      Deletes[N] := False;
       Continue;
     end;
     SetLength(Planned, Length(Planned) + 1);
@@ -476,8 +519,12 @@ begin
   for I := 0 to High(Planned) do
     if Planned[I].Outcome = rvReverted then
     begin
-      Ok := SysWriteAtomic(
-        IncludeTrailingPathDelimiter(ARoot) + Planned[I].Path, Produced[N], Err);
+      if Deletes[N] then
+        Ok := SysDeleteFile(IncludeTrailingPathDelimiter(ARoot) +
+          Planned[I].Path, Err)
+      else
+        Ok := SysWriteAtomic(IncludeTrailingPathDelimiter(ARoot) +
+          Planned[I].Path, Produced[N], Err);
       Inc(N);
       if not Ok then
       begin
