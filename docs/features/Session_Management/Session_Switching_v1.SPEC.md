@@ -2,11 +2,11 @@
 
 **Related Feature:** [FEATURE.md](FEATURE.md)
 
-**Depends on:** `hildegard.helper.tui.sessionsmodal` (the `/sessions` modal),
-`hildegard.helper.harness.app` (`THarnessApp`, the connect lifecycle, the
-windowed transcript), `hildegard.helper.harness.view` (`TSessionView`,
-`Open`/`EnsureSession`), `hildegard.helper.harness.driver` (`ISessionDriver`,
-`RemoteDriver`), `hildegard.helper.session` (`TSessionRow`).
+**Depends on:** `hildi.tui.sessionsmodal` (the `/sessions` modal),
+`hildi.harness.app` (`THarnessApp`, the connect lifecycle, the
+windowed transcript), `hildi.harness.view` (`TSessionView`,
+`Open`/`EnsureSession`), `hildi.harness.driver` (`ISessionDriver`,
+`RemoteDriver`), `hildi.session` (`TSessionRow`).
 
 **Depended on by:** nothing (the composition root wires it).
 
@@ -72,7 +72,7 @@ increment is a modal key, an app callback, and a composition-root method.
 ### The modal (an activate event)
 
 ```pascal
-unit hildegard.helper.tui.sessionsmodal;
+unit hildi.tui.sessionsmodal;
 
 type
   { Fired when the operator activates a row (Enter): open that session. Separate
@@ -90,7 +90,7 @@ type
 ### The app (the switch seam)
 
 ```pascal
-unit hildegard.helper.harness.app;
+unit hildi.harness.app;
 
 type
   { Opens a different session for the app: returns its view and driver, or False

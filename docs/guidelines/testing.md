@@ -1,6 +1,6 @@
 # Testing Guidelines
 
-These guidelines cover how tests are written and run in hildegard-helper. The
+These guidelines cover how tests are written and run in hildi. The
 workflow itself (red, green, refactor) lives in
 `spec-driven-development.md`; this document is the practical companion: gates,
 conventions, and hard-won FPC/FCL findings that cost us real debugging time.
@@ -26,7 +26,7 @@ Useful commands:
 ## Conventions
 
 - One `tests/test_<unit>.pas` per source unit. Each `test_*.pas` must be added to
-  the `uses` clause of `tests/hildegard_helper_tests.pas` - FPC does not
+  the `uses` clause of `tests/hildi_tests.pas` - FPC does not
   auto-link test units.
 - Suite and method names describe the behaviour; every acceptance criterion maps
   to at least one named test.
@@ -51,7 +51,7 @@ Useful commands:
 allocated. Run a single suite under the leak build to localise a leak:
 
 ```sh
-HEAPTRC=haltonnotreleased build/bin/hildegard-helper-tests-leak \
+HEAPTRC=haltonnotreleased build/bin/hildi-tests-leak \
   --suite=TStoreTest --format=plain
 ```
 
@@ -173,7 +173,7 @@ separate direct connection in the test rather than widening the production API.
 ## Database-specific notes (SQLite)
 
 > **Superseded (SQLDB removed).** The store no longer uses SQLDB; it binds the
-> vendored SQLite directly (`hildegard.helper.sqlite`) and links it statically
+> vendored SQLite directly (`hildi.sqlite`) and links it statically
 > (`-k<archive>`). The SQLDB notes below are kept for historical context only.
 > Current hard-won points: `external 'sqlite3'` pulls no library by itself;
 > `-Fl`+`-lsqlite3` resolves to the *system* dylib (FPC's search order), so link

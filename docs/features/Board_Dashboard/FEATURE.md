@@ -5,7 +5,7 @@
 layout was settled by iterating on the mock against real feedback, and this doc
 records the as-built shape.
 
-**Code:** `src/hildegard.helper.dashboard.panel.pas` (the widget) ·
+**Code:** `src/hildi.dashboard.panel.pas` (the widget) ·
 `examples/dashboard.pas` (the binary: store → panel) ·
 `examples/dashboard_mock.pas` (the same widget, static data).
 
@@ -326,7 +326,7 @@ No deadline. v1 is a viewer; the only write is the announcement.
 - **Sessions** (`ListSessions`, `ListSessionRows`, the runtime row) — see
   [Sessions and Ledger](../Sessions_And_Ledger/FEATURE.md).
 - **TUI toolkit** (`tui.*`) for the frame, themes, and input.
-- **Store** (`hildegard.helper.store`, vendored SQLite) as the read connection.
+- **Store** (`hildi.store`, vendored SQLite) as the read connection.
 
 ### External
 
@@ -394,7 +394,7 @@ None. No new dependency; no network.
   border, a card holder landing on the card's own border, and a kind chip too
   narrow for `[decision]`.
 
-  The widget lives in `hildegard.helper.dashboard.panel`; the mock is ~96 lines
+  The widget lives in `hildi.dashboard.panel`; the mock is ~96 lines
   of static data, and `make dashboard-mock` and `make dashboard` draw through
   the same implementation.
 

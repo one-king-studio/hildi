@@ -26,13 +26,13 @@ of the Sessions v2 history.
       `TestRecallNegativeOffsetFails`, `TestRecallRegistersTheTool` in
       `tests/test_recall_tool.pas`
 - [x] **Implement**: `TRecallTool` in
-      `src/hildegard.helper.recall.tool.pas`; add `QueryMessage` to the store
+      `src/hildi.recall.tool.pas`; add `QueryMessage` to the store
 
 ### Phase 3: Wiring
 
 - [x] **Implement**: `THarnessSessionConfig.ToolResultCap`; resolve the cap; set
       it on the adapter and register the recall tool in
-      `hildegard.helper.harness.session.pas`
+      `hildi.harness.session.pas`
 - [x] **Implement**: register the recall tool and set the cap in
       `examples/agent_cli.pas`
 - [x] **Test**: `TestRecallToolRegisteredWithStore`,
@@ -51,20 +51,20 @@ of the Sessions v2 history.
 ### New Files
 
 ```
-src/hildegard.helper.recall.tool.pas
+src/hildi.recall.tool.pas
 tests/test_recall_tool.pas
 ```
 
 ### Modified Files
 
 ```
-src/hildegard.helper.session.store.pas   the cap in Compose
-src/hildegard.helper.store.pas           QueryMessage
-src/hildegard.helper.harness.session.pas ToolResultCap + register the tool
+src/hildi.session.store.pas   the cap in Compose
+src/hildi.store.pas           QueryMessage
+src/hildi.harness.session.pas ToolResultCap + register the tool
 examples/agent_cli.pas                   register the tool
 tests/test_session.pas                   cap tests
 tests/test_harness_session.pas           registration tests
-tests/hildegard_helper_tests.pas         add the new test unit to uses
+tests/hildi_tests.pas         add the new test unit to uses
 ```
 
 ## Success Criteria
@@ -81,14 +81,14 @@ Deviations from the specification, and why:
 - **The shared bits live in the tool unit.** `RecallToolName`,
   `DefaultToolResultCap`, `ResolveToolResultCap`, and
   `ToolResultTruncationMarker` are declared in
-  `src/hildegard.helper.recall.tool.pas`, and the adapter imports the marker
+  `src/hildi.recall.tool.pas`, and the adapter imports the marker
   from there, so the prompt cap and the tool that reads the artifact cannot
   drift on the tool name or the marker shape.
 - **`TSqliteStore.QueryMessage` was added** (not in the SPEC's contract) for the
   tool's lookup; it is session-scoped so a session cannot read another's
   artifacts.
 - **Config shape:** `THarnessSessionConfig.ToolResultCap` is 0 for the default
-  (8 KiB), negative for uncapped; `HILDEGARD_TOOL_RESULT_CAP` overrides when the
+  (8 KiB), negative for uncapped; `HILDI_TOOL_RESULT_CAP` overrides when the
   field is 0. The adapter property treats any value `<= 0` as "no cap".
 - **The recall tool is registered only when a store exists** (harness and CLI):
   without one there are no artifacts to read.

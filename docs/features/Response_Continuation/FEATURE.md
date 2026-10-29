@@ -168,14 +168,14 @@ Errors and rollback
 
 ### Internal
 
-- `hildegard.helper.agent` - the loop, `BuildRequest`, `AppendResponse`,
+- `hildi.agent` - the loop, `BuildRequest`, `AppendResponse`,
   `InterceptToolCalls`, `FinishError`, `TAgentConfig`, `FailTurn`.
-- `hildegard.helper.llm` - `TFinishReason`, `TLLMErrorCode`, `TChatResult`,
+- `hildi.llm` - `TFinishReason`, `TLLMErrorCode`, `TChatResult`,
   `TChatMessage`, `TSSEParser.SetFinish`.
-- `hildegard.helper.harness.turn` - `TTurnWorker`, `TTurnEvent`, `teError`.
-- `hildegard.helper.harness.app` - `HandleTurnEvent`, the in-flight
+- `hildi.harness.turn` - `TTurnWorker`, `TTurnEvent`, `teError`.
+- `hildi.harness.app` - `HandleTurnEvent`, the in-flight
   `FAssistant`/`FThought` blocks, `AppendError`.
-- `hildegard.helper.session.store` - `IConversationStore` (no change expected).
+- `hildi.session.store` - `IConversationStore` (no change expected).
 
 ### External
 

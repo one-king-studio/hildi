@@ -1,6 +1,6 @@
 unit test_session_socket;
 { fpcunit tests for the stale runtime-file sweep in
-  hildegard.helper.session.socket.
+  hildi.session.socket.
 
   The sweep is best-effort housekeeping for /tmp: it must remove a dead socket
   and an old log, but never a socket a live runtime still owns. }
@@ -11,7 +11,7 @@ interface
 
 uses
   SysUtils, fpcunit, testregistry,
-  hildegard.helper.session.socket;
+  hildi.session.socket;
 
 type
   TSessionSocketSweepTest = class(TTestCase)
@@ -92,7 +92,7 @@ end;
 
 procedure TSessionSocketSweepTest.SetUp;
 begin
-  FDir := IncludeTrailingPathDelimiter(GetTempDir) + 'hildegard-sweep-test' +
+  FDir := IncludeTrailingPathDelimiter(GetTempDir) + 'hildi-sweep-test' +
     PathDelim;
   RemoveTree(FDir);
   ForceDirectories(FDir);

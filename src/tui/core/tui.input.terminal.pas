@@ -91,7 +91,7 @@ var
   Tio: termios;
 begin
   inherited Create;
-  FTracePath := GetEnvironmentVariable('HILDEGARD_TUI_TRACE');
+  FTracePath := GetEnvironmentVariable('HILDI_TUI_TRACE');
   FTrace := FTracePath <> '';
   FRawSet := False;
   FOpenedTty := False;

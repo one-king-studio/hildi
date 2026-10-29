@@ -10,8 +10,8 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.approval, hildegard.helper.shell.fs,
-  hildegard.helper.shell.tier;
+  hildi.approval, hildi.shell.fs,
+  hildi.shell.tier;
 
 type
   TAllowAll = class(TInterfacedObject, IApprovalService)

@@ -83,7 +83,7 @@ client. The TUI's adoption (it currently *owns* the loop) is the next slice.
 ## Decisions (resolving the FEATURE's open questions)
 
 1. **Idle exit: 300 s.** `DefaultIdleExitMs = 300000` (no clients, no turn in
-   flight), configurable via `HILDEGARD_RUNTIME_IDLE_MS`. Long enough to survive
+   flight), configurable via `HILDI_RUNTIME_IDLE_MS`. Long enough to survive
    a TUI restart, short enough not to strand processes.
 2. **The socket is authoritative for liveness; the store row is advisory.** A
    row is discovery and display only; it may be stale after a crash. Liveness is
@@ -106,9 +106,9 @@ client. The TUI's adoption (it currently *owns* the loop) is the next slice.
    pending and notifies the driver (`drive_requested`); the driver promotes the
    pending claimer by issuing `release_drive`. A pending claim times out after
    `DefaultDriveRequestMs`. A driver is still never evicted without consent.
-6. **The runtime directory is `/tmp/hildegard-helper-<uid>/`** (mode `0700`),
+6. **The runtime directory is `/tmp/hildi-<uid>/`** (mode `0700`),
    short enough for the `AF_UNIX` path limit and never `$HOME`.
-7. **`HILDEGARD_RUNTIME_IDLE_MS`** overrides `DefaultIdleExitMs`, as Decision 1
+7. **`HILDI_RUNTIME_IDLE_MS`** overrides `DefaultIdleExitMs`, as Decision 1
    requires.
 8. **The CLI's `--attach` is opt-in.** The existing in-process prompt path is
    unchanged; routing it through the runtime is left for the TUI-adoption slice.
@@ -118,7 +118,7 @@ client. The TUI's adoption (it currently *owns* the loop) is the next slice.
 ### Public API
 
 ```pascal
-unit hildegard.helper.session.runtime;
+unit hildi.session.runtime;
 
 type
   TSessionRuntimeConfig = record
@@ -182,7 +182,7 @@ type
 
 ### Data Contracts
 
-The runtime-row types live in `hildegard.helper.session` (the shared model unit)
+The runtime-row types live in `hildi.session` (the shared model unit)
 so both the store and the runtime can use them without a dependency cycle.
 
 ```pascal

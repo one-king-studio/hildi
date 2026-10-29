@@ -1,7 +1,7 @@
 # CLI Agent Harness Feature Parity
 
 A survey of five terminal/CLI coding-agent harnesses, compared against
-`hildegard-helper`. The point is to see what the field treats as table stakes,
+`hildi`. The point is to see what the field treats as table stakes,
 what is differentiating, and where this project deliberately or accidentally
 diverges.
 
@@ -18,12 +18,12 @@ space moves fast; treat every cell as "as documented at the time of writing".
 | ✗ | Not available |
 | ? | Not verified in the sources read |
 
-The `hildegard-helper` column reflects `docs/features/FEATURES.md` at the time
+The `hildi` column reflects `docs/features/FEATURES.md` at the time
 of writing, not aspirations.
 
 ## Foundations
 
-| Feature | hildegard-helper | OpenCode | Codex CLI | Claude Code | Pi | DeepSeek Harness |
+| Feature | hildi | OpenCode | Codex CLI | Claude Code | Pi | DeepSeek Harness |
 | ------- | ---------------- | -------- | --------- | ----------- | -- | ---------------- |
 | Implementation language | Free Pascal | TypeScript | Rust | TypeScript + native | TypeScript | TypeScript |
 | License | none (private) | MIT | Apache-2.0 | Proprietary | MIT | MIT |
@@ -34,7 +34,7 @@ of writing, not aspirations.
 
 ## Interfaces
 
-| Feature | hildegard-helper | OpenCode | Codex CLI | Claude Code | Pi | DeepSeek Harness |
+| Feature | hildi | OpenCode | Codex CLI | Claude Code | Pi | DeepSeek Harness |
 | ------- | ---------------- | -------- | --------- | ----------- | -- | ---------------- |
 | Interactive TUI | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ (`dsh cli`) |
 | Headless / print mode | ✅ (`-p`, pipe) | ✅ (`opencode run`) | ✅ (`codex exec`) | ✅ (`-p`) | ✅ (`-p`) | ✅ (`--profile headless`) |
@@ -47,7 +47,7 @@ of writing, not aspirations.
 
 ## Agent model
 
-| Feature | hildegard-helper | OpenCode | Codex CLI | Claude Code | Pi | DeepSeek Harness |
+| Feature | hildi | OpenCode | Codex CLI | Claude Code | Pi | DeepSeek Harness |
 | ------- | ---------------- | -------- | --------- | ----------- | -- | ---------------- |
 | Agent loop | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Subagents | ✗ (a bounded shell-command pool exists; no agent tool) | ✅ General/Explore/Scout | ✅ | ✅ built-in + custom | ✗ (extensions / tmux) | ✅ (Codex + Claude Code subagent plugins) |
@@ -63,7 +63,7 @@ of writing, not aspirations.
 
 ## Tools
 
-| Feature | hildegard-helper | OpenCode | Codex CLI | Claude Code | Pi | DeepSeek Harness |
+| Feature | hildi | OpenCode | Codex CLI | Claude Code | Pi | DeepSeek Harness |
 | ------- | ---------------- | -------- | --------- | ----------- | -- | ---------------- |
 | Shell execution | ✅ `run_command` | ✅ `bash` | ✅ | ✅ `Bash` | ✅ | ✅ |
 | Read / write / edit files | ✅ `file_read`/`file_write`/`file_edit` | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -84,7 +84,7 @@ of writing, not aspirations.
 
 ## Context and configuration
 
-| Feature | hildegard-helper | OpenCode | Codex CLI | Claude Code | Pi | DeepSeek Harness |
+| Feature | hildi | OpenCode | Codex CLI | Claude Code | Pi | DeepSeek Harness |
 | ------- | ---------------- | -------- | --------- | ----------- | -- | ---------------- |
 | Project instructions file | ✅ `AGENTS.md` | ✅ `AGENTS.md` | ✅ `AGENTS.md` | ✅ `CLAUDE.md` | ✅ `AGENTS.md` + `SYSTEM.md` | ✅ `AGENTS.md` |
 | Skills | ✗ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -97,7 +97,7 @@ of writing, not aspirations.
 
 ## Safety and control
 
-| Feature | hildegard-helper | OpenCode | Codex CLI | Claude Code | Pi | DeepSeek Harness |
+| Feature | hildi | OpenCode | Codex CLI | Claude Code | Pi | DeepSeek Harness |
 | ------- | ---------------- | -------- | --------- | ----------- | -- | ---------------- |
 | Approval / permission modes | ✅ durable whitelist, ask/allow/deny | ✅ per-tool `allow`/`ask`/`deny` | ✅ untrusted/on-request/never + writes | ✅ default/acceptEdits/plan/auto/bypass | ✗ (extensions) | ✅ permission cycling |
 | OS-level sandbox | ✗ (static parser is a guardrail, by design) | ◐ | ✅ Seatbelt/Landlock/Windows | ✅ sandboxed Bash (Seatbelt/bubblewrap) | ✗ (run in a container) | ✅ (plugin) |
@@ -107,7 +107,7 @@ of writing, not aspirations.
 
 ## Sessions and state
 
-| Feature | hildegard-helper | OpenCode | Codex CLI | Claude Code | Pi | DeepSeek Harness |
+| Feature | hildi | OpenCode | Codex CLI | Claude Code | Pi | DeepSeek Harness |
 | ------- | ---------------- | -------- | --------- | ----------- | -- | ---------------- |
 | Session persistence | ✅ SQLite | ✅ | ✅ | ✅ | ✅ JSONL | ✅ |
 | Resume / continue | ✅ `--attach`, ledger replay | ✅ | ✅ `codex resume` | ✅ `-c` / `-r` | ✅ `/tree` | ✅ |
@@ -120,7 +120,7 @@ of writing, not aspirations.
 
 ## Ecosystem
 
-| Feature | hildegard-helper | OpenCode | Codex CLI | Claude Code | Pi | DeepSeek Harness |
+| Feature | hildi | OpenCode | Codex CLI | Claude Code | Pi | DeepSeek Harness |
 | ------- | ---------------- | -------- | --------- | ----------- | -- | ---------------- |
 | Package marketplace / registry | ✗ | ✅ plugins + skills | ✅ plugin marketplace | ✅ plugin marketplaces | ✅ Pi packages | ✅ `dsh-plugin` |
 | Git worktrees | ✗ | ◐ (community plugin) | ✅ | ✅ `-w` | ◐ tmux | ◐ |
@@ -130,7 +130,7 @@ of writing, not aspirations.
 | Telemetry | ✗ | ◐ | ◐ | ◐ | ◐ | ◐ |
 | Multi-session UI | ◐ one session per TUI | ✅ tabs | ✅ | ✅ agent view | ◐ | ✅ |
 
-## Where hildegard-helper stands
+## Where hildi stands
 
 **Strengths (uncommon in this set):**
 

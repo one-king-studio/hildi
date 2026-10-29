@@ -60,14 +60,14 @@ Toolbar
 
 > Contracts as Pascal type declarations. No method bodies.
 
-### Store (`hildegard.helper.store`)
+### Store (`hildi.store`)
 
 ```pascal
 function TSqliteStore.MostRecentTurn(const ASessionId: string;
   out ATurn: TTurnRecord; out AError: TStoreError): Boolean;
 ```
 
-### Harness session (`hildegard.helper.harness.session`)
+### Harness session (`hildi.harness.session`)
 
 ```pascal
 type
@@ -78,14 +78,14 @@ type
   end;
 ```
 
-### Stats (`hildegard.helper.harness.stats`)
+### Stats (`hildi.harness.stats`)
 
 ```pascal
 { A compact, deterministic one-line summary of a turn's metrics. }
 function FormatTurnStats(const ATurn: TTurnRecord): string;
 ```
 
-### Chat panel (`hildegard.helper.tui.chatpanel`)
+### Chat panel (`hildi.tui.chatpanel`)
 
 ```pascal
 type
@@ -150,8 +150,8 @@ Format (fields separated by ` · `):
 ### Component Boundaries
 
 - **Store** answers one indexed query for the latest turn.
-- **`hildegard.helper.harness.stats`** owns the format; it depends only on
-  `hildegard.helper.session`.
+- **`hildi.harness.stats`** owns the format; it depends only on
+  `hildi.session`.
 - **`TChatPanel`** owns the two status lines and the CTA strip.
 - **`THarnessApp`** composes them from the session's last turn.
 

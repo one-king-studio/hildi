@@ -2,7 +2,7 @@ unit shell.types;
 { The shell library's shared types: the environment, a command call and its
   result, the handler and gate seams, the execution limits, and the parse error.
 
-  The library is standalone: nothing here may reach a hildegard.helper.* unit.
+  The library is standalone: nothing here may reach a hildi.* unit.
   Commands are capabilities the consumer registers; the gate is its policy. }
 
 {$mode delphi}{$H+}

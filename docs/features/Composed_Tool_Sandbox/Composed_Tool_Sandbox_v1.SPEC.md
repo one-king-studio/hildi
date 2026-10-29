@@ -9,9 +9,9 @@
 
 **Related Feature:** [FEATURE.md](FEATURE.md)
 
-**Depends on:** `hildegard.helper.agent` (the tool registry + `TToolHandler`),
-`hildegard.helper.approval` (the gate the sub-calls route through),
-`hildegard.helper.files` / `hildegard.helper.command.tool` (the world-touching
+**Depends on:** `hildi.agent` (the tool registry + `TToolHandler`),
+`hildi.approval` (the gate the sub-calls route through),
+`hildi.files` / `hildi.command.tool` (the world-touching
 tools the sandbox exposes), the vendored engine (`deps/goccia`, via
 `scripts/fetch-goccia.sh`).
 
@@ -34,7 +34,7 @@ the operator accepted the ~8 MB binary delta. This SPEC pins the integration.
 
 | Need | Existing | Change |
 | --- | --- | --- |
-| The tool registry + handler contract | `hildegard.helper.agent` | reuse; the `tools` object is a view over it |
+| The tool registry + handler contract | `hildi.agent` | reuse; the `tools` object is a view over it |
 | The approval gate | `IApprovalService` (the same one a tool uses) | reuse |
 | The async "block then settle" pattern | the harness's own worker/queue | reuse the idea: the callback blocks |
 | Vendored-dep build integration | `scripts/fetch-sqlite.sh`, `fetch-mbedtls.sh`, the Makefile's `libstatic` pattern | follow it for `fetch-goccia.sh` |
@@ -94,7 +94,7 @@ and the Makefile integration.
 > Pascal type declarations; bodies are the implementer's.
 
 ```pascal
-unit hildegard.helper.script;
+unit hildi.script;
 { The facade over the vendored engine: run one script with the harness's tools
   injected, and map the result. Isolates the engine's surface so an upgrade is a
   facade change. }
@@ -128,7 +128,7 @@ function RunScript(const ASource: string; const AReason: string;
 ```
 
 ```pascal
-unit hildegard.helper.tool.script;
+unit hildi.tool.script;
 { The run_script tool: parses its arguments, wires the facade to the registry,
   and gates the call. }
 
@@ -202,7 +202,7 @@ direct call.
 - The engine is `{$mode delphiunicode}` (UTF-16 `string`); our units are UTF-8
   `{$mode delphi}`. Every value crossing the boundary converts **explicitly**
   (`UTF8Encode`/`UTF8Decode`), the same rule the codebase already follows.
-- The engine's public surface is reached only through `hildegard.helper.script`.
+- The engine's public surface is reached only through `hildi.script`.
 
 ## Validation and error handling
 

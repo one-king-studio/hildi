@@ -28,8 +28,8 @@ Unix-only); v1 accepts that and records the foundation gaps Windows will need.
 
 ## Problem Statement
 
-The harness can already execute a command (`hildegard.helper.process`) and the
-loop can already dispatch tools (`hildegard.helper.agent`), but nothing decides
+The harness can already execute a command (`hildi.process`) and the
+loop can already dispatch tools (`hildi.agent`), but nothing decides
 *which* commands should run. The only built-in tool is `get_system_time`. For the
 helper to be useful it must run real commands; for it to be safe to leave
 running, an operator must be able to say "these commands are fine, ask me about
@@ -41,8 +41,8 @@ the parser/classifier, the policy engine, and the approval seam - not command
 execution, which exists.
 
 Applying the first rung of the Ponytail ladder (`docs/guidelines/ponytail.md`):
-execution already exists (`hildegard.helper.process`), durable key/value settings
-already exist (`hildegard.helper.store`), JSON already exists (`fpjson`), and the
+execution already exists (`hildi.process`), durable key/value settings
+already exist (`hildi.store`), JSON already exists (`fpjson`), and the
 tool contract already exists (`TToolRegistry`). The genuinely new pieces are the
 command parser/classifier, the policy decision, and the tool wiring.
 
@@ -105,7 +105,7 @@ Command tool
 
 - [ ] A `run_command` tool is registered and advertised with a documented
       parameter schema (`command` required; optional `cwd` and `timeout_ms`).
-- [ ] The tool executes the command through `hildegard.helper.process`
+- [ ] The tool executes the command through `hildi.process`
       synchronously and returns combined stdout/stderr plus the exit code.
 - [ ] A command that times out or is cancelled reports that distinctly (using the
       existing 124/130 conventions), not as a generic failure.
@@ -198,7 +198,7 @@ Approval
 Store integration
 
 - [ ] Allow patterns, deny patterns, allowed roots, and remembered approvals are
-      read from and written to `hildegard.helper.store` settings.
+      read from and written to `hildi.store` settings.
 - [ ] The policy is reloaded from the store when it changes, or at session start;
       a missing policy yields safe defaults (ask everything, deny nothing).
 - [ ] An audit record is written for each attempted command with the decision, the
@@ -254,8 +254,8 @@ Store integration
 
 - Must build with Free Pascal 3.3.1, `{$mode delphi}`, and keep `make check`
   green.
-- Must reuse `hildegard.helper.process` for execution; no second process runner.
-- Must reuse `hildegard.helper.store` settings for persistence; no new database.
+- Must reuse `hildi.process` for execution; no second process runner.
+- Must reuse `hildi.store` settings for persistence; no new database.
 - Must not change the `TToolHandler` signature if avoidable; the shell tool holds
   its policy and approver as instance state.
 - Must remain single-threaded at the loop level; the runner's thread is joined by
@@ -278,13 +278,13 @@ Store integration
 
 ### Internal
 
-- `hildegard.helper.process` - execution, streaming, timeout, cancellation.
-- `hildegard.helper.agent` - `TToolRegistry`, `TToolHandler`, `TToolSpec`, plus
+- `hildi.process` - execution, streaming, timeout, cancellation.
+- `hildi.agent` - `TToolRegistry`, `TToolHandler`, `TToolSpec`, plus
   the shared change to require a `reason` on every tool call
   (`Tool_Reason_v1.SPEC.md`).
-- `hildegard.helper.store` - `GetSetting`/`SetSetting` for policy and audit.
-- `hildegard.helper.llm` - `TToolSpec` shape for the advertised schema.
-- `hildegard.helper.transcript` - gains the tool-call reason for display.
+- `hildi.store` - `GetSetting`/`SetSetting` for policy and audit.
+- `hildi.llm` - `TToolSpec` shape for the advertised schema.
+- `hildi.transcript` - gains the tool-call reason for display.
 - The CLI (`examples/agent_cli.pas`) - wires the tool, the approver, and the
   store.
 

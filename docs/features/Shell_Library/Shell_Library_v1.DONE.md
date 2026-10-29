@@ -23,7 +23,7 @@ moving on. `main` only.
       `shell.words`, `shell.parser`, `shell.interpreter`, `shell.registry`,
       `shell.fs`; every unit self-declares `{$mode delphi}{$H+}`.
 - [x] **Test**: `TestShellClosureExcludesHarness` — walk the library roots'
-      transitive `uses`; assert no `hildegard.helper.*` / TUI / store / socket
+      transitive `uses`; assert no `hildi.*` / TUI / store / socket
       unit (mirror `TestHeadlessClosureExcludesTui`).
 - [x] **Add** `make shell-standalone` — build a tiny example against `src/shell`
       only (mirror `async-standalone`), and run it in `make check`.
@@ -147,7 +147,7 @@ tests/test_shell_corpus.pas
 tests/test_shell_interpreter.pas
 tests/test_shell_consumer.pas
 tests/test_shell_isolation.pas     (the uses-closure test)
-tests/hildegard_helper_tests.pas   (register the suites)
+tests/hildi_tests.pas   (register the suites)
 tests/data/shell_corpus.txt        (the recorded commands)
 Makefile                           (shell-standalone)
 docs/features/FEATURES.md

@@ -15,7 +15,7 @@ before moving on. `main` only.
 
 ## Implementation Tasks
 
-### Phase 1: Store reads/writes (`hildegard.helper.store`)
+### Phase 1: Store reads/writes (`hildi.store`)
 
 - [x] **Test**: `ListSessionRows` returns pinned-first then newest, excludes
       archived by default, and includes them when asked.
@@ -28,7 +28,7 @@ before moving on. `main` only.
 
 ### Phase 2: The row model and the modal widget
 
-- [x] **Create** `src/hildegard.helper.tui.sessionsmodal.pas`:
+- [x] **Create** `src/hildi.tui.sessionsmodal.pas`:
       `TSessionRow`, `TSessionRowArray`, `TSessionAction`,
       `TSessionActionEvent`, `TSessionsModal`.
 - [x] **Add** `test_tui_sessionsmodal.pas` to the runner's `uses`.
@@ -60,7 +60,7 @@ before moving on. `main` only.
       those rows.
 - [x] **Implement**: the toggle.
 
-### Phase 5: Command wiring (`hildegard.helper.harness.app`)
+### Phase 5: Command wiring (`hildi.harness.app`)
 
 - [x] **Test**: `sessions` is in `DefaultCommands`; `RunCommand('sessions')`
       pushes the modal plane; Escape pops it.
@@ -79,16 +79,16 @@ before moving on. `main` only.
 ### New Files
 
 ```
-src/hildegard.helper.tui.sessionsmodal.pas
+src/hildi.tui.sessionsmodal.pas
 tests/test_tui_sessionsmodal.pas
 ```
 
 ### Modified Files
 
 ```
-tests/hildegard_helper_tests.pas        (add the test unit)
-src/hildegard.helper.store.pas          (ListSessionRows, pin/archive setters)
-src/hildegard.helper.harness.app.pas    (the sessions command + plane)
+tests/hildi_tests.pas        (add the test unit)
+src/hildi.store.pas          (ListSessionRows, pin/archive setters)
+src/hildi.harness.app.pas    (the sessions command + plane)
 ```
 
 ## Dependencies & Ordering

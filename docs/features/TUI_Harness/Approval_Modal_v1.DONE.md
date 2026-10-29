@@ -6,7 +6,7 @@
 
 ### Phase 1: Dim the whole screen
 
-- [x] **Implement**: `DimPaletteIndex` in `hildegard.helper.tui.base` (moved out
+- [x] **Implement**: `DimPaletteIndex` in `hildi.tui.base` (moved out
       of the video surface); both surfaces' `DimRect` now give a `sfScreenBg`
       cell an explicit dimmed background, darken `Fg`, and set `sfDim`.
 - [x] **Test**: `TestDimDarkensColorsAndAddsFaint` (renamed from
@@ -35,11 +35,11 @@
 ## Files Created/Modified
 
 ```
-src/hildegard.helper.tui.base.pas          DimPaletteIndex
-src/hildegard.helper.tui.surface.pas       DimRect dims the screen background
-src/hildegard.helper.tui.surface.video.pas same, with FScreenBg stored
-src/hildegard.helper.tui.approvalmodal.pas redrawn to the design
-src/hildegard.helper.harness.app.pas       pass the theme
+src/hildi.tui.base.pas          DimPaletteIndex
+src/hildi.tui.surface.pas       DimRect dims the screen background
+src/hildi.tui.surface.video.pas same, with FScreenBg stored
+src/hildi.tui.approvalmodal.pas redrawn to the design
+src/hildi.harness.app.pas       pass the theme
 tests/test_tui_surface.pas                 the dim test
 tests/test_tui_approvalmodal.pas           the dialog tests
 tests/test_harness_app.pas                 the dim integration test

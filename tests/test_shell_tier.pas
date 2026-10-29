@@ -8,8 +8,8 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  shell.types, hildegard.helper.approval, hildegard.helper.shell.fs,
-  hildegard.helper.shell.commands, hildegard.helper.shell.tier;
+  shell.types, hildi.approval, hildi.shell.fs,
+  hildi.shell.commands, hildi.shell.tier;
 
 type
   TFakeApproval = class(TInterfacedObject, IApprovalService)

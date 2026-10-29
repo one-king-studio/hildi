@@ -10,7 +10,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.store, hildegard.helper.changes.store,
+  hildi.store, hildi.changes.store,
   changes.types, changes.store, changes.log, changes.text;
 
 type

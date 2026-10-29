@@ -4,7 +4,7 @@
 
 ## Purpose
 
-`hildegard.helper.markdown` turns a supported subset of markdown into blocks of
+`hildi.markdown` turns a supported subset of markdown into blocks of
 styled spans, and maps block kinds and inline styles to text attributes (a
 colouriser). It is deliberately **not** a renderer: it produces data that
 `TTextBlock` already knows how to draw. This keeps parsing pure and testable, and
@@ -55,10 +55,10 @@ re-parse completed content.
 ### Public API
 
 ```pascal
-unit hildegard.helper.markdown;
+unit hildi.markdown;
 
 uses
-  hildegard.helper.tui.base;   { TAttr }
+  hildi.tui.base;   { TAttr }
 
 type
   TMdBlockKind = (
@@ -154,7 +154,7 @@ type
 
 ### Data Contracts
 
-- Theme and span colours use `TAttr` from `hildegard.helper.tui.base`: 256-colour
+- Theme and span colours use `TAttr` from `hildi.tui.base`: 256-colour
   palette indices (0..255) plus rendition flags. Markdown styling therefore
   cannot exceed the terminal palette; truecolour is not required
   (`TUI_Core_v1.SPEC.md`).
@@ -186,7 +186,7 @@ type
   Mustache, and OpenAPI, but not markdown. A minimal parser is therefore
   justified under the Ponytail ladder, after checking FPC user-contributed units
   for a reusable subset (record the result in the TODO).
-- **Reuse `hildegard.helper.tui.base`** for `TAttr` so colourised spans feed
+- **Reuse `hildi.tui.base`** for `TAttr` so colourised spans feed
   `TTextBlock` directly.
 - **Reuse the RTL** for string handling; no regex is needed for the chosen subset
   (line classification plus a small inline scanner).
@@ -198,7 +198,7 @@ stability.
 
 - **Responsibilities:** markdown subset -> typed blocks -> styled spans;
   theme mapping; incremental parse.
-- **Dependencies:** `hildegard.helper.tui.base.TAttr`, `SysUtils`, `Classes`.
+- **Dependencies:** `hildi.tui.base.TAttr`, `SysUtils`, `Classes`.
 - **Side effects:** none; no UI, no I/O.
 
 ### Data Flow

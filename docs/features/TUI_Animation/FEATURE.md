@@ -69,7 +69,7 @@ not a new rendering model.
 - [x] No per-widget timers; exactly one clock and one frame cadence.
 - [x] An idle app makes no periodic wakeups at the frame rate.
 - [x] Deterministic tests; leak-clean under `make test-leak`; `make check` green.
-- [x] No new dependency; style `{$mode delphi}{$H+}`, `hildegard.helper.tui.*`.
+- [x] No new dependency; style `{$mode delphi}{$H+}`, `hildi.tui.*`.
 
 ## Success Metrics
 
@@ -101,7 +101,7 @@ not a new rendering model.
 
 ### Internal
 
-- `hildegard.helper.tui.app` (`TTuiApp`), `.widget` (`TWidget`/`TContainer`),
+- `hildi.tui.app` (`TTuiApp`), `.widget` (`TWidget`/`TContainer`),
   `.surface`, `.input`, and the widget kit (`theme`, `panel`, `focus`).
 
 ### External
@@ -127,7 +127,7 @@ not a new rendering model.
 
 - `TTimeline`/keyframes and easing helpers.
 - `TStatusBar` with a spinner slot; `TTabs`, `TTable`.
-- A global `HILDEGARD_TUI_ANIM_MS` override and a "reduce motion" mode.
+- A global `HILDI_TUI_ANIM_MS` override and a "reduce motion" mode.
 
 ## Notes
 

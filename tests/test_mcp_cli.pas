@@ -1,5 +1,5 @@
 unit test_mcp_cli;
-{ fpcunit tests for hildegard.helper.mcp.cli. The parser is pure; only formatting
+{ fpcunit tests for hildi.mcp.cli. The parser is pure; only formatting
   and parsing are exercised here. }
 
 {$mode delphi}{$H+}
@@ -8,7 +8,7 @@ interface
 
 uses
   SysUtils, fpcunit, testregistry,
-  hildegard.helper.mcp.cli, hildegard.helper.mcp.config;
+  hildi.mcp.cli, hildi.mcp.config;
 
 type
   TMcpCliTest = class(TTestCase)

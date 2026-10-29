@@ -1,5 +1,5 @@
 unit test_env;
-{ fpcunit tests for hildegard.helper.env. Parsing is tested purely; apply/load
+{ fpcunit tests for hildi.env. Parsing is tested purely; apply/load
   tests use a uniquely named variable cleared first. }
 
 {$mode delphi}{$H+}
@@ -7,7 +7,7 @@ unit test_env;
 interface
 
 uses
-  Classes, SysUtils, ctypes, fpcunit, testregistry, hildegard.helper.env;
+  Classes, SysUtils, ctypes, fpcunit, testregistry, hildi.env;
 
 type
   TEnvTest = class(TTestCase)
@@ -32,7 +32,7 @@ function c_unsetenv(Name: PAnsiChar): cint; cdecl; external 'c' name 'unsetenv';
 {$endif}
 
 const
-  TestVar = 'HILDEGARD_TEST_ENV_A1B2';
+  TestVar = 'HILDI_TEST_ENV_A1B2';
 
 procedure ClearTestVar;
 begin
@@ -132,7 +132,7 @@ var
 begin
   ClearTestVar;
   FileName := IncludeTrailingPathDelimiter(GetTempDir) +
-    'hildegard_env_test.env';
+    'hildi_env_test.env';
   F := TStringList.Create;
   try
     F.Add('# sample');

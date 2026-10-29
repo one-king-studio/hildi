@@ -65,7 +65,7 @@ them, not a framework.
 
 - [x] No new dependency; reuses TUI Core and the encoder.
 - [x] Testable headlessly; leak-clean under `make test-leak`; `make check` green.
-- [x] Style: `{$mode delphi}{$H+}`, units named `hildegard.helper.tui.*`.
+- [x] Style: `{$mode delphi}{$H+}`, units named `hildi.tui.*`.
 
 ## Success Metrics
 
@@ -96,7 +96,7 @@ them, not a framework.
 
 ### Internal
 
-- `hildegard.helper.tui.base/widget/text/scroll/surface/app` (TUI Core).
+- `hildi.tui.base/widget/text/scroll/surface/app` (TUI Core).
 
 ### External
 

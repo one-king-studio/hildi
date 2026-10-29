@@ -171,7 +171,7 @@ Store API
 ### Technical
 
 - Must build with FPC 3.3.1, `{$mode delphi}`, and keep `make check` green.
-- Must reuse `hildegard.helper.store` and its migration machinery.
+- Must reuse `hildi.store` and its migration machinery.
 - Must use the vendored SQLite; no new dependency.
 - The loop must remain provider-agnostic and must not embed SQL.
 - A pre-v2 database is not migrated; it is rejected.
@@ -185,10 +185,10 @@ Store API
 
 ### Internal
 
-- `hildegard.helper.store` - migrations, connections, transactions.
-- `hildegard.helper.llm` - `TChatMessage`, `TChatToolCall`, the SSE parser
+- `hildi.store` - migrations, connections, transactions.
+- `hildi.llm` - `TChatMessage`, `TChatToolCall`, the SSE parser
   (`usage`), and `TTokenUsage`.
-- `hildegard.helper.agent` - the loop and the persistence seam.
+- `hildi.agent` - the loop and the persistence seam.
 - Workspaces - sessions are bound to a workspace.
 - TUI Harness - renders the restored blocks.
 

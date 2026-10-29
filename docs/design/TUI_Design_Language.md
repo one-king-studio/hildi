@@ -1,6 +1,6 @@
 # TUI Design Language (v0 — first pass)
 
-A reference for the look and feel of hildegard-helper's TUI: which glyphs to use,
+A reference for the look and feel of hildi's TUI: which glyphs to use,
 how to animate, how to colour, and how to lay out screens. It is exploratory —
 the visual source of truth is the companion
 [`tui_design_language.html`](tui_design_language.html) (self-contained; open it
@@ -97,7 +97,7 @@ Design rules:
   border, not by a fill colour.
 - **Match the terminal's mode.** The theme is `auto` (detect the terminal's
   background with an OSC 11 query), or forced `dark`/`light`
-  (`--theme=…` / `HILDEGARD_THEME`). Auto picks the palette; forcing ignores the
+  (`--theme=…` / `HILDI_THEME`). Auto picks the palette; forcing ignores the
   terminal. A light terminal gets dark text on a light background.
 - Keep body text at a high-contrast index (e.g. `252` on dark, `235` on light).
 
@@ -249,6 +249,6 @@ changed cells reach the terminal.
 
 - Do we ship a glyph capability probe (query the font/terminal) or assume the
   common BMP set?
-- Should animation be globally disableable (`HILDEGARD_TUI_NO_ANIM=1`)?
+- Should animation be globally disableable (`HILDI_TUI_NO_ANIM=1`)?
 - Light theme: is a full light palette worth maintaining, or a single dark one?
 - Status bar vs. per-pane status: which scales better for many panes?

@@ -9,10 +9,10 @@
 
 **Related Feature:** [FEATURE.md](FEATURE.md)
 
-**Depends on:** `hildegard.helper.command.policy` (the plan types and the
-fallback splitter), `hildegard.helper.command.tool` (the approval adapter),
-`hildegard.helper.syntax` / `hildegard.helper.tui.markdownview` (the
-highlighting consumer), `hildegard.helper.wrap` (the `$ <command>` display).
+**Depends on:** `hildi.command.policy` (the plan types and the
+fallback splitter), `hildi.command.tool` (the approval adapter),
+`hildi.syntax` / `hildi.tui.markdownview` (the
+highlighting consumer), `hildi.wrap` (the `$ <command>` display).
 
 ## Purpose
 
@@ -36,15 +36,15 @@ The shell adapter is the reason; the highlighting adapter rides along.
       parses (the TUI and the headless runtime). A **build-time assertion**
       checks each grammar's `ts_language_version` is supported by the runtime;
       skew fails the build.
-- [ ] **Binding.** `hildegard.helper.treesitter` declares the C API and wraps it
+- [ ] **Binding.** `hildi.treesitter` declares the C API and wraps it
       in owned handles (`TSParser`, `TSTree`, `TSQuery`) and value nodes
       (`TSNode`), so a parse is one call and cleanup is automatic (leak-gate
       clean).
-- [ ] **Grammar registry.** `hildegard.helper.treesitter.grammars` maps a
+- [ ] **Grammar registry.** `hildi.treesitter.grammars` maps a
       language name (with aliases: `sh`/`bash`/`shell` → bash) to its
       `TSLanguage` and its vendored `.scm` query files. An unknown name yields
       no grammar (the consumer degrades).
-- [ ] **Shell adapter.** `hildegard.helper.command.ast.ParseShellPlan(const
+- [ ] **Shell adapter.** `hildi.command.ast.ParseShellPlan(const
       ACommand: string): TCommandPlan` parses with `tree-sitter-bash` and
       returns the **same `TCommandPlan`/`TCommandSegment` shape** the approval
       adapter already consumes, with one segment per *program actually run*.
@@ -66,7 +66,7 @@ The shell adapter is the reason; the highlighting adapter rides along.
 - [ ] **Approval adapter.** `BuildAsks` sources its plan from `ParseShellPlan`
       and keeps its current contract: one `TApprovalAsk` per executable, ref
       `run_command:<basename>`, the call's reason carried on each ask.
-- [ ] **Highlight adapter.** `hildegard.helper.syntax` gains a tree-sitter path:
+- [ ] **Highlight adapter.** `hildi.syntax` gains a tree-sitter path:
       when the fence's language maps to a vendored grammar, spans come from the
       grammar's `highlights.scm` mapped capture → `TMdTheme` role; otherwise the
       existing hand-rolled tokenizer runs unchanged. The public shape (text +
@@ -89,7 +89,7 @@ The shell adapter is the reason; the highlighting adapter rides along.
 ## Contracts & Interfaces
 
 ```pascal
-unit hildegard.helper.treesitter;   // NEW: binding + RAII wrappers
+unit hildi.treesitter;   // NEW: binding + RAII wrappers
 
 type
   TSLanguage = Pointer;      // const TSLanguage*
@@ -136,7 +136,7 @@ function TSLanguageVersion(ALanguage: TSLanguage): Cardinal;
 ```
 
 ```pascal
-unit hildegard.helper.treesitter.grammars;   // NEW: registry + queries
+unit hildi.treesitter.grammars;   // NEW: registry + queries
 
 type
   TGrammar = record
@@ -151,7 +151,7 @@ function GrammarFor(const AName: string; out AGrammar: TGrammar): Boolean;
 ```
 
 ```pascal
-unit hildegard.helper.command.ast;   // NEW: the shell ask extractor
+unit hildi.command.ast;   // NEW: the shell ask extractor
 
 { Parse a shell command with tree-sitter-bash and return the programs it runs,
   in the same TCommandPlan shape the approval adapter consumes. Fail-safe: on a
@@ -161,13 +161,13 @@ function ParseShellPlan(const ACommand: string): TCommandPlan;
 ```
 
 ```pascal
-unit hildegard.helper.command.tool;   // CHANGED
+unit hildi.command.tool;   // CHANGED
 
 { BuildAsks now sources its plan from ParseShellPlan (was ParseCommand). }
 ```
 
 ```pascal
-unit hildegard.helper.syntax;   // CHANGED (extended)
+unit hildi.syntax;   // CHANGED (extended)
 
 { Unchanged shape. Internally: if GrammarFor(ALanguage) succeeds, spans come
   from the grammar's highlights.scm; else the existing rule-table tokenizer. }
@@ -195,13 +195,13 @@ function HighlightCode(const ACode, ALanguage: string): TSyntaxSpanArray;
 
 ### Prior Art & Reuse
 
-- **`hildegard.helper.command.policy`** — its `TCommandPlan`/`TCommandSegment`
+- **`hildi.command.policy`** — its `TCommandPlan`/`TCommandSegment`
   types and `ParseCommand` are **reused**: the types are the adapter's output,
   and `ParseCommand` is the fail-safe fallback.
-- **`hildegard.helper.approval`** — unchanged; the ask engine is untouched.
-- **`hildegard.helper.syntax`** — its public shape and its hand-rolled tokenizer
+- **`hildi.approval`** — unchanged; the ask engine is untouched.
+- **`hildi.syntax`** — its public shape and its hand-rolled tokenizer
   are reused; the tokenizer stays as the fallback for unvendored languages.
-- **`hildegard.helper.tui.markdownview`** — unchanged; spans in, colours out.
+- **`hildi.tui.markdownview`** — unchanged; spans in, colours out.
 - **Build shape** — mirrors `libsqlite`/`libmbedtls`: a `scripts/fetch-*.sh`, a
   `deps/` tree, a static archive, and a link rule.
 - **Genuine gap:** the runtime binding, the grammar registry, the query runner,

@@ -71,8 +71,8 @@ makes a command cheap rather than merely desirable.
 | Command | Reuse | Effort |
 | --- | --- | --- |
 | `diff` | `DiffText` / `ApplyUnifiedDiff` in `src/changes/changes.text.pas` | **very low** |
-| `yq` | `ParseYaml` / `ToYaml` in `hildegard.helper.yaml` | **very low** |
-| `md5sum` | `Sha256Hex` / `Sha256File` in `hildegard.helper.hash` | trivial |
+| `yq` | `ParseYaml` / `ToYaml` in `hildi.yaml` | **very low** |
+| `md5sum` | `Sha256Hex` / `Sha256File` in `hildi.hash` | trivial |
 | `stat` | `FFs.Info` already returns size, kind, mtime | trivial |
 | `pwd` | `ACall.Cwd` | trivial |
 | `seq`, `rev`, `tac`, `nl` | pure string work over `LinesOf` | trivial |
@@ -85,7 +85,7 @@ today that costs a `perl` or `python3` escalation. It also pairs with
 `patch_apply`.
 
 **Constraint to check first:** `make shell-standalone` builds `src/shell` with
-only `src/shell` on the path. `hildegard.helper.shell.commands` lives in `src/`,
+only `src/shell` on the path. `hildi.shell.commands` lives in `src/`,
 not `src/shell/`, so reaching `changes.text` *should* be legal — but confirm it
 or the isolation gate breaks.
 
@@ -133,7 +133,7 @@ evidence we have is one session's transcript, and it says: `perl`, `python3`,
 
 | Candidate | Why | Effort |
 | --- | --- | --- |
-| `yq` | the parser exists in `hildegard.helper.yaml`; this is plumbing | low |
+| `yq` | the parser exists in `hildi.yaml`; this is plumbing | low |
 | `expr` | arithmetic in a script; otherwise `$(())` or a language | low |
 | `xargs` | the usual companion to `find`; without it a loop is a language | moderate |
 | `strings` | pairs with `od` for inspecting a binary | low |

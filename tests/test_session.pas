@@ -1,5 +1,5 @@
 unit test_session;
-{ fpcunit tests for hildegard.helper.session and the SQLite conversation
+{ fpcunit tests for hildi.session and the SQLite conversation
   adapter: session ids, the history round trip, the turn/request audit, and
   restore. }
 
@@ -9,9 +9,9 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.store, hildegard.helper.session,
-  hildegard.helper.session.store, hildegard.helper.llm, hildegard.helper.agent,
-  hildegard.helper.recall.tool, hildegard.helper.ambient;
+  hildi.store, hildi.session,
+  hildi.session.store, hildi.llm, hildi.agent,
+  hildi.recall.tool, hildi.ambient;
 
 type
   TSessionTest = class(TTestCase)

@@ -2,8 +2,8 @@
 
 **Related Feature:** [MCP_Admin_CLI_FEATURE.md](MCP_Admin_CLI_FEATURE.md)
 
-**Depends on:** `hildegard.helper.mcp.config`, `hildegard.helper.mcp.cli`,
-`hildegard.helper.store`.
+**Depends on:** `hildi.mcp.config`, `hildi.mcp.cli`,
+`hildi.store`.
 
 ## Purpose
 
@@ -53,7 +53,7 @@ reserved: the JSON maps onto `TMcpServerRowArray`, and the store is unchanged.
 ## Contracts & Interfaces
 
 ```pascal
-unit hildegard.helper.mcp.config;   // additions
+unit hildi.mcp.config;   // additions
 
 { Parse the standard `mcpServers` JSON into rows at a scope. Validates each
   entry. False + AError on malformed input; ARows untouched on failure. }
@@ -66,7 +66,7 @@ function FormatMcpServersJson(const ARows: TMcpServerRowArray): string;
 ```
 
 ```pascal
-unit hildegard.helper.mcp.cli;   // additions
+unit hildi.mcp.cli;   // additions
 
 type
   TMcpVerb = (mvList, mvAdd, mvRemove, mvEnable, mvDisable, mvTest,

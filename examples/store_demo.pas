@@ -3,13 +3,13 @@ program store_demo;
   credentials, registers a workspace, starts a session, appends a ledger record,
   lists sessions, and round-trips a setting.
 
-  Run:  make store-demo && ./build/bin/hildegard-helper-store-demo }
+  Run:  make store-demo && ./build/bin/hildi-store-demo }
 
 {$mode delphi}{$H+}
 
 uses
   {$ifdef unix}cthreads,{$endif}   // must come first on Unix
-  SysUtils, hildegard.helper.store, hildegard.helper.session;
+  SysUtils, hildi.store, hildi.session;
 
 var
   Cfg: TStoreConfig;
@@ -29,7 +29,7 @@ begin
 end;
 
 begin
-  Path := IncludeTrailingPathDelimiter(GetTempDir) + 'hildegard_store_demo.db';
+  Path := IncludeTrailingPathDelimiter(GetTempDir) + 'hildi_store_demo.db';
   DeleteFile(Path);
   DeleteFile(Path + '-wal');
   DeleteFile(Path + '-shm');

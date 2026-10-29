@@ -5,7 +5,7 @@
 
 ## Overview
 
-Task breakdown for `hildegard.helper.agent`. Depends on the LLM client
+Task breakdown for `hildi.agent`. Depends on the LLM client
 (`LLM_Client_v1`). Each implementation task starts with a failing test. Work
 directly on `main`.
 
@@ -18,7 +18,7 @@ directly on `main`.
 - [x] **Reuse fakes**: build tool round-trip SSE sequences with
       `tests/llm_fakes.pas` from the client plan
 - [x] **Types**: define the interface-section types from the SPEC in
-      `src/hildegard.helper.agent.pas`
+      `src/hildi.agent.pas`
 
 ### Phase 2: Conversation Store
 
@@ -80,7 +80,7 @@ directly on `main`.
 ### New Files
 
 ```
-src/hildegard.helper.agent.pas
+src/hildi.agent.pas
 tests/test_agent.pas
 examples/agent_cli.pas
 ```
@@ -88,7 +88,7 @@ examples/agent_cli.pas
 ### Modified Files
 
 ```
-tests/hildegard_helper_tests.pas   (add test_agent to uses)
+tests/hildi_tests.pas   (add test_agent to uses)
 Makefile                           (agent-cli target; maybe a real-transport demo)
 docs/features/Agent_Loop/          (SPEC/TODO status)
 docs/features/FEATURES.md          (status)
@@ -134,10 +134,10 @@ end-to-end CLI run against Fireworks, which requires an API key and is done
 manually:
 
 ```sh
-export FIREWORKS_API_KEY=...        # or HILDEGARD_LLM_API_KEY
-export HILDEGARD_LLM_MODEL=accounts/fireworks/models/<model>
+export FIREWORKS_API_KEY=...        # or HILDI_LLM_API_KEY
+export HILDI_LLM_MODEL=accounts/fireworks/models/<model>
 make agent-cli
-./build/bin/hildegard-helper-agent-cli
+./build/bin/hildi-agent-cli
 ```
 
 Ask it for the time to exercise the `get_system_time` tool, then ask a

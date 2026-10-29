@@ -13,7 +13,7 @@ container. Completed; `make check` green.
 
 ### Phase 1: Parser types & helpers
 
-- [x] **Define types** in `src/hildegard.helper.markdown.pas`: `mbTable`,
+- [x] **Define types** in `src/hildi.markdown.pas`: `mbTable`,
       `TMdAlign`, `TMdAlignArray`, `TMdTableRow`, `TMdTableRows`, and the
       `TMdBlock` table fields.
 - [x] **Test**: `TestTableDetected`
@@ -36,7 +36,7 @@ container. Completed; `make check` green.
 
 - [x] **Refactor**: `Combine`/`ConvertSpans` to unit-level functions taking
       `TMdSpanArray`, so the table can share them
-- [x] **Define** `TTableBlock` in `src/hildegard.helper.tui.markdownview.pas`
+- [x] **Define** `TTableBlock` in `src/hildi.tui.markdownview.pas`
 - [x] **Test**: `TestTableRendersGrid` (frame, header, rules, cells)
 - [x] **Test**: `TestTableIsContentWidth` (narrow table is not full width)
 - [x] **Test**: `TestTableCompressesAndWraps` (over-wide table wraps to width)

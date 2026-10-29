@@ -16,7 +16,7 @@ protocol/runtime → TUI.
 - [x] Add `-DSQLITE_ENABLE_FTS5` to `SQLITE_CCFLAGS` in the Makefile; rebuild
       `libsqlite3.a`; assert `messages_fts` can be created (a smoke test).
 
-### Phase 1: Store — checkpoints (`hildegard.helper.store`)
+### Phase 1: Store — checkpoints (`hildi.store`)
 
 - [x] **Test**: `TestSaveCheckpointAtHwm`, `TestLatestCheckpoint`,
       `TestListCheckpoints` in `tests/test_store.pas` — red.
@@ -125,7 +125,7 @@ from the normal turn path — the exact things the out-of-band call lacked.
   `ekCheckpointReady`/`ekCheckpointCommitted`, `THarnessSession.DraftCheckpoint`,
   the runtime's `HandleCheckpoint`/`HandleCheckpointCommit`, and
   `TCommandPalette`'s draft handling.
-- **Loop prompt role** (`hildegard.helper.agent` ~line 1262): allow the turn's
+- **Loop prompt role** (`hildi.agent` ~line 1262): allow the turn's
   user prompt to be appended as **`mrAmbient`** (a flag on the loop or a
   checkpoint-turn marker), so the prompt is an ambient block.
 - **Runtime**: on `teDone` for a checkpoint turn, `SaveCheckpoint(session,
@@ -151,8 +151,8 @@ SPEC's "The handoff" and the FEATURE decision (2026-10-12).
 
 - [x] **Test**: `tests/test_handoff.pas` — the wrapper, the escaping, and the
       instruction block (orientation, not authority).
-- [x] **Implement**: `hildegard.helper.handoff` (`FormatHandoff`,
-      `HandoffInstructions`), beside `hildegard.helper.ambient`.
+- [x] **Implement**: `hildi.handoff` (`FormatHandoff`,
+      `HandoffInstructions`), beside `hildi.ambient`.
 - [x] **Test**: `TestResumeFromCheckpointShrinksContext` — after a checkpoint the
       window is `[system] + [handoff (crUser)]`, carrying the summary.
 - [x] **Implement**: `Compose` emits a `crUser` handoff; dropped
@@ -160,7 +160,7 @@ SPEC's "The handoff" and the FEATURE decision (2026-10-12).
 - [x] **Implement**: expanded `CheckpointInstruction` — a handoff document (not a
       specification) with a **Grounding** section (documents/files/resources +
       why), domain-neutral.
-- [x] **Implement**: a distinct `ckHandoff` kind in `hildegard.helper.tui.chat`,
+- [x] **Implement**: a distinct `ckHandoff` kind in `hildi.tui.chat`,
       wired through every branch (box, inset, markdown body, caret, compact
       clamp, toggle). It draws identically to `ckAmbient` today, but the
       presentation seam (the border selection in `Render`) is its own, so a
@@ -197,14 +197,14 @@ checkpoint"). The conversation sibling of Workspace Snapshots' undo/redo.
 
 ```
 Makefile                                  (-DSQLITE_ENABLE_FTS5)
-src/hildegard.helper.store.pas            (checkpoints, window, FTS)
-src/hildegard.helper.session.protocol.pas (checkpoint verbs/events)
-src/hildegard.helper.session.runtime.pas  (checkpoint handling)
-src/hildegard.helper.harness.session.pas  (DraftCheckpoint; CheckpointInstruction)
-src/hildegard.helper.session.store.pas    (Compose: the handoff)
-src/hildegard.helper.handoff.pas          (the handoff wrapper - NEW)
-src/hildegard.helper.recall.tool.pas      (FTS recall)
-src/hildegard.helper.tui.*                (checkpoint UX, boundary, nudge)
+src/hildi.store.pas            (checkpoints, window, FTS)
+src/hildi.session.protocol.pas (checkpoint verbs/events)
+src/hildi.session.runtime.pas  (checkpoint handling)
+src/hildi.harness.session.pas  (DraftCheckpoint; CheckpointInstruction)
+src/hildi.session.store.pas    (Compose: the handoff)
+src/hildi.handoff.pas          (the handoff wrapper - NEW)
+src/hildi.recall.tool.pas      (FTS recall)
+src/hildi.tui.*                (checkpoint UX, boundary, nudge)
 tests/test_store.pas, test_session_runtime.pas, test_recall_tool.pas
 tests/test_handoff.pas                    (the wrapper - NEW)
 tests/test_session.pas                    (resume composition)

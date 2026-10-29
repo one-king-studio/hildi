@@ -1,5 +1,5 @@
 unit test_session_protocol;
-{ fpcunit tests for hildegard.helper.session.protocol: the pure NDJSON codec.
+{ fpcunit tests for hildi.session.protocol: the pure NDJSON codec.
   Every message type and event kind must round-trip; malformed, unknown, and
   oversize lines must be rejected. No socket is involved. }
 
@@ -9,8 +9,8 @@ interface
 
 uses
   SysUtils, fpcunit, testregistry,
-  hildegard.helper.approval, hildegard.helper.llm,
-  hildegard.helper.session.protocol;
+  hildi.approval, hildi.llm,
+  hildi.session.protocol;
 
 type
   TSessionProtocolTest = class(TTestCase)

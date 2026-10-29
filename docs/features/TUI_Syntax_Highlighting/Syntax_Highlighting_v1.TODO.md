@@ -5,7 +5,7 @@
 
 ## Overview
 
-A pure tokenizer (`hildegard.helper.syntax`) turns fenced code into spans of
+A pure tokenizer (`hildi.syntax`) turns fenced code into spans of
 token kinds; the markdown theme gains code-token roles; the view maps kinds to
 attributes and draws them in the existing code box. TDD-first; update tasks in
 real time. Landing order: Pascal and shell first, then Python/JSON/SQL.
@@ -15,8 +15,8 @@ real time. Landing order: Pascal and shell first, then Python/JSON/SQL.
 ### Phase 1: Tokenizer core
 
 - [ ] **Add the test unit** to the `uses` clause of
-      `tests/hildegard_helper_tests.pas`
-- [ ] **Define types** in `src/hildegard.helper.syntax.pas`: `TSynToken`,
+      `tests/hildi_tests.pas`
+- [ ] **Define types** in `src/hildi.syntax.pas`: `TSynToken`,
       `TSynTokenSpan`, `TSynDelim`, `TSynLang`, and the `HighlightCode` /
       `SynLanguage` / `SynLanguageKnown` signatures
 - [ ] **Test**: `TestPlainWhenLanguageUnknown`, `TestSpansCoverInputExactly`
@@ -74,7 +74,7 @@ real time. Landing order: Pascal and shell first, then Python/JSON/SQL.
 ### New Files
 
 ```
-src/hildegard.helper.syntax.pas
+src/hildi.syntax.pas
 tests/test_syntax.pas
 ```
 
@@ -82,8 +82,8 @@ tests/test_syntax.pas
 
 ```
 src/tui/widgets/tui.widgets.mdtheme.pas   (Code* roles + CodeTokenAttr)
-src/hildegard.helper.tui.markdownview.pas  (highlight the fence)
-tests/hildegard_helper_tests.pas           (add the test unit)
+src/hildi.tui.markdownview.pas  (highlight the fence)
+tests/hildi_tests.pas           (add the test unit)
 tests/test_markdown.pas                    (theme mapping)
 tests/test_markdownview.pas                (fence rendering)
 docs/design/tui_design_language.html       (palette preview)

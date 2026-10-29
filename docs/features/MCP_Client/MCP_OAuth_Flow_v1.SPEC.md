@@ -2,8 +2,8 @@
 
 **Related Feature:** [MCP_OAuth_FEATURE.md](MCP_OAuth_FEATURE.md)
 
-**Depends on:** `MCP_OAuth_Discovery_v1.SPEC.md`, `hildegard.helper.store`,
-`hildegard.helper.mcp.http`.
+**Depends on:** `MCP_OAuth_Discovery_v1.SPEC.md`, `hildi.store`,
+`hildi.mcp.http`.
 
 ## Purpose
 
@@ -42,7 +42,7 @@ valid bearer token to the HTTP transport (refreshing when needed).
 ## Contracts & Interfaces
 
 ```pascal
-unit hildegard.helper.mcp.oauth.flow;
+unit hildi.mcp.oauth.flow;
 
 type
   TOAuthBrowser = procedure(const AUrl: string) of object;
@@ -67,7 +67,7 @@ type
   end;
 ```
 
-Store additions (`hildegard.helper.store`, migration **v5**):
+Store additions (`hildi.store`, migration **v5**):
 
 ```pascal
 type

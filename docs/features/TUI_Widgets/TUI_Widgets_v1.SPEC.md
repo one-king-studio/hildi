@@ -28,7 +28,7 @@ and composes with the existing grid, scroll, and modal machinery.
 
 ## Contracts & Interfaces
 
-### Theme — `hildegard.helper.tui.theme`
+### Theme — `hildi.tui.theme`
 
 ```pascal
 type
@@ -41,7 +41,7 @@ function DarkTheme: TTheme;
 function LightTheme: TTheme;
 ```
 
-### Single child and panel — `hildegard.helper.tui.panel`
+### Single child and panel — `hildi.tui.panel`
 
 ```pascal
 type
@@ -82,7 +82,7 @@ type
 
 `DefaultBoxStyle` = `(Border: True; Title: ''; Padding: 1)`.
 
-### Focus — `hildegard.helper.tui.focus`
+### Focus — `hildi.tui.focus`
 
 ```pascal
 type
@@ -115,7 +115,7 @@ Routing rules:
   behaviour).
 - With no focusable focused, the first focusable takes focus when a key arrives.
 
-### Button — `hildegard.helper.tui.button`
+### Button — `hildi.tui.button`
 
 ```pascal
 type
@@ -134,7 +134,7 @@ type
 Renders `[ caption ]`; when focused, the caption uses the theme's focus accent
 (reverse). `Enter` or `Space` while focused, or a left click, fires `OnClick`.
 
-### List — `hildegard.helper.tui.list`
+### List — `hildi.tui.list`
 
 ```pascal
 type

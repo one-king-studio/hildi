@@ -75,7 +75,7 @@ therefore starts by making the claim true.
 
 ### Non-Functional Requirements
 
-- [ ] Reuse the TLS stack (`hildegard.helper.tls`) for HTTPS — no new dependency.
+- [ ] Reuse the TLS stack (`hildi.tls`) for HTTPS — no new dependency.
 - [ ] Requests are bounded by the configured call/list timeouts.
 - [ ] `make check` green; leak-clean.
 
@@ -84,7 +84,7 @@ therefore starts by making the claim true.
 ### Technical
 
 - FPC 3.3.1, `{$mode delphi}`; reuse `TJsonRpcCodec`, `TMcpClient`,
-  `TMcpManager`, `TMcpProvider`, and `hildegard.helper.tls`/`fphttpclient`.
+  `TMcpManager`, `TMcpProvider`, and `hildi.tls`/`fphttpclient`.
 - POSIX (macOS/Linux); no dependency.
 
 ### Business / Time
@@ -95,8 +95,8 @@ therefore starts by making the claim true.
 
 ### Internal
 
-- `hildegard.helper.mcp.client`, `.config`, `.stdio.child`, `hildegard.helper.tls`.
-- `hildegard.helper.store` (the transport-kind column).
+- `hildi.mcp.client`, `.config`, `.stdio.child`, `hildi.tls`.
+- `hildi.store` (the transport-kind column).
 
 ### External
 

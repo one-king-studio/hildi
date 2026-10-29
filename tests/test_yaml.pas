@@ -1,5 +1,5 @@
 unit test_yaml;
-{ fpcunit tests for hildegard.helper.yaml: the minimal YAML subset - mappings,
+{ fpcunit tests for hildi.yaml: the minimal YAML subset - mappings,
   nested mappings, sequences, scalars - and the out-of-subset errors. }
 
 {$mode delphi}{$H+}
@@ -7,7 +7,7 @@ unit test_yaml;
 interface
 
 uses
-  SysUtils, fpcunit, testregistry, fpjson, hildegard.helper.yaml;
+  SysUtils, fpcunit, testregistry, fpjson, hildi.yaml;
 
 type
   TYamlTest = class(TTestCase)

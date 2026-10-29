@@ -56,7 +56,7 @@ for the default path.
   and a **gate** consulted before every handler belong to the consumer. A
   handler cannot be reached around the policy.
 - **Standalone and publishable.** `src/shell/` with `shell.*` units, no
-  `hildegard.helper.*` dependency, an isolation test over the `uses` closure, and
+  `hildi.*` dependency, an isolation test over the `uses` closure, and
   a `make shell-standalone` smoke.
 - **Fail-safe.** A parse error is a first-class outcome: the caller gets the
   error and its position. The consumer decides the conservative path (today's
@@ -122,7 +122,7 @@ for the default path.
 ### Non-Functional
 
 - [ ] **Standalone**: the library's transitive `uses` closure contains no
-      `hildegard.helper.*`, TUI, store, or network unit (asserted by a test).
+      `hildi.*`, TUI, store, or network unit (asserted by a test).
 - [ ] **No regex, no backtracking**: a hand-written lexer and recursive descent
       with bounded lookahead.
 - [ ] **Deterministic**: the same script and registry produce the same output,

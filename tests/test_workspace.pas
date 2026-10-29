@@ -1,5 +1,5 @@
 unit test_workspace;
-{ fpcunit tests for hildegard.helper.workspace. Pure path logic plus a store
+{ fpcunit tests for hildi.workspace. Pure path logic plus a store
   round trip against a temporary database. }
 
 {$mode delphi}{$H+}
@@ -9,7 +9,7 @@ interface
 uses
   Classes, SysUtils, fpcunit, testregistry,
   {$ifdef unix}BaseUnix,{$endif}
-  hildegard.helper.store, hildegard.helper.workspace;
+  hildi.store, hildi.workspace;
 
 {$ifdef unix}
 function c_symlink(ATarget, ALinkPath: PAnsiChar): cint; cdecl;

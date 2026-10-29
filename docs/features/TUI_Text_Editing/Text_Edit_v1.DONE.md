@@ -7,19 +7,19 @@
 ## Phase 1 - Shared grapheme helpers
 
 - [x] **1.1** `tests/test_tui_grapheme.pas`, registered in
-      `tests/hildegard_helper_tests.pas`.
-- [x] **1.2** `src/hildegard.helper.tui.grapheme.pas` with `Clusters`,
+      `tests/hildi_tests.pas`.
+- [x] **1.2** `src/hildi.tui.grapheme.pas` with `Clusters`,
       `ClusterWidth`, `StringWidth`, and `ClusterStarts`.
-- [x] **1.3** Adopted in `hildegard.helper.tui.text.pas` and
-      `hildegard.helper.tui.prompt.pas`; their local copies are gone.
-- [x] **1.4** Adopted in `hildegard.helper.tui.encoder.pas` (it keeps a local
+- [x] **1.3** Adopted in `hildi.tui.text.pas` and
+      `hildi.tui.prompt.pas`; their local copies are gone.
+- [x] **1.4** Adopted in `hildi.tui.encoder.pas` (it keeps a local
       wrapper only because an empty cell still advances the cursor by one).
 - [x] **1.5** `make check` green; the text/prompt/encoder suites pass unchanged.
 
 ## Phase 2 - Buffer and caret
 
 - [x] **2.1** Editing tests in `tests/test_tui_edit.pas`.
-- [x] **2.2** `src/hildegard.helper.tui.edit.pas` with the buffer, caret, and
+- [x] **2.2** `src/hildi.tui.edit.pas` with the buffer, caret, and
       editing operations.
 
 ## Phase 3 - Layout and navigation

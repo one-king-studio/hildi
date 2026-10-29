@@ -232,11 +232,11 @@ state      the manifest reports loaded/unloaded, so the model knows to reload
 
 - `docs/features/Turn_Injection/FEATURE.md` — the contributor seam
   (`Prepare`/`Specs`/`PromptFragment`/`Find`) skills plug into.
-- `hildegard.helper.agent` — `IToolProvider`, `TToolRegistry`, `BuildRequest`
+- `hildi.agent` — `IToolProvider`, `TToolRegistry`, `BuildRequest`
   (where a `PromptFragment` is injected), the tool-call budget, the turn boundary.
-- `hildegard.helper.harness.session` — where contributors are registered.
-- `hildegard.helper.tui.clock` — `MonotonicMs` for the decay timer.
-- `hildegard.helper.store` — the ledger, which must not see the manifest.
+- `hildi.harness.session` — where contributors are registered.
+- `hildi.tui.clock` — `MonotonicMs` for the decay timer.
+- `hildi.store` — the ledger, which must not see the manifest.
 - `docs/features/Lazy_MCP/FEATURE.md` — the first provider.
 
 ### External

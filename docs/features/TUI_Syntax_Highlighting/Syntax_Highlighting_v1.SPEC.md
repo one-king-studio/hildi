@@ -23,7 +23,7 @@ SynEdit's highlighters, not their code (see Prior Art).
 
 ### Functional
 
-**Tokenizer** (`hildegard.helper.syntax`)
+**Tokenizer** (`hildi.syntax`)
 
 - [ ] `HighlightCode(text, language)` returns spans of `TSynToken` kinds,
       covering the input exactly once and in order.
@@ -57,7 +57,7 @@ SynEdit's highlighters, not their code (see Prior Art).
 - [ ] `CodeTokenAttr(token, theme)` returns the role's foreground on the code
       box's sunken background (never `sfScreenBg`), so the surface survives.
 
-**View** (`hildegard.helper.tui.markdownview`)
+**View** (`hildi.tui.markdownview`)
 
 - [ ] `MakeBlock` for `mbCodeFence` runs `HighlightCode` on the fence text with
       the fence language and maps each token span to a `TSpan`, built once when
@@ -78,7 +78,7 @@ SynEdit's highlighters, not their code (see Prior Art).
 ### Public API
 
 ```pascal
-unit hildegard.helper.syntax;
+unit hildi.syntax;
 
 type
   { A lexical token kind. The role a code fragment plays, not its semantics. }
@@ -185,7 +185,7 @@ function CodeTokenAttr(const AToken: TSynToken;
   mid-document; our blocks are immutable and scanned once. The
   attribute-modifier/priority merge — unneeded against a fixed palette.
 - **Reuse `tui.widgets.mdtheme.TMdTheme`** for the roles and
-  `hildegard.helper.tui.text.TTextBlock` for drawing; the tokenizer feeds the
+  `hildi.tui.text.TTextBlock` for drawing; the tokenizer feeds the
   existing span pipeline and adds no renderer.
 - **Reuse the RTL** (`SysUtils`, `UnicodeString`, a sorted `TStringList` for the
   keyword/builtin lookup). No regex engine: the markdown parser already refuses

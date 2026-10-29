@@ -1,5 +1,5 @@
 unit test_script;
-{ fpcunit tests for hildegard.helper.script: the facade over the vendored
+{ fpcunit tests for hildi.script: the facade over the vendored
   GocciaScript engine. Pure-compute, console capture, error mapping, the
   injected async tools object, the limits, and the excluded tools. }
 
@@ -9,7 +9,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.script;
+  hildi.llm, hildi.agent, hildi.script;
 
 type
   { Records each injected call; Allow toggles fulfilment vs rejection. }

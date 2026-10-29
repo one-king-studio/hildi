@@ -7,7 +7,7 @@ unit llm_fakes;
 interface
 
 uses
-  Classes, SysUtils, Generics.Collections, fpjson, hildegard.helper.llm;
+  Classes, SysUtils, Generics.Collections, fpjson, hildi.llm;
 
 type
   { Replays canned SSE chunks to the client. Either a flat chunk list reused for

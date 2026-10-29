@@ -296,12 +296,12 @@ The knowledge base is the operator's too, not only the agents':
 
 ### Internal
 
-- `hildegard.helper.store` — the board tables and their migration; the FTS5 index.
-- `hildegard.helper.agent` — the prompt-queue seam (`pkBoard`) and the tail block.
-- `hildegard.helper.wrap` — `FormatTail` carries the TOC.
-- `hildegard.helper.approval` — the moderation ask.
-- `hildegard.helper.session.runtime` — the tick that drains notices.
-- `hildegard.helper.workspace.changes` — the path history the staleness rule reads.
+- `hildi.store` — the board tables and their migration; the FTS5 index.
+- `hildi.agent` — the prompt-queue seam (`pkBoard`) and the tail block.
+- `hildi.wrap` — `FormatTail` carries the TOC.
+- `hildi.approval` — the moderation ask.
+- `hildi.session.runtime` — the tick that drains notices.
+- `hildi.workspace.changes` — the path history the staleness rule reads.
 
 ### External
 

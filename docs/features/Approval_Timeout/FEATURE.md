@@ -33,14 +33,14 @@ decision.
 
 ## Implementation
 
-- `hildegard.helper.approval` — `TApprovalChoice.TimedOut`; the denial reason
+- `hildi.approval` — `TApprovalChoice.TimedOut`; the denial reason
   distinguishes a timeout from an operator denial.
-- `hildegard.helper.harness.turn` — `TApprovalGate.Ask` sets `TimedOut` on a wait
+- `hildi.harness.turn` — `TApprovalGate.Ask` sets `TimedOut` on a wait
   timeout (a `WaitFor` that returned `wrTimeout`).
-- `hildegard.helper.harness.view` — `THarnessSessionConfig.ApprovalTimeoutMs`
+- `hildi.harness.view` — `THarnessSessionConfig.ApprovalTimeoutMs`
   (0 => wait indefinitely).
-- `hildegard.helper.harness.session` — the gate uses the configured timeout.
-- `hildegard.helper.session.runtime` — sets `ApprovalTimeoutMs := 0`: the runtime
+- `hildi.harness.session` — the gate uses the configured timeout.
+- `hildi.session.runtime` — sets `ApprovalTimeoutMs := 0`: the runtime
   serves connected clients, which own the timeout.
 
 ## Acceptance Criteria

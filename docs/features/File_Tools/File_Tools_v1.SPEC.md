@@ -30,7 +30,7 @@ resolves an approval ask before acting, and reports failures as `False` +
 
 ## Contracts & Interfaces
 
-Unit: `hildegard.helper.files`.
+Unit: `hildi.files`.
 
 ```pascal
 type
@@ -105,12 +105,12 @@ performs no I/O.
 
 ### Prior Art & Reuse
 
-- `hildegard.helper.command.tool` (`TCommandTool`) - the gated-tool pattern:
+- `hildi.command.tool` (`TCommandTool`) - the gated-tool pattern:
   parse args, resolve approval, act, return text. The ask/option shape is reused
   verbatim so the CLI/TUI approval UI already understands it.
-- `hildegard.helper.approval` - `IApprovalService.Resolve`,
+- `hildi.approval` - `IApprovalService.Resolve`,
   `TApprovalBatchResult`, `TApprovalAsk`, `TApprovalOption`, `DefaultApprovalRule`.
-- `hildegard.helper.workspace` - `TWorkspace.Resolve`/`Contains` for the trust
+- `hildi.workspace` - `TWorkspace.Resolve`/`Contains` for the trust
   boundary (the same one the shell tool uses).
 - RTL: `SysUtils` (`FindFirst`/`FindNext`, `ForceDirectories`, `FileExists`,
   `DirectoryExists`), `Classes` (`TStringList`, `TFileStream`), `fpjson`.

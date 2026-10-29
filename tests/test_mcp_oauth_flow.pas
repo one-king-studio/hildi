@@ -1,5 +1,5 @@
 unit test_mcp_oauth_flow;
-{ fpcunit tests for hildegard.helper.mcp.oauth.flow. The pure parts
+{ fpcunit tests for hildi.mcp.oauth.flow. The pure parts
   (token-response parsing, URL decoding) here; the full flow is exercised
   against a fake authorization server in a separate, network-bound test. }
 
@@ -8,7 +8,7 @@ unit test_mcp_oauth_flow;
 interface
 
 uses
-  SysUtils, fpcunit, testregistry, hildegard.helper.mcp.oauth.flow;
+  SysUtils, fpcunit, testregistry, hildi.mcp.oauth.flow;
 
 type
   TMcpOAuthFlowTest = class(TTestCase)

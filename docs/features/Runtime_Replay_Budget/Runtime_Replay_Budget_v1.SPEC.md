@@ -2,8 +2,8 @@
 
 **Related Feature:** [FEATURE.md](FEATURE.md)
 
-**Depends on:** `hildegard.helper.session.runtime` (the replay buffer and
-`Broadcast`), `hildegard.helper.session.protocol` (`ekGap`, `TSessionEvent`).
+**Depends on:** `hildi.session.runtime` (the replay buffer and
+`Broadcast`), `hildi.session.protocol` (`ekGap`, `TSessionEvent`).
 
 ## Purpose
 
@@ -47,7 +47,7 @@ turn boundary.
 ## Contracts & Interfaces
 
 ```pascal
-{ hildegard.helper.session.runtime }
+{ hildi.session.runtime }
 const
   DefaultMaxReplayEvents = 4096;
 

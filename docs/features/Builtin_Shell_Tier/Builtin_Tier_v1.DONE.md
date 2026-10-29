@@ -18,7 +18,7 @@ dispatch, and an `ICommandExecutor` that prefers the tier. Spec-driven, TDD,
 
 ### Phase 0: The workspace filesystem
 
-- [x] **Create** `src/hildegard.helper.shell.fs.pas` with `TWorkspaceShellFs`:
+- [x] **Create** `src/hildi.shell.fs.pas` with `TWorkspaceShellFs`:
       `Resolve`, `ReadFile`, `WriteFile`, `ListDir`, `Stat`, `Delete`, `Move`,
       `Copy`, `MakeDir`, `Touch`.
 - [x] **Test**: read/write/append/list/stat; every op refuses an outside path;
@@ -27,7 +27,7 @@ dispatch, and an `ICommandExecutor` that prefers the tier. Spec-driven, TDD,
 
 ### Phase 1: The commands
 
-- [x] **Create** `src/hildegard.helper.shell.commands.pas` with
+- [x] **Create** `src/hildi.shell.commands.pas` with
       `TBuiltinCommands` and the command table from the SPEC.
 - [x] **Test**: each command's output and status for the common and the error
       case; combined short flags; `--`; an unknown option; `grep`'s regex
@@ -35,7 +35,7 @@ dispatch, and an `ICommandExecutor` that prefers the tier. Spec-driven, TDD,
 
 ### Phase 2: The tier
 
-- [x] **Create** `src/hildegard.helper.shell.tier.pas` with `TBuiltinShell`:
+- [x] **Create** `src/hildi.shell.tier.pas` with `TBuiltinShell`:
       the pre-flight (parse, names, literal options), the gate (ask construction
       + `IApprovalService.Resolve`), the run, and tool dispatch.
 - [x] **Test**: a supported script runs; an unregistered name declines; an
@@ -48,9 +48,9 @@ dispatch, and an `ICommandExecutor` that prefers the tier. Spec-driven, TDD,
 
 - [x] **Change** `ICommandExecutor.Execute` to take `const AReason: string`;
       update `TProcessCommandExecutor` and `TCommandTool.Run`.
-- [x] **Create** `src/hildegard.helper.shell.executor.pas` with
+- [x] **Create** `src/hildi.shell.executor.pas` with
       `TBuiltinCommandExecutor` (tier first, process fallback).
-- [x] **Wire** `hildegard.helper.harness.session`: build the tier config from
+- [x] **Wire** `hildi.harness.session`: build the tier config from
       the workspace root, the allow-list, and the session's tool resolution.
 - [x] **Test**: the executor uses the tier when supported (fallback not called)
       and falls back when not; reasons pass through; execution fields.
@@ -71,18 +71,18 @@ dispatch, and an `ICommandExecutor` that prefers the tier. Spec-driven, TDD,
 ## Files to Create/Modify
 
 ```
-src/hildegard.helper.shell.fs.pas
-src/hildegard.helper.shell.commands.pas
-src/hildegard.helper.shell.tier.pas
-src/hildegard.helper.shell.executor.pas
-src/hildegard.helper.command.tool.pas      (the reason on the executor seam)
-src/hildegard.helper.harness.session.pas   (wiring)
+src/hildi.shell.fs.pas
+src/hildi.shell.commands.pas
+src/hildi.shell.tier.pas
+src/hildi.shell.executor.pas
+src/hildi.command.tool.pas      (the reason on the executor seam)
+src/hildi.harness.session.pas   (wiring)
 tests/test_shell_harness_fs.pas
 tests/test_shell_commands.pas
 tests/test_shell_tier.pas
 tests/test_shell_executor.pas
 tests/data/shell_commands_differential.txt
-tests/hildegard_helper_tests.pas
+tests/hildi_tests.pas
 docs/features/FEATURES.md
 ```
 
@@ -106,7 +106,7 @@ docs/features/FEATURES.md
   `/bin/bash` fallback second).
 - **Wiring**: the session builds the tier from the workspace root with an
   allow-list (`file_read`, `file_list`, `file_glob`, `file_grep`, `file_stat`,
-  `mcp_*`); `HILDEGARD_BUILTIN_SHELL=0` disables it.
+  `mcp_*`); `HILDI_BUILTIN_SHELL=0` disables it.
 - **The gate**: the same `run_command:<bin>` refs and option shapes, the model's
   reason inherited, one ask per command, and `OwnsApproval` keeps the splitter's
   asks out of the builtin path.

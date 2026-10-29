@@ -119,7 +119,7 @@ wrapper exists. Three consequences:
   the conversation's **context usage** (tokens) and **limit** (the model's max),
   so the model can see its own headroom and manage the thread — instead of
   discovering it hit the ceiling. Sourced from the loop's context guard
-  (`HILDEGARD_MAX_CONTEXT_TOKENS`, already tracked for the status bar's gauge).
+  (`HILDI_MAX_CONTEXT_TOKENS`, already tracked for the status bar's gauge).
 - **Nothing is persisted.** Both the wrapper and the guard are request-only; the
   stored record stays plain.
 
@@ -142,7 +142,7 @@ The shape:
   (`formatCurrentMessage`, `formatPastMessage`, `formatSystemEventMessage`).
   Checkout path is machine-local: see `LOCAL_NOTES.md`.
 - **The existing vocabulary is already ours:** `FormatAmbient`
-  (`hildegard.helper.ambient`) uses `<message>` + `<instructions>`, and escaping
+  (`hildi.ambient`) uses `<message>` + `<instructions>`, and escaping
   helpers exist. The user-message wrapper reuses that shape.
 - **Related:** `docs/issues/session-memory-retention.md` (the same composition
   path; independent).

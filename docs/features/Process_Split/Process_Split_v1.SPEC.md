@@ -16,12 +16,12 @@ client and the default tools it never uses.
 
 ### Functional
 
-- [ ] A `hildegard-helper-agent` program runs `RunSessionRuntime` and links no
+- [ ] A `hildi-agent` program runs `RunSessionRuntime` and links no
       TUI unit.
-- [ ] A `hildegard-helper-tui` program drives a runtime and links no `agent`,
+- [ ] A `hildi` program drives a runtime and links no `agent`,
       `harness.session` (the loop), `harness.turn.worker`, `command.tool`,
       `files`, `recall.tool`, `session.store`, or `session.runtime` unit.
-- [ ] The TUI spawns the headless binary located by `HILDEGARD_RUNTIME_BIN`, else
+- [ ] The TUI spawns the headless binary located by `HILDI_RUNTIME_BIN`, else
       a sibling of the TUI executable; a missing binary is a clear error.
 - [ ] `agent_cli` is a client: it uses `session.client` and no longer hosts the
       runtime.
@@ -62,7 +62,7 @@ client and the default tools it never uses.
                         └───────────────────────────┘
 ```
 
-### `hildegard.helper.session.socket` (new)
+### `hildi.session.socket` (new)
 
 Transport primitives shared by the client and the server. Uses only
 `Classes, SysUtils, BaseUnix, Sockets` — no protocol, no agent.
@@ -78,7 +78,7 @@ The low-level helpers currently private to `session.runtime` (`MakeUnixAddr`,
 `WaitReadable`, `SetNonBlocking`, `SetNoSigPipe`, `NowMs`, `ShellQuote`) move
 here as unit-level declarations so both halves share one implementation.
 
-### `hildegard.helper.session.client` (new)
+### `hildi.session.client` (new)
 
 The wire client. Uses `session.socket` and `session.protocol`.
 
@@ -89,9 +89,9 @@ type
   TSessionClient = class ... end;            // unchanged, moves here
 
 const
-  DefaultRuntimeBinary = 'hildegard-helper-agent';
+  DefaultRuntimeBinary = 'hildi-agent';
 
-{ The runtime binary to spawn: AExplicit (from HILDEGARD_RUNTIME_BIN) when it
+{ The runtime binary to spawn: AExplicit (from HILDI_RUNTIME_BIN) when it
   names a file, else a sibling of AExecutable named DefaultRuntimeBinary. ''
   when neither exists, so the caller can fail with a clear message. }
 function ResolveRuntimeBinary(const AExplicit, AExecutable: string): string;
@@ -100,7 +100,7 @@ function ResolveRuntimeBinary(const AExplicit, AExecutable: string): string;
 `SpawnDetached` and the connect-or-spawn loop move here; the client owns
 spawning the server.
 
-### `hildegard.helper.session.runtime` (trimmed)
+### `hildi.session.runtime` (trimmed)
 
 The server. Uses `session.socket`, `session.protocol`, `harness.session`,
 `harness.turn`, `harness.turn.worker`.
@@ -114,20 +114,20 @@ function RunSessionRuntime(const AArgs: array of string): Integer;
 
 `TSessionClient`, `ISessionSink`, and the transport helpers leave this unit.
 
-### `hildegard.helper.harness.turn` (trimmed to types) and `.worker` (new)
+### `hildi.harness.turn` (trimmed to types) and `.worker` (new)
 
 `harness.turn` keeps the pure thread-boundary types and drops `agent` from its
 `uses`; the worker, which needs `TAgentLoop`, moves out.
 
 ```pascal
-{ hildegard.helper.harness.turn — uses llm, approval only. }
+{ hildi.harness.turn — uses llm, approval only. }
 type
   TTurnEventKind = (...);   // unchanged
   TTurnEvent = record ... end;
   TTurnQueue = class ... end;
   TApprovalGate = class ... end;
 
-{ hildegard.helper.harness.turn.worker — uses harness.turn, agent, llm. }
+{ hildi.harness.turn.worker — uses harness.turn, agent, llm. }
 type
   TTurnWorker = class(TThread) ... end;
 ```
@@ -135,7 +135,7 @@ type
 Keeping the types in `harness.turn` means existing `uses harness.turn` call
 sites are unchanged.
 
-### `hildegard.helper.harness.view` (new)
+### `hildi.harness.view` (new)
 
 The client-side session handle: workspace, store, identity, history, metrics. No
 loop, no LLM client, no tools. Uses `llm, workspace, store, session`.
@@ -176,7 +176,7 @@ type
 `NoLoop` is deleted from the config: the view never builds a loop, and
 `THarnessSession` always does.
 
-### `hildegard.helper.harness.session` (trimmed)
+### `hildi.harness.session` (trimmed)
 
 The loop side, used only by the runtime. Owns a `TSessionView`; exposes the loop
 seam. Uses `harness.view`, `harness.turn`, `harness.turn.worker`, `agent`, `llm`,
@@ -202,7 +202,7 @@ type
 The runtime reaches the view through `FSession.View` (`View.Store`,
 `View.SessionId`, `View.LastTurn`).
 
-### `hildegard.helper.harness.driver` (trimmed) and `.local` (new)
+### `hildi.harness.driver` (trimmed) and `.local` (new)
 
 ```pascal
 { harness.driver — uses harness.turn, session.client, approval. }
@@ -216,7 +216,7 @@ function RemoteDriver(const AConfig: TSessionClientConfig;
 function LocalDriver(ASession: THarnessSession): ISessionDriver;
 ```
 
-### `hildegard.helper.harness.app` (trimmed)
+### `hildi.harness.app` (trimmed)
 
 The app takes a `TSessionView` and an `ISessionDriver`; it no longer uses
 `harness.session`. Its `agent`/`llm` uses are dropped if unused (verify).
@@ -231,14 +231,14 @@ constructor THarnessApp.Create(ASurface: ISurface; AInput: IInputSource;
 
 ```pascal
 { examples/headless_agent.pas — the headless agent. }
-uses cthreads, cwstring, SysUtils, hildegard.helper.session.runtime;
+uses cthreads, cwstring, SysUtils, hildi.session.runtime;
 begin
   Halt(RunSessionRuntime(Args));
 end.
 
 { examples/tui_agent.pas — drops session.runtime and the --session-runtime
   dispatch; sets ClientCfg.RuntimeCommand := ResolveRuntimeBinary(
-    GetEnvironmentVariable('HILDEGARD_RUNTIME_BIN'), ParamStr(0)); }
+    GetEnvironmentVariable('HILDI_RUNTIME_BIN'), ParamStr(0)); }
 ```
 
 ## Architecture

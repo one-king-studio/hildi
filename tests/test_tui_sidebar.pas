@@ -12,7 +12,7 @@ uses
   tui.base, tui.surface,
   tui.input, tui.theme,
   tui.widget,
-  hildegard.helper.harness.subagent, tui.widgets.sidebar;
+  hildi.harness.subagent, tui.widgets.sidebar;
 
 type
   TSelectRecorder = class

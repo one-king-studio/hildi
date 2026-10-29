@@ -11,7 +11,7 @@ program demo_harness;
 uses
   {$ifdef unix}cthreads,{$endif}   // must come first on Unix
   SysUtils, Classes, SyncObjs, Generics.Collections,
-  hildegard.helper.process, hildegard.helper.pool;
+  hildi.process, hildi.pool;
 
 type
   { Thread-safe console reporter. TAgentPool calls OnOutput from worker threads,

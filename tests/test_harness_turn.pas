@@ -1,5 +1,5 @@
 unit test_harness_turn;
-{ fpcunit tests for hildegard.helper.harness.turn: the thread-safe event queue,
+{ fpcunit tests for hildi.harness.turn: the thread-safe event queue,
   the approval gate that bridges the worker to the UI, and the turn worker that
   maps agent callbacks to turn events. Uses the fake LLM transport; no terminal
   and no real network. }
@@ -10,8 +10,8 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.approval,
-  hildegard.helper.harness.turn, hildegard.helper.harness.turn.worker,
+  hildi.llm, hildi.agent, hildi.approval,
+  hildi.harness.turn, hildi.harness.turn.worker,
   llm_fakes;
 
 type

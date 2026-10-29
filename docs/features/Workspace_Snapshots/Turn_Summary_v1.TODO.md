@@ -5,7 +5,7 @@
 > **STATUS (as of `ec8121d`): the checkboxes below are NOT reliable — do not read
 > them as a work list.** Phases 1, 3 and 4 are entirely unticked yet fully shipped
 > (`ForTurn` on both stores, `SummarizeTurn`/`TTurnChangeSummary`/`TFileChangeStat`,
-> and `TDiffView` all exist and are wired through `hildegard.helper.harness.app.pas`).
+> and `TDiffView` all exist and are wired through `hildi.harness.app.pas`).
 > The plan was abandoned mid-flight and never reconciled against the merged code.
 > [FEATURE.md](FEATURE.md) is the authority on what is built. What is genuinely
 > unbuilt is **Phase 6** (the viewer pane, card #22) and the shared history dialog.

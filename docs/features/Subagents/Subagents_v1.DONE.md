@@ -2,8 +2,8 @@
 
 Reference: `Subagents_v1.SPEC.md`. TDD-first: each task begins with a failing
 test, then the minimum to pass. `make check` before moving on. Files under
-`src/` are `hildegard.helper.*`; tests are `tests/test_<unit>.pas` and must be
-registered in `tests/hildegard_helper_tests.pas` (integrator-owned).
+`src/` are `hildi.*`; tests are `tests/test_<unit>.pas` and must be
+registered in `tests/hildi_tests.pas` (integrator-owned).
 
 ## Phase 1 — Lineage in the store
 
@@ -15,7 +15,7 @@ registered in `tests/hildegard_helper_tests.pas` (integrator-owned).
       `idx_sessions_parent`, `messages.ref_session_id`); `CreateChildSession`,
       `SessionLineage`, `ChildrenOf`; extend `TSessionSummary`; extend
       `QueryMessages`/`AppendMessage` for `ref_session_id`; `StoreSchemaVersion`.
-  - Files: `src/hildegard.helper.store.pas`, `src/hildegard.helper.session.pas`.
+  - Files: `src/hildi.store.pas`, `src/hildi.session.pas`.
 - [x] **Check**: `make test SUITE=TStoreTest`.
 
 ## Phase 2 — Ambient record and wrapper
@@ -25,12 +25,12 @@ registered in `tests/hildegard_helper_tests.pas` (integrator-owned).
       (`<ambient timestamp=... session=...>` + instructions, role user),
       `TestFormatAmbientEscapes`.
 - [x] **Implement**: `mrAmbient`; `IConversationStore.AppendAmbient`; the ambient
-      wrapper (a pure function in a new `hildegard.helper.ambient` unit) and its
+      wrapper (a pure function in a new `hildi.ambient` unit) and its
       use in `TSqliteConversationStore.Compose`; in-memory store degradation
       (append as a plain user message).
-  - Files: `src/hildegard.helper.session.pas`,
-    `src/hildegard.helper.session.store.pas`, `src/hildegard.helper.ambient.pas`
-    (new), `src/hildegard.helper.agent.pas`.
+  - Files: `src/hildi.session.pas`,
+    `src/hildi.session.store.pas`, `src/hildi.ambient.pas`
+    (new), `src/hildi.agent.pas`.
 - [x] **Check**: `make test SUITE=TSessionTest`.
 
 ## Phase 3 — Prompt queue kinds and the ambient turn
@@ -41,9 +41,9 @@ registered in `tests/hildegard_helper_tests.pas` (integrator-owned).
 - [x] **Implement**: `TPromptKind`; `TPromptQueue.PushAmbient`; `DrainQueued`
       branching; `OnAmbient` in `TAgentEvents`; `TAgentLoop.SendAmbient`;
       `TTurnWorker.CreateAmbient`.
-  - Files: `src/hildegard.helper.agent.pas`,
-    `src/hildegard.helper.harness.turn.pas`,
-    `src/hildegard.helper.harness.turn.worker.pas`.
+  - Files: `src/hildi.agent.pas`,
+    `src/hildi.harness.turn.pas`,
+    `src/hildi.harness.turn.worker.pas`.
 - [x] **Check**: `make test SUITE=TAgentLoopTest`.
 
 ## Phase 4 — Delegation tools
@@ -52,10 +52,10 @@ registered in `tests/hildegard_helper_tests.pas` (integrator-owned).
       `TestDelegateTaskRequiresReason`, `TestDelegateTaskReturnsSessionAndCapacity`,
       `TestMessageAbortReleaseSpecs`, `TestUnknownChildIdErrors`,
       `TestApprovalAskShape` (`subagent:<verb>` refs, default ask).
-- [x] **Implement**: `hildegard.helper.subagent` — `ISubagentService`,
+- [x] **Implement**: `hildi.subagent` — `ISubagentService`,
       `TSubagentSpawnResult`, the four `IApprovableTool`s, and a
       `RegisterSubagentTools(ATools, AService, AApproval)` helper.
-  - Files: `src/hildegard.helper.subagent.pas` (new).
+  - Files: `src/hildi.subagent.pas` (new).
 - [x] **Check**: `make test SUITE=TSubagentToolTest`.
 
 ## Phase 5 — Supervisor
@@ -68,14 +68,14 @@ registered in `tests/hildegard_helper_tests.pas` (integrator-owned).
       `TestReleaseDetachesWithoutAbort`, `TestUnknownChildIdErrors`,
       `TestTerminateAllOnShutdown`, `TestChildApprovalRelayed`,
       `TestAutoDenyWhenHeadless`.
-- [x] **Implement**: `hildegard.helper.subagent.supervisor` —
+- [x] **Implement**: `hildi.subagent.supervisor` —
       `TSubagentSupervisor`, the per-child client, the event queue
       (`Poll`), `Delegate/Message/Abort/Release/Status`, `AnswerChildAsk`,
       `TerminateAll`, auto-deny deadlines (`TickAutoDeny`), `HasClient`.
       Children are freed via a deferred graveyard (`ReapPending`) so a client is
       never closed from its own reader thread.
-  - Files: `src/hildegard.helper.subagent.supervisor.pas` (new);
-    `src/hildegard.helper.session.client.pas` (`ReaderDone`).
+  - Files: `src/hildi.subagent.supervisor.pas` (new);
+    `src/hildi.session.client.pas` (`ReaderDone`).
 - [x] **Check**: `make test SUITE=TSubagentSupervisorTest` and `make test-leak`.
 
 ## Phase 6 — Approvals: lineage-wide scope
@@ -87,11 +87,11 @@ registered in `tests/hildegard_helper_tests.pas` (integrator-owned).
       `THarnessSession`/`TSessionView`/`TSessionRuntimeConfig`/
       `TSessionClientConfig` and the runtime `--approval-root` arg; the
       supervisor sets a child's root to its parent.
-  - Files: `src/hildegard.helper.harness.session.pas`,
-    `src/hildegard.helper.harness.view.pas`,
-    `src/hildegard.helper.session.runtime.pas`,
-    `src/hildegard.helper.session.client.pas`,
-    `src/hildegard.helper.subagent.supervisor.pas`.
+  - Files: `src/hildi.harness.session.pas`,
+    `src/hildi.harness.view.pas`,
+    `src/hildi.session.runtime.pas`,
+    `src/hildi.session.client.pas`,
+    `src/hildi.subagent.supervisor.pas`.
 - [x] **Check**: `make test SUITE=TApprovalTest`.
 
 ## Phase 7 — Protocol additions
@@ -103,8 +103,8 @@ registered in `tests/hildegard_helper_tests.pas` (integrator-owned).
       `scAbortSubagent`, `scReleaseSubagent`; the new `TSessionEvent`/
       `TSessionCommand` fields; wire names; encode/decode. The runtime accepts
       the new commands as a no-op reply until Phase 8 routes them.
-  - Files: `src/hildegard.helper.session.protocol.pas`,
-    `src/hildegard.helper.session.runtime.pas`.
+  - Files: `src/hildi.session.protocol.pas`,
+    `src/hildi.session.runtime.pas`.
 - [x] **Check**: `make test SUITE=TSessionProtocolTest`.
 
 ## Phase 8 — Runtime integration
@@ -124,22 +124,22 @@ registered in `tests/hildegard_helper_tests.pas` (integrator-owned).
       (roster/ambient/ask relay, ambient turn start, auto-deny); handle
       `scAbortSubagent`/`scReleaseSubagent`; route `scApprove` for a namespaced
       child ask; maintain `HasClient`; `TerminateAll` on every exit reason.
-  - Files: `src/hildegard.helper.session.runtime.pas`,
-    `src/hildegard.helper.harness.session.pas` (ApprovalService accessor),
-    `src/hildegard.helper.subagent.supervisor.pas` (CanDelegate,
+  - Files: `src/hildi.session.runtime.pas`,
+    `src/hildi.harness.session.pas` (ApprovalService accessor),
+    `src/hildi.subagent.supervisor.pas` (CanDelegate,
     ParentApprovalRoot).
 - [x] **Check**: `make test SUITE=TSessionRuntimeTest`.
 
 ## Phase 9 — Configuration and CLI
 
 - [x] **Test** (`tests/test_subagent.pas`): `TestSubagentConfigDefaults`
-      (`HILDEGARD_SUBAGENT_MAX` = 10, `_DEPTH` = 1, `_AUTO_DENY_MS` = 60000),
+      (`HILDI_SUBAGENT_MAX` = 10, `_DEPTH` = 1, `_AUTO_DENY_MS` = 60000),
       `TestSubagentConfigOverridesAndBounds`.
 - [x] **Implement**: pure resolvers `ResolveSubagentMax`/`_Depth`/`_AutoDenyMs`
-      in `hildegard.helper.subagent` (raw value in, default/bounds applied); the
+      in `hildi.subagent` (raw value in, default/bounds applied); the
       runtime reads the env vars and delegates to them.
-  - Files: `src/hildegard.helper.subagent.pas`,
-    `src/hildegard.helper.session.runtime.pas`.
+  - Files: `src/hildi.subagent.pas`,
+    `src/hildi.session.runtime.pas`.
 - [x] **Check**: `make test SUITE=TSubagentToolTest`.
 
 ## Phase 10 — Verification

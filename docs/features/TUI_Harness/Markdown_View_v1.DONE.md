@@ -14,9 +14,9 @@ A widget that stacks a parsed `TMdBlockArray` as styled text blocks plus chrome
 ### Phase 1: Skeleton
 
 - [x] **Test unit**: `tests/test_markdownview.pas`, added to the `uses` clause of
-      `tests/hildegard_helper_tests.pas`
+      `tests/hildi_tests.pas`
 - [x] **Test**: `TestEmptySourceMeasuresZero`
-- [x] **Implement**: `src/hildegard.helper.tui.markdownview.pas` with the types
+- [x] **Implement**: `src/hildi.tui.markdownview.pas` with the types
 
 ### Phase 2: Block rendering
 
@@ -54,12 +54,12 @@ A widget that stacks a parsed `TMdBlockArray` as styled text blocks plus chrome
 ## Files Created/Modified
 
 ```
-src/hildegard.helper.tui.markdownview.pas   (new)
+src/hildi.tui.markdownview.pas   (new)
 tests/test_markdownview.pas                 (new) 14 tests
-src/hildegard.helper.tui.chat.pas           (assistant blocks use the view)
+src/hildi.tui.chat.pas           (assistant blocks use the view)
 tests/test_tui_chat.pas                     (TestAssistantRendersMarkdown)
-tests/hildegard_helper_tests.pas            (add the test unit to uses)
-src/hildegard.helper.markdown.pas           (FinalizedCount/FinalizedBlock/TailText)
+tests/hildi_tests.pas            (add the test unit to uses)
+src/hildi.markdown.pas           (FinalizedCount/FinalizedBlock/TailText)
 docs/features/TUI_Harness/Markdown_View_v1.SPEC.md
 docs/features/TUI_Harness/Markdown_View_v1.DONE.md
 docs/features/FEATURES.md

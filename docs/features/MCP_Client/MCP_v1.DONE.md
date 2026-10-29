@@ -23,13 +23,13 @@ all three.
 - [ ] **Branch**: already on `agent/mcp` (repurposed onto main; integrator-owned
       files are ours this round).
 - [ ] **Add test units** to the `uses` clause of
-      `tests/hildegard_helper_tests.pas`: `test_jsonrpc`, `test_stdio_child`,
+      `tests/hildi_tests.pas`: `test_jsonrpc`, `test_stdio_child`,
       `test_mcp_config`, `test_mcp_client` (added as each unit lands).
 - [ ] **Confirm conventions** against `docs/guidelines/testing.md`:
       `{$mode delphi}{$H+}`, `-Sew` (warnings are errors), managed locals via
       `Default(T)`, `{$codepage utf8}` if any non-ASCII literal.
 
-### Phase 1: JSON-RPC codec (`hildegard.helper.jsonrpc`) — DONE
+### Phase 1: JSON-RPC codec (`hildi.jsonrpc`) — DONE
 
 Pure, no I/O — the easiest red/green, and the base of everything.
 
@@ -51,10 +51,10 @@ Pure, no I/O — the easiest red/green, and the base of everything.
   (a `TJsonRpcTest.AssertJsonEquals` helper), not byte-for-byte. The codec keeps
   the parsed node as-is; JSON-RPC is whitespace-insensitive.
 
-### Phase 2: Stdio child manager (`hildegard.helper.stdio.child`) — DONE
+### Phase 2: Stdio child manager (`hildi.stdio.child`) — DONE
 
 - [x] **Promote `NormalizeExit`**: exported in place from
-      `hildegard.helper.process` (Decision A), with `TestNormalizeExitMapping`.
+      `hildi.process` (Decision A), with `TestNormalizeExitMapping`.
 - [x] **Test**: `TestSpawnEchoRoundTrip` (a `/bin/sh` fake echoes a line).
 - [x] **Implement**: `TStdioChild.Start`/`WriteLine`/`ReadLine` over pipes
       (`fpRead`/`fpWrite` + `ExtractLine` + `fpSelect`).
@@ -73,7 +73,7 @@ Pure, no I/O — the easiest red/green, and the base of everything.
   (see the `ponytail:` note in `Close`) — bounded, leak-clean, acceptable for
   v1.
 
-### Phase 3: Config (`hildegard.helper.mcp.config` + store v3) — DONE
+### Phase 3: Config (`hildi.mcp.config` + store v3) — DONE
 
 - [x] **Test**: `TestResolveGlobalOnly`, `TestResolveWorkspaceOverridesGlobal`,
       `TestResolveUnionsDistinctNames`, `TestResolveExcludesDisabled`,
@@ -87,7 +87,7 @@ Pure, no I/O — the easiest red/green, and the base of everything.
 - [x] **Test (store)**: `TestMcpServerMigrationIsAdditive` (a v2 DB upgrades to
       v3; earlier data intact).
 - [x] **Implement**: migration v3 (`mcp_servers` table + index) in
-      `hildegard.helper.store`.
+      `hildi.store`.
 - [x] **Test (store)**: `TestSaveMcpServerUpserts`, `TestLoadMcpServersScoped`,
       `TestRemoveMcpServer`, `TestMcpArgsEnvRoundTrip`,
       `TestSaveMcpServerRejectsInvalid`.
@@ -101,7 +101,7 @@ Pure, no I/O — the easiest red/green, and the base of everything.
   grow to 3 — writing `Result[2]` past a 2-length array corrupted memory (a
   range-check error cascaded to every store test).
 
-### Phase 4: MCP client (`hildegard.helper.mcp.client`) — DONE
+### Phase 4: MCP client (`hildi.mcp.client`) — DONE
 
 - [x] **Test**: `TestMcpRefIsStable`, `TestMcpToolNameIsProviderSafe`,
       `TestMcpToolNameNeverCollidesWithNative` (covered by the `mcp_` prefix +
@@ -184,10 +184,10 @@ Pure, no I/O — the easiest red/green, and the base of everything.
 ### New Files
 
 ```
-src/hildegard.helper.jsonrpc.pas
-src/hildegard.helper.stdio.child.pas
-src/hildegard.helper.mcp.config.pas
-src/hildegard.helper.mcp.client.pas
+src/hildi.jsonrpc.pas
+src/hildi.stdio.child.pas
+src/hildi.mcp.config.pas
+src/hildi.mcp.client.pas
 tests/test_jsonrpc.pas
 tests/test_stdio_child.pas
 tests/test_mcp_config.pas
@@ -197,10 +197,10 @@ tests/test_mcp_client.pas
 ### Modified Files
 
 ```
-tests/hildegard_helper_tests.pas        (register the four new test units)
-src/hildegard.helper.process.pas        (export NormalizeExit — Decision A)
-src/hildegard.helper.store.pas          (migration v3 + 4 mcp_servers methods)
-src/hildegard.helper.harness.session.pas (own the TMcpManager)
+tests/hildi_tests.pas        (register the four new test units)
+src/hildi.process.pas        (export NormalizeExit — Decision A)
+src/hildi.store.pas          (migration v3 + 4 mcp_servers methods)
+src/hildi.harness.session.pas (own the TMcpManager)
 examples/...                            (demonstrate an MCP session)
 docs/features/FEATURES.md               (status) — integrator-owned
 docs/features/MCP_Client/*.SPEC.md      (if behaviour diverges)

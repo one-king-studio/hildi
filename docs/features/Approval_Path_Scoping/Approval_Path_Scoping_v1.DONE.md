@@ -68,7 +68,7 @@ real time.
 - [x] **Verify**: the CLI prompt renders the extra options through the existing
       ask/option mechanism (no code change expected)
 
-### Phase 5: The physical primitive (`hildegard.helper.workspace`)
+### Phase 5: The physical primitive (`hildi.workspace`)
 
 - [x] **Test**: `TestPhysicalContainsRefusesOutside`,
       `TestPhysicalContainsAcceptsInside`
@@ -82,7 +82,7 @@ real time.
 - [x] **Implement**: `PhysicalContains` — the both-readings (lexical ∧ physical)
       rule; the separator boundary
 
-### Phase 6: The extractor (`hildegard.helper.command.paths`, NEW)
+### Phase 6: The extractor (`hildi.command.paths`, NEW)
 
 - [x] **Test**: `TestCdParentIsAnOutsideAccess`,
       `TestAbsoluteArgumentIsAnOutsideAccess`, `TestInBoundsArgumentIsSilent`
@@ -96,7 +96,7 @@ real time.
       argument as an access
 - [x] **Test**: `TestOrderAndDedupAreDeterministic`
 
-### Phase 7: Precedence (`hildegard.helper.approval`)
+### Phase 7: Precedence (`hildi.approval`)
 
 - [x] **Test**: `TestExactCommandGrantSuppressesThePathAsk`,
       `TestWildcardCommandGrantDoesNotSuppressIt`
@@ -105,7 +105,7 @@ real time.
 - [x] **Test**: `TestPathDenyBeatsWildcardCommandAllow`,
       `TestAbsolutePathRuleMatchesByDirectory`
 
-### Phase 8: The command tool (`hildegard.helper.command.tool`)
+### Phase 8: The command tool (`hildi.command.tool`)
 
 - [x] **Test**: `TestWildcardAllowedCatStillAsksAboutThePath`,
       `TestExactlyApprovedCatDoesNotAskAboutThePath`,
@@ -115,7 +115,7 @@ real time.
 - [x] **Implement**: the path ask's options (`once`/`dir`/`any`/`never`) and the
       dialog line that says the command is already allowed
 
-### Phase 9: The file tools (`hildegard.helper.files`)
+### Phase 9: The file tools (`hildi.files`)
 
 - [x] **Test**: `file_read` through a symlink pointing outside is refused
 - [x] **Implement**: `ResolveChecked` uses `PhysicalContains`
@@ -140,13 +140,13 @@ real time.
 ### Modified Files
 
 ```
-src/hildegard.helper.approval.pas         (fields, path helpers, matching, Covers)
-src/hildegard.helper.store.pas            (v2 migration, approvals SQL)
-src/hildegard.helper.files.pas            (path on the subject, new options,
+src/hildi.approval.pas         (fields, path helpers, matching, Covers)
+src/hildi.store.pas            (v2 migration, approvals SQL)
+src/hildi.files.pas            (path on the subject, new options,
                                            PhysicalContains)
-src/hildegard.helper.workspace.pas        (PhysicalResolve / PhysicalContains)
-src/hildegard.helper.command.paths.pas    (NEW: the extractor)
-src/hildegard.helper.command.tool.pas     (path asks, Covers)
+src/hildi.workspace.pas        (PhysicalResolve / PhysicalContains)
+src/hildi.command.paths.pas    (NEW: the extractor)
+src/hildi.command.tool.pas     (path asks, Covers)
 tests/test_approval.pas                   (matcher cases, suppression)
 tests/test_store.pas                      (migration, round-trip)
 tests/test_file_tool.pas                  (option sets, the symlink refusal)
@@ -171,7 +171,7 @@ docs/features/FEATURES.md                 (status)
 Implemented on `main`: the engine fields + path matching + helpers, the v12
 store migration, the file-tool `dir`/`ext`/`dir_ext`/`never` asks, the
 physical primitive (`PhysicalResolve`/`PhysicalContains`), the command path
-extractor (`hildegard.helper.command.paths`), exact-grant suppression, the
+extractor (`hildi.command.paths`), exact-grant suppression, the
 command tool's outside-path asks, and the file tools' physical check.
 `make check` green (1403 tests, leak-clean).
 

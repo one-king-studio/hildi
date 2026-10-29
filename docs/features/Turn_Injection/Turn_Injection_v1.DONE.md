@@ -10,7 +10,7 @@ Add the `IToolProvider` seam to the loop, then move MCP behind it. TDD-first.
 
 ## Implementation Tasks
 
-### Phase 1: The seam (`hildegard.helper.agent`)
+### Phase 1: The seam (`hildi.agent`)
 
 - [x] **Expose** `MakeToolSpec` (a provider-facing spec builder that ensures the
       required `reason` param) alongside the existing augmentation.
@@ -28,7 +28,7 @@ Add the `IToolProvider` seam to the loop, then move MCP behind it. TDD-first.
       `ExecuteToolCalls`.
 - [x] **Refactor**; `make check`.
 
-### Phase 2: MCP provider (`hildegard.helper.mcp.client`)
+### Phase 2: MCP provider (`hildi.mcp.client`)
 
 - [x] **Test**: `TMcpProvider.Specs` reflects connected servers; `Find`
       dispatches to the right handler; `PromptFragment` is `''`.
@@ -55,9 +55,9 @@ Add the `IToolProvider` seam to the loop, then move MCP behind it. TDD-first.
 ## Files to Create/Modify
 
 ```
-src/hildegard.helper.agent.pas           (IToolProvider; compose; inject; ResolveTool)
-src/hildegard.helper.mcp.client.pas      (TMcpProvider; Reconcile decoupled; client Specs/Find)
-src/hildegard.helper.harness.session.pas (register the provider)
+src/hildi.agent.pas           (IToolProvider; compose; inject; ResolveTool)
+src/hildi.mcp.client.pas      (TMcpProvider; Reconcile decoupled; client Specs/Find)
+src/hildi.harness.session.pas (register the provider)
 tests/test_agent.pas                     (provider seam tests)
 tests/test_mcp_client.pas                (provider tests; reconcile tests via provider)
 tests/test_harness_session.pas           (between-turns via provider)

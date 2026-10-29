@@ -4,7 +4,7 @@
 
 ## Purpose
 
-`hildegard-helper-agent` is a Unix-style command-line agent. Like a standard
+`hildi-agent` is a Unix-style command-line agent. Like a standard
 system utility it does one thing well from the shell's point of view: it emits
 text. Internally it can do whatever the agent's tools allow. It runs
 interactively by default, or once for a given prompt, and streams output like
@@ -16,8 +16,8 @@ tool calls, and the final answer, and it is designed to be piped - for example
 
 Two units implement it:
 
-- `hildegard.helper.cli` - pure command-line parsing and usage text.
-- `hildegard.helper.transcript` - stateful rendering of a turn to a `TStream`.
+- `hildi.cli` - pure command-line parsing and usage text.
+- `hildi.transcript` - stateful rendering of a turn to a `TStream`.
 
 ## Requirements
 
@@ -46,7 +46,7 @@ Two units implement it:
 ## Contracts & Interfaces
 
 ```pascal
-unit hildegard.helper.cli;
+unit hildi.cli;
 
 type
   TTriState = (tsDefault, tsOn, tsOff);
@@ -76,7 +76,7 @@ function UsageText: string;
 ```
 
 ```pascal
-unit hildegard.helper.transcript;
+unit hildi.transcript;
 
 type
   TTranscriptOptions = record
@@ -87,7 +87,7 @@ type
   end;
 
   { Renders one or more turns to AOutput as labelled sections. Colours come from
-    hildegard.helper.ansi (no-ops when disabled). Methods map to the agent
+    hildi.ansi (no-ops when disabled). Methods map to the agent
     events; BeginTurn starts a user section. }
   TTranscriptWriter = class
   public

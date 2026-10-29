@@ -61,7 +61,7 @@ type
   end;
 ```
 
-### Dimming (`hildegard.helper.tui.base` / the surfaces)
+### Dimming (`hildi.tui.base` / the surfaces)
 
 ```pascal
 { Map a 256-colour palette index to a darker one. }

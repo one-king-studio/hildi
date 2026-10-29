@@ -1,5 +1,5 @@
 unit test_patch;
-{ fpcunit tests for hildegard.helper.patch: the unified-diff applier, against
+{ fpcunit tests for hildi.patch: the unified-diff applier, against
   an in-memory file via the injected read/write callbacks. }
 
 {$mode delphi}{$H+}
@@ -7,7 +7,7 @@ unit test_patch;
 interface
 
 uses
-  SysUtils, fpcunit, testregistry, hildegard.helper.patch;
+  SysUtils, fpcunit, testregistry, hildi.patch;
 
 type
   { A one-file in-memory host: Read returns FText, Write records the result. }

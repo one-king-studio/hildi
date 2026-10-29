@@ -1,5 +1,5 @@
 unit test_command_paths;
-{ fpcunit tests for hildegard.helper.command.paths: the paths a shell command
+{ fpcunit tests for hildi.command.paths: the paths a shell command
   names, resolved against the effective base, and which of them leave the
   workspace. }
 
@@ -9,8 +9,8 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.workspace, hildegard.helper.command.policy,
-  hildegard.helper.command.paths;
+  hildi.workspace, hildi.command.policy,
+  hildi.command.paths;
 
 type
   TCommandPathsTest = class(TTestCase)

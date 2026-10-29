@@ -101,7 +101,7 @@ dependencies.
 ## Out of scope
 
 - **Fixing the pollution.** 36 failures are routed around, not repaired.
-- **`markdown`/`fuzzy` placement.** `hildegard.helper.markdown` depends on
+- **`markdown`/`fuzzy` placement.** `hildi.markdown` depends on
   `tui.base`, a layering inversion: a "helper" unit sitting below the UI
   library. Both belong in core or a sibling text library, but moving them is a
   separate change with its own blast radius.

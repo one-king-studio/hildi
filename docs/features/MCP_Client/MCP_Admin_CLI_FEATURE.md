@@ -89,16 +89,16 @@ small dispatcher. No new store code.
 
 ### Technical
 
-- FPC 3.3.1, `{$mode delphi}`; reuse `hildegard.helper.mcp.config`
-  (`TMcpScope`, `TMcpServerRow`, validation) and `hildegard.helper.store`.
+- FPC 3.3.1, `{$mode delphi}`; reuse `hildi.mcp.config`
+  (`TMcpScope`, `TMcpServerRow`, validation) and `hildi.store`.
 - POSIX (macOS/Linux); no dependency.
 
 ## Dependencies
 
 ### Internal
 
-- `hildegard.helper.store` (`SaveMcpServer` etc.).
-- `hildegard.helper.mcp.config` (`TMcpServerRow`, `TMcpScope`,
+- `hildi.store` (`SaveMcpServer` etc.).
+- `hildi.mcp.config` (`TMcpServerRow`, `TMcpScope`,
   `ValidateMcpServerRow`).
 - `examples/agent_cli.pas` (the entry point; the `mcp` subcommand is handled
   before any LLM setup).

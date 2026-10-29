@@ -1,7 +1,7 @@
 unit tui.widgets.mdtheme;
 { The markdown theme: AST styles mapped to cell attributes.
 
-  This lived inside the parser (hildegard.helper.markdown), which is why that
+  This lived inside the parser (hildi.markdown), which is why that
   unit could not be consumed by anything without a terminal. The parser produces
   spans; deciding what colour bold is belongs to the view. So the theme lives
   here, in the TUI layer, and the AST never carries a TAttr.

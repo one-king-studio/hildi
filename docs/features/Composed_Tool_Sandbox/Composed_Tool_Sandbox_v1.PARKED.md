@@ -34,7 +34,7 @@ on. `main` only.
 - [x] **Verify**: a throwaway program links the precompiled units and runs a
       script, under the debug flags (no compiler crash).
 
-### Phase 2: The facade (`hildegard.helper.script`)
+### Phase 2: The facade (`hildi.script`)
 
 - [x] **Test**: a pure-compute script returns its value (`test_script`).
 - [x] **Implement**: `RunScript` — engine + interpreter per call, console
@@ -50,7 +50,7 @@ on. `main` only.
       `run_command`/`recall_tool_result` are absent.
 - [x] **Implement**: the limits; the tool filter.
 
-### Phase 3: The tool (`hildegard.helper.tool.script`)
+### Phase 3: The tool (`hildi.tool.script`)
 
 - [x] **Test**: `run_script` is registered with a required `reason`; a missing
       reason fails before the engine runs (`test_tool_script`).
@@ -84,8 +84,8 @@ on. `main` only.
 
 ```
 scripts/patch-goccia.sh
-src/hildegard.helper.script.pas
-src/hildegard.helper.tool.script.pas
+src/hildi.script.pas
+src/hildi.tool.script.pas
 tests/test_script.pas
 tests/test_tool_script.pas
 ```
@@ -94,8 +94,8 @@ tests/test_tool_script.pas
 
 ```
 Makefile                              (libgoccia; -Fu for the engine units)
-tests/hildegard_helper_tests.pas      (register the two test units)
-src/hildegard.helper.harness.session.pas  (register the script tool)
+tests/hildi_tests.pas      (register the two test units)
+src/hildi.harness.session.pas  (register the script tool)
 docs/features/FEATURES.md
 ```
 

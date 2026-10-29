@@ -1,5 +1,5 @@
 unit test_subagent;
-{ fpcunit tests for the delegation tools (hildegard.helper.subagent): the four
+{ fpcunit tests for the delegation tools (hildi.subagent): the four
   tool specs, required-reason enforcement, argument parsing, the approval ask
   shape (subagent:<verb> refs, default ask), and the immediate delegate result
   carrying the child session id and the parent's remaining capacity. }
@@ -10,8 +10,8 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.agent, hildegard.helper.llm, hildegard.helper.approval,
-  hildegard.helper.subagent;
+  hildi.agent, hildi.llm, hildi.approval,
+  hildi.subagent;
 
 type
   TFakeApproval = class(TInterfacedObject, IApprovalService)

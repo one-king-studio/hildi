@@ -40,7 +40,7 @@ uses
   tui.base, tui.input,
   tui.surface, tui.widget,
   tui.theme, tui.compact,
-  hildegard.helper.approval;
+  hildi.approval;
 
 type
   TApprovalChoiceEvent = procedure(const AChoice: TApprovalChoice) of object;

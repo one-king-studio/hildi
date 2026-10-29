@@ -2,11 +2,11 @@
 
 **Related Feature:** [FEATURE.md](FEATURE.md)
 
-**Depends on:** `hildegard.helper.agent` (`TAgentLoop`, `TToolHandler`,
-`TToolSpec`), `hildegard.helper.approval` (`IApprovalService`,
-`TApprovalService`), `hildegard.helper.harness.turn` (`TApprovalGate`),
-`async.concurrency` (`TExecutorScheduler`), `hildegard.helper.tui.chatpanel` +
-`hildegard.helper.harness.app` (output routing), `hildegard.helper.tool.stream`
+**Depends on:** `hildi.agent` (`TAgentLoop`, `TToolHandler`,
+`TToolSpec`), `hildi.approval` (`IApprovalService`,
+`TApprovalService`), `hildi.harness.turn` (`TApprovalGate`),
+`async.concurrency` (`TExecutorScheduler`), `hildi.tui.chatpanel` +
+`hildi.harness.app` (output routing), `hildi.tool.stream`
 (the observer seam).
 
 **Depended on by:** nothing (it changes an existing path).
@@ -23,7 +23,7 @@ independent of — the other calls' work.
 | Need | Existing | Change |
 | --- | --- | --- |
 | A bounded thread pool | `async.concurrency.TExecutorScheduler` (`Schedule`, `ScheduleCancellable`) | none - reuse |
-| A fan-out-then-join precedent | `hildegard.helper.pool` (`TAgentPool`) | model the join on it |
+| A fan-out-then-join precedent | `hildi.pool` (`TAgentPool`) | model the join on it |
 | The turn already runs on the pool | `TTurnWorker` (`IAsyncScheduler`) | pass the session pool down |
 | Ordered stream merge | `async.observable` (`Merge`, `Zip`) | reuse for output |
 | The gate's prompt bridge | `TApprovalGate.Prompt` -> `TApprovalService` | make it concurrent |
@@ -67,7 +67,7 @@ The gap is the **concurrent gate** and the **fan-out/join + ordered results**.
 
 > Pascal type declarations; bodies are the implementer's.
 
-### The concurrent gate (`hildegard.helper.harness.turn`)
+### The concurrent gate (`hildi.harness.turn`)
 
 ```pascal
 type
@@ -90,7 +90,7 @@ type
   end;
 ```
 
-### The serialized permission check (`hildegard.helper.approval`)
+### The serialized permission check (`hildi.approval`)
 
 ```pascal
 type
@@ -114,7 +114,7 @@ type
 > concurrently with that wait. This preserves the "gate is authoritative" while
 > removing head-of-line blocking of *work*.
 
-### Tool parallel-safety (`hildegard.helper.agent`)
+### Tool parallel-safety (`hildi.agent`)
 
 ```pascal
 type
@@ -129,7 +129,7 @@ type
   end;
 ```
 
-### The fan-out and join (`hildegard.helper.agent`)
+### The fan-out and join (`hildi.agent`)
 
 ```pascal
 type

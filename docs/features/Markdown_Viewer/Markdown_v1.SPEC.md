@@ -24,7 +24,7 @@ Per `ponytail.md`, climb before building:
 
 | Existing | Reuse how |
 | --- | --- |
-| `hildegard.helper.markdown` (1,219 lines, 676 test lines) | **The source.** The block scanner, inline scanner, wrap logic and table layout are moved, not rewritten. This is a refactor with a purity boundary, not a new parser. |
+| `hildi.markdown` (1,219 lines, 676 test lines) | **The source.** The block scanner, inline scanner, wrap logic and table layout are moved, not rewritten. This is a refactor with a purity boundary, not a new parser. |
 | `tests/test_markdown.pas` (676 lines) | **The acceptance bar.** Its assertions must pass against the new module with import changes only. |
 | `tui.widgets.markdownview` (1,158 lines) | Keeps its drawing; gains the theme it currently imports. |
 | `src/shell/`, `src/async/`, `src/changes/` | The module layout and `-standalone` target convention, copied. |
@@ -160,7 +160,7 @@ make markdown-standalone
 ```
 
 compiles the module with **only** `-Fu$(SRC)/markdown` on the search path. A dependency on
-`tui.*` or `hildegard.helper.*` fails the build. This is the same gate as
+`tui.*` or `hildi.*` fails the build. This is the same gate as
 `shell-standalone` and `tui-standalone`, and it is the feature's central claim.
 
 **Consequence for width.** The inline scanner must not measure display width — that is a
@@ -258,7 +258,7 @@ suite asserts *work* (block counts, call counts); `make bench` may report time.
 | The refactor changes behaviour silently | The existing 676 test lines are the bar; any changed assertion is treated as a regression and justified individually. |
 | Theme extraction breaks every render call | One mechanical rename (`StyleFor` → `MdAttrFor`), done in the same commit as the move. |
 | Pass order drifts | §7.4 pins it structurally. |
-| Two parsers coexist | `hildegard.helper.markdown` is deleted. The old name is not kept as an alias. |
+| Two parsers coexist | `hildi.markdown` is deleted. The old name is not kept as an alias. |
 | The viewer grows into an editor | Out of scope in §6, and the acceptance criteria name only reads. |
 
 ## 10. Open questions

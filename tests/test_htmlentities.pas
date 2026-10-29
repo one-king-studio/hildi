@@ -7,7 +7,7 @@ unit test_htmlentities;
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, hildegard.helper.htmlentities;
+  Classes, SysUtils, fpcunit, testregistry, hildi.htmlentities;
 
 type
   THtmlEntitiesTest = class(TTestCase)

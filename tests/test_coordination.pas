@@ -11,8 +11,8 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.store, hildegard.helper.session,
-  hildegard.helper.coordination;
+  hildi.store, hildi.session,
+  hildi.coordination;
 
 type
   TCoordinationTest = class(TTestCase)

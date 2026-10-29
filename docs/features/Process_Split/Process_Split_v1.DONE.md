@@ -9,28 +9,28 @@ window is last so the memory win can be measured on a settled split.
 
 ## Phase 1 — Split the transport and the wire client
 
-- [x] **New** `src/hildegard.helper.session.socket.pas`: move the AF_UNIX
+- [x] **New** `src/hildi.session.socket.pas`: move the AF_UNIX
       helpers (`MakeUnixAddr`, `ConnectFd`, `ConnectProbe`, `SendAll`,
       `ReadLineTimeout`, `ExtractLine`, `WaitReadable`, `SetNonBlocking`,
       `SetNoSigPipe`, `NowMs`, `ShellQuote`) and `RuntimeDir`, `SocketPathFor`,
       `SessionSocketReady` out of `session.runtime`.
-- [x] **New** `src/hildegard.helper.session.client.pas`: move `ISessionSink`,
+- [x] **New** `src/hildi.session.client.pas`: move `ISessionSink`,
       `TSessionClientConfig`, `TSessionClient`, `TClientReader`, `SpawnDetached`;
       add `ResolveRuntimeBinary` and `DefaultRuntimeBinary`.
-- [x] **Trim** `src/hildegard.helper.session.runtime.pas` to the server
+- [x] **Trim** `src/hildi.session.runtime.pas` to the server
       (`TSessionRuntime`, `TClientConn`, `RunSessionRuntime`).
 - [x] **Test** `tests/test_session_client.pas`: `ResolveRuntimeBinary` (explicit
       wins, sibling fallback, `''` when neither exists); add the unit to
-      `tests/hildegard_helper_tests.pas`.
+      `tests/hildi_tests.pas`.
 - [x] **Verify** the existing `test_session_runtime.pas` and
       `test_harness_driver.pas` still pass.
 
 ## Phase 2 — Split the turn types from the worker
 
-- [x] **Trim** `src/hildegard.helper.harness.turn.pas` to the types
+- [x] **Trim** `src/hildi.harness.turn.pas` to the types
       (`TTurnEventKind`, `TTurnEvent`, `TTurnQueue`, `TApprovalGate`); drop
       `agent` from its `uses`.
-- [x] **New** `src/hildegard.helper.harness.turn.worker.pas` with `TTurnWorker`.
+- [x] **New** `src/hildi.harness.turn.worker.pas` with `TTurnWorker`.
 - [x] **Update** `uses` in `harness.session`, `harness.driver`, and the tests
       that construct a worker.
 - [x] **Verify** `test_harness_turn.pas`, `test_harness_session.pas`,
@@ -38,10 +38,10 @@ window is last so the memory win can be measured on a settled split.
 
 ## Phase 3 — Split the session view from the loop
 
-- [x] **New** `src/hildegard.helper.harness.view.pas`: move
+- [x] **New** `src/hildi.harness.view.pas`: move
       `THarnessSessionConfig` (drop `NoLoop`) and add `TSessionView` (workspace,
       store, identity, history, metrics; no client, no tools).
-- [x] **Trim** `src/hildegard.helper.harness.session.pas` to `THarnessSession`,
+- [x] **Trim** `src/hildi.harness.session.pas` to `THarnessSession`,
       owning a `TSessionView` and exposing `Loop`/`Tools`/`Queue`/`Gate`.
 - [x] **Update** `session.runtime` to reach the view (`FSession.View.…`).
 - [x] **Update** `harness.app` to take a `TSessionView`; drop its `agent`/`llm`
@@ -53,9 +53,9 @@ window is last so the memory win can be measured on a settled split.
 
 ## Phase 4 — Split the driver
 
-- [x] **Trim** `src/hildegard.helper.harness.driver.pas` to `ISessionDriver` and
+- [x] **Trim** `src/hildi.harness.driver.pas` to `ISessionDriver` and
       `TRemoteDriver`.
-- [x] **New** `src/hildegard.helper.harness.driver.local.pas` with
+- [x] **New** `src/hildi.harness.driver.local.pas` with
       `TLocalDriver`.
 - [x] **Update** `harness.app`, the tests, and any demo that uses `LocalDriver`.
 - [x] **Verify** `test_harness_driver.pas` passes.
@@ -69,8 +69,8 @@ window is last so the memory win can be measured on a settled split.
       `ResolveRuntimeBinary`.
 - [x] **Trim** `examples/agent_cli.pas`: drop `--session-runtime` and the server
       unit; use `session.client`.
-- [x] **Makefile**: build `build/bin/hildegard-helper-agent` (`headless-agent`)
-      and `build/bin/hildegard-helper-tui` (`tui-agent`); update `help`.
+- [x] **Makefile**: build `build/bin/hildi-agent` (`headless-agent`)
+      and `build/bin/hildi` (`tui-agent`); update `help`.
 - [x] **Verify**: both binaries build; `nm` shows the TUI links no
       agent/loop/tool symbols and the headless agent links no TUI symbols; the
       headless binary reports clear errors. (The spawn path is covered by
@@ -112,7 +112,7 @@ window is last so the memory win can be measured on a settled split.
 ## Phase 9 — Documentation and completion
 
 - [x] Update `docs/features/FEATURES.md`, `HANDOFF.md`, and the Makefile help;
-      add `HILDEGARD_RUNTIME_BIN` to `.env.example`.
+      add `HILDI_RUNTIME_BIN` to `.env.example`.
 - [x] Measure the heap on a large transcript: 70 / 700 / 3500 blocks allocate
       622 KB / 753 KB / 1.34 MB — flat as the block count grows, versus the
       56.6 MB baseline that retained every block's layout.

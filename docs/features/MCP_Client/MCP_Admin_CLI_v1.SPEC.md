@@ -2,7 +2,7 @@
 
 **Related Feature:** [MCP_Admin_CLI_FEATURE.md](MCP_Admin_CLI_FEATURE.md)
 
-**Depends on:** `hildegard.helper.mcp.config`, `hildegard.helper.store`.
+**Depends on:** `hildi.mcp.config`, `hildi.store`.
 **Depended on by:** `examples/agent_cli.pas` (the `mcp` subcommand).
 
 ## Purpose
@@ -37,7 +37,7 @@ the only part that touches I/O.
 ## Contracts & Interfaces
 
 ```pascal
-unit hildegard.helper.mcp.cli;
+unit hildi.mcp.cli;
 { Pure parsing for the `mcp` admin subcommand. No store, no I/O. }
 
 {$mode delphi}{$H+}
@@ -45,7 +45,7 @@ unit hildegard.helper.mcp.cli;
 interface
 
 uses
-  SysUtils, hildegard.helper.mcp.config;
+  SysUtils, hildi.mcp.config;
 
 type
   TMcpVerb = (mvList, mvAdd, mvRemove, mvEnable, mvDisable, mvHelp);
@@ -89,9 +89,9 @@ function McpUsageText: string;
 
 ### Prior Art & Reuse
 
-- **`hildegard.helper.cli`** is the precedent for a pure, unit-tested parser;
+- **`hildi.cli`** is the precedent for a pure, unit-tested parser;
   this mirrors its shape (`Parse*` + `UsageText` + `ECLIError`).
-- **`hildegard.helper.mcp.config`** supplies the types and `ValidateMcpServerRow`.
+- **`hildi.mcp.config`** supplies the types and `ValidateMcpServerRow`.
 - **`TSqliteStore`** already has the four methods; the dispatcher is a thin map.
 - **Genuine gap:** the grammar and the dispatcher wiring.
 

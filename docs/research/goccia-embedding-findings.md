@@ -76,7 +76,7 @@ leak still fails the gate.
 The three compatibility fixes now live in a **fork**, not in `patch-goccia.sh`:
 
 - Fork: <https://github.com/johnrcui/GocciaScript>
-- Branch: `hildegard`, based on upstream `531fb52`
+- Branch: `hildi`, based on upstream `531fb52`
 - Commit pinned by the harness: `312ddd19`
 
 ```
@@ -104,4 +104,4 @@ findings above are its body.
 The arena work is unchanged and unstarted in the tree; see
 `docs/research/goccia-ast-arena.md` for the decision, the three-scope
 correction (entry / module / shim), the resume steps and the WIP location.
-When it lands it becomes a fourth commit on `hildegard`.
+When it lands it becomes a fourth commit on `hildi`.

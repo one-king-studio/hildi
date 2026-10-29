@@ -2,8 +2,8 @@
 
 **Status:** Live — a measured-looking defect with a decided fix. Read before
 changing `BuildRequest` or anything that decorates a message.
-**Related:** [wrap.pas](../../src/hildegard.helper.wrap.pas),
-`TAgentLoop.BuildRequest` (`src/hildegard.helper.agent.pas`),
+**Related:** [wrap.pas](../../src/hildi.wrap.pas),
+`TAgentLoop.BuildRequest` (`src/hildi.agent.pas`),
 [Context Budget](../features/Context_Budget/FEATURE.md),
 [Tool Limits](../features/Tool_Limits/FEATURE.md)
 

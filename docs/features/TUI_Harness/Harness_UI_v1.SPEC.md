@@ -47,7 +47,7 @@ input, rendering): a thread-safe event queue plus an approval bridge.
 
 ### Turn events and queue
 
-Unit: `hildegard.helper.harness.turn`.
+Unit: `hildi.harness.turn`.
 
 ```pascal
 type
@@ -140,7 +140,7 @@ type
 
 ### Harness session (config, bootstrap, ownership)
 
-Unit: `hildegard.helper.harness.session`.
+Unit: `hildi.harness.session`.
 
 ```pascal
 type
@@ -185,7 +185,7 @@ type
 
 ### Prompt editor
 
-Unit: `hildegard.helper.tui.prompt`.
+Unit: `hildi.tui.prompt`.
 
 ```pascal
 type
@@ -214,7 +214,7 @@ type
 
 ### Conversation view
 
-Unit: `hildegard.helper.tui.conversation`.
+Unit: `hildi.tui.conversation`.
 
 ```pascal
 type
@@ -237,7 +237,7 @@ type
 
 ### Approval modal
 
-Unit: `hildegard.helper.tui.approvalmodal`.
+Unit: `hildi.tui.approvalmodal`.
 
 ```pascal
 type
@@ -262,7 +262,7 @@ type
 
 ### Application assembly
 
-Unit: `hildegard.helper.harness.app`. `examples/tui_agent.pas` is a thin entry
+Unit: `hildi.harness.app`. `examples/tui_agent.pas` is a thin entry
 point: create surface, input source, session, and `THarnessApp`; run.
 
 ```pascal
@@ -288,27 +288,27 @@ type
 
 ### Prior Art & Reuse
 
-- `hildegard.helper.tui.app` (`TTuiApp`, `TPlane`) - plane stack, modal trap and
+- `hildi.tui.app` (`TTuiApp`, `TPlane`) - plane stack, modal trap and
   dim, `Step`, `Invalidate` (replaces the demo's hand-rolled loop).
-- `hildegard.helper.tui.text` (`TTextBlock`, `TSpan`) - styled, width-correct
+- `hildi.tui.text` (`TTextBlock`, `TSpan`) - styled, width-correct
   text; the conversation view wraps it rather than re-implementing wrapping.
-- `hildegard.helper.tui.scroll` (`TScrollContainer`) - clipping and scrollbar;
+- `hildi.tui.scroll` (`TScrollContainer`) - clipping and scrollbar;
   reuse for the conversation.
-- `hildegard.helper.tui.widget` (`TContainer`, tracks) - layout; no new engine.
-- `hildegard.helper.agent` (`TAgentLoop`, `TToolRegistry`, `IConversationStore`)
-  and `hildegard.helper.llm` (`TLLMClient`, `TChatMessage`) - the worker body.
-- `hildegard.helper.approval` (`IApprovalService`, `TApprovalService`,
+- `hildi.tui.widget` (`TContainer`, tracks) - layout; no new engine.
+- `hildi.agent` (`TAgentLoop`, `TToolRegistry`, `IConversationStore`)
+  and `hildi.llm` (`TLLMClient`, `TChatMessage`) - the worker body.
+- `hildi.approval` (`IApprovalService`, `TApprovalService`,
   `TApprovalAsk`, `TApprovalChoice`) and `.approval.store` - approval rules; the
   gate only bridges the prompt across threads.
-- `hildegard.helper.store` (`TSqliteStore`, `EnsureWorkspace`, `CreateSession`,
-  approvals, ledger) and `hildegard.helper.session.store`
+- `hildi.store` (`TSqliteStore`, `EnsureWorkspace`, `CreateSession`,
+  approvals, ledger) and `hildi.session.store`
   (`TSqliteConversationStore`) - persistence; reuse, do not reimplement.
-- `hildegard.helper.workspace` (`TWorkspace.Open`) and `hildegard.helper.env`
+- `hildi.workspace` (`TWorkspace.Open`) and `hildi.env`
   (`LoadDotEnvFile`) - workspace identity and `.env`; the same resolution as
   `examples/agent_cli.pas`.
-- `hildegard.helper.command.tool` (`TCommandTool`, `IExecutor`) and
-  `hildegard.helper.process` (`TCommandRunner`) - the shell tool.
-- `hildegard.helper.input.terminal` - the SIGTERM `Terminated` flag is surfaced by
+- `hildi.command.tool` (`TCommandTool`, `IExecutor`) and
+  `hildi.process` (`TCommandRunner`) - the shell tool.
+- `hildi.input.terminal` - the SIGTERM `Terminated` flag is surfaced by
   the app so a signal still exits through the normal path.
 
 Gap designed here: the thread-safe event queue + approval gate, the prompt-line

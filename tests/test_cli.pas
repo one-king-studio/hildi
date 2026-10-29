@@ -1,12 +1,12 @@
 unit test_cli;
-{ fpcunit tests for hildegard.helper.cli (pure argument parsing). }
+{ fpcunit tests for hildi.cli (pure argument parsing). }
 
 {$mode delphi}{$H+}
 
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, hildegard.helper.cli;
+  Classes, SysUtils, fpcunit, testregistry, hildi.cli;
 
 type
   TCLITest = class(TTestCase)

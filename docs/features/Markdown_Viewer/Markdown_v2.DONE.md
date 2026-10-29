@@ -53,7 +53,7 @@ gone from production.
 - [x] Ids are document order, gapless, deterministic; `Parent`/`Children`
       symmetric both ways; every node reachable from the root.
 - [x] `make markdown-standalone` compiles with only `-Fu$(SRC)/markdown`.
-- [x] `hildegard.helper.markdown` deleted, no alias.
+- [x] `hildi.markdown` deleted, no alias.
 
 ### Phase 2 — Compat adapter — done, then deleted
 

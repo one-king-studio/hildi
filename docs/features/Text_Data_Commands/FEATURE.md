@@ -48,7 +48,7 @@ still handles the long tail:
 5. **`rg`** (shipped): recursive search over the same engine as `grep`, with
    `-n`, `-i`, `-l`, `-c`, `-F`, `-E`, `-g`, `--hidden`, `--no-ignore`. It
    respects `.gitignore` inside a repository through the **reusable**
-   `hildegard.helper.gitignore` parser (root and nested files, `!` negation,
+   `hildi.gitignore` parser (root and nested files, `!` negation,
    anchoring, `**`, classes) — the same unit the file-diff tracker will use to
    avoid recording edits to ignored files. ripgrep's stdin heuristic is
    deliberately dropped: `rg` always searches paths.

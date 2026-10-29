@@ -4,7 +4,7 @@
 
 ## Purpose
 
-`hildegard.helper.session` defines session identity and the append-only ledger.
+`hildi.session` defines session identity and the append-only ledger.
 A session is a random 128-bit id (32 lowercase hex) bound to a workspace. The
 ledger stores typed, ordered records of everything that happened in the session
 (messages, reasoning, tool calls, tool results, errors). A SQLite
@@ -68,12 +68,12 @@ This work also removes the store's `requests` table and its public API.
 ### Session unit
 
 ```pascal
-unit hildegard.helper.session;
+unit hildi.session;
 
 interface
 
 uses
-  SysUtils, hildegard.helper.store, hildegard.helper.agent, hildegard.helper.llm;
+  SysUtils, hildi.store, hildi.agent, hildi.llm;
 
 type
   TSessionRecordKind = (
@@ -111,7 +111,7 @@ public
 end;
 ```
 
-### Store additions (`hildegard.helper.store`)
+### Store additions (`hildi.store`)
 
 ```pascal
 function TSqliteStore.CreateSession(AWorkspaceId: Integer; out AId: string;
@@ -180,8 +180,8 @@ None. The conversation adapter is called by the loop on its thread.
 
 ### Prior Art & Reuse
 
-- `hildegard.helper.agent.IConversationStore` and `TChatMessage` - the seam.
-- `hildegard.helper.store` - migrations, locking, transactions.
+- `hildi.agent.IConversationStore` and `TChatMessage` - the seam.
+- `hildi.store` - migrations, locking, transactions.
 - `SysUtils.CreateGUID` gives 128 bits to seed/format; platform randomness may be
   used for the bytes.
 
@@ -189,8 +189,8 @@ None. The conversation adapter is called by the loop on its thread.
 
 - **Responsibilities:** session identity, ledger records, conversation
   persistence, restore recomposition.
-- **Dependencies:** `hildegard.helper.store`, `hildegard.helper.agent`,
-  `hildegard.helper.llm` (`TChatMessage`, `TChatToolCall`), `fpjson` for
+- **Dependencies:** `hildi.store`, `hildi.agent`,
+  `hildi.llm` (`TChatMessage`, `TChatToolCall`), `fpjson` for
   `DataJson`.
 - **Side effects:** inserts into `sessions` and `session_records`.
 

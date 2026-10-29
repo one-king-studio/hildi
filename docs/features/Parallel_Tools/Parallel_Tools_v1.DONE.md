@@ -12,7 +12,7 @@ output streamed live, per call. TDD-first; `make check` before moving on.
 
 ## Implementation Tasks
 
-### Phase 1: The concurrent gate (`hildegard.helper.harness.turn`)
+### Phase 1: The concurrent gate (`hildi.harness.turn`)
 
 - [x] **Test**: two concurrent `Ask`s both receive their own answer; answering #2
       releases #2 and leaves #1 waiting (`test_harness_turn`).
@@ -23,7 +23,7 @@ output streamed live, per call. TDD-first; `make check` before moving on.
 - [x] **Implement**: `CancelAll`; per-ask timeout.
 - [x] **Test**: `Answer` for an unknown id is a no-op (late/duplicate answer).
 
-### Phase 2: Serialize the permission decision (`hildegard.helper.approval`)
+### Phase 2: Serialize the permission decision (`hildi.approval`)
 
 - [x] **Test**: two concurrent `Resolve`s do not double-prompt for a rule one
       just granted; deny-first still short-circuits (`test_approval`).
@@ -35,7 +35,7 @@ output streamed live, per call. TDD-first; `make check` before moving on.
 > blocked behind a prompting sibling. The persist+publish of a grant is atomic
 > under `FDecisionLock`. See `a094053`.
 
-### Phase 3: Fan-out and join (`hildegard.helper.agent`)
+### Phase 3: Fan-out and join (`hildi.agent`)
 
 - [x] **Test**: `ExecuteToolCalls` stores and emits results in **call order**
       when calls complete out of order (a fake tool with a controllable delay).
@@ -102,11 +102,11 @@ docs/features/Parallel_Tools/Parallel_Tools_v1.TODO.md
 ### Modified Files
 
 ```
-src/hildegard.helper.harness.turn.pas   (concurrent TApprovalGate)
-src/hildegard.helper.approval.pas        (serialize the decision section)
-src/hildegard.helper.agent.pas           (fan-out/join, SerialOnly, ordered results)
-src/hildegard.helper.harness.session.pas (inject the executor into the loop)
-src/hildegard.helper.harness.app.pas     (per-call output routing)
+src/hildi.harness.turn.pas   (concurrent TApprovalGate)
+src/hildi.approval.pas        (serialize the decision section)
+src/hildi.agent.pas           (fan-out/join, SerialOnly, ordered results)
+src/hildi.harness.session.pas (inject the executor into the loop)
+src/hildi.harness.app.pas     (per-call output routing)
 tests/test_harness_turn.pas              (the concurrent gate)
 tests/test_approval.pas                  (serialized resolution)
 tests/test_agent.pas                     (ordering, concurrency, lanes)

@@ -153,16 +153,16 @@ focus      DECSET 1004 -> CSI I / CSI O -> TerminalFocused; unfocused withdraws 
 
 ### Internal
 
-- `hildegard.helper.tui.clock` — the clock, `MonotonicMs`, `DefaultTickMs`; the
+- `hildi.tui.clock` — the clock, `MonotonicMs`, `DefaultTickMs`; the
   natural home for the registry.
-- `hildegard.helper.tui.app` — `Animating`, `NextFrameDelayMs`, `Tick`,
+- `hildi.tui.app` — `Animating`, `NextFrameDelayMs`, `Tick`,
   `AdvanceTree`.
-- `hildegard.helper.tui.edit` / `.compose` — the caret and its `Active` state.
-- `hildegard.helper.tui.input.decode` / `.terminal` — the key decoder and the
+- `hildi.tui.edit` / `.compose` — the caret and its `Active` state.
+- `hildi.tui.input.decode` / `.terminal` — the key decoder and the
   tty reader.
-- `hildegard.helper.tui.surface.video` — terminal control sequences at
+- `hildi.tui.surface.video` — terminal control sequences at
   init/teardown.
-- `hildegard.helper.tui.chat` — the chat stack's block list.
+- `hildi.tui.chat` — the chat stack's block list.
 
 ### External
 

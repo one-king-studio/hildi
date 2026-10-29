@@ -27,7 +27,7 @@ program tui_layout_demo;
   Shift+Enter newline; arrows / Home / End move the caret in the input; wheel
   scrolls the stream; click a block to expand it.
 
-  Theme: --theme=dark|light|auto (or HILDEGARD_THEME); auto detects the
+  Theme: --theme=dark|light|auto (or HILDI_THEME); auto detects the
   terminal's own background. We always paint our own background.
 
   Run: make layout-demo }
@@ -360,7 +360,7 @@ begin
     if S = '--light' then
       Exit(tmLight);
   end;
-  Result := ThemeModeFromString(GetEnvironmentVariable('HILDEGARD_THEME'));
+  Result := ThemeModeFromString(GetEnvironmentVariable('HILDI_THEME'));
 end;
 
 function ShouldStop: Boolean;
@@ -408,7 +408,7 @@ begin
   Style.Title := 'Editor';
   EditorPanel := TPanel.Create(EditorText, Theme, Style);
 
-  ChatPanel := TChatPanel.Create(Theme, 'Hildegard · Model v1 Fireworks · low',
+  ChatPanel := TChatPanel.Create(Theme, 'Hildi · Model v1 Fireworks · low',
     '↵ send   ⇧+↵ newline   click a block to expand   ' +
     'ctrl+p commands   ctrl+b sidebar');
   ChatPanel.Stream.Add(ckUser, '',
@@ -447,7 +447,7 @@ begin
     '  run_command    idle' + #10 +
     '  file_grep      idle' + #10 + '' + #10 +
     'Context' + #10 + '' + #10 +
-    '  workspace  hildegard-helper' + #10 +
+    '  workspace  hildi' + #10 +
     '  model      fireworks' + #10 +
     '  session    (in memory)', Theme.Muted);
   Style := DefaultBoxStyle;

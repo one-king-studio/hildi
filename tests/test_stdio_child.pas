@@ -1,5 +1,5 @@
 unit test_stdio_child;
-{ fpcunit tests for hildegard.helper.stdio.child. POSIX-only: the fakes are
+{ fpcunit tests for hildi.stdio.child. POSIX-only: the fakes are
   /bin/sh scripts. Every child is closed in the test; the leak gate (make
   test-leak) is what proves teardown is clean. }
 
@@ -9,7 +9,7 @@ interface
 
 uses
   SysUtils, fpcunit, testregistry,
-  hildegard.helper.stdio.child, hildegard.helper.process;
+  hildi.stdio.child, hildi.process;
 
 type
   TStdioChildTest = class(TTestCase)

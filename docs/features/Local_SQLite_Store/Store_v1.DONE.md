@@ -5,7 +5,7 @@
 
 ## Overview
 
-Task breakdown for `hildegard.helper.store` as specified in `Store_v1.SPEC.md`.
+Task breakdown for `hildi.store` as specified in `Store_v1.SPEC.md`.
 Tasks are checkboxes; update them in real time. Each implementation task starts
 with a failing test. This plan tracks Stage 3-5 of
 `docs/guidelines/spec-driven-development.md`.
@@ -22,9 +22,9 @@ is omitted.
 - [x] **Build target**: add Makefile `libsqlite` target producing
       `build/lib/libsqlite3.{dylib,so}`; wire `test`/`test-leak` to depend on it
 - [x] **Test unit**: create `tests/test_store.pas` with an empty `TStoreTest`
-      suite; add it to the `uses` clause of `tests/hildegard_helper_tests.pas`
+      suite; add it to the `uses` clause of `tests/hildi_tests.pas`
 - [x] **Types**: define the interface-section types from the SPEC in
-      `src/hildegard.helper.store.pas` (no bodies yet)
+      `src/hildi.store.pas` (no bodies yet)
 
 ### Phase 2: Open, Library Loading & Migrations
 
@@ -111,7 +111,7 @@ is omitted.
 ### New Files
 
 ```
-src/hildegard.helper.store.pas
+src/hildi.store.pas
 tests/test_store.pas
 scripts/fetch-sqlite.sh
 deps/sqlite3/README.md
@@ -121,7 +121,7 @@ examples/store_demo.pas        (small, if not folded into demo_harness)
 ### Modified Files
 
 ```
-tests/hildegard_helper_tests.pas   (add test_store to uses)
+tests/hildi_tests.pas   (add test_store to uses)
 Makefile                           (libsqlite target; dependencies; maybe store_demo)
 .gitignore                         (deps/sqlite3 downloaded amalgamation)
 docs/features/Local_SQLite_Store/  (SPEC/TODO status)

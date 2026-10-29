@@ -15,7 +15,7 @@ Turn Stats v2.
 - [x] **Test**: `TestBorderDrawsRightTitle`,
       `TestRightTitleSkipsWhenTooNarrow` in `tests/test_tui_widgets.pas`
 - [x] **Implement**: `TBoxStyle.TitleRight` and the right-aligned title in
-      `src/hildegard.helper.tui.panel.pas`
+      `src/hildi.tui.panel.pas`
 
 ### Phase 2: The formatters
 
@@ -23,17 +23,17 @@ Turn Stats v2.
       `TestFormatSessionHeader`, `TestFormatSessionHeaderEmpty` in
       `tests/test_harness_stats.pas`
 - [x] **Implement**: `FormatContextUsage`, `FormatSessionHeader` (and the
-      private progress bar) in `src/hildegard.helper.harness.stats.pas`
+      private progress bar) in `src/hildi.harness.stats.pas`
 
 ### Phase 3: The panel and the app
 
 - [x] **Implement**: `TChatPanel.SetHeader` in
-      `src/hildegard.helper.tui.chatpanel.pas`
+      `src/hildi.tui.chatpanel.pas`
 - [x] **Test**: `TestHeaderShowsSessionIdAndStats`,
       `TestHeaderUpdatesAfterATurn`, `TestResumeHeaderMatchesLive`,
       `TestStatusBarCleared` in `tests/test_harness_app.pas`
 - [x] **Implement**: the header (id left, stats right) and the cleared status
-      bar in `src/hildegard.helper.harness.app.pas`
+      bar in `src/hildi.harness.app.pas`
 
 ### Phase 4: Docs and validation
 
@@ -54,11 +54,11 @@ docs/features/TUI_Harness/Session_Header_v1.DONE.md
 ### Modified Files
 
 ```
-src/hildegard.helper.tui.panel.pas        TitleRight on the top border
-src/hildegard.helper.tui.chatpanel.pas    SetHeader, HeaderLeft/Right
-src/hildegard.helper.harness.stats.pas    FormatContextUsage, FormatSessionHeader
-src/hildegard.helper.harness.session.pas  MaxContextTokens resolves the default
-src/hildegard.helper.harness.app.pas      the header; the cleared status bar
+src/hildi.tui.panel.pas        TitleRight on the top border
+src/hildi.tui.chatpanel.pas    SetHeader, HeaderLeft/Right
+src/hildi.harness.stats.pas    FormatContextUsage, FormatSessionHeader
+src/hildi.harness.session.pas  MaxContextTokens resolves the default
+src/hildi.harness.app.pas      the header; the cleared status bar
 tests/test_tui_widgets.pas                the border titles
 tests/test_harness_stats.pas              the header formatters
 tests/test_harness_app.pas                the header + the cleared status bar
@@ -85,10 +85,10 @@ Deviations from the specification, and why:
   is the workspace plus the billed in/out, cache hit, time and requests.
 - **`MaxContextTokens` resolves to the default.** To keep the header's
   percentage and bar always present, `THarnessSession.MaxContextTokens` now
-  resolves config -> `HILDEGARD_MAX_CONTEXT_TOKENS` -> the agent default (120k)
+  resolves config -> `HILDI_MAX_CONTEXT_TOKENS` -> the agent default (120k)
   rather than exposing 0.
 - **The app tests pin the limit.** The environment may set
-  `HILDEGARD_MAX_CONTEXT_TOKENS` (`.env`), so the test config sets
+  `HILDI_MAX_CONTEXT_TOKENS` (`.env`), so the test config sets
   `MaxContextTokens := 120000` to keep the header assertions deterministic.
 - **Cost is omitted.** It will be tracked per turn with the provider and model;
   the header leaves the slot for it.

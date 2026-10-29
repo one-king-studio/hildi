@@ -29,21 +29,21 @@ type
 const
   SrcDir = 'src';
   TuiPrefix = 'tui.';
-  HeadlessRoot = 'hildegard.helper.session.runtime';
+  HeadlessRoot = 'hildi.session.runtime';
   { Units a client (the TUI) must never link. }
   ForbiddenForClient: array[0..7] of string = (
-    'hildegard.helper.agent',
-    'hildegard.helper.harness.session',
-    'hildegard.helper.harness.turn.worker',
-    'hildegard.helper.command.tool',
-    'hildegard.helper.files',
-    'hildegard.helper.recall.tool',
-    'hildegard.helper.session.store',
-    'hildegard.helper.session.runtime');
+    'hildi.agent',
+    'hildi.harness.session',
+    'hildi.harness.turn.worker',
+    'hildi.command.tool',
+    'hildi.files',
+    'hildi.recall.tool',
+    'hildi.session.store',
+    'hildi.session.runtime');
   ClientRoots: array[0..2] of string = (
-    'hildegard.helper.harness.app',
-    'hildegard.helper.harness.driver',
-    'hildegard.helper.harness.view');
+    'hildi.harness.app',
+    'hildi.harness.driver',
+    'hildi.harness.view');
 
 { Strip brace, paren-star, and line comments so `uses` scanning sees code. }
 function StripComments(const AText: string): string;
@@ -310,7 +310,7 @@ begin
       AssertTrue('async unit exists: ' + Roots[I], Closure.Count > 0);
       for J := 0 to Closure.Count - 1 do
       begin
-        IsHarness := Copy(Closure[J], 1, Length('hildegard')) = 'hildegard';
+        IsHarness := Copy(Closure[J], 1, Length('hildi')) = 'hildi';
         AssertFalse('the async library reached a harness unit: ' + Closure[J] +
           ' (from ' + Roots[I] + ')', IsHarness);
       end;

@@ -10,7 +10,7 @@ command learns about Windows.
 
 ## 1. The line policy (shipped)
 
-`hildegard.helper.shell.textlines` owns line splitting for every text command:
+`hildi.shell.textlines` owns line splitting for every text command:
 
 ```pascal
 function SplitLinesEx(const S: string; AStripCR: Boolean): TStringArray;
@@ -40,7 +40,7 @@ An `IShellFileSystem` rooted at a directory, mirroring `TWorkspaceShellFs`:
 | `Copy`, `MakeDir`, `Touch` | as today |
 
 - **Containment:** reuse `PhysicalResolve`/`PhysicalContains` from
-  `hildegard.helper.workspace`, extended for junctions and 8.3 short names —
+  `hildi.workspace`, extended for junctions and 8.3 short names —
   the nearest existing ancestor is resolved, and the tail is re-appended.
 - **Paths presented:** `/` internally, so commands, globs, `grep -r` output and
   `find` display the same text as on Unix.

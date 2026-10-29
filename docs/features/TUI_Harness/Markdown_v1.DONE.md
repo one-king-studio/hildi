@@ -5,7 +5,7 @@
 
 ## Overview
 
-A pure parser (`hildegard.helper.markdown`) that turns a markdown subset into
+A pure parser (`hildi.markdown`) that turns a markdown subset into
 typed blocks of styled spans and maps them to `TAttr`; no UI, no I/O. Complete:
 `make check` green at 649 tests, leak-clean.
 
@@ -14,9 +14,9 @@ typed blocks of styled spans and maps them to `TAttr`; no UI, no I/O. Complete:
 ### Phase 1: Skeleton & types
 
 - [x] **Test unit**: `tests/test_markdown.pas`, added to the `uses` clause of
-      `tests/hildegard_helper_tests.pas`
+      `tests/hildi_tests.pas`
 - [x] **Test**: `TestEmptyInputYieldsNoBlocks`
-- [x] **Implement**: `src/hildegard.helper.markdown.pas` with the SPEC's public
+- [x] **Implement**: `src/hildi.markdown.pas` with the SPEC's public
       types
 - [x] **Check FPC user-contributed units for a reusable markdown subset**: none
       exists. `fcl-*` has JSON, XML, CSS, PDF, Mustache, and OpenAPI but no
@@ -76,9 +76,9 @@ typed blocks of styled spans and maps them to `TAttr`; no UI, no I/O. Complete:
 ## Files Created/Modified
 
 ```
-src/hildegard.helper.markdown.pas   (new) parser, inline scanner, theme
+src/hildi.markdown.pas   (new) parser, inline scanner, theme
 tests/test_markdown.pas             (new) 28 tests
-tests/hildegard_helper_tests.pas    (add the test unit to uses)
+tests/hildi_tests.pas    (add the test unit to uses)
 docs/features/TUI_Harness/Markdown_v1.SPEC.md   (incremental design, fields, Finish)
 docs/features/FEATURES.md           (TUI Harness specs list)
 HANDOFF.md                          (state, test count)

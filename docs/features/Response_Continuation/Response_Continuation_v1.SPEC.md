@@ -12,7 +12,7 @@ pending response is discarded and never persisted. A truncated tool call is
 dropped, answered with a paired notice, and the loop continues so the model can
 resubmit.
 
-One component, `hildegard.helper.agent`, plus a small change to the live app's
+One component, `hildi.agent`, plus a small change to the live app's
 error path.
 
 ## Requirements
@@ -77,7 +77,7 @@ Live view
 
 ## Contracts & Interfaces
 
-### Agent (`hildegard.helper.agent`)
+### Agent (`hildi.agent`)
 
 ```pascal
 const
@@ -116,7 +116,7 @@ type
   end;
 ```
 
-### LLM (`hildegard.helper.llm`)
+### LLM (`hildi.llm`)
 
 ```pascal
 type
@@ -130,7 +130,7 @@ type
 `TFinishReason` is unchanged. `TSSEParser.SetFinish` already maps `length`;
 optionally it also maps `max_tokens` (Anthropic-style gateways) to `frLength`.
 
-### Turn worker and app (`hildegard.helper.harness.turn` / `.app`)
+### Turn worker and app (`hildi.harness.turn` / `.app`)
 
 No new event kind and no new event field. The existing `teError` carries the
 error code and message. The app removes the in-flight blocks on any non-cancel
@@ -162,7 +162,7 @@ cancel restored the prompt).
 - **Responsibilities:** the loop owns the pending response and the continuation
   budget; it decides when to continue, commit, or discard. The app owns the live
   rollback. The store stays a plain append seam.
-- **Dependencies:** `hildegard.helper.llm` for the finish reason and error codes;
+- **Dependencies:** `hildi.llm` for the finish reason and error codes;
   `IConversationStore` for the committed messages.
 - **Side effects:** committed assistant/tool messages and reasoning blocks; the
   turn outcome (`tsCompleted` / `tsFailed`).

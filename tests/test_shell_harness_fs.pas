@@ -9,7 +9,7 @@ interface
 
 uses
   Classes, SysUtils, BaseUnix, fpcunit, testregistry,
-  shell.fs, hildegard.helper.shell.fs;
+  shell.fs, hildi.shell.fs;
 
 type
   TShellHarnessFsTest = class(TTestCase)

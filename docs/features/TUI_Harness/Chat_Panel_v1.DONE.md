@@ -11,9 +11,9 @@ complete.
 
 - [x] **1.1** Tests: `PutCh` places one cell; `PutText` places a string; both
       clip outside the surface bounds and advance by display width.
-- [x] **1.2** Add `PutCh`/`PutText` to `hildegard.helper.tui.surface`.
+- [x] **1.2** Add `PutCh`/`PutText` to `hildi.tui.surface`.
 
-**Files:** `src/hildegard.helper.tui.surface.pas`, `tests/test_tui_surface.pas`.
+**Files:** `src/hildi.tui.surface.pas`, `tests/test_tui_surface.pas`.
 
 ## Phase 2 - Chat stream
 
@@ -21,26 +21,26 @@ complete.
       the measured height; a user bubble, an assistant line, a collapsed and an
       expanded thought/tool block each render their chrome on `TSurfaceMemory`;
       a click toggles and fires `OnToggle`; the thinking block animates.
-- [x] **2.2** Add `src/hildegard.helper.tui.chat.pas` with `TChatKind`,
+- [x] **2.2** Add `src/hildi.tui.chat.pas` with `TChatKind`,
       `TChatItem` and `TChatStream`, moved from the demo and made mutable.
 - [x] **2.3** Tests: adding items keeps the newest visible; `Clear` empties it.
 
-**Files:** `src/hildegard.helper.tui.chat.pas`, `tests/test_tui_chat.pas`,
-`tests/hildegard_helper_tests.pas`.
+**Files:** `src/hildi.tui.chat.pas`, `tests/test_tui_chat.pas`,
+`tests/hildi_tests.pas`.
 
 ## Phase 3 - Compose and chat panel
 
 - [x] **3.1** Tests: `NeededHeight` grows with wrapped text; Enter submits and
       clears; Shift+Enter adds a line; the info line renders.
-- [x] **3.2** Add `src/hildegard.helper.tui.compose.pas` with `TComposeBox`.
+- [x] **3.2** Add `src/hildi.tui.compose.pas` with `TComposeBox`.
 - [x] **3.3** Tests: the compose overlays the messages panel without reflowing
       it; the status line and CTA render; `SetComposeActive(False)` stops input
       while keeping the text.
-- [x] **3.4** Add `src/hildegard.helper.tui.chatpanel.pas` with `TChatPanel`.
+- [x] **3.4** Add `src/hildi.tui.chatpanel.pas` with `TChatPanel`.
 
-**Files:** `src/hildegard.helper.tui.compose.pas`,
-`src/hildegard.helper.tui.chatpanel.pas`, `tests/test_tui_compose.pas`,
-`tests/test_tui_chatpanel.pas`, `tests/hildegard_helper_tests.pas`.
+**Files:** `src/hildi.tui.compose.pas`,
+`src/hildi.tui.chatpanel.pas`, `tests/test_tui_compose.pas`,
+`tests/test_tui_chatpanel.pas`, `tests/hildi_tests.pas`.
 
 ## Phase 4 - Harness wiring
 
@@ -50,11 +50,11 @@ complete.
 - [x] **4.2** Rewire `THarnessApp`: build the panel, replay history into the
       stream, map `TTurnEvent` to blocks, drive the thinking indicator, and set
       the status line from the workspace.
-- [x] **4.3** Delete `hildegard.helper.tui.conversation.pas` and its tests once
+- [x] **4.3** Delete `hildi.tui.conversation.pas` and its tests once
       nothing uses them.
 
-**Files:** `src/hildegard.helper.harness.app.pas`, `tests/test_harness_app.pas`,
-`src/hildegard.helper.tui.conversation.pas`, `tests/test_tui_conversation.pas`.
+**Files:** `src/hildi.harness.app.pas`, `tests/test_harness_app.pas`,
+`src/hildi.tui.conversation.pas`, `tests/test_tui_conversation.pas`.
 
 ## Phase 5 - Demo adoption
 

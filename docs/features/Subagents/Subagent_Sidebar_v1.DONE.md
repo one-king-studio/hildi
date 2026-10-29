@@ -2,7 +2,7 @@
 
 Reference: `Subagent_Sidebar_v1.SPEC.md`. Depends on the core
 (`Subagents_v1.SPEC.md`) protocol additions. TDD-first; `make check` before
-moving on. Register new tests in `tests/hildegard_helper_tests.pas`
+moving on. Register new tests in `tests/hildi_tests.pas`
 (integrator-owned).
 
 ## Phase 1 — Roster model
@@ -10,10 +10,10 @@ moving on. Register new tests in `tests/hildegard_helper_tests.pas`
 - [x] **Test** (`tests/test_subagent_sidebar.pas`): `TestApplyMapsStatuses`,
       `TestApplyUpdatesInPlace`, `TestTerminalEntriesPersist`,
       `TestRosterFind`, `TestPruneDropsOldTerminalOnly`.
-- [x] **Implement**: `hildegard.helper.harness.subagent` — `TSubagentStatus`,
+- [x] **Implement**: `hildi.harness.subagent` — `TSubagentStatus`,
       `TSubagentEntry`, `TSubagentRoster` (`Apply`, `Entries`, `Count`, `Find`,
       `Prune`).
-  - Files: `src/hildegard.helper.harness.subagent.pas` (new).
+  - Files: `src/hildi.harness.subagent.pas` (new).
 - [x] **Check**: `make test SUITE=TSubagentRosterTest`.
 
 ## Phase 2 — Sidebar widget
@@ -21,9 +21,9 @@ moving on. Register new tests in `tests/hildegard_helper_tests.pas`
 - [x] **Test** (`tests/test_tui_sidebar.pas`): `TestSidebarRendersRows`,
       `TestSidebarSelectionMoves`, `TestSidebarEnterFiresSelect`,
       `TestSidebarEmptyState` — all over `TSurfaceMemory`.
-- [x] **Implement**: `hildegard.helper.tui.sidebar` — `TSidebar`
+- [x] **Implement**: `hildi.tui.sidebar` — `TSidebar`
       (`Measure`/`Render`/`HandleEvent`/`Refresh`, `OnSelect`).
-  - Files: `src/hildegard.helper.tui.sidebar.pas` (new).
+  - Files: `src/hildi.tui.sidebar.pas` (new).
 - [x] **Check**: `make test SUITE=TSidebarTest`.
 
 ## Phase 3 — Spy binding
@@ -31,17 +31,17 @@ moving on. Register new tests in `tests/hildegard_helper_tests.pas`
 - [x] **Test** (`tests/test_subagent_spy.pas`): `TestSpyMapsChildStream`
       (a driver-driven child's stream maps to the chat panel's `TTurnEvent`s),
       `TestSpyUnknownChildFails`.
-- [x] **Implement**: `hildegard.helper.harness.subagent.spy` — `TSubagentSpy`
+- [x] **Implement**: `hildi.harness.subagent.spy` — `TSubagentSpy`
       (`Open`, `PopEvent`, `SessionId`, `Close`) over `TSessionClient`
       (`srObserve`, `Spawn = False`).
-  - Files: `src/hildegard.helper.harness.subagent.spy.pas` (new).
+  - Files: `src/hildi.harness.subagent.spy.pas` (new).
 - [x] **Also** (found while testing the core live): the driver dropped the
       subagent wire events, so a child's approval ask never reached the TUI. The
       event mapping is now a shared `MapSessionEvent` in `harness.driver` that
       maps `ekSubagent`/`ekSubagentAsk`/`ekAmbient` to `teSubagent`/
       `teSubagentAsk`/`teAmbient`.
-  - Files: `src/hildegard.helper.harness.driver.pas`,
-    `src/hildegard.helper.harness.turn.pas`.
+  - Files: `src/hildi.harness.driver.pas`,
+    `src/hildi.harness.turn.pas`.
 - [x] **Check**: `make test SUITE=TSubagentSpyTest`.
 
 ## Phase 4 — App integration (sidebar + spy + actions)
@@ -54,9 +54,9 @@ moving on. Register new tests in `tests/hildegard_helper_tests.pas`
       (`TSubagentSpy`, `srObserve`) and hides the composer; `Step` drains the
       spy; a relayed child ask (`teSubagentAsk`) opens the approval modal; the
       driver gains `AbortSubagent`/`ReleaseSubagent`.
-  - Files: `src/hildegard.helper.harness.app.pas`,
-    `src/hildegard.helper.harness.driver.pas`,
-    `src/hildegard.helper.harness.driver.local.pas`.
+  - Files: `src/hildi.harness.app.pas`,
+    `src/hildi.harness.driver.pas`,
+    `src/hildi.harness.driver.local.pas`.
 - [x] **Check**: `make test SUITE=THarnessAppTest`.
 
   *(Remaining polish, folded into Phase 5: the spy-mode **Abort/Release actions
@@ -69,8 +69,8 @@ moving on. Register new tests in `tests/hildegard_helper_tests.pas`
 - [x] **Implement**: a `ckAmbient` chat kind (dimmed body), and the app renders
       an `mrAmbient` record as a `ckAmbient` block: a marker line
       (`◀ label · status ▶`) then the child's text.
-  - Files: `src/hildegard.helper.tui.chat.pas`,
-    `src/hildegard.helper.harness.app.pas`.
+  - Files: `src/hildi.tui.chat.pas`,
+    `src/hildi.harness.app.pas`.
 - [x] **Check**: `make test SUITE=TTuiChatTest`.
 
 ## Phase 6 — Verification

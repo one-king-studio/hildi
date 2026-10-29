@@ -1,5 +1,5 @@
 unit test_harness_app;
-{ fpcunit tests for hildegard.helper.harness.app: the application wires the
+{ fpcunit tests for hildi.harness.app: the application wires the
   session, widgets, turn queue, and approval modal together. Runs a real turn
   through the worker over the fake transport against an in-memory surface and a
   scripted input source. }
@@ -10,19 +10,19 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry, Generics.Collections,
-  hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.approval,
+  hildi.llm, hildi.agent, hildi.approval,
   tui.base, tui.input,
   tui.surface, tui.widget,
   tui.widgets.chat,
-  hildegard.helper.harness.turn, hildegard.helper.harness.session,
-  hildegard.helper.harness.view,
-  hildegard.helper.harness.driver, hildegard.helper.harness.driver.local,
-  hildegard.helper.harness.app,
-  hildegard.helper.harness.subagent.spy,
-  hildegard.helper.session.protocol, hildegard.helper.session.client,
-  hildegard.helper.store,
-  hildegard.helper.session, llm_fakes,
-  hildegard.helper.changes.store, changes.types, changes.store, changes.text;
+  hildi.harness.turn, hildi.harness.session,
+  hildi.harness.view,
+  hildi.harness.driver, hildi.harness.driver.local,
+  hildi.harness.app,
+  hildi.harness.subagent.spy,
+  hildi.session.protocol, hildi.session.client,
+  hildi.store,
+  hildi.session, llm_fakes,
+  hildi.changes.store, changes.types, changes.store, changes.text;
 
 type
   { Calls Gate.Ask on its own thread so the app can answer it. }
@@ -409,7 +409,7 @@ begin
   Result.WorkspacePath := FDir;
   Result.Transport := FFake;
   { Pin the context limit so the header is deterministic (the environment may
-    set HILDEGARD_MAX_CONTEXT_TOKENS). }
+    set HILDI_MAX_CONTEXT_TOKENS). }
   Result.MaxContextTokens := 120000;
   { The retry would delay a failed turn by seconds; the tests exercise the
     failure paths, not the retry. }

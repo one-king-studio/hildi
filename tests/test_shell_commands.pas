@@ -8,8 +8,8 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  shell.types, shell.fs, shell.registry, hildegard.helper.shell.fs,
-  hildegard.helper.shell.commands;
+  shell.types, shell.fs, shell.registry, hildi.shell.fs,
+  hildi.shell.commands;
 
 type
   TShellCommandsTest = class(TTestCase)

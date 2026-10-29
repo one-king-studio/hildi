@@ -2,9 +2,9 @@
 
 **Related Feature:** [FEATURE.md](FEATURE.md) (TUI Harness)
 
-**Depends on:** `hildegard.helper.harness.turn` (`teError`/`teRetrying`),
-`hildegard.helper.harness.app` (the transcript and status bar),
-`hildegard.helper.llm` (`OperatorPhrase`).
+**Depends on:** `hildi.harness.turn` (`teError`/`teRetrying`),
+`hildi.harness.app` (the transcript and status bar),
+`hildi.llm` (`OperatorPhrase`).
 
 **Pairs with:** [Request Retry
 v1](../Agent_Loop/Request_Retry_v1.SPEC.md) — the loop's half of the same
@@ -64,7 +64,7 @@ either, so a recovered blip is invisible and an unrecovered one is unexplained.
 ## Contracts & Interfaces
 
 ```pascal
-unit hildegard.helper.harness.app;   // extended
+unit hildi.harness.app;   // extended
 
 { The block text for a turn failure: the message, plus the detail when present.
   Pure, so the format is pinned without a surface. }

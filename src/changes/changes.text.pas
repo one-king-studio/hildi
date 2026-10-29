@@ -1,7 +1,7 @@
 unit changes.text;
 { The diff engine: generate a bounded unified diff, and apply one.
 
-  Generation is the genuinely new work here - hildegard.helper.patch only ever
+  Generation is the genuinely new work here - hildi.patch only ever
   applied. Application is the same algorithm the harness already trusts, moved in
   so there is one implementation rather than two.
 

@@ -8,7 +8,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.handoff;
+  hildi.handoff;
 
 type
   THandoffTest = class(TTestCase)

@@ -1,9 +1,9 @@
 # Component Specification: Workspace Board v1
 
 **Related Feature:** [FEATURE.md](FEATURE.md)
-**Depends on:** `hildegard.helper.store` (SQLite + the v13 schema),
-`hildegard.helper.approval` (moderation only), `hildegard.helper.workspace.changes`
-(the staleness annotation), `hildegard.helper.agent` (the `tools` dispatch seam).
+**Depends on:** `hildi.store` (SQLite + the v13 schema),
+`hildi.approval` (moderation only), `hildi.workspace.changes`
+(the staleness annotation), `hildi.agent` (the `tools` dispatch seam).
 **Depended on by:** nothing (a leaf capability).
 
 ## Purpose
@@ -20,9 +20,9 @@ bodies** — roughly 30 tokens, flat in board size.
 
 | Need | Existing | Change |
 | --- | --- | --- |
-| Persistence + migrations | `hildegard.helper.store` | one additive migration (v14) |
+| Persistence + migrations | `hildi.store` | one additive migration (v14) |
 | Path-change history for staleness | `workspace.changes` / `file_changes` | reuse; annotate a read |
-| The tail block | `hildegard.helper.wrap` (`FormatTail`) | add a `<board>` element |
+| The tail block | `hildi.wrap` (`FormatTail`) | add a `<board>` element |
 | Provider seam | `IToolProvider` (`Prepare`/`Specs`/`PromptFragment`) | **reuse**: the board is a provider |
 | Approval for moderation | `IApprovalService` | reuse, one ask per destructive op |
 | FTS search | the existing `messages_fts` | a second FTS table |
@@ -64,7 +64,7 @@ TOC, and the staleness join.
 ### The record
 
 ```pascal
-unit hildegard.helper.board;
+unit hildi.board;
 
 type
   TBoardKind = (

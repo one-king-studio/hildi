@@ -282,7 +282,7 @@ instead of documents.
 
 ## 9. File-backed mode (parked)
 
-A workspace may later choose `.hildegard/messages` and `.hildegard/tasks` instead
+A workspace may later choose `.hildi/messages` and `.hildi/tasks` instead
 of SQLite. **Design only; not scheduled.**
 
 The paradox worth recording: persisting the board to files makes it a *durable

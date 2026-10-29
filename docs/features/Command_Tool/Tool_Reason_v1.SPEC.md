@@ -9,13 +9,13 @@ call the model makes. It exists so the operator can see *why* the agent is
 asking to run something, and so approval prompts and audit records carry intent
 rather than bare arguments.
 
-It is a change to the shared tool contract in `hildegard.helper.agent`, not a
+It is a change to the shared tool contract in `hildi.agent`, not a
 `run_command`-only parameter: the requirement is enforced by the registry and the
 loop for every registered tool, so a tool author cannot forget it. It is specced
 here because the Command Tool's approval and audit are the first consumers.
 
 > **Cross-feature note:** this modifies the Agent Loop's tool contract
-> (`hildegard.helper.agent`) and the transcript (`hildegard.helper.transcript`).
+> (`hildi.agent`) and the transcript (`hildi.transcript`).
 > When implemented, the Agent Loop feature should be updated to reference this
 > spec, and `Agent_Loop_v1.SPEC.md`'s `TToolCallEvent` contract superseded.
 
@@ -47,13 +47,13 @@ here because the Command Tool's approval and audit are the first consumers.
 ## Contracts & Interfaces
 
 > Contracts as Pascal type declarations. No method bodies. This section describes
-> the delta to `hildegard.helper.agent`; unchanged types are as in
+> the delta to `hildi.agent`; unchanged types are as in
 > `Agent_Loop_v1.SPEC.md`.
 
 ### Changed public API
 
 ```pascal
-unit hildegard.helper.agent;
+unit hildi.agent;
 
 type
   { CHANGED: gains AReason, the model's stated reason for the call ('' if none
@@ -96,7 +96,7 @@ the registry's registration behaviour change.
 
 ### Prior Art & Reuse
 
-- `hildegard.helper.agent` already owns the registry and dispatch; this is a
+- `hildi.agent` already owns the registry and dispatch; this is a
   small extension, not a new path.
 - `fpjson`/`jsonparser` (already used by the LLM client) is reused to inspect and
   augment the arguments/schema JSON; no string concatenation of JSON.

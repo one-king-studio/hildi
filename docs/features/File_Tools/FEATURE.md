@@ -71,7 +71,7 @@ exists - so only the tool layer and a small glob matcher are new.
 - [ ] No new dependency; RTL only.
 - [ ] Deterministic and unit-tested against a temporary directory.
 - [ ] Leak-clean under `make test-leak`; `make check` green.
-- [ ] Style: `{$mode delphi}{$H+}`, unit `hildegard.helper.file.tool`.
+- [ ] Style: `{$mode delphi}{$H+}`, unit `hildi.file.tool`.
 
 ## Success Metrics
 
@@ -102,10 +102,10 @@ exists - so only the tool layer and a small glob matcher are new.
 
 ### Internal
 
-- `hildegard.helper.agent` (`TToolRegistry`, `TToolSpec`, `TToolHandler`).
-- `hildegard.helper.approval` (`IApprovalService`, `TApprovalAsk`,
+- `hildi.agent` (`TToolRegistry`, `TToolSpec`, `TToolHandler`).
+- `hildi.approval` (`IApprovalService`, `TApprovalAsk`,
   `TApprovalOption`, `DefaultApprovalRule`).
-- `hildegard.helper.workspace` (`TWorkspace` containment) - the same boundary
+- `hildi.workspace` (`TWorkspace` containment) - the same boundary
   the shell tool uses.
 
 ### External

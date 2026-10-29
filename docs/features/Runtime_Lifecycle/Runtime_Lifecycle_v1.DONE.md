@@ -10,7 +10,7 @@ Three triggers (command, signal, no-clients grace) into the existing `FStop` →
 
 ## Implementation Tasks
 
-### Phase 1: Protocol (`hildegard.helper.session.protocol`)
+### Phase 1: Protocol (`hildi.session.protocol`)
 
 - [ ] **Add** `scShutdown` to `TSessionCommandKind` (appended last) and its wire
       name `'shutdown'` to `CommandKindNames`.
@@ -18,7 +18,7 @@ Three triggers (command, signal, no-clients grace) into the existing `FStop` →
 - [ ] **Implement**: the enum + name (the codec loops over the enum, so no other
       change).
 
-### Phase 2: Runtime (`hildegard.helper.session.runtime`)
+### Phase 2: Runtime (`hildi.session.runtime`)
 
 - [ ] **Add** `ClientExitGraceMs` to `TSessionRuntimeConfig` (0 => default,
       negative => never).
@@ -57,9 +57,9 @@ Three triggers (command, signal, no-clients grace) into the existing `FStop` →
 ## Files to Create/Modify
 
 ```
-src/hildegard.helper.session.protocol.pas (scShutdown enum + wire name)
-src/hildegard.helper.session.runtime.pas  (command, signal, no-clients grace)
-src/hildegard.helper.session.client.pas   (Shutdown convenience; optional)
+src/hildi.session.protocol.pas (scShutdown enum + wire name)
+src/hildi.session.runtime.pas  (command, signal, no-clients grace)
+src/hildi.session.client.pas   (Shutdown convenience; optional)
 tests/test_session_protocol.pas           (round-trip)
 tests/test_session_runtime.pas            (shutdown/grace/signal tests)
 ```

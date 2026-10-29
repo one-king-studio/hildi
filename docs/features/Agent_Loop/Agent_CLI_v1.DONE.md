@@ -4,8 +4,8 @@
 
 ## Tasks
 
-- [x] `hildegard.helper.cli`: `TCLIOptions`, `ParseCLIOptions`, `UsageText`
-- [x] `hildegard.helper.transcript`: labelled sections, streaming, token pacing
+- [x] `hildi.cli`: `TCLIOptions`, `ParseCLIOptions`, `UsageText`
+- [x] `hildi.transcript`: labelled sections, streaming, token pacing
 - [x] `tests/test_cli.pas` (12 tests) and `tests/test_transcript.pas` (10 tests)
 - [x] Rewrite `examples/agent_cli.pas`: interactive/once modes, piped stdin,
       flags, exit codes, streaming

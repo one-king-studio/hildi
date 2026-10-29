@@ -117,10 +117,10 @@ the stale runtime. Restarting required killing processes by hand.
 
 ### Internal
 
-- `hildegard.helper.session.runtime` (serve loop, `FStop`, `Shutdown`).
-- `hildegard.helper.session.protocol` (`TSessionCommandKind`).
-- `hildegard.helper.session.client` (the client sends `scShutdown`/detaches).
-- `hildegard.helper.harness.session` (owns the MCP children to tear down).
+- `hildi.session.runtime` (serve loop, `FStop`, `Shutdown`).
+- `hildi.session.protocol` (`TSessionCommandKind`).
+- `hildi.session.client` (the client sends `scShutdown`/detaches).
+- `hildi.harness.session` (owns the MCP children to tear down).
 
 ### External
 

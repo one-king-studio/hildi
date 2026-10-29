@@ -266,7 +266,7 @@ or engine units; asserted by a test) so it can be lifted into the other apps.
   `cwstring` where non-ASCII text crosses the boundary.
 - No `TSemaphore` on macOS — `TCriticalSection` + `TSimpleEvent`, as the harness
   already does.
-- No dependency on `hildegard.helper.*` or any engine unit; the library must
+- No dependency on `hildi.*` or any engine unit; the library must
   build standalone.
 - The virtual clock is the only time source in tests; no `Sleep` in the suite.
 

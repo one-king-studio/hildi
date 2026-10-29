@@ -1,5 +1,5 @@
 unit test_utf8;
-{ fpcunit tests for hildegard.helper.utf8: byte caps that never split a UTF-8
+{ fpcunit tests for hildi.utf8: byte caps that never split a UTF-8
   sequence, so a truncated stream ends on a character instead of a replacement
   character. }
 
@@ -8,7 +8,7 @@ unit test_utf8;
 interface
 
 uses
-  SysUtils, fpcunit, testregistry, hildegard.helper.utf8;
+  SysUtils, fpcunit, testregistry, hildi.utf8;
 
 type
   TUtf8Test = class(TTestCase)

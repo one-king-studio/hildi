@@ -351,5 +351,5 @@ than forgotten.
 
    Neither the parser nor the utility refuses a document for lacking frontmatter.
    Interpreting the entries — deciding what `title` is for — belongs to the
-   consumer (`hildegard.helper.replymeta`, which already does exactly that at the
+   consumer (`hildi.replymeta`, which already does exactly that at the
    turn boundary).

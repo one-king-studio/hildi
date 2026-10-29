@@ -5,7 +5,7 @@
 
 ## Overview
 
-Build `hildegard.helper.command.policy`: a pure parser/classifier that turns a
+Build `hildi.command.policy`: a pure parser/classifier that turns a
 POSIX command line into a `TCommandPlan` and classifies it against a
 `TCommandPolicy` as allow/ask/deny. It executes nothing and reads no store, so
 this can be built independently of the other components.
@@ -17,8 +17,8 @@ this can be built independently of the other components.
 ### Phase 1: Setup & Foundation
 
 - [x] **Add** `tests/test_command_policy.pas` to the `uses` clause of
-      `tests/hildegard_helper_tests.pas`
-- [x] **Create** `src/hildegard.helper.command.policy.pas` with the interface
+      `tests/hildi_tests.pas`
+- [x] **Create** `src/hildi.command.policy.pas` with the interface
       types from the SPEC (no bodies)
 - [x] **Create** `tests/test_command_policy.pas` with an empty `TTestCase`
 
@@ -88,14 +88,14 @@ this can be built independently of the other components.
 ### New Files
 
 ```
-src/hildegard.helper.command.policy.pas
+src/hildi.command.policy.pas
 tests/test_command_policy.pas
 ```
 
 ### Modified Files
 
 ```
-tests/hildegard_helper_tests.pas   (add test unit to uses)
+tests/hildi_tests.pas   (add test unit to uses)
 ```
 
 ## Success Criteria

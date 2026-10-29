@@ -88,7 +88,7 @@ The link doc is not changed here; that reconciliation is recorded, not assumed.
 
 ### Non-Functional Requirements
 
-- [ ] Reuse `hildegard.helper.tls` / `fphttpclient` and `fpjson`; no new
+- [ ] Reuse `hildi.tls` / `fphttpclient` and `fpjson`; no new
       dependency.
 - [ ] The browser/redirect step is injectable (a callback) so tests need no
       browser.
@@ -109,8 +109,8 @@ The link doc is not changed here; that reconciliation is recorded, not assumed.
 
 ### Internal
 
-- `hildegard.helper.mcp.http` (the transport that will use the token),
-  `hildegard.helper.store` (token persistence), `hildegard.helper.tls`.
+- `hildi.mcp.http` (the transport that will use the token),
+  `hildi.store` (token persistence), `hildi.tls`.
 
 ### External
 

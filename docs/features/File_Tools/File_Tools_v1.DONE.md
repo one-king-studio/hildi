@@ -12,9 +12,9 @@ a failing test; `make check` before moving on.
 
 ### Phase 1: Types, config, path containment, approval
 
-- [x] Add `test_file_tool` to `tests/hildegard_helper_tests.pas`
+- [x] Add `test_file_tool` to `tests/hildi_tests.pas`
 - [x] **Types**: `TFileToolConfig`, `TFileTool` in
-      `src/hildegard.helper.files.pas` (interface only)
+      `src/hildi.files.pas` (interface only)
 - [x] **Test**: containment - `../` and absolute escapes refused; inside allowed
 - [x] **Test**: a denied ask returns the reason and performs no I/O
 - [x] **Implement**: `ResolvePath` (root + containment), `Approve` (ask/options
@@ -64,15 +64,15 @@ a failing test; `make check` before moving on.
 ### New Files
 
 ```
-src/hildegard.helper.files.pas
+src/hildi.files.pas
 tests/test_file_tool.pas
 ```
 
 ### Modified Files
 
 ```
-tests/hildegard_helper_tests.pas   (add the test unit)
-src/hildegard.helper.harness.session.pas  (own + register TFileTool)
+tests/hildi_tests.pas   (add the test unit)
+src/hildi.harness.session.pas  (own + register TFileTool)
 examples/agent_cli.pas             (own + register TFileTool)
 docs/features/FEATURES.md
 HANDOFF.md

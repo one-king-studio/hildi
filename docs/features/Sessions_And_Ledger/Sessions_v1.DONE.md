@@ -9,7 +9,7 @@
 **Related Specification:** `Sessions_v1.SPEC.md`
 **Related Feature:** `FEATURE.md`
 
-> **Progress:** implemented and committed. `hildegard.helper.session` (session
+> **Progress:** implemented and committed. `hildi.session` (session
 > ids + record model), migration v4 (`sessions`, `session_records`, drop
 > `requests`), store session/ledger methods, `TSqliteConversationStore`
 > (persist + restore, skipping reasoning/errors), and CLI `--session` resume.
@@ -33,7 +33,7 @@
 
 ## Overview
 
-Build `hildegard.helper.session`: session identity, the typed ledger, and a
+Build `hildi.session`: session identity, the typed ledger, and a
 SQLite `IConversationStore` adapter that persists and restores conversations.
 Also remove the store's `requests` table and API. Depends on Workspaces for the
 workspace id.
@@ -45,8 +45,8 @@ workspace id.
 ### Phase 1: Setup & Foundation
 
 - [ ] Add `tests/test_session.pas` to the uses clause of
-      `tests/hildegard_helper_tests.pas`
-- [ ] Create `src/hildegard.helper.session.pas` with the interface from the SPEC
+      `tests/hildi_tests.pas`
+- [ ] Create `src/hildi.session.pas` with the interface from the SPEC
 - [ ] Create `tests/test_session.pas` with an empty `TTestCase`
 
 ### Phase 2: Session identity (TDD)
@@ -117,18 +117,18 @@ workspace id.
 ### New Files
 
 ```
-src/hildegard.helper.session.pas
+src/hildi.session.pas
 tests/test_session.pas
 ```
 
 ### Modified Files
 
 ```
-src/hildegard.helper.store.pas   (migration v4, session methods; remove requests)
+src/hildi.store.pas   (migration v4, session methods; remove requests)
 tests/test_store.pas             (remove requests tests)
-src/hildegard.helper.cli.pas     (--session option)
+src/hildi.cli.pas     (--session option)
 examples/agent_cli.pas           (session + conversation store)
-tests/hildegard_helper_tests.pas
+tests/hildi_tests.pas
 ```
 
 ## Success Criteria

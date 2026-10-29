@@ -22,11 +22,11 @@ TDD-first; `make check` before moving on. `main` only.
 > grant covers the batch). `make check` green (1366 tests, leak-clean).
 > **Remaining:** Phases 4–5 — the structured formats (`json_read`/`json_edit`,
 > `yaml_read`/`yaml_edit`) and `patch_apply` (the two new pure units
-> `hildegard.helper.patch` and `hildegard.helper.yaml`).
+> `hildi.patch` and `hildi.yaml`).
 
 ## Implementation Tasks
 
-### Phase 1: The simple tools (`hildegard.helper.files`)
+### Phase 1: The simple tools (`hildi.files`)
 
 - [x] **Test**: `file_append` creates then appends (`test_file_tools`).
 - [x] **Implement**: `AppendFile`.
@@ -60,12 +60,12 @@ TDD-first; `make check` before moving on. `main` only.
 - [x] **Implement**: `JsonRead`/`JsonEdit` over `fpjson`.
 - [x] **Test**: `yaml_read`/`yaml_edit` on the subset; an out-of-subset
       construct errors with a line number.
-- [x] **Implement**: `hildegard.helper.yaml` (`ParseYaml`, `SetYamlPath`) and the
+- [x] **Implement**: `hildi.yaml` (`ParseYaml`, `SetYamlPath`) and the
       two handlers.
 
 ### Phase 5: Patches
 
-- [x] **Test**: `hildegard.helper.patch` applies a clean diff, counts a bad hunk
+- [x] **Test**: `hildi.patch` applies a clean diff, counts a bad hunk
       rejected, `dryRun` writes nothing (`test_patch`).
 - [x] **Implement**: `ApplyUnifiedPatch` (pure; injected read/write).
 - [x] **Test**: `patch_apply` wires it to the workspace + approval.
@@ -85,8 +85,8 @@ TDD-first; `make check` before moving on. `main` only.
 ```
 docs/features/File_Tools/File_Tools_v2.SPEC.md
 docs/features/File_Tools/File_Tools_v2.TODO.md
-src/hildegard.helper.patch.pas
-src/hildegard.helper.yaml.pas
+src/hildi.patch.pas
+src/hildi.yaml.pas
 tests/test_patch.pas
 tests/test_yaml.pas
 ```
@@ -94,9 +94,9 @@ tests/test_yaml.pas
 ### Modified Files
 
 ```
-src/hildegard.helper.files.pas     (13 new handlers + registration)
+src/hildi.files.pas     (13 new handlers + registration)
 tests/test_file_tools.pas          (the new tool tests)
-tests/hildegard_helper_tests.pas   (register test_patch, test_yaml)
+tests/hildi_tests.pas   (register test_patch, test_yaml)
 ```
 
 ## Dependencies & Ordering
@@ -114,8 +114,8 @@ tests/hildegard_helper_tests.pas   (register test_patch, test_yaml)
 
 Implemented on `main` (`1b48bf3`, `e7c35e3`, `e6264c8`, `e2b9c6e`): the six
 simple tools, the regex tools, and the format/patch tools (13 new tools, 19
-total with the v1 six). Two new pure units (`hildegard.helper.yaml`,
-`hildegard.helper.patch`). `make check` green (1385 tests, leak-clean).
+total with the v1 six). Two new pure units (`hildi.yaml`,
+`hildi.patch`). `make check` green (1385 tests, leak-clean).
 
 **Deviations from the SPEC, with reasons:**
 

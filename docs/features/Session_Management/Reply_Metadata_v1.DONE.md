@@ -13,9 +13,9 @@ markdown renderer; while streaming it is suppressed until it closes. TDD-first;
 
 ## Implementation Tasks
 
-### Phase 1: The extractor (`hildegard.helper.replymeta`)
+### Phase 1: The extractor (`hildi.replymeta`)
 
-- [x] **Create** `src/hildegard.helper.replymeta.pas` (interface only):
+- [x] **Create** `src/hildi.replymeta.pas` (interface only):
       `TReplyMeta`, `ExtractReplyMeta`, `TFrontMatterSuppressor`,
       `SuppressFrontMatter`.
 - [x] **Add** `test_replymeta.pas` to the runner's `uses`.
@@ -76,18 +76,18 @@ markdown renderer; while streaming it is suppressed until it closes. TDD-first;
 ### New Files
 
 ```
-src/hildegard.helper.replymeta.pas
+src/hildi.replymeta.pas
 tests/test_replymeta.pas
 ```
 
 ### Modified Files
 
 ```
-tests/hildegard_helper_tests.pas        (add the test unit)
-src/hildegard.helper.store.pas          (migration v10 + title/keyword methods)
-src/hildegard.helper.session.runtime.pas (extract + persist at teDone)
-src/hildegard.helper.agent.pas          (the prompt instruction)
-src/hildegard.helper.tui.chat.pas       (the assistant metadata header)
+tests/hildi_tests.pas        (add the test unit)
+src/hildi.store.pas          (migration v10 + title/keyword methods)
+src/hildi.session.runtime.pas (extract + persist at teDone)
+src/hildi.agent.pas          (the prompt instruction)
+src/hildi.tui.chat.pas       (the assistant metadata header)
 ```
 
 ## Dependencies & Ordering
@@ -125,7 +125,7 @@ src/hildegard.helper.tui.chat.pas       (the assistant metadata header)
 ## Outcome
 
 Implemented on `main` (`28d8da2`, `b6a9657`, `8811e83`, `ae18cde`, `e4b5741`).
-`hildegard.helper.replymeta` (the extractor + streaming suppressor), migration v10
+`hildi.replymeta` (the extractor + streaming suppressor), migration v10
 + the store methods, the `teDone` seam, the prompt, and the assistant header.
 `make check` green; leak-clean.
 

@@ -8,9 +8,9 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.store, hildegard.helper.tasks,
-  hildegard.helper.tasks.store, hildegard.helper.sqlite,
-  hildegard.helper.session;
+  hildi.store, hildi.tasks,
+  hildi.tasks.store, hildi.sqlite,
+  hildi.session;
 
 type
   TTaskStoreTest = class(TTestCase)

@@ -15,15 +15,15 @@ Out of scope: new approval refs, regex matching in `grep`, `find`, recursive
 ## Units
 
 ```
-src/hildegard.helper.shell.fs.pas         TWorkspaceShellFs (IShellFileSystem + ops)
-src/hildegard.helper.shell.commands.pas   TBuiltinCommands (the closed command set)
-src/hildegard.helper.shell.tier.pas       TBuiltinShell (pre-flight, gate, run)
-src/hildegard.helper.shell.executor.pas   TBuiltinCommandExecutor (ICommandExecutor)
+src/hildi.shell.fs.pas         TWorkspaceShellFs (IShellFileSystem + ops)
+src/hildi.shell.commands.pas   TBuiltinCommands (the closed command set)
+src/hildi.shell.tier.pas       TBuiltinShell (pre-flight, gate, run)
+src/hildi.shell.executor.pas   TBuiltinCommandExecutor (ICommandExecutor)
 ```
 
 ### Changes to existing units
 
-- `hildegard.helper.command.tool`: `ICommandExecutor.Execute` gains
+- `hildi.command.tool`: `ICommandExecutor.Execute` gains
   `const AReason: string`; `TProcessCommandExecutor` accepts and ignores it.
   `TCommandTool.Run` passes the model's reason.
 - `ICommandExecutor` also carries the **executor mode**: `TCommandMode =
@@ -35,7 +35,7 @@ src/hildegard.helper.shell.executor.pas   TBuiltinCommandExecutor (ICommandExecu
   builtin executor when the tier's pre-flight would accept the script. Without
   it, one `run_command` prompts twice (once from the splitter, once per command
   from the tier) and the second prompt is never answered.
-- `hildegard.helper.harness.session`: construct the builtin executor with the
+- `hildi.harness.session`: construct the builtin executor with the
   approval service, the workspace root, a timeout cap, and a tool dispatcher;
   pass it as `TCommandTool`'s executor. The process executor remains the
   fallback inside it.
@@ -223,7 +223,7 @@ A `TShellGate` implementation on `TBuiltinShell`:
 `tool <name> [json]` and `mcp <server>:<tool> [json]`:
 
 - `mcp` maps `server:tool` to `mcp_<sanitised server>_<sanitised tool>`. The
-  mapping reuses `McpToolName`/`McpSanitize` from `hildegard.helper.mcp.client`
+  mapping reuses `McpToolName`/`McpSanitize` from `hildi.mcp.client`
   so it cannot drift from the registry's names.
 - The name must match one of `AllowedTools` (glob, `MatchGlob` from the shell
   interpreter). Otherwise status 1 + `not allowed in the builtin shell: <name>`.

@@ -18,12 +18,12 @@ publishes.
 
 | Need | Already exists | Reuse |
 | --- | --- | --- |
-| A list widget | `hildegard.helper.tui.list` (`TListView`) | The roster rows |
-| The chat rendering | `hildegard.helper.tui.chat` (`TChatStream`) + `TChatPanel` | Spy feeds the same stream |
-| Attach to a live session | `hildegard.helper.session.client` (`TSessionClient`, `srObserve`) | Spy is a second observer |
-| Map a child's wire events | `hildegard.helper.harness.driver` (`TRemoteDriver`, `TRemoteSink`) | A child driver for spy |
-| A floating panel | `hildegard.helper.tui.panel` / planes (`TTuiApp.PushPlane`) | The sidebar is a non-modal plane or an overlay panel |
-| Compose replacement | `hildegard.helper.tui.chatpanel` (`SetComposeActive`, CTA) | Hide the compose, show an actions bar |
+| A list widget | `hildi.tui.list` (`TListView`) | The roster rows |
+| The chat rendering | `hildi.tui.chat` (`TChatStream`) + `TChatPanel` | Spy feeds the same stream |
+| Attach to a live session | `hildi.session.client` (`TSessionClient`, `srObserve`) | Spy is a second observer |
+| Map a child's wire events | `hildi.harness.driver` (`TRemoteDriver`, `TRemoteSink`) | A child driver for spy |
+| A floating panel | `hildi.tui.panel` / planes (`TTuiApp.PushPlane`) | The sidebar is a non-modal plane or an overlay panel |
+| Compose replacement | `hildi.tui.chatpanel` (`SetComposeActive`, CTA) | Hide the compose, show an actions bar |
 
 **New code:** the roster model; the sidebar widget; the spy binding (a child
 driver whose events render into the chat panel); and the actions bar.
@@ -56,7 +56,7 @@ THarnessApp (TUI)
 ### 1. Roster
 
 ```pascal
-unit hildegard.helper.harness.subagent;
+unit hildi.harness.subagent;
 
 type
   TSubagentStatus = (ssSpawned, ssRunning, ssCompleted, ssFailed, ssAborted,
@@ -89,7 +89,7 @@ type
 ### 2. Sidebar widget
 
 ```pascal
-unit hildegard.helper.tui.sidebar;
+unit hildi.tui.sidebar;
 
 type
   TSubagentSelectedEvent = procedure(const ASessionId: string) of object;
@@ -122,7 +122,7 @@ session id. The selected row uses the theme's accent; terminal rows are dimmed.
 ### 3. Spy binding
 
 ```pascal
-unit hildegard.helper.harness.subagent.spy;
+unit hildi.harness.subagent.spy;
 
 type
   { A second observer of one child session: attaches with srObserve, maps the

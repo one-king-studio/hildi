@@ -1,5 +1,5 @@
 program agent_cli;
-{ hildegard-helper agent: a Unix-style CLI that turns an instruction into work.
+{ hildi agent: a Unix-style CLI that turns an instruction into work.
 
   Interactive by default; `-p/--prompt` (or piped stdin) runs a single prompt.
   Output is a labelled, pipeable transcript with an optional token-rate limit:
@@ -9,10 +9,10 @@ program agent_cli;
     echo "list the files here" | agent
 
   Config from environment or ./.env:
-    HILDEGARD_LLM_ENDPOINT, HILDEGARD_LLM_MODEL,
-    HILDEGARD_LLM_API_KEY (or FIREWORKS_API_KEY), HILDEGARD_SYSTEM_PROMPT
+    HILDI_LLM_ENDPOINT, HILDI_LLM_MODEL,
+    HILDI_LLM_API_KEY (or FIREWORKS_API_KEY), HILDI_SYSTEM_PROMPT
 
-  Run:  make agent-cli && ./build/bin/hildegard-helper-agent-cli --help }
+  Run:  make agent-cli && ./build/bin/hildi-agent-cli --help }
 
 {$mode delphi}{$H+}
 
@@ -20,18 +20,18 @@ uses
   {$ifdef unix}cthreads, cwstring,{$endif}   // cthreads first; cwstring for Unicode
   SysUtils, Classes, ctypes, DateUtils, SyncObjs, Process,
   {$ifdef unix}BaseUnix,{$endif}
-  hildegard.helper.ansi, hildegard.helper.env, hildegard.helper.cli,
-  hildegard.helper.transcript, hildegard.helper.llm, hildegard.helper.agent,
-  hildegard.helper.command.policy, hildegard.helper.command.tool,
-  hildegard.helper.files,
-  hildegard.helper.approval, hildegard.helper.approval.store,
-  hildegard.helper.session, hildegard.helper.session.store,
-  hildegard.helper.session.protocol, hildegard.helper.session.client,
-  hildegard.helper.recall.tool,
-  hildegard.helper.mcp.cli, hildegard.helper.mcp.config,
-  hildegard.helper.mcp.client,
-  hildegard.helper.mcp.oauth, hildegard.helper.mcp.oauth.flow,
-  hildegard.helper.store, hildegard.helper.workspace;
+  hildi.ansi, hildi.env, hildi.cli,
+  hildi.transcript, hildi.llm, hildi.agent,
+  hildi.command.policy, hildi.command.tool,
+  hildi.files,
+  hildi.approval, hildi.approval.store,
+  hildi.session, hildi.session.store,
+  hildi.session.protocol, hildi.session.client,
+  hildi.recall.tool,
+  hildi.mcp.cli, hildi.mcp.config,
+  hildi.mcp.client,
+  hildi.mcp.oauth, hildi.mcp.oauth.flow,
+  hildi.store, hildi.workspace;
 
 {$ifdef unix}
 function c_isatty(Fd: cint): cint; cdecl; external 'c' name 'isatty';
@@ -290,7 +290,7 @@ begin
     Cfg.Spawn := True;
     Cfg.SpawnTimeoutMs := 5000;
     Cfg.RuntimeCommand := ResolveRuntimeBinary(
-      GetEnvironmentVariable('HILDEGARD_RUNTIME_BIN'), ParamStr(0));
+      GetEnvironmentVariable('HILDI_RUNTIME_BIN'), ParamStr(0));
     Client := TSessionClient.Open(Cfg, Sink, Err);
     if Client = nil then
       Fatal('attach: ' + Err, 1);
@@ -635,10 +635,10 @@ begin
     Exit(0);
   end;
 
-  StorePath := GetEnvironmentVariable('HILDEGARD_STORE_PATH');
+  StorePath := GetEnvironmentVariable('HILDI_STORE_PATH');
   if StorePath = '' then
     StorePath := IncludeTrailingPathDelimiter(GetUserDir) +
-      '.hildegard-helper' + PathDelim + 'store.db';
+      '.hildi' + PathDelim + 'store.db';
   ForceDirectories(ExtractFileDir(StorePath));
   Cfg := Default(TStoreConfig);
   Cfg.DatabasePath := StorePath;
@@ -1013,17 +1013,17 @@ begin
 
   WorkspacePath := Opts.Workspace;
   if WorkspacePath = '' then
-    WorkspacePath := GetEnvironmentVariable('HILDEGARD_WORKSPACE');
+    WorkspacePath := GetEnvironmentVariable('HILDI_WORKSPACE');
   Workspace := TWorkspace.Open(WorkspacePath, WSErr);
   if Workspace = nil then
     Fatal('workspace: ' + WSErr, 1);
 
   if Opts.Mode = cmListSessions then
   begin
-    StorePath := GetEnvironmentVariable('HILDEGARD_STORE_PATH');
+    StorePath := GetEnvironmentVariable('HILDI_STORE_PATH');
     if StorePath = '' then
       StorePath := IncludeTrailingPathDelimiter(GetUserDir) +
-        '.hildegard-helper' + PathDelim + 'store.db';
+        '.hildi' + PathDelim + 'store.db';
     ForceDirectories(ExtractFileDir(StorePath));
     StoreConfig := Default(TStoreConfig);
     StoreConfig.DatabasePath := StorePath;
@@ -1051,10 +1051,10 @@ begin
 
   if Opts.Mode = cmAttach then
   begin
-    StorePath := GetEnvironmentVariable('HILDEGARD_STORE_PATH');
+    StorePath := GetEnvironmentVariable('HILDI_STORE_PATH');
     if StorePath = '' then
       StorePath := IncludeTrailingPathDelimiter(GetUserDir) +
-        '.hildegard-helper' + PathDelim + 'store.db';
+        '.hildi' + PathDelim + 'store.db';
     ForceDirectories(ExtractFileDir(StorePath));
     RunAttach(Opts.AttachSession, Workspace.Root, StorePath, Opts.AttachDrive,
       (Opts.Reasoning = tsOn) or (Opts.Reasoning = tsDefault), Opts.ShowTools);
@@ -1069,9 +1069,9 @@ begin
   if Opts.Endpoint <> '' then
     Config.Endpoint := Opts.Endpoint;
   if Config.ApiKey = '' then
-    Fatal('no API key. Set HILDEGARD_LLM_API_KEY or FIREWORKS_API_KEY.', 1);
+    Fatal('no API key. Set HILDI_LLM_API_KEY or FIREWORKS_API_KEY.', 1);
   if Config.Model = '' then
-    Fatal('no model. Set HILDEGARD_LLM_MODEL or use --model.', 1);
+    Fatal('no model. Set HILDI_LLM_MODEL or use --model.', 1);
 
   Interactive := (Opts.Mode = cmInteractive) and StdinIsTTY;
 
@@ -1085,7 +1085,7 @@ begin
     PromptText := ReadAllStdin;
   end;
 
-  AgentConfig.SystemPrompt := GetEnvironmentVariable('HILDEGARD_SYSTEM_PROMPT');
+  AgentConfig.SystemPrompt := GetEnvironmentVariable('HILDI_SYSTEM_PROMPT');
   if Opts.SystemPrompt <> '' then
     AgentConfig.SystemPrompt := Opts.SystemPrompt;
   if AgentConfig.SystemPrompt = '' then
@@ -1105,9 +1105,9 @@ begin
   ApprovalStore := nil;
   SqliteStore := nil;
   WorkspaceId := 0;
-  StorePath := GetEnvironmentVariable('HILDEGARD_STORE_PATH');
+  StorePath := GetEnvironmentVariable('HILDI_STORE_PATH');
   if StorePath = '' then
-    StorePath := IncludeTrailingPathDelimiter(GetUserDir) + '.hildegard-helper' +
+    StorePath := IncludeTrailingPathDelimiter(GetUserDir) + '.hildi' +
       PathDelim + 'store.db';
   ForceDirectories(ExtractFileDir(StorePath));
   StoreConfig := Default(TStoreConfig);
@@ -1207,7 +1207,7 @@ begin
   try
     if Interactive then
     begin
-      WriteLn('hildegard-helper-agent');
+      WriteLn('hildi-agent');
       WriteLn('  workspace: ', Workspace.Root);
       if SessionId = '' then
         WriteLn('  session:   (in memory; no store)')

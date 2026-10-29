@@ -11,7 +11,7 @@ A bounded, cancellable retry around each request for transient failures
 
 ## Implementation Tasks
 
-### Phase 1: Classification and phrasing (`hildegard.helper.llm`)
+### Phase 1: Classification and phrasing (`hildi.llm`)
 
 - [x] **Test**: `TestIsRetryable` — the exhaustive table: `leNetwork` yes;
       `leRateLimit` yes; `leHttpStatus` 5xx yes, 400/401/403/404 no; everything
@@ -21,7 +21,7 @@ A bounded, cancellable retry around each request for transient failures
 - [x] **Implement**: `OperatorPhrase`.
 - [x] **Refactor**; `make check`.
 
-### Phase 2: The retry loop (`hildegard.helper.agent`)
+### Phase 2: The retry loop (`hildi.agent`)
 
 - [x] **Test**: `TestRetryOnNetworkThenSucceed` — a fake transport fails
       `leNetwork` twice, succeeds third; the turn completes.
@@ -65,10 +65,10 @@ A bounded, cancellable retry around each request for transient failures
 ## Files to Create/Modify
 
 ```
-src/hildegard.helper.llm.pas              (IsRetryable, OperatorPhrase)
-src/hildegard.helper.agent.pas            (the retry loop, config, the message)
-src/hildegard.helper.harness.turn.pas     (teRetrying)
-src/hildegard.helper.session.protocol.pas (ekRetrying)
+src/hildi.llm.pas              (IsRetryable, OperatorPhrase)
+src/hildi.agent.pas            (the retry loop, config, the message)
+src/hildi.harness.turn.pas     (teRetrying)
+src/hildi.session.protocol.pas (ekRetrying)
 tests/test_llm.pas                        (the classifier, the phrases)
 tests/test_agent.pas                      (the retry cases)
 docs/features/FEATURES.md

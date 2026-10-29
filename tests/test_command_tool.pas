@@ -1,5 +1,5 @@
 unit test_command_tool;
-{ fpcunit tests for hildegard.helper.command.tool: the approval-driven shell
+{ fpcunit tests for hildi.command.tool: the approval-driven shell
   tool. Uses a fake executor and prompt and an in-memory approval store; one
   test exercises the real process executor. }
 
@@ -9,9 +9,9 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.agent, hildegard.helper.llm,
-  hildegard.helper.command.policy, hildegard.helper.approval,
-  hildegard.helper.command.tool, hildegard.helper.workspace.changes;
+  hildi.agent, hildi.llm,
+  hildi.command.policy, hildi.approval,
+  hildi.command.tool, hildi.workspace.changes;
 
 type
   TFakeExecutor = class(TNoRefCountObject, ICommandExecutor)

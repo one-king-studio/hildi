@@ -7,7 +7,7 @@ unit test_gitignore;
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, hildegard.helper.gitignore;
+  Classes, SysUtils, fpcunit, testregistry, hildi.gitignore;
 
 type
   TGitignoreTest = class(TTestCase)

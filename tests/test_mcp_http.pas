@@ -1,5 +1,5 @@
 unit test_mcp_http;
-{ fpcunit tests for hildegard.helper.mcp.http. Pure body parsing (JSON and SSE);
+{ fpcunit tests for hildi.mcp.http. Pure body parsing (JSON and SSE);
   no network. }
 
 {$mode delphi}{$H+}
@@ -7,7 +7,7 @@ unit test_mcp_http;
 interface
 
 uses
-  SysUtils, fpcunit, testregistry, hildegard.helper.mcp.http;
+  SysUtils, fpcunit, testregistry, hildi.mcp.http;
 
 type
   TMcpHttpTest = class(TTestCase)

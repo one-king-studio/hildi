@@ -7,78 +7,78 @@ independent; phase 3 builds on it; phases 4-5 touch the loop and land last.
 
 ## Phase 1 - Compact content (item 5) - done
 
-- [x] `src/hildegard.helper.tui.compact.pas`: `TCompactOptions`,
+- [x] `src/hildi.tui.compact.pas`: `TCompactOptions`,
       `DefaultCompactOptions`, `CompactLines`.
 - [x] `tests/test_tui_compact.pas`: short text unchanged, long text elided
       (2 + `...` + 3), blank edges trimmed, interior blanks kept.
-- [x] Add the suite to `tests/hildegard_helper_tests.pas`.
+- [x] Add the suite to `tests/hildi_tests.pas`.
 
 ## Phase 2 - Approval dialog: reason, wrapping, compaction (items 3, 4) - done
 
-- [x] `hildegard.helper.approval`: add `TApprovalAsk.Reason`.
-- [x] `hildegard.helper.command.tool` and `hildegard.helper.files`: fill
+- [x] `hildi.approval`: add `TApprovalAsk.Reason`.
+- [x] `hildi.command.tool` and `hildi.files`: fill
       `Reason` from the call's `reason` argument in `ApprovalAsks`.
-- [x] `hildegard.helper.tui.approvalmodal`: draw `reason:` beneath the title;
+- [x] `hildi.tui.approvalmodal`: draw `reason:` beneath the title;
       wrap details; compact long details; clamp to `AAvail - 8`.
 - [x] Tests: reason shown, details wrap, long details compact, edge padding.
 
 ## Phase 3 - Compose: submit, paste, CTA (item 6) - done
 
-- [x] `hildegard.helper.tui.input`: `ikPaste` kind and `Text` payload.
-- [x] `hildegard.helper.tui.input.decode`: parse `ESC [ 200 ~ ... ESC [ 201 ~`.
-- [x] `hildegard.helper.tui.input.terminal`: enable/disable bracketed paste
+- [x] `hildi.tui.input`: `ikPaste` kind and `Text` payload.
+- [x] `hildi.tui.input.decode`: parse `ESC [ 200 ~ ... ESC [ 201 ~`.
+- [x] `hildi.tui.input.terminal`: enable/disable bracketed paste
       around the run.
-- [x] `hildegard.helper.tui.edit`: insert `ikPaste` text literally.
-- [x] `hildegard.helper.tui.compose`: Shift+Enter/Ctrl+Enter submit; `Cta`.
-- [x] `hildegard.helper.tui.chatpanel` / `harness.app`: set the CTA from state.
+- [x] `hildi.tui.edit`: insert `ikPaste` text literally.
+- [x] `hildi.tui.compose`: Shift+Enter/Ctrl+Enter submit; `Cta`.
+- [x] `hildi.tui.chatpanel` / `harness.app`: set the CTA from state.
 - [x] Tests: submit keys, newline, paste, CTA states, decoder paste.
 
 ## Phase 4 - Immediate cancel (item 1) - done
 
-- [x] `hildegard.helper.llm`: `TLLMCancelCheck`, `PostStream` `ACancelled`,
+- [x] `hildi.llm`: `TLLMCancelCheck`, `PostStream` `ACancelled`,
       `TLLMClient.CancelCheck`.
-- [x] `hildegard.helper.agent`: consult the check mid-stream; on early cancel
+- [x] `hildi.agent`: consult the check mid-stream; on early cancel
       drop the turn's messages (keep the row); `leCancelled`.
-- [x] `hildegard.helper.store` / `session.store` / `agent`: `DropTurnMessages`.
-- [x] `hildegard.helper.harness.app`: remove the user block and prepend the
+- [x] `hildi.store` / `session.store` / `agent`: `DropTurnMessages`.
+- [x] `hildi.harness.app`: remove the user block and prepend the
       prompt to the compose on an early cancel (`Dropped`).
 - [x] Tests: mid-stream cancel, early vs late, restore.
 
 ## Phase 5 - Prompt queue (item 2) - done
 
-- [x] `hildegard.helper.agent`: `TPromptQueue`; drain before each request; drop
+- [x] `hildi.agent`: `TPromptQueue`; drain before each request; drop
       a tool call in favour of queued prompts; start a new turn at the stop.
-- [x] `hildegard.helper.harness.turn`: `TTurnWorker.QueuePrompt`; `tePromptQueued`.
-- [x] `hildegard.helper.harness.app`: a submit while busy enqueues; the compose
+- [x] `hildi.harness.turn`: `TTurnWorker.QueuePrompt`; `tePromptQueued`.
+- [x] `hildi.harness.app`: a submit while busy enqueues; the compose
       stays active so the operator can type mid-flight.
 - [x] Tests: drain, drop tool call, next turn, app queueing.
 
 ## Phase 6 - Reason length and live thinking (trial follow-up) - done
 
-- [x] `hildegard.helper.agent`: `ToolReasonMaxLength`; `AugmentReasonParam`
+- [x] `hildi.agent`: `ToolReasonMaxLength`; `AugmentReasonParam`
       advertises `maxLength` on the reason property.
-- [x] `hildegard.helper.tui.chat`: truncate a block title to the block width
+- [x] `hildi.tui.chat`: truncate a block title to the block width
       with an ellipsis; add a live block mode that shows `TailLines(FBody, 6)`
       and cannot be toggled.
-- [x] `hildegard.helper.tui.compact`: `TailLines`.
-- [x] `hildegard.helper.harness.app`: reasoning streams as `Thinking...` (live),
+- [x] `hildi.tui.compact`: `TailLines`.
+- [x] `hildi.harness.app`: reasoning streams as `Thinking...` (live),
       settles to a collapsed `Thought` when the next event arrives.
 - [x] Tests: schema cap, title truncation, live tail, tail helper, app settle.
 
 ## Phase 7 - Tool-call budget and context guard - done
 
-- [x] `hildegard.helper.llm`: `leLoop` error code.
-- [x] `hildegard.helper.agent`: `SoftToolLimit`/`HardToolLimit`/
+- [x] `hildi.llm`: `leLoop` error code.
+- [x] `hildi.agent`: `SoftToolLimit`/`HardToolLimit`/
       `ToolNoticeStep`/`MaxContextTokens` replace `MaxToolIterations`; the loop
       intercepts calls from the soft limit, locks down at the hard limit, fails
       one past it, and guards the running context.
-- [x] `hildegard.helper.harness.session` / `examples/agent_cli.pas`: drop the
+- [x] `hildi.harness.session` / `examples/agent_cli.pas`: drop the
       old `MaxToolIterations` plumbing (defaults apply).
 - [x] Tests: soft intercept, hard lockdown, loop abort, context abort.
 
 ## Testing
 
-Each phase adds its `tests/test_*.pas` to `tests/hildegard_helper_tests.pas`
+Each phase adds its `tests/test_*.pas` to `tests/hildi_tests.pas`
 and runs `make check` before moving on.
 
 ## Completion

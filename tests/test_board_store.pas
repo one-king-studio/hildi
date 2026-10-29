@@ -8,9 +8,9 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.store, hildegard.helper.board,
-  hildegard.helper.board.store,
-  changes.types, changes.store, hildegard.helper.changes.store;
+  hildi.store, hildi.board,
+  hildi.board.store,
+  changes.types, changes.store, hildi.changes.store;
 
 type
   TBoardStoreTest = class(TTestCase)

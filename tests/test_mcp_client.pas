@@ -1,5 +1,5 @@
 unit test_mcp_client;
-{ fpcunit tests for hildegard.helper.mcp.client. The mappers are pure; the
+{ fpcunit tests for hildi.mcp.client. The mappers are pure; the
   lifecycle is exercised against a scripted /bin/sh fake server over real pipes.
   POSIX-only. }
 
@@ -9,9 +9,9 @@ interface
 
 uses
   SysUtils, Classes, fpcunit, testregistry,
-  hildegard.helper.mcp.client, hildegard.helper.mcp.config,
-  hildegard.helper.skills,
-  hildegard.helper.agent, hildegard.helper.llm, hildegard.helper.approval;
+  hildi.mcp.client, hildi.mcp.config,
+  hildi.skills,
+  hildi.agent, hildi.llm, hildi.approval;
 
 type
   { An approval service that allows or denies everything. }

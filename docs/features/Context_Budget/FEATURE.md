@@ -92,7 +92,7 @@ storing, with a recall path, loses neither.
 ### Internal
 
 - Sessions v2 - `messages`, `TSqliteConversationStore`, the store.
-- `hildegard.helper.agent` - tool registration and the loop.
+- `hildi.agent` - tool registration and the loop.
 
 ### External
 

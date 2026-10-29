@@ -4,9 +4,9 @@
 > `=`/interleaved-`*` patterns, and the `requests`-table audit built here are
 > replaced by the [Tool Approvals](../Tool_Approvals/FEATURE.md) and
 > [Sessions and Ledger](../Sessions_And_Ledger/FEATURE.md) features. What
-> survives: the command parser (`hildegard.helper.command.policy`), the required
+> survives: the command parser (`hildi.command.policy`), the required
 > tool-call `reason` (`Tool_Reason_v1`), the shell-parameter change in
-> `hildegard.helper.process`, and the synchronous executor. Do not extend this
+> `hildi.process`, and the synchronous executor. Do not extend this
 > plan; open tasks are cancelled.
 
 **Related Specification:** `Command_Tool_v1.SPEC.md`
@@ -14,11 +14,11 @@
 
 ## Overview
 
-Build `hildegard.helper.command.tool`: the `run_command` agent tool that loads a
+Build `hildi.command.tool`: the `run_command` agent tool that loads a
 policy, obtains approval when required, executes synchronously through a seam
 over `TCommandRunner`, caps output, and audits every decision. Depends on
 `Command_Policy_v1` (classification) and `Tool_Reason_v1` (the `reason` field),
-and on a small shell-parameter change in `hildegard.helper.process`.
+and on a small shell-parameter change in `hildi.process`.
 
 > Deviation from template: `main`-only project, no feature branch.
 
@@ -27,8 +27,8 @@ and on a small shell-parameter change in `hildegard.helper.process`.
 ### Phase 1: Setup & Foundation
 
 - [x] **Add** `tests/test_command_tool.pas` to the uses clause of
-      `tests/hildegard_helper_tests.pas`
-- [x] **Create** `src/hildegard.helper.command.tool.pas` interface types (no
+      `tests/hildi_tests.pas`
+- [x] **Create** `src/hildi.command.tool.pas` interface types (no
       bodies): `TShellProfile`, `TCommandToolConfig`, `TCommandExecution`,
       `ICommandExecutor`, `ICommandPolicySource`, `TCommandAuditEntry`,
       `TApprovalRequest`, `TApprovalOutcome`, `TApprovalHandler`, constants
@@ -38,7 +38,7 @@ and on a small shell-parameter change in `hildegard.helper.process`.
 ### Phase 2: Process shell parameter
 
 - [x] **Test**: `TestProcessRunnerUsesProvidedShell` in
-      `tests/test_hildegard_helper.pas` - red
+      `tests/test_hildi.pas` - red
 - [x] **Implement**: add defaulted `AShellExecutable='/bin/bash'` and
       `AShellSwitch='-c'` parameters to `TCommandRunner.Create`; use them in
       `Execute` - green
@@ -135,16 +135,16 @@ and on a small shell-parameter change in `hildegard.helper.process`.
 ### New Files
 
 ```
-src/hildegard.helper.command.tool.pas
+src/hildi.command.tool.pas
 tests/test_command_tool.pas
 ```
 
 ### Modified Files
 
 ```
-src/hildegard.helper.process.pas    (defaulted shell/switch parameters)
-tests/hildegard_helper_tests.pas    (add test unit to uses)
-tests/test_hildegard_helper.pas     (shell parameter test)
+src/hildi.process.pas    (defaulted shell/switch parameters)
+tests/hildi_tests.pas    (add test unit to uses)
+tests/test_hildi.pas     (shell parameter test)
 examples/agent_cli.pas              (wire tool, store source, console approver)
 docs/features/FEATURES.md           (feature row)
 HANDOFF.md                          (unit map, state)
@@ -174,8 +174,8 @@ HANDOFF.md                          (unit map, state)
   approvals and covers later matching segments in the same command. Exact
   approvals persist as `=<argv>` (so a no-argument command is distinct from
   `<executable> *`). Persisted patterns are argument-aware (policy v1.1).
-- Deviations: the CLI uses `HILDEGARD_STORE_PATH` (default
-  `~/.hildegard-helper/store.db`); if the store opens it persists policy and
+- Deviations: the CLI uses `HILDI_STORE_PATH` (default
+  `~/.hildi/store.db`); if the store opens it persists policy and
   audit, otherwise the tool is still registered with
   `TMemoryCommandPolicySource` and `DefaultCommandPolicy` (ask everything,
   session-only approvals). Test doubles derive from `TNoRefCountObject` so the

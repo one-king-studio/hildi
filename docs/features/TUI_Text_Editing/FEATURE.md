@@ -99,7 +99,7 @@ be built twice.
 - [ ] Shared cluster/width helpers live in one unit, not copied per widget.
 - [ ] Testable headlessly with the memory surface; leak-clean under
       `make test-leak`; `make check` green.
-- [ ] Style: `{$mode delphi}{$H+}`, units named `hildegard.helper.tui.*`.
+- [ ] Style: `{$mode delphi}{$H+}`, units named `hildi.tui.*`.
 
 ## Success Metrics
 
@@ -130,9 +130,9 @@ be built twice.
 
 ### Internal
 
-- `hildegard.helper.tui.base/widget/input/surface` (TUI Core).
-- `hildegard.helper.tui.text` (`TWrapMode`), and the extracted
-  `hildegard.helper.tui.grapheme` helper.
+- `hildi.tui.base/widget/input/surface` (TUI Core).
+- `hildi.tui.text` (`TWrapMode`), and the extracted
+  `hildi.tui.grapheme` helper.
 - The demo's compose box becomes the first consumer.
 
 ### External
@@ -146,7 +146,7 @@ be built twice.
   derived, so a wrap change can move the caret. Mitigation: one mapping function,
   covered by round-trip tests, and a `Shift+Enter` regression test.
 - **Duplicated cluster helpers.** A third copy would ossify the duplication.
-  Mitigation: extract `hildegard.helper.tui.grapheme` first and adopt it in
+  Mitigation: extract `hildi.tui.grapheme` first and adopt it in
   `text.pas`/`prompt.pas`.
 - **Vertical column drift.** Up/Down must not accumulate rounding across rows.
   Mitigation: a stored goal column, cleared by any non-vertical move.

@@ -52,7 +52,7 @@ retained strings at the turn boundary. TDD-first; `make check` before moving on.
 ## Files to Create/Modify
 
 ```
-src/hildegard.helper.session.runtime.pas   (ring + gap + reset)
+src/hildi.session.runtime.pas   (ring + gap + reset)
 tests/test_session_runtime.pas             (extended)
 docs/features/FEATURES.md
 ```

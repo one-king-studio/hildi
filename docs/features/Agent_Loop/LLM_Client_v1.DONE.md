@@ -5,7 +5,7 @@
 
 ## Overview
 
-Task breakdown for `hildegard.helper.llm` as specified in
+Task breakdown for `hildi.llm` as specified in
 `LLM_Client_v1.SPEC.md`. Each implementation task starts with a failing test.
 Work directly on `main` (project decision).
 
@@ -18,7 +18,7 @@ Work directly on `main` (project decision).
 - [x] **Fakes**: implement `TFakeTransport` (records URL/body/headers, replays a
       chunk list) and SSE-body builders in `tests/llm_fakes.pas`
 - [x] **Types**: define the interface-section types from the SPEC in
-      `src/hildegard.helper.llm.pas`
+      `src/hildi.llm.pas`
 
 ### Phase 2: Config & Serialization
 
@@ -78,7 +78,7 @@ Work directly on `main` (project decision).
 ### New Files
 
 ```
-src/hildegard.helper.llm.pas
+src/hildi.llm.pas
 tests/test_llm.pas
 tests/llm_fakes.pas
 ```
@@ -86,7 +86,7 @@ tests/llm_fakes.pas
 ### Modified Files
 
 ```
-tests/hildegard_helper_tests.pas   (add test_llm to uses)
+tests/hildi_tests.pas   (add test_llm to uses)
 docs/features/Agent_Loop/          (SPEC/TODO status)
 docs/features/FEATURES.md          (status)
 ```
@@ -124,5 +124,5 @@ docs/features/FEATURES.md          (status)
 
 ## Outcome
 
-`hildegard.helper.llm` implemented with 22 fpcunit tests (part of the 52-test
+`hildi.llm` implemented with 22 fpcunit tests (part of the 52-test
 suite), all green under `make check` including the heptrc leak gate.

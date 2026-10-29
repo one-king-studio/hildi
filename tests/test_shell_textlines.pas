@@ -7,7 +7,7 @@ unit test_shell_textlines;
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, hildegard.helper.shell.textlines;
+  Classes, SysUtils, fpcunit, testregistry, hildi.shell.textlines;
 
 type
   TShellTextLinesTest = class(TTestCase)

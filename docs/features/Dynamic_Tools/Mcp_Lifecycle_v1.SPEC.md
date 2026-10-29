@@ -3,8 +3,8 @@
 **Related Feature:** [FEATURE.md](FEATURE.md)
 
 **Depends on:** `Tool_Boundary_v1.SPEC.md` (the hook and `Remove`),
-`hildegard.helper.mcp.client` / `hildegard.helper.mcp.config`.
-**Depended on by:** `hildegard.helper.harness.session` (wires the hook).
+`hildi.mcp.client` / `hildi.mcp.config`.
+**Depended on by:** `hildi.harness.session` (wires the hook).
 
 ## Purpose
 
@@ -49,7 +49,7 @@ This is the remote-MCP requirement: a network drop is normal, not exceptional.
 ## Contracts & Interfaces
 
 ```pascal
-unit hildegard.helper.mcp.client;   // additions/changes
+unit hildi.mcp.client;   // additions/changes
 
 type
   { A server's lifecycle state. }

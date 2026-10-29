@@ -4,7 +4,7 @@
 
 ## Tasks
 
-- [x] `src/hildegard.helper.ansi.pas`: `TAnsiColor`, named palette, `AnsiFg`,
+- [x] `src/hildi.ansi.pas`: `TAnsiColor`, named palette, `AnsiFg`,
       `AnsiReset`, `AnsiBold`, `AnsiDim`, `AnsiStyled`, `AnsiEnabled`,
       `AnsiSetEnabled`
 - [x] Auto-detection: TTY + `TERM<>dumb` + `NO_COLOR` unset, via libc `isatty`

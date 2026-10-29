@@ -1,5 +1,5 @@
 unit test_fuzzy;
-{ fpcunit tests for hildegard.helper.fuzzy: the subsequence matcher, its
+{ fpcunit tests for hildi.fuzzy: the subsequence matcher, its
   scoring (so results rank sensibly), and the stable ranker. }
 
 {$mode delphi}{$H+}
@@ -8,7 +8,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.fuzzy;
+  hildi.fuzzy;
 
 type
   TFuzzyTest = class(TTestCase)

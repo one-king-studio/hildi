@@ -1,5 +1,5 @@
 unit test_mcp_oauth;
-{ fpcunit tests for hildegard.helper.mcp.oauth: discovery parsing, PKCE, and the
+{ fpcunit tests for hildi.mcp.oauth: discovery parsing, PKCE, and the
   authorize URL. Pure; no network. }
 
 {$mode delphi}{$H+}
@@ -7,7 +7,7 @@ unit test_mcp_oauth;
 interface
 
 uses
-  SysUtils, fpcunit, testregistry, hildegard.helper.mcp.oauth;
+  SysUtils, fpcunit, testregistry, hildi.mcp.oauth;
 
 type
   TMcpOAuthTest = class(TTestCase)

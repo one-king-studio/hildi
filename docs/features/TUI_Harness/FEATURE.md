@@ -2,7 +2,7 @@
 
 ## Overview
 
-A full-screen interactive terminal UI for hildegard-helper: a composable pane
+A full-screen interactive terminal UI for hildi: a composable pane
 layout (nested grid of containers), independently scrollable panes, modal
 overlays for confirmations and approvals, and markdown-coloured agent text. It
 is an **additional** front end; the existing pipe-friendly CLI remains the
@@ -225,10 +225,10 @@ Demonstration
 ### Internal
 
 - None required for the core; it is a standalone front-end foundation.
-- `hildegard.helper.ansi` is **not** reused for rendering: it emits SGR for a
+- `hildi.ansi` is **not** reused for rendering: it emits SGR for a
   stream and never buffers or positions the cursor. It remains the CLI's styling
   layer.
-- `hildegard.helper.transcript` is CLI-oriented; the TUI is a separate renderer.
+- `hildi.transcript` is CLI-oriented; the TUI is a separate renderer.
 - Follow-on (separate specs): `Harness_UI_v1` wires panes to the agent loop;
   `Editor_v1` (if ever) adds an editable text buffer.
 

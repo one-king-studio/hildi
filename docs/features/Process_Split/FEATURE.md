@@ -2,7 +2,7 @@
 
 ## Overview
 
-Split hildegard-helper into two programs: a **headless agent** that runs a
+Split hildi into two programs: a **headless agent** that runs a
 session's loop with no terminal, and a **TUI client** that renders and drives it
 with no loop. Today one binary is both — `examples/tui_agent.pas` re-executes
 itself with `--session-runtime` to spawn the loop — so each process maps the
@@ -56,9 +56,9 @@ measurable outcome, not a new subsystem.
 **Committed: two programs, split along the client/server seam that already
 exists in the code.**
 
-- The **headless agent** (`hildegard-helper-agent`) hosts the session runtime:
+- The **headless agent** (`hildi-agent`) hosts the session runtime:
   `RunSessionRuntime`, the loop, the tools, the store. No TUI unit.
-- The **TUI client** (`hildegard-helper-tui`) renders and drives: the widget kit,
+- The **TUI client** (`hildi`) renders and drives: the widget kit,
   the app, the remote driver, the client session view. No agent/tool/runtime
   unit.
 - The **split is enforced by unit boundaries**, not by a build flag: the client
@@ -66,7 +66,7 @@ exists in the code.**
   the server half (`session.runtime`, the turn *worker*, the full session) so the
   compiler's `uses` closure keeps each binary honest.
 - **Runtime discovery:** the TUI spawns the headless binary located by
-  `HILDEGARD_RUNTIME_BIN`, else a sibling of the TUI executable.
+  `HILDI_RUNTIME_BIN`, else a sibling of the TUI executable.
 - **`TLocalDriver` stays**, in its own unit, for tests and demos.
 - **The chat list is windowed:** it holds the visible range plus a bounded tail,
   not every block.
@@ -110,12 +110,12 @@ exists in the code.**
 
 Binaries
 
-- [ ] `hildegard-helper-agent` runs the session runtime (`RunSessionRuntime`) and
+- [ ] `hildi-agent` runs the session runtime (`RunSessionRuntime`) and
       links no TUI unit.
-- [ ] `hildegard-helper-tui` drives a runtime and links no `agent`,
+- [ ] `hildi` drives a runtime and links no `agent`,
       `harness.session` (the loop), `harness.turn.worker`, `command.tool`,
       `files`, `recall.tool`, `session.store`, or `session.runtime` unit.
-- [ ] The TUI spawns the headless binary, located by `HILDEGARD_RUNTIME_BIN`,
+- [ ] The TUI spawns the headless binary, located by `HILDI_RUNTIME_BIN`,
       else a sibling of the TUI executable; a missing binary is a clear error.
 - [ ] `agent_cli` uses the client units and no longer hosts the runtime.
 
@@ -176,13 +176,13 @@ Chat windowing
 
 ### Internal
 
-- `hildegard.helper.session.protocol` — the shared, versioned wire schema; the
+- `hildi.session.protocol` — the shared, versioned wire schema; the
   split removes the server from the client, not the schema.
-- `hildegard.helper.session.runtime` — the runtime server, split from the client.
-- `hildegard.helper.harness.session` — the full loop bootstrap, split from the
+- `hildi.session.runtime` — the runtime server, split from the client.
+- `hildi.harness.session` — the full loop bootstrap, split from the
   client-only session view.
-- `hildegard.helper.harness.turn` — the turn types, split from the worker.
-- `hildegard.helper.harness.driver` — the remote driver stays; `TLocalDriver`
+- `hildi.harness.turn` — the turn types, split from the worker.
+- `hildi.harness.driver` — the remote driver stays; `TLocalDriver`
   moves to its own unit.
 - `tui.widgets.chat` / `.chatpanel` — the chat list that becomes
   windowed.

@@ -14,7 +14,7 @@ program smoke;
 uses
   {$ifdef unix}cthreads, cwstring,{$endif}   // cthreads first; cwstring for Unicode
   SysUtils,
-  hildegard.helper.session.client,
+  hildi.session.client,
   smoke_runner;
 
 var
@@ -70,13 +70,13 @@ begin
   Wanted := FindArg('--scenario');
   Bin := FindArg('--runtime');
   if Bin = '' then
-    Bin := GetEnvironmentVariable('HILDEGARD_RUNTIME_BIN');
+    Bin := GetEnvironmentVariable('HILDI_RUNTIME_BIN');
   if Bin = '' then
     Bin := ResolveRuntimeBinary('', ParamStr(0));
   if Bin = '' then
   begin
     WriteLn(StdErr, 'smoke: no runtime binary; build it (make headless-agent) or '
-      + 'set HILDEGARD_RUNTIME_BIN');
+      + 'set HILDI_RUNTIME_BIN');
     Halt(2);
   end;
 

@@ -65,7 +65,7 @@ see whose session it is, and leave it.
 > Pascal type declarations; bodies are the implementer's.
 
 ```pascal
-unit hildegard.helper.harness.app;
+unit hildi.harness.app;
 
 type
   THarnessApp = class

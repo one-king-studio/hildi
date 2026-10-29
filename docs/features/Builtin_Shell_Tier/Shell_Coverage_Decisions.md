@@ -142,7 +142,7 @@ a data-exfiltration grant.
 
 | Piece | Status | Effort |
 | --- | --- | --- |
-| TLS client | exists — `hildegard_tls_connect/read/write`, `hildegard_ca_pem` | reuse |
+| TLS client | exists — `hildi_tls_connect/read/write`, `hildi_ca_pem` | reuse |
 | HTTP request/response | `THttpTransport` exists but is **MCP-specific** (JSON-RPC framing) | **generalise it** |
 | Redirect policy | none | new — and a security decision, not a detail |
 | Host allowlist | none | new — the main thing that makes this worth owning |

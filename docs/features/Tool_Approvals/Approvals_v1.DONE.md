@@ -2,7 +2,7 @@
 
 > **Status: complete.** The plan was finished without ticking its boxes; the
 > `Progress` note below records what landed, and the code is in
-> `hildegard.helper.approval`/`.approval.store`/`.tui.approvalmodal`. Renamed to
+> `hildi.approval`/`.approval.store`/`.tui.approvalmodal`. Renamed to
 > `Approvals_v1.DONE.md` on 2026-10-18 as part of a docs-index audit. The one
 > item left open in the original plan — a live CLI smoke — is tracked on the
 > feature row in `FEATURES.md`.
@@ -21,7 +21,7 @@
 >   the global read-whitelist (an allowed `cat *` must read `/etc/os-release`).
 >   The workspace root remains the cwd and relative-path base; path-aware rules
 >   are future work. The spec's path-check acceptance is superseded.
-> - **Dead classifier deleted** from `hildegard.helper.command.policy`; only the
+> - **Dead classifier deleted** from `hildi.command.policy`; only the
 >   parser (and `SegmentText`/`Paths`) remains. `TestCommandPolicy` is now 15
 >   parser tests.
 >
@@ -32,7 +32,7 @@
 
 ## Overview
 
-Build `hildegard.helper.approval`: the generic rule model, matcher, scope
+Build `hildi.approval`: the generic rule model, matcher, scope
 resolution, store-backed and in-memory `IApprovalStore`, the `IApprovalService`
 that prompts and persists tool-owned options, and the command tool's
 `IApprovableTool` adapter. Depends on Workspaces (context) and precedes/parallels
@@ -45,8 +45,8 @@ Sessions (session context).
 ### Phase 1: Setup & Foundation
 
 - [ ] Add `tests/test_approval.pas` to the uses clause of
-      `tests/hildegard_helper_tests.pas`
-- [ ] Create `src/hildegard.helper.approval.pas` with the interface from the SPEC
+      `tests/hildi_tests.pas`
+- [ ] Create `src/hildi.approval.pas` with the interface from the SPEC
 - [ ] Create `tests/test_approval.pas` with an empty `TTestCase`
 
 ### Phase 2: Matching (TDD, pure)
@@ -124,18 +124,18 @@ Sessions (session context).
 ### New Files
 
 ```
-src/hildegard.helper.approval.pas
+src/hildi.approval.pas
 tests/test_approval.pas
 ```
 
 ### Modified Files
 
 ```
-src/hildegard.helper.store.pas        (migration v3, approval methods)
-src/hildegard.helper.command.tool.pas (IApprovableTool adapter; drop policy/audit)
+src/hildi.store.pas        (migration v3, approval methods)
+src/hildi.command.tool.pas (IApprovableTool adapter; drop policy/audit)
 tests/test_command_tool.pas           (rewrite for approvals)
 examples/agent_cli.pas                (wire service + prompt)
-tests/hildegard_helper_tests.pas
+tests/hildi_tests.pas
 ```
 
 ## Success Criteria

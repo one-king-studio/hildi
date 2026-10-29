@@ -9,9 +9,9 @@ interface
 
 uses
   Classes, SysUtils, StrUtils, fpcunit, testregistry,
-  hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.approval,
-  hildegard.helper.store, hildegard.helper.board, hildegard.helper.board.store,
-  hildegard.helper.board.tools;
+  hildi.llm, hildi.agent, hildi.approval,
+  hildi.store, hildi.board, hildi.board.store,
+  hildi.board.tools;
 
 type
   { Records the ask and answers however the test wants. }

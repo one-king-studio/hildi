@@ -16,13 +16,13 @@ program tui_agent;
 uses
   {$ifdef unix}cthreads, cwstring,{$endif}   // cthreads first; cwstring for Unicode
   Classes, Contnrs, SysUtils,
-  hildegard.helper.cli,
+  hildi.cli,
   tui.base, tui.input,
   tui.surface, tui.surface.video,
   tui.input.terminal, tui.theme,
-  hildegard.helper.harness.view, hildegard.helper.harness.driver,
-  hildegard.helper.harness.app, hildegard.helper.session.protocol,
-  hildegard.helper.session.client;
+  hildi.harness.view, hildi.harness.driver,
+  hildi.harness.app, hildi.session.protocol,
+  hildi.session.client;
 
 type
   { The lazy-connect hook: on the first prompt, create the session and spawn its
@@ -111,7 +111,7 @@ begin
   ClientCfg.Spawn := True;
   ClientCfg.SpawnTimeoutMs := 5000;
   ClientCfg.RuntimeCommand := ResolveRuntimeBinary(
-    GetEnvironmentVariable('HILDEGARD_RUNTIME_BIN'), ParamStr(0));
+    GetEnvironmentVariable('HILDI_RUNTIME_BIN'), ParamStr(0));
   Driver := RemoteDriver(ClientCfg, Err);
   if Driver = nil then
   begin
@@ -152,7 +152,7 @@ begin
   ClientCfg.Spawn := True;
   ClientCfg.SpawnTimeoutMs := 5000;
   ClientCfg.RuntimeCommand := ResolveRuntimeBinary(
-    GetEnvironmentVariable('HILDEGARD_RUNTIME_BIN'), ParamStr(0));
+    GetEnvironmentVariable('HILDI_RUNTIME_BIN'), ParamStr(0));
   ADriver := RemoteDriver(ClientCfg, AError);
   if ADriver = nil then
   begin
@@ -208,10 +208,10 @@ begin
     Halt(0);
   end;
 
-  StorePath := GetEnvironmentVariable('HILDEGARD_STORE_PATH');
+  StorePath := GetEnvironmentVariable('HILDI_STORE_PATH');
   if StorePath = '' then
     StorePath := IncludeTrailingPathDelimiter(GetUserDir) +
-      '.hildegard-helper' + PathDelim + 'store.db';
+      '.hildi' + PathDelim + 'store.db';
 
   { The TUI process only needs the store/workspace/session handle; the runtime
     owns the loop. With no explicit session or --continue, defer creating one

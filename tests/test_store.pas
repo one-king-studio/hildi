@@ -1,5 +1,5 @@
 unit test_store;
-{ fpcunit tests for hildegard.helper.store. Each test runs against a temporary
+{ fpcunit tests for hildi.store. Each test runs against a temporary
   database path; the vendored library is resolved relative to the test binary. }
 
 {$mode delphi}{$H+}
@@ -9,9 +9,9 @@ interface
 uses
   Classes, SysUtils, SyncObjs, fpcunit, testregistry,
   {$ifdef unix}BaseUnix,{$endif}
-  hildegard.helper.sqlite,
-  hildegard.helper.store, hildegard.helper.session, hildegard.helper.llm,
-  hildegard.helper.mcp.config;
+  hildi.sqlite,
+  hildi.store, hildi.session, hildi.llm,
+  hildi.mcp.config;
 
 type
   TStoreTest = class(TTestCase)

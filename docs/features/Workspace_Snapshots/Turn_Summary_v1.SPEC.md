@@ -3,7 +3,7 @@
 **Related Feature:** [FEATURE.md](FEATURE.md)
 
 **Depends on:** `changes.types`, `changes.store`, `changes.log` (the standalone
-library), `hildegard.helper.changes.store` (the SQLite adapter), and the TUI
+library), `hildi.changes.store` (the SQLite adapter), and the TUI
 widget layer (`tui.widgets.*`) after the core/widgets split.
 
 **Depended on by:** the `/undo`, `/redo` and `/revert` commands (a later spec);

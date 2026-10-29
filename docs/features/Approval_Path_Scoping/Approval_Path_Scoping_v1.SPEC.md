@@ -29,7 +29,7 @@ tools.
 
 ### Functional
 
-**Engine** (`hildegard.helper.approval`)
+**Engine** (`hildi.approval`)
 
 - [ ] `TApprovalRule` gains `Directory` and `Extension`; `TApprovalSubject`
       gains `Path`.
@@ -47,7 +47,7 @@ tools.
       lower-cases. Matching compares canonical to canonical — the path is the
       one the tool already computes, so `..`/`./` cannot defeat it.
 
-**File tools** (`hildegard.helper.files`)
+**File tools** (`hildi.files`)
 
 - [ ] `Approve` takes the operation's workspace-relative path and sets
       `Subject.Path`; `file_glob`/`file_grep` pass the searched directory, not the pattern.
@@ -61,7 +61,7 @@ tools.
 - [ ] Each tool owns its own option builder: the file tool gains the path
       options; the command tool gains the boundary options below.
 
-**Workspace** (`hildegard.helper.workspace`)
+**Workspace** (`hildi.workspace`)
 
 - [ ] `PhysicalResolve`/`PhysicalContains`: resolve a path physically —
       `realpath(3)` the nearest **existing** ancestor and re-append the
@@ -72,8 +72,8 @@ tools.
 - [ ] The file tools' `ResolveChecked` uses `PhysicalContains`, closing the
       symlink escape: a link inside the workspace pointing out is refused.
 
-**Command tool** (`hildegard.helper.command.tool`,
-`hildegard.helper.command.paths`)
+**Command tool** (`hildi.command.tool`,
+`hildi.command.paths`)
 
 - [ ] A new extractor derives the paths a command **names** from its plan: each
       segment's path-like arguments and redirection targets, the `cwd`
@@ -96,7 +96,7 @@ tools.
       says so ("`cat` is allowed; `/etc/hosts` is not"), so a wildcard grant is
       not misleading.
 
-**Store** (`hildegard.helper.store`, `hildegard.helper.approval.store`)
+**Store** (`hildi.store`, `hildi.approval.store`)
 
 - [ ] A v2 migration adds `directory` and `extension` (`TEXT NOT NULL DEFAULT
       ''`) and **rebuilds** `approvals` so the `UNIQUE` includes them (SQLite
@@ -128,7 +128,7 @@ tools.
 ### Public API
 
 ```pascal
-unit hildegard.helper.approval;
+unit hildi.approval;
 
 type
   TApprovalRule = record
@@ -167,7 +167,7 @@ is matched by an allow rule with `AnyParams = false` (an exact command grant
 trumps the path gate). Two units carry the boundary:
 
 ```pascal
-unit hildegard.helper.workspace;   // extended
+unit hildi.workspace;   // extended
 
   { Resolve APath (relative allowed) against ABase ('' => the root), physically:
     the nearest existing ancestor is realpath(3)-resolved and the non-existent
@@ -178,7 +178,7 @@ unit hildegard.helper.workspace;   // extended
 ```
 
 ```pascal
-unit hildegard.helper.command.paths;   // NEW
+unit hildi.command.paths;   // NEW
 
 type
   TPathAccess = record
@@ -257,7 +257,7 @@ Option keys:
 
 ### Prior Art & Reuse
 
-- **Reuse `hildegard.helper.approval`** wholesale: ref/params matching, scopes,
+- **Reuse `hildi.approval`** wholesale: ref/params matching, scopes,
   deny-wins, the ask/option model, and the store interface. This adds two rule
   fields, one subject field, and the option rows.
 - **Reuse `TSqliteStore`'s migration framework** (`DefaultMigrations`,

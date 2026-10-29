@@ -164,12 +164,12 @@ errors    connection_failed / not_connected / ... returned to the model, not thr
 
 ### Internal
 
-- `hildegard.helper.harness.session` — `Init` / `FMcp.Open` (the thing that moves).
-- `hildegard.helper.session.runtime` — `Open` vs `Serve` ordering.
-- `hildegard.helper.mcp.client` — `TMcpManager`, `TMcpProvider`,
+- `hildi.harness.session` — `Init` / `FMcp.Open` (the thing that moves).
+- `hildi.session.runtime` — `Open` vs `Serve` ordering.
+- `hildi.mcp.client` — `TMcpManager`, `TMcpProvider`,
   `Reconcile`/`OpenRuntime`, `Specs`/`Find`.
-- `hildegard.helper.mcp.config` / `.store` — the connection rows.
-- `hildegard.helper.agent` — `IToolProvider`, `load_skill`, the turn boundary.
+- `hildi.mcp.config` / `.store` — the connection rows.
+- `hildi.agent` — `IToolProvider`, `load_skill`, the turn boundary.
 - `docs/features/Skills/FEATURE.md` — the mechanism this is the first provider
   for; `docs/features/Turn_Injection/FEATURE.md` — the contributor seam.
 

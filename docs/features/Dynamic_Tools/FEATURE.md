@@ -132,9 +132,9 @@ remove / reconnect with backoff).
 
 ### Internal
 
-- `hildegard.helper.agent` (`TAgentLoop`, `TToolRegistry`).
-- `hildegard.helper.mcp.client` / `hildegard.helper.mcp.config`.
-- `hildegard.helper.harness.session` (the wiring).
+- `hildi.agent` (`TAgentLoop`, `TToolRegistry`).
+- `hildi.mcp.client` / `hildi.mcp.config`.
+- `hildi.harness.session` (the wiring).
 - `docs/features/MCP_Client/` (v1).
 
 ### External

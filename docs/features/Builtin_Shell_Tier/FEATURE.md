@@ -19,7 +19,7 @@ the research note [just-bash and the builtin shell tier](../../research/just-bas
 - **Cost.** A `cat`, a `grep`, a `wc -l` — the overwhelmingly common commands in
   the recorded corpus — pay a process spawn, a shell startup and an OS pipe.
 - **The gate is a guess.** Approval asks are built by
-  `hildegard.helper.command.policy`'s splitter, which has no shell-language
+  `hildi.command.policy`'s splitter, which has no shell-language
   knowledge: a `for` loop asks to allow `for`, a command inside `$(...)` is
   never surfaced, and a script's meaning is never seen. The gate is wrong in
   both directions.

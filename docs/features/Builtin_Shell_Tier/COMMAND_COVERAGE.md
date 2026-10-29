@@ -224,7 +224,7 @@ coverage numbers above — only who decides.
 
 ## Adding a flag or a command
 
-1. Add the command to `CommandSpecs` in `src/hildegard.helper.shell.commands.pas`
+1. Add the command to `CommandSpecs` in `src/hildi.shell.commands.pas`
    with its option string (`N` for a numeric shorthand).
 2. Implement the handler there; it must return a `TShellResult` and never raise.
 3. Register it in `TBuiltinShell.Create`.

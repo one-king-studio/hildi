@@ -15,7 +15,7 @@ interface
 uses
   SysUtils, fpcunit, testregistry,
   tui.base, tui.input, tui.theme,
-  hildegard.helper.dashboard.panel;
+  hildi.dashboard.panel;
 
 type
   TDashboardPanelTest = class(TTestCase)

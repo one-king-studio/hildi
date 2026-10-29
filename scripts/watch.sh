@@ -11,7 +11,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
 TARGET="${1:-test}"
-STAMP="$(mktemp "${TMPDIR:-/tmp}/hildegard-helper-watch.XXXXXX")"
+STAMP="$(mktemp "${TMPDIR:-/tmp}/hildi-watch.XXXXXX")"
 WATCH_PATHS=(src tests examples Makefile .gitignore)
 
 cleanup() { rm -f "$STAMP"; }
@@ -20,7 +20,7 @@ trap cleanup EXIT
 trap on_signal INT TERM
 
 touch "$STAMP"
-printf 'hildegard-helper watch: \033[1mmake %s\033[0m on changes under %s\n' "$TARGET" "${WATCH_PATHS[*]}"
+printf 'hildi watch: \033[1mmake %s\033[0m on changes under %s\n' "$TARGET" "${WATCH_PATHS[*]}"
 printf 'Press Ctrl-C to stop.\n\n'
 
 # Initial run so you start from a known state.

@@ -12,9 +12,9 @@ interface
 
 uses
   Classes, SysUtils, StrUtils, fpcunit, testregistry,
-  hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.approval,
-  hildegard.helper.store, hildegard.helper.tasks, hildegard.helper.tasks.store,
-  hildegard.helper.tasks.tools, hildegard.helper.sqlite;
+  hildi.llm, hildi.agent, hildi.approval,
+  hildi.store, hildi.tasks, hildi.tasks.store,
+  hildi.tasks.tools, hildi.sqlite;
 
 type
   TFakeTaskApproval = class(TInterfacedObject, IApprovalService)

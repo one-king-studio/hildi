@@ -4,7 +4,7 @@
 
 ## Purpose
 
-`hildegard.helper.agent` is the reasoning core. It owns the conversation, injects
+`hildi.agent` is the reasoning core. It owns the conversation, injects
 tools, drives the LLM client, executes the tool calls the model requests, feeds
 the results back, and keeps re-querying until a proper stop reason or a bounded
 iteration limit. Conversations live behind a small store interface with an
@@ -45,10 +45,10 @@ provider/SSE details.
 ### Public API
 
 ```pascal
-unit hildegard.helper.agent;
+unit hildi.agent;
 
 uses
-  hildegard.helper.llm;
+  hildi.llm;
 
 type
   { Conversation persistence boundary. The Agent Loop reads and writes only
@@ -132,10 +132,10 @@ Tool-result content on failure is a short error string (for example
 
 ### Prior Art & Reuse
 
-- `hildegard.helper.llm` (this feature) for provider I/O and streaming.
+- `hildi.llm` (this feature) for provider I/O and streaming.
 - `fpjson` for parsing tool arguments when a handler needs them; handlers decide
   their own argument handling.
-- The SQLite store (`hildegard.helper.store`) already provides a request queue and
+- The SQLite store (`hildi.store`) already provides a request queue and
   settings; a future `IConversationStore` implementation can persist messages
   there. v1 does **not** wire that up.
 
@@ -146,7 +146,7 @@ interface, and the default tools.
 
 - **Responsibilities:** conversation state, tool registration and dispatch, turn
   orchestration, stop-reason policy, iteration bounding.
-- **Dependencies:** `hildegard.helper.llm`, `fpjson`, `Classes`, `SysUtils`.
+- **Dependencies:** `hildi.llm`, `fpjson`, `Classes`, `SysUtils`.
 - **Side effects:** none directly; tool handlers may have side effects.
 
 ### Data Flow

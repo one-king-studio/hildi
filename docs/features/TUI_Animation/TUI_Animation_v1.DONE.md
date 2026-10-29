@@ -12,9 +12,9 @@ with a failing test; `make check` before moving on.
 
 ### Phase 1: Clock and the widget hook
 
-- [x] Add `test_tui_animation` to `tests/hildegard_helper_tests.pas`
+- [x] Add `test_tui_animation` to `tests/hildi_tests.pas`
 - [x] **Test**: `MonotonicMs` is non-decreasing
-- [x] **Implement**: `hildegard.helper.tui.clock` (`MonotonicMs`, `DefaultTickMs`)
+- [x] **Implement**: `hildi.tui.clock` (`MonotonicMs`, `DefaultTickMs`)
 - [x] **Test**: `TContainer.Advance` reaches children; `Animating` is the OR
 - [x] **Implement**: `TWidget.Advance`/`Animating`; forward in `TContainer` and
       `TSingleChild`
@@ -34,13 +34,13 @@ with a failing test; `make check` before moving on.
 
 - [x] **Test**: frame advances with `now`; two same-origin spinners in phase;
       `Animating`; measure = widest frame
-- [x] **Implement**: `hildegard.helper.tui.spinner` (`TSpinner`, presets)
+- [x] **Implement**: `hildi.tui.spinner` (`TSpinner`, presets)
 
 ### Phase 4: Progress
 
 - [x] **Test**: determinate eighths at 0/50/100%; clamp; indeterminate bounce;
       `Animating` follows `Indeterminate`
-- [x] **Implement**: `hildegard.helper.tui.progress` (`TProgress`)
+- [x] **Implement**: `hildi.tui.progress` (`TProgress`)
 
 ### Phase 5: Demo & docs
 
@@ -85,20 +85,20 @@ with a failing test; `make check` before moving on.
 ### New Files
 
 ```
-src/hildegard.helper.tui.clock.pas
-src/hildegard.helper.tui.spinner.pas
-src/hildegard.helper.tui.progress.pas
+src/hildi.tui.clock.pas
+src/hildi.tui.spinner.pas
+src/hildi.tui.progress.pas
 tests/test_tui_animation.pas
 ```
 
 ### Modified Files
 
 ```
-src/hildegard.helper.tui.widget.pas   (Advance/Animating)
-src/hildegard.helper.tui.panel.pas    (TSingleChild forwards the hooks)
-src/hildegard.helper.tui.app.pas      (Tick/NextFrameDelayMs/Run)
-src/hildegard.helper.harness.app.pas  (TAppShell rebased on TSingleChild)
-tests/hildegard_helper_tests.pas      (add the test unit)
+src/hildi.tui.widget.pas   (Advance/Animating)
+src/hildi.tui.panel.pas    (TSingleChild forwards the hooks)
+src/hildi.tui.app.pas      (Tick/NextFrameDelayMs/Run)
+src/hildi.harness.app.pas  (TAppShell rebased on TSingleChild)
+tests/hildi_tests.pas      (add the test unit)
 examples/tui_widgets_demo.pas         (spinner + progress, App.Run)
 docs/design/TUI_Design_Language.md
 docs/features/FEATURES.md

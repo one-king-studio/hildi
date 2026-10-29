@@ -2,10 +2,10 @@
 
 **Related Feature:** [FEATURE.md](FEATURE.md)
 
-**Depends on:** `hildegard.helper.store` (messages, checkpoints, FTS),
-`hildegard.helper.session.protocol`, `hildegard.helper.session.runtime`,
-`hildegard.helper.harness.session` / `view`, `hildegard.helper.tui.app`,
-`hildegard.helper.recall.tool`.
+**Depends on:** `hildi.store` (messages, checkpoints, FTS),
+`hildi.session.protocol`, `hildi.session.runtime`,
+`hildi.harness.session` / `view`, `hildi.tui.app`,
+`hildi.recall.tool`.
 
 ## Purpose
 
@@ -71,7 +71,7 @@ the turn boundary when the turn completes.
 ## Contracts & Interfaces
 
 ```pascal
-unit hildegard.helper.store;   // additions
+unit hildi.store;   // additions
 
 type
   TCheckpointRecord = record
@@ -110,7 +110,7 @@ type
 ```
 
 ```pascal
-unit hildegard.helper.session.protocol;   // additions
+unit hildi.session.protocol;   // additions
 
 type
   TSessionCommandKind = (
@@ -166,7 +166,7 @@ block is generic and domain-neutral, and states that the document is
 then continue; do not re-explore from scratch.
 
 - `FormatHandoff(ASummary, ASeq)` lives in its own unit
-  (`hildegard.helper.handoff`), beside `hildegard.helper.ambient`: both do the
+  (`hildi.handoff`), beside `hildi.ambient`: both do the
   "carried context" job, and both keep the wrapper volatile (the document stays
   plain in `session_checkpoints`).
 - `Compose` emits it once, at the head of the tail (after the leading system
@@ -176,12 +176,12 @@ then continue; do not re-explore from scratch.
   prompt-injection guard stays on the operator's turn (it closes that turn), so
   the handoff can never be read as the operator's words.
 - The TUI renders the document as its own block kind, `ckHandoff` (in
-  `hildegard.helper.tui.chat`), so a distinct handoff presentation can fork from
+  `hildi.tui.chat`), so a distinct handoff presentation can fork from
   the ambient one without touching it. Today it draws identically to an ambient
   box (violet border, disclosure caret, markdown body); the title stays
   `checkpoint`, the boundary.
 
-**Generator.** `CheckpointInstruction` (in `hildegard.helper.harness.session`)
+**Generator.** `CheckpointInstruction` (in `hildi.harness.session`)
 asks for a handoff document, not a specification, with a **Grounding** section:
 the documents, files, or resources the next agent should read first (exact
 paths, links, or identifiers, and why each matters). It is domain-neutral — a
@@ -197,7 +197,7 @@ undo of the latest one (see the 2026-10-12 FEATURE decision). Two store
 primitives, one operator action:
 
 ```pascal
-unit hildegard.helper.store;   // additions
+unit hildi.store;   // additions
 
   { Delete one checkpoint by its boundary seq. Messages are never touched; the
     active window expands to the previous checkpoint. }
@@ -213,7 +213,7 @@ unit hildegard.helper.store;   // additions
 ```
 
 ```pascal
-unit hildegard.helper.session.protocol;   // additions
+unit hildi.session.protocol;   // additions
 
 type
   TSessionCommandKind = (

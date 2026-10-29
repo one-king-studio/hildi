@@ -21,7 +21,7 @@ compresses the columns and wraps the cells, rather than scrolling horizontally
 
 ### Functional
 
-**Parser** (`hildegard.helper.markdown`)
+**Parser** (`hildi.markdown`)
 
 - [ ] Recognise a pipe table: a header row containing an unescaped `|`, followed
       immediately by a delimiter row whose cells are `:?-+:?` and whose cell
@@ -42,7 +42,7 @@ compresses the columns and wraps the cells, rather than scrolling horizontally
 - [ ] Streaming: an open table is inert raw text until it finalises, like every
       other block.
 
-**View** (`hildegard.helper.tui.markdownview`)
+**View** (`hildi.tui.markdownview`)
 
 - [ ] Draw an `mbTable` block as a rounded grid with a `├─┼─┤` rule between
       every row, framed by `╭╮╰╯` and `┬┴┼`.
@@ -77,7 +77,7 @@ compresses the columns and wraps the cells, rather than scrolling horizontally
 
 ### Public API
 
-Parser (additions to `hildegard.helper.markdown`):
+Parser (additions to `hildi.markdown`):
 
 ```pascal
 type
@@ -105,7 +105,7 @@ type
   end;
 ```
 
-View (additions to `hildegard.helper.tui.markdownview`):
+View (additions to `hildi.tui.markdownview`):
 
 ```pascal
 type
@@ -159,12 +159,12 @@ type
 
 ### Prior Art & Reuse
 
-- `hildegard.helper.markdown.InlineSpans` - cell content.
-- `hildegard.helper.tui.text.TTextBlock` - per-cell wrapping, alignment, and
+- `hildi.markdown.InlineSpans` - cell content.
+- `hildi.tui.text.TTextBlock` - per-cell wrapping, alignment, and
   clipping (`WrapWidth`, `Align`), plus `LineCountAt` - a non-caching line count
   so the width search can probe many widths without disturbing the wrap cache.
   The table composes text blocks rather than wrapping text itself.
-- `hildegard.helper.tui.surface` - `FillRect`/`PutText`/`PutCh` for the grid.
+- `hildi.tui.surface` - `FillRect`/`PutText`/`PutCh` for the grid.
 - The existing `TMarkdownView` block stack and its span-to-attribute helpers.
 - No FPC facility covers table layout; the width policy is the gap.
 

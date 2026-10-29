@@ -1,5 +1,5 @@
 unit test_approval;
-{ fpcunit tests for hildegard.helper.approval: the generic matcher, in-memory
+{ fpcunit tests for hildi.approval: the generic matcher, in-memory
   store, and the resolve service. No SQLite, no prompting side effects. }
 
 {$mode delphi}{$H+}
@@ -7,8 +7,8 @@ unit test_approval;
 interface
 
 uses
-  Classes, SysUtils, SyncObjs, fpcunit, testregistry, hildegard.helper.approval,
-  hildegard.helper.approval.store, hildegard.helper.store;
+  Classes, SysUtils, SyncObjs, fpcunit, testregistry, hildi.approval,
+  hildi.approval.store, hildi.store;
 
 type
   { Scripted approval prompt. }

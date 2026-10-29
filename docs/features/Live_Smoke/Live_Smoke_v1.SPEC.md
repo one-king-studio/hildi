@@ -2,9 +2,9 @@
 
 **Related Feature:** [FEATURE.md](FEATURE.md)
 
-**Depends on:** `hildegard.helper.session.runtime` (the spawned program),
-`hildegard.helper.session.client`, `hildegard.helper.session.protocol`,
-`hildegard.helper.store`.
+**Depends on:** `hildi.session.runtime` (the spawned program),
+`hildi.session.client`, `hildi.session.protocol`,
+`hildi.store`.
 
 **Depended on by:** nothing (a verification harness).
 
@@ -145,9 +145,9 @@ function ScenarioNames: TStringArray;
 `TSessionClient.Open(Spawn := True)` calls `SpawnDetached`, which passes
 `--session-runtime`, `--workspace`, `--store`, `--approval-root` and `--idle-ms`
 — **not `--endpoint` and not `--model`**. And `ResolveLLMConfig` reads
-`HILDEGARD_LLM_MODEL` and `HILDEGARD_LLM_API_KEY` from the environment but
-**never reads an endpoint variable**, although `hildegard.helper.cli`'s help text
-advertises `HILDEGARD_LLM_ENDPOINT`. So a spawned runtime cannot be aimed at a
+`HILDI_LLM_MODEL` and `HILDI_LLM_API_KEY` from the environment but
+**never reads an endpoint variable**, although `hildi.cli`'s help text
+advertises `HILDI_LLM_ENDPOINT`. So a spawned runtime cannot be aimed at a
 local provider by any supported route today.
 
 Two consequences, both recorded rather than papered over:
@@ -155,7 +155,7 @@ Two consequences, both recorded rather than papered over:
 1. The smoke spawns with an explicit argv (its own `TProcess`, not
    `SpawnDetached`), which is also a better test — it pins the argv the product
    documents.
-2. **This is a real product gap**: `HILDEGARD_LLM_ENDPOINT` is documented and
+2. **This is a real product gap**: `HILDI_LLM_ENDPOINT` is documented and
    ignored, and `SpawnDetached` drops `--endpoint`/`--model`. File it separately;
    the smoke must not depend on the fix, or it cannot land first.
 

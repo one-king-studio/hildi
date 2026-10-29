@@ -2,7 +2,7 @@
 # The harness's vendored-engine patches now live in the FORK, not here.
 #
 # `scripts/fetch-goccia.sh` fetches a pinned commit from
-# https://github.com/johnrcui/GocciaScript (branch `hildegard`), whose three
+# https://github.com/johnrcui/GocciaScript (branch `hildi`), whose three
 # commits carry the FPC-compatibility fixes that used to be sed'd in here:
 #
 #   92775fda  fix(fpc):   constref -> const for FPC 3.3.1's TComparison<T>

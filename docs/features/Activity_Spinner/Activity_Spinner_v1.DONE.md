@@ -54,8 +54,8 @@ moving on. `main` only.
 ## Files to Create/Modify
 
 ```
-src/hildegard.helper.tui.chat.pas        (ActivityFrame; live pad; box spinner)
-src/hildegard.helper.tui.chatpanel.pas   (toolbar uses ActivityFrame)
+src/hildi.tui.chat.pas        (ActivityFrame; live pad; box spinner)
+src/hildi.tui.chatpanel.pas   (toolbar uses ActivityFrame)
 tests/test_tui_chat.pas                  (extended)
 docs/features/FEATURES.md
 ```

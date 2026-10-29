@@ -19,7 +19,7 @@ idle-exits. See "Implementation notes" for the small deviations from the spec.
 
 ### Phase 1: Protocol codec (pure)
 
-- [x] **Define** `hildegard.helper.session.protocol`: the message, event,
+- [x] **Define** `hildi.session.protocol`: the message, event,
       command, hello, and attached types, and the codec class.
 - [x] **Test**: `TestRoundTripEveryEventKind`, `TestRoundTrip*` for every
       message type, `TestRejectsBadJson`, `TestRejectsUnknownType`,
@@ -38,7 +38,7 @@ idle-exits. See "Implementation notes" for the small deviations from the spec.
 
 - [x] **Test**: `TestSocketPathFitsUnixLimit`, `TestStaleSocketRecovered`,
       `TestSecondRuntimeExits`.
-- [x] **Implement** `hildegard.helper.session.runtime`: `TSessionRuntime.Open`,
+- [x] **Implement** `hildi.session.runtime`: `TSessionRuntime.Open`,
       the bind-or-reuse acquisition, and `Serve`.
 - [x] **Test**: `TestTurnStreamsToObserver`, `TestApprovalCrossesTheWire`,
       `TestAttachMidTurnReplaysLiveTurn`.
@@ -79,8 +79,8 @@ These were resolved during implementation; the specs were reconciled.
 - **`TSessionEvent` gained fields** for payloads the spec's payload table names
   but the record lacked: `TurnSeq`, `LoopId`, `SessionId`, `ErrorCode`,
   `Reason`.
-- **The runtime-row types live in `hildegard.helper.session`** (`TSessionRuntimeRow`,
-  `TSessionRuntimeStatus`), not in `hildegard.helper.session.runtime`, so the
+- **The runtime-row types live in `hildi.session`** (`TSessionRuntimeRow`,
+  `TSessionRuntimeStatus`), not in `hildi.session.runtime`, so the
   store and the runtime can share them without a dependency cycle.
 - **`TSessionClientConfig` gained `WorkspacePath` and `IdleExitMs`** so a
   spawned runtime can be told the workspace and a (short, for tests) idle exit.
@@ -91,9 +91,9 @@ These were resolved during implementation; the specs were reconciled.
 - **`RunSessionRuntime` / `RuntimeDir` / `SocketPathFor` / `SessionSocketReady`**
   are public helpers (the CLI and the test harness spawn a runtime by
   re-executing the binary with `--session-runtime`).
-- **The socket runtime directory is `/tmp/hildegard-helper-<uid>/`** (mode
+- **The socket runtime directory is `/tmp/hildi-<uid>/`** (mode
   `0700`), short enough for the `AF_UNIX` limit.
-- **`HILDEGARD_RUNTIME_IDLE_MS`** overrides the idle exit, as the spec's
+- **`HILDI_RUNTIME_IDLE_MS`** overrides the idle exit, as the spec's
   Decision 1 requires.
 - **The CLI's `--attach` is opt-in.** The existing in-process prompt path is
   unchanged; routing it through the runtime is left for the TUI-adoption slice.

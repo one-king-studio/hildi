@@ -25,7 +25,7 @@ the cause.
 
 The Makefile says the agent CLI release target is an "optimized, self-
 contained production binary (static SQLite, no runtime libs)". That is only
-half true: static SQLite, runtime-loaded TLS. `hildegard.helper.llm` pulls in
+half true: static SQLite, runtime-loaded TLS. `hildi.llm` pulls in
 `opensslsockets`, whose `openssl` unit `dlopen`s libssl/libcrypto from the host
 on the **first HTTPS call** — not at launch, which is why `otool -L` already
 looks clean and hides the problem. On a dev machine this is invisible. On the
@@ -144,7 +144,7 @@ the transport, and how CA trust is provided.
 
 - Must build with Free Pascal 3.3.1, `{$mode delphi}`, and keep `make check`
   green.
-- Must reuse the existing `TLLMTransport` seam in `hildegard.helper.llm`;
+- Must reuse the existing `TLLMTransport` seam in `hildi.llm`;
   the swap must not fork a second HTTP client or fork behaviour per-feature.
 - Must follow the vendored-dependency pattern established by SQLite: pinned
   source under `deps/`, checksum-verified fetch script, static archive target
@@ -161,7 +161,7 @@ the transport, and how CA trust is provided.
 
 ### Internal
 
-- `hildegard.helper.llm` - the `TLLMTransport` seam and `TFPHTTPTransport`;
+- `hildi.llm` - the `TLLMTransport` seam and `TFPHTTPTransport`;
   `opensslsockets` is referenced in this one unit, so the blast radius is one
   file.
 - The SQLite vendoring pattern - `scripts/fetch-sqlite.sh` (pinned version,
@@ -239,5 +239,5 @@ the transport, and how CA trust is provided.
 - **Resolved by the SPEC** (`TLS_Foundation_v1.SPEC.md`): composition is FPC's
   `TSSLSocketHandler.SetDefaultHandlerClass` registration (no HTTP-client fork);
   the binding is a small C shim over an opaque handle; CA trust is a Mozilla
-  bundle embedded in the binary (`HILDEGARD_CA_BUNDLE` overrides); and the TLS
+  bundle embedded in the binary (`HILDI_CA_BUNDLE` overrides); and the TLS
   path is tested offline through a loopback handshake.

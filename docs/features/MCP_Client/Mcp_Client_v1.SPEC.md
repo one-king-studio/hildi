@@ -4,8 +4,8 @@
 
 **Depends on:** `JsonRpc_v1.SPEC.md`, `Stdio_Child_Manager_v1.SPEC.md`,
 `Config_v1.SPEC.md`, and the existing tool/approval/ledger machinery
-(`hildegard.helper.agent`, `hildegard.helper.approval`).
-**Depended on by:** `hildegard.helper.harness.session` (registration at session
+(`hildi.agent`, `hildi.approval`).
+**Depended on by:** `hildi.harness.session` (registration at session
 open).
 
 ## Purpose
@@ -95,12 +95,12 @@ handler**, nothing more.
 ### Public API
 
 ```pascal
-unit hildegard.helper.mcp.client;
+unit hildi.mcp.client;
 
 uses
   Classes, SysUtils,
-  hildegard.helper.agent, hildegard.helper.approval,
-  hildegard.helper.stdio.child, hildegard.helper.mcp.config;
+  hildi.agent, hildi.approval,
+  hildi.stdio.child, hildi.mcp.config;
 
 type
   { One discovered MCP tool, after mapping. Ref is the persisted-approval
@@ -124,7 +124,7 @@ type
     Server: TMcpServerConfig;      // from Config_v1.SPEC.md
     ListTimeoutMs: Integer;        // 0 => DefaultMcpListTimeoutMs
     CallTimeoutMs: Integer;        // 0 => DefaultMcpCallTimeoutMs
-    ClientName: string;            // 'hildegard-helper'
+    ClientName: string;            // 'hildi'
     ClientVersion: string;         // build version
   end;
 
@@ -190,7 +190,7 @@ function McpResultToText(const AResultJson: string): string;
 const
   DefaultMcpListTimeoutMs = 10000;
   DefaultMcpCallTimeoutMs = 60000;
-  McpClientName = 'hildegard-helper';
+  McpClientName = 'hildi';
   { Schema-acceptance bounds: a tool whose inputSchema exceeds either is
     rejected (that tool only), keeping the registry sane. }
   MaxSchemaProperties = 64;
@@ -250,7 +250,7 @@ const
 ### Prior Art & Reuse
 
 - **Registry (rung 2):** `TToolRegistry.Add` already rejects a non-object
-  `ParametersJson` and injects a required `reason` (`hildegard.helper.agent`).
+  `ParametersJson` and injects a required `reason` (`hildi.agent`).
   The adapter feeds it a valid object; it does **not** re-implement validation.
 - **Loop (rung 2):** `TAgentLoop.DispatchTools` already validates `reason`
   (`ExtractToolReason`) and appends the `crTool` message (ledger row, duration,

@@ -2,7 +2,7 @@
 
 **Related Feature:** [MCP_OAuth_FEATURE.md](MCP_OAuth_FEATURE.md)
 
-**Depends on:** `hildegard.helper.tls` / `fphttpclient`, `fpjson`.
+**Depends on:** `hildi.tls` / `fphttpclient`, `fpjson`.
 **Depended on by:** `Mcp_OAuth_Flow_v1.SPEC.md`.
 
 ## Purpose
@@ -45,7 +45,7 @@ testable.
 ## Contracts & Interfaces
 
 ```pascal
-unit hildegard.helper.mcp.oauth;
+unit hildi.mcp.oauth;
 { OAuth 2.1 discovery and PKCE for MCP. Discovery parsing and PKCE are pure;
   the discovery fetch is a thin HTTP wrapper. }
 
@@ -121,7 +121,7 @@ function DiscoverAuthServer(const AIssuerURL: string;
 
 ### Prior Art & Reuse
 
-- **`fphttpclient` + `hildegard.helper.tls`** for the discovery GETs.
+- **`fphttpclient` + `hildi.tls`** for the discovery GETs.
 - **`fpjson`** for parsing.
 - **mbedTLS** (already vendored) supplies SHA-256; the TLS shim may expose a
   `sha256` helper, or a small local implementation is used (SPEC pins: prefer

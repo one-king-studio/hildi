@@ -4,7 +4,7 @@ program dashboard;
   channel list with a live feed.
 
   A VIEWER. It reads the store and draws; it posts nothing yet. The panel itself
-  lives in hildegard.helper.dashboard.panel, so the layout can be exercised by
+  lives in hildi.dashboard.panel, so the layout can be exercised by
   the mock (examples/dashboard_mock.pas) without a store.
 
   It links no agent-loop unit: the same closure discipline the TUI client is
@@ -18,10 +18,10 @@ program dashboard;
 uses
   {$ifdef unix}cthreads, cwstring,{$endif}   // cthreads first; cwstring for Unicode
   SysUtils, DateUtils,
-  hildegard.helper.store, hildegard.helper.board, hildegard.helper.board.store,
-  hildegard.helper.tasks, hildegard.helper.tasks.store,
-  hildegard.helper.workspace,
-  hildegard.helper.dashboard.panel,
+  hildi.store, hildi.board, hildi.board.store,
+  hildi.tasks, hildi.tasks.store,
+  hildi.workspace,
+  hildi.dashboard.panel,
   tui.base, tui.theme, tui.app, tui.surface, tui.surface.video,
   tui.input, tui.input.terminal, tui.widget;
 
@@ -222,10 +222,10 @@ begin
 end;
 
 begin
-  StorePath := GetEnvironmentVariable('HILDEGARD_STORE_PATH');
+  StorePath := GetEnvironmentVariable('HILDI_STORE_PATH');
   if StorePath = '' then
     StorePath := IncludeTrailingPathDelimiter(GetUserDir) +
-      '.hildegard-helper' + PathDelim + 'store.db';
+      '.hildi' + PathDelim + 'store.db';
   ForceDirectories(ExtractFileDir(StorePath));
   Cfg := Default(TStoreConfig);
   Cfg.DatabasePath := StorePath;

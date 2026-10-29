@@ -127,9 +127,9 @@ mechanism.
 
 ### Internal
 
-- `hildegard.helper.agent` (loop, registry, `BuildRequest`, `ExecuteToolCalls`).
-- `hildegard.helper.mcp.client` (the MCP manager, refactored to a contributor).
-- `hildegard.helper.harness.session` (registration).
+- `hildi.agent` (loop, registry, `BuildRequest`, `ExecuteToolCalls`).
+- `hildi.mcp.client` (the MCP manager, refactored to a contributor).
+- `hildi.harness.session` (registration).
 - `docs/features/Dynamic_Tools/` (the reconcile this generalises).
 
 ### External

@@ -1,5 +1,5 @@
 unit test_tls;
-{ fpcunit tests for hildegard.helper.tls and the vendored mbedTLS shim. The
+{ fpcunit tests for hildi.tls and the vendored mbedTLS shim. The
   loopback tests drive the real handler against a test-only mbedTLS server
   (tests/tls_test_server.c) on 127.0.0.1: no network, no committed key. }
 
@@ -9,7 +9,7 @@ interface
 
 uses
   Classes, SysUtils, ctypes, fpcunit, testregistry,
-  sslsockets, ssockets, fphttpclient, hildegard.helper.tls, hildegard.helper.llm;
+  sslsockets, ssockets, fphttpclient, hildi.tls, hildi.llm;
 
 type
   TTlsTest = class(TTestCase)
@@ -49,11 +49,11 @@ procedure tls_test_server_stop; cdecl; external;
 function tls_test_server_error: PAnsiChar; cdecl; external;
 function tls_test_server_ca_pem(buf: PAnsiChar; buflen: Cardinal): Integer;
   cdecl; external;
-function hildegard_tls_live_count: Integer; cdecl; external;
-function hildegard_ca_pem_len: Cardinal; cdecl; external;
+function hildi_tls_live_count: Integer; cdecl; external;
+function hildi_ca_pem_len: Cardinal; cdecl; external;
 
 const
-  CAVar = 'HILDEGARD_CA_BUNDLE';
+  CAVar = 'HILDI_CA_BUNDLE';
 
 procedure TTlsTest.SetEnvVar(const AName, AValue: string);
 begin
@@ -101,7 +101,7 @@ var
   F: TFileStream;
 begin
   Result := IncludeTrailingPathDelimiter(GetTempDir) +
-    'hildegard_tls_' + IntToStr(Random(MaxInt)) + '.pem';
+    'hildi_tls_' + IntToStr(Random(MaxInt)) + '.pem';
   F := TFileStream.Create(Result, fmCreate);
   try
     if AContent <> '' then
@@ -128,7 +128,7 @@ end;
 
 procedure TTlsTest.TestEmbeddedBundleIsPresent;
 begin
-  AssertTrue('embedded CA bundle is non-empty', hildegard_ca_pem_len > 0);
+  AssertTrue('embedded CA bundle is non-empty', hildi_ca_pem_len > 0);
 end;
 
 procedure TTlsTest.TestBundleOverrideResolves;
@@ -154,7 +154,7 @@ procedure TTlsTest.TestUnreadableOverrideIsConfigError;
 var
   Err: string;
 begin
-  SetEnvVar(CAVar, '/no/such/hildegard/ca.pem');
+  SetEnvVar(CAVar, '/no/such/hildi/ca.pem');
   try
     AssertFalse('unreadable override is rejected', ValidateTLSConfig(Err));
     AssertTrue('a distinct message is returned', Err <> '');
@@ -172,7 +172,7 @@ var
   Err: TLLMError;
   Msg: TChatMessage;
 begin
-  SetEnvVar(CAVar, '/no/such/hildegard/ca.pem');
+  SetEnvVar(CAVar, '/no/such/hildi/ca.pem');
   try
     Config := Default(TLLMConfig);
     Config.Model := 'a-model';
@@ -244,7 +244,7 @@ begin
     DeleteFile(Path);
     tls_test_server_stop;
   end;
-  AssertEquals('no shim handle leaked', 0, hildegard_tls_live_count);
+  AssertEquals('no shim handle leaked', 0, hildi_tls_live_count);
 end;
 
 procedure TTlsTest.TestLoopbackRejectsUnknownCa;
@@ -272,7 +272,7 @@ begin
     tls_test_server_stop;
   end;
   AssertEquals('no shim handle leaked after a failure', 0,
-    hildegard_tls_live_count);
+    hildi_tls_live_count);
 end;
 
 procedure TTlsTest.TestLoopbackRejectsWrongHost;

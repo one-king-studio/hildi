@@ -2,10 +2,10 @@
 
 ## Overview
 
-hildegard-helper needs somewhere durable to keep its own state. This feature adds
+hildi needs somewhere durable to keep its own state. This feature adds
 an embedded SQLite database as the single local store for application data:
 device credentials, a request/audit history, a durable pending-request queue, and
-settings. It is exposed as a focused `hildegard.helper.*` access layer - typed
+settings. It is exposed as a focused `hildi.*` access layer - typed
 operations over parameterized SQL - so other units never embed SQL strings or
 depend on the schema directly.
 
@@ -187,7 +187,7 @@ Concurrency
 
 ### Internal
 
-- A new `hildegard.helper.*` store unit (plus a small migration list) - exact
+- A new `hildi.*` store unit (plus a small migration list) - exact
   boundaries decided in the SPEC.
 - Consumers: Remote Agent Link (credentials, history, queue) and future features
   that need settings.

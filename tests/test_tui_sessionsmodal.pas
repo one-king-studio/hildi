@@ -11,7 +11,7 @@ uses
   Classes, SysUtils, fpcunit, testregistry,
   tui.base, tui.input,
   tui.surface, tui.widget,
-  tui.theme, hildegard.helper.session,
+  tui.theme, hildi.session,
   tui.widgets.sessionsmodal;
 
 type

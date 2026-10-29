@@ -206,15 +206,15 @@ The modal
 
 ### Internal
 
-- `hildegard.helper.store` — `sessions` table, `ListSessions`, `TouchSession`,
+- `hildi.store` — `sessions` table, `ListSessions`, `TouchSession`,
   `sessions.label`, migrations.
-- `hildegard.helper.session` — `TSessionSummary`.
-- `hildegard.helper.session.runtime` — where the assistant reply is committed
+- `hildi.session` — `TSessionSummary`.
+- `hildi.session.runtime` — where the assistant reply is committed
   (the natural place to derive the title), alongside the existing checkpoint-turn
   hook.
-- `hildegard.helper.harness.app` — command registry, modal planes, driver seam.
-- `hildegard.helper.tui.palette`, `hildegard.helper.tui.list`,
-  `hildegard.helper.tui.approvalmodal`, `hildegard.helper.tui.theme`.
+- `hildi.harness.app` — command registry, modal planes, driver seam.
+- `hildi.tui.palette`, `hildi.tui.list`,
+  `hildi.tui.approvalmodal`, `hildi.tui.theme`.
 - Related features: Sessions and Ledger, Headless Sessions (runtime ↔ store),
   Context Checkpoint (the ambient reply path is the precedent for acting on a
   completed turn), Subagents (child sessions share the `sessions` table).

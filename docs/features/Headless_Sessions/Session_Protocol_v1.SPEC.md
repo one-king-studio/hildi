@@ -118,7 +118,7 @@ this spec fixes the schema and the one binding v1 ships (NDJSON over
 ### Public API
 
 ```pascal
-unit hildegard.helper.session.protocol;
+unit hildi.session.protocol;
 
 type
   TSessionRole = (srObserve, srDrive);
@@ -202,7 +202,7 @@ type
   end;
 
   TSessionHello = record
-    Protocol: string;           // 'hildegard-session'
+    Protocol: string;           // 'hildi-session'
     Version: Integer;           // 1
     SessionId: string;
     LoopId: string;
@@ -277,10 +277,10 @@ Event payloads (the fields beyond `seq`/`ts`/`kind`):
 
 ### Prior Art & Reuse
 
-- **`TTurnEvent`** (`hildegard.helper.harness.turn`) is the in-process event
+- **`TTurnEvent`** (`hildi.harness.turn`) is the in-process event
   shape this protocol externalizes; the kinds map closely, and the flat-record
   style is reused.
-- **`TSSEParser`** (`hildegard.helper.llm`) is prior art for a line-oriented,
+- **`TSSEParser`** (`hildi.llm`) is prior art for a line-oriented,
   incremental stream reader; the NDJSON reader follows the same discipline
   (buffer partial lines, dispatch whole ones).
 - **`fpjson`** is the JSON layer already in use; the codec adds no dependency.

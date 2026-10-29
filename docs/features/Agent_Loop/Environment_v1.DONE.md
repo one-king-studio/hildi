@@ -4,7 +4,7 @@
 
 ## Tasks
 
-- [x] `src/hildegard.helper.env.pas`: `ParseDotEnv` (pure), `ApplyEnv`,
+- [x] `src/hildi.env.pas`: `ParseDotEnv` (pure), `ApplyEnv`,
       `LoadDotEnvFile`
 - [x] Comments, blank lines, `export ` prefix, whitespace, single/double quotes,
       `=` in values, malformed-line skipping

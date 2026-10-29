@@ -18,7 +18,7 @@ failing test. `make check` before moving on.
 - [x] **Register** any new test methods in existing suites (no new unit needed;
       additions go to `test_agent.pas` and `test_mcp_client.pas`).
 
-### Phase 1: Tool boundary (`hildegard.helper.agent`)
+### Phase 1: Tool boundary (`hildi.agent`)
 
 - [x] **Test**: `TestRegistryRemovePresentAndAbsent` in `tests/test_agent.pas` —
       red.
@@ -29,7 +29,7 @@ failing test. `make check` before moving on.
       single call at the top of `DoSend`.
 - [x] **Refactor**; `make check`.
 
-### Phase 2: MCP lifecycle (`hildegard.helper.mcp.client`)
+### Phase 2: MCP lifecycle (`hildi.mcp.client`)
 
 - [x] **Expose** `TMcpClient.Dead: Boolean` (the existing `FDead`).
 - [x] **Test**: `TestReconcileOpensNewServer`, `TestReconcileNoOpWhenConnected`
@@ -66,9 +66,9 @@ failing test. `make check` before moving on.
 ## Files to Create/Modify
 
 ```
-src/hildegard.helper.agent.pas          (OnTurnStart hook; TToolRegistry.Remove)
-src/hildegard.helper.mcp.client.pas     (lifecycle manager; TMcpClient.Dead)
-src/hildegard.helper.harness.session.pas (wire OnTurnStart -> Reconcile)
+src/hildi.agent.pas          (OnTurnStart hook; TToolRegistry.Remove)
+src/hildi.mcp.client.pas     (lifecycle manager; TMcpClient.Dead)
+src/hildi.harness.session.pas (wire OnTurnStart -> Reconcile)
 tests/test_agent.pas                    (boundary + remove tests)
 tests/test_mcp_client.pas               (lifecycle tests)
 ```

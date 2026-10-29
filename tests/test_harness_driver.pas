@@ -1,5 +1,5 @@
 unit test_harness_driver;
-{ fpcunit tests for hildegard.helper.harness.driver: the local driver over the
+{ fpcunit tests for hildi.harness.driver: the local driver over the
   in-process worker, and the remote driver over a real runtime + fake LLM
   transport. No terminal. }
 
@@ -9,18 +9,18 @@ interface
 
 uses
   Classes, SysUtils, SyncObjs, fpcunit, testregistry,
-  hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.approval,
-  hildegard.helper.store, hildegard.helper.session,
-  hildegard.helper.session.protocol, hildegard.helper.session.socket,
-  hildegard.helper.session.client, hildegard.helper.session.runtime,
-  hildegard.helper.harness.session, hildegard.helper.harness.view,
-  hildegard.helper.harness.turn,
-  hildegard.helper.harness.driver,
-  hildegard.helper.harness.driver.local,
+  hildi.llm, hildi.agent, hildi.approval,
+  hildi.store, hildi.session,
+  hildi.session.protocol, hildi.session.socket,
+  hildi.session.client, hildi.session.runtime,
+  hildi.harness.session, hildi.harness.view,
+  hildi.harness.turn,
+  hildi.harness.driver,
+  hildi.harness.driver.local,
   tui.base, tui.input,
   tui.surface, tui.widgets.chat,
-  hildegard.helper.harness.app,
-  hildegard.helper.workspace, llm_fakes;
+  hildi.harness.app,
+  hildi.workspace, llm_fakes;
 
 type
   { Runs Gate.Ask on its own thread so the driver can answer it. }

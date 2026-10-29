@@ -8,15 +8,15 @@ chat counter (3) capture most of the win; focus reporting (5–6) finishes it.
 
 ## Phase 1 — The registry
 
-- [x] **Implement** `TAnimationClock` in `src/hildegard.helper.tui.clock.pas`:
+- [x] **Implement** `TAnimationClock` in `src/hildi.tui.clock.pas`:
       `Register`/`Unregister`/`MinIntervalMs`/`Count`, and the process
       `AnimationClock` accessor.
 - [x] **Implement** the `TWidget.SetAnimation`/`ClearAnimation` helper in
-      `src/hildegard.helper.tui.widget.pas`.
+      `src/hildi.tui.widget.pas`.
 - [x] **Test** `tests/test_tui_clock.pas`: register/replace/unregister;
       `MinIntervalMs` is the minimum; `<= 0` unregisters; unknown unregister is a
       no-op; `Count` tracks entries. Add the unit to
-      `tests/hildegard_helper_tests.pas`.
+      `tests/hildi_tests.pas`.
 
 ## Phase 2 — The app rate
 
@@ -46,11 +46,11 @@ chat counter (3) capture most of the win; focus reporting (5–6) finishes it.
 ## Phase 5 — Focus reporting
 
 - [x] **Implement** `ikFocus` (appended last) and `TInputEvent.Focused` in
-      `src/hildegard.helper.tui.input.pas`.
+      `src/hildi.tui.input.pas`.
 - [x] **Implement** the `CSI I`/`CSI O` mapping in
-      `src/hildegard.helper.tui.input.decode.pas`.
+      `src/hildi.tui.input.decode.pas`.
 - [x] **Implement** `CSI ? 1004 h` on init and `CSI ? 1004 l` on teardown in
-      `src/hildegard.helper.tui.surface.video.pas`.
+      `src/hildi.tui.surface.video.pas`.
 - [x] **Test** the decoder mapping (`test_tui_input.pas`). The surface's emitted
       bytes are exercised live (the video surface writes to a tty).
 

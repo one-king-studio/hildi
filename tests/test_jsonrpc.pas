@@ -1,5 +1,5 @@
 unit test_jsonrpc;
-{ fpcunit tests for hildegard.helper.jsonrpc. The codec is pure, so every test
+{ fpcunit tests for hildi.jsonrpc. The codec is pure, so every test
   is a direct encode/decode assertion with no I/O. }
 
 {$mode delphi}{$H+}
@@ -7,7 +7,7 @@ unit test_jsonrpc;
 interface
 
 uses
-  SysUtils, fpjson, jsonparser, fpcunit, testregistry, hildegard.helper.jsonrpc;
+  SysUtils, fpjson, jsonparser, fpcunit, testregistry, hildi.jsonrpc;
 
 type
   TJsonRpcTest = class(TTestCase)

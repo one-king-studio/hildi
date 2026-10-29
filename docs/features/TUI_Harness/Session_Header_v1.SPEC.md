@@ -57,7 +57,7 @@ The header content
 
 > Contracts as Pascal type declarations. No method bodies.
 
-### Panel (`hildegard.helper.tui.panel`)
+### Panel (`hildi.tui.panel`)
 
 ```pascal
 TBoxStyle = record
@@ -69,13 +69,13 @@ TBoxStyle = record
 end;
 ```
 
-### Chat panel (`hildegard.helper.tui.chatpanel`)
+### Chat panel (`hildi.tui.chatpanel`)
 
 ```pascal
 procedure TChatPanel.SetHeader(const ALeft, ARight: string);
 ```
 
-### Stats (`hildegard.helper.harness.stats`)
+### Stats (`hildi.harness.stats`)
 
 ```pascal
 function FormatContextUsage(ATokens, ALimit: Integer): string;
@@ -123,7 +123,7 @@ Status bar (the workspace on the left, the consumption on the right):
 
 - **`tui.panel`** owns the two border titles.
 - **`tui.chatpanel`** exposes the header seam on the messages panel.
-- **`harness.stats`** owns the format; it depends only on `hildegard.helper.session`.
+- **`harness.stats`** owns the format; it depends only on `hildi.session`.
 - **`harness.app`** composes the header from the session.
 
 ### Data Flow

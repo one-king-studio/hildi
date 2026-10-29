@@ -43,21 +43,21 @@ Compose keys
 
 ## Contracts & Interfaces
 
-### LLM (`hildegard.helper.llm`)
+### LLM (`hildi.llm`)
 
 ```pascal
 type
   TLLMErrorCode = (..., leProvider, leCancelled);
 ```
 
-### Session model (`hildegard.helper.session`)
+### Session model (`hildi.session`)
 
 ```pascal
 type
   TTurnStatus = (tsRunning, tsCompleted, tsFailed, tsCancelled);
 ```
 
-### Agent (`hildegard.helper.agent`)
+### Agent (`hildi.agent`)
 
 ```pascal
 type
@@ -74,7 +74,7 @@ The loop consults `CancelCheck` at the top of each iteration (before building a
 request). It never breaks a tool batch part-way: the assistant's tool calls and
 their results must stay paired.
 
-### Turn worker (`hildegard.helper.harness.turn`)
+### Turn worker (`hildi.harness.turn`)
 
 ```pascal
 type
@@ -84,7 +84,7 @@ type
   end;
 ```
 
-### Compose (`hildegard.helper.tui.edit`)
+### Compose (`hildi.tui.edit`)
 
 ```pascal
 type
@@ -99,7 +99,7 @@ type
 (handled only when the buffer is non-empty, so an empty box falls through to the
 shell's quit).
 
-### App shell (`hildegard.helper.harness.app`)
+### App shell (`hildi.harness.app`)
 
 ```pascal
 type

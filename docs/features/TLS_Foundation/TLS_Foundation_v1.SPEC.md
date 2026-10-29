@@ -2,7 +2,7 @@
 
 **Related Feature:** [FEATURE.md](FEATURE.md)
 
-**Extends:** the transport seam in `hildegard.helper.llm`
+**Extends:** the transport seam in `hildi.llm`
 (`TLLMTransport` / `TFPHTTPTransport`).
 
 ## Purpose
@@ -30,7 +30,7 @@ automatically.
 - [ ] The Makefile compiles the vendored source into static archives under
       `build/libstatic/` (`libmbedtls.a`, `libmbedx509.a`, `libmbedcrypto.a`)
       and links them with `-k<abs path>`, so a system mbedTLS is never used.
-- [ ] A small C shim (`src/hildegard_tls_shim.c`) wraps the mbedTLS **client**
+- [ ] A small C shim (`src/hildi_tls_shim.c`) wraps the mbedTLS **client**
       API behind one opaque handle, so no mbedTLS struct layout is mirrored in
       Pascal. It is the only C the project writes for TLS.
 - [ ] `scripts/fetch-cacert.sh` pins a Mozilla CA bundle (version + SHA-256)
@@ -41,7 +41,7 @@ automatically.
       context survives an error path. A live-context counter lets a test assert
       it returns to zero.
 
-**Transport (`hildegard.helper.tls`)**
+**Transport (`hildi.tls`)**
 
 - [ ] `TMbedTLSSocketHandler` extends FPC's `TSSLSocketHandler` (from
       `sslsockets`), implements the socket methods, and binds the shim through
@@ -54,14 +54,14 @@ automatically.
       sends SNI, and verifies the peer chain and hostname. It reuses FPC's
       `CertificateData` (`CertCA.FileName`, `TrustedCertsDir`) rather than
       inventing a parallel config shape.
-- [ ] CA source, in order: a readable `HILDEGARD_CA_BUNDLE` PEM path when set,
+- [ ] CA source, in order: a readable `HILDI_CA_BUNDLE` PEM path when set,
       otherwise the embedded bundle. A set-but-unreadable override is a
       distinct, actionable `leConfig` error.
 - [ ] `GetLastSSLErrorString`/`GetLastSSLErrorCode` return the mbedTLS error, so
       FPC's `ESocketError`/`GetLastErrorDescription` path carries TLS detail into
       the transport's error string.
-- [ ] `hildegard.helper.llm` replaces `opensslsockets` with
-      `hildegard.helper.tls` in its `uses`. Nothing else in that unit changes.
+- [ ] `hildi.llm` replaces `opensslsockets` with
+      `hildi.tls` in its `uses`. Nothing else in that unit changes.
 - [ ] No shipping target links `opensslsockets`, so `libssl`/`libcrypto` are
       never `dlopen`ed.
 
@@ -91,7 +91,7 @@ automatically.
 ### Public API (Pascal)
 
 ```pascal
-unit hildegard.helper.tls;
+unit hildi.tls;
 
 type
   { A TSSLSocketHandler backed by the vendored mbedTLS shim. Registered as the
@@ -109,7 +109,7 @@ type
     function BytesAvailable: Integer; override;
   end;
 
-{ The CA bundle override from HILDEGARD_CA_BUNDLE, or '' when unset. }
+{ The CA bundle override from HILDI_CA_BUNDLE, or '' when unset. }
 function TLSBundleOverride: string;
 
 { True when the resolved CA source is usable. AError is a distinct, actionable
@@ -120,34 +120,34 @@ function ValidateTLSConfig(out AError: string): Boolean;
 ### Native Contract (C shim)
 
 ```c
-typedef struct hildegard_tls hildegard_tls;   /* opaque */
+typedef struct hildi_tls hildi_tls;   /* opaque */
 
-hildegard_tls *hildegard_tls_new(void);       /* NULL on allocation failure   */
-void           hildegard_tls_free(hildegard_tls *h);
+hildi_tls *hildi_tls_new(void);       /* NULL on allocation failure   */
+void           hildi_tls_free(hildi_tls *h);
 
 /* Trust chain: a PEM buffer, or a file path. 0 ok, <0 error. */
-int hildegard_tls_set_ca_mem(hildegard_tls *h, const void *pem, unsigned len);
-int hildegard_tls_set_ca_file(hildegard_tls *h, const char *path);
+int hildi_tls_set_ca_mem(hildi_tls *h, const void *pem, unsigned len);
+int hildi_tls_set_ca_file(hildi_tls *h, const char *path);
 
 /* Handshake on an already-connected fd. host drives SNI and verification. */
-int hildegard_tls_connect(hildegard_tls *h, int fd, const char *host);
+int hildi_tls_connect(hildi_tls *h, int fd, const char *host);
 
 /* >0 bytes, 0 orderly EOF, <0 error. */
-int hildegard_tls_read(hildegard_tls *h, void *buf, int len);
+int hildi_tls_read(hildi_tls *h, void *buf, int len);
 /* >=0 bytes, <0 error. */
-int hildegard_tls_write(hildegard_tls *h, const void *buf, int len);
-int hildegard_tls_pending(hildegard_tls *h);
-int hildegard_tls_close(hildegard_tls *h);
+int hildi_tls_write(hildi_tls *h, const void *buf, int len);
+int hildi_tls_pending(hildi_tls *h);
+int hildi_tls_close(hildi_tls *h);
 
 /* mbedTLS error code; copies a human, non-secret string into buf. */
-int hildegard_tls_last_error(hildegard_tls *h, char *buf, unsigned buflen);
+int hildi_tls_last_error(hildi_tls *h, char *buf, unsigned buflen);
 
 /* Live shim contexts; the test asserts it returns to zero. */
-int hildegard_tls_live_count(void);
+int hildi_tls_live_count(void);
 
 /* The embedded CA bundle, generated from deps/cacert/cacert.pem. */
-const unsigned char *hildegard_ca_pem(void);
-unsigned             hildegard_ca_pem_len(void);
+const unsigned char *hildi_ca_pem(void);
+unsigned             hildi_ca_pem_len(void);
 ```
 
 ### Data Contracts
@@ -155,8 +155,8 @@ unsigned             hildegard_ca_pem_len(void);
 - **Return convention.** `connect`/`set_ca_*` return `0` on success and a
   negative mbedTLS code on failure; `read` returns `>0`, `0` (orderly EOF), or a
   negative code; `write` returns `>=0` or a negative code. The shim records the
-  last error for `hildegard_tls_last_error`.
-- **Handle lifetime.** One `hildegard_tls` per TLS connection. The handler owns
+  last error for `hildi_tls_last_error`.
+- **Handle lifetime.** One `hildi_tls` per TLS connection. The handler owns
   it: created lazily on first `Connect`, freed in `Close`/`Destroy`.
 - **CA bundle.** The embedded bytes are the default; `set_ca_file` overrides.
   Both feed an mbedTLS X.509 chain used for `MBEDTLS_SSL_VERIFY_REQUIRED`.
@@ -232,7 +232,7 @@ unsigned             hildegard_ca_pem_len(void);
 
 - The host is `TInetSocket.Host`; it drives SNI and hostname verification. An
   empty host is a verification failure, not a silent skip.
-- `HILDEGARD_CA_BUNDLE`, when set, must name a readable PEM file.
+- `HILDI_CA_BUNDLE`, when set, must name a readable PEM file.
 - The embedded bundle is always present (generated at build time).
 
 ### Output Guarantees
@@ -269,14 +269,14 @@ The handler does not introduce a new error type: it reports through FPC's
 
 - [ ] `TestHandlerIsRegisteredDefault` — `TSSLSocketHandler.GetDefaultHandler`
       returns a `TMbedTLSSocketHandler`.
-- [ ] `TestEmbeddedBundleIsPresent` — `hildegard_ca_pem_len > 0` and the bytes
+- [ ] `TestEmbeddedBundleIsPresent` — `hildi_ca_pem_len > 0` and the bytes
       parse as PEM.
 - [ ] `TestBundleOverrideResolves` — `TLSBundleOverride` reads the environment;
       `ValidateTLSConfig` accepts an unset override and a readable file.
 - [ ] `TestUnreadableOverrideIsConfigError` — a set-but-missing path yields a
       distinct error, and `TLLMClient` maps it to `leConfig`.
 - [ ] `TestShimHandleRoundTrip` — `new`/`free` balances
-      (`hildegard_tls_live_count = 0`), including after a failed `connect`.
+      (`hildi_tls_live_count = 0`), including after a failed `connect`.
 - [ ] `TestBadCaFileFails` — a garbage CA file fails `set_ca_file` with a
       reported error and no leak.
 

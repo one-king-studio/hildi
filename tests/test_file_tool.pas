@@ -1,5 +1,5 @@
 unit test_file_tool;
-{ fpcunit tests for hildegard.helper.files: the six gated file tools against
+{ fpcunit tests for hildi.files: the six gated file tools against
   a real temporary workspace, with a fake approval service (and one real
   TApprovalService to prove persistence). }
 
@@ -10,9 +10,9 @@ interface
 uses
   Classes, SysUtils, fpcunit, testregistry,
   {$ifdef unix}BaseUnix,{$endif}
-  hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.approval,
-  hildegard.helper.workspace, hildegard.helper.workspace.changes,
-  hildegard.helper.files;
+  hildi.llm, hildi.agent, hildi.approval,
+  hildi.workspace, hildi.workspace.changes,
+  hildi.files;
 
 {$ifdef unix}
 function c_symlink(ATarget, ALinkPath: PAnsiChar): cint; cdecl;

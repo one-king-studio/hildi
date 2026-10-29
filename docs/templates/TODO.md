@@ -14,8 +14,8 @@ real time as you work. Each implementation task starts with a failing test.
 ### Phase 1: Setup & Foundation
 
 - [ ] **Create branch**: `feature/[feature-name]/[component-name]`
-- [ ] **Add the test unit** to the `uses` clause of `tests/hildegard_helper_tests.pas`
-- [ ] **Define shared types** in `src/hildegard.helper.[component].pas` (interface section only)
+- [ ] **Add the test unit** to the `uses` clause of `tests/hildi_tests.pas`
+- [ ] **Define shared types** in `src/hildi.[component].pas` (interface section only)
 
 ### Phase 2: Core Implementation
 
@@ -23,7 +23,7 @@ For each public behaviour, follow the TDD loop
 (`docs/guidelines/spec-driven-development.md`, Stage 4).
 
 - [ ] **Test**: `<TestCase method>` in `tests/test_[component].pas` - fails (red)
-- [ ] **Implement**: minimum in `src/hildegard.helper.[component].pas` - passes (green)
+- [ ] **Implement**: minimum in `src/hildi.[component].pas` - passes (green)
 - [ ] **Refactor**: tidy while green
 - [ ] **Repeat** for the next behaviour
 
@@ -70,14 +70,14 @@ For each public behaviour, follow the TDD loop
 ### New Files
 
 ```
-src/hildegard.helper.[component].pas
+src/hildi.[component].pas
 tests/test_[component].pas
 ```
 
 ### Modified Files
 
 ```
-tests/hildegard_helper_tests.pas   (add the new test unit to uses)
+tests/hildi_tests.pas   (add the new test unit to uses)
 examples/...            (exercise the new behaviour)
 Makefile                (only if new sources need new targets)
 ```

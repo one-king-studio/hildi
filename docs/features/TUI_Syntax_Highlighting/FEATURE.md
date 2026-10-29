@@ -149,7 +149,7 @@ markdown view's span pipeline. Nothing more.
   (`TTextBlock`-shaped spans into the chat stream blocks); must not fork a
   second renderer or bypass the encoder.
 - Tokenizer is a **pure function** (text + rule table → spans) in
-  `hildegard.helper.syntax`, unit-tested without a surface in
+  `hildi.syntax`, unit-tested without a surface in
   `tests/test_syntax.pas`, per the testing conventions.
 - Rule tables are data, versioned with the unit; language names match the
   common fence tags (with aliases: `sh`/`bash`/`shell` → the shell table,

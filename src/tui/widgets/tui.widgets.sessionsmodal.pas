@@ -14,8 +14,8 @@ uses
   tui.base, tui.input,
   tui.surface, tui.widget,
   tui.theme, tui.grapheme,
-  hildegard.helper.fuzzy,
-  hildegard.helper.session;
+  hildi.fuzzy,
+  hildi.session;
 
 type
   { A row action; the host performs the store write and re-reads the rows. }

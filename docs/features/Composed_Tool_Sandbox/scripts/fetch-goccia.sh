@@ -19,7 +19,7 @@ GOCCIA_SHA256="1bd89459ce2b5061a148768be1f0471cf56f33d88649e18a717d5d037b617f4b"
 
 DEST="deps/goccia"
 TARBALL="GocciaScript-${GOCCIA_SHA}.tar.gz"
-# The fork, not upstream: our FPC-compatibility fixes live on its `hildegard`
+# The fork, not upstream: our FPC-compatibility fixes live on its `hildi`
 # branch as three commits (see docs/research/goccia-embedding-findings.md).
 # Keeping the fixes in the fork rather than in patch-goccia.sh means the sed
 # script can go away and `deps/goccia` is exactly a fork commit.

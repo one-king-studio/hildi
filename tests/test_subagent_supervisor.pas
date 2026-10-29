@@ -16,12 +16,12 @@ interface
 
 uses
   Classes, Contnrs, SysUtils, fpcunit, testregistry,
-  hildegard.helper.workspace, hildegard.helper.store, hildegard.helper.session,
-  hildegard.helper.session.protocol, hildegard.helper.session.client,
-  hildegard.helper.session.socket, hildegard.helper.session.runtime,
-  hildegard.helper.subagent, hildegard.helper.subagent.supervisor,
-  hildegard.helper.approval,
-  hildegard.helper.llm, llm_fakes;
+  hildi.workspace, hildi.store, hildi.session,
+  hildi.session.protocol, hildi.session.client,
+  hildi.session.socket, hildi.session.runtime,
+  hildi.subagent, hildi.subagent.supervisor,
+  hildi.approval,
+  hildi.llm, llm_fakes;
 
 type
   TRuntimeThread = class(TThread)

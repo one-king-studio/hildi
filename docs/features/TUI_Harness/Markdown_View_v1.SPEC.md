@@ -4,8 +4,8 @@
 
 ## Purpose
 
-`hildegard.helper.tui.markdownview` draws a `TMdBlockArray` (from
-`hildegard.helper.markdown`) as a vertical stack of styled text. It is the
+`hildi.tui.markdownview` draws a `TMdBlockArray` (from
+`hildi.markdown`) as a vertical stack of styled text. It is the
 render half of the markdown work: the parser produces the AST, this widget maps
 it to `TTextBlock`s and block chrome (bullets, quote bars, a boxed code block, a
 rule line).
@@ -56,11 +56,11 @@ delta and reintroduce the O(n) per-chunk cost the parser was built to avoid.
 ## Contracts & Interfaces
 
 ```pascal
-unit hildegard.helper.tui.markdownview;
+unit hildi.tui.markdownview;
 
 uses
-  hildegard.helper.markdown, hildegard.helper.tui.base,
-  hildegard.helper.tui.widget, hildegard.helper.tui.surface;
+  hildi.markdown, hildi.tui.base,
+  hildi.tui.widget, hildi.tui.surface;
 
 type
   TMarkdownView = class(TWidget)
@@ -92,12 +92,12 @@ The theme is the parser's `TMdTheme`; the view adds no colours of its own.
 
 ### Prior Art & Reuse
 
-- `hildegard.helper.markdown` - the parser and theme (this widget is its only
+- `hildi.markdown` - the parser and theme (this widget is its only
   consumer).
-- `hildegard.helper.tui.text.TTextBlock` - per-block wrapping and rendering; the
+- `hildi.tui.text.TTextBlock` - per-block wrapping and rendering; the
   view stacks text blocks rather than wrapping text itself.
-- `hildegard.helper.tui.surface.FillRect` - the code backdrop and the rule line.
-- `hildegard.helper.tui.widget.TWidget` - the measure/arrange/render protocol.
+- `hildi.tui.surface.FillRect` - the code backdrop and the rule line.
+- `hildi.tui.widget.TWidget` - the measure/arrange/render protocol.
 
 The gap: the per-block mapping (spans + chrome) and the vertical stack.
 

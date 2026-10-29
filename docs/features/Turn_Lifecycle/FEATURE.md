@@ -132,11 +132,11 @@ resume that replays a history ending mid-tool-call.
 
 ### Internal
 
-- `hildegard.helper.store` (`BeginTurn`, `FinishTurn`, a new "finalize running
+- `hildi.store` (`BeginTurn`, `FinishTurn`, a new "finalize running
   turns" query).
-- `hildegard.helper.session.runtime` (startup, client loss, shutdown).
-- `hildegard.helper.harness.turn` (`TApprovalGate` timeout).
-- `hildegard.helper.harness.session` (gate creation).
+- `hildi.session.runtime` (startup, client loss, shutdown).
+- `hildi.harness.turn` (`TApprovalGate` timeout).
+- `hildi.harness.session` (gate creation).
 
 ### External
 

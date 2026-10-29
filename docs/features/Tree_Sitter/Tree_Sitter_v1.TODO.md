@@ -39,7 +39,7 @@ shell ask extractor (the reason) and the highlight runner (the bonus). TDD-first
 - [ ] **Test**: the smoke is part of `make check` (a guard that the runtime
       links and parses).
 
-### Phase 1: The binding (`hildegard.helper.treesitter`)
+### Phase 1: The binding (`hildi.treesitter`)
 
 - [ ] **Test**: `tests/test_treesitter.pas` — parse a snippet; the root kind,
       a field-named child, and `Text` are as expected; `HasError` reflects
@@ -53,7 +53,7 @@ shell ask extractor (the reason) and the highlight runner (the bonus). TDD-first
       resolution, the `#match?`/`#eq?` predicates the bash query uses).
 - [ ] **Refactor**; `make check`; `make test-leak` (every handle freed).
 
-### Phase 2: The grammar registry (`hildegard.helper.treesitter.grammars`)
+### Phase 2: The grammar registry (`hildi.treesitter.grammars`)
 
 - [ ] **Test**: `GrammarFor('bash')`/`('sh')`/`('shell')` resolve to the same
       grammar; an unknown name returns False; the highlights text is present.
@@ -61,7 +61,7 @@ shell ask extractor (the reason) and the highlight runner (the bonus). TDD-first
       as a resource — a Pascal string loaded at build, or a `deps` file read at
       startup; decide here and record it).
 
-### Phase 3: The shell adapter (`hildegard.helper.command.ast`)
+### Phase 3: The shell adapter (`hildi.command.ast`)
 
 - [ ] **Test**: `ParseShellPlan('for f in *.pas; do echo $f; done')` → one
       segment, executable `echo`; no `for`/`do`/`done`.
@@ -80,7 +80,7 @@ shell ask extractor (the reason) and the highlight runner (the bonus). TDD-first
 - [ ] **Implement**: the fail-safe union and the raw-command fallback.
 - [ ] **Refactor**; `make check`.
 
-### Phase 4: Approval integration (`hildegard.helper.command.tool`)
+### Phase 4: Approval integration (`hildi.command.tool`)
 
 - [ ] **Test**: `BuildAsks` on the `for`-loop command emits the body's program(s)
       with refs `run_command:echo`; **no** keyword refs.
@@ -91,7 +91,7 @@ shell ask extractor (the reason) and the highlight runner (the bonus). TDD-first
       honoured on the next loop.
 - [ ] **Refactor**; `make check`.
 
-### Phase 5: Highlighting (`hildegard.helper.syntax`)
+### Phase 5: Highlighting (`hildi.syntax`)
 
 - [ ] **Test**: a `bash` block highlights strings/comments/keywords/functions
       via the grammar; an unvendored tag still renders via the rule-table
@@ -117,11 +117,11 @@ shell ask extractor (the reason) and the highlight runner (the bonus). TDD-first
 scripts/fetch-tree-sitter.sh            (NEW: runtime vendoring)
 scripts/fetch-tree-sitter-grammars.sh   (NEW: grammar vendoring)
 Makefile                                (libtree-sitter.a, link rules, smoke)
-src/hildegard.helper.treesitter.pas     (NEW: binding + wrappers)
-src/hildegard.helper.treesitter.grammars.pas (NEW: registry + queries)
-src/hildegard.helper.command.ast.pas    (NEW: shell ask extractor)
-src/hildegard.helper.command.tool.pas   (BuildAsks/Run use ParseShellPlan)
-src/hildegard.helper.syntax.pas         (tree-sitter path; tokenizer fallback)
+src/hildi.treesitter.pas     (NEW: binding + wrappers)
+src/hildi.treesitter.grammars.pas (NEW: registry + queries)
+src/hildi.command.ast.pas    (NEW: shell ask extractor)
+src/hildi.command.tool.pas   (BuildAsks/Run use ParseShellPlan)
+src/hildi.syntax.pas         (tree-sitter path; tokenizer fallback)
 tests/test_treesitter.pas               (NEW)
 tests/test_command_ast.pas              (NEW)
 tests/test_command_tool.pas             (extended)

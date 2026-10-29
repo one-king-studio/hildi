@@ -23,15 +23,15 @@ The hard part already exists. This spec designs only the gap.
 
 | Need | Already exists | Reuse |
 | --- | --- | --- |
-| A child agent session | `hildegard.helper.session.runtime` (`TSessionRuntime`) | Spawn one per child; it is an ordinary session |
-| Spawn / attach / drive a child | `hildegard.helper.session.client` (`TSessionClient`, connect-or-spawn, `srDrive`) | The supervisor is a client of each child |
-| Line framing | `hildegard.helper.session.socket` (`ExtractLine`/`ReadLineTimeout`/`SendAll`) | Not re-implemented |
-| Durable lineage | `hildegard.helper.store` (`sessions` table, migrations) | Additive migration v4 (v3 is MCP servers) |
-| History + ambient rows | `hildegard.helper.session.store` (`TSqliteConversationStore`) | New `mrAmbient` role + `AppendAmbient` |
-| Tool contract + reason gate | `hildegard.helper.agent` (`TToolRegistry`/`TToolSpec`, `ExtractToolReason`) | Register four tools |
-| Approvals + scopes | `hildegard.helper.approval` (+ `.store`) | Lineage = one shared session scope (see §7) |
-| Ambient message wrapper | hildegard main `src-backend/lib/main-agent/message-formatter.ts` (`formatCurrentMessage`, `formatSystemMessage`) | Port the pattern; wrap only at API-build time |
-| Turn boundary | `hildegard.helper.harness.turn` / `.worker` | `TTurnWorker` variant for an ambient turn |
+| A child agent session | `hildi.session.runtime` (`TSessionRuntime`) | Spawn one per child; it is an ordinary session |
+| Spawn / attach / drive a child | `hildi.session.client` (`TSessionClient`, connect-or-spawn, `srDrive`) | The supervisor is a client of each child |
+| Line framing | `hildi.session.socket` (`ExtractLine`/`ReadLineTimeout`/`SendAll`) | Not re-implemented |
+| Durable lineage | `hildi.store` (`sessions` table, migrations) | Additive migration v4 (v3 is MCP servers) |
+| History + ambient rows | `hildi.session.store` (`TSqliteConversationStore`) | New `mrAmbient` role + `AppendAmbient` |
+| Tool contract + reason gate | `hildi.agent` (`TToolRegistry`/`TToolSpec`, `ExtractToolReason`) | Register four tools |
+| Approvals + scopes | `hildi.approval` (+ `.store`) | Lineage = one shared session scope (see §7) |
+| Ambient message wrapper | hildi main `src-backend/lib/main-agent/message-formatter.ts` (`formatCurrentMessage`, `formatSystemMessage`) | Port the pattern; wrap only at API-build time |
+| Turn boundary | `hildi.harness.turn` / `.worker` | `TTurnWorker` variant for an ambient turn |
 
 **New code (no equivalent):** the lineage columns and queries; the four
 delegation tools; the runtime-side supervisor; the ambient record kind, its
@@ -107,7 +107,7 @@ function ChildrenOf(const AParentId: string;
 ### 2. Delegation identity and tools
 
 ```pascal
-unit hildegard.helper.subagent;
+unit hildi.subagent;
 
 const
   { Model-visible tool names. }
@@ -155,7 +155,7 @@ child **without** aborting it (fire-and-forget) and frees the slot.
 ### 3. `ISubagentService` (tools → supervisor)
 
 ```pascal
-unit hildegard.helper.subagent;
+unit hildi.subagent;
 
 type
   TSubagentSpawnResult = record
@@ -197,7 +197,7 @@ naming the task/label, and the reason from the arguments. Default decision is
 ### 4. Supervisor (runtime side)
 
 ```pascal
-unit hildegard.helper.subagent.supervisor;
+unit hildi.subagent.supervisor;
 
 type
   { A child event surfaced to the runtime loop, in arrival order. }
@@ -291,7 +291,7 @@ Children are terminated when the parent session ends.
 
 ### 5. Protocol additions
 
-Appended last to preserve stored ordinals (`hildegard.helper.session.protocol`).
+Appended last to preserve stored ordinals (`hildi.session.protocol`).
 
 ```pascal
 TSessionEventKind = ( ...existing..., ekAmbient, ekSubagent, ekSubagentAsk);
@@ -347,7 +347,7 @@ future async producer:
 ```
 
 `status` is one of `completed`, `failed`, `aborted`, `gone` (the ambient
-statuses are canonical constants in `hildegard.helper.ambient`).
+statuses are canonical constants in `hildi.ambient`).
 
 `IConversationStore` gains:
 
@@ -429,9 +429,9 @@ The child's **conversation** session id stays its own (the ledger is per-session
 
 | Knob | Default | Meaning |
 | --- | --- | --- |
-| `HILDEGARD_SUBAGENT_MAX` | 10 | Max live children per parent session |
-| `HILDEGARD_SUBAGENT_DEPTH` | 1 | Max depth (1 = children may not delegate) |
-| `HILDEGARD_SUBAGENT_AUTO_DENY_MS` | 60000 | Headless child ask auto-deny window |
+| `HILDI_SUBAGENT_MAX` | 10 | Max live children per parent session |
+| `HILDI_SUBAGENT_DEPTH` | 1 | Max depth (1 = children may not delegate) |
+| `HILDI_SUBAGENT_AUTO_DENY_MS` | 60000 | Headless child ask auto-deny window |
 
 ## Data Model and Migrations
 

@@ -167,10 +167,10 @@ an integration regression to sit undetected until someone happens to launch it.
 
 ### Internal
 
-`hildegard.helper.session.runtime` (the spawned program),
-`hildegard.helper.session.client` (the wire), `hildegard.helper.session.protocol`
-(the codec), `hildegard.helper.store` (ledger read-back),
-`hildegard.helper.harness.session` (approval defaults).
+`hildi.session.runtime` (the spawned program),
+`hildi.session.client` (the wire), `hildi.session.protocol`
+(the codec), `hildi.store` (ledger read-back),
+`hildi.harness.session` (approval defaults).
 
 ### External
 

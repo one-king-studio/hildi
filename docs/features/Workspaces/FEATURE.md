@@ -47,7 +47,7 @@ and to scope approvals per project.
 
 ### Functional Requirements
 
-- [ ] The active workspace is `--workspace DIR` (or `HILDEGARD_WORKSPACE`) when
+- [ ] The active workspace is `--workspace DIR` (or `HILDI_WORKSPACE`) when
       given, otherwise the process working directory.
 - [ ] The workspace path is canonicalised to an absolute path (resolving `.`,
       `..` and symlinks where possible) before use and persistence.
@@ -90,7 +90,7 @@ and to scope approvals per project.
 ### Technical
 
 - Must build with FPC 3.3.1, `{$mode delphi}`, and keep `make check` green.
-- Must reuse `hildegard.helper.store`; a migration adds the workspaces table.
+- Must reuse `hildi.store`; a migration adds the workspaces table.
 - Must not require the Sessions/Ledger feature to function.
 - Symlink resolution may be best-effort; a documented limitation is acceptable.
 
@@ -102,10 +102,10 @@ and to scope approvals per project.
 
 ### Internal
 
-- `hildegard.helper.store` - workspaces table and lookup by canonical path.
+- `hildi.store` - workspaces table and lookup by canonical path.
 - Tool Approvals - consumes the workspace identity and root.
 - Sessions/Ledger - sessions are bound to a workspace.
-- `hildegard.helper.process` - commands default their working directory here.
+- `hildi.process` - commands default their working directory here.
 
 ### External
 

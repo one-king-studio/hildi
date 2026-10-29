@@ -1,7 +1,7 @@
 # Spec Driven Development
 
 Spec Driven Development (SDD) is the structured approach to feature development
-used in hildegard-helper. It ensures requirements are defined before implementation
+used in hildi. It ensures requirements are defined before implementation
 begins, and it pairs naturally with the project's test-driven workflow: the
 specification is the source of truth, and the tests are how we prove we met it.
 
@@ -64,7 +64,7 @@ Define the "how": the design, contracts, and behaviour of each component.
 ### Content Requirements
 
 - Architecture and component boundaries
-- **Prior art and reuse** - which existing units (`src/hildegard.helper.*`), RTL/FCL
+- **Prior art and reuse** - which existing units (`src/hildi.*`), RTL/FCL
   facilities, native platform features, or `deps/` units already cover part of
   this. Design only the gap; see `ponytail.md`.
 - **Contracts and interfaces, expressed as Pascal type declarations** - records,

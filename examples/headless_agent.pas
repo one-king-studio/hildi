@@ -14,7 +14,7 @@ program headless_agent;
 uses
   {$ifdef unix}cthreads, cwstring,{$endif}   // cthreads first; cwstring for Unicode
   SysUtils,
-  hildegard.helper.session.runtime;
+  hildi.session.runtime;
 
 var
   Args: array of string;

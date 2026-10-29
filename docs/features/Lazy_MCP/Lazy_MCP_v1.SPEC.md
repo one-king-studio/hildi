@@ -3,9 +3,9 @@
 **Related Feature:** [FEATURE.md](FEATURE.md)
 
 **Depends on:** `Skills` (`TSkillRegistry`, `ISkillToolSource`, `TSkill`),
-`hildegard.helper.mcp.client` (`TMcpManager`, `TMcpClient`, `TMcpServerRuntime`,
-`McpToolName`, `McpRef`, `TMcpProvider`), `hildegard.helper.harness.session`
-(`Init`, the provider registration), `hildegard.helper.session.runtime`
+`hildi.mcp.client` (`TMcpManager`, `TMcpClient`, `TMcpServerRuntime`,
+`McpToolName`, `McpRef`, `TMcpProvider`), `hildi.harness.session`
+(`Init`, the provider registration), `hildi.session.runtime`
 (`Open` vs `Serve`).
 
 **Depended on by:** the `TUI_Startup` budget (a fast socket), the remote-MCP
@@ -32,7 +32,7 @@ loads on demand.
 | Per-server lifecycle, backoff, reconcile | `TMcpManager` (`Reconcile`, `CloseRuntime`, `OpenRuntime`, backoff) | `Reconcile` no longer *opens* disabled-by-default servers; opening becomes explicit (on load) |
 | Tool naming | `McpToolName` = `mcp_<server>_<tool>`; `McpRef` = `mcp:<server>:<tool>` | **ref separator** aligned to the other families (`:`); see Naming |
 | The provider seam | `TMcpProvider` (`IToolProvider`) | **replaced** by a per-server `ISkillToolSource` under the registry |
-| Manifest / load / decay | `hildegard.helper.skills` (`TSkillRegistry`, `ISkillToolSource`) | the registry is the new home; MCP is its first source |
+| Manifest / load / decay | `hildi.skills` (`TSkillRegistry`, `ISkillToolSource`) | the registry is the new home; MCP is its first source |
 | Startup ordering | `TSessionRuntime.Open` (builds session, then `Serve` binds) | `THarnessSession.Init` stops calling `FMcp.Open` |
 
 No new MCP machinery; the change is *where* the connect is triggered.
@@ -81,9 +81,9 @@ No new MCP machinery; the change is *where* the connect is triggered.
 ### A server as a skill source
 
 ```pascal
-unit hildegard.helper.mcp.client;   // additions
+unit hildi.mcp.client;   // additions
 
-uses hildegard.helper.skills;
+uses hildi.skills;
 
 type
   { One configured MCP server as a skill tool source. Owns its TMcpClient via

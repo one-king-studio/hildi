@@ -11,8 +11,8 @@ program mcp_session_auth_check;
 uses
   {$ifdef unix}cthreads, cwstring,{$endif}
   SysUtils,
-  hildegard.helper.harness.session, hildegard.helper.harness.view,
-  hildegard.helper.agent;
+  hildi.harness.session, hildi.harness.view,
+  hildi.agent;
 
 var
   Cfg: THarnessSessionConfig;

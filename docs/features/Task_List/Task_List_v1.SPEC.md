@@ -1,9 +1,9 @@
 # Component Specification: Task List v1
 
 **Related Feature:** [FEATURE.md](FEATURE.md)
-**Depends on:** `hildegard.helper.store` (SQLite + the v13/v14 schema),
-`hildegard.helper.approval` (reassign and delete only),
-`hildegard.helper.agent` (`IToolProvider` + the tail block).
+**Depends on:** `hildi.store` (SQLite + the v13/v14 schema),
+`hildi.approval` (reassign and delete only),
+`hildi.agent` (`IToolProvider` + the tail block).
 Optionally the [Workspace Board](../Message_Board/Message_Board_v1.SPEC.md), for
 `BlockedOn` naming a question.
 **Depended on by:** nothing (a leaf capability).
@@ -22,8 +22,8 @@ board entry is an append-only fact, and one table cannot hold both disciplines.
 
 | Need | Existing | Change |
 | --- | --- | --- |
-| Persistence + migrations | `hildegard.helper.store` | one additive migration (v14 or v15) |
-| The tail block | `hildegard.helper.wrap.FormatTail` | a `<tasks>` element |
+| Persistence + migrations | `hildi.store` | one additive migration (v14 or v15) |
+| The tail block | `hildi.wrap.FormatTail` | a `<tasks>` element |
 | Provider seam | `IToolProvider` | **reuse**: the task list is a provider |
 | Approval | `IApprovalService` | reuse for `reassign` and `delete` |
 | The CAS idiom | `changes.log.CheckWrite` | the same shape, applied to a status |
@@ -65,7 +65,7 @@ work queue.
 ### The record
 
 ```pascal
-unit hildegard.helper.tasks;
+unit hildi.tasks;
 
 type
   TTaskStatus = (tsOpen, tsClaimed, tsBlocked, tsDone, tsDropped);

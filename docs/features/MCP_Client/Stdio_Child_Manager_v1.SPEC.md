@@ -2,14 +2,14 @@
 
 **Related Feature:** [FEATURE.md](FEATURE.md)
 
-**Depends on:** `hildegard.helper.session.socket` (framing/`select` helpers).
+**Depends on:** `hildi.session.socket` (framing/`select` helpers).
 **Depended on by:** `Mcp_Client_v1.SPEC.md`.
 
 ## Purpose
 
 MCP's stdio transport is a **bidirectional** conversation with a child process:
 we write framed requests to its stdin and read framed responses from its stdout.
-The existing runner (`hildegard.helper.process`) cannot serve this — it is
+The existing runner (`hildi.process`) cannot serve this — it is
 one-shot, stdout-only, and never writes to the child's stdin — and the headless
 runtime reaches its child over a detached socket, not pipes. So this is the one
 genuinely new low-level piece of v1: a small, synchronous, single-threaded
@@ -48,7 +48,7 @@ and tear it down leak-clean.
 ### Public API
 
 ```pascal
-unit hildegard.helper.stdio.child;
+unit hildi.stdio.child;
 
 uses
   SysUtils;
@@ -127,7 +127,7 @@ const
 ### Prior Art & Reuse
 
 - **Reuse (rung 2):** `ExtractLine` (pure line splitter), `WaitReadable`
-  (single-fd `select`), and `NowMs` from `hildegard.helper.session.socket`.
+  (single-fd `select`), and `NowMs` from `hildi.session.socket`.
   `WaitReadable` works on a pipe fd exactly as on a socket fd.
 - **Do not reuse:** `ReadLineTimeout`/`SendAll`/`Recv` from that unit — they
   call `fpRecv`/`fpSend`, which fail with `ENOTSOCK` on a pipe. This component
@@ -135,9 +135,9 @@ const
 - **Reuse (rung 3):** `TProcess` (`Process`) with `poUsePipes`, and the
   `TProcess.Input`/`Output`/`Stderr` handles for the three fds.
 - **Promote, don't duplicate:** `NormalizeExit` is currently file-local in
-  `hildegard.helper.process`. v1 **exports it in place** (move its signature to
+  `hildi.process`. v1 **exports it in place** (move its signature to
   that unit's interface section); this manager adds
-  `uses hildegard.helper.process` and reuses it rather than copying the mapping.
+  `uses hildi.process` and reuses it rather than copying the mapping.
   (Decision A: smallest diff, no new unit for one function.)
 - **Genuine gap:** bidirectional pipe I/O with bounded reads and a bounded
   close-then-kill. Nothing in `src/` provides it.
@@ -146,8 +146,8 @@ const
 
 - **Responsibilities:** child spawn, pipe ownership, framed line I/O, stderr
   capture, bounded teardown, exit-code normalization.
-- **Dependencies:** `hildegard.helper.session.socket` (helpers),
-  `hildegard.helper.process` (`NormalizeExit`), `Process`, `BaseUnix`.
+- **Dependencies:** `hildi.session.socket` (helpers),
+  `hildi.process` (`NormalizeExit`), `Process`, `BaseUnix`.
 - **Side effects:** creates a process; owns three fds; reaps the child.
 
 ### Data Flow

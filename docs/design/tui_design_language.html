@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TUI Design Language — hildegard-helper</title>
+<title>TUI Design Language — hildi</title>
 <style>
   :root{
     --bg:#1c1c1c; --panel:#262626; --panel2:#2e2e2e; --border:#444;
@@ -82,7 +82,7 @@
   .mock .acc{color:#5fafff;font-weight:bold}
   .mock .sel{background:#5fafff;color:#101010}
   .mock .rev{background:#e4e4e4;color:#101010}
-  /* Markdown rendering (hildegard.helper.markdown DefaultMdTheme). Body is a
+  /* Markdown rendering (hildi.markdown DefaultMdTheme). Body is a
      step dimmer than headings; bold and italic each carry a colour so emphasis
      survives terminals that ignore italic or map bold to the bright colour.
      Bold+italic takes the cool colour in bold, so it still reads if italic is
@@ -119,7 +119,7 @@
 <body>
 <header>
   <h1>TUI Design Language <span class="tag">v0 · first pass</span></h1>
-  <p>Glyphs, motion, colour, and layout for the hildegard-helper terminal UI. Self-contained; no external assets.</p>
+  <p>Glyphs, motion, colour, and layout for the hildi terminal UI. Self-contained; no external assets.</p>
   <p class="legend">Diagrams render in one monospace font with ligatures disabled and whitespace preserved. Box-drawing alignment needs a font that includes U+2500–U+257F (Menlo, DejaVu Sans Mono, JetBrains Mono, Cascadia Mono all do).</p>
 </header>
 
@@ -653,7 +653,7 @@ else:
       <p class="legend">The divider is dim (<code>Muted</code>), one row, stats right-aligned, one trailing <code>─</code>. A failed or cancelled loop gets none.</p>
     </div>
     <div class="card"><h4>Status bar</h4>
-      <pre class="mock"> <span class="m">~/code/hildegard-helper</span>   <span class="m">12.3M in · 127.3k out · 87% cached · 2h15m · 202 req</span></pre>
+      <pre class="mock"> <span class="m">~/code/hildi</span>   <span class="m">12.3M in · 127.3k out · 87% cached · 2h15m · 202 req</span></pre>
       <p class="legend">The workspace on the left; the session's consumption on the right (billed input, output, token-weighted cache hit, wall time, request count). The context lives on the <a href="#sessionheader">header</a>.</p>
     </div>
   </div>
@@ -739,7 +739,7 @@ context  final context [shades] pct%</pre>
 </main>
 
 <footer>
-  hildegard-helper · docs/design/TUI_Design_Language.md · this file is the visual companion (v0, first pass).
+  hildi · docs/design/TUI_Design_Language.md · this file is the visual companion (v0, first pass).
 </footer>
 
 <script>
@@ -871,13 +871,13 @@ const MOCK = (function(){
 (function appShellMock(){
   const H='─', L=50, R=22, TOT=L+R+1;
   const out=[];
-  out.push('┌' + MOCK.fill('─ hildegard-helper ', L, H) + '┬' +
+  out.push('┌' + MOCK.fill('─ hildi ', L, H) + '┬' +
                    MOCK.fill('─ Files ', R, H) + '┐');
   const left=[
     [['> explain the pool','acc']],
     [['The pool runs up to N commands at once…','m']],
     [['[tool] file_read  (look at the pool)','t']],
-    [['  src/hildegard.helper.pool.pas','m']],
+    [['  src/hildi.pool.pas','m']],
     [['[result] file_read: ok','m']],
     []
   ];

@@ -1,4 +1,4 @@
-# hildegard-helper — developer Makefile
+# hildi — developer Makefile
 #
 #   make            build the example (debug)
 #   make test       build & run the fpcunit suite
@@ -43,7 +43,7 @@ MBEDTLS_STAMP     := $(LIBSTATIC)/.mbedtls-built
 MBEDTLS_AR        := $(LIBSTATIC)/libmbedtls.a
 MBEDTLS_X509_AR   := $(LIBSTATIC)/libmbedx509.a
 MBEDTLS_CRYPTO_AR := $(LIBSTATIC)/libmbedcrypto.a
-TLS_SHIM_OBJ      := $(LIBSTATIC)/hildegard_tls_shim.o
+TLS_SHIM_OBJ      := $(LIBSTATIC)/hildi_tls_shim.o
 CACERT_PEM        := deps/cacert/cacert.pem
 CACERT_GEN_C      := $(BUILD)/gen/cacert_embedded.c
 CACERT_OBJ        := $(LIBSTATIC)/cacert_embedded.o
@@ -99,7 +99,7 @@ TEST_SRCS := $(wildcard $(TESTS)/*.pas)
         store-demo agent-cli release-agent-cli tui-demo widgets-demo layout-demo \
         headless-agent tui-agent bench perf agents agent-% mcp-smoke smoke smoke-list async-standalone async-bench async-freeze async-examples
 
-all: $(BIN)/hildegard-helper-demo
+all: $(BIN)/hildi-demo
 
 # Build the vendored SQLite static archive; fetches the amalgamation if missing.
 libsqlite: $(SQLITE_AR)
@@ -122,9 +122,9 @@ $(MBEDTLS_STAMP):
 	cp $(MBEDTLS_DIR)/library/libmbedtls.a $(MBEDTLS_DIR)/library/libmbedx509.a $(MBEDTLS_DIR)/library/libmbedcrypto.a $(LIBSTATIC)/
 	@touch $@
 
-$(TLS_SHIM_OBJ): $(SRC)/hildegard_tls_shim.c $(SRC)/hildegard_tls_shim.h
+$(TLS_SHIM_OBJ): $(SRC)/hildi_tls_shim.c $(SRC)/hildi_tls_shim.h
 	@mkdir -p $(LIBSTATIC)
-	$(CC) $(TLS_CCFLAGS) -c -o $@ $(SRC)/hildegard_tls_shim.c
+	$(CC) $(TLS_CCFLAGS) -c -o $@ $(SRC)/hildi_tls_shim.c
 
 $(CACERT_PEM):
 	@scripts/fetch-cacert.sh
@@ -132,7 +132,7 @@ $(CACERT_PEM):
 $(CACERT_GEN_C): $(CACERT_PEM) scripts/gen-cacert-embed.sh
 	@scripts/gen-cacert-embed.sh
 
-$(CACERT_OBJ): $(CACERT_GEN_C) $(SRC)/hildegard_tls_shim.h
+$(CACERT_OBJ): $(CACERT_GEN_C) $(SRC)/hildi_tls_shim.h
 	@mkdir -p $(LIBSTATIC)
 	$(CC) $(TLS_CCFLAGS) -c -o $@ $(CACERT_GEN_C)
 
@@ -141,15 +141,15 @@ $(TLS_TEST_SERVER_OBJ): $(TESTS)/tls_test_server.c $(TESTS)/tls_test_server.h
 	@mkdir -p $(LIBSTATIC)
 	$(CC) $(TLS_CCFLAGS) -I$(TESTS) -c -o $@ $(TESTS)/tls_test_server.c
 
-store-demo: libsqlite $(BIN)/hildegard-helper-store-demo
+store-demo: libsqlite $(BIN)/hildi-store-demo
 
-$(BIN)/hildegard-helper-store-demo: $(EXAMPLES)/store_demo.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR)
+$(BIN)/hildi-store-demo: $(EXAMPLES)/store_demo.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
-agent-cli: libsqlite libmbedtls $(BIN)/hildegard-helper-agent-cli
+agent-cli: libsqlite libmbedtls $(BIN)/hildi-agent-cli
 
-$(BIN)/hildegard-helper-agent-cli: $(EXAMPLES)/agent_cli.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
+$(BIN)/hildi-agent-cli: $(EXAMPLES)/agent_cli.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
@@ -164,50 +164,50 @@ $(BIN)/mcp-smoke: $(EXAMPLES)/mcp_smoke.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOW
 	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Optimized, self-contained production binary (static SQLite, no runtime libs).
-release-agent-cli: libsqlite libmbedtls $(BIN)/hildegard-helper-agent-cli-release
+release-agent-cli: libsqlite libmbedtls $(BIN)/hildi-agent-cli-release
 
-$(BIN)/hildegard-helper-agent-cli-release: $(EXAMPLES)/agent_cli.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
+$(BIN)/hildi-agent-cli-release: $(EXAMPLES)/agent_cli.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(BIN) $(RELUNITS)
 	$(FPC) $(RELEASE) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(RELUNITS) -FE$(BIN) -o$@ $<
 
-$(BIN)/hildegard-helper-demo: $(EXAMPLES)/demo_harness.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
+$(BIN)/hildi-demo: $(EXAMPLES)/demo_harness.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Interactive TUI demonstration: build, then run it in the terminal.
-tui-demo: $(BIN)/hildegard-helper-tui-demo
-	$(BIN)/hildegard-helper-tui-demo
+tui-demo: $(BIN)/hildi-demo
+	$(BIN)/hildi-demo
 
-$(BIN)/hildegard-helper-tui-demo: $(EXAMPLES)/tui_demo.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
+$(BIN)/hildi-demo: $(EXAMPLES)/tui_demo.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Widget-kit demo: a list, a preview panel, and focusable buttons. Builds and
 # runs; Tab/Shift-Tab or click to focus, Enter/Space to activate, q to quit.
-widgets-demo: $(BIN)/hildegard-helper-tui-widgets-demo
-	$(BIN)/hildegard-helper-tui-widgets-demo
+widgets-demo: $(BIN)/hildi-widgets-demo
+	$(BIN)/hildi-widgets-demo
 
-$(BIN)/hildegard-helper-tui-widgets-demo: $(EXAMPLES)/tui_widgets_demo.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
+$(BIN)/hildi-widgets-demo: $(EXAMPLES)/tui_widgets_demo.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Mock of the Board Dashboard: three zones over static data, so the operator can
 # judge the layout before the feature is specified. Reads no store, writes none.
 # See docs/features/Board_Dashboard/FEATURE.md.
-dashboard-mock: $(BIN)/hildegard-helper-dashboard-mock
-	$(BIN)/hildegard-helper-dashboard-mock
+dashboard-mock: $(BIN)/hildi-dash-mock
+	$(BIN)/hildi-dash-mock
 
-$(BIN)/hildegard-helper-dashboard-mock: $(EXAMPLES)/dashboard_mock.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
+$(BIN)/hildi-dash-mock: $(EXAMPLES)/dashboard_mock.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # The real dashboard: opens this workspace's store and draws it. A viewer with
 # one write deferred; it links no agent-loop unit, the same closure discipline
 # the TUI client is held to. See docs/features/Board_Dashboard/FEATURE.md.
-dashboard: libsqlite libmbedtls $(BIN)/hildegard-helper-dashboard
-	$(BIN)/hildegard-helper-dashboard
+dashboard: libsqlite libmbedtls $(BIN)/hildi-dash
+	$(BIN)/hildi-dash
 
-$(BIN)/hildegard-helper-dashboard: $(EXAMPLES)/dashboard.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP)
+$(BIN)/hildi-dash: $(EXAMPLES)/dashboard.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
@@ -215,45 +215,45 @@ $(BIN)/hildegard-helper-dashboard: $(EXAMPLES)/dashboard.pas $(LIB_SRCS) $(TUILI
 # chat column). The chat column has an optional side panel and a persistent
 # bottom input panel. The split appears only when the terminal is wider than 180
 # columns; Ctrl-B toggles the side panel, Ctrl-C quits.
-layout-demo: $(BIN)/hildegard-helper-tui-layout-demo
-	$(BIN)/hildegard-helper-tui-layout-demo
+layout-demo: $(BIN)/hildi-layout-demo
+	$(BIN)/hildi-layout-demo
 
-$(BIN)/hildegard-helper-tui-layout-demo: $(EXAMPLES)/tui_layout_demo.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
+$(BIN)/hildi-layout-demo: $(EXAMPLES)/tui_layout_demo.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Headless agent: hosts a session's runtime; spawned detached by the TUI or the
-# CLI. No terminal. A client finds it as a sibling (or via HILDEGARD_RUNTIME_BIN).
-headless-agent: libsqlite libmbedtls $(BIN)/hildegard-helper-agent
+# CLI. No terminal. A client finds it as a sibling (or via HILDI_RUNTIME_BIN).
+headless-agent: libsqlite libmbedtls $(BIN)/hildi-agent
 
-$(BIN)/hildegard-helper-agent: $(EXAMPLES)/headless_agent.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
+$(BIN)/hildi-agent: $(EXAMPLES)/headless_agent.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Full-screen agent harness (conversation + approvals + sessions). Builds and
 # runs; Ctrl-C quits. Drives the headless agent. A pure client: no engine.
-tui-agent: headless-agent $(BIN)/hildegard-helper-tui
-	$(BIN)/hildegard-helper-tui $(ARGS)
+tui-agent: headless-agent $(BIN)/hildi
+	$(BIN)/hildi $(ARGS)
 
-$(BIN)/hildegard-helper-tui: $(EXAMPLES)/tui_agent.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
+$(BIN)/hildi: $(EXAMPLES)/tui_agent.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	@# The TUI is a pure client: no agent, loop, tool or runtime unit links here.
 	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Printable wall-clock benchmark. `make bench ARGS=--real` measures the real
 # terminal; `make perf` asserts the budgets and is not part of `make check`.
-bench: $(BIN)/hildegard-helper-tui-bench
-	$(BIN)/hildegard-helper-tui-bench $(ARGS)
+bench: $(BIN)/hildi-bench
+	$(BIN)/hildi-bench $(ARGS)
 
-perf: $(BIN)/hildegard-helper-tui-bench
-	$(BIN)/hildegard-helper-tui-bench --assert
+perf: $(BIN)/hildi-bench
+	$(BIN)/hildi-bench --assert
 
-$(BIN)/hildegard-helper-tui-bench: $(EXAMPLES)/tui_bench.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
+$(BIN)/hildi-bench: $(EXAMPLES)/tui_bench.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
-test: libsqlite libmbedtls $(BIN)/hildegard-helper-tests
-	$(BIN)/hildegard-helper-tests $(TESTARGS)
+test: libsqlite libmbedtls $(BIN)/hildi-tests
+	$(BIN)/hildi-tests $(TESTARGS)
 
 # The isolation gate: build a program that uses ONLY the async library, with no
 # harness unit on the path. If the library ever depends on the harness, this
@@ -341,27 +341,27 @@ async-examples: $(ASYNC_SRCS)
 	$(FPC) $(DEBUG) -Fu$(SRC)/async -FU$(DBGUNITS) -FE$(BIN) -o$(BIN)/async-examples $(EXAMPLES)/async_examples.pas
 	$(BIN)/async-examples
 
-$(BIN)/hildegard-helper-tests: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(ASYNC_SRCS) $(SHELL_SRCS) $(CHANGES_SRCS) $(MARKDOWN_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
+$(BIN)/hildi-tests: $(TESTS)/hildi_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(ASYNC_SRCS) $(SHELL_SRCS) $(CHANGES_SRCS) $(MARKDOWN_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
-test-leak: libsqlite libmbedtls $(BIN)/hildegard-helper-tests-leak
-	HEAPTRC=$(HEAPTRC) $(BIN)/hildegard-helper-tests-leak $(TESTARGS)
+test-leak: libsqlite libmbedtls $(BIN)/hildi-tests-leak
+	HEAPTRC=$(HEAPTRC) $(BIN)/hildi-tests-leak $(TESTARGS)
 
 # The leak gate, one process per suite, in parallel. Same binary and same HEAPTRC
 # setting; only the process shape differs. Worth having because the leak run is
 # the second-longest part of `make check` (~103 s of a ~275 s gate) and it was
 # the last piece still paying the single-process cost.
-test-leak-parallel: libsqlite libmbedtls $(BIN)/hildegard-helper-tests-leak \
-    $(BIN)/hildegard-helper-agent
-	HILDEGARD_TEST_BIN=$(BIN)/hildegard-helper-tests-leak HEAPTRC=$(HEAPTRC) \
+test-leak-parallel: libsqlite libmbedtls $(BIN)/hildi-tests-leak \
+    $(BIN)/hildi-agent
+	HILDI_TEST_BIN=$(BIN)/hildi-tests-leak HEAPTRC=$(HEAPTRC) \
 	    scripts/test-parallel.sh $(SUITE)
 
 # Auto-rerun TARGET (default: test) whenever sources change.
 watch:
 	@scripts/watch.sh $(TARGET)
 
-$(BIN)/hildegard-helper-tests-leak: $(TESTS)/hildegard_helper_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(ASYNC_SRCS) $(SHELL_SRCS) $(CHANGES_SRCS) $(MARKDOWN_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
+$(BIN)/hildi-tests-leak: $(TESTS)/hildi_tests.pas $(TEST_SRCS) $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(ASYNC_SRCS) $(SHELL_SRCS) $(CHANGES_SRCS) $(MARKDOWN_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
 	@mkdir -p $(BIN) $(LEAKUNITS)
 	$(FPC) $(LEAKFLAGS) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -Fu$(TESTS) -FU$(LEAKUNITS) -FE$(BIN) -o$@ $<
 
@@ -369,13 +369,13 @@ $(BIN)/hildegard-helper-tests-leak: $(TESTS)/hildegard_helper_tests.pas $(TEST_S
 # loopback fake provider. Hermetic (loopback only, ephemeral port, temp store);
 # safe in `make check`, but kept separate because it forks a process. Needs the
 # runtime binary, so it depends on `headless-agent`. See docs/features/Live_Smoke/.
-smoke: libsqlite libmbedtls headless-agent $(BIN)/hildegard-smoke
-	HILDEGARD_RUNTIME_BIN=$(BIN)/hildegard-helper-agent $(BIN)/hildegard-smoke $(if $(SCENARIO),--scenario $(SCENARIO),)
+smoke: libsqlite libmbedtls headless-agent $(BIN)/hildi-smoke
+	HILDI_RUNTIME_BIN=$(BIN)/hildi-agent $(BIN)/hildi-smoke $(if $(SCENARIO),--scenario $(SCENARIO),)
 
-smoke-list: libsqlite libmbedtls $(BIN)/hildegard-smoke
-	$(BIN)/hildegard-smoke --list
+smoke-list: libsqlite libmbedtls $(BIN)/hildi-smoke
+	$(BIN)/hildi-smoke --list
 
-$(BIN)/hildegard-smoke: $(EXAMPLES)/smoke.pas $(TESTS)/smoke_runner.pas $(TESTS)/smoke_provider.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ)
+$(BIN)/hildi-smoke: $(EXAMPLES)/smoke.pas $(TESTS)/smoke_runner.pas $(TESTS)/smoke_provider.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
@@ -392,13 +392,13 @@ check: test-parallel test-leak-parallel shell-standalone markdown-standalone
 # intra-process state pollution, and they pass when a suite gets its own process.
 # Not a replacement for `check`: the leak gate needs one process per suite too
 # before it can be split. See scripts/test-parallel.sh.
-test-parallel: libsqlite libmbedtls $(BIN)/hildegard-helper-tests \
-    $(BIN)/hildegard-helper-agent
+test-parallel: libsqlite libmbedtls $(BIN)/hildi-tests \
+    $(BIN)/hildi-agent
 	scripts/test-parallel.sh $(SUITE)
 
-release: $(BIN)/hildegard-helper-demo-release
+release: $(BIN)/hildi-demo-release
 
-$(BIN)/hildegard-helper-demo-release: $(EXAMPLES)/demo_harness.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
+$(BIN)/hildi-demo-release: $(EXAMPLES)/demo_harness.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
 	@mkdir -p $(BIN) $(RELUNITS)
 	$(FPC) $(RELEASE) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(RELUNITS) -FE$(BIN) -o$@ $<
 
@@ -445,7 +445,7 @@ agent-%:
 	$(MAKE) -C $(WORKTREES)/$(ACTIVE) $*
 
 help:
-	@echo "hildegard-helper targets:"
+	@echo "hildi targets:"
 	@echo "  make                          build the example (debug)"
 	@echo "  make test                     build & run the fpcunit suite"
 	@echo "  make test SUITE=<name>        run one suite or test method"

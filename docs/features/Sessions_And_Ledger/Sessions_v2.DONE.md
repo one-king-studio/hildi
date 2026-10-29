@@ -43,7 +43,7 @@ the TUI restore move together.
 - [x] **Test**: `TestNewSessionIdIs32LowercaseHex`, `TestNewSessionIdIsUnique`
 - [x] **Implement**: `TMessageRole`, `TTurnStatus`, `TMessageRecord`,
       `TRequestRecord`, `TTurnRecord`, and the updated `TSessionSummary` in
-      `src/hildegard.helper.session.pas`; keep `NewSessionId`
+      `src/hildi.session.pas`; keep `NewSessionId`
 
 ### Phase 4: Adapter and loop seam
 
@@ -79,7 +79,7 @@ the TUI restore move together.
       `examples/store_demo.pas` (new store operations)
 - [x] **Update**: the SPEC where it diverged (below); this plan is now
       `Sessions_v2.DONE.md`; `docs/features/FEATURES.md`
-- [x] **Update**: `hildegard.helper.sqlite` (add `sqlite3_last_insert_rowid`)
+- [x] **Update**: `hildi.sqlite` (add `sqlite3_last_insert_rowid`)
 
 ### Phase 7: Validation
 
@@ -96,14 +96,14 @@ the TUI restore move together.
 ### Modified Files
 
 ```
-src/hildegard.helper.llm.pas          TTokenUsage, usage parsing, timings, Model
-src/hildegard.helper.sqlite.pas       sqlite3_last_insert_rowid
-src/hildegard.helper.session.pas      the record model
-src/hildegard.helper.store.pas        schema + operations, guard
-src/hildegard.helper.session.store.pas adapter + seam
-src/hildegard.helper.agent.pas        seam + outcomes + loop bracketing
-src/hildegard.helper.harness.session.pas  rich History
-src/hildegard.helper.harness.app.pas  RenderHistory over blocks
+src/hildi.llm.pas          TTokenUsage, usage parsing, timings, Model
+src/hildi.sqlite.pas       sqlite3_last_insert_rowid
+src/hildi.session.pas      the record model
+src/hildi.store.pas        schema + operations, guard
+src/hildi.session.store.pas adapter + seam
+src/hildi.agent.pas        seam + outcomes + loop bracketing
+src/hildi.harness.session.pas  rich History
+src/hildi.harness.app.pas  RenderHistory over blocks
 examples/agent_cli.pas                listing field
 examples/store_demo.pas               new operations
 tests/test_llm.pas                    usage tests

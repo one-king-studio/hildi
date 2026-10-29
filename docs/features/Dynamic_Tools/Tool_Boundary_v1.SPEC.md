@@ -2,7 +2,7 @@
 
 **Related Feature:** [FEATURE.md](FEATURE.md)
 
-**Depends on:** `hildegard.helper.agent` (`TAgentLoop`, `TToolRegistry`).
+**Depends on:** `hildi.agent` (`TAgentLoop`, `TToolRegistry`).
 **Depended on by:** `Mcp_Lifecycle_v1.SPEC.md` (reconcile rides the hook).
 
 ## Purpose
@@ -38,7 +38,7 @@ the registry and a way to remove a tool.
 ## Contracts & Interfaces
 
 ```pascal
-unit hildegard.helper.agent;   // additions only
+unit hildi.agent;   // additions only
 
 type
   { Invoked once at the start of a turn, on the loop's thread, before the first

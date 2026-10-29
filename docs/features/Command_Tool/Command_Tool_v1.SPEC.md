@@ -10,7 +10,7 @@
 
 ## Purpose
 
-`hildegard.helper.command.tool` turns the pure decisions of
+`hildi.command.tool` turns the pure decisions of
 [`Command_Policy_v1.SPEC.md`](Command_Policy_v1.SPEC.md) into an agent tool. It
 advertises `run_command`, parses the model's arguments, loads the policy,
 obtains operator approval when required, executes the command through the
@@ -73,12 +73,12 @@ The profile is a value, so a future Windows profile is additive.
 ### Public API
 
 ```pascal
-unit hildegard.helper.command.tool;
+unit hildi.command.tool;
 
 interface
 
 uses
-  hildegard.helper.agent, hildegard.helper.command.policy;
+  hildi.agent, hildi.command.policy;
 
 type
   { Shell description. v1 ships DefaultShellProfile (POSIX). }
@@ -123,7 +123,7 @@ type
   end;
 
   { TCommandDecision, TCommandPlan, and TPolicyDecision come from
-    hildegard.helper.command.policy. }
+    hildi.command.policy. }
 
   TCommandAuditEntry = record
     Id: string;
@@ -210,7 +210,7 @@ const
   SettingPolicyApproved = 'command.policy.approved';
 ```
 
-### Required change to `hildegard.helper.process`
+### Required change to `hildi.process`
 
 `TCommandRunner` currently hard-codes `/bin/bash` and `-c`. Add two constructor
 parameters (defaulted, so existing callers are unchanged):
@@ -274,12 +274,12 @@ tool itself is single-threaded on the loop's thread.
 
 ### Prior Art & Reuse
 
-- `hildegard.helper.process` (`TCommandRunner`) - execution, streaming, timeout,
+- `hildi.process` (`TCommandRunner`) - execution, streaming, timeout,
   cancellation. Only the shell/switch parameterisation is added.
-- `hildegard.helper.command.policy` - parsing and classification (this feature).
-- `hildegard.helper.agent` (`TToolRegistry`, `TToolHandler`, `TToolSpec`) - tool
+- `hildi.command.policy` - parsing and classification (this feature).
+- `hildi.agent` (`TToolRegistry`, `TToolHandler`, `TToolSpec`) - tool
   contract and dispatch.
-- `hildegard.helper.store` (`GetSetting`/`SetSetting`/`EnqueueRequest`/
+- `hildi.store` (`GetSetting`/`SetSetting`/`EnqueueRequest`/
   `FinishRequest`) - policy persistence and audit. The existing requests table is
   the audit log; no migration is added.
 - `fpjson`/`jsonparser` - argument and settings encoding.
@@ -385,7 +385,7 @@ here.
 
 ### Integration Tests
 
-- [ ] `TestProcessRunnerUsesProvidedShell` (in `test_hildegard_helper.pas`):
+- [ ] `TestProcessRunnerUsesProvidedShell` (in `test_hildi.pas`):
       a custom switch proves the shell parameter is honoured.
 - [ ] `TestStoreCommandPolicySourceRoundTrip` (in `tests/test_command_tool.pas`,
       `{ $IFDEF }`-gated or using the existing store test fixture): sets policy

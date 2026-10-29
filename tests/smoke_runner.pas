@@ -8,7 +8,7 @@ unit smoke_runner;
   --workspace, --store, --approval-root and --idle-ms, but NOT --endpoint and NOT
   --model, and ResolveLLMConfig reads the model and key from the environment but
   never reads an endpoint variable (although the CLI's help text advertises
-  HILDEGARD_LLM_ENDPOINT). So a spawned runtime cannot be aimed at a local
+  HILDI_LLM_ENDPOINT). So a spawned runtime cannot be aimed at a local
   provider by any supported route today. Spawning explicitly is also the stronger
   test: it pins the argv the product documents. }
 
@@ -18,11 +18,11 @@ interface
 
 uses
   Classes, SysUtils, Process, SyncObjs, fpjson,
-  hildegard.helper.llm, hildegard.helper.session.protocol,
-  hildegard.helper.session.client,
-  hildegard.helper.session.socket, hildegard.helper.approval,
-  hildegard.helper.store, hildegard.helper.session.store,
-  hildegard.helper.workspace,
+  hildi.llm, hildi.session.protocol,
+  hildi.session.client,
+  hildi.session.socket, hildi.approval,
+  hildi.store, hildi.session.store,
+  hildi.workspace,
   smoke_provider;
 
 type
@@ -308,7 +308,7 @@ var
   Base: string;
   N: Integer;
 begin
-  Base := IncludeTrailingPathDelimiter(GetTempDir) + 'hildegard-smoke-' +
+  Base := IncludeTrailingPathDelimiter(GetTempDir) + 'hildi-smoke-' +
     IntToStr(GetProcessID) + '-';
   N := 0;
   repeat
@@ -960,10 +960,10 @@ begin
     { The runtime binary: an explicit override first, then the environment, then
       a sibling of this executable (the TUI's own discovery rule). }
     Host.RuntimeBinary := ResolveRuntimeBinary(
-      GetEnvironmentVariable('HILDEGARD_RUNTIME_BIN'), ParamStr(0));
+      GetEnvironmentVariable('HILDI_RUNTIME_BIN'), ParamStr(0));
     if Host.RuntimeBinary = '' then
       Exit(Fail('spawn', 'no runtime binary; run make headless-agent or set '
-        + 'HILDEGARD_RUNTIME_BIN'));
+        + 'HILDI_RUNTIME_BIN'));
     if not Host.Start(Err) then
       Exit(Fail('spawn', Err));
     if AName = 'text' then

@@ -33,7 +33,7 @@ still does.
 
 ## Contracts & Interfaces
 
-### `hildegard.helper.tui.clock` — the registry
+### `hildi.tui.clock` — the registry
 
 The clock unit already owns `MonotonicMs` and `DefaultTickMs`; it gains the
 registry. A single instance serves the process (the TUI is one app per process,

@@ -8,7 +8,7 @@ unit test_shell_effects;
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, hildegard.helper.shell.effects;
+  Classes, SysUtils, fpcunit, testregistry, hildi.shell.effects;
 
 type
   TShellEffectsTest = class(TTestCase)

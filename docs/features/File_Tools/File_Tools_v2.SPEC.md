@@ -27,7 +27,7 @@ prerequisite for the sandbox being useful.
 | --- | --- | --- |
 | Workspace confinement | `TWorkspace.Contains`/`Resolve`, `TFileTool.ResolveChecked` | reuse; extend with the physical check (Path Scoping) |
 | Approval gate | `TFileTool.Approve` + `IApprovalService` | reuse; pass the operation's path (Path Scoping) |
-| Glob matching | `hildegard.helper.files` (`**`, `*`, `?`) | reuse for `file_search_replace` |
+| Glob matching | `hildi.files` (`**`, `*`, `?`) | reuse for `file_search_replace` |
 | JSON | `fpjson`/`jsonparser` (in-tree) | reuse for `json_read`/`json_edit` |
 | Unified-diff apply | none | **new** (a small parser; `patch` is not assumed installed) |
 | YAML | none (replymeta has a *tolerant frontmatter* scanner, not a parser) | **new**, minimal subset |
@@ -96,7 +96,7 @@ prerequisite for the sandbox being useful.
 > Pascal type declarations; bodies are the implementer's.
 
 ```pascal
-unit hildegard.helper.files;
+unit hildi.files;
 
 type
   { The v2 handlers, added to TFileTool. Each resolves approval first. }
@@ -145,7 +145,7 @@ type
 ```
 
 ```pascal
-unit hildegard.helper.patch;   // NEW: a unified-diff applier (pure)
+unit hildi.patch;   // NEW: a unified-diff applier (pure)
 
 type
   TPatchResult = record
@@ -163,7 +163,7 @@ function ApplyUnifiedPatch(const APatch: string; AStrip: Integer;
 ```
 
 ```pascal
-unit hildegard.helper.yaml;   // NEW: a minimal, tolerant YAML subset
+unit hildi.yaml;   // NEW: a minimal, tolerant YAML subset
 
 { Parse to a fpjson TJSONData (so the tool result is uniform JSON). A construct
   outside the subset (anchors, tags, flow beyond simple scalars) fails with a

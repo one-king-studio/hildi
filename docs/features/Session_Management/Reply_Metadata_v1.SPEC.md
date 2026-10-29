@@ -2,11 +2,11 @@
 
 **Related Feature:** [FEATURE.md](FEATURE.md)
 
-**Depends on:** `hildegard.helper.markdown` (`TMarkdownParser`, block kinds),
-`hildegard.helper.agent` (the completed-turn append, `DefaultSystemPrompt`),
-`hildegard.helper.store` (migrations, the `messages` table),
-`hildegard.helper.session.runtime` (the `teDone` boundary),
-`hildegard.helper.tui.chat` (`TChatItem`, `ckAssistant`).
+**Depends on:** `hildi.markdown` (`TMarkdownParser`, block kinds),
+`hildi.agent` (the completed-turn append, `DefaultSystemPrompt`),
+`hildi.store` (migrations, the `messages` table),
+`hildi.session.runtime` (the `teDone` boundary),
+`hildi.tui.chat` (`TChatItem`, `ckAssistant`).
 
 **Depended on by:** `Session_Modal_v1.SPEC.md` (the modal lists titles and
 searches keywords).
@@ -79,7 +79,7 @@ No YAML dependency: extraction is a tolerant line scanner over the block.
 - [ ] Extraction is O(reply length), allocation-light, and independent of the
       store and the model (unit-testable in isolation).
 - [ ] No YAML or other dependency; no new unit outside the existing ones unless
-      one is warranted (a small `hildegard.helper.replymeta` is acceptable).
+      one is warranted (a small `hildi.replymeta` is acceptable).
 - [ ] No leaks (heaptrc gate); `make check` green; macOS + Linux; FPC 3.3.1.
 
 ## Contracts & Interfaces
@@ -89,7 +89,7 @@ No YAML dependency: extraction is a tolerant line scanner over the block.
 ### The extractor (pure)
 
 ```pascal
-unit hildegard.helper.replymeta;
+unit hildi.replymeta;
 
 type
   { The metadata a reply's leading frontmatter block carries, plus the body with

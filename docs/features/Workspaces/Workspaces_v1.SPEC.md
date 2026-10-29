@@ -4,7 +4,7 @@
 
 ## Purpose
 
-`hildegard.helper.workspace` owns the active workspace: it selects and
+`hildi.workspace` owns the active workspace: it selects and
 canonicalises the directory, verifies access, resolves relative paths, decides
 containment, and provides the persisted workspace identity that approvals and
 sessions attach to.
@@ -42,12 +42,12 @@ subsystem.
 ### Public API
 
 ```pascal
-unit hildegard.helper.workspace;
+unit hildi.workspace;
 
 interface
 
 uses
-  SysUtils, hildegard.helper.store;
+  SysUtils, hildi.store;
 
 type
   TWorkspace = class
@@ -70,7 +70,7 @@ function CanonicalWorkspacePath(const APath: string): string;
 function WorkspaceAccessible(const APath: string;
   out AError: string): Boolean;
 
-{ Store additions (in hildegard.helper.store). }
+{ Store additions (in hildi.store). }
 function TSqliteStore.EnsureWorkspace(const APath: string; out AId: Integer;
   out AError: TStoreError): Boolean;
 function TSqliteStore.FindWorkspace(const APath: string; out AId: Integer;
@@ -101,7 +101,7 @@ None.
   `IncludeTrailingPathDelimiter`, `ExtractFileDir`.
 - Unix `realpath` (via `BaseUnix`/libc) may be used for symlink canonicalisation;
   an `{$ifdef unix}` block, with a documented fallback to `ExpandFileName`.
-- `hildegard.helper.store` migrations and typed methods.
+- `hildi.store` migrations and typed methods.
 
 The gap: the workspace record, access verification, and containment logic.
 
@@ -109,7 +109,7 @@ The gap: the workspace record, access verification, and containment logic.
 
 - **Responsibilities:** selection, canonicalisation, access check, resolution,
   containment, identity persistence.
-- **Dependencies:** `SysUtils`; `hildegard.helper.store` for identity.
+- **Dependencies:** `SysUtils`; `hildi.store` for identity.
 - **Side effects:** a workspace row may be inserted; no other filesystem writes.
 
 ### Data Flow

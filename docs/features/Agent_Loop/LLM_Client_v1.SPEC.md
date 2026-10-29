@@ -4,7 +4,7 @@
 
 ## Purpose
 
-`hildegard.helper.llm` is the provider boundary for the Agent Loop. It turns a
+`hildi.llm` is the provider boundary for the Agent Loop. It turns a
 request (messages plus tool declarations) into an OpenAI-compatible chat
 completion call over HTTPS, reads the **streamed** SSE response, surfaces text
 deltas as they arrive, and returns a complete assistant message with its tool
@@ -43,7 +43,7 @@ can be tested offline against canned SSE streams.
 ### Public API
 
 ```pascal
-unit hildegard.helper.llm;
+unit hildi.llm;
 
 type
   TChatRole = (crSystem, crUser, crAssistant, crTool);
@@ -142,7 +142,7 @@ type
       out AResult: TChatResult; out AError: TLLMError): Boolean;
   end;
 
-{ Fill missing config fields from HILDEGARD_LLM_ENDPOINT/MODEL/API_KEY and
+{ Fill missing config fields from HILDI_LLM_ENDPOINT/MODEL/API_KEY and
   FIREWORKS_API_KEY (first non-empty wins). }
 function ResolveLLMConfig(const AConfig: TLLMConfig): TLLMConfig;
 

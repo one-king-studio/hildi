@@ -77,7 +77,7 @@ passes a consumer **gate** first.
 - [ ] **No host escape**: the library never spawns a process, reads a real file
       directly, or opens a socket. (A consumer handler may; that is its gate.)
 - [ ] **Leak-clean**; no exception escapes `Run` (errors are results).
-- [ ] **Standalone**: no `hildegard.helper.*` dependency.
+- [ ] **Standalone**: no `hildi.*` dependency.
 
 ## Contracts & Interfaces
 

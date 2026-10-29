@@ -4,7 +4,7 @@
 # A bare `git worktree add` produces a checkout with no deps/ and no build/, so it
 # cannot compile: deps/sqlite3/sqlite3.c, deps/mbedtls/ and deps/cacert/ are all
 # gitignored, and the integration suites additionally need
-# build/bin/hildegard-helper-agent built. Without it ~36 tests fail for a reason
+# build/bin/hildi-agent built. Without it ~36 tests fail for a reason
 # unrelated to the code under test - which is why a pristine worktree reports
 # spurious failures.
 #
@@ -116,12 +116,12 @@ Ready to build. Next:
 
 Two things worth knowing:
 
-  This worktree has its OWN database (.hildegard/), so its board, task list and
+  This worktree has its OWN database (.hildi/), so its board, task list and
   sessions are separate from the primary tree. That is deliberate - worktrees are
   tested independently - but it means an empty board here is NOT "no coordination
   happening", it is a different workspace.
 
-  The integration suites need build/bin/hildegard-helper-agent. Without it about
+  The integration suites need build/bin/hildi-agent. Without it about
   36 tests fail for a reason unrelated to the code under test. 'make check' builds
-  it as part of the gate; a bare '\$(BIN)/hildegard-helper-tests' run does not.
+  it as part of the gate; a bare '\$(BIN)/hildi-tests' run does not.
 EOF

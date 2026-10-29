@@ -5,13 +5,13 @@
 
 ## Implementation Tasks
 
-### Phase 1: Parser (`hildegard.helper.mcp.cli`)
+### Phase 1: Parser (`hildi.mcp.cli`)
 
 - [x] **Test**: `tests/test_mcp_cli.pas` — list/add(--split)/scope/env/cwd/
       disabled/remove/enable/disable/errors/format — red.
 - [x] **Implement**: `TMcpVerb`, `TMcpCommand`, `EMcpCLIError`,
       `ParseMcpCommand`, `FormatMcpServers`, `McpUsageText`.
-- [x] **Register** `test_mcp_cli` in `tests/hildegard_helper_tests.pas`.
+- [x] **Register** `test_mcp_cli` in `tests/hildi_tests.pas`.
 - [x] **Refactor**; `make check`.
 
 ### Phase 2: Dispatch (`examples/agent_cli.pas`)
@@ -30,14 +30,14 @@
 ## Files to Create/Modify
 
 ```
-src/hildegard.helper.mcp.cli.pas   (parser; pure)
+src/hildi.mcp.cli.pas   (parser; pure)
 tests/test_mcp_cli.pas
-tests/hildegard_helper_tests.pas   (register)
+tests/hildi_tests.pas   (register)
 examples/agent_cli.pas             (dispatch the mcp subcommand)
 ```
 
 ## Notes & Considerations
 
-- The parser is pure (mirrors `hildegard.helper.cli`); only the dispatcher
+- The parser is pure (mirrors `hildi.cli`); only the dispatcher
   touches the store.
 - Record deviations from the SPEC here.

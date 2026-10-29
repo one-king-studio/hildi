@@ -1,5 +1,5 @@
 unit test_harness_stats;
-{ fpcunit tests for hildegard.helper.harness.stats: the one-line turn summary. }
+{ fpcunit tests for hildi.harness.stats: the one-line turn summary. }
 
 {$mode delphi}{$H+}
 
@@ -7,7 +7,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.session, hildegard.helper.harness.stats;
+  hildi.session, hildi.harness.stats;
 
 type
   THarnessStatsTest = class(TTestCase)

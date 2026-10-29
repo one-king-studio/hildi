@@ -2,7 +2,7 @@
 
 **Related Feature:** [MCP_HTTP_v2_FEATURE.md](MCP_HTTP_v2_FEATURE.md)
 
-**Depends on:** `hildegard.helper.mcp.client`, `hildegard.helper.stdio.child`.
+**Depends on:** `hildi.mcp.client`, `hildi.stdio.child`.
 **Depended on by:** `Mcp_HTTP_Transport_v1.SPEC.md`.
 
 ## Purpose
@@ -34,7 +34,7 @@ prerequisite for HTTP.
 ## Contracts & Interfaces
 
 ```pascal
-unit hildegard.helper.mcp.transport;
+unit hildi.mcp.transport;
 { The byte-transport seam for the MCP client: framed JSON-RPC lines in and out.
   Implementations: stdio (a child's pipes), HTTP (a remote endpoint). }
 
@@ -43,7 +43,7 @@ unit hildegard.helper.mcp.transport;
 interface
 
 uses
-  SysUtils, hildegard.helper.stdio.child;
+  SysUtils, hildi.stdio.child;
 
 type
   { Why a Receive returned False (mirrors TStdioReadResult). }

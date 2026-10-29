@@ -17,7 +17,7 @@ command timeout, with an optional operator-imposed cap.
 
 The seam
 
-- [ ] `TToolObserver` (in `hildegard.helper.agent`) is an abstract object with
+- [ ] `TToolObserver` (in `hildi.agent`) is an abstract object with
       `Next(const AText: string)` (flush a chunk) and `Complete` (end the
       stream).
 - [ ] `TToolHandler` receives an observer as an optional trailing parameter:
@@ -38,7 +38,7 @@ The command tool
 - [ ] `TCommandToolConfig` gains `MaxTimeoutMs` (0 => no cap); when set, the
       per-call `timeout_ms` is clamped to it. By default the model defines its
       own timeout. `THarnessSession` resolves the optional cap from
-      `HILDEGARD_COMMAND_TIMEOUT_MS`.
+      `HILDI_COMMAND_TIMEOUT_MS`.
 
 The live path
 
@@ -62,7 +62,7 @@ The live path
 
 > Contracts as Pascal type declarations. No method bodies.
 
-### Agent (`hildegard.helper.agent`)
+### Agent (`hildi.agent`)
 
 ```pascal
 { A tool's output observer, RxJS-shaped. A streaming tool calls Next for each
@@ -87,7 +87,7 @@ TAgentEvents = record
 end;
 ```
 
-### Command tool (`hildegard.helper.command.tool`)
+### Command tool (`hildi.command.tool`)
 
 ```pascal
 TCommandToolConfig = record
@@ -105,13 +105,13 @@ ICommandExecutor = interface
 end;
 ```
 
-### Turn events (`hildegard.helper.harness.turn`)
+### Turn events (`hildi.harness.turn`)
 
 ```pascal
 TTurnEventKind = (..., teToolOutput, ...);   // ToolId, ToolName, Text
 ```
 
-### Session protocol (`hildegard.helper.session.protocol`)
+### Session protocol (`hildi.session.protocol`)
 
 ```pascal
 TSessionEventKind = (..., ekToolOutput, ...);   // wire: 'tool_output'

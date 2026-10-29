@@ -241,15 +241,15 @@ Tool-call budget and context guard
 
 ### Internal
 
-- `hildegard.helper.agent` - the loop and its boundaries, `IConversationStore`,
+- `hildi.agent` - the loop and its boundaries, `IConversationStore`,
   the cancel check, `FailTurn`.
-- `hildegard.helper.harness.turn` - `TTurnQueue`, `TTurnWorker`,
+- `hildi.harness.turn` - `TTurnQueue`, `TTurnWorker`,
   `TApprovalGate`, `TTurnEvent.ToolReason`.
-- `hildegard.helper.harness.app` - the interrupt handling, compose, and modal.
-- `hildegard.helper.approval` - `TApprovalAsk` (needs the reason).
-- `hildegard.helper.tui.compose` / `.edit` - submit key and paste insertion.
-- `hildegard.helper.tui.approvalmodal` - reason line, wrapping, compaction.
-- `hildegard.helper.tui.input.decode` / `.input.terminal` - bracketed paste.
+- `hildi.harness.app` - the interrupt handling, compose, and modal.
+- `hildi.approval` - `TApprovalAsk` (needs the reason).
+- `hildi.tui.compose` / `.edit` - submit key and paste insertion.
+- `hildi.tui.approvalmodal` - reason line, wrapping, compaction.
+- `hildi.tui.input.decode` / `.input.terminal` - bracketed paste.
 
 ### External
 

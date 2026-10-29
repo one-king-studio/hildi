@@ -52,7 +52,7 @@ end;
 
 ## 2a. Pure commands (shipped)
 
-`hildegard.helper.command.pure.IsPureCommand` names the commands that produce
+`hildi.command.pure.IsPureCommand` names the commands that produce
 text from their own arguments and nothing else:
 
 `echo`, `printf`, `true`, `false`, `basename`, `dirname`.
@@ -71,7 +71,7 @@ allows without a prompt.
 
 ## 2b. The effect-scoped gate (tier, shipped)
 
-`hildegard.helper.shell.effects.ComputeEffects(Name, Args, out Reads, out
+`hildi.shell.effects.ComputeEffects(Name, Args, out Reads, out
 Writes, out Known)` maps a builtin command to the files it will read and write,
 positionally (grep's first operand is a pattern, `cp`'s second is the
 destination) and without touching the filesystem:

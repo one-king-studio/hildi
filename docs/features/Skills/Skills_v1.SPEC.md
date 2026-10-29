@@ -2,7 +2,7 @@
 
 **Related Feature:** [FEATURE.md](FEATURE.md)
 
-**Depends on:** `hildegard.helper.agent` (`IToolProvider`, `TToolRegistry`,
+**Depends on:** `hildi.agent` (`IToolProvider`, `TToolRegistry`,
 `TToolSpec`, `TRegisteredTool`, `TToolHandler`, `MakeToolSpec`, `BuildRequest`,
 `PrepareProviders`), `SysUtils` (`GetTickCount64`).
 **Depended on by:** `Lazy_MCP` (an MCP connection becomes a skill); the future
@@ -24,14 +24,14 @@ The seam already exists; this adds the registry and one tool.
 
 | Need | Existing unit | What changes |
 | --- | --- | --- |
-| The contributor seam | `hildegard.helper.agent` `IToolProvider` (`Prepare`/`Specs`/`PromptFragment`/`Find`) | `TSkillRegistry` **implements** it — no new seam |
+| The contributor seam | `hildi.agent` `IToolProvider` (`Prepare`/`Specs`/`PromptFragment`/`Find`) | `TSkillRegistry` **implements** it — no new seam |
 | Request-only prompt injection | `TAgentLoop.BuildRequest` (already injects provider `PromptFragment` as `crSystem`, never persisted) | none — the manifest rides it |
 | Tool dispatch + approval | `ExecuteToolCalls` → `FTools.Find` then provider `Find` | none — loaded tools resolve through `Find` |
 | Turn boundary | `TAgentLoop.PrepareProviders` (`OnTurnStart` + each `Prepare`) | the registry's `Prepare` runs decay here |
 | The clock | `SysUtils` `GetTickCount64` (monotonic) | reuse for the idle TTL — **not** `tui.clock` (the registry must not link a TUI unit; the Process Split forbids it) |
 | Spec building | `MakeToolSpec` (adds the required `reason` param) | reuse for `load_skill` and tool specs |
 
-New unit: `hildegard.helper.skills`. Nothing else is new.
+New unit: `hildi.skills`. Nothing else is new.
 
 ## Requirements
 
@@ -81,9 +81,9 @@ New unit: `hildegard.helper.skills`. Nothing else is new.
 ### The skill and its tool source
 
 ```pascal
-unit hildegard.helper.skills;
+unit hildi.skills;
 
-uses hildegard.helper.agent;
+uses hildi.agent;
 
 type
   TSkillState = (ssUnloaded, ssLoaded);

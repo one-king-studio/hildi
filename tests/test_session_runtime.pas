@@ -1,5 +1,5 @@
 unit test_session_runtime;
-{ fpcunit integration tests for hildegard.helper.session.runtime: the socket
+{ fpcunit integration tests for hildi.session.runtime: the socket
   lease, stale recovery, spawn/attach, turn streaming, the approval bridge, the
   drive lease, idle exit, and observer backpressure. Uses the fake LLM
   transport and real AF_UNIX sockets; no terminal and no network. }
@@ -10,11 +10,11 @@ interface
 
 uses
   Classes, SysUtils, SyncObjs, fpcunit, testregistry,
-  hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.approval,
-  hildegard.helper.store, hildegard.helper.session,
-  hildegard.helper.session.protocol, hildegard.helper.session.socket,
-  hildegard.helper.session.client, hildegard.helper.session.runtime,
-  hildegard.helper.workspace, llm_fakes;
+  hildi.llm, hildi.agent, hildi.approval,
+  hildi.store, hildi.session,
+  hildi.session.protocol, hildi.session.socket,
+  hildi.session.client, hildi.session.runtime,
+  hildi.workspace, llm_fakes;
 
 type
   { Collects sink callbacks. OnEvent is called on the client's reader thread. }

@@ -33,7 +33,7 @@ set -uo pipefail
 
 cd "$(dirname "$0")/.." || exit 1
 
-BIN="${HILDEGARD_TEST_BIN:-build/bin/hildegard-helper-tests}"
+BIN="${HILDI_TEST_BIN:-build/bin/hildi-tests}"
 if [ ! -x "$BIN" ]; then
   echo "test-parallel: $BIN is missing - build it first" >&2
   exit 2
@@ -42,7 +42,7 @@ fi
 # The runtime binary is spawned by the integration suites. Without it they fail
 # for a reason that has nothing to do with the code under test, which is exactly
 # the kind of noise this script exists to remove.
-RUNTIME="build/bin/hildegard-helper-agent"
+RUNTIME="build/bin/hildi-agent"
 if [ ! -x "$RUNTIME" ]; then
   echo "test-parallel: $RUNTIME is missing - run 'make headless-agent' first" >&2
   echo "  (the integration suites spawn it; without it ~36 tests fail spuriously)" >&2
@@ -51,11 +51,11 @@ fi
 
 # Default to the machine's core count, but never unbounded: each worker may
 # itself spawn runtimes and sockets, so more workers than cores just adds
-# contention. HILDEGARD_TEST_JOBS overrides.
+# contention. HILDI_TEST_JOBS overrides.
 CORES="$( (sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null) || echo 4)"
-JOBS="${HILDEGARD_TEST_JOBS:-$CORES}"
+JOBS="${HILDI_TEST_JOBS:-$CORES}"
 
-TMPDIR_RUN="$(mktemp -d "${TMPDIR:-/tmp}/hildegard-tests.XXXXXX")" || exit 1
+TMPDIR_RUN="$(mktemp -d "${TMPDIR:-/tmp}/hildi-tests.XXXXXX")" || exit 1
 trap 'rm -rf "$TMPDIR_RUN"' EXIT
 
 if [ "$#" -gt 0 ]; then

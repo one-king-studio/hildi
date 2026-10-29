@@ -9,8 +9,8 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.hash, hildegard.helper.workspace.changes,
-  hildegard.helper.changes.recorder,
+  hildi.hash, hildi.workspace.changes,
+  hildi.changes.recorder,
   changes.types, changes.store, changes.log;
 
 type

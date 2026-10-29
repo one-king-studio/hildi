@@ -10,8 +10,8 @@ program mcp_session_check;
 uses
   {$ifdef unix}cthreads, cwstring,{$endif}   // cthreads first: sync primitives
   SysUtils,
-  hildegard.helper.llm, hildegard.helper.agent,
-  hildegard.helper.harness.session, hildegard.helper.harness.view;
+  hildi.llm, hildi.agent,
+  hildi.harness.session, hildi.harness.view;
 
 var
   Cfg: THarnessSessionConfig;

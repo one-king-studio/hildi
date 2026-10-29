@@ -1,5 +1,5 @@
 unit test_ansi;
-{ fpcunit tests for hildegard.helper.ansi. Each test sets the enabled state
+{ fpcunit tests for hildi.ansi. Each test sets the enabled state
   explicitly and restores it, so results do not depend on the TTY. }
 
 {$mode delphi}{$H+}
@@ -7,7 +7,7 @@ unit test_ansi;
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, hildegard.helper.ansi;
+  Classes, SysUtils, fpcunit, testregistry, hildi.ansi;
 
 type
   TAnsiTest = class(TTestCase)

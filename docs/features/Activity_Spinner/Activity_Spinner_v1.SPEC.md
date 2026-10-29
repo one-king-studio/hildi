@@ -2,9 +2,9 @@
 
 **Related Feature:** [FEATURE.md](FEATURE.md)
 
-**Depends on:** `hildegard.helper.tui.chat` (the stream, the item boxes, the
-sparkle), `hildegard.helper.tui.chatpanel` (the toolbar state),
-`hildegard.helper.tui.spinner` (the existing `TSpinner` and its frames).
+**Depends on:** `hildi.tui.chat` (the stream, the item boxes, the
+sparkle), `hildi.tui.chatpanel` (the toolbar state),
+`hildi.tui.spinner` (the existing `TSpinner` and its frames).
 
 ## Purpose
 
@@ -40,7 +40,7 @@ call shows movement where the work is.
 
 ### Non-Functional
 
-- [ ] No new unit; the frames come from `hildegard.helper.tui.spinner`
+- [ ] No new unit; the frames come from `hildi.tui.spinner`
       (`BrailleFrames`).
 - [ ] The frame is a pure function of `ANowMs`; no per-widget timer.
 - [ ] Animation registration is unchanged in kind: an active box registers at
@@ -50,7 +50,7 @@ call shows movement where the work is.
 ## Contracts & Interfaces
 
 ```pascal
-{ hildegard.helper.tui.chat }
+{ hildi.tui.chat }
 const
   { The activity spinner's frame interval and frames (the shared source). }
   SpinnerIntervalMs = 90;

@@ -2,8 +2,8 @@
 
 **Related Feature:** [MCP_HTTP_v2_FEATURE.md](MCP_HTTP_v2_FEATURE.md)
 
-**Depends on:** `MCP_Transport_Seam_v1.SPEC.md`, `hildegard.helper.tls`,
-`hildegard.helper.mcp.config`, `hildegard.helper.store`.
+**Depends on:** `MCP_Transport_Seam_v1.SPEC.md`, `hildi.tls`,
+`hildi.mcp.config`, `hildi.store`.
 **Depended on by:** the MCP manager/provider (unchanged).
 
 ## Purpose
@@ -35,14 +35,14 @@ JSON-RPC object or an SSE stream carrying it.
 
 ### Non-Functional
 
-- [ ] HTTPS via the vendored TLS (`hildegard.helper.tls`); no new dependency.
+- [ ] HTTPS via the vendored TLS (`hildi.tls`); no new dependency.
 - [ ] Bounded by the call/list timeouts.
 - [ ] `make check` green; leak-clean.
 
 ## Contracts & Interfaces
 
 ```pascal
-unit hildegard.helper.mcp.http.transport;   // or a unit under mcp.*
+unit hildi.mcp.http.transport;   // or a unit under mcp.*
 
 type
   THttpTransportConfig = record
@@ -81,9 +81,9 @@ type
 ### Prior Art & Reuse
 
 - **`TJsonRpcCodec`** — unchanged; the transport only moves bytes.
-- **`hildegard.helper.tls` / `fphttpclient`** — the HTTP + TLS stack already
+- **`hildi.tls` / `fphttpclient`** — the HTTP + TLS stack already
   used by the LLM client; reuse it.
-- **The SSE parsing** from `hildegard.helper.llm` is the model.
+- **The SSE parsing** from `hildi.llm` is the model.
 - **Genuine gap:** the HTTP transport itself.
 
 ### Component Boundaries

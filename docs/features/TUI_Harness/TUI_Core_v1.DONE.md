@@ -5,7 +5,7 @@
 
 ## Overview
 
-Task breakdown for `hildegard.helper.tui.*`. Work directly on `main` (project
+Task breakdown for `hildi.tui.*`. Work directly on `main` (project
 convention: no branches). Each implementation task starts with a failing test.
 Order is deliberate: the memory surface and injected input come first so every
 later phase is testable without a terminal; the terminal adapters are written
@@ -16,9 +16,9 @@ against the same interfaces and can be deferred until the example needs them.
 ### Phase 1: Base Types & Test Scaffolding
 
 - [x] **Test unit(s)**: create `tests/test_tui_surface.pas` with an empty
-      `TTuiSurfaceTest`; add to `tests/hildegard_helper_tests.pas` `uses`
+      `TTuiSurfaceTest`; add to `tests/hildi_tests.pas` `uses`
 - [x] **Types**: define `TSize`, `TRect`, `TStyle`, `TAttr`, `TCell`,
-      `DefaultAttr` in `src/hildegard.helper.tui.base.pas`
+      `DefaultAttr` in `src/hildi.tui.base.pas`
 - [x] **Compile check**: an empty test referencing `TAttr` compiles (pins the
       shadowed `TRect` decision)
 
@@ -32,14 +32,14 @@ against the same interfaces and can be deferred until the example needs them.
 - [x] **Test** `TestFlushIdempotent`
 - [x] **Test** `TestDimAddsFaintButKeepsGlyphsAndColors`
 - [x] **Implement** `ISurface` and `TSurfaceMemory` in
-      `src/hildegard.helper.tui.surface.pas` (`TSurfaceVideo` deferred to the
+      `src/hildi.tui.surface.pas` (`TSurfaceVideo` deferred to the
       terminal phase rather than stubbed)
 
 ### Phase 3: Input
 
 - [x] **Test unit** `tests/test_tui_input.pas` + `TTuiInputTest`
 - [x] **Implement** the event types and `IInputSource` /
-      `TInputSourceScripted` in `src/hildegard.helper.tui.input.pas`
+      `TInputSourceScripted` in `src/hildi.tui.input.pas`
 - [x] **Test** `TestScriptedSourceYieldsQueuedEvents`
 - [x] **Test** `TestScriptedSourceReportsResize`
 
@@ -47,7 +47,7 @@ against the same interfaces and can be deferred until the example needs them.
 
 - [x] **Test unit** `tests/test_tui_layout.pas` + `TTuiLayoutTest`
 - [x] **Implement** `TWidget`, `TTrack`/`Fixed`/`Auto`/`Fill`, `TContainer` in
-      `src/hildegard.helper.tui.widget.pas`
+      `src/hildi.tui.widget.pas`
 - [x] **Test** `TestFixedTracksTakeExactSize` - red/green
 - [x] **Test** `TestFillTracksShareRemainderByWeight`
 - [x] **Test** `TestAutoTrackMeasuresContent`
@@ -61,7 +61,7 @@ against the same interfaces and can be deferred until the example needs them.
 
 - [x] **Test unit** `tests/test_tui_text.pas` + `TTuiTextTest`
 - [x] **Implement** `TSpan`, `TTextBlock`, wrapping/measuring in
-      `src/hildegard.helper.tui.text.pas`
+      `src/hildi.tui.text.pas`
 - [x] **Test** `TestMeasureLongestLine`
 - [x] **Test** `TestCharacterWrap`
 - [x] **Test** `TestWordWrap`
@@ -74,7 +74,7 @@ against the same interfaces and can be deferred until the example needs them.
 
 - [x] **Test unit** `tests/test_tui_scroll.pas` + `TTuiScrollTest`
 - [x] **Implement** `TScrollContainer` (clipping, offsets, keyboard) and
-      `TScrollBar` geometry in `src/hildegard.helper.tui.scroll.pas`
+      `TScrollBar` geometry in `src/hildi.tui.scroll.pas`
 - [x] **Test** `TestContentSmallerThanViewportDoesNotScroll`
 - [x] **Test** `TestContentEqualViewportDoesNotScroll`
 - [x] **Test** `TestContentLargerThanViewportScrolls`
@@ -87,7 +87,7 @@ against the same interfaces and can be deferred until the example needs them.
 
 - [x] **Test unit** `tests/test_tui_app.pas` + `TTuiAppTest`
 - [x] **Implement** `TPlane` and `TTuiApp` (`Step`, routing, layout dirtying,
-      render order) in `src/hildegard.helper.tui.app.pas`
+      render order) in `src/hildi.tui.app.pas`
 - [x] **Test** `TestFrameRendersBaseThenModal`
 - [x] **Test** `TestModalDimsBackgroundButKeepsText` (base visible, glyphs intact,
       attributes gain `sfDim`)
@@ -100,9 +100,9 @@ against the same interfaces and can be deferred until the example needs them.
 ### Phase 8: Terminal Adapters
 
 - [x] **Implement** `TSurfaceVideo` over FPC `video` (cells, `UpdateScreen`,
-      cursor, lifecycle, restore on exit) - in `hildegard.helper.tui.surface.video`
+      cursor, lifecycle, restore on exit) - in `hildi.tui.surface.video`
 - [x] **Implement** `TInputSourceTerminal` over FPC `keyboard` and `TIOCGWINSZ`
-      - in `hildegard.helper.tui.input.terminal`
+      - in `hildi.tui.input.terminal`
 - [x] **Calibrate** on macOS: verify resize detection and cursor visibility;
       record findings in `docs/guidelines/testing.md` (needs a real terminal)
       — **verified in practice**: the harness runs daily in a real terminal
@@ -197,16 +197,16 @@ benchmark, run explicitly.
 ### New Files
 
 ```
-src/hildegard.helper.tui.base.pas      (cell, attr, rect, size)
-src/hildegard.helper.tui.surface.pas   (ISurface, TSurfaceMemory, TSurfaceVideo)
-src/hildegard.helper.tui.input.pas     (event types, IInputSource, scripted source)
-src/hildegard.helper.tui.input.decode.pas (pure raw-bytes-to-event decoder)
-src/hildegard.helper.tui.input.terminal.pas (raw mode + TIOCGWINSZ + decoder)
-src/hildegard.helper.tui.surface.video.pas  (TSurfaceVideo over FPC video)
-src/hildegard.helper.tui.widget.pas    (TWidget, tracks, TContainer)
-src/hildegard.helper.tui.text.pas      (TSpan, TTextBlock)
-src/hildegard.helper.tui.scroll.pas    (TScrollContainer, TScrollBar)
-src/hildegard.helper.tui.app.pas       (TPlane, TTuiApp)
+src/hildi.tui.base.pas      (cell, attr, rect, size)
+src/hildi.tui.surface.pas   (ISurface, TSurfaceMemory, TSurfaceVideo)
+src/hildi.tui.input.pas     (event types, IInputSource, scripted source)
+src/hildi.tui.input.decode.pas (pure raw-bytes-to-event decoder)
+src/hildi.tui.input.terminal.pas (raw mode + TIOCGWINSZ + decoder)
+src/hildi.tui.surface.video.pas  (TSurfaceVideo over FPC video)
+src/hildi.tui.widget.pas    (TWidget, tracks, TContainer)
+src/hildi.tui.text.pas      (TSpan, TTextBlock)
+src/hildi.tui.scroll.pas    (TScrollContainer, TScrollBar)
+src/hildi.tui.app.pas       (TPlane, TTuiApp)
 tests/test_tui_surface.pas
 tests/test_tui_input.pas
 tests/test_tui_layout.pas
@@ -221,7 +221,7 @@ examples/tui_bench.pas
 ### Modified Files
 
 ```
-tests/hildegard_helper_tests.pas   (add the new test units to uses)
+tests/hildi_tests.pas   (add the new test units to uses)
 Makefile                           (tui-demo, bench, perf targets; unit paths)
 docs/features/TUI_Harness/         (SPEC/TODO status)
 docs/features/FEATURES.md          (status)
@@ -272,8 +272,8 @@ docs/features/FEATURES.md          (status)
 
 ### Deviations
 
-- **Terminal adapters live in separate units** (`hildegard.helper.tui.surface.video`
-  and `hildegard.helper.tui.input.terminal`) rather than in `surface`/`input`.
+- **Terminal adapters live in separate units** (`hildi.tui.surface.video`
+  and `hildi.tui.input.terminal`) rather than in `surface`/`input`.
   Reason: the test binary must not link `video`/`keyboard`; keeping them out
   makes that structural rather than incidental. The SPEC was updated.
 - **`TTuiApp.Invalidate` added.** The SPEC requires re-arranging when *content*
@@ -294,7 +294,7 @@ docs/features/FEATURES.md          (status)
   blocking kitty-key/DA1 probe (can hang or swallow the first key) and its
   decoder latched a phantom keypress under a pty. The adapter sets raw mode with
   `termio` and decodes bytes in the new pure unit
-  `hildegard.helper.tui.input.decode` (unit-tested). The SPEC was updated.
+  `hildi.tui.input.decode` (unit-tested). The SPEC was updated.
 - **`TTuiApp.Run` idles (1 ms) between steps.** A tight `Step` loop can starve
   terminal input on macOS; tests drive `Step` directly, so only `Run` changed.
 - **Mouse is implemented (v1 said "deferred").** The operator asked for it.

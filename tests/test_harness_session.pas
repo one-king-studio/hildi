@@ -1,5 +1,5 @@
 unit test_harness_session;
-{ fpcunit tests for hildegard.helper.harness.session: bootstrap in memory and
+{ fpcunit tests for hildi.harness.session: bootstrap in memory and
   against a store, resume, and failure modes. Uses the fake LLM transport and a
   temporary workspace/store. }
 
@@ -9,17 +9,17 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry, Generics.Collections,
-  hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.session,
-  hildegard.helper.store, hildegard.helper.workspace,
-  hildegard.helper.recall.tool,
-  hildegard.helper.harness.session, hildegard.helper.harness.view,
-  hildegard.helper.session.store,
-  hildegard.helper.mcp.config,
-  hildegard.helper.board, hildegard.helper.board.store,
-  hildegard.helper.tasks, hildegard.helper.tasks.store,
+  hildi.llm, hildi.agent, hildi.session,
+  hildi.store, hildi.workspace,
+  hildi.recall.tool,
+  hildi.harness.session, hildi.harness.view,
+  hildi.session.store,
+  hildi.mcp.config,
+  hildi.board, hildi.board.store,
+  hildi.tasks, hildi.tasks.store,
   changes.types, changes.text, changes.store,
-  hildegard.helper.changes.store, hildegard.helper.changes.revert,
-  hildegard.helper.tasks.tools, hildegard.helper.sqlite,
+  hildi.changes.store, hildi.changes.revert,
+  hildi.tasks.tools, hildi.sqlite,
   llm_fakes;
 
 type

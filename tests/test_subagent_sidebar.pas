@@ -1,5 +1,5 @@
 unit test_subagent_sidebar;
-{ fpcunit tests for the subagent roster model (hildegard.helper.harness.subagent):
+{ fpcunit tests for the subagent roster model (hildi.harness.subagent):
   applying status updates, terminal-entry persistence, prune, and find. }
 
 {$mode delphi}{$H+}
@@ -8,7 +8,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.harness.subagent;
+  hildi.harness.subagent;
 
 type
   TSubagentRosterTest = class(TTestCase)

@@ -14,7 +14,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.wrap;
+  hildi.wrap;
 
 type
   TWrapTest = class(TTestCase)

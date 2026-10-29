@@ -62,7 +62,7 @@ rejected with an actionable message.
 
 > Contracts as Pascal type declarations. No method bodies.
 
-### LLM additions (`hildegard.helper.llm`)
+### LLM additions (`hildi.llm`)
 
 ```pascal
 type
@@ -106,15 +106,15 @@ type
 
 `BuildRequestBody` adds `"stream_options": {"include_usage": true}`.
 
-### Session model (`hildegard.helper.session`)
+### Session model (`hildi.session`)
 
 ```pascal
-unit hildegard.helper.session;
+unit hildi.session;
 
 interface
 
 uses
-  SysUtils, hildegard.helper.llm;
+  SysUtils, hildi.llm;
 
 type
   TMessageRole = (
@@ -191,7 +191,7 @@ type
 function NewSessionId: string;
 ```
 
-### Store operations (`hildegard.helper.store`)
+### Store operations (`hildi.store`)
 
 ```pascal
 function TSqliteStore.CreateSession(AWorkspaceId: Integer; out AId: string;
@@ -234,7 +234,7 @@ Removed: `TSessionRecordKind`, `TSessionRecord`, `TSessionRecordArray`,
 `AppendSessionRecord`, `QuerySessionRecords`. `TSessionSummary.RecordCount`
 becomes `MessageCount` (+ `TurnCount`).
 
-### Agent seam (`hildegard.helper.agent`)
+### Agent seam (`hildi.agent`)
 
 ```pascal
 type
@@ -275,7 +275,7 @@ type
   end;
 ```
 
-### SQLite adapter (`hildegard.helper.session.store`)
+### SQLite adapter (`hildi.session.store`)
 
 ```pascal
 type
@@ -439,30 +439,30 @@ with `seMigrationFailed` and a message naming the path and asking for deletion.
 
 ### Prior Art & Reuse
 
-- `hildegard.helper.store` - the serialized connection, migration machinery,
+- `hildi.store` - the serialized connection, migration machinery,
   parameterized `TStmt` helper, and 0600 file permissions are reused unchanged.
-- `hildegard.helper.llm` - the SSE parser is extended to read `usage`; the
+- `hildi.llm` - the SSE parser is extended to read `usage`; the
   transport, request builder, and message types are reused.
-- `hildegard.helper.session` - `NewSessionId` is reused; the record model is
+- `hildi.session` - `NewSessionId` is reused; the record model is
   replaced.
-- `hildegard.helper.tui.chat` - `TChatStream`/`TChatItem` are reused for
+- `hildi.tui.chat` - `TChatStream`/`TChatItem` are reused for
   rendering; no new widget is needed.
 - `TSessionSummary`, `ListSessions`, `MostRecentSessionId`, `TouchSession`,
   `CreateSession`, and `SessionExists` keep their shape.
 
 ### Component Boundaries
 
-- **`hildegard.helper.llm`** owns provider shape: it parses usage and timings
+- **`hildi.llm`** owns provider shape: it parses usage and timings
   and normalises them; it knows nothing about persistence.
-- **`hildegard.helper.session`** owns the persisted record model and session
+- **`hildi.session`** owns the persisted record model and session
   identity; it has no store or agent dependency.
-- **`hildegard.helper.store`** owns SQL and the schema; it knows nothing about
+- **`hildi.store`** owns SQL and the schema; it knows nothing about
   the loop.
-- **`hildegard.helper.agent`** owns the loop and the seam; it knows nothing
+- **`hildi.agent`** owns the loop and the seam; it knows nothing
   about SQL or the provider's JSON shape.
-- **`hildegard.helper.session.store`** adapts chat messages to rows and the
+- **`hildi.session.store`** adapts chat messages to rows and the
   seam to store operations; it is the only place the two meet.
-- **`hildegard.helper.harness.*`** bootstraps and renders; it reads blocks.
+- **`hildi.harness.*`** bootstraps and renders; it reads blocks.
 
 ### Data Flow
 

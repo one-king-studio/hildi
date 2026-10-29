@@ -6,7 +6,7 @@ unit markdown.types;
   render these into cells, HTML or plain text without inheriting a theme.
 
   The shape is deliberately UNCHANGED from the parser this was extracted from
-  (hildegard.helper.markdown). A new shape would silently change behaviour, so
+  (hildi.markdown). A new shape would silently change behaviour, so
   the extraction's acceptance bar is that every existing assertion passes with
   import changes only; any assertion that had to change is a regression and is
   justified individually.

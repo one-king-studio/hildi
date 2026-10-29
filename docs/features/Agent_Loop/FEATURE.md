@@ -6,7 +6,7 @@ live model-provider check, which needs a key and so cannot be committed.
 
 ## Overview
 
-This feature gives hildegard-helper its brain: a single-threaded agent loop that
+This feature gives hildi its brain: a single-threaded agent loop that
 talks to an OpenAI-compatible LLM provider (Fireworks.ai by default), injects
 tools, executes the tools the model asks for, and keeps re-querying the model
 until it reaches a proper stop reason. Conversations are kept in memory across
@@ -33,7 +33,7 @@ future system actions) can be usefully wired in.
 
 Applying the first rung of the Ponytail ladder (`docs/guidelines/ponytail.md`):
 the HTTP, TLS, and JSON plumbing already exist in FPC (`fphttpclient`, `fpjson`),
-and command execution already exists in `hildegard.helper.process`/`pool`. The
+and command execution already exists in `hildi.process`/`pool`. The
 gap is the reasoning loop, the tool contract, and the conversation store seam -
 not an LLM SDK and not a general async framework.
 
@@ -223,11 +223,11 @@ Interactive CLI
 
 ### Internal
 
-- New `hildegard.helper.*` units anticipated: an OpenAI-compatible provider
+- New `hildi.*` units anticipated: an OpenAI-compatible provider
   client, an SSE parser, a tool registry/contract, the agent loop, and a
   conversation store interface with an in-memory implementation (exact
   boundaries decided in the SPEC).
-- `hildegard.helper.process`/`pool` will back richer tools later, not in v1.
+- `hildi.process`/`pool` will back richer tools later, not in v1.
 
 ### External
 

@@ -11,7 +11,7 @@ in `FEATURE.md`: a TUI diff pane and a checkpoint store, both fed by the same
 
 ### Phase 1: the builtin tier records its writes (shipped)
 
-- [x] `hildegard.helper.workspace.changes`: `TFileChange`, `TFileChangeSet`,
+- [x] `hildi.workspace.changes`: `TFileChange`, `TFileChangeSet`,
       `Summary`.
 - [x] `TWorkspaceShellFs.OnChange` and reporting in `WriteFile`, `Delete`,
       `Move`, `Copy`, `MakeDir`, `Touch`.
@@ -22,7 +22,7 @@ in `FEATURE.md`: a TUI diff pane and a checkpoint store, both fed by the same
 ### Phase 2: the process tier (shipped)
 
 - [x] Snapshot (path, size, mtime) before/after a spawned command when a set is
-      supplied; ignore-aware via `hildegard.helper.gitignore`.
+      supplied; ignore-aware via `hildi.gitignore`.
 - [x] Report created/modified/deleted into the same set; read content for
       created and modified files up to the cap (a deleted file keeps its size
       only — its bytes are gone by the time we diff).

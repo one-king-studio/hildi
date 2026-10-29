@@ -1,7 +1,7 @@
 program dashboard_mock;
 { A MOCK of the Board Dashboard: the same widget, rendered over static data.
 
-  The widget itself lives in hildegard.helper.dashboard.panel, so this program
+  The widget itself lives in hildi.dashboard.panel, so this program
   carries no drawing code at all - it fills the panel's globals with the shape
   of a real workspace and runs it. That is the point of the split: the mock and
   the real binary (examples/dashboard.pas) draw through one implementation, so
@@ -20,7 +20,7 @@ uses
   SysUtils,
   tui.base, tui.theme, tui.app, tui.surface, tui.surface.video,
   tui.input, tui.input.terminal, tui.widget,
-  hildegard.helper.dashboard.panel;
+  hildi.dashboard.panel;
 
 var
   Theme: TTheme;

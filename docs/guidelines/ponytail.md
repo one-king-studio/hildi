@@ -60,9 +60,9 @@ Lazy code without its check is unfinished. Non-trivial logic leaves **one**
 runnable check - the smallest thing that fails if the logic breaks. Trivial
 one-liners need no test.
 
-## In hildegard-helper
+## In hildi
 
-- **The ladder, grounded here:** rung 2 is `src/hildegard.helper.*`; rung 3 is the FPC
+- **The ladder, grounded here:** rung 2 is `src/hildi.*`; rung 3 is the FPC
   RTL/FCL (`SysUtils`, `Classes`, `Generics.Collections`, `Process`, `SyncObjs`,
   `BaseUnix`, ...); rung 4 is native OS facilities; rung 5 is units under
   `deps/`. Check before you build.

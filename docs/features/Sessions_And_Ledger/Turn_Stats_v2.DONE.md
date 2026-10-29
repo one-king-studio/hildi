@@ -17,18 +17,18 @@ timing collection, and the UI (status, divider, thought label).
       `TestFormatSessionStatsEmpty`, `TestFormatThoughtLabel`,
       `TestFormatDurationMs` in `tests/test_harness_stats.pas`
 - [x] **Implement**: `FormatSessionStats`, `FormatThoughtLabel`,
-      `FormatDurationMs` in `src/hildegard.helper.harness.stats.pas`
+      `FormatDurationMs` in `src/hildi.harness.stats.pas`
 
 ### Phase 2: The aggregates
 
 - [x] **Test**: `TestSessionTotalsContextAndGenerated`, `TestSessionTotalsEmpty` in
       `tests/test_store.pas`
 - [x] **Implement**: `TSqliteStore.SessionTotals` in
-      `src/hildegard.helper.store.pas`
+      `src/hildi.store.pas`
 - [x] **Test**: `TestSessionTotalsEmptyWithoutTurns` in
       `tests/test_harness_session.pas`
 - [x] **Implement**: `THarnessSession.SessionTotals`, `THarnessSession.Turns`
-      in `src/hildegard.helper.harness.session.pas`
+      in `src/hildi.harness.session.pas`
 
 ### Phase 3: The timing collection
 
@@ -39,29 +39,29 @@ timing collection, and the UI (status, divider, thought label).
       `TAgentLoop`; `TAgentEvents.OnReasoningDone`;
       `IConversationStore.AppendReasoning(AText, ADurationMs)`; persist the
       assistant's `DurationMs`
-      (`src/hildegard.helper.agent.pas`,
-      `src/hildegard.helper.session.store.pas`)
+      (`src/hildi.agent.pas`,
+      `src/hildi.session.store.pas`)
 - [x] **Test**: `TestReasoningDoneRoundTrip` in
       `tests/test_session_protocol.pas`
 - [x] **Implement**: `ekReasoningDone` (`reasoning_done`, `elapsed_ms`) in
-      `src/hildegard.helper.session.protocol.pas`
+      `src/hildi.session.protocol.pas`
 - [x] **Implement**: `teReasoningDone` in
-      `src/hildegard.helper.harness.turn.pas`; map it in
-      `src/hildegard.helper.session.runtime.pas` and
-      `src/hildegard.helper.harness.driver.pas`
+      `src/hildi.harness.turn.pas`; map it in
+      `src/hildi.session.runtime.pas` and
+      `src/hildi.harness.driver.pas`
 
 ### Phase 4: The UI
 
 - [x] **Test**: `TestTurnDividerDrawsRuleAndRightAlignedStats` in
       `tests/test_tui_chat.pas`
-- [x] **Implement**: `ckTurn` in `src/hildegard.helper.tui.chat.pas`
+- [x] **Implement**: `ckTurn` in `src/hildi.tui.chat.pas`
 - [x] **Test**: `TestStatusShowsSessionTotals`,
       `TestTurnDividerAfterSuccessfulTurn`, `TestNoDividerAfterFailedTurn`,
       `TestResumeRendersTurnDividers`, `TestThoughtShowsDuration` in
       `tests/test_harness_app.pas`
 - [x] **Implement**: the session-consumption status, the `ckTurn` divider (live
       and restore), and the thought label in
-      `src/hildegard.helper.harness.app.pas`
+      `src/hildi.harness.app.pas`
 
 ### Phase 5: Docs and validation
 
@@ -85,17 +85,17 @@ docs/features/Sessions_And_Ledger/Turn_Stats_v2.DONE.md
 ### Modified Files
 
 ```
-src/hildegard.helper.harness.stats.pas     FormatSessionStats, FormatThoughtLabel
-src/hildegard.helper.store.pas             SessionTotals
-src/hildegard.helper.harness.session.pas   SessionTotals, Turns
-src/hildegard.helper.agent.pas             reasoning/content timing; AppendReasoning
-src/hildegard.helper.session.store.pas     reasoning + assistant durations
-src/hildegard.helper.session.protocol.pas  ekReasoningDone
-src/hildegard.helper.harness.turn.pas      teReasoningDone
-src/hildegard.helper.session.runtime.pas   map reasoning_done
-src/hildegard.helper.harness.driver.pas    map reasoning_done; free the prior worker
-src/hildegard.helper.tui.chat.pas          ckTurn divider
-src/hildegard.helper.harness.app.pas       status, divider, thought label
+src/hildi.harness.stats.pas     FormatSessionStats, FormatThoughtLabel
+src/hildi.store.pas             SessionTotals
+src/hildi.harness.session.pas   SessionTotals, Turns
+src/hildi.agent.pas             reasoning/content timing; AppendReasoning
+src/hildi.session.store.pas     reasoning + assistant durations
+src/hildi.session.protocol.pas  ekReasoningDone
+src/hildi.harness.turn.pas      teReasoningDone
+src/hildi.session.runtime.pas   map reasoning_done
+src/hildi.harness.driver.pas    map reasoning_done; free the prior worker
+src/hildi.tui.chat.pas          ckTurn divider
+src/hildi.harness.app.pas       status, divider, thought label
 tests/test_harness_stats.pas               the new formatters
 tests/test_store.pas                       SessionTotals
 tests/test_harness_session.pas             SessionTotals
@@ -138,7 +138,7 @@ Deviations from the specification, and why:
 - **The context guard is overridable.** The loop's `DefaultMaxContextTokens`
   (120000) failed a real session at 120,798 prompt tokens, far below the model's
   1M window, because the app has no model→limit table yet.
-  `THarnessSessionConfig.MaxContextTokens` (0 => `HILDEGARD_MAX_CONTEXT_TOKENS`,
+  `THarnessSessionConfig.MaxContextTokens` (0 => `HILDI_MAX_CONTEXT_TOKENS`,
   else the default) overrides it; the model API will supply it later.
 - **`FormatDurationMs` gained hours** (`1h30m`); a session's total time is often
   over an hour.

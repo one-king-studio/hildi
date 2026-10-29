@@ -169,7 +169,7 @@ Persistence
 ### Technical
 
 - Must build with FPC 3.3.1, `{$mode delphi}`, and keep `make check` green.
-- Must reuse `hildegard.helper.store`; a new migration adds the approvals table.
+- Must reuse `hildi.store`; a new migration adds the approvals table.
 - Must not depend on the Sessions ledger feature to function; session-scoped
   approvals require it, but global/workspace approvals do not.
 - The command tool's existing `TCommandPolicySource`/audit are removed in favor of
@@ -183,12 +183,12 @@ Persistence
 
 ### Internal
 
-- `hildegard.helper.store` - approvals table (new migration) and workspace/session
+- `hildi.store` - approvals table (new migration) and workspace/session
   references.
 - Workspaces feature - workspace identity and the active workspace root.
 - Sessions/Ledger feature - session identity.
-- `hildegard.helper.command.tool` - the first consumer and the adapter.
-- `hildegard.helper.command.policy` - the command parser (segments) used by the
+- `hildi.command.tool` - the first consumer and the adapter.
+- `hildi.command.policy` - the command parser (segments) used by the
   adapter; the policy/allow/deny/roots model is retired.
 
 ### External

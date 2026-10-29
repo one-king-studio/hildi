@@ -97,7 +97,7 @@ parameters, globs, `if`, functions, `local`, `for`/`while`/`until`, symlinks.
 - **`curl` / network.** A separate feature with its own policy; not part of a
   command tier.
 
-## The mapping to hildegard-helper
+## The mapping to hildi
 
 Today: `run_command` runs **real** `/bin/bash -c`, gated per program (Tool
 Approvals) and, since Approval Path Scoping, per outside path. The shell
@@ -391,7 +391,7 @@ Those must go through `IShellFileSystem`, and the consumer's implementation is
 where the path bound lives (`PhysicalContains`). Likewise the gate is consulted
 before every handler, so a handler can never be reached around the policy.
 
-**Packaging.** `src/shell/` with `shell.*` units, no `hildegard.helper.*`
+**Packaging.** `src/shell/` with `shell.*` units, no `hildi.*`
 dependency, an isolation test that walks the `uses` closure (like
 `TestHeadlessClosureExcludesTui`), and a `make shell-standalone` smoke. A version,
 a license (this repository has none of its own yet — a publishing prerequisite),
@@ -517,7 +517,7 @@ because it runs no process for the OS to kill.
 
 ## What to build if this is accepted
 
-1. The **library**: `src/shell/` (`shell.*`), no `hildegard.helper.*`
+1. The **library**: `src/shell/` (`shell.*`), no `hildi.*`
    dependency, an isolation test over the `uses` closure, `make shell-standalone`.
 2. The **parser** (the first component): lexer, words, simple/compound/list
    parsing, here-docs; the corpus + golden ASTs + differential fixtures.

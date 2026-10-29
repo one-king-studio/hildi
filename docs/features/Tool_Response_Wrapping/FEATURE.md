@@ -61,7 +61,7 @@ not a failure — it should ride along with the result.
    A limit is reported, not enforced by blocking: the tool returns what it has
    **plus** the advisory, in one response.
 4. **Reuse `FormatAmbient`.** The ambient wrapper already exists
-   (`hildegard.helper.ambient`); advisories use it. `FormatUserMessage` and the
+   (`hildi.ambient`); advisories use it. `FormatUserMessage` and the
    new `FormatToolResult` share its escapers.
 
 ## Goals

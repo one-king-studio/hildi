@@ -1,5 +1,5 @@
 unit test_recall_tool;
-{ fpcunit tests for hildegard.helper.recall.tool: windowed reads of a stored
+{ fpcunit tests for hildi.recall.tool: windowed reads of a stored
   tool result, capped and never spilled. }
 
 {$mode delphi}{$H+}
@@ -8,8 +8,8 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.store, hildegard.helper.session,
-  hildegard.helper.agent, hildegard.helper.recall.tool;
+  hildi.store, hildi.session,
+  hildi.agent, hildi.recall.tool;
 
 type
   TRecallToolTest = class(TTestCase)

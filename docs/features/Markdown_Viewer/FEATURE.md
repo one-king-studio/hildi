@@ -18,7 +18,7 @@ Two things, one direction of dependency:
    existing styled-cell look for markdown and raw text for everything else.
 
 > **Shipped.** Both goals are met and the old unit is gone. In the original code the
-> parser and the renderer were one unit: `hildegard.helper.markdown` produced
+> parser and the renderer were one unit: `hildi.markdown` produced
 > `TMdBlock` but also owned `TMdTheme` and `uses tui.base` for `TAttr`, so the AST
 > was a private intermediate rather than a contract. `src/markdown/` now holds a
 > pure node tree, `tui.widgets.mdtheme` owns the theme, `tui.widgets.markdownview`
@@ -35,7 +35,7 @@ structure and the terminal are welded together. Consequences:
 | --- | --- |
 | Render markdown to plain text (tests, transcripts, logs) | pulling in the TUI |
 | Prove batch and streaming agree, structurally | assertions are co-located with theme code |
-| Reuse the parser outside the harness | the unit names `hildegard.helper.*` and depends on `tui.*` |
+| Reuse the parser outside the harness | the unit names `hildi.*` and depends on `tui.*` |
 | Add a second renderer (HTML, a debug dumper) | same |
 
 **There is also no file viewer.** The harness can read a file with `file_read` (through an
@@ -45,7 +45,7 @@ markdown file* in the TUI. Reading documentation is the most common reason to wa
 ## Goals
 
 - **A pure module.** `src/markdown/` depends on the RTL and nothing else — no `tui.*`, no
-  `hildegard.helper.*`. Proven by a build target, the same way `shell-standalone` and
+  `hildi.*`. Proven by a build target, the same way `shell-standalone` and
   `tui-standalone` prove theirs.
 - **The AST is the product.** Batch and streaming produce the same tree; a consumer never
   needs the parser's internals.
@@ -107,7 +107,7 @@ message instead of an array dump.
 - Free Pascal 3.3.1, `{$mode delphi}`; `cthreads` first, `cwstring` next.
 - Public names take the module prefix (`markdown.tree`, `markdown.stream`), like `shell.*`
   and `async.*`.
-- The existing `hildegard.helper.markdown` was **replaced, not kept alongside**. Both it
+- The existing `hildi.markdown` was **replaced, not kept alongside**. Both it
   and its successor `markdown.parse` are now deleted: two parsers was the state this
   feature existed to end, and one model is the outcome.
 

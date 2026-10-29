@@ -4,9 +4,9 @@
 
 ## Purpose
 
-Two units: `hildegard.helper.tui.grapheme`, the shared grapheme-cluster and
+Two units: `hildi.tui.grapheme`, the shared grapheme-cluster and
 display-width helpers currently copied into `text.pas` and `prompt.pas`, and
-`hildegard.helper.tui.edit`, the caret-aware multi-line editor widget built on
+`hildi.tui.edit`, the caret-aware multi-line editor widget built on
 them. The editor is the only thing that changes text; hosts (the compose box,
 later the editor panel) supply chrome and decide what `Enter` means.
 
@@ -36,10 +36,10 @@ later the editor panel) supply chrome and decide what `Enter` means.
 > Contracts are expressed as Pascal type declarations. This section defines
 > *what* crosses the boundary; the implementer decides the bodies.
 
-### Shared helpers: `hildegard.helper.tui.grapheme`
+### Shared helpers: `hildi.tui.grapheme`
 
 ```pascal
-unit hildegard.helper.tui.grapheme;
+unit hildi.tui.grapheme;
 
 type
   TClusterArray = array of UnicodeString;
@@ -61,15 +61,15 @@ function StringWidth(const AText: UnicodeString): Integer;
 function ClusterStarts(const AText: UnicodeString): TClusterOffsetArray;
 ```
 
-### Editor widget: `hildegard.helper.tui.edit`
+### Editor widget: `hildi.tui.edit`
 
 ```pascal
-unit hildegard.helper.tui.edit;
+unit hildi.tui.edit;
 
 uses
-  hildegard.helper.tui.base, hildegard.helper.tui.input,
-  hildegard.helper.tui.surface, hildegard.helper.tui.widget,
-  hildegard.helper.tui.text;   { TWrapMode }
+  hildi.tui.base, hildi.tui.input,
+  hildi.tui.surface, hildi.tui.widget,
+  hildi.tui.text;   { TWrapMode }
 
 type
   { One visual line: the clusters it shows and their total display width.
@@ -144,15 +144,15 @@ type
 
 ### Prior Art & Reuse
 
-- `hildegard.helper.tui.text` already wraps clusters with correct widths and
+- `hildi.tui.text` already wraps clusters with correct widths and
   hard-break handling (`WrapClusters`), but the helpers are implementation-only.
   This spec lifts the shared helpers into `grapheme.pas`; `text.pas` keeps its
   styled-cluster wrapping and adopts the helpers.
-- `hildegard.helper.tui.prompt` already does cluster-indexed insertion, deletion,
+- `hildi.tui.prompt` already does cluster-indexed insertion, deletion,
   and left/right/home/end, plus a reverse-video caret and horizontal scroll.
   `TTextEdit` generalises the same model to multiple lines and a wrapping width;
   the prompt is left alone (it owns history and a prompt gutter).
-- `hildegard.helper.tui.widget` supplies the leaf protocol, bounds, and
+- `hildi.tui.widget` supplies the leaf protocol, bounds, and
   `Advance`/`Animating` for the blink. Nothing else in the tree edits text.
 - The demo's `TComposeBox` becomes a thin chrome wrapper around `TTextEdit`; its
   `WrapText`, `InsertText`, and `Backspace` go away.

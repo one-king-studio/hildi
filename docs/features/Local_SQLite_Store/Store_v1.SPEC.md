@@ -1,7 +1,7 @@
 # Component Specification: Local SQLite Store
 
 > **Revision:** SQLDB has since been removed. The store now binds the vendored
-> SQLite directly (`hildegard.helper.sqlite`) and links it **statically** (no
+> SQLite directly (`hildi.sqlite`) and links it **statically** (no
 > runtime `.dylib`/`.so`, no `TSQLDBLibraryLoader`, no `LibraryPath`). References
 > to SQLDB below are historical; the schema, migrations, and public store API are
 > unchanged.
@@ -10,7 +10,7 @@
 
 ## Purpose
 
-`hildegard.helper.store` is the helper's embedded persistence layer. It owns one
+`hildi.store` is the helper's embedded persistence layer. It owns one
 SQLite database file and exposes typed operations for four kinds of application
 data: device credentials, request/audit history, a durable pending-request queue,
 and key/value settings. It hides the SQL, the schema, migrations, and thread
@@ -51,7 +51,7 @@ mechanism, the public contracts, and the test surface.
 ### Public API
 
 ```pascal
-unit hildegard.helper.store;
+unit hildi.store;
 
 type
   { Stable error codes. seOk is the success value. }
@@ -352,7 +352,7 @@ store per process. This is recorded as a `ponytail:` ceiling.
 ### Error Contracts
 
 `TStoreError` above. Harness-wide exit-code conventions (`0`, `124`, `130`,
-`128+signal`) live in `hildegard.helper.process`; the store's `ExitCode` field on
+`128+signal`) live in `hildi.process`; the store's `ExitCode` field on
 requests carries those values through unchanged but does not interpret them.
 
 ## Testing Requirements

@@ -19,7 +19,7 @@ the same session.
 ### Phase 1: The driver seam
 
 - [x] Add `AskRef` to `TTurnEvent`; the local driver sets it from `RequestId`.
-- [x] **Define** `hildegard.helper.harness.driver`: `ISessionDriver`,
+- [x] **Define** `hildi.harness.driver`: `ISessionDriver`,
       `TLocalDriver`, `TRemoteDriver`, and the `LocalDriver`/`RemoteDriver`
       factories.
 - [x] **Test**: `TestLocalDriverEmitsUserMessageThenDone`,

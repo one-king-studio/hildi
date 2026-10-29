@@ -1,5 +1,5 @@
 unit test_replymeta;
-{ fpcunit tests for hildegard.helper.replymeta: the tolerant frontmatter
+{ fpcunit tests for hildi.replymeta: the tolerant frontmatter
   extractor (title + keywords, body stripped) and the streaming suppressor. }
 
 {$mode delphi}{$H+}
@@ -8,7 +8,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.replymeta;
+  hildi.replymeta;
 
 function ListHasKeyword(const AList: TStringArray; const AWord: string): Boolean;
 

@@ -1,5 +1,5 @@
 unit test_command_policy;
-{ fpcunit tests for hildegard.helper.command.policy: the pure POSIX command
+{ fpcunit tests for hildi.command.policy: the pure POSIX command
   parser. Classification now lives in the Tool Approvals feature. }
 
 {$mode delphi}{$H+}
@@ -7,7 +7,7 @@ unit test_command_policy;
 interface
 
 uses
-  SysUtils, fpcunit, testregistry, hildegard.helper.command.policy;
+  SysUtils, fpcunit, testregistry, hildi.command.policy;
 
 type
   TCommandPolicyTest = class(TTestCase)

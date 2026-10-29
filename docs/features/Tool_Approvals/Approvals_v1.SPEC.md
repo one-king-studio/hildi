@@ -4,7 +4,7 @@
 
 ## Purpose
 
-`hildegard.helper.approval` is the generic, durable whitelist for tool calls. It
+`hildi.approval` is the generic, durable whitelist for tool calls. It
 stores approval rules, matches a call's **ref** + **params** against them, and
 resolves a decision (allow / ask / deny) across the global, workspace, and
 session scopes.
@@ -48,7 +48,7 @@ knowledge.
 ### Public API
 
 ```pascal
-unit hildegard.helper.approval;
+unit hildi.approval;
 
 interface
 
@@ -149,7 +149,7 @@ function Decide(const ARules: TApprovalRuleArray;
 function DefaultApprovalRule(const AEffect: TApprovalEffect): TApprovalRule;
 ```
 
-### Store additions (`hildegard.helper.store`)
+### Store additions (`hildi.store`)
 
 ```pascal
 function TSqliteStore.LoadApprovals(const AContext: TApprovalContext;
@@ -182,7 +182,7 @@ is required by the caller.
 
 ### Prior Art & Reuse
 
-- `hildegard.helper.store` migrations and typed methods.
+- `hildi.store` migrations and typed methods.
 - Workspaces and Sessions features provide the context ids.
 - No general matcher exists; the rule is tiny and unit-tested.
 

@@ -109,7 +109,7 @@ primitive; then take the chain. It also means a slow MCP start is already
 | Feature | Depends on | Size | Notes |
 | --- | --- | --- | --- |
 | **TUI Startup** | driver, app, view (all exist) | **M** | composition-root reorder; app connecting/failed state; tail-first history + scroll-up paging; ~4–6 steps + tests |
-| **Skills** | Turn_Injection seam (exists) | **L** | new `hildegard.helper.skills` unit; manifest fragment; `load_skill` tool; decay timer at turn boundary; namespacing; system-prompt copy; SPEC + TODO |
+| **Skills** | Turn_Injection seam (exists) | **L** | new `hildi.skills` unit; manifest fragment; `load_skill` tool; decay timer at turn boundary; namespacing; system-prompt copy; SPEC + TODO |
 | **Lazy MCP** | **Skills** | **S–M** | move `FMcp.Open` off startup; make `TMcpProvider.PromptFragment` return the manifest; `load_skill` triggers connect/discover; TTL unload. Small *because* the seam and manager already exist |
 
 ## Risks / decisions to settle before speccing

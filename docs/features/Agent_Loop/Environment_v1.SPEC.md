@@ -4,7 +4,7 @@
 
 ## Purpose
 
-`hildegard.helper.env` loads a simple `.env` file into the process environment so
+`hildi.env` loads a simple `.env` file into the process environment so
 operators can keep local configuration (for example the LLM API key and model) in
 one untracked file instead of exporting variables every session. It is
 deliberately minimal and never overrides variables already present in the
@@ -29,7 +29,7 @@ environment - the shell wins, which is the safe precedence for secrets.
 ## Contracts & Interfaces
 
 ```pascal
-unit hildegard.helper.env;
+unit hildi.env;
 
 type
   TEnvPair = record

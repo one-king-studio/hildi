@@ -190,7 +190,7 @@ int tls_test_server_start(void) {
   mbedtls_pk_init(&g_key);
 
   rc = mbedtls_ctr_drbg_seed(&g_drbg, mbedtls_entropy_func, &g_entropy,
-                             (const unsigned char *)"hildegard-test", 14);
+                             (const unsigned char *)"hildi-test", 14);
   if (rc) { set_error("drbg seed", rc); return -1; }
   rc = make_cert();
   if (rc) { set_error("make cert", rc); return -1; }

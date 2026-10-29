@@ -12,7 +12,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.shell.commands, hildegard.helper.shell.tier;
+  hildi.shell.commands, hildi.shell.tier;
 
 type
   TShellTierCorpusTest = class(TTestCase)

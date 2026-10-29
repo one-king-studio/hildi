@@ -22,12 +22,12 @@ The design adds one state machine and one paging path; everything else exists.
 
 | Need | Existing unit | What changes |
 | --- | --- | --- |
-| The app, its tree, its run loop | `hildegard.helper.harness.app` (`THarnessApp`, `TTuiApp.Run`/`Step`/`OnLoop`) | a lifecycle enum + a late driver; `RenderHistory` splits into tail + page |
-| The transcript view | `hildegard.helper.tui.chat` (`TChatPanel`, the stream) | prepend a page; keep the scroll anchor |
-| Driver connect | `hildegard.helper.harness.driver` (`ISessionDriver`, `TRemoteDriver`) | none (still blocking in v1) |
-| Session/store/view | `hildegard.helper.harness.view` (`TSessionView.Open`, `History`) | a tail-limited `History` (a new query) |
-| Windowed history query | `hildegard.helper.store` (`QueryMessagesBefore`, `QueryActiveMessages`) | reuse `QueryMessagesBefore` for pages; add a tail-limited active query |
-| The scroll container | `hildegard.helper.tui.scroll` (`TScrollContainer`) | none (already anchors) |
+| The app, its tree, its run loop | `hildi.harness.app` (`THarnessApp`, `TTuiApp.Run`/`Step`/`OnLoop`) | a lifecycle enum + a late driver; `RenderHistory` splits into tail + page |
+| The transcript view | `hildi.tui.chat` (`TChatPanel`, the stream) | prepend a page; keep the scroll anchor |
+| Driver connect | `hildi.harness.driver` (`ISessionDriver`, `TRemoteDriver`) | none (still blocking in v1) |
+| Session/store/view | `hildi.harness.view` (`TSessionView.Open`, `History`) | a tail-limited `History` (a new query) |
+| Windowed history query | `hildi.store` (`QueryMessagesBefore`, `QueryActiveMessages`) | reuse `QueryMessagesBefore` for pages; add a tail-limited active query |
+| The scroll container | `hildi.tui.scroll` (`TScrollContainer`) | none (already anchors) |
 
 `QueryMessagesBefore(ASessionId, ABeforeSeq, ALimit, ...)` already returns the
 last `ALimit` messages at or before a boundary, oldest first — the paging

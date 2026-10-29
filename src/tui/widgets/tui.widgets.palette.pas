@@ -23,7 +23,7 @@ interface
 uses
   Classes, SysUtils, tui.base, tui.input,
   tui.surface, tui.widget,
-  tui.theme, hildegard.helper.fuzzy;
+  tui.theme, hildi.fuzzy;
 
 type
   TCommand = record

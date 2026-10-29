@@ -86,7 +86,7 @@ go.
 ## Contracts & Interfaces
 
 ```pascal
-unit hildegard.helper.harness.driver;
+unit hildi.harness.driver;
 
 type
   { Where the app's turns come from. Local = the in-process worker;

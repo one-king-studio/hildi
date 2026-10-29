@@ -2,9 +2,9 @@
 
 **Related Feature:** [MCP_Admin_CLI_FEATURE.md](MCP_Admin_CLI_FEATURE.md)
 
-**Depends on:** `hildegard.helper.mcp.cli` (the parser),
-`hildegard.helper.mcp.client` (`TMcpClient`),
-`hildegard.helper.mcp.config`, `hildegard.helper.store`.
+**Depends on:** `hildi.mcp.cli` (the parser),
+`hildi.mcp.client` (`TMcpClient`),
+`hildi.mcp.config`, `hildi.store`.
 
 ## Purpose
 
@@ -39,7 +39,7 @@ This is the one admin command that *runs* a server; the others only edit config.
 ## Contracts & Interfaces
 
 ```pascal
-unit hildegard.helper.mcp.cli;   // addition
+unit hildi.mcp.cli;   // addition
 
 type
   TMcpVerb = (mvList, mvAdd, mvRemove, mvEnable, mvDisable, mvTest, mvHelp);

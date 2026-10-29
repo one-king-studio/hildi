@@ -1,5 +1,5 @@
 unit test_workspace_snapshot;
-{ fpcunit tests for hildegard.helper.workspace.snapshot: the ignore-aware
+{ fpcunit tests for hildi.workspace.snapshot: the ignore-aware
   before/after tree diff that gives the process tier the file changes the
   builtin tier records directly. }
 
@@ -9,8 +9,8 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.gitignore, hildegard.helper.workspace.changes,
-  hildegard.helper.workspace.snapshot;
+  hildi.gitignore, hildi.workspace.changes,
+  hildi.workspace.snapshot;
 
 type
   TWorkspaceSnapshotTest = class(TTestCase)

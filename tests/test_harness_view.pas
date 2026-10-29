@@ -1,5 +1,5 @@
 unit test_harness_view;
-{ fpcunit tests for hildegard.helper.harness.view: the client-side session handle
+{ fpcunit tests for hildi.harness.view: the client-side session handle
   that opens a workspace/store/session and reads history and metrics, with no
   loop, LLM client, or tools. The "no agent" property is asserted by the split
   boundary test (tests/test_split.pas). }
@@ -10,8 +10,8 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.store, hildegard.helper.session,
-  hildegard.helper.harness.view;
+  hildi.store, hildi.session,
+  hildi.harness.view;
 
 type
   THarnessViewTest = class(TTestCase)

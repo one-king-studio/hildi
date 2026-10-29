@@ -26,12 +26,12 @@ in-memory store and liftable into another project, exactly like `src/shell/`.
 
 | Need | Existing | Change |
 | --- | --- | --- |
-| Applying a unified diff | `hildegard.helper.patch` (trusted, tested) | **reuse the algorithm as the reference**, but the library cannot depend on a harness unit — move the applier into the library and have the harness unit delegate |
-| File ignore rules | `hildegard.helper.gitignore` | same: the matcher moves in, the harness unit delegates |
-| File walking | `hildegard.helper.workspace.snapshot` | the *walk* stays harness-side (it needs the workspace trust boundary); the library takes a seam |
+| Applying a unified diff | `hildi.patch` (trusted, tested) | **reuse the algorithm as the reference**, but the library cannot depend on a harness unit — move the applier into the library and have the harness unit delegate |
+| File ignore rules | `hildi.gitignore` | same: the matcher moves in, the harness unit delegates |
+| File walking | `hildi.workspace.snapshot` | the *walk* stays harness-side (it needs the workspace trust boundary); the library takes a seam |
 | Hash + text capture | harness | the library takes a seam |
 
-The genuinely new work: a diff **generator** (`hildegard.helper.patch` only
+The genuinely new work: a diff **generator** (`hildi.patch` only
 applies), the keyframe policy, and replay.
 
 ## The seam: two interfaces, no SQLite
@@ -144,7 +144,7 @@ function CheckWrite(const AStore: IChangeStore; AWorkspaceId: Integer;
       `---`/`+++` header and hunks; equal inputs return `''`.
 - [ ] `DiffText` respects `ACapBytes` and reports `ACapped`.
 - [ ] `ApplyUnifiedDiff` applies a diff this library generated, and one that
-      `hildegard.helper.patch` generates (they must agree).
+      `hildi.patch` generates (they must agree).
 - [ ] A hunk whose context does not match fails with a message naming the line.
 - [ ] `Reconstruct` returns the exact text at any change id, verified by hash at
       each hop.
@@ -162,7 +162,7 @@ function CheckWrite(const AStore: IChangeStore; AWorkspaceId: Integer;
       `TestChangesClosureExcludesHarness`, mirroring the shell and async gates.
 - [ ] `make changes-standalone` builds and **runs** a program against `src/changes`
       only.
-- [ ] No new dependency beyond the RTL. No SQLite, no TUI, no `hildegard.helper.*`.
+- [ ] No new dependency beyond the RTL. No SQLite, no TUI, no `hildi.*`.
 - [ ] `make check` green; leak-clean.
 - [ ] macOS + Linux, FPC 3.3.1.
 
@@ -216,7 +216,7 @@ shell.** Applying that here has real consequences, not just a directory move:
 | No workspace trust in the library | path confinement stays harness-side; the library is given already-relative paths |
 | No hashing in the library | a consumer supplies hashes (we have SHA-256 in the TLS/MCP path) |
 | No walking in the library | the ignore-aware walk stays harness-side, since it needs the trust boundary |
-| The diff engine **moves in** | `hildegard.helper.patch` and `hildegard.helper.gitignore` become thin delegates to the library, so there is one implementation |
+| The diff engine **moves in** | `hildi.patch` and `hildi.gitignore` become thin delegates to the library, so there is one implementation |
 
 That last row is the point of the exercise: today the diff algorithm, the ignore
 matcher and the change model are three hand-coded harness pieces. After this they
@@ -228,7 +228,7 @@ are one library with one test suite, and the harness units are adapters.
 said the diff applier would "move in and the harness unit delegates". Reading both
 implementations shows that is **not a move** — they solve different problems:
 
-| | `hildegard.helper.patch` (shipped, trusted) | `changes.text` (library) |
+| | `hildi.patch` (shipped, trusted) | `changes.text` (library) |
 | --- | --- | --- |
 | Scope | **one patch, many files** | one text, one file |
 | Failure | **tolerant**: a bad hunk is counted `Rejected` and the rest are attempted | **strict**: the first mismatch fails with a line number |
@@ -244,7 +244,7 @@ The honest position:
 
 - `changes.text.ApplyUnifiedDiff` is the **replay-grade** applier: exact, strict,
   and its refusal is what makes a reconstructed file trustworthy.
-- `hildegard.helper.patch` keeps the **patch-grade** applier: multi-file,
+- `hildi.patch` keeps the **patch-grade** applier: multi-file,
   tolerant, callback-driven, and its `Rejected` count is what `patch_apply`
   reports.
 - There is genuine duplication in the *hunk matcher* between them. Unifying that
@@ -260,7 +260,7 @@ callers want identical semantics. That one can be delegated.
 3. Move the `gitignore` pattern matcher into the library; the harness unit
    delegates. Its existing tests passing unchanged is the proof.
 4. **Not** a move: give `changes.text` an optional tolerant multi-file mode, then
-   have `hildegard.helper.patch` delegate. Only if the duplication of the
+   have `hildi.patch` delegate. Only if the duplication of the
    hunk matcher proves costly — otherwise leave both, and record why.
 5. Then implement `IChangeStore` over SQLite in the harness, and wire
    `OnChanges` (which today has **no consumer at all**).
@@ -282,7 +282,7 @@ The library's own suite, all with `TMemoryChangeStore` and no database:
 
 - [ ] Diff/applier round-trip: `Apply(a, Diff(a, b)) = b` across created files,
       single-line edits, multi-hunk edits, and CRLF-vs-LF text.
-- [ ] `DiffText` agrees with `hildegard.helper.patch`'s parser (generate here,
+- [ ] `DiffText` agrees with `hildi.patch`'s parser (generate here,
       apply there).
 - [ ] A diff over the cap reports `Capped` and still applies to the extent it
       covers.
@@ -294,4 +294,4 @@ The library's own suite, all with `TMemoryChangeStore` and no database:
       previous session.
 - [ ] Prune keeps the horizon reconstructable; a pruned change is not returned
       but its successor is.
-- [ ] The closure test: no `hildegard.helper.*` unit in the transitive uses.
+- [ ] The closure test: no `hildi.*` unit in the transitive uses.

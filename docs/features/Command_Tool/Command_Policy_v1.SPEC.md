@@ -11,7 +11,7 @@
 
 ## Purpose
 
-`hildegard.helper.command.policy` is the pure decision core of the Command Tool.
+`hildi.command.policy` is the pure decision core of the Command Tool.
 It parses a shell command line into simple-command segments, extracts each
 segment's executable and literal path-like arguments, and classifies the whole
 command against a policy as **allow**, **ask**, or **deny**. It never executes
@@ -95,7 +95,7 @@ v1 implements the POSIX syntax mode only. The `TShellSyntax` type reserves a
 ### Public API
 
 ```pascal
-unit hildegard.helper.command.policy;
+unit hildi.command.policy;
 
 interface
 

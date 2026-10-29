@@ -10,7 +10,7 @@ any engine.
 ## Component boundaries
 
 Namespace `async.*` (provisional). The dependency rule is one-way: `base` is
-leaf-most; nothing in the library `uses` a `hildegard.helper.*` unit.
+leaf-most; nothing in the library `uses` a `hildi.*` unit.
 
 | Unit | Owns |
 | --- | --- |
@@ -258,7 +258,7 @@ thread is joined on teardown.
   `TSemaphore`); a test asserts every worker thread is joined and every object
   freed.
 - **Isolation**: a test asserts the library's transitive `uses` closure contains no
-  `hildegard.helper.*` unit.
+  `hildi.*` unit.
 - **Leak gate**: the whole suite runs under `heaptrc` (`make test-leak`).
 
 ## Open questions

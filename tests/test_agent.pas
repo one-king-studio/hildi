@@ -1,5 +1,5 @@
 unit test_agent;
-{ fpcunit tests for hildegard.helper.agent, driven by the fake LLM transport. }
+{ fpcunit tests for hildi.agent, driven by the fake LLM transport. }
 
 {$mode delphi}{$H+}
 
@@ -8,7 +8,7 @@ interface
 uses
   Classes, SysUtils, SyncObjs, fpcunit, testregistry, fpjson, jsonparser,
   async.scheduler, async.concurrency,
-  hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.session,
+  hildi.llm, hildi.agent, hildi.session,
   llm_fakes;
 
 type

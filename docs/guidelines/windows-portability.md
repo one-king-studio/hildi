@@ -43,10 +43,10 @@ animation / text editing / clipboard.
 
 | Where | Unix | Windows |
 | --- | --- | --- |
-| `hildegard.helper.ansi` | `isatty(1)` | `_isatty` |
-| `hildegard.helper.env` | `setenv` | `SetEnvironmentVariable` |
-| `hildegard.helper.workspace` | `fpAccess` | an access check |
-| `hildegard.helper.store` | `fpChmod` (already no-op'd) | — |
+| `hildi.ansi` | `isatty(1)` | `_isatty` |
+| `hildi.env` | `setenv` | `SetEnvironmentVariable` |
+| `hildi.workspace` | `fpAccess` | an access check |
+| `hildi.store` | `fpChmod` (already no-op'd) | — |
 | build | static `libsqlite3.a`, `libmbedtls.a` | mingw `.a` or MSVC `.lib` |
 
 ### Needs a real rewrite
@@ -56,11 +56,11 @@ animation / text editing / clipboard.
    `tui.surface.video.pas` (`fpioctl`). Windows needs
    `SetConsoleMode` / `ReadConsoleInput` / `GetConsoleScreenBufferInfo`.
    `video` already supports Windows, so the surface half is the easier part.
-2. **TLS C shim** — `src/hildegard_tls_shim.c` uses `sys/socket.h`, `send`/`recv`,
+2. **TLS C shim** — `src/hildi_tls_shim.c` uses `sys/socket.h`, `send`/`recv`,
    `errno`, `SO_NOSIGPIPE`. Windows needs `winsock2.h`, `WSAStartup`,
    `WSAGetLastError`, and no SIGPIPE (there isn't one). `tests/tls_test_server.c`
    is worse (`arpa/inet.h`, `pthread.h`, `signal.h`, `unistd.h`).
-3. **Command tool streaming** — `hildegard.helper.process.pas` uses `fpSelect` in
+3. **Command tool streaming** — `hildi.process.pas` uses `fpSelect` in
    `WaitReadable` and `poNewProcessGroup`. Windows needs
    `WaitForMultipleObjects` / `PeekNamedPipe` and `CREATE_NEW_PROCESS_GROUP`.
 4. **Headless Sessions transport** — see below; this is the one to decide early.

@@ -12,7 +12,7 @@ uses
   tui.base, tui.input,
   tui.surface, tui.widget,
   tui.theme,
-  hildegard.helper.approval, tui.widgets.approvalmodal;
+  hildi.approval, tui.widgets.approvalmodal;
 
 type
   TChoiceRecorder = class

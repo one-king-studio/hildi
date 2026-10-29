@@ -13,7 +13,7 @@ REAL headless runtime against it, and `make smoke`. TDD-first; `make check` befo
 moving on. `main` only.
 
 > **Prerequisite found while speccing (file separately, do not block on it):**
-> `HILDEGARD_LLM_ENDPOINT` is advertised in `hildegard.helper.cli`'s help text and
+> `HILDI_LLM_ENDPOINT` is advertised in `hildi.cli`'s help text and
 > never read, and `SpawnDetached` passes no `--endpoint`/`--model`. A spawned
 > runtime therefore cannot be aimed at a test endpoint by any supported route.
 > The smoke spawns with an explicit argv instead, which is also the stronger test.
@@ -129,7 +129,7 @@ moving on. `main` only.
 
 1. **The runtime refuses an unknown session id** — a client must create the row
    first (`EnsureWorkspace` + `CreateSession`). Nothing documented this.
-2. **`HILDEGARD_LLM_ENDPOINT` is advertised in the CLI help and never read**, and
+2. **`HILDI_LLM_ENDPOINT` is advertised in the CLI help and never read**, and
    `SpawnDetached` passes no `--endpoint`/`--model` — so a spawned runtime cannot
    be aimed at a local provider by any supported route. Filed as a separate
    product gap; the smoke works around it by spawning with an explicit argv.

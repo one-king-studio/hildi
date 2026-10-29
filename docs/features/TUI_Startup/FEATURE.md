@@ -190,12 +190,12 @@ future     an async driver that never blocks the UI thread
 ### Internal
 
 - `examples/tui_agent.pas` — the ordering change.
-- `hildegard.helper.harness.app` — `THarnessApp`, the connecting state, the
+- `hildi.harness.app` — `THarnessApp`, the connecting state, the
   transcript, `RenderHistory`.
-- `hildegard.helper.harness.driver` — `ISessionDriver` / `TRemoteDriver`.
-- `hildegard.helper.harness.view` — `TSessionView.Open`, `History`, `Turns`.
-- `hildegard.helper.tui.app` — `Run`, `Present`, `Tick`, the `OnLoop` hook.
-- `hildegard.helper.tui.chat` — the stream and its windowed layout.
+- `hildi.harness.driver` — `ISessionDriver` / `TRemoteDriver`.
+- `hildi.harness.view` — `TSessionView.Open`, `History`, `Turns`.
+- `hildi.tui.app` — `Run`, `Present`, `Tick`, the `OnLoop` hook.
+- `hildi.tui.chat` — the stream and its windowed layout.
 
 ### External
 

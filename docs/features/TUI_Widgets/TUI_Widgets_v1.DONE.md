@@ -15,26 +15,26 @@ with a failing test; `make check` before moving on.
 - [x] Add `test_tui_theme` (name-free) `test_tui_widgets` units to the runner as
       created
 - [x] **Test**: `DarkTheme`/`LightTheme` set every role
-- [x] **Implement**: `hildegard.helper.tui.theme`
+- [x] **Implement**: `hildi.tui.theme`
 
 ### Phase 2: Single child and panel
 
 - [x] **Test**: `TSingleChild` forwards measure/arrange/render/event
-- [x] **Implement**: `TSingleChild` in `hildegard.helper.tui.panel`
+- [x] **Implement**: `TSingleChild` in `hildi.tui.panel`
 - [x] **Test**: `TPanel` border/title/padding; measure; border-off pads
 - [x] **Implement**: `TPanel`
 
 ### Phase 3: Focus
 
 - [x] **Test**: `Tab`/`Shift-Tab` cycle with wrap; click focuses; keys to focused
-- [x] **Implement**: `TFocusable`, `TFocusGroup` in `hildegard.helper.tui.focus`
+- [x] **Implement**: `TFocusable`, `TFocusGroup` in `hildi.tui.focus`
 
 ### Phase 4: Controls
 
 - [x] **Test**: `TButton` fires `OnClick` on Enter/Space/click; renders caption
-- [x] **Implement**: `hildegard.helper.tui.button`
+- [x] **Implement**: `hildi.tui.button`
 - [x] **Test**: `TList` selection/clamp/activate; accent row
-- [x] **Implement**: `hildegard.helper.tui.list`
+- [x] **Implement**: `hildi.tui.list`
 
 ### Phase 5: Integration & docs
 
@@ -49,11 +49,11 @@ with a failing test; `make check` before moving on.
 ### New Files
 
 ```
-src/hildegard.helper.tui.theme.pas
-src/hildegard.helper.tui.panel.pas
-src/hildegard.helper.tui.focus.pas
-src/hildegard.helper.tui.button.pas
-src/hildegard.helper.tui.list.pas
+src/hildi.tui.theme.pas
+src/hildi.tui.panel.pas
+src/hildi.tui.focus.pas
+src/hildi.tui.button.pas
+src/hildi.tui.list.pas
 tests/test_tui_widgets.pas
 examples/tui_widgets_demo.pas
 ```
@@ -61,7 +61,7 @@ examples/tui_widgets_demo.pas
 ### Modified Files
 
 ```
-tests/hildegard_helper_tests.pas   (add the test unit)
+tests/hildi_tests.pas   (add the test unit)
 examples/tui_widgets_demo.pas      (the kit demo; new)
 Makefile                           (widgets-demo target)
 docs/features/FEATURES.md

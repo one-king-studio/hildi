@@ -1,5 +1,5 @@
 unit test_skills;
-{ fpcunit tests for the skill registry (hildegard.helper.skills): declaration,
+{ fpcunit tests for the skill registry (hildi.skills): declaration,
   the manifest, load_skill, tool exposure/namespacing, and idle decay. A fake
   ISkillToolSource stands in for a real provider (e.g. MCP). }
 
@@ -9,7 +9,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.skills;
+  hildi.llm, hildi.agent, hildi.skills;
 
 type
   { A fake tool source: records Activate/Deactivate, offers one tool, and can be

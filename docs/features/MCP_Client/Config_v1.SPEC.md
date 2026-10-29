@@ -4,7 +4,7 @@
 
 **Depends on:** nothing (pure types + resolution).
 **Depended on by:** `Mcp_Client_v1.SPEC.md`; persisted by
-`hildegard.helper.store`.
+`hildi.store`.
 
 ## Purpose
 
@@ -51,9 +51,9 @@ the row array, not a file.
 ### Public API
 
 ```pascal
-unit hildegard.helper.mcp.config;
+unit hildi.mcp.config;
 { Typed MCP server configuration and its scope resolution. Pure: no store, no
-  files, no I/O. The SQLite store owns the rows (hildegard.helper.store); this
+  files, no I/O. The SQLite store owns the rows (hildi.store); this
   unit decides which row wins for a context. A future file source produces the
   same rows and reuses the same resolution. }
 
@@ -128,7 +128,7 @@ const
   MaxMcpNameChars = 64;
 ```
 
-### Store additions (`hildegard.helper.store`)
+### Store additions (`hildi.store`)
 
 The store owns the SQL. A new migration (**v3**, additive) creates the table;
 the store exposes typed operations; the store stays free of MCP *semantics*
@@ -202,7 +202,7 @@ CREATE INDEX idx_mcp_servers_scope
   (`scope`, `workspace_id`, `session_id`, `UNIQUE(...)`); `approval.store.pas`
   adapts the store to the engine. MCP config follows the same three-way split:
   `mcp.config` (pure) ↔ `store.pas` (SQL) ↔ the client (consumer).
-- **`hildegard.helper.store`** already has the migration mechanism
+- **`hildi.store`** already has the migration mechanism
   (`TMigration`, `DefaultMigrations`, `StoreSchemaVersion`), the
   `UNIQUE`-table upsert idiom, and single-connection serialization. The new
   table is one migration and four methods.

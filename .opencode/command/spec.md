@@ -17,7 +17,7 @@ Rules:
 
 - Edit only files under `docs/`.
 - Climb the Ponytail ladder (`docs/guidelines/ponytail.md`) before designing:
-  does this need to exist at all (YAGNI), does `src/hildegard.helper.*` already do it, does
+  does this need to exist at all (YAGNI), does `src/hildi.*` already do it, does
   the RTL/FCL, does the platform, does a `deps/` unit? Record the reuse in a
   "Prior art and reuse" bullet and design only the gap.
 - Question complex requests: "Do you actually need X, or does Y cover it?"

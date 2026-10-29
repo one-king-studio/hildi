@@ -1,5 +1,5 @@
 unit test_transcript;
-{ fpcunit tests for hildegard.helper.transcript. Rendering is asserted against a
+{ fpcunit tests for hildi.transcript. Rendering is asserted against a
   TStringStream; colour is forced off so output is deterministic. }
 
 {$mode delphi}{$H+}
@@ -8,7 +8,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.ansi, hildegard.helper.transcript, hildegard.helper.llm;
+  hildi.ansi, hildi.transcript, hildi.llm;
 
 type
   TTranscriptTest = class(TTestCase)

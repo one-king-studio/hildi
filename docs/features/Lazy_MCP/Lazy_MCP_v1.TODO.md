@@ -15,7 +15,7 @@ load connects + discovers. A re-ordering plus one new class, on top of the
 
 ## Implementation Tasks
 
-### Phase 1: The skill source (`hildegard.helper.mcp.client`)
+### Phase 1: The skill source (`hildi.mcp.client`)
 
 - [x] **Test**: `TMcpSkillSource.Activate` calls the manager to open the server
       (a spy manager records `OpenRuntime`) and returns the tool names; a failure
@@ -94,9 +94,9 @@ load connects + discovers. A re-ordering plus one new class, on top of the
 ## Modified Files
 
 ```
-src/hildegard.helper.mcp.client.pas       (TMcpSkillSource, RegisterMcpSkills)
-src/hildegard.helper.harness.session.pas  (drop FMcp.Open; register MCP skills)
-src/hildegard.helper.session.runtime.pas  (only if the preload flag lands here)
+src/hildi.mcp.client.pas       (TMcpSkillSource, RegisterMcpSkills)
+src/hildi.harness.session.pas  (drop FMcp.Open; register MCP skills)
+src/hildi.session.runtime.pas  (only if the preload flag lands here)
 tests/test_mcp_client.pas                 (source tests)
 tests/test_harness_session.pas            (startup / manifest / load tests)
 docs/features/FEATURES.md

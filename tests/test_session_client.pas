@@ -8,7 +8,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.session.client;
+  hildi.session.client;
 
 type
   TSessionClientTest = class(TTestCase)
@@ -29,7 +29,7 @@ implementation
 
 procedure TSessionClientTest.SetUp;
 begin
-  FTempDir := GetTempDir + 'hildegard-client-test-' + IntToStr(Random(MaxInt)) +
+  FTempDir := GetTempDir + 'hildi-client-test-' + IntToStr(Random(MaxInt)) +
     PathDelim;
   ForceDirectories(FTempDir);
 end;
@@ -58,7 +58,7 @@ var
 begin
   Explicit := Touch(FTempDir + 'custom-agent');
   AssertEquals('explicit path', Explicit,
-    ResolveRuntimeBinary(Explicit, FTempDir + 'hildegard-helper-tui'));
+    ResolveRuntimeBinary(Explicit, FTempDir + 'hildi'));
 end;
 
 procedure TSessionClientTest.TestSiblingFallback;
@@ -67,13 +67,13 @@ var
 begin
   Sibling := Touch(FTempDir + DefaultRuntimeBinary);
   AssertEquals('sibling', Sibling,
-    ResolveRuntimeBinary('', FTempDir + 'hildegard-helper-tui'));
+    ResolveRuntimeBinary('', FTempDir + 'hildi'));
 end;
 
 procedure TSessionClientTest.TestEmptyWhenNeitherExists;
 begin
   AssertEquals('nothing', '',
-    ResolveRuntimeBinary('', FTempDir + 'hildegard-helper-tui'));
+    ResolveRuntimeBinary('', FTempDir + 'hildi'));
 end;
 
 procedure TSessionClientTest.TestExplicitMustExist;
@@ -83,7 +83,7 @@ begin
   Sibling := Touch(FTempDir + DefaultRuntimeBinary);
   AssertEquals('falls back', Sibling,
     ResolveRuntimeBinary(FTempDir + 'missing-agent',
-      FTempDir + 'hildegard-helper-tui'));
+      FTempDir + 'hildi'));
 end;
 
 initialization

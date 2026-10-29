@@ -89,7 +89,7 @@ type
 
 ### Prior Art & Reuse
 
-Which existing units (`src/hildegard.helper.*`), RTL/FCL facilities, native platform
+Which existing units (`src/hildi.*`), RTL/FCL facilities, native platform
 features, or `deps/` units already cover part of this - and what genuinely
 remains to be built. Apply the Ponytail ladder (`docs/guidelines/ponytail.md`)
 and design only the gap.

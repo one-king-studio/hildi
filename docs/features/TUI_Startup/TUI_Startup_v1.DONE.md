@@ -17,7 +17,7 @@ TDD-first; `make check` before moving on. `main` only.
 
 ## Implementation Tasks
 
-### Phase 1: The connect lifecycle (`hildegard.helper.harness.app`)
+### Phase 1: The connect lifecycle (`hildi.harness.app`)
 
 > **Done** (commit `a18eca2`), extended with the lazy-session half (`a5521c7`,
 > `be40988`): `TConnState` is `csIdle`/`csConnecting`/`csConnected`/`csFailed`;
@@ -46,7 +46,7 @@ TDD-first; `make check` before moving on. `main` only.
       after `Attach`.
 - [x] **Implement**: `OnNeedConnect` + the held-prompt flush.
 
-### Phase 1b: The lazy session (`hildegard.helper.harness.view`)
+### Phase 1b: The lazy session (`hildi.harness.view`)
 
 > **Done** (`a5521c7`): a view opened with no session id and `LazySession` set
 > creates no session row until `EnsureSession`; the composition root wires the
@@ -60,7 +60,7 @@ TDD-first; `make check` before moving on. `main` only.
 - [x] **Test**: `EnsureSession` creates the session on demand and is idempotent.
 - [x] **Implement**: the composition root (`examples/tui_agent.pas`).
 
-### Phase 2: Tail-first history (`hildegard.helper.harness.view` + store)
+### Phase 2: Tail-first history (`hildi.harness.view` + store)
 
 > **Done** (`a006fbe`, `5c190d8`): the queries and the bounded `RenderHistory`.
 
@@ -78,7 +78,7 @@ TDD-first; `make check` before moving on. `main` only.
       the whole history.
 - [x] **Add** `MessageCount` (store + view), the virtual-extent input.
 
-### Phase 3: Back-pagination in the app (`hildegard.helper.harness.app`)
+### Phase 3: Back-pagination in the app (`hildi.harness.app`)
 
 > **Done** (`5c190d8`, `b7407c5`, `458b090`, `d4a3f4a`). The loads are
 > **synchronous** (a local SQLite query), so there is no in-flight moment and no
@@ -128,9 +128,9 @@ TDD-first; `make check` before moving on. `main` only.
 ## Modified Files
 
 ```
-src/hildegard.helper.harness.app.pas    (TConnState, Attach, FailConnect, paging)
-src/hildegard.helper.harness.view.pas   (HistoryTail, HistoryPage)
-src/hildegard.helper.store.pas          (a tail-limited active query, if not reused)
+src/hildi.harness.app.pas    (TConnState, Attach, FailConnect, paging)
+src/hildi.harness.view.pas   (HistoryTail, HistoryPage)
+src/hildi.store.pas          (a tail-limited active query, if not reused)
 tests/test_harness_app.pas              (lifecycle + paging tests)
 tests/test_session.pas                  (HistoryTail/HistoryPage tests)
 examples/tui_agent.pas                  (the reorder)

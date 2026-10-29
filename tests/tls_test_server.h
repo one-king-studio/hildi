@@ -5,8 +5,8 @@
  * committed), listens on an ephemeral loopback port, completes one handshake,
  * and echoes bytes until the peer closes. Compiled into the test binary only.
  */
-#ifndef HILDEGARD_TLS_TEST_SERVER_H
-#define HILDEGARD_TLS_TEST_SERVER_H
+#ifndef HILDI_TLS_TEST_SERVER_H
+#define HILDI_TLS_TEST_SERVER_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -33,4 +33,4 @@ int tls_test_server_ca_pem(char *buf, unsigned buflen);
 }
 #endif
 
-#endif /* HILDEGARD_TLS_TEST_SERVER_H */
+#endif /* HILDI_TLS_TEST_SERVER_H */

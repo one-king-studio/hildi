@@ -5,7 +5,7 @@
 ## Types
 
 ```pascal
-unit hildegard.helper.workspace.changes;
+unit hildi.workspace.changes;
 
 type
   TFileChangeKind = (fcCreated, fcModified, fcDeleted);
@@ -70,7 +70,7 @@ A write that leaves the content unchanged reports nothing (no diff to show).
 A spawned command writes outside the seam. Before `TProcessCommandExecutor`
 runs, the executor (when a change set was supplied) walks the workspace into a
 `TWorkspaceSnapshot` of `(size, mtime, is-dir)` per path
-(`hildegard.helper.workspace.snapshot`); after the run — including a failed or
+(`hildi.workspace.snapshot`); after the run — including a failed or
 timed-out one — it walks again and `DiffSnapshots` reports created, modified
 (size or mtime differs) and deleted paths through the same `TFileChangeSet`.
 

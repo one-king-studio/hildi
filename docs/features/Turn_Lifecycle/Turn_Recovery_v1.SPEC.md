@@ -2,9 +2,9 @@
 
 **Related Feature:** [FEATURE.md](FEATURE.md)
 
-**Depends on:** `hildegard.helper.store` (turn methods),
-`hildegard.helper.session.runtime`, `hildegard.helper.harness.turn`
-(`TApprovalGate`), `hildegard.helper.harness.session`.
+**Depends on:** `hildi.store` (turn methods),
+`hildi.session.runtime`, `hildi.harness.turn`
+(`TApprovalGate`), `hildi.harness.session`.
 
 ## Purpose
 
@@ -45,7 +45,7 @@ resume repair for a dangling tool call.
 ## Contracts & Interfaces
 
 ```pascal
-unit hildegard.helper.store;   // addition
+unit hildi.store;   // addition
 
 type
   TSqliteStore = class
@@ -56,7 +56,7 @@ type
       out ACount: Integer; out AError: TStoreError): Boolean;
   end;
 
-unit hildegard.helper.harness.turn;   // existing (used, not changed)
+unit hildi.harness.turn;   // existing (used, not changed)
 
 const
   { The default approval wait; past it the ask is denied and the loop proceeds.

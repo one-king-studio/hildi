@@ -3,8 +3,8 @@
 **Related Feature:** [FEATURE.md](FEATURE.md)
 
 **Depends on:** `Turn_Assembly_v1.SPEC.md` (the provider seam),
-`hildegard.helper.mcp.client` (the lifecycle manager).
-**Depended on by:** `hildegard.helper.harness.session` (registration).
+`hildi.mcp.client` (the lifecycle manager).
+**Depended on by:** `hildi.harness.session` (registration).
 
 ## Purpose
 
@@ -46,7 +46,7 @@ reconnect) is unchanged — it moves behind the interface.
 ## Contracts & Interfaces
 
 ```pascal
-unit hildegard.helper.mcp.client;   // additions
+unit hildi.mcp.client;   // additions
 
 type
   { Supplies the current effective MCP config (e.g. from the store). }

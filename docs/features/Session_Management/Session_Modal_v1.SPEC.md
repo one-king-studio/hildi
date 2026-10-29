@@ -2,11 +2,11 @@
 
 **Related Feature:** [FEATURE.md](FEATURE.md)
 
-**Depends on:** `hildegard.helper.store` (`ListSessions`, the v10 columns,
-`reply_keywords`), `hildegard.helper.harness.app` (`THarnessApp`, the command
-registry), `hildegard.helper.tui.palette` (`TCommand`, `TCommandPalette`),
-`hildegard.helper.tui.list` (`TListView`), `hildegard.helper.tui.approvalmodal`
-(the modal precedent), `hildegard.helper.tui.theme` (`TTheme`).
+**Depends on:** `hildi.store` (`ListSessions`, the v10 columns,
+`reply_keywords`), `hildi.harness.app` (`THarnessApp`, the command
+registry), `hildi.tui.palette` (`TCommand`, `TCommandPalette`),
+`hildi.tui.list` (`TListView`), `hildi.tui.approvalmodal`
+(the modal precedent), `hildi.tui.theme` (`TTheme`).
 
 **Depended on by:** nothing (a leaf surface).
 
@@ -67,7 +67,7 @@ No new dependency; the modal is a thin surface over the store and the widget kit
 ### The modal
 
 ```pascal
-unit hildegard.helper.tui.sessionsmodal;
+unit hildi.tui.sessionsmodal;
 
 type
   { What the modal does when a row action fires; the app performs the store

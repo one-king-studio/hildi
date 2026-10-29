@@ -5,7 +5,7 @@
 
 ## Overview
 
-Build `hildegard.helper.workspace`: selection, canonicalisation, access checks,
+Build `hildi.workspace`: selection, canonicalisation, access checks,
 resolution, containment, and a persisted workspace identity. This lands first,
 because approvals and sessions key off the workspace.
 
@@ -16,8 +16,8 @@ because approvals and sessions key off the workspace.
 ### Phase 1: Setup & Foundation
 
 - [x] Add `tests/test_workspace.pas` to the uses clause of
-      `tests/hildegard_helper_tests.pas`
-- [x] Create `src/hildegard.helper.workspace.pas` with the interface from the SPEC
+      `tests/hildi_tests.pas`
+- [x] Create `src/hildi.workspace.pas` with the interface from the SPEC
 - [x] Create `tests/test_workspace.pas` with an empty `TTestCase`
 
 ### Phase 2: Pure path helpers (TDD)
@@ -50,7 +50,7 @@ because approvals and sessions key off the workspace.
 
 ### Phase 5: CLI wiring
 
-- [x] Add `--workspace DIR` (and `HILDEGARD_WORKSPACE`) to `hildegard.helper.cli`
+- [x] Add `--workspace DIR` (and `HILDI_WORKSPACE`) to `hildi.cli`
 - [x] Open the workspace at startup in `examples/agent_cli.pas`; fail fatally if
       inaccessible; pass the root to the command tool's cwd
 - [x] Resume session + policy wiring deferred to the Approvals/Sessions features
@@ -70,17 +70,17 @@ because approvals and sessions key off the workspace.
 ### New Files
 
 ```
-src/hildegard.helper.workspace.pas
+src/hildi.workspace.pas
 tests/test_workspace.pas
 ```
 
 ### Modified Files
 
 ```
-src/hildegard.helper.store.pas      (migration v2, EnsureWorkspace/FindWorkspace)
-src/hildegard.helper.cli.pas        (--workspace option)
+src/hildi.store.pas      (migration v2, EnsureWorkspace/FindWorkspace)
+src/hildi.cli.pas        (--workspace option)
 examples/agent_cli.pas              (open workspace, use as cwd)
-tests/hildegard_helper_tests.pas    (add test unit)
+tests/hildi_tests.pas    (add test unit)
 tests/test_cli.pas                  (workspace option)
 ```
 

@@ -20,7 +20,7 @@ Evidence first: the corpus says `sed` (1,245 uses) is the whole story today;
 
 ### Phase 1: sed (shipped)
 
-- [x] **Implement** `hildegard.helper.shell.sed`: `-n`, `-E`/`-r`, `-e`,
+- [x] **Implement** `hildi.shell.sed`: `-n`, `-E`/`-r`, `-e`,
       `-i[SUFFIX]`; addresses `N`, `$`, `/re/`, ranges; `p`, `d`, `q`, `s///`
       with `g`/`p`/`i`; `&` and `\1`..`\9` in the replacement.
 - [x] **Register** `sed` in the tier and the option table (`-i<suffix>` exempt
@@ -59,7 +59,7 @@ Evidence first: the corpus says `sed` (1,245 uses) is the whole story today;
 
 ### Phase 5: rg (shipped)
 
-- [x] **Implement** the reusable `hildegard.helper.gitignore` parser (root and
+- [x] **Implement** the reusable `hildi.gitignore` parser (root and
       nested files, `!` negation, anchoring, `**`, classes, `.git` opt-in) and
       verify it against `git check-ignore`.
 - [x] **Implement** `rg` over the shared engine: `-n`, `-i`, `-l`, `-c`, `-F`,

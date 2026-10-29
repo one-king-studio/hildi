@@ -10,8 +10,8 @@ interface
 uses
   Classes, SysUtils, fpcunit, testregistry,
   changes.types, changes.text, changes.log,
-  hildegard.helper.hash,
-  hildegard.helper.changes.revert;
+  hildi.hash,
+  hildi.changes.revert;
 
 type
   TShaHasher = class

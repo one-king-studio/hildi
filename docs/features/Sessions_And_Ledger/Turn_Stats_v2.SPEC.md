@@ -53,7 +53,7 @@ Cumulative status
 Context guard
 
 - [ ] `THarnessSessionConfig.MaxContextTokens` (0 => the
-      `HILDEGARD_MAX_CONTEXT_TOKENS` env var, else the agent default) overrides
+      `HILDI_MAX_CONTEXT_TOKENS` env var, else the agent default) overrides
       the loop's context guard. The limit is a model property the app does not
       know yet; this is the stopgap until it is pulled from the model API.
 - [ ] `THarnessSession.MaxContextTokens` exposes the resolved value.
@@ -98,7 +98,7 @@ Per-block durations
 
 > Contracts as Pascal type declarations. No method bodies.
 
-### Store (`hildegard.helper.store`)
+### Store (`hildi.store`)
 
 ```pascal
 { The session's billed sums (prompt/completion/cached/reasoning), the final
@@ -107,14 +107,14 @@ function TSqliteStore.SessionTotals(const ASessionId: string;
   out ATurn: TTurnRecord; out AError: TStoreError): Boolean;
 ```
 
-### Harness session (`hildegard.helper.harness.session`)
+### Harness session (`hildi.harness.session`)
 
 ```pascal
 function THarnessSession.SessionTotals: TTurnRecord;   // cumulative
 function THarnessSession.Turns: TTurnRecordArray;      // ordered, for restore
 ```
 
-### Stats (`hildegard.helper.harness.stats`)
+### Stats (`hildi.harness.stats`)
 
 ```pascal
 function FormatTurnStats(const ATurn: TTurnRecord): string;      // v1
@@ -123,27 +123,27 @@ function FormatThoughtLabel(ADurationMs: Int64): string;         // 'Thought …
 function FormatDurationMs(AMs: Int64): string;                   // '3.4s'
 ```
 
-### Conversation store (`hildegard.helper.agent`)
+### Conversation store (`hildi.agent`)
 
 ```pascal
 procedure IConversationStore.AppendReasoning(const AText: string;
   ADurationMs: Int64);
 ```
 
-### Turn events (`hildegard.helper.harness.turn`)
+### Turn events (`hildi.harness.turn`)
 
 ```pascal
 TTurnEventKind = (..., teReasoningDone, ...);   // ElapsedMs = reasoning ms
 ```
 
-### Session protocol (`hildegard.helper.session.protocol`)
+### Session protocol (`hildi.session.protocol`)
 
 ```pascal
 TSessionEventKind = (..., ekReasoningDone, ...);   // wire: 'reasoning_done'
 // carries elapsed_ms
 ```
 
-### Chat stream (`hildegard.helper.tui.chat`)
+### Chat stream (`hildi.tui.chat`)
 
 ```pascal
 TChatKind = (ckUser, ckAssistant, ckError, ckThought, ckTool, ckThinking, ckTurn);
@@ -181,7 +181,7 @@ Divider (width `W`, stats width `S`):
 ### Component Boundaries
 
 - **Store** answers the aggregate and the turn list.
-- **`harness.stats`** owns every format; it depends only on `hildegard.helper.session`.
+- **`harness.stats`** owns every format; it depends only on `hildi.session`.
 - **`tui.chat`** owns the divider block.
 - **`harness.app`** composes the status, the divider and the thought label.
 - **`agent`** owns the timing; **`harness.turn`**/**`session.runtime`** carry it.

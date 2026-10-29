@@ -1,5 +1,5 @@
 unit test_tool_script;
-{ fpcunit tests for hildegard.helper.tool.script: the run_script tool. A real
+{ fpcunit tests for hildi.tool.script: the run_script tool. A real
   TToolRegistry with the file tool and the script tool, a fake approval service
   that records the asks, and a temporary workspace. }
 
@@ -9,9 +9,9 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  hildegard.helper.llm, hildegard.helper.agent, hildegard.helper.approval,
-  hildegard.helper.workspace, hildegard.helper.files, hildegard.helper.script,
-  hildegard.helper.tool.script;
+  hildi.llm, hildi.agent, hildi.approval,
+  hildi.workspace, hildi.files, hildi.script,
+  hildi.tool.script;
 
 type
   { Records every ask it resolves; Allow toggles allow vs deny. }

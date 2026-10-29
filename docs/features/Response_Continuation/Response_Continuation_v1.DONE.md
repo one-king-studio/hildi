@@ -6,8 +6,8 @@
 ## Overview
 
 Task breakdown for `Response_Continuation_v1.SPEC.md`. The change is almost
-entirely in `hildegard.helper.agent`, with a small change to the live error path
-in `hildegard.helper.harness.app`. Complete: `make check` green at 621 tests,
+entirely in `hildi.agent`, with a small change to the live error path
+in `hildi.harness.app`. Complete: `make check` green at 621 tests,
 leak-clean.
 
 ## Implementation Tasks
@@ -15,9 +15,9 @@ leak-clean.
 ### Phase 1: Foundation
 
 - [x] **Add the types**: `leTruncated` appended to `TLLMErrorCode` in
-      `src/hildegard.helper.llm.pas`; `DefaultMaxContinuations`,
+      `src/hildi.llm.pas`; `DefaultMaxContinuations`,
       `ContinuationInstruction`, `TruncatedToolNotice`, `TPendingResponse`, and
-      `TAgentConfig.MaxContinuations` in `src/hildegard.helper.agent.pas`
+      `TAgentConfig.MaxContinuations` in `src/hildi.agent.pas`
 - [x] **Test**: `TestErrorCodeOrdinalsStable` in `tests/test_llm.pas` - the
       ordinals of `leOk..leLoop` are unchanged and `leTruncated` is last
 - [x] **Implement**: nothing further - the ordinal test goes green with the type
@@ -87,9 +87,9 @@ leak-clean.
 ## Files Modified
 
 ```
-src/hildegard.helper.llm.pas         leTruncated appended
-src/hildegard.helper.agent.pas       pending buffer, continuation, notice, config
-src/hildegard.helper.harness.app.pas error rollback; system prompt not restored
+src/hildi.llm.pas         leTruncated appended
+src/hildi.agent.pas       pending buffer, continuation, notice, config
+src/hildi.harness.app.pas error rollback; system prompt not restored
 tests/test_agent.pas                 12 new tests, 1 updated
 tests/test_llm.pas                   TestErrorCodeOrdinalsStable
 tests/test_harness_app.pas           2 new tests

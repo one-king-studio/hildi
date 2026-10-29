@@ -5,13 +5,13 @@
 ## Scope
 
 A line-oriented sed subset that covers the recorded corpus (1,245 uses) and
-declines the rest. Implemented in `hildegard.helper.shell.sed`
+declines the rest. Implemented in `hildi.shell.sed`
 (`RunSed`) and registered as the `sed` command by the tier.
 
 ```
-src/hildegard.helper.shell.sed.pas        RunSed (the interpreter)
-src/hildegard.helper.shell.pattern.pas    BRE/ERE translation + matcher (shared)
-src/hildegard.helper.shell.commands.pas   the `sed` command: argv, files, -i
+src/hildi.shell.sed.pas        RunSed (the interpreter)
+src/hildi.shell.pattern.pas    BRE/ERE translation + matcher (shared)
+src/hildi.shell.commands.pas   the `sed` command: argv, files, -i
 ```
 
 ## Command line

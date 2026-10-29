@@ -48,7 +48,7 @@ a rewrite, and what makes the protocol unit-testable with no server at all.
 ### Public API
 
 ```pascal
-unit hildegard.helper.jsonrpc;
+unit hildi.jsonrpc;
 
 type
   TJsonRpcId = Int64;
@@ -133,7 +133,7 @@ const
 
 - **`fpjson`/`jsonparser`** (rung 3): object build/parse and `AsString`/`Find`
   already do the heavy lifting; the codec is a thin, typed skin over them.
-- **The session protocol** (`hildegard.helper.session.protocol`,
+- **The session protocol** (`hildi.session.protocol`,
   `TSessionCodec`) is the closest in-house analogue: it also encodes/decodes a
   line-delimited envelope. It is **not** reused — its schema is the session
   wire, not JSON-RPC — but it is the pattern to follow, and the same framing

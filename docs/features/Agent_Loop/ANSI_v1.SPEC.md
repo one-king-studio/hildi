@@ -4,7 +4,7 @@
 
 ## Purpose
 
-`hildegard.helper.ansi` is a zero-dependency helper for colour and emphasis in
+`hildi.ansi` is a zero-dependency helper for colour and emphasis in
 terminal output. It emits SGR escape sequences, and it disables itself when
 output is not a terminal (or when the user asks for no colour) so piped or
 logged output stays clean. It never buffers, moves the cursor, or reads input -
@@ -33,7 +33,7 @@ over the console and are unsuitable for streaming line output.
 > Contracts as Pascal type declarations. No method bodies.
 
 ```pascal
-unit hildegard.helper.ansi;
+unit hildi.ansi;
 
 type
   TAnsiColor = record

@@ -297,9 +297,9 @@ Each step stands alone:
    every later step delivers through it.
 2. **Transient board notices** (`pkBoard`). Small, and the current
    always-persist behaviour is the blocker for everything multi-agent.
-3. **`file_changes` + `file_keyframes` + a diff generator** (`hildegard.helper.diff`
+3. **`file_changes` + `file_keyframes` + a diff generator** (`hildi.diff`
    with `DiffLines`; generation and application are different problems and
-   `hildegard.helper.patch` is already trusted as an applier). Wire `OnChanges`,
+   `hildi.patch` is already trusted as an applier). Wire `OnChanges`,
    which today has no consumer.
 4. **`board_messages` + cursor + `board_post`/`board_read`**, single-agent first —
    an agent talking to itself proves the plumbing.
@@ -314,7 +314,7 @@ intra-line word diff, and any board message that carries authority.
 
 ## Open questions
 
-- **Diff generator home** — new unit, or extend `hildegard.helper.patch`?
+- **Diff generator home** — new unit, or extend `hildi.patch`?
   Leaning new.
 - **Board notification budget** — a cap per peer, and how many peers before the
   notice becomes `+4 more`.

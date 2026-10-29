@@ -1,5 +1,5 @@
 unit test_mcp_config;
-{ fpcunit tests for hildegard.helper.mcp.config. Pure resolution and validation;
+{ fpcunit tests for hildi.mcp.config. Pure resolution and validation;
   no store, no files. }
 
 {$mode delphi}{$H+}
@@ -7,7 +7,7 @@ unit test_mcp_config;
 interface
 
 uses
-  SysUtils, fpcunit, testregistry, hildegard.helper.mcp.config;
+  SysUtils, fpcunit, testregistry, hildi.mcp.config;
 
 type
   TMcpConfigTest = class(TTestCase)

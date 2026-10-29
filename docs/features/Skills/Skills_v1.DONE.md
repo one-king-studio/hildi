@@ -5,7 +5,7 @@
 
 ## Overview
 
-Add `hildegard.helper.skills`: a `TSkillRegistry` that implements the existing
+Add `hildi.skills`: a `TSkillRegistry` that implements the existing
 `IToolProvider` seam, renders a manifest as its `PromptFragment`, offers active
 skills' tools plus the always-on `load_skill`, and decays idle skills at the turn
 boundary. One new unit, no new seam. TDD-first; `make check` before moving on.
@@ -13,13 +13,13 @@ boundary. One new unit, no new seam. TDD-first; `make check` before moving on.
 
 ## Implementation Tasks
 
-### Phase 1: Types and the registry skeleton (`hildegard.helper.skills`)
+### Phase 1: Types and the registry skeleton (`hildi.skills`)
 
-- [x] **Create** `src/hildegard.helper.skills.pas` (interface only):
+- [x] **Create** `src/hildi.skills.pas` (interface only):
       `TSkillState`, `ISkillToolSource`, `TSkill`, `TSkillRegistry`,
       `DefaultSkillTtlMs`, `LoadSkillToolName`.
 - [x] **Add** `test_skills.pas` to the `uses` clause of
-      `tests/hildegard_helper_tests.pas`.
+      `tests/hildi_tests.pas`.
 - [x] **Test**: `Add` declares skills; `StateOf` returns `ssUnloaded` for each.
 - [x] **Implement**: `TSkillRegistry.Add` / `StateOf` (declaration list).
 
@@ -89,11 +89,11 @@ boundary. One new unit, no new seam. TDD-first; `make check` before moving on.
 ## Modified Files
 
 ```
-src/hildegard.helper.skills.pas     (new)
+src/hildi.skills.pas     (new)
 tests/test_skills.pas               (new)
-tests/hildegard_helper_tests.pas    (add the test unit)
-src/hildegard.helper.harness.session.pas   (register the registry as a provider)
-src/hildegard.helper.agent.pas      (only if the system prompt copy lives here)
+tests/hildi_tests.pas    (add the test unit)
+src/hildi.harness.session.pas   (register the registry as a provider)
+src/hildi.agent.pas      (only if the system prompt copy lives here)
 docs/features/FEATURES.md
 ```
 
@@ -135,14 +135,14 @@ docs/features/FEATURES.md
 
 ## Outcome
 
-Implemented on `main`. `hildegard.helper.skills` provides `TSkillRegistry` (an
+Implemented on `main`. `hildi.skills` provides `TSkillRegistry` (an
 `IToolProvider`), `ISkillToolSource`, `TSkill`, the manifest, `load_skill`, and
 idle decay; `tests/test_skills.pas` has 18 tests; the registry is wired into
 `THarnessSession` as the first provider and freed by refcount. `make check`
 green.
 
 **Deviations from the SPEC, with reasons:**
-- **The clock.** The SPEC said to reuse `hildegard.helper.tui.clock`
+- **The clock.** The SPEC said to reuse `hildi.tui.clock`
   (`MonotonicMs`); that links a TUI unit into the headless runtime and fails the
   Process Split test. The registry calls `SysUtils.GetTickCount64` directly, like
   `process.pas` and `subagent.supervisor.pas`. The SPEC is corrected.

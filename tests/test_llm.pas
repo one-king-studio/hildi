@@ -1,5 +1,5 @@
 unit test_llm;
-{ fpcunit tests for hildegard.helper.llm, driven entirely by a fake transport
+{ fpcunit tests for hildi.llm, driven entirely by a fake transport
   that replays canned SSE chunks. No network access. }
 
 {$mode delphi}{$H+}
@@ -8,7 +8,7 @@ interface
 
 uses
   Classes, SysUtils, ctypes, fpcunit, testregistry, fpjson, jsonparser,
-  hildegard.helper.llm, llm_fakes;
+  hildi.llm, llm_fakes;
 
 type
   TTextCollector = class
@@ -141,8 +141,8 @@ end;
 
 procedure TLLMClientTest.TearDown;
 begin
-  SetEnv('HILDEGARD_LLM_API_KEY', '');
-  SetEnv('HILDEGARD_LLM_MODEL', '');
+  SetEnv('HILDI_LLM_API_KEY', '');
+  SetEnv('HILDI_LLM_MODEL', '');
 end;
 
 function TLLMClientTest.MakeClient(out AFake: TFakeTransport;
@@ -193,8 +193,8 @@ procedure TLLMClientTest.TestConfigResolutionReadsEnvironment;
 var
   Cfg, R: TLLMConfig;
 begin
-  SetEnv('HILDEGARD_LLM_MODEL', 'env-model');
-  SetEnv('HILDEGARD_LLM_API_KEY', 'env-key');
+  SetEnv('HILDI_LLM_MODEL', 'env-model');
+  SetEnv('HILDI_LLM_API_KEY', 'env-key');
   Cfg := Default(TLLMConfig);
   R := ResolveLLMConfig(Cfg);
   AssertEquals('model from env', 'env-model', R.Model);
@@ -209,7 +209,7 @@ var
   Res: TChatResult;
   Err: TLLMError;
 begin
-  SetEnv('HILDEGARD_LLM_API_KEY', '');
+  SetEnv('HILDI_LLM_API_KEY', '');
   SetEnv('FIREWORKS_API_KEY', '');
   Client := MakeClient(Fake, 'a-model', '');
   try

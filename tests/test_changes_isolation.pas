@@ -1,6 +1,6 @@
 unit test_changes_isolation;
 { The isolation gate for the changes library: nothing in src/changes may name a
-  hildegard.helper.* unit in a uses clause. (The `make changes-standalone` build
+  hildi.* unit in a uses clause. (The `make changes-standalone` build
   is the stronger check; this catches a dependency added later.) }
 
 {$mode delphi}{$H+}
@@ -96,7 +96,7 @@ begin
   try
     for I := 0 to Files.Count - 1 do
       AssertFalse(Files[I] + ' must not use a harness unit',
-        UsesClauseNames(Files[I], 'hildegard.helper'));
+        UsesClauseNames(Files[I], 'hildi'));
   finally
     Files.Free;
   end;
@@ -116,7 +116,7 @@ begin
       AssertFalse(Files[I] + ' must not use sqlite',
         UsesClauseNames(Files[I], 'sqlite'));
       AssertFalse(Files[I] + ' must not use the store',
-        UsesClauseNames(Files[I], 'hildegard.helper.store'));
+        UsesClauseNames(Files[I], 'hildi.store'));
     end;
   finally
     Files.Free;

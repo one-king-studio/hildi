@@ -17,7 +17,7 @@ Sessions v2.
       `TestFormatTurnStatsAbbreviatesTokens`, `TestFormatTurnStatsDuration`,
       `TestFormatTurnStatsZeroTurnIsEmpty` in `tests/test_harness_stats.pas`
 - [x] **Implement**: `FormatTurnStats` in
-      `src/hildegard.helper.harness.stats.pas`
+      `src/hildi.harness.stats.pas`
 
 ### Phase 2: The latest turn
 
@@ -56,23 +56,23 @@ Sessions v2.
 ### New Files
 
 ```
-src/hildegard.helper.harness.stats.pas
+src/hildi.harness.stats.pas
 tests/test_harness_stats.pas
 ```
 
 ### Modified Files
 
 ```
-src/hildegard.helper.store.pas            MostRecentTurn
-src/hildegard.helper.harness.session.pas  LastTurn
-src/hildegard.helper.tui.chatpanel.pas    the right-aligned stats line + FitStatus
-src/hildegard.helper.harness.app.pas      compose the status/CTA
+src/hildi.store.pas            MostRecentTurn
+src/hildi.harness.session.pas  LastTurn
+src/hildi.tui.chatpanel.pas    the right-aligned stats line + FitStatus
+src/hildi.harness.app.pas      compose the status/CTA
 examples/tui_layout_demo.pas              CTA + stats
 tests/test_store.pas                      MostRecentTurn tests
 tests/test_harness_session.pas            LastTurn test
 tests/test_tui_chatpanel.pas              stats-line tests
 tests/test_harness_app.pas                live vs resume identity
-tests/hildegard_helper_tests.pas          add the new test unit to uses
+tests/hildi_tests.pas          add the new test unit to uses
 ```
 
 ## Success Criteria

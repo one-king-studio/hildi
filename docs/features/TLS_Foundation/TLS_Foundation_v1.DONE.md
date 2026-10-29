@@ -25,7 +25,7 @@ before wiring the handler.
 
 ### Phase 2: The C shim (spike: real handshake)
 
-- [x] **Write** `src/hildegard_tls_shim.h` / `.c`: opaque handle, `new`/`free`,
+- [x] **Write** `src/hildi_tls_shim.h` / `.c`: opaque handle, `new`/`free`,
       `set_ca_mem`/`set_ca_file`, `connect`, `read`, `write`, `pending`,
       `close`, `last_error`, `live_count`; all contexts allocated and freed in
       one place
@@ -40,7 +40,7 @@ before wiring the handler.
 - [x] **Test** (`tests/test_tls.pas`): `TestHandlerIsRegisteredDefault`,
       `TestLoopbackHandshake` (asserts the shim live count returns to zero,
       including after a failed connect), `TestBadCaFileFails`
-- [x] **Implement** `src/hildegard.helper.tls.pas`: `TMbedTLSSocketHandler`
+- [x] **Implement** `src/hildi.tls.pas`: `TMbedTLSSocketHandler`
       (`Connect`/`Close`/`Shutdown`/`Send`/`Recv`/`BytesAvailable` + error
       getters), the `external` binds, and self-registration in `initialization`
 - [x] **Test**: `TestLoopbackRejectsUnknownCa`, `TestLoopbackRejectsWrongHost`
@@ -48,9 +48,9 @@ before wiring the handler.
       error mapping
 - [x] **Test**: `TestHandlerDrivesTFPHTTPClient` — a real `TFPHTTPClient` GET
       over loopback returns the expected body
-- [x] **Change** `src/hildegard.helper.llm.pas`: `uses ... hildegard.helper.tls`
+- [x] **Change** `src/hildi.llm.pas`: `uses ... hildi.tls`
       instead of `opensslsockets`
-- [x] **Add** `test_tls` to `tests/hildegard_helper_tests.pas` and link the shim
+- [x] **Add** `test_tls` to `tests/hildi_tests.pas` and link the shim
       + test server + mbedTLS into the test targets
 
 ### Phase 4: CA trust (embed + override)
@@ -100,9 +100,9 @@ before wiring the handler.
 ```
 scripts/fetch-mbedtls.sh              pinned source fetch + checksum
 scripts/fetch-cacert.sh               pinned CA bundle fetch + checksum
-src/hildegard_tls_shim.h              shim contract
-src/hildegard_tls_shim.c              mbedTLS client wrapper (opaque handle)
-src/hildegard.helper.tls.pas          TSSLSocketHandler subclass + registration
+src/hildi_tls_shim.h              shim contract
+src/hildi_tls_shim.c              mbedTLS client wrapper (opaque handle)
+src/hildi.tls.pas          TSSLSocketHandler subclass + registration
 tests/test_tls.pas                    unit + loopback integration tests
 tests/tls_test_server.h               test-only server contract
 tests/tls_test_server.c               test-only mbedTLS server
@@ -113,8 +113,8 @@ tests/fixtures/tls/localhost.key      throwaway test key (test-only)
 ### Modified Files
 
 ```
-src/hildegard.helper.llm.pas          uses: opensslsockets -> hildegard.helper.tls
-tests/hildegard_helper_tests.pas      add test_tls to the uses clause
+src/hildi.llm.pas          uses: opensslsockets -> hildi.tls
+tests/hildi_tests.pas      add test_tls to the uses clause
 Makefile                              vendoring, CA embed, link wiring
 .gitignore                            fetched mbedTLS source, cacert, build/gen
 HANDOFF.md                            current state + lessons
@@ -136,7 +136,7 @@ docs/features/FEATURES.md             status
 - **The shim is the binding.** Do not mirror mbedTLS struct layouts in Pascal;
   the opaque handle is what keeps a version bump safe.
 - **heaptrc does not see C `malloc`.** The leak gate will not catch an mbedTLS
-  leak, so the shim exposes `hildegard_tls_live_count` and the test asserts it
+  leak, so the shim exposes `hildi_tls_live_count` and the test asserts it
   returns to zero.
 - **Timeouts must not regress.** `Recv` keeps the "stalled read with
   `IOTimeout>0` yields 0/EOF" behaviour the OpenSSL handler had.

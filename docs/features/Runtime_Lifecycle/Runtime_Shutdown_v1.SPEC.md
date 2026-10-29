@@ -2,8 +2,8 @@
 
 **Related Feature:** [FEATURE.md](FEATURE.md)
 
-**Depends on:** `hildegard.helper.session.runtime`,
-`hildegard.helper.session.protocol`, `hildegard.helper.session.client`.
+**Depends on:** `hildi.session.runtime`,
+`hildi.session.protocol`, `hildi.session.client`.
 **Depended on by:** the TUI/CLI clients (they may issue `scShutdown` / rely on
 the no-clients exit).
 
@@ -44,7 +44,7 @@ flag and `Shutdown` path, so there is one teardown.
 ## Contracts & Interfaces
 
 ```pascal
-unit hildegard.helper.session.protocol;   // addition
+unit hildi.session.protocol;   // addition
 
 type
   TSessionCommandKind = (
@@ -54,7 +54,7 @@ type
       ordinals are unchanged. }
     scShutdown);
 
-unit hildegard.helper.session.runtime;   // addition
+unit hildi.session.runtime;   // addition
 
 type
   TSessionRuntimeConfig = record

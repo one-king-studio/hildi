@@ -8,7 +8,7 @@ tool:
 
 1. **Shell command parsing for the approval gate.** The gate must know which
    programs a command will run. The current parser
-   (`hildegard.helper.command.policy`) splits a command line at unquoted POSIX
+   (`hildi.command.policy`) splits a command line at unquoted POSIX
    operators and calls each segment's first word its executable. It has no
    notion of shell keywords or nesting, so it is wrong in **both** directions.
 2. **Syntax highlighting** of fenced code blocks, replacing the hand-rolled
@@ -267,13 +267,13 @@ cheapest.
 
 ### Internal
 
-- `hildegard.helper.command.tool` / `hildegard.helper.command.policy` — the
+- `hildi.command.tool` / `hildi.command.policy` — the
   current splitter and the approval adapter (`BuildAsks`); the new parser
   replaces the plan it consumes.
-- `hildegard.helper.approval` — the ask/whitelist engine (unchanged).
-- `hildegard.helper.syntax` / `hildegard.helper.tui.markdownview` — the
+- `hildi.approval` — the ask/whitelist engine (unchanged).
+- `hildi.syntax` / `hildi.tui.markdownview` — the
   highlighting consumer; the engine swaps behind the same span pipeline.
-- `hildegard.helper.wrap` — the `$ <command>` display line (highlighting).
+- `hildi.wrap` — the `$ <command>` display line (highlighting).
 
 ### External
 

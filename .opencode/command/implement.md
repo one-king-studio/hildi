@@ -12,7 +12,7 @@ solution it describes, following `docs/guidelines/spec-driven-development.md`
 the provided instructions.
 
 Before writing any code, climb the Ponytail ladder
-(`docs/guidelines/ponytail.md`): YAGNI first, then reuse from `src/hildegard.helper.*`,
+(`docs/guidelines/ponytail.md`): YAGNI first, then reuse from `src/hildi.*`,
 then the FPC RTL/FCL, then the platform, then `deps/`. Write only the gap. Fix
 bugs at the root cause - grep the callers and fix the shared function once, not
 each symptom site. Mark deliberate shortcuts with a `ponytail:` comment naming
@@ -29,9 +29,9 @@ Workflow:
      `make test SUITE=<TestName>` (red).
    - Implement the minimum in `src/` to pass (green).
    - Refactor while green.
-4. Keep units in `{$mode delphi}{$H+}`, named `hildegard.helper.<area>`. Add any
+4. Keep units in `{$mode delphi}{$H+}`, named `hildi.<area>`. Add any
    new `tests/test_*.pas` unit to the `uses` clause of
-   `tests/hildegard_helper_tests.pas`.
+   `tests/hildi_tests.pas`.
 5. Mark tasks complete in the TODO as you go; record deviations from the spec.
 6. Run `make check` (all tests + the heaptrc leak gate) before considering any
    task done.

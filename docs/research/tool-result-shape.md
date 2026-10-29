@@ -146,7 +146,7 @@ blocks keep their attribution; the view can group the batch or list per call.
 | --- | --- | --- |
 | Markdown tool results | Files + a formatter | small; touches 19 result strings |
 | `TFileChange` + capture at `WriteAtomic` | Files | small-medium (one choke point) |
-| A unified-diff helper | **already exists** — `hildegard.helper.patch` parses one | the render side reuses it |
+| A unified-diff helper | **already exists** — `hildi.patch` parses one | the render side reuses it |
 | `tool_changes` table + migration | Store | medium (the usual schema reset) |
 | TUI block rendering the diff | harness.app, chat | medium |
 | Context cost | — | **zero** (never in the prompt) |

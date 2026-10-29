@@ -12,9 +12,9 @@ implementation task starts with a failing test; run `make check` before moving o
 
 ### Phase 1: Turn events, queue, gate, worker
 
-- [x] Add `test_harness_turn` to `tests/hildegard_helper_tests.pas`
+- [x] Add `test_harness_turn` to `tests/hildi_tests.pas`
 - [x] **Types**: `TTurnEvent`/`TTurnEventKind`, `TTurnQueue`, `TApprovalGate`,
-      `TTurnWorker` in `src/hildegard.helper.harness.turn.pas` (interface only)
+      `TTurnWorker` in `src/hildi.harness.turn.pas` (interface only)
 - [x] **Test**: `TTurnQueueTest.TestFifoOrderAndEmpty`
 - [x] **Implement**: `TTurnQueue` over a `TCriticalSection` FIFO
 - [x] **Test**: `TApprovalGateTest.TestAskBlocksUntilAnswer` (Ask on a helper
@@ -36,7 +36,7 @@ implementation task starts with a failing test; run `make check` before moving o
 - [x] **Test**: typing, Backspace/Delete, Home/End, Left/Right by cluster
 - [x] **Test**: Up/Down history and non-mutation after recall
 - [x] **Test**: Enter fires `OnSubmit` with the text and clears; inactive ignores
-- [x] **Implement**: `TPromptLine` in `src/hildegard.helper.tui.prompt.pas`
+- [x] **Implement**: `TPromptLine` in `src/hildi.tui.prompt.pas`
 
 ### Phase 3: Conversation view
 
@@ -45,7 +45,7 @@ implementation task starts with a failing test; run `make check` before moving o
 - [x] **Test**: sticky-to-bottom - follows on append; stops after scroll-up;
       resumes at the bottom; `Clear`
 - [x] **Implement**: `TConversationView` in
-      `src/hildegard.helper.tui.conversation.pas`
+      `src/hildi.tui.conversation.pas`
 
 ### Phase 4: Approval modal
 
@@ -54,7 +54,7 @@ implementation task starts with a failing test; run `make check` before moving o
 - [x] **Test**: Enter fires `OnChoose` once with the matching option; Escape
       denies; a zero-option ask denies safely
 - [x] **Implement**: `TApprovalModal` in
-      `src/hildegard.helper.tui.approvalmodal.pas`
+      `src/hildi.tui.approvalmodal.pas`
 
 ### Phase 5: Harness session
 
@@ -63,7 +63,7 @@ implementation task starts with a failing test; run `make check` before moving o
 - [x] **Test**: store config ensures workspace/session; `History` round trips
 - [x] **Test**: `Resume` with a bad id fails
 - [x] **Implement**: `THarnessSession.Open` in
-      `src/hildegard.helper.harness.session.pas` (config resolution shared with
+      `src/hildi.harness.session.pas` (config resolution shared with
       the CLI; see the reuse note)
 
 ### Phase 6: Application assembly
@@ -74,7 +74,7 @@ implementation task starts with a failing test; run `make check` before moving o
       re-enables, `teError` shows an error line
 - [x] **Test**: draining N events in one `Step` renders one frame
 - [x] **Test (leak)**: quit mid-turn with a blocked approval joins the worker
-- [x] **Implement**: `THarnessApp` in `src/hildegard.helper.harness.app.pas`
+- [x] **Implement**: `THarnessApp` in `src/hildi.harness.app.pas`
 
 ### Phase 7: Example & docs
 
@@ -101,12 +101,12 @@ implementation task starts with a failing test; run `make check` before moving o
 ### New Files
 
 ```
-src/hildegard.helper.harness.turn.pas
-src/hildegard.helper.harness.session.pas
-src/hildegard.helper.harness.app.pas
-src/hildegard.helper.tui.prompt.pas
-src/hildegard.helper.tui.conversation.pas
-src/hildegard.helper.tui.approvalmodal.pas
+src/hildi.harness.turn.pas
+src/hildi.harness.session.pas
+src/hildi.harness.app.pas
+src/hildi.tui.prompt.pas
+src/hildi.tui.conversation.pas
+src/hildi.tui.approvalmodal.pas
 tests/test_harness_turn.pas
 tests/test_harness_session.pas
 tests/test_harness_app.pas
@@ -119,7 +119,7 @@ examples/tui_agent.pas
 ### Modified Files
 
 ```
-tests/hildegard_helper_tests.pas   (add the new test units to uses)
+tests/hildi_tests.pas   (add the new test units to uses)
 Makefile                           (tui-agent target)
 docs/features/FEATURES.md
 HANDOFF.md

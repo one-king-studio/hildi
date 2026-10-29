@@ -15,7 +15,7 @@ TDD-first; `make check` before moving on. `main` only.
 
 ## Implementation Tasks
 
-### Phase 1: The modal's activate key (`hildegard.helper.tui.sessionsmodal`)
+### Phase 1: The modal's activate key (`hildi.tui.sessionsmodal`)
 
 - [x] **Add** `TSessionActivateEvent` and the `OnActivate` property.
 - [x] **Test**: Enter raises `OnActivate` with the selected id; Enter on an empty
@@ -24,7 +24,7 @@ TDD-first; `make check` before moving on. `main` only.
 - [x] **Test**: the footer advertises `enter open`.
 - [x] **Implement**: add the footer hint.
 
-### Phase 2: The app's switch (`hildegard.helper.harness.app`)
+### Phase 2: The app's switch (`hildi.harness.app`)
 
 - [x] **Add** `TSwitchSessionEvent`, the `OnSwitchSession` property, the
       `SessionId` read, and `SwitchSession`.
@@ -63,8 +63,8 @@ docs/features/Session_Management/Session_Switching_v1.TODO.md
 ### Modified Files
 
 ```
-src/hildegard.helper.tui.sessionsmodal.pas   (OnActivate, Enter, footer hint)
-src/hildegard.helper.harness.app.pas          (TSwitchSessionEvent, SwitchSession)
+src/hildi.tui.sessionsmodal.pas   (OnActivate, Enter, footer hint)
+src/hildi.harness.app.pas          (TSwitchSessionEvent, SwitchSession)
 examples/tui_agent.pas                        (TLauncher.Switch + wiring)
 tests/test_tui_sessionsmodal.pas              (the activate key)
 tests/test_harness_app.pas                    (the switch)

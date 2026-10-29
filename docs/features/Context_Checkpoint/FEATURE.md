@@ -140,11 +140,11 @@ footage before it still on disk.
 
 ### Internal
 
-- `hildegard.helper.store` (a `session_checkpoints` table; an FTS5 virtual table;
+- `hildi.store` (a `session_checkpoints` table; an FTS5 virtual table;
   active-window queries).
-- `hildegard.helper.session.protocol` / `runtime` (a checkpoint command + events).
-- `hildegard.helper.harness.session` / `view` (draft + checkpoint).
-- `hildegard.helper.tui.app` (the checkpoint UX, back-pagination, boundary marker).
+- `hildi.session.protocol` / `runtime` (a checkpoint command + events).
+- `hildi.harness.session` / `view` (draft + checkpoint).
+- `hildi.tui.app` (the checkpoint UX, back-pagination, boundary marker).
 - `recall_tool_result` (extended to search the FTS index).
 
 ### External
@@ -216,7 +216,7 @@ footage before it still on disk.
   the document was written as a narrative that named no sources.
 
   **Decision:** the summary is delivered as the **first user message of the new
-  page**, wrapped as a `<handoff>` (`hildegard.helper.handoff`), with a generic
+  page**, wrapped as a `<handoff>` (`hildi.handoff`), with a generic
   instruction block that frames it as **orientation, not authority** — read the
   sources it names to ground yourself, then continue; do not re-explore. The
   operator's own turn follows as a second user message, so the handoff can never

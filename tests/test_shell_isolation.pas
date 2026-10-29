@@ -1,6 +1,6 @@
 unit test_shell_isolation;
 { The isolation gate for the shell library: nothing in src/shell may name a
-  hildegard.helper.* unit in a uses clause. (The `make shell-standalone` build
+  hildi.* unit in a uses clause. (The `make shell-standalone` build
   is the stronger check; this catches a dependency added later.) }
 
 {$mode delphi}{$H+}
@@ -48,7 +48,7 @@ begin
       end;
       if InUses then
       begin
-        if Pos('hildegard.', LowerCase(S)) > 0 then
+        if Pos('hildi.', LowerCase(S)) > 0 then
           Exit(True);
         if Pos(';', S) > 0 then
           InUses := False;

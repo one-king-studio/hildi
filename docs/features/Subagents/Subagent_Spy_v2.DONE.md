@@ -71,8 +71,8 @@ docs/features/Subagents/Subagent_Spy_v2.TODO.md
 ### Modified Files
 
 ```
-src/hildegard.helper.harness.app.pas          (overlay, HandleEscape, ShowSpy/LeaveSpy, drain)
-src/hildegard.helper.harness.subagent.spy.pas (CreateStub)
+src/hildi.harness.app.pas          (overlay, HandleEscape, ShowSpy/LeaveSpy, drain)
+src/hildi.harness.subagent.spy.pas (CreateStub)
 tests/test_harness_app.pas                    (the enter/leave/indicator/render tests)
 docs/features/FEATURES.md                     (the Subagents row)
 ```
@@ -133,6 +133,6 @@ Deferred (unchanged): the live smoke.
 **Follow-up (delivered): the spy's Abort/Release actions bar.** The compose gives
 way to a CTA actions bar while spying (`a abort`, `r release`, `esc leave`);
 Abort/Release route through the parent driver. The bar is a new **reusable**
-widget (`hildegard.helper.tui.actions`, `TActionsBar`), and the chat panel swaps
+widget (`hildi.tui.actions`, `TActionsBar`), and the chat panel swaps
 compose <-> actions (`SetActionsMode`), so the same take-over + CTA machinery can
 back a read-only view of **any** session, not only a subagent spy.

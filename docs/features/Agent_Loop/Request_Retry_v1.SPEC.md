@@ -5,9 +5,9 @@
 **Extends:** [Agent Loop v2](Agent_Loop_v2.SPEC.md) (the turn loop) and
 [LLM Client v2](LLM_Client_v2.SPEC.md) (the error codes).
 
-**Depends on:** `hildegard.helper.agent` (the loop and `TAgentConfig`),
-`hildegard.helper.llm` (the error model and `TLLMErrorCode`),
-`hildegard.helper.harness.turn` (the turn event stream).
+**Depends on:** `hildi.agent` (the loop and `TAgentConfig`),
+`hildi.llm` (the error model and `TLLMErrorCode`),
+`hildi.harness.turn` (the turn event stream).
 
 ## Purpose
 
@@ -93,7 +93,7 @@ backoff, an attempt record, and a message.
 ## Contracts & Interfaces
 
 ```pascal
-unit hildegard.helper.llm;   // extended
+unit hildi.llm;   // extended
 
 { Whether a request error is worth retrying. True for leNetwork, leRateLimit,
   and leHttpStatus with a 5xx status. }
@@ -105,7 +105,7 @@ function OperatorPhrase(AError: TLLMErrorCode): string;
 ```
 
 ```pascal
-unit hildegard.helper.agent;   // extended
+unit hildi.agent;   // extended
 
 type
   TAgentConfig = record
@@ -120,7 +120,7 @@ type
 ```
 
 ```pascal
-unit hildegard.helper.harness.turn;   // extended
+unit hildi.harness.turn;   // extended
 
 type
   TTurnEventKind = (
@@ -129,7 +129,7 @@ type
 ```
 
 ```pascal
-unit hildegard.helper.session.protocol;   // extended (Headless Sessions)
+unit hildi.session.protocol;   // extended (Headless Sessions)
 
 type
   TSessionEventKind = (

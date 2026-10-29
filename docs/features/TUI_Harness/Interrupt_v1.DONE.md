@@ -38,13 +38,13 @@
 ## Files Created/Modified
 
 ```
-src/hildegard.helper.llm.pas             leCancelled
-src/hildegard.helper.session.pas         tsCancelled
-src/hildegard.helper.agent.pas           the cancel check
-src/hildegard.helper.harness.turn.pas    bind the flag to the loop
-src/hildegard.helper.tui.edit.pas        ClearLine + Ctrl+U/Ctrl+C
-src/hildegard.helper.tui.chatpanel.pas   psInterrupt
-src/hildegard.helper.harness.app.pas     the shell callbacks + the gesture
+src/hildi.llm.pas             leCancelled
+src/hildi.session.pas         tsCancelled
+src/hildi.agent.pas           the cancel check
+src/hildi.harness.turn.pas    bind the flag to the loop
+src/hildi.tui.edit.pas        ClearLine + Ctrl+U/Ctrl+C
+src/hildi.tui.chatpanel.pas   psInterrupt
+src/hildi.harness.app.pas     the shell callbacks + the gesture
 examples/tui_layout_demo.pas             the guarded Ctrl+C
 tests/test_agent.pas                     the loop cancel
 tests/test_tui_edit.pas                  the compose keys

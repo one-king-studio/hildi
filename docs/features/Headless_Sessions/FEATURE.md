@@ -183,10 +183,10 @@ Subagents
 
 ### Internal
 
-- `hildegard.helper.store` — the ledger, the additive migration for discovery.
-- `hildegard.helper.session` / `.store` — the durable history a client reads and
+- `hildi.store` — the ledger, the additive migration for discovery.
+- `hildi.session` / `.store` — the durable history a client reads and
   the loop restores from.
-- `hildegard.helper.harness.turn` — the turn worker, the queue, and the cancel
+- `hildi.harness.turn` — the turn worker, the queue, and the cancel
   seam the host reuses.
 - The approval engine and modal — approvals cross the socket as events/commands.
 - The CLI and TUI — the first two clients; both stop owning the loop.

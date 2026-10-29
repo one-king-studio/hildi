@@ -30,7 +30,7 @@ focus event, so the app stays "focused" and behaves exactly as today.
 
 ## Contracts & Interfaces
 
-### `hildegard.helper.tui.input` — the event
+### `hildi.tui.input` — the event
 
 A focus change is an input event, so it flows through the existing event path.
 The kind is appended last, per the project's enum rule, so stored ordinals are
@@ -49,7 +49,7 @@ type
   end;
 ```
 
-### `hildegard.helper.tui.input.decode` — the sequences
+### `hildi.tui.input.decode` — the sequences
 
 ```pascal
 { In the CSI switch on the final byte:
@@ -60,7 +60,7 @@ type
 `CSI I` / `CSI O` carry no parameters; a final byte of `I`/`O` with no private
 prefix maps to a focus event. Any other final byte is unchanged.
 
-### `hildegard.helper.tui.surface.video` — the enable/disable
+### `hildi.tui.surface.video` — the enable/disable
 
 ```pascal
 { Init, alongside the existing control writes: }
@@ -70,7 +70,7 @@ WriteOut(#27'[?1004h');   { focus reporting on }
 WriteOut(#27'[?1004l');   { focus reporting off }
 ```
 
-### `hildegard.helper.tui.app` — the focus state
+### `hildi.tui.app` — the focus state
 
 ```pascal
 type
@@ -91,7 +91,7 @@ restores the exact prior demand without re-registration. (The caret's
 registration is owned by the compose's `Active` state, which focus does not
 change.)
 
-### `hildegard.helper.tui.edit` — the steady caret
+### `hildi.tui.edit` — the steady caret
 
 ```pascal
 { The caret renders as a block whether or not it is blinking; only the blink is

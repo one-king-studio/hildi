@@ -85,7 +85,7 @@ Reason length and live thinking (trial follow-up)
 
 ## Contracts & Interfaces
 
-### Compact content (`hildegard.helper.tui.compact`, new)
+### Compact content (`hildi.tui.compact`, new)
 
 ```pascal
 type
@@ -106,7 +106,7 @@ function CompactLines(const AText: UnicodeString;
 function TailLines(const AText: UnicodeString; AMaxLines: Integer): UnicodeString;
 ```
 
-### Chat (`hildegard.helper.tui.chat`)
+### Chat (`hildi.tui.chat`)
 
 ```pascal
 type
@@ -117,7 +117,7 @@ type
   end;
 ```
 
-### Agent (`hildegard.helper.agent`)
+### Agent (`hildi.agent`)
 
 ```pascal
 const
@@ -144,14 +144,14 @@ the tools, answers each call with a paired notice result, and re-queries. One
 round past the hard limit fails the turn with `leLoop`. The running context (the
 latest request's prompt tokens) is checked each round.
 
-### LLM (`hildegard.helper.llm`)
+### LLM (`hildi.llm`)
 
 ```pascal
 type
   TLLMErrorCode = (..., leProvider, leCancelled, leLoop);
 ```
 
-### Approval (`hildegard.helper.approval`)
+### Approval (`hildi.approval`)
 
 ```pascal
 type
@@ -164,16 +164,16 @@ type
 ```
 
 The reason is the call's `reason` argument, already parsed by
-`ExtractToolReason` in `hildegard.helper.agent`. Each approvable tool
+`ExtractToolReason` in `hildi.agent`. Each approvable tool
 (`command.tool`, `files`) fills `Reason` in its `ApprovalAsks`.
 
-### Approval modal (`hildegard.helper.tui.approvalmodal`)
+### Approval modal (`hildi.tui.approvalmodal`)
 
 Rows, top to bottom: title, `reason:`, details (sunken, wrapped/compacted),
 blank, options, scope, separator, actions. `Measure` clamps to `AAvail - 8` in
 both dimensions and keeps `MinWidth = 55`.
 
-### Compose (`hildegard.helper.tui.compose` / `.edit`)
+### Compose (`hildi.tui.compose` / `.edit`)
 
 ```pascal
 type
@@ -189,7 +189,7 @@ type
 the editor as a newline. `ikPaste` inserts text literally. The CTA renders on
 the info row: the key in `Muted`, the action in `Accent`, right-aligned.
 
-### Input (`hildegard.helper.tui.input` / `.input.decode` / `.input.terminal`)
+### Input (`hildi.tui.input` / `.input.decode` / `.input.terminal`)
 
 ```pascal
 type
@@ -204,7 +204,7 @@ The decoder recognises `ESC [ 200 ~ ... ESC [ 201 ~` and emits one `ikPaste`.
 The terminal source writes `ESC [ ? 2004 h` on start and `ESC [ ? 2004 l` on
 stop.
 
-### Agent (`hildegard.helper.agent`)
+### Agent (`hildi.agent`)
 
 ```pascal
 type
@@ -231,7 +231,7 @@ with tool calls arrives and the queue is non-empty, keep no response for it and
 drain instead (the tool call is superseded); after a stop, begin a new turn if
 the queue is non-empty.
 
-### Cancel (`hildegard.helper.llm`)
+### Cancel (`hildi.llm`)
 
 ```pascal
 type
@@ -256,7 +256,7 @@ turn's messages (keeping the `tsCancelled` row) and records `LastTurnDropped`;
 the worker puts that on the `teError` event as `Dropped`. A queued prompt
 injected mid-flight is reported as `tePromptQueued`.
 
-### Turn worker / app (`hildegard.helper.harness.turn` / `.harness.app`)
+### Turn worker / app (`hildi.harness.turn` / `.harness.app`)
 
 ```pascal
 type

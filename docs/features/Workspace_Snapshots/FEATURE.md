@@ -13,7 +13,7 @@ What is **built**:
   tool result (a `[changed: …]` line used to ride it and was removed, since a
   diff view reads the change log instead).
 - **Storage.** `TChangeRecorder` writes `file_changes` at the turn boundary
-  (`hildegard.helper.changes.store`, migration v13), with **16-turn retention**
+  (`hildi.changes.store`, migration v13), with **16-turn retention**
   enforced at the same boundary. A change is a patch anchored by its before/after
   hash, which is what makes it replayable and what makes a write a compare-and-swap.
   The patch is built from the two texts the recorder already holds, so a captured
@@ -279,7 +279,7 @@ summary aggregates, and the **call** (or file) is what a diff shows.
 
 ```
 ╭─ Turn 14 · 6 calls · 4 files · +38 −12 ──────────────────────╮
-│  M src/hildegard.helper.replymeta.pas            +30 −8      │
+│  M src/hildi.replymeta.pas            +30 −8      │
 │  A tests/test_replymeta_preamble.pas             +93 −0      │
 │  M docs/features/.../Reply_Metadata_v1.SPEC.md    +17 −4     │
 │  · 3 more files                                   +12 −6     │
@@ -558,17 +558,17 @@ genuine gaps are the store, a diff generator, and the TUI surface.
 
 ### Internal
 
-- `hildegard.helper.store` (SQLite) — the change-log tables (`file_changes`,
+- `hildi.store` (SQLite) — the change-log tables (`file_changes`,
   `file_keyframes`) and their migration.
   entries) and their migration.
-- `hildegard.helper.workspace` — the root and the trust boundary to confine to.
-- `hildegard.helper.harness.turn` / `session.runtime` — the turn boundary where a
+- `hildi.workspace` — the root and the trust boundary to confine to.
+- `hildi.harness.turn` / `session.runtime` — the turn boundary where a
   snapshot is taken, and the command path for revert.
-- `hildegard.helper.session.protocol` — the revert commands and the
+- `hildi.session.protocol` — the revert commands and the
   changed-files/diff replies (the TUI is a client).
-- `hildegard.helper.files` — the existing workspace-confined read/write primitives
+- `hildi.files` — the existing workspace-confined read/write primitives
   (restore reuses the same path checks and atomic write).
-- `hildegard.helper.tui.*` — the changed-files list and the diff view; the diff
+- `hildi.tui.*` — the changed-files list and the diff view; the diff
   rendering can reuse the `TTextBlock`/`TMarkdownView` stack and the planned
   syntax highlighting.
 

@@ -2,7 +2,7 @@
 
 **Related Feature:** [FEATURE.md](FEATURE.md)
 
-**Depends on:** `hildegard.helper.agent` (`TAgentLoop`, `TToolRegistry`,
+**Depends on:** `hildi.agent` (`TAgentLoop`, `TToolRegistry`,
 `BuildRequest`, `ExecuteToolCalls`).
 **Depended on by:** `Mcp_Provider_v1.SPEC.md` (MCP becomes a contributor).
 
@@ -47,7 +47,7 @@ name via `FTools.Find`).
 ## Contracts & Interfaces
 
 ```pascal
-unit hildegard.helper.agent;   // additions
+unit hildi.agent;   // additions
 
 type
   { A per-turn source of tools and prompt. Prepare is called once at turn start

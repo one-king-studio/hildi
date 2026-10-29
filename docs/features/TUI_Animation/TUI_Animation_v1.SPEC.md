@@ -29,7 +29,7 @@ time-based content from the frame time; animations are pure functions of it.
 
 ## Contracts & Interfaces
 
-### Clock — `hildegard.helper.tui.clock`
+### Clock — `hildi.tui.clock`
 
 ```pascal
 { Monotonic milliseconds since an unspecified epoch. Never wall-clock; backed by
@@ -40,7 +40,7 @@ const
   DefaultTickMs = 10;   // 100 Hz frame cadence
 ```
 
-### Widget time hook — `hildegard.helper.tui.widget`
+### Widget time hook — `hildi.tui.widget`
 
 ```pascal
 TWidget = class
@@ -58,7 +58,7 @@ end;
 - `TSpinner`/`TProgress` return True only when the frame index / bounce cell
   actually moves, so a 90 ms spinner repaints ~11 times a second, not 100.
 
-### App frame loop — `hildegard.helper.tui.app`
+### App frame loop — `hildi.tui.app`
 
 ```pascal
 type
@@ -121,7 +121,7 @@ whole timeout and read as a laggy UI. When idle, `Run` still uses a short
 `IdleWaitMs` (100 ms) timeout so a signal or a resize is noticed promptly; that
 is a wake-up cadence, not a repaint cadence.
 
-### Spinner — `hildegard.helper.tui.spinner`
+### Spinner — `hildi.tui.spinner`
 
 ```pascal
 type
@@ -155,7 +155,7 @@ const
 - The frame is a pure function of `ANowMs` (and the first call's time as the
   phase origin), so two spinners started together stay in step.
 
-### Progress — `hildegard.helper.tui.progress`
+### Progress — `hildi.tui.progress`
 
 ```pascal
 type
@@ -188,9 +188,9 @@ type
 
 - `TTuiApp` already composites planes and flushes once; `Tick` reuses
   `RenderFrame`.
-- `hildegard.helper.tui.encoder` diffs cells, so an unchanged frame emits nothing.
+- `hildi.tui.encoder` diffs cells, so an unchanged frame emits nothing.
 - `IInputSource.Wait(ATimeoutMs, E)` already blocks with a timeout.
-- `hildegard.helper.tui.theme` supplies attributes; `panel`/`focus` compose them.
+- `hildi.tui.theme` supplies attributes; `panel`/`focus` compose them.
 - Monotonic time: RTL `unix.fpgettimeofday` (the benchmark already uses it).
 
 Gap designed here: the clock, the `Advance`/`Animating` hook, and the two
@@ -296,4 +296,4 @@ time-based widgets.
 ## Future Considerations
 
 - `TTimeline`/keyframes and easing; `TStatusBar` spinner slot.
-- `HILDEGARD_TUI_ANIM_MS` override and a reduce-motion mode.
+- `HILDI_TUI_ANIM_MS` override and a reduce-motion mode.

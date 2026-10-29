@@ -19,14 +19,14 @@ Subagents are not a new kind of thing to build — they are ordinary sessions wi
 a parent. This feature adds the **lineage**, the **delegation tools**, the
 **ambient result delivery**, **approval relaying up the lineage**, and a **TUI
 sidebar** for the operator to watch (and abort) live subagents. The existing
-`hildegard.helper.pool` (a bounded shell-command fan-out) is a different concern
+`hildi.pool` (a bounded shell-command fan-out) is a different concern
 and is left alone.
 
 ## Problem Statement
 
 The harness survey (`docs/research/cli-agent-harness-parity.md`) calls subagents
 the **single biggest gap** versus OpenCode, Codex CLI, Claude Code, and DeepSeek
-Harness, all of which ship task delegation. Today hildegard-helper's only
+Harness, all of which ship task delegation. Today hildi's only
 "parallelism" is a pool that runs *shell commands* — no model, no context, no
 reasoning, no result to feed back. A parent agent that needs a bounded,
 independent piece of work done has nowhere to put it.
@@ -234,9 +234,9 @@ Cost
 ### Technical
 
 - Must build with FPC 3.3.1, `{$mode delphi}`, and keep `make check` green.
-- Must **reuse**: `hildegard.helper.session.runtime` / `.client` / `.protocol` /
-  `.socket` (child sessions and their streams), `hildegard.helper.session.store`
-  and `hildegard.helper.store` (lineage persistence), the approval engine
+- Must **reuse**: `hildi.session.runtime` / `.client` / `.protocol` /
+  `.socket` (child sessions and their streams), `hildi.session.store`
+  and `hildi.store` (lineage persistence), the approval engine
   (refs/asks), `TToolRegistry`/`TToolSpec` (registration), the ledger, and the
   required-reason contract.
 - **New code required**: the lineage fields and queries; the delegation tool
@@ -245,7 +245,7 @@ Cost
 - Store changes are an **additive migration** (no reset of history): lineage
   columns on `sessions` (parent, depth, label) and an index for child lookup.
 - The ambient wrapper is a **port** of the dynamic user message formatter in the
-  hildegard main project (`src-backend/lib/main-agent/message-formatter.ts`) —
+  hildi main project (`src-backend/lib/main-agent/message-formatter.ts`) —
   only the uncached/current message carries volatile metadata; once answered, the
   message persists as a normal message.
 - No implementation without a specification; TDD-first.
@@ -259,13 +259,13 @@ Cost
 
 ### Internal
 
-- `hildegard.helper.session.runtime` / `.client` / `.protocol` / `.socket` — the
+- `hildi.session.runtime` / `.client` / `.protocol` / `.socket` — the
   child session and its observable event stream.
-- `hildegard.helper.store` / `.session.store` — lineage rows and the ledger.
-- `hildegard.helper.approval` / `.store` — lineage-wide approvals and relay.
-- `hildegard.helper.agent` — `TToolRegistry`/`TToolSpec`, the loop, the prompt
+- `hildi.store` / `.session.store` — lineage rows and the ledger.
+- `hildi.approval` / `.store` — lineage-wide approvals and relay.
+- `hildi.agent` — `TToolRegistry`/`TToolSpec`, the loop, the prompt
   queue (ambient delivery at loop boundaries), and the reason gate.
-- `hildegard.helper.harness.*` and the TUI widgets — the sidebar and spy view.
+- `hildi.harness.*` and the TUI widgets — the sidebar and spy view.
 
 ### External
 
@@ -320,9 +320,9 @@ Cost
   detach-without-abort (fire-and-forget).
 - **Ambient format.** `<ambient timestamp="ISO_DATE"><message source="delegate_task" id="<child-id>" label="..." status="completed|failed|aborted|gone">…</message><instructions>…</instructions></ambient>`,
   delivered as a `user` message with auto-injected handling instructions.
-- **Config knobs.** `HILDEGARD_SUBAGENT_MAX` (default 10),
-  `HILDEGARD_SUBAGENT_DEPTH` (default 1), and an auto-deny timeout (default 60s).
-- **Prior art.** The dynamic user message wrapper lives in the hildegard main
+- **Config knobs.** `HILDI_SUBAGENT_MAX` (default 10),
+  `HILDI_SUBAGENT_DEPTH` (default 1), and an auto-deny timeout (default 60s).
+- **Prior art.** The dynamic user message wrapper lives in the hildi main
   project at `src-backend/lib/main-agent/message-formatter.ts`
   (`formatCurrentMessage`, `formatPastMessage`, `formatSystemEventMessage`); the
   `<ambient>` convention is already used there for injected context.

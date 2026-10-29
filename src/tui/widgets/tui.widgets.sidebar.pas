@@ -22,7 +22,7 @@ uses
   Classes, SysUtils, tui.base, tui.input,
   tui.surface, tui.widget,
   tui.grapheme, tui.theme,
-  hildegard.helper.harness.subagent;
+  hildi.harness.subagent;
 
 type
   TSubagentSelectedEvent = procedure(const ASessionId: string) of object;

@@ -7,7 +7,7 @@
 
 Add a required, non-empty `reason` string to every advertised tool and validate
 it before dispatch, surfacing it on the tool-call event. This is a change to the
-shared tool contract in `hildegard.helper.agent` plus the transcript, and it is
+shared tool contract in `hildi.agent` plus the transcript, and it is
 the foundation the Command Tool's approval and audit build on. Do this first.
 
 > Deviation from template: this project is `main`-only (`HANDOFF.md`), so no
@@ -20,7 +20,7 @@ the foundation the Command Tool's approval and audit build on. Do this first.
 - [x] **No new test unit**: extend `tests/test_agent.pas` and
       `tests/test_transcript.pas` in place
 - [x] **Define the changed event signature and constants** in the interface of
-      `src/hildegard.helper.agent.pas`:
+      `src/hildi.agent.pas`:
       `TToolCallEvent` gains `AReason`; add `ToolReasonParamName = 'reason'`
       and `ExtractToolReason`
 
@@ -94,8 +94,8 @@ the foundation the Command Tool's approval and audit build on. Do this first.
 ### Modified Files
 
 ```
-src/hildegard.helper.agent.pas      (event, constants, ExtractToolReason, registry, loop)
-src/hildegard.helper.transcript.pas (OnToolCall gains AReason)
+src/hildi.agent.pas      (event, constants, ExtractToolReason, registry, loop)
+src/hildi.transcript.pas (OnToolCall gains AReason)
 examples/agent_cli.pas              (event wiring)
 tests/test_agent.pas                (new + updated cases)
 tests/test_transcript.pas           (new + updated cases)

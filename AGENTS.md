@@ -1,4 +1,4 @@
-# hildegard-helper
+# hildi
 
 A headless agent harness written in Free Pascal (FPC), developed locally with a
 heavy emphasis on test-driven development.
@@ -41,7 +41,7 @@ Full pattern: `docs/guidelines/ponytail.md`.
 
 ## Project Structure
 
-- `src/` - library units (`hildegard.helper.*`)
+- `src/` - library units (`hildi.*`)
 - `tests/` - fpcunit test suites
 - `examples/` - runnable example programs
 - `scripts/` - developer tooling (watch loop)
@@ -76,7 +76,7 @@ each suite in **its own process**, `$(cores)` at a time:
 ```
 make test-parallel                        # every suite, auto-discovered
 make test-parallel SUITE="TSessionRuntimeTest TBoardStoreTest"
-HILDEGARD_TEST_JOBS=4 make test-parallel  # cap the workers
+HILDI_TEST_JOBS=4 make test-parallel  # cap the workers
 ```
 
 Measured on a 10-core machine, 1,826 tests:
@@ -101,7 +101,7 @@ Two reasons to prefer it while iterating, and the second is not about speed:
    is intra-process state pollution, not a real defect. Until the shared state is
    found, one-process-per-suite is the trustworthy reading.
 
-`test-parallel` refuses to start without `build/bin/hildegard-helper-agent`: the
+`test-parallel` refuses to start without `build/bin/hildi-agent`: the
 integration suites spawn it, and its absence alone produces ~36 spurious
 failures. `make headless-agent` builds it.
 
@@ -131,7 +131,7 @@ specification.**
 5. Run `make check` before moving on.
 
 Each `test_*.pas` unit must be added to the `uses` clause of
-`tests/hildegard_helper_tests.pas` - FPC does not auto-link test units.
+`tests/hildi_tests.pas` - FPC does not auto-link test units.
 
 Test conventions and the FPC/FCL testing gotchas we have hit (managed-record
 `Default` vs `FillChar`, initialising managed locals and results, SQLite binding
@@ -167,7 +167,7 @@ Hard-won constraints; please respect them:
 - FPC's `TDictionary` `D[key] := value` setter raises `EListError` when the key
   is absent. Use `AddOrSetValue`.
 - `TProcess.ExitStatus` conventions vary by platform/build;
-  `hildegard.helper.process` normalizes them (`NormalizeExit`).
+  `hildi.process` normalizes them (`NormalizeExit`).
 - Tests compile with `-Sew`, so warnings are errors - handle every `case`
   branch explicitly.
 - Always `WaitFor`/`Free` threads and their owned objects; `make test-leak`
@@ -214,8 +214,8 @@ Hard-won constraints; please respect them:
 
 ## Code Style
 
-- Name units `hildegard.helper.<area>` (e.g. `hildegard.helper.process`,
-  `hildegard.helper.pool`).
+- Name units `hildi.<area>` (e.g. `hildi.process`,
+  `hildi.pool`).
 - Start every unit with `{$mode delphi}{$H+}`.
 - Keep units focused; add tests for any new public behavior.
 - Comments explain *why*, not *what*.

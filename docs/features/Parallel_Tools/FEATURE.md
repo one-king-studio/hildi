@@ -121,11 +121,11 @@ is narrow: a **concurrent approval gate** (many outstanding asks, one modal), a
 
 - `async.concurrency` (`TExecutorScheduler`), `async.observable` (`Merge`),
   `async.future`.
-- `hildegard.helper.approval` (`IApprovalService`, `TApprovalService`,
-  `TApprovalAsk`) and `hildegard.helper.harness.turn` (`TApprovalGate`).
-- `hildegard.helper.agent` (`TAgentLoop.ExecuteToolCalls`, `TToolHandler`,
+- `hildi.approval` (`IApprovalService`, `TApprovalService`,
+  `TApprovalAsk`) and `hildi.harness.turn` (`TApprovalGate`).
+- `hildi.agent` (`TAgentLoop.ExecuteToolCalls`, `TToolHandler`,
   `IToolProvider`).
-- `hildegard.helper.tool.stream` (the observer seam) and the app's ask queue.
+- `hildi.tool.stream` (the observer seam) and the app's ask queue.
 
 ### External
 

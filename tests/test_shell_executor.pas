@@ -8,11 +8,11 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testutils, testregistry,
-  hildegard.helper.agent, hildegard.helper.approval,
-  hildegard.helper.command.tool,
-  hildegard.helper.shell.commands, hildegard.helper.shell.tier,
-  hildegard.helper.shell.executor, hildegard.helper.shell.fs,
-  hildegard.helper.workspace.changes;
+  hildi.agent, hildi.approval,
+  hildi.command.tool,
+  hildi.shell.commands, hildi.shell.tier,
+  hildi.shell.executor, hildi.shell.fs,
+  hildi.workspace.changes;
 
 type
   TFakeFallback = class(TNoRefCountObject, ICommandExecutor)

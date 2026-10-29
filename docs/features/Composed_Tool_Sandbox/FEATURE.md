@@ -302,15 +302,15 @@ Design points to pin:
 
 ### Internal
 
-- `hildegard.helper.agent` — the tool registry and contract (`reason` validation,
+- `hildi.agent` — the tool registry and contract (`reason` validation,
   dispatch). The `tools` object is a **view over it**.
-- `hildegard.helper.approval` — the `script:run` class ref and the per-tool refs the
+- `hildi.approval` — the `script:run` class ref and the per-tool refs the
   sub-calls carry.
-- `hildegard.helper.files` — the world-touching tools that get injected.
+- `hildi.files` — the world-touching tools that get injected.
 - The turn cancellation seam (`Live Turn Control`) — the timeout rides it.
 - `Workspace_Snapshots` — the interception the sub-calls must pass through, or the
   feature has a hole.
-- `hildegard.helper.llm` — nothing new; the tool result is ordinary text.
+- `hildi.llm` — nothing new; the tool result is ordinary text.
 
 ### External
 
@@ -494,8 +494,8 @@ rest on a component whose failure mode we keep discovering by accident.
 
 ### What "park" means here
 
-- **Code is kept, not deleted**: `hildegard.helper.script`,
-  `hildegard.helper.tool.script`, `run_script`, the session wiring, the fork
+- **Code is kept, not deleted**: `hildi.script`,
+  `hildi.tool.script`, `run_script`, the session wiring, the fork
   pin, the leak-floor machinery. It is not advertised as the answer to compound
   work. *(Moved out of the build on 2026-10-18 — see the note below.)*
 - **The vendored fork is kept** (`github.com/johnrcui/GocciaScript`, branch

@@ -44,7 +44,7 @@ switches to the library and drops its private copies.
 
 ## Contracts & Interfaces
 
-### `hildegard.helper.tui.surface` additions
+### `hildi.tui.surface` additions
 
 ```pascal
 { Put one cell, and one string of cells, at (X, Y). Small conveniences the
@@ -55,7 +55,7 @@ procedure PutText(const S: ISurface; X, Y: Integer; const AText: UnicodeString;
   const AAttr: TAttr);
 ```
 
-### `hildegard.helper.tui.chat`
+### `hildi.tui.chat`
 
 ```pascal
 type
@@ -96,7 +96,7 @@ type
   end;
 ```
 
-### `hildegard.helper.tui.compose`
+### `hildi.tui.compose`
 
 ```pascal
 type
@@ -114,7 +114,7 @@ type
   end;
 ```
 
-### `hildegard.helper.tui.chatpanel`
+### `hildi.tui.chatpanel`
 
 ```pascal
 type
@@ -141,13 +141,13 @@ panel border (`TScrollContainer.TrackVisible`), the CTA strip and the status
 line. This spec moves those classes into `src/` unchanged where possible, adds
 the mutation needed for streaming, and wires them to `TTurnEvent`.
 
-- `hildegard.helper.tui.edit` (`TTextEdit`) is the compose's editor; v1/v2
+- `hildi.tui.edit` (`TTextEdit`) is the compose's editor; v1/v2
   already give it the caret, selection and word motion.
-- `hildegard.helper.tui.theme` supplies the surfaces (`RaisedBg`, `SunkenBg`) and
+- `hildi.tui.theme` supplies the surfaces (`RaisedBg`, `SunkenBg`) and
   the `OnBg`/`WithStyle` helpers.
-- `hildegard.helper.tui.panel` supplies the bordered messages panel.
-- `hildegard.helper.tui.scroll` supplies the scrolling and the bar geometry.
-- `hildegard.helper.tui.conversation` (`TConversationView`) is superseded for the
+- `hildi.tui.panel` supplies the bordered messages panel.
+- `hildi.tui.scroll` supplies the scrolling and the bar geometry.
+- `hildi.tui.conversation` (`TConversationView`) is superseded for the
   harness and is deleted with its tests once the panel is in place.
 
 ### Component Boundaries

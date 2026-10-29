@@ -217,7 +217,7 @@ Multi-instance safety
 
 - Must build with Free Pascal 3.3.1, `{$mode delphi}`, and keep `make check`
   green.
-- Must reuse `hildegard.helper.session`/`.store` (ledger and restore),
+- Must reuse `hildi.session`/`.store` (ledger and restore),
   `harness.turn` (drain/interrupt), the approval engine, and the modal
   machinery; the protocol must not reimplement any of them.
 - Store changes must be an additive migration (v2) - `session_holders` and a
@@ -239,15 +239,15 @@ Multi-instance safety
 
 ### Internal
 
-- `hildegard.helper.store` - a new additive migration (v2) adding
+- `hildi.store` - a new additive migration (v2) adding
   `session_holders` and the per-session event feed; the existing WAL + busy
   timeout.
-- `hildegard.helper.session` / `.store` - the ledger and the restore path the
+- `hildi.session` / `.store` - the ledger and the restore path the
   requester adopts.
-- `hildegard.helper.harness.turn` - the turn worker and the drain/interrupt
+- `hildi.harness.turn` - the turn worker and the drain/interrupt
   semantics reused by the handoff.
 - The approval engine and the approval modal - the holder's accept/deny dialog.
-- `hildegard.helper.tui.app` / `harness.app` - the TUI holder and its blank
+- `hildi.tui.app` / `harness.app` - the TUI holder and its blank
   "session handed off" screen.
 
 ### External

@@ -1,8 +1,8 @@
 # Issue: session memory is not trimmed by a checkpoint
 
 **Status:** fixed (both proposed code changes landed; see "Proposed fix" below)
-**Area:** session runtime + store (`hildegard.helper.session.runtime`,
-`hildegard.helper.session.store`), not `Context_Checkpoint` itself
+**Area:** session runtime + store (`hildi.session.runtime`,
+`hildi.session.store`), not `Context_Checkpoint` itself
 **Symptom:** memory stays high when a session is resumed from a new checkpoint,
 even though the prompt sent to the model is small.
 

@@ -22,7 +22,7 @@ Two transports, two phases:
 - **v1: stdio** — MCP servers are child processes; JSON-RPC over
   stdin/stdout. No network, no TLS, no OAuth, and no new dependency. The
   majority of MCP servers ship this way. The child-process precedent is only
-  partial, though: the existing runner (`hildegard.helper.process`) is
+  partial, though: the existing runner (`hildi.process`) is
   one-shot, stdout-only, and never writes to the child's stdin, and the
   headless runtime reaches its own child over a detached socket rather than
   pipes. v1 therefore needs a small, new **bidirectional stdio child
@@ -323,7 +323,7 @@ SPECs, and the code stay in sync. Each is also pinned in its SPEC.
   (sanitized to `[a-z0-9_-]`); model-visible name `mcp_<server>_<tool>`
   (provider-safe, ≤64 chars). Native tools keep bare names; MCP tools can never
   shadow them. See `Mcp_Client_v1.SPEC.md`.
-- **`NormalizeExit` is exported in place** from `hildegard.helper.process`
+- **`NormalizeExit` is exported in place** from `hildi.process`
   (Decision A) so the stdio child manager reuses it. See
   `Stdio_Child_Manager_v1.SPEC.md`.
 - **Approvals stay ref-only in v1** (tool-level asks, `AnyParams`); param-scoped

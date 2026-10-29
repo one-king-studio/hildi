@@ -17,9 +17,9 @@ first, then the command tool, then the live path, then the UI.
       `TestForwardObserverDropsChunksAfterComplete` in `tests/test_agent.pas`
 - [x] **Implement**: `TToolObserver`, `TToolOutputEvent`, the `TToolHandler`
       parameter, `TAgentEvents.OnToolOutput`, and the forwarding observer in
-      `src/hildegard.helper.agent.pas`
+      `src/hildi.agent.pas`
 - [x] **Implement**: the parameter on every handler
-      (`src/hildegard.helper.files.pas`, `src/hildegard.helper.recall.tool.pas`)
+      (`src/hildi.files.pas`, `src/hildi.recall.tool.pas`)
 
 ### Phase 2: The command tool
 
@@ -27,21 +27,21 @@ first, then the command tool, then the live path, then the UI.
       `TestTimeoutIsHonouredWithoutACap` in `tests/test_command_tool.pas`
 - [x] **Implement**: the observer through `ICommandExecutor` and
       `TProcessCommandExecutor`; `MaxTimeoutMs` and the clamp in
-      `src/hildegard.helper.command.tool.pas`
-- [x] **Implement**: `HILDEGARD_COMMAND_TIMEOUT_MS` (an optional cap) in
-      `src/hildegard.helper.harness.session.pas`
+      `src/hildi.command.tool.pas`
+- [x] **Implement**: `HILDI_COMMAND_TIMEOUT_MS` (an optional cap) in
+      `src/hildi.harness.session.pas`
 
 ### Phase 3: The live path
 
 - [x] **Test**: `TestWorkerEmitsToolOutput` in `tests/test_harness_turn.pas`
 - [x] **Implement**: `teToolOutput` and the worker mapping in
-      `src/hildegard.helper.harness.turn.pas`
+      `src/hildi.harness.turn.pas`
 - [x] **Test**: `tool_output` round trip in `tests/test_session_protocol.pas`
       (the all-kinds loop covers it)
 - [x] **Implement**: `ekToolOutput` in
-      `src/hildegard.helper.session.protocol.pas`; the runtime mapping in
-      `src/hildegard.helper.session.runtime.pas`; the sink mapping in
-      `src/hildegard.helper.harness.driver.pas`
+      `src/hildi.session.protocol.pas`; the runtime mapping in
+      `src/hildi.session.runtime.pas`; the sink mapping in
+      `src/hildi.harness.driver.pas`
 
 ### Phase 4: The UI
 
@@ -49,7 +49,7 @@ first, then the command tool, then the live path, then the UI.
       `tests/test_harness_app.pas`
 - [x] **Implement**: append the streamed chunk to the live tool block and
       replace the body with the result on completion, bounded by the cap, in
-      `src/hildegard.helper.harness.app.pas` (via `TChatItem.Live`; the cap is
+      `src/hildi.harness.app.pas` (via `TChatItem.Live`; the cap is
       applied by `TCappedObserver` in the command tool)
 
 ### Phase 5: Docs and validation
@@ -66,12 +66,12 @@ the tests compile unchanged and `nil` reads as "single-shot".
 
 Beyond the plan:
 
-- `TToolForwardObserver` is exported from `hildegard.helper.agent` so its
+- `TToolForwardObserver` is exported from `hildi.agent` so its
   "drop chunks after `Complete`" contract is unit-tested directly.
 - `TCappedObserver` (command tool) bounds the live body to `MaxOutputBytes`, so
   an unbounded command (`yes`) cannot grow the live block without end.
 - The model defines its own `run_command` timeout. `MaxTimeoutMs` (from
-  `HILDEGARD_COMMAND_TIMEOUT_MS`) is an **opt-in** cap, default off, so the model
+  `HILDI_COMMAND_TIMEOUT_MS`) is an **opt-in** cap, default off, so the model
   is not silently limited; the tool description tells it to raise the timeout for
   slow commands.
 - The live block uses the existing `TChatItem.Live` state (auto-expanded tail),
@@ -90,16 +90,16 @@ docs/features/Tool_Streaming/Tool_Streaming_v1.DONE.md
 ### Modified Files
 
 ```
-src/hildegard.helper.agent.pas             the observer seam + forwarding observer
-src/hildegard.helper.files.pas             the handler parameter
-src/hildegard.helper.recall.tool.pas       the handler parameter
-src/hildegard.helper.command.tool.pas      streaming executor + timeout cap + capped observer
-src/hildegard.helper.harness.session.pas   HILDEGARD_COMMAND_TIMEOUT_MS
-src/hildegard.helper.harness.turn.pas      teToolOutput
-src/hildegard.helper.session.protocol.pas  ekToolOutput
-src/hildegard.helper.session.runtime.pas   map teToolOutput
-src/hildegard.helper.harness.driver.pas    map ekToolOutput
-src/hildegard.helper.harness.app.pas       live append + result replace
+src/hildi.agent.pas             the observer seam + forwarding observer
+src/hildi.files.pas             the handler parameter
+src/hildi.recall.tool.pas       the handler parameter
+src/hildi.command.tool.pas      streaming executor + timeout cap + capped observer
+src/hildi.harness.session.pas   HILDI_COMMAND_TIMEOUT_MS
+src/hildi.harness.turn.pas      teToolOutput
+src/hildi.session.protocol.pas  ekToolOutput
+src/hildi.session.runtime.pas   map teToolOutput
+src/hildi.harness.driver.pas    map ekToolOutput
+src/hildi.harness.app.pas       live append + result replace
 tests/test_agent.pas                       the observer tests
 tests/test_command_tool.pas                the streaming + clamp tests
 tests/test_harness_turn.pas                the worker streaming test

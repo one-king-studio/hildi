@@ -91,7 +91,7 @@ These are ours, and they are the ones to *not repeat*.
 | ID | Issue | Evidence |
 | --- | --- | --- |
 | **I1** | **We weakened a gate for a dependency.** The harness's leak gate is strict zero. With the engine linked it became a *floor*: 77,917 unfreed blocks at first link (2,481 after a post-run collect), then 2,588 → 400 → 244 as the arena and singleton work landed — a number written into the SPEC and this repo's docs as an allowance. A gate that cannot reach zero has stopped being a gate; it only catches *growth*. | `Makefile` history; `goccia-embedding-findings.md` §3 |
-| **I2** | **The facade `uses` 18 engine units** — `Goccia.Executor.Interpreter`, `Goccia.GarbageCollector`, `Goccia.Scope`, `Goccia.Threading`, `Goccia.Values.*`, … The stated goal was "one place to change on upgrade"; the effect was a facade welded to internals, which is the opposite. | `src/hildegard.helper.script.pas` → `implementation uses` |
+| **I2** | **The facade `uses` 18 engine units** — `Goccia.Executor.Interpreter`, `Goccia.GarbageCollector`, `Goccia.Scope`, `Goccia.Threading`, `Goccia.Values.*`, … The stated goal was "one place to change on upgrade"; the effect was a facade welded to internals, which is the opposite. | `src/hildi.script.pas` → `implementation uses` |
 | **I3** | **We poked the collector from the host** — `TGarbageCollector.Instance.Collect` after every run — to paper over E10. A host reaching into a dependency's GC is a defect in the boundary, not a fix. | `goccia-embedding-findings.md` → *Harness workaround* |
 | **I4** | **Promise machinery we did not need.** Tool calls were modelled as async natives that *block inside their callback* and return an already-settled promise, so the script could `await` them. It works, but it is a whole concurrency model crossing the boundary to express "a synchronous host call". | `gocciascript-async.md` → *TL;DR* |
 | **I5** | **Our probes all passed while the real path crashed.** Single-file probes (interpreter, bytecode, module) each ran the failing file cleanly; only the vendor's own runner setup (testing-library globals + module loader + shims) reached E5. **A capability boundary you cannot test end-to-end is not a boundary.** | `goccia-ast-arena.md` → *What it is not* |
@@ -286,9 +286,9 @@ vendored code; the engine appears in exactly one unit.
 
 ```
 L3  wiring          session registers run_script        (≈30 lines, from v1)
-L2  tool            hildegard.helper.tool.script       (v1, essentially unchanged)
-L1  adapter         hildegard.helper.script.engine     (NEW, ≤ ~200 lines, the only engine `uses`)
-L0  contract        hildegard.helper.script            (v1's types + pure helpers; ENGINE-FREE)
+L2  tool            hildi.tool.script       (v1, essentially unchanged)
+L1  adapter         hildi.script.engine     (NEW, ≤ ~200 lines, the only engine `uses`)
+L0  contract        hildi.script            (v1's types + pure helpers; ENGINE-FREE)
 ```
 
 **L0 — the contract.** `TScriptToolInvoker`, `TScriptCancelCheck`,
@@ -308,7 +308,7 @@ translation: build the realm, inject `tools`, run, map the result, dispose. Rule
 - every line justified against a v1 line: if a line existed only because of
   E4–E10, it must not survive.
 
-**L2 — the tool.** v1's `hildegard.helper.tool.script` is the model: parse args,
+**L2 — the tool.** v1's `hildi.tool.script` is the model: parse args,
 require `reason`, approve `script:run`, build the invoker over the registry, run,
 format the result. Changed only to call L0's seam.
 
