@@ -20,6 +20,12 @@
 Makefile text eol=lf
 *.example text eol=lf
 
+# Byte-exact test fixture. This document MUST keep its CRLF line endings: it is
+# the corpus document that exercises CRLF handling, so normalising it to LF
+# silently stops the test testing CRLF. Marked binary so git compares it
+# byte-for-byte and never rewrites it on checkout.
+tests/data/md_corpus/10_crlf.md binary
+
 # Binary-ish
 *.a   binary
 *.o   binary
