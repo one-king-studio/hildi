@@ -1039,7 +1039,11 @@ begin
   N := 0;
   Add('checkpoint', 'create a checkpoint for this session');
   Add('sessions', 'list and manage this workspace''s sessions');
-  Add('new', 'start a new session in this workspace');
+  { /new needs a workspace to mint the session into, which an unattached TUI does
+    not have: csIdle means no session and no runtime yet. Offering it there would
+    invite a command that can only report "no store". }
+  if FConnState <> csIdle then
+    Add('new', 'start a new session in this workspace');
   { The turn-dependent three appear only when there is something to act on. }
   if HasUndoableTurn then
     Add('undo', 'revert the newest turn and rewind the transcript');

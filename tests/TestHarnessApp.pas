@@ -166,7 +166,7 @@ type
     procedure TestRenamingTheCurrentSessionUpdatesTheHeader;
     { /new mints a session in this workspace and switches to it. }
     procedure TestNewCommandMintsAndSwitchesSession;
-    procedure TestNewIsOfferedByThePalette;
+    procedure TestNewIsAbsentWhenUnattached;
     procedure TestHeaderReadsNewSessionWithoutAnId;
     { EVERY command RunCommand dispatches must be listed in the palette. RunCommand
       is reachable only through the palette, and with no match the palette declines
@@ -1611,20 +1611,22 @@ begin
   AssertTrue('the store has rows', Length(Rows) >= 1);
 end;
 
-procedure THarnessAppTest.TestNewIsOfferedByThePalette;
+procedure THarnessAppTest.TestNewIsAbsentWhenUnattached;
 var
   I: Integer;
   Found: Boolean;
 begin
+  { /new mints a session in the CURRENT workspace, so an unattached TUI has
+    nothing to mint into - offering it there invites a command that can only
+    report "no store". BuildWithStore leaves the app idle (no session id, no
+    driver), which is exactly that state. }
   BuildWithStore;
-  { Registered, not merely dispatched: an unregistered command cannot be typed -
-    the palette declines the key and the composer submits the text as a PROMPT. }
   FApp.Panel.Palette.Filter('/new');
   Found := False;
   for I := 0 to FApp.Panel.Palette.VisibleCount - 1 do
     if FApp.Panel.Palette.VisibleAt(I).Name = 'new' then
       Found := True;
-  AssertTrue('/new is offered by the palette', Found);
+  AssertFalse('/new is not offered when unattached', Found);
 end;
 
 procedure THarnessAppTest.TestHeaderReadsNewSessionWithoutAnId;
@@ -1677,7 +1679,7 @@ const
   { Commands offered unconditionally. /redo is deliberately absent: it appears
     only when there is something to redo, and a test asserting it is always there
     would forbid that. }
-  Dispatched: array[0..2] of string = ('checkpoint', 'sessions', 'new');
+  Dispatched: array[0..1] of string = ('checkpoint', 'sessions');
 var
   I, J: Integer;
   Found: Boolean;
