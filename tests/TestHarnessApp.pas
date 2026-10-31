@@ -190,6 +190,18 @@ type
     { Variety proven END TO END, without consulting the composer: two calls with
       the same reason must not produce the same caption on screen. }
     procedure TestTwoCallsInATurnReadDifferently;
+    { The caption says what is ACTUALLY happening: the tool's action plus its
+      primary argument, not a generic wait. Every existing caption test passes an
+      EMPTY ToolArguments, so all of them reach the fallback branch and none of
+      them exercises this. }
+    procedure TestActivityCaptionNamesTheFile;
+    procedure TestActivityCaptionNamesTheCommand;
+    procedure TestActivityCaptionSearchesForAPattern;
+    procedure TestActivityCaptionClampsALongSubject;
+    procedure TestActivityCaptionSurvivesMalformedArguments;
+    procedure TestActivityCaptionPrefersTheSubjectOverTheReason;
+    procedure TestActivityCaptionDoesNotDoubleUpTheToolName;
+    procedure TestActivityCaptionReachesTheStatus;
     procedure TestHeaderReadsNewSessionWithoutAnId;
     { EVERY command RunCommand dispatches must be listed in the palette. RunCommand
       is reachable only through the palette, and with no match the palette declines
@@ -1940,6 +1952,139 @@ begin
     behaviour this replaced. Assert the vocabulary is genuinely in use. }
   AssertTrue('two calls do not read identically: "' + CaptionA + '" vs "' +
     CaptionB + '"', CaptionA <> CaptionB);
+end;
+
+procedure THarnessAppTest.TestActivityCaptionNamesTheFile;
+begin
+  { The concrete case the operator asked for: the caption names the file, not a
+    generic "Waiting to read". }
+  AssertEquals('a read names its path', 'Reading src/hildi.pas',
+    ToolActivityCaption('file_read', '{"path":"src/hildi.pas","reason":"x"}',
+      'Read the file', 'c1'));
+  AssertEquals('an edit names its path', 'Editing src/tui/core.pas',
+    ToolActivityCaption('file_edit', '{"path":"src/tui/core.pas"}', '', 'c2'));
+  AssertEquals('a write names its path', 'Writing docs/NOTES.md',
+    ToolActivityCaption('file_write', '{"path":"docs/NOTES.md"}', '', 'c3'));
+  AssertEquals('a listing names its directory', 'Listing src',
+    ToolActivityCaption('file_list', '{"path":"src"}', '', 'c4'));
+  { No path on a listing is legal (it defaults to the workspace root), and it
+    must still say something concrete - a bare "Listing" would be a dangling
+    verb, and a generic phrase says nothing. }
+  AssertEquals('a bare listing names the root', 'Listing the workspace',
+    ToolActivityCaption('file_list', '{"reason":"see the tree"}', '', 'c5'));
+end;
+
+procedure THarnessAppTest.TestActivityCaptionNamesTheCommand;
+begin
+  { A shell command is the case where the reason is least informative: "run the
+    tests" tells the operator nothing that `make check` does not. }
+  AssertEquals('the command is quoted as written', 'Running make check',
+    ToolActivityCaption('run_command', '{"command":"make check"}',
+      'Run the tests', 'c1'));
+  AssertEquals('a pipeline is clamped, not truncated mid-token',
+    'Running git log --oneline -5',
+    ToolActivityCaption('run_command',
+      '{"command":"git log --oneline -5"}', '', 'c2'));
+end;
+
+procedure THarnessAppTest.TestActivityCaptionSearchesForAPattern;
+begin
+  AssertEquals('a grep names its pattern', 'Searching for TODO',
+    ToolActivityCaption('file_grep', '{"pattern":"TODO"}', '', 'c1'));
+  AssertEquals('a glob names its pattern', 'Finding files matching **/*.pas',
+    ToolActivityCaption('file_glob', '{"pattern":"**/*.pas"}', '', 'c2'));
+end;
+
+procedure THarnessAppTest.TestActivityCaptionClampsALongSubject;
+var
+  Long, Caption: string;
+begin
+  { A long shell command would push the interaction hints off the row. The END is
+    what identifies a path, so the tail is kept.
+
+    Built from single-quoted arguments on purpose: an earlier version embedded raw
+    double quotes, which made the arguments invalid JSON, so the clamp was never
+    reached and the test passed for the wrong reason - it was exercising the
+    fallback, not the clamp. }
+  Long := 'git log --oneline --stat --follow --all --graph --decorate -- ' +
+    'src/tui/widgets/TUIWidgetsChatPanel.pas';
+  Caption := ToolActivityCaption('run_command', '{"command":"' + Long + '"}',
+    '', 'c1');
+  AssertTrue('the caption is bounded: ' + IntToStr(Length(Caption)),
+    Length(Caption) <= 48 + Length('...') + Length('Running '));
+  AssertTrue('the tail is kept, not the head: ' + Caption,
+    Pos('TUIWidgetsChatPanel.pas', Caption) > 0);
+  AssertTrue('it is a clamped subject, not the fallback',
+    Pos('Running ', Caption) = 1);
+end;
+
+procedure THarnessAppTest.TestActivityCaptionSurvivesMalformedArguments;
+var
+  Caption: string;
+begin
+  { Model output is attacker-influenced and frequently truncated mid-call. A
+    parse failure must still caption the run - the tool IS running - by falling
+    back rather than raising. }
+  Caption := ToolActivityCaption('file_read', '{"path":"src/hil',
+    'Read the file', 'c1');
+  AssertTrue('a truncated call still gets a caption', Caption <> '');
+  { It falls through to the reason, because no path could be read. }
+  AssertTrue('and falls back to the reason: ' + Caption,
+    Pos('read the file', Caption) > 0);
+
+  Caption := ToolActivityCaption('file_read', 'not json at all', '', 'c2');
+  AssertTrue('garbage with no reason still gets a caption', Caption <> '');
+  AssertTrue('naming the tool, since nothing else is known: ' + Caption,
+    Pos('file_read', Caption) > 0);
+end;
+
+procedure THarnessAppTest.TestActivityCaptionPrefersTheSubjectOverTheReason;
+var
+  Caption: string;
+begin
+  { When the arguments name a concrete subject, the reason is redundant: the file
+    IS the answer. This is the deliberate departure from "show the reason". }
+  Caption := ToolActivityCaption('file_read',
+    '{"path":"src/hildi.pas","reason":"Check the store path"}',
+    'Check the store path', 'c1');
+  AssertEquals('the subject wins over the reason', 'Reading src/hildi.pas',
+    Caption);
+  AssertFalse('the reason is not appended',
+    Pos('store path', Caption) > 0);
+end;
+
+procedure THarnessAppTest.TestActivityCaptionDoesNotDoubleUpTheToolName;
+var
+  Caption: string;
+begin
+  { An unknown tool whose reason merely restates its name would read as
+    "Waiting to some_mcp_tool", which is worse than the varied generic caption.
+    Falls back to the tool name through ToolWaitCaption instead. }
+  Caption := ToolActivityCaption('some_mcp_tool', '{}', 'some_mcp_tool', 'c1');
+  AssertEquals('no doubled possessive-free echo',
+    ToolWaitCaption('c1', 'some_mcp_tool'), Caption);
+end;
+
+procedure THarnessAppTest.TestActivityCaptionReachesTheStatus;
+var
+  Call: TTurnEvent;
+begin
+  { End to end: the event carries real arguments, and the APP's status names the
+    file. The old caption tests all pushed an empty ToolArguments. }
+  Build;
+  Call := Default(TTurnEvent);
+  Call.Kind := teToolCall;
+  Call.ToolId := 'call-99';
+  Call.ToolName := 'file_read';
+  Call.ToolArguments := '{"path":"src/HildiHarnessApp.pas","reason":"inspect"}';
+  Call.ToolReason := 'Read the file';
+  FSession.Queue.Push(Call);
+  FApp.Step;
+
+  AssertEquals('the status names the file', 'Reading src/HildiHarnessApp.pas',
+    FApp.StateText);
+  AssertFalse('not the vague reason',
+    Pos('Read the file', FApp.StateText) > 0);
 end;
 
 procedure THarnessAppTest.TestHeaderReadsNewSessionWithoutAnId;

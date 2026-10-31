@@ -455,9 +455,9 @@ function ShouldTrimHistory(AOlderPages: Integer; ANowMs, ALastScrollMs: Int64;
   Empty parts are dropped rather than leaving a dangling separator: a session
   with no title shows just its label, and one with neither shows the id. Pure,
   so the format is testable without a widget. }
-{ How a running tool call is captioned. Every entry reads as the lead-in of a
-  sentence whose object is the reason, so "find related files" works unchanged
-  after any of them.
+{ How a running tool call is captioned when we cannot name its subject. Every
+  entry reads as the lead-in of a sentence whose object is the reason, so "find
+  related files" works unchanged after any of them.
 
   The entry is chosen by the CALL ID, not by the clock: a tool run states a FACT,
   and a caption that rewords itself while the tool is still running is decoration.
@@ -465,6 +465,21 @@ function ShouldTrimHistory(AOlderPages: Integer; ANowMs, ALastScrollMs: Int64;
   turn with five tool calls read as five decisions rather than five copies of one
   phrase. Pure, so the vocabulary is testable without a turn. }
 function ToolWaitCaption(const AToolId, AWhat: string): string;
+
+{ What a running tool call is ACTUALLY doing, named concretely: "Reading
+  src/hildi.pas", "Running make check", "Searching for TODO".
+
+  The earlier rule was that the tool name is an implementation detail and the
+  model's reason is what the operator reads. That holds while the reason is
+  informative ("Find related files") and fails when it is not ("Read the file",
+  which says nothing the operator cannot see). The tool name plus its primary
+  argument is the context that always exists and is never vague.
+
+  Falls back to ToolWaitCaption - the reason, or failing that the tool name - for
+  a tool with no known subject, so this is an improvement over that caption, not
+  a replacement for it. Pure, so the whole mapping is testable without a turn. }
+function ToolActivityCaption(const AToolName, AToolArguments, AToolReason,
+  AToolId: string): string;
 
 function SessionDisplayName(const ALabel, ATitle, ASessionId: string): string;
 
@@ -478,6 +493,10 @@ function ComposerHints(AHasSubagents: Boolean): string;
 procedure OrderByLineage(var ARows: TSessionRowArray);
 
 implementation
+
+{ fpjson is implementation-only: the app reads a tool call's arguments to caption
+  it, and nothing in the interface exposes a JSON type. }
+uses fpjson, jsonparser;
 
 const
   { How many files a collapsed turn summary names before it tails off. }
@@ -1946,16 +1965,14 @@ begin
         { A tool is running; the sparkle keeps animating because the turn is
           still in flight. Blocks are keyed by call id, so a parallel batch's
           calls each get their own block, created here in call order. }
-        { "<lead-in> <reason>", not "running <tool>": the reason is a passive
-          action ("Find related files"), so it reads as the object of the
-          lead-in. The tool NAME is an implementation detail - the operator reads
-          the decision, which is what the block's title already shows. The
-          lead-in varies per call (ToolWaitCaption), so a long turn does not say
-          the same four words five times. }
-        if E.ToolReason <> '' then
-          SetState(psTool, ToolWaitCaption(E.ToolId, E.ToolReason))
-        else
-          SetState(psTool, ToolWaitCaption(E.ToolId, E.ToolName));
+        { "<verb> <subject>": what the tool is actually doing, named concretely -
+          "Reading src/hildi.pas", "Running make check". Falls back to the model's
+          reason, and then to the tool name, for anything without a known subject.
+          This SUPERSEDES "the tool name is an implementation detail": the name
+          plus its primary argument is the context that is always present and
+          never vague, where a reason can be ("Read the file"). }
+        SetState(psTool, ToolActivityCaption(E.ToolName, E.ToolArguments,
+          E.ToolReason, E.ToolId));
         { The reason is the block's title, so collapsed tool lines read as the
           story of the agent's decisions. The raw call is not shown: the result
           is the body, visible when the block is expanded. }
@@ -2225,6 +2242,180 @@ begin
   for I := 1 to Length(AToolId) do
     H := (H * 31 + Ord(AToolId[I])) mod 65521;
   Result := ToolWaitLeads[H mod Length(ToolWaitLeads)] + LowerFirst(AWhat);
+end;
+
+{ The longest subject the caption will carry. The state label shares the toolbar
+  with the interaction hints, and a 300-character shell command would push them
+  off the row; the tool block below already shows the call in full when expanded. }
+const
+  ToolSubjectMaxLen = 48;
+
+{ One string-valued property of a tool call's arguments. False when the arguments
+  are not an object, the property is absent, or it is not a scalar - a malformed
+  call still gets a caption, because a tool IS running. }
+function ArgText(const AArguments, AName: string; out AValue: string): Boolean;
+var
+  Data: TJSONData;
+  Root: TJSONObject;
+  V: TJSONData;
+begin
+  Result := False;
+  AValue := '';
+  if Trim(AArguments) = '' then
+    Exit;
+  Data := nil;
+  try
+    try
+      Data := GetJSON(AArguments);
+    except
+      { Model output is attacker-influenced and often truncated mid-call; a parse
+        failure must not break the status row. }
+      Exit;
+    end;
+    if not (Data is TJSONObject) then
+      Exit;
+    Root := TJSONObject(Data);
+    V := Root.Find(AName);
+    if V = nil then
+      Exit;
+    { Integers matter: board/task tools take an `id`. }
+    if V.JSONType in [jtString, jtNumber] then
+    begin
+      AValue := Trim(V.AsString);
+      Result := AValue <> '';
+    end;
+  finally
+    Data.Free;
+  end;
+end;
+
+{ Shorten a subject to something a one-line toolbar can hold. Done at a path
+  separator where possible, so "src/tui/widgets/TUIWidgetsChatPanel.pas" becomes
+  ".../widgets/TUIWidgetsChatPanel.pas" rather than a chopped-off stem. }
+function ClampSubject(const AText: string): string;
+var
+  Start, I: Integer;
+begin
+  if Length(AText) <= ToolSubjectMaxLen then
+    Exit(AText);
+  { Keep the TAIL: the end of a path or a command is what identifies it, the
+    beginning does not. Three cells go to the ellipsis. }
+  Start := Length(AText) - (ToolSubjectMaxLen - 3) + 1;
+  { Prefer to begin just after a separator, so the tail is a whole component and
+    the result reads as a path rather than a chopped stem. Bounded search: if no
+    separator is close, keep the plain tail rather than eating the whole string. }
+  for I := Start to Start + 12 do
+    if (I <= Length(AText)) and (AText[I] = '/') then
+    begin
+      Start := I;
+      Break;
+    end;
+  Result := '...' + Copy(AText, Start, Length(AText) - Start + 1);
+end;
+
+function ToolActivityCaption(const AToolName, AToolArguments, AToolReason,
+  AToolId: string): string;
+var
+  Subject, Verb: string;
+
+  { "<verb> <subject>", or the generic caption when the subject is missing - a
+    bare "Reading" would be worse than saying nothing. }
+  function VerbPhrase(const AVerb, AArg: string): string;
+  begin
+    if ArgText(AToolArguments, AArg, Subject) then
+      Result := AVerb + ' ' + ClampSubject(Subject)
+    else
+      Result := '';
+  end;
+
+begin
+  Result := '';
+
+  { The file tools are the bulk of a turn, and their first argument names exactly
+    what the operator wants to know. Grouped by what they DO, so the caption reads
+    as an action rather than as a tool name. }
+  if (AToolName = 'file_read') or (AToolName = 'file_stat') then
+    Result := VerbPhrase('Reading', 'path')
+  else if (AToolName = 'file_write') or (AToolName = 'file_append') then
+    Result := VerbPhrase('Writing', 'path')
+  else if (AToolName = 'file_edit') or (AToolName = 'file_replace_regex') or
+    (AToolName = 'file_search_replace') or (AToolName = 'patch_apply') then
+    Result := VerbPhrase('Editing', 'path')
+  else if (AToolName = 'file_delete') then
+    Result := VerbPhrase('Deleting', 'path')
+  else if (AToolName = 'file_move') or (AToolName = 'file_copy') then
+    Result := VerbPhrase('Moving', 'path')
+  else if (AToolName = 'file_mkdir') then
+    Result := VerbPhrase('Creating', 'path')
+  else if (AToolName = 'file_list') then
+  begin
+    { A listing with no path lists the workspace ROOT, so name that rather than
+      falling back to a generic phrase - "Listing the workspace" is the answer,
+      and a bare "Listing" would be a dangling verb. }
+    if ArgText(AToolArguments, 'path', Subject) then
+      Result := 'Listing ' + ClampSubject(Subject)
+    else
+      Result := 'Listing the workspace';
+  end
+  else if (AToolName = 'file_cwd') then
+    Result := 'Resolving the workspace path'
+  else if (AToolName = 'file_glob') then
+    Result := VerbPhrase('Finding files matching', 'pattern')
+  else if (AToolName = 'file_grep') then
+    Result := VerbPhrase('Searching for', 'pattern')
+  else if AToolName = 'run_command' then
+    Result := VerbPhrase('Running', 'command')
+  else if AToolName = 'recall_tool_result' then
+  begin
+    { This one's subject is a mode, not a name: it either reads a window or
+      searches the session. Say which, so the caption is not "Recalling". }
+    if ArgText(AToolArguments, 'query', Subject) then
+      Result := 'Searching the transcript for ' + ClampSubject(Subject)
+    else
+      Result := 'Reading earlier output';
+  end
+  else if AToolName = 'board_post' then
+    Result := VerbPhrase('Posting to the board', 'topic')
+  else if AToolName = 'board_read' then
+    Result := VerbPhrase('Reading the board', 'topic')
+  else if AToolName = 'board_moderate' then
+    Result := VerbPhrase('Moderating the board', 'kind')
+  else if AToolName = 'task_add' then
+    Result := 'Adding a task card'
+  else if AToolName = 'task_list' then
+    Result := 'Listing task cards'
+  else if AToolName = 'task_claim' then
+    Result := VerbPhrase('Claiming task', 'id')
+  else if AToolName = 'task_update' then
+    Result := VerbPhrase('Updating task', 'id')
+  else if AToolName = 'task_edit' then
+    Result := VerbPhrase('Editing task', 'id')
+  else if AToolName = 'task_moderate' then
+    Result := VerbPhrase('Moderating task', 'id')
+  else if (AToolName = 'json_read') or (AToolName = 'yaml_read') then
+    Result := VerbPhrase('Reading', 'path')
+  else if (AToolName = 'json_edit') or (AToolName = 'yaml_edit') then
+    Result := VerbPhrase('Editing', 'path')
+  else if AToolName = 'get_system_time' then
+    Result := 'Checking the current time';
+
+  { No known subject: say what the model said it was doing, which is all there is.
+    When there is no reason either, ToolWaitCaption falls back to the tool name. }
+  if Result = '' then
+  begin
+    if AToolReason <> '' then
+    begin
+      { A reason that only restates the tool name adds nothing; keep the varied
+        generic caption for it instead of doubling up. }
+      Verb := Trim(AToolReason);
+      if (AToolName <> '') and (LowerCase(Verb) = LowerCase(AToolName)) then
+        Result := ToolWaitCaption(AToolId, AToolName)
+      else
+        Result := ToolWaitCaption(AToolId, Verb);
+    end
+    else
+      Result := ToolWaitCaption(AToolId, AToolName);
+  end;
 end;
 
 function SessionDisplayName(const ALabel, ATitle, ASessionId: string): string;
