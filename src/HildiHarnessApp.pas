@@ -2106,6 +2106,10 @@ begin
   { The label names the agent: the operator's stored label, else the short id.
     The title says what it is doing. Both, when both exist. }
   Name := ALabel;
+  if (Name = '') and (ASessionId = '') then
+    { No label and no id: the session does not exist yet. An empty border reads
+      as a broken header, not an idle one. }
+    Exit('New Session');
   if Name = '' then
   begin
     if Length(ASessionId) > 12 then

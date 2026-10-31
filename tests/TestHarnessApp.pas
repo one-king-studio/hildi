@@ -164,6 +164,10 @@ type
     procedure TestHeaderTruncatesALongTitle;
     procedure TestHeaderRendersANonAsciiTitle;
     procedure TestRenamingTheCurrentSessionUpdatesTheHeader;
+    { /new mints a session in this workspace and switches to it. }
+    procedure TestNewCommandMintsAndSwitchesSession;
+    procedure TestNewIsOfferedByThePalette;
+    procedure TestHeaderReadsNewSessionWithoutAnId;
     { EVERY command RunCommand dispatches must be listed in the palette. RunCommand
       is reachable only through the palette, and with no match the palette declines
       the key and the composer sends the text as a PROMPT - which is how /undo,
@@ -1580,6 +1584,68 @@ begin
     silently drifted out of sync with the value it set. }
   AssertTrue('the title is in the header: ' + FApp.Panel.HeaderLeft,
     Pos(Title, FApp.Panel.HeaderLeft) > 0);
+end;
+
+procedure THarnessAppTest.TestNewCommandMintsAndSwitchesSession;
+var
+  Before: string;
+  Rows: TSessionRowArray;
+  Err: TStoreError;
+begin
+  BuildWithStore;
+  FApp.OnSwitchSession := SwitchTo;
+  FSwitchResult := True;
+  Before := FApp.SessionId;
+  FApp.Panel.Palette.OnRun('new');
+  FApp.Step;
+  { A NEW id, not the same one: /new mints rather than reopening. }
+  AssertTrue('a session id exists', FApp.SessionId <> '');
+  AssertTrue('it is a different session', FApp.SessionId <> Before);
+  { And it is real: the store lists it in this workspace. }
+  Rows := nil;
+  AssertTrue('it was persisted',
+    FSession.View.Store.ListSessionRows(FSession.View.WorkspaceId, False, Rows,
+      Err));
+  AssertTrue('the store has rows', Length(Rows) >= 1);
+end;
+
+procedure THarnessAppTest.TestNewIsOfferedByThePalette;
+var
+  I: Integer;
+  Found: Boolean;
+begin
+  BuildWithStore;
+  { Registered, not merely dispatched: an unregistered command cannot be typed -
+    the palette declines the key and the composer submits the text as a PROMPT. }
+  FApp.Panel.Palette.Filter('/new');
+  Found := False;
+  for I := 0 to FApp.Panel.Palette.VisibleCount - 1 do
+    if FApp.Panel.Palette.VisibleAt(I).Name = 'new' then
+      Found := True;
+  AssertTrue('/new is offered by the palette', Found);
+end;
+
+procedure THarnessAppTest.TestHeaderReadsNewSessionWithoutAnId;
+var
+  Pairs: array[0..1] of string;
+begin
+  { No label and no title: the border says "New Session". An empty border reads
+    as a broken header rather than an idle one. }
+  Pairs[0] := '';
+  Pairs[1] := '';
+  AssertEquals('the idle header', 'New Session',
+    SessionDisplayName('', '', ''));
+  { With an id but no label, the SHORT id names the session. }
+  AssertEquals('short id', '6b30f848217e',
+    SessionDisplayName('', '', '6b30f848217eca30501219f2543c9e33'));
+  { <name> - <running title>, which is the whole format. }
+  AssertEquals('name and title', '6b30f848217e - Doing work',
+    SessionDisplayName('', 'Doing work', '6b30f848217eca30501219f2543c9e33'));
+  AssertEquals('label wins over id', 'agent-1 - Doing work',
+    SessionDisplayName('agent-1', 'Doing work', '6b30f848217eca30501219f2543c9e33'));
+  { No title yet: just the name, with no dangling separator. }
+  AssertEquals('no title', 'agent-1',
+    SessionDisplayName('agent-1', '', '6b30f848217eca30501219f2543c9e33'));
 end;
 
 procedure THarnessAppTest.TestRenamingTheCurrentSessionUpdatesTheHeader;
