@@ -28,7 +28,12 @@ FPC      ?= fpc
 #   make check FPC=/path/to/fpc FPC_CFG=/path/to/fpc.cfg
 #
 FPC_CFG     ?=
-FPC_ROOT_CFG := $(wildcard $(dir $(FPC))../lib/fpc/etc/fpc.cfg)
+# FPC may be given as a bare name ("fpc") or a path. `$(dir fpc)` is "./", so a
+# bare name has to be resolved through PATH first -- otherwise the derivation
+# silently finds nothing and the ~/.fpc.cfg shadow comes back on any machine
+# whose fpc is a version-managed one.
+FPC_BIN     := $(shell command -v $(firstword $(FPC)) 2>/dev/null)
+FPC_ROOT_CFG := $(wildcard $(dir $(FPC_BIN))../lib/fpc/etc/fpc.cfg)
 ifneq ($(strip $(FPC_CFG)),)
 FPCARGS  := -n @$(FPC_CFG)
 else ifneq ($(strip $(FPC_ROOT_CFG)),)
