@@ -227,6 +227,13 @@ type
     FProviderError: string;
     FStartMs: QWord;
     FMarked: Boolean;
+    { The streamed reply assembled into a buffer, not by `Results := Results +`.
+      A turn is ~5,900 allocations averaging 121 bytes, and string concatenation
+      reallocs and copies the whole prefix each time - O(n^2) in the reply length.
+      Appending to a buffer that grows geometrically turns that into amortised
+      O(n); the two accumulators are handed to FResult once, in Finish. }
+    FContentBuf: TStringBuilder;
+    FReasoningBuf: TStringBuilder;
     procedure ProcessLine(const ALine: string);
     procedure FlushEvent;
     procedure HandleData(const AData: RawByteString);
@@ -235,12 +242,14 @@ type
     procedure ReadUsage(const AUsage: TJSONObject);
     procedure MarkFirstToken;
     procedure SetFinish(const AReason: string);
+    function GetResult: TChatResult;
   public
     constructor Create(AOnText: TLLMTextEvent;
       AOnReasoning: TLLMReasoningEvent);
+    destructor Destroy; override;
     procedure Feed(const AData: RawByteString);
     procedure Finish;
-    property Result: TChatResult read FResult;
+    property Result: TChatResult read GetResult;
     property Done: Boolean read FDone;
     property Malformed: Boolean read FMalformed;
     property ProviderError: string read FProviderError;
@@ -444,8 +453,17 @@ begin
   FProviderError := '';
   FStartMs := GetTickCount64;
   FMarked := False;
+  FContentBuf := TStringBuilder.Create;
+  FReasoningBuf := TStringBuilder.Create;
   FResult := Default(TChatResult);
   FResult.Message.Role := crAssistant;
+end;
+
+destructor TSSEParser.Destroy;
+begin
+  FContentBuf.Free;
+  FReasoningBuf.Free;
+  inherited Destroy;
 end;
 
 procedure TSSEParser.Feed(const AData: RawByteString);
@@ -571,7 +589,7 @@ begin
         (Content.AsString <> '') then
       begin
         MarkFirstToken;
-        FResult.Message.Content := FResult.Message.Content + Content.AsString;
+        FContentBuf.Append(Content.AsString);
         if Assigned(FOnText) then
           FOnText(Content.AsString);
       end;
@@ -583,8 +601,7 @@ begin
         (Reasoning.AsString <> '') then
       begin
         MarkFirstToken;
-        FResult.ReasoningContent :=
-          FResult.ReasoningContent + Reasoning.AsString;
+        FReasoningBuf.Append(Reasoning.AsString);
         if Assigned(FOnReasoning) then
           FOnReasoning(Reasoning.AsString);
       end;
@@ -717,6 +734,21 @@ begin
   FlushEvent;
   if not FHasFinish then
     FResult.FinishReason := frUnknown;
+end;
+
+function TSSEParser.GetResult: TChatResult;
+begin
+  { Publish the streamed text on READ, not only in Finish. Finish is reached
+    only on a clean 2xx; a cancel, a transport failure or an HTTP error exits
+    before it, and the accumulated text must still be visible on Result - the
+    pre-buffer code wrote each delta straight into FResult and so had that
+    property for free. Assigning here keeps it, and costs one copy per read
+    rather than one realloc per delta. }
+  if FContentBuf.Length > 0 then
+    FResult.Message.Content := FContentBuf.ToString;
+  if FReasoningBuf.Length > 0 then
+    FResult.ReasoningContent := FReasoningBuf.ToString;
+  Result := FResult;
 end;
 
 { --- request serialization --------------------------------------------- }
