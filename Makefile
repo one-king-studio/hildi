@@ -67,13 +67,25 @@ SYS_LDFLAGS     :=
 else
 SQLITE_CCFLAGS  := -O2 -fPIC -DSQLITE_THREADSAFE=1 -DSQLITE_ENABLE_FTS5
 MBEDTLS_CCFLAGS  := -O2 -fPIC
-# Linux does not: the vendored archives need symbols from two separate system
-# libraries that FPC does not add for us.
-#   -lgcc  -> __udivti3, the 64-bit division helper mbedTLS's bignum uses
-#   -lm    -> log, used by SQLite's FTS5 bm25 ranking
-# Both are present on macOS only because libSystem re-exports them, which is why
-# the missing flags went unnoticed until a Linux link.
-SYS_LDFLAGS     := -k-lm -k-lgcc
+# Linux does not link libSystem, so the vendored archives' symbols have to come
+# from somewhere else:
+#   __udivti3 (mbedTLS bignum) -> the compiler runtime
+#   log       (SQLite FTS5)    -> libm
+# -lm is safe to name outright. The compiler runtime is NOT: hardcoding -lgcc
+# assumed GCC, and a box with clang and no GCC has no libgcc at all (it failed
+# with "cannot find -lgcc"). Both pieces are resolved through the C compiler that
+# is actually installed, and each is added only if it exists.
+#   crtbegin.o/crtend.o are also GCC-distributed, so their directory goes on the
+#   library path; without it FPC warns they are missing and the link can fail.
+LIBGCC_A   := $(shell $(CC) -print-libgcc-file-name 2>/dev/null)
+CRTBEGIN_A := $(shell $(CC) -print-file-name=crtbegin.o 2>/dev/null)
+SYS_LDFLAGS := -k-lm
+ifneq ($(wildcard $(LIBGCC_A)),)
+SYS_LDFLAGS += -Fl$(dir $(LIBGCC_A)) -k$(LIBGCC_A)
+endif
+ifneq ($(wildcard $(CRTBEGIN_A)),)
+SYS_LDFLAGS += -Fl$(dir $(CRTBEGIN_A))
+endif
 endif
 # Link the static archive explicitly (-k), so a system libsqlite3 is never used.
 # -Fl is also required: HildiSQLITE declares `external 'sqlite3'`, which makes the
