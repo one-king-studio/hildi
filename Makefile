@@ -66,7 +66,12 @@ SQLITE_CCFLAGS  := -O2 -fPIC -DSQLITE_THREADSAFE=1 -DSQLITE_ENABLE_FTS5
 MBEDTLS_CCFLAGS  := -O2 -fPIC
 endif
 # Link the static archive explicitly (-k), so a system libsqlite3 is never used.
-SQLITE_LDFLAGS  := -k$(abspath $(SQLITE_AR))
+# -Fl is also required: HildiSQLITE declares `external 'sqlite3'`, which makes the
+# linker emit -lsqlite3, and without a library path that resolves against the
+# SYSTEM sqlite (a dylib on macOS, absent entirely on a bare Fedora). The static
+# archive was being passed by -k but the -lsqlite3 it exists to satisfy had
+# nowhere to look, so the build failed on Linux with "cannot find -lsqlite3".
+SQLITE_LDFLAGS  := -Fl$(abspath $(SQLITE_LIBDIR)) -k$(abspath $(SQLITE_AR))
 CC ?= cc
 AR ?= ar
 
