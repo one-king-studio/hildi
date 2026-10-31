@@ -78,7 +78,7 @@ git worktree add .worktrees/agent-tls -b agent/tls
   not reuse a merged branch.
 - **Main checkout = integrator.** Agent branches never land on main
   directly. The integrator merges one branch at a time (see Integration
-  below) and owns the shared doc index (`FEATURES.md`, `HANDOFF.md`) plus
+  below) and owns the shared doc index (`FEATURES.md`) plus
   the tests' `uses` registration - the guaranteed-conflict files. Agents
   work their feature folder, `src/`, and their tests; they do not edit
   integrator-owned files.

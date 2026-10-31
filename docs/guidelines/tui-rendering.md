@@ -66,8 +66,8 @@ comment states an invariant, back it with a diagnostic and a test.
 (the idle-exit condition also requires no clients), so `select` returned
 immediately forever and the agent pinned a core at 100%. A client keeps the
 runtime up, so it must block there — `RuntimeSelectTimeout` does. The same rule
-holds for the TUI loop (see "Never busy-poll a TUI loop" in `HANDOFF.md`): a
-blocking wait with a finite timeout, never a 0-delay poll.
+holds for the TUI loop: a blocking wait with a finite timeout, never a 0-delay
+poll.
 
 ## Animation is registered, not discovered
 
@@ -101,7 +101,6 @@ lower the wake rate before adding caches.
 
 ## Related
 
-- `HANDOFF.md` — "Lessons learned" has the headlines.
 - `docs/guidelines/testing.md` — FPC/FCL test gotchas.
 - `docs/features/Process_Split/Chat_Window_v1.SPEC.md` — the layout release and
   the window.
