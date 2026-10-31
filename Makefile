@@ -146,7 +146,8 @@ TEST_SRCS := $(wildcard $(TESTS)/*.pas)
 
 .PHONY: all test test-leak watch check release clean help libsqlite libmbedtls deps \
         store-demo agent-cli release-agent-cli tui-demo widgets-demo layout-demo \
-        headless-agent tui-agent bench perf agents agent-% mcp-smoke smoke smoke-list async-standalone async-bench async-freeze async-examples
+        headless-agent tui-agent bench perf agents agent-% mcp-smoke smoke smoke-list async-standalone async-bench async-freeze async-examples \
+        probe heap-report
 
 # Fetch and verify every vendored dependency. The README tells a new contributor
 # to run this first, and it used to be a silent no-op: there was no `deps` rule,
@@ -400,7 +401,7 @@ async-examples: $(ASYNC_SRCS)
 
 $(BIN)/hildi-tests: $(TESTS)/HildiTests.pas $(TEST_SRCS) $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(ASYNC_SRCS) $(SHELL_SRCS) $(CHANGES_SRCS) $(MARKDOWN_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(SYS_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 test-leak: libsqlite libmbedtls $(BIN)/hildi-tests-leak
 	HEAPTRC=$(HEAPTRC) $(BIN)/hildi-tests-leak $(TESTARGS)
@@ -420,7 +421,7 @@ watch:
 
 $(BIN)/hildi-tests-leak: $(TESTS)/HildiTests.pas $(TEST_SRCS) $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(ASYNC_SRCS) $(SHELL_SRCS) $(CHANGES_SRCS) $(MARKDOWN_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
 	@mkdir -p $(BIN) $(LEAKUNITS)
-	$(FPC) $(FPCARGS) $(LEAKFLAGS) $(SQLITE_LDFLAGS) $(SYS_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -Fu$(TESTS) -FU$(LEAKUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(LEAKFLAGS) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -Fu$(TESTS) -FU$(LEAKUNITS) -FE$(BIN) -o$@ $<
 
 # Live smoke: drive the REAL headless runtime through a scripted turn against a
 # loopback fake provider. Hermetic (loopback only, ephemeral port, temp store);
@@ -432,9 +433,23 @@ smoke: libsqlite libmbedtls headless-agent $(BIN)/hildi-smoke
 smoke-list: libsqlite libmbedtls $(BIN)/hildi-smoke
 	$(BIN)/hildi-smoke --list
 
-$(BIN)/hildi-smoke: $(EXAMPLES)/smoke.pas $(TESTS)/smoke_runner.pas $(TESTS)/smoke_provider.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ)
+$(BIN)/hildi-smoke: $(EXAMPLES)/smoke.pas $(TESTS)/SmokeRunner.pas $(TESTS)/SmokeProvider.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+
+# Heap probe: the runtime built with heaptrc, so an exiting process reports every
+# allocation it made and what it never freed. Used to answer "is the accrued RSS
+# a leak or retention?" -- see docs/research/memory-footprint.md. The binary must
+# EXIT for heaptrc to write; a SIGKILLed process dumps only its header line, so
+# drive it with an --idle-ms that outlives the turn.
+probe: libsqlite libmbedtls $(BIN)/hildi-agent-probe
+	@echo "probe: $(BIN)/hildi-agent-probe"
+	@echo "  HEAPTRC='log=/tmp/heap.log' HILDI_RUNTIME_BIN=$(abspath $(BIN))/hildi-agent-probe \\"
+	@echo "    $(BIN)/hildi-smoke --scenario text"
+
+$(BIN)/hildi-agent-probe: $(EXAMPLES)/headless_agent.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ)
+	@mkdir -p $(BIN) $(LEAKUNITS)
+	$(FPC) $(FPCARGS) $(LEAKFLAGS) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -FU$(LEAKUNITS) -FE$(BIN) -o$@ $<
 
 # All quality gates, for CI: functional tests + leak check + library isolation.
 # The two suite runs go one-process-per-suite in parallel (see
