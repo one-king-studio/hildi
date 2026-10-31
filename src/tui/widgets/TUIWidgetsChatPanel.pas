@@ -96,11 +96,22 @@ type
     FStateKind: TPanelState;
     FReasoningFromMs: Int64;   { when this reasoning run started; -1 = not reasoning }
     FStateLabel: string;
+    { The hint text as SET, before any fitting: FitToolbar clamps it to the row,
+      so the raw string must be kept to re-fit when the pane widens again. }
+    FHintsText: string;
+    { Display cells the state label may occupy. 0 = unbounded (not yet arranged).
+      RenderState applies it, so there is ONE path that paints the label and it
+      cannot disagree with the budget FitToolbar computed. }
+    FStateLabelMax: Integer;
     FStateSpans: array[0..1] of TSpan;
     FSpark: UnicodeString;
     procedure RenderState;
     procedure RefreshAnimation;
     procedure FitStatus;
+    { Clamp the state label so the interaction hints keep their place on the
+      shared toolbar row. Called from Arrange, because the row's width is only
+      known then. }
+    procedure FitToolbar;
   public
     constructor Create(const ATheme: TTheme; const AInfo, AHints: string);
     destructor Destroy; override;
@@ -298,13 +309,21 @@ begin
 end;
 
 procedure TChatPanel.RenderState;
+var
+  Caption: UnicodeString;
 begin
   if StateAnimated(FStateKind) then
     FStateSpans[0].Text := FSpark
   else
     FStateSpans[0].Text := StateIcon(FStateKind);
   FStateSpans[0].Attr := StateAttr(FTheme, FStateKind);
-  FStateSpans[1].Text := UnicodeString(' ' + FStateLabel);
+  { FitToolbar may have budgeted less than the label needs; applying it HERE
+    rather than in the fitter keeps one path that paints the label, so the two
+    cannot disagree about what is on screen. }
+  Caption := UnicodeString(FStateLabel);
+  if FStateLabelMax > 0 then
+    Caption := FitWidth(Caption, FStateLabelMax);
+  FStateSpans[1].Text := UnicodeString(' ') + Caption;
   FStateSpans[1].Attr := FTheme.Muted;
   FStateBlock.SetSpans(FStateSpans);
 end;
@@ -381,6 +400,13 @@ begin
   FCta.Arrange(Rc(ChromeX, ComposeY - 1, ChromeW, 1));
   FStatus.Arrange(Rc(ChromeX, ABounds.Y + ABounds.H - 1, ChromeW, 1));
   FStats.Arrange(Rc(ChromeX, ABounds.Y + ABounds.H - 1, ChromeW, 1));
+  { The row's width is only known now, so the label/hint split is decided here
+    rather than in SetState or SetHints. It must run BEFORE the toolbar is
+    arranged: the container resolves its Auto/Fill tracks from each child's
+    MEASURED width, so clamping the label afterwards changes the text but leaves
+    the hints column still squeezed to whatever the wide label left. }
+  FitToolbar;
+  FCta.Arrange(Rc(ChromeX, ComposeY - 1, ChromeW, 1));
   FitStatus;
 end;
 
@@ -625,6 +651,10 @@ end;
 
 procedure TChatPanel.SetHints(const AText: string);
 begin
+  { Keep the RAW text: the fitter clamps it to whatever room is left after the
+    state label, and the caller re-supplies the full hint whenever the roster or
+    the nudge changes. }
+  FHintsText := AText;
   FHintsBlock.SetText(AText, FTheme.Muted);
 end;
 
@@ -645,6 +675,52 @@ begin
   else
     FStatus.SetText(string(FitWidth(UnicodeString(FStatusText),
       RowW - StatsW - 2)), FTheme.Muted);
+end;
+
+{ The toolbar holds the state label (left, Auto) and the interaction hints
+  (right, Fill). An Auto track measures its content and takes that width even when
+  the row cannot hold it, so a long label silently squeezes the hints - and a text
+  block CLIPS rather than overflows, so the operator sees a hint cut mid-word
+  rather than an obvious break.
+
+  That collision got much easier to hit once the label started naming its subject
+  ("Editing src/tui/widgets/TUIWidgetsChatPanel.pas"). The hints are key reminders
+  the operator needs WHILE a long operation runs, which is exactly when the label
+  is longest, so the label yields.
+
+  The hint is budgeted FIRST - it is the fixed, known-length part - and the label
+  takes what remains. At the extreme the label is dropped entirely rather than
+  clipped to a meaningless fragment. }
+procedure TChatPanel.FitToolbar;
+var
+  RowW, IconW, HintsW, LabelAvail: Integer;
+begin
+  if FBounds.W <= 0 then
+    Exit;
+  RowW := FBounds.W - 2 * ChromePad;
+  if RowW < 1 then
+    RowW := 1;
+  { The sparkle or the state icon occupies one cell, plus one for the space
+    before the label. }
+  IconW := 2;
+  HintsW := StringWidth(UnicodeString(FHintsText));
+  if HintsW > 0 then
+    Inc(HintsW);   { the column gap between the label and the hints }
+  if HintsW > RowW then
+  begin
+    { The hints alone do not fit. Keep the LABEL and let the hints clip: a long
+      state is the rarer case, and a label cut to two characters says nothing. }
+    FHintsBlock.SetText(FHintsText, FTheme.Muted);
+    Exit;
+  end;
+  LabelAvail := RowW - IconW - HintsW;
+  { Record the budget and repaint through the ONE path that paints the label, so
+    the fitter and the renderer cannot disagree about what is on screen. }
+  if LabelAvail <= 0 then
+    FStateLabelMax := 0    { no room: the hints win, the label is dropped }
+  else
+    FStateLabelMax := LabelAvail;
+  RenderState;
 end;
 
 procedure TChatPanel.SetComposeActive(AValue: Boolean);

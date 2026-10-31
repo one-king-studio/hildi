@@ -28,6 +28,11 @@ type
     procedure TestStatsLineRendersRightAligned;
     procedure TestLongWorkspaceIsTrimmedForStats;
     procedure TestToolbarSplitsStateAndHints;
+    { The toolbar is ONE row shared by the state label and the interaction
+      hints. A long label must not starve the hints - the key reminders are what
+      the operator needs while something slow is running, which is exactly when
+      the label is longest. }
+    procedure TestLongStateLabelLeavesTheHintsOnTheRow;
     procedure TestReadyStateShowsACheck;
     procedure TestThinkingStateAnimates;
     { The reasoning caption rotates; a tool state does not. }
@@ -301,6 +306,50 @@ begin
         Pos('ready', S.RowText(13, 0, 20)) > 0);
       AssertTrue('hints on the right',
         Pos('hints here', S.RowText(13, 48, 12)) > 0);
+    finally
+      P.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatPanelTest.TestLongStateLabelLeavesTheHintsOnTheRow;
+var
+  P: TChatPanel;
+  S: TSurfaceMemory;
+  Row, Col: Integer;
+  Line: UnicodeString;
+  SawHint: Boolean;
+begin
+  { The state label and the hints share ONE row: left is Auto, right is Fill, so
+    an over-long label takes its full measured width and the hints are squeezed
+    into whatever is left - clipped mid-word by the text block's clip rect.
+
+    That is reachable in normal use, and the two features collide: the label is
+    longest exactly while a tool runs ("Editing src/tui/widgets/..."), which is
+    when the key reminders matter most. A 60-column pane with the real hint text
+    is enough to lose it. }
+  S := TSurfaceMemory.Create(60, 20);
+  try
+    P := TChatPanel.Create(FTheme, 'info', 'shift+enter newline');
+    try
+      P.SetState(psTool,
+        'Editing src/tui/widgets/TUIWidgetsChatPanel.pas');
+      P.Arrange(Rc(0, 0, 60, 20));
+      P.Render(S);
+      { Read the toolbar row as text and look for the hint's FIRST word: a hint
+        clipped to "shift+en" still counts as lost, so assert the whole token. }
+      SawHint := False;
+      for Row := 0 to 19 do
+      begin
+        Line := '';
+        for Col := 0 to 59 do
+          Line := Line + S.CellAt(Col, Row).Ch;
+        if Pos(UnicodeString('shift+enter'), Line) > 0 then
+          SawHint := True;
+      end;
+      AssertTrue('the hint survives a long state label', SawHint);
     finally
       P.Free;
     end;
