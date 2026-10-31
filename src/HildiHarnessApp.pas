@@ -389,6 +389,8 @@ type
       is no hook, or when the hook fails. The swap happens inline; the modal is
       popped on the next Step (it is the caller). }
     procedure SwitchSession(const ASessionId: string);
+    { Mint a session in this workspace and switch to it: the /new command. }
+    procedure StartNewSession;
     { Enter spy mode on a child session: rebuild the panel to show the child's
       transcript and its live stream, mark the header, and hide the composer.
       Escape leaves. Public so the composition root and tests can drive it. }
@@ -711,8 +713,10 @@ begin
   case FConnState of
     csIdle:
       begin
-        FPanel.Stream.Add(ckThinking, '',
-          'type a prompt to start a session');
+        { No stream block here: the panel's empty state draws the mark and the
+          first-run hints. Adding a notice gave the stream a count of 1, which
+          disabled that empty state - the notice and the logo were competing for
+          the same screen, and the notice won by making the stream non-empty. }
         SetState(psReady, 'idle');
       end;
     csConnecting:
@@ -780,6 +784,31 @@ begin
     Result := FSession.SessionId
   else
     Result := '';
+end;
+
+{ /new: mint a session in the CURRENT workspace and switch to it.
+
+  Two steps, because the id must exist before the launcher can open a view for
+  it: create the row, then go through the same SwitchSession path /sessions uses.
+  That reuses one switch implementation, so a new session and a chosen one cannot
+  diverge. }
+procedure THarnessApp.StartNewSession;
+var
+  Id: string;
+  StoreErr: TStoreError;
+begin
+  if (FSession = nil) or (FSession.Store = nil) then
+  begin
+    AppendError('no store; cannot start a session');
+    Exit;
+  end;
+  Id := '';
+  if not FSession.Store.CreateSession(FSession.WorkspaceId, Id, StoreErr) then
+  begin
+    AppendError('could not start a session: ' + StoreErr.Message);
+    Exit;
+  end;
+  SwitchSession(Id);
 end;
 
 procedure THarnessApp.SwitchSession(const ASessionId: string);
@@ -956,7 +985,7 @@ begin
     RunCommand but never registered, so '/undo' was sent to the model as a
     message. }
   Result := nil;
-  SetLength(Result, 5);
+  SetLength(Result, 6);
   Result[0].Name := 'checkpoint';
   Result[0].Description := 'create a checkpoint for this session';
   Result[1].Name := 'sessions';
@@ -979,6 +1008,10 @@ begin
   end;
   Result[4].Name := 'revert';
   Result[4].Description := 'ask the agent to undo an earlier turn, going forwards';
+  { /new starts a fresh session in this workspace. Listed unconditionally: it
+    works while connecting, since it only needs the store. }
+  Result[5].Name := 'new';
+  Result[5].Description := 'start a new session in this workspace';
 end;
 
 procedure THarnessApp.ComposeChanged(Sender: TObject);
@@ -1018,6 +1051,13 @@ begin
   if (AName = 'sessions') or (AName = 'ss') then
   begin
     ShowSessions;
+    Exit;
+  end;
+  { /new also only needs the store: a fresh session is a fresh runtime, so it
+    works while connecting too. }
+  if AName = 'new' then
+  begin
+    StartNewSession;
     Exit;
   end;
   { While connecting or failed, other commands have no driver; refuse cleanly. }
@@ -1132,8 +1172,10 @@ begin
       StoreErr);
     Left := SessionDisplayName(Lbl, Title, FSession.SessionId);
   end;
+  { Before a session exists there is nothing to name it by, and an empty title
+    border reads as a broken header rather than an idle one. }
   if Left = '' then
-    Left := Copy(FSession.SessionId, 1, 12);
+    Left := 'New Session';
   { Keep the title within the border: reserve room for the right-aligned context
     (and the corners), so a long title cannot push the usage off the border.
     TruncateTitle returns a UnicodeString; encode it to a UTF-8 `string`

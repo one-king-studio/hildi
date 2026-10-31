@@ -91,12 +91,10 @@ type
     procedure TestFtsSearchScoped;
 
     procedure TestReplyMetadataMigrationV10IsAdditive;
-    procedure TestSessionTitleOverrideWins;
     procedure TestReplyKeywordsReplace;
     procedure TestReplyKeywordsCascade;
     procedure TestListSessionRowsOrderAndArchived;
     procedure TestSessionPinAndArchiveRoundTrip;
-    procedure TestRenameReusesTitleOverride;
   end;
 
 implementation
@@ -1895,39 +1893,6 @@ begin
   end;
 end;
 
-procedure TStoreTest.TestSessionTitleOverrideWins;
-var
-  S: TSqliteStore;
-  Err: TStoreError;
-  Ws: Integer;
-  Sid, Title: string;
-begin
-  S := OpenStore;
-  try
-    S.EnsureWorkspace('/tmp', Ws, Err);
-    S.CreateSession(Ws, Sid, Err);
-    { The extracted title. }
-    AssertTrue('set title', S.SetSessionTitle(Sid, 'Extracted title', Err));
-    AssertTrue('read', S.SessionTitle(Sid, Title, Err));
-    AssertEquals('extracted wins while no override', 'Extracted title', Title);
-    { An override beats the extracted title. }
-    AssertTrue('set override', S.SetSessionTitleOverride(Sid, 'My name', Err));
-    AssertTrue('read', S.SessionTitle(Sid, Title, Err));
-    AssertEquals('override wins', 'My name', Title);
-    { A later extracted title must NOT overwrite the override. }
-    AssertTrue('set title again', S.SetSessionTitle(Sid, 'Newer extracted', Err));
-    AssertTrue('read', S.SessionTitle(Sid, Title, Err));
-    AssertEquals('override still wins', 'My name', Title);
-    { Clearing the override reveals the last ACCEPTED extracted title (the one
-      attempted while overridden was dropped). }
-    AssertTrue('clear override', S.SetSessionTitleOverride(Sid, '', Err));
-    AssertTrue('read', S.SessionTitle(Sid, Title, Err));
-    AssertEquals('extracted after clear', 'Extracted title', Title);
-  finally
-    S.Free;
-  end;
-end;
-
 procedure TStoreTest.TestReplyKeywordsReplace;
 var
   S: TSqliteStore;
@@ -2054,32 +2019,6 @@ begin
     AssertTrue('list', S.ListSessionRows(Ws, False, Rows, Err));
     AssertEquals('visible again', 1, Length(Rows));
     AssertFalse('unpinned', Rows[0].Pinned);
-  finally
-    S.Free;
-  end;
-end;
-
-procedure TStoreTest.TestRenameReusesTitleOverride;
-var
-  S: TSqliteStore;
-  Err: TStoreError;
-  Ws: Integer;
-  A: string;
-  Rows: TSessionRowArray;
-begin
-  { The modal's rename is SetSessionTitleOverride; the row shows the override. }
-  S := OpenStore;
-  try
-    S.EnsureWorkspace('/tmp', Ws, Err);
-    S.CreateSession(Ws, A, Err);
-    S.SetSessionTitle(A, 'Extracted', Err);
-    AssertTrue('rename', S.SetSessionTitleOverride(A, 'My name', Err));
-    AssertTrue('list', S.ListSessionRows(Ws, False, Rows, Err));
-    AssertEquals('override shown', 'My name', Rows[0].Title);
-    { Clearing the override falls back to the extracted title. }
-    AssertTrue('clear', S.SetSessionTitleOverride(A, '', Err));
-    AssertTrue('list', S.ListSessionRows(Ws, False, Rows, Err));
-    AssertEquals('extracted shown', 'Extracted', Rows[0].Title);
   finally
     S.Free;
   end;

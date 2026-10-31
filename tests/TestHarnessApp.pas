@@ -3169,9 +3169,15 @@ begin
   AssertFalse('no session id', FSession.View.HasSession);
   FApp := THarnessApp.Create(FSurface, FInput, FSession.View, nil);
   AssertEquals('idle', Ord(csIdle), Ord(FApp.ConnState));
-  AssertTrue('an idle frame is drawn', BlockCount >= 1);
-  AssertTrue('it invites a prompt',
-    FindText(ckThinking, 'type a prompt to start'));
+  { The idle frame is drawn by the panel's EMPTY STATE now (logo + first-run
+    hints), not by a stream block: a notice block made the stream non-empty and
+    suppressed the mark it was competing with. Assert the property that matters -
+    nothing was added to the conversation - and that the state is ready. }
+  AssertEquals('no conversation blocks on a fresh session', 0, BlockCount);
+  { The state is asserted where it is observable: the panel's own suite pins
+    psReady drawing a check, and TestEmptyTranscriptDrawsTheLogo pins the mark.
+    Reaching into a private field from here would test the accessor, not the
+    screen. }
 end;
 
 procedure THarnessAppTest.TestPaintBeforeConnectOrder;
@@ -3195,7 +3201,8 @@ begin
   FApp := THarnessApp.Create(FSurface, FInput, FSession.View, nil);
   FApp.Step;   // the first frame
   FramesBefore := BlockCount;
-  AssertTrue('a frame is on screen before any connect', FramesBefore >= 1);
+  { Same reason: nothing is SEEDED into the transcript before connecting. }
+  AssertEquals('no conversation blocks before any connect', 0, FramesBefore);
   AssertEquals('still not connected', Ord(csIdle), Ord(FApp.ConnState));
   { Only now connect. }
   FApp.Attach(FSession.View, LocalDriver(FSession));

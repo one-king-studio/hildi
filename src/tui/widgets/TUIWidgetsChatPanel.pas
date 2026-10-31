@@ -23,6 +23,27 @@ uses
   TUIWidgetsCompose, TUIWidgetsPalette,
   TUIWidgetsActions;
 
+{ The start-of-session mark: drawn centred in an empty transcript. Braille block
+  art, so it reads as a logo on a terminal that has no images. One string per
+  ROW, so a badly-wide row cannot shift the centring of the others. }
+const
+  EmptyLogo: array[0..7] of UnicodeString = (
+    '⠀⠀⠀⠀⠀⠀⣀⣤⣴⡶⠶⠶⠶⣦⣤⣀⠀⠀⠀⠀⠀⠀⠀',
+    '⠀⠀⠀⠀⠀⣠⣶⣿⠟⠉⠀⢀⣤⣶⣶⣄⠻⣿⣿⣶⣄⠀⠀⠀⠀⠀',
+    '⠀⠀⠀⠀⣼⣿⡟⠁⠀⠀⣰⣿⡿⠁⠈⣿⠀⢿⣿⣿⣿⣧⡀⠀⠀⠀',
+    '⠀⠀⠀⣾⣿⡟⠀⠀⠀⢰⣿⡿⠀⠀⢠⡟⠀⠘⣿⣿⣿⣿⣧⠀⠀⠀',
+    '⠀⠀⠀⣿⡿⠀⠀⠀⠀⢸⣿⠃⠀⣠⠟⠀⠀⠀⠹⣿⣿⣿⣿⠀⠀⠀',
+    '⠀⠀⠀⢻⡇⠀⠀⠀⠀⢼⡟⢀⡴⢁⣀⡀⠀⠀⠀⠙⣿⣿⡟⠀⠀⠀',
+    '⠀⠀⠀⠀⠀⠀⠀⠀⠀⣸⡟⢁⣼⡿⠋⣿⠀⠀⠀⠀⢹⡟⠁⠀⠀⠀',
+    '⠀⠀⠀⠀⠀⠀⢀⠠⠊⠈⠻⠾⠟⠀⠀⠘⠦⣀⠀⠀⠀⠀⠀⠀⠀⠀');
+
+  { The first-run instructions, below the mark. Short: this is a resting screen,
+    not documentation. }
+  EmptyHints: array[0..2] of UnicodeString = (
+    'Type a prompt and press Enter to start',
+    'Shift+Enter adds a line',
+    'Ctrl+? lists commands');
+
 type
   { What the run is doing, shown at the left of the toolbar. psThinking and
     psTool animate the sparkle; the others are static icons. }
@@ -82,6 +103,7 @@ type
     { The messages panel's top border: the session id at the left, the session
       stats at the right. }
     procedure SetHeader(const ALeft, ARight: string);
+    procedure RenderEmptyMark(const S: ISurface);
     property HeaderLeft: string read FHeaderLeft;
     property HeaderRight: string read FHeaderRight;
     { A multi-page (checkpointed) session: the messages panel's left border is
@@ -341,6 +363,41 @@ begin
   FitStatus;
 end;
 
+{ The empty-transcript mark: the logo centred horizontally, then the hints below
+  it. Widths are measured in DISPLAY CELLS, because a braille blank is one cell
+  and centring by string length drifts on any line holding a wide glyph. }
+procedure TChatPanel.RenderEmptyMark(const S: ISurface);
+var
+  B: TRect;
+  TotalH, Top, I, W, X: Integer;
+  Line: UnicodeString;
+begin
+  B := FMessages.Bounds;
+  TotalH := Length(EmptyLogo) + Length(EmptyHints) + 2;
+  Top := B.Y + 1 + ((B.H - 2) - TotalH) div 2;
+  if Top < B.Y + 1 then
+    Top := B.Y + 1;
+  for I := 0 to High(EmptyLogo) do
+  begin
+    Line := EmptyLogo[I];
+    W := StringWidth(Line);
+    if W > B.W - 2 then
+      Continue;   { too wide for this pane: skip the row rather than clip it }
+    X := B.X + 1 + ((B.W - 2) - W) div 2;
+    PutText(S, X, Top + I, Line, FTheme.Muted);
+  end;
+  Inc(Top, Length(EmptyLogo) + 1);
+  for I := 0 to High(EmptyHints) do
+  begin
+    Line := EmptyHints[I];
+    W := StringWidth(Line);
+    if W > B.W - 2 then
+      Continue;
+    X := B.X + 1 + ((B.W - 2) - W) div 2;
+    PutText(S, X, Top + I, Line, FTheme.Muted);
+  end;
+end;
+
 procedure TChatPanel.Render(const S: ISurface);
 var
   B: TRect;
@@ -348,6 +405,13 @@ var
   Heavy: UnicodeString;
 begin
   FMessages.Render(S);
+  { A FRESH session shows the mark and the first-run hints, centred in the empty
+    transcript. Drawn here rather than seeded into the stream as rows: it is
+    decoration, so it must not become part of the conversation or scroll with it,
+    and it disappears the moment the first block arrives. }
+  if (FStream.Count = 0) and (FMessages.Bounds.W >= 24) and
+    (FMessages.Bounds.H >= Length(EmptyLogo) + Length(EmptyHints) + 3) then
+    RenderEmptyMark(S);
   { The left border doubles as a page gauge: one segment per page, the current
     page heavy. Only drawn for a multi-page session. }
   if (FPageCount > 1) and (FMessages.Bounds.W >= 2) and

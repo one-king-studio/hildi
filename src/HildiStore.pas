@@ -192,11 +192,8 @@ type
     function SetSessionLabel(const ASessionId, ALabel: string;
       out AError: TStoreError): Boolean;
     { Set ('' clears) the operator's title override. DEPRECATED: renames now
-      write the label. Kept so an old override still resolves in SessionTitle
-      until a migration clears the column. }
-    function SetSessionTitleOverride(const ASessionId, AOverride: string;
-      out AError: TStoreError): Boolean;
-    { The resolved title (override else extracted; '' when neither). }
+      write the label. }
+    { The extracted title for the session ('' when none yet). }
     function SessionTitle(const ASessionId: string; out ATitle: string;
       out AError: TStoreError): Boolean;
     { Replace a reply's keyword set (by the assistant message id). }
@@ -3083,7 +3080,7 @@ var
   Stmt: TStmt;
   N: Integer;
   Row: TSessionRow;
-  Title, Override: string;
+  Title: string;
 begin
   AError := OkError;
   ARows := nil;
@@ -3092,7 +3089,7 @@ begin
     if not EnsureOpen(AError) then
       Exit(False);
     Stmt := TStmt.Create(FDb,
-      'SELECT id, updated_at, pinned, archived, title, title_override, ' +
+      'SELECT id, updated_at, pinned, archived, title, ' +
       'parent_session_id, depth, label ' +
       'FROM sessions WHERE workspace_id = ? ' +
       'ORDER BY pinned DESC, updated_at DESC, rowid DESC');
@@ -3110,17 +3107,14 @@ begin
         Row.Archived := Stmt.ColInt(3) <> 0;
         if Row.Archived and (not AIncludeArchived) then
           Continue;
-        { The resolved title: the override wins over the extracted title. }
-        Title := Stmt.ColText(4);
-        Override := Stmt.ColText(5);
-        if Override <> '' then
-          Row.Title := Override
-        else
-          Row.Title := Title;
-        { Lineage: a delegated child carries its parent, so a list can nest it. }
-        Row.ParentSessionId := Stmt.ColText(6);
-        Row.Depth := Stmt.ColInt(7);
-        Row.LabelText := Stmt.ColText(8);
+        Row.Title := Stmt.ColText(4);
+        { Lineage: a delegated child carries its parent, so a list can nest it.
+          These indices are POSITIONAL - removing a column from the SELECT above
+          shifts every one of them, and the fallout is silent (ParentSessionId
+          reads the label, Depth reads a string as an int). }
+        Row.ParentSessionId := Stmt.ColText(5);
+        Row.Depth := Stmt.ColInt(6);
+        Row.LabelText := Stmt.ColText(7);
         SetLength(ARows, N + 1);
         ARows[N] := Row;
         Inc(N);
@@ -3283,9 +3277,10 @@ begin
   try
     if not EnsureOpen(AError) then
       Exit(False);
-    { The extracted title never overwrites an operator override. }
+    { The extracted title is the only title: an operator names a session with the
+      LABEL, so there is nothing here to protect from being overwritten. }
     Stmt := TStmt.Create(FDb,
-      'UPDATE sessions SET title = ? WHERE id = ? AND title_override = ''''');
+      'UPDATE sessions SET title = ? WHERE id = ?');
     try
       if not Stmt.Valid then
         Exit(Fail(AError, seError, 'could not set title', DbErrorText));
@@ -3332,38 +3327,10 @@ begin
   end;
 end;
 
-function TSqliteStore.SetSessionTitleOverride(const ASessionId,
-  AOverride: string; out AError: TStoreError): Boolean;
-var
-  Stmt: TStmt;
-begin
-  AError := OkError;
-  FLock.Acquire;
-  try
-    if not EnsureOpen(AError) then
-      Exit(False);
-    Stmt := TStmt.Create(FDb,
-      'UPDATE sessions SET title_override = ? WHERE id = ?');
-    try
-      if not Stmt.Valid then
-        Exit(Fail(AError, seError, 'could not set title override', DbErrorText));
-      Stmt.BindText(1, AOverride);
-      Stmt.BindText(2, ASessionId);
-      Stmt.Step;
-    finally
-      Stmt.Free;
-    end;
-    Result := True;
-  finally
-    FLock.Release;
-  end;
-end;
-
 function TSqliteStore.SessionTitle(const ASessionId: string;
   out ATitle: string; out AError: TStoreError): Boolean;
 var
   Stmt: TStmt;
-  Override: string;
 begin
   AError := OkError;
   ATitle := '';
@@ -3372,7 +3339,7 @@ begin
     if not EnsureOpen(AError) then
       Exit(False);
     Stmt := TStmt.Create(FDb,
-      'SELECT title, title_override FROM sessions WHERE id = ?');
+      'SELECT title FROM sessions WHERE id = ?');
     try
       if not Stmt.Valid then
         Exit(Fail(AError, seError, 'could not read title', DbErrorText));
@@ -3380,9 +3347,6 @@ begin
       if Stmt.Step = SQLITE_ROW then
       begin
         ATitle := Stmt.ColText(0);
-        Override := Stmt.ColText(1);
-        if Override <> '' then
-          ATitle := Override;
       end;
     finally
       Stmt.Free;

@@ -37,6 +37,13 @@ type
     procedure TestTwoPagesSplitTheLeftBorder;
     procedure TestThreePagesMarkTheCurrentMiddle;
     procedure TestSetPageIndexMovesTheHeavySegment;
+    { A ckThinking row WITH a body is a plain notice, not the spinner: the idle
+      screen said "type a prompt to start a session" through this kind and the
+      renderer drew the hardcoded word over it. }
+    procedure TestThinkingRowWithABodyDrawsTheBody;
+    procedure TestThinkingRowWithoutABodyDrawsTheSpinner;
+    { A fresh session's empty transcript shows the mark and the hints. }
+    procedure TestEmptyTranscriptDrawsTheLogo;
   end;
 
 implementation
@@ -286,6 +293,119 @@ begin
         Pos('ready', S.RowText(13, 0, 20)) > 0);
       AssertTrue('hints on the right',
         Pos('hints here', S.RowText(13, 48, 12)) > 0);
+    finally
+      P.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatPanelTest.TestThinkingRowWithABodyDrawsTheBody;
+var
+  P: TChatPanel;
+  S: TSurfaceMemory;
+  Row, Col: Integer;
+  Found: Boolean;
+  Line: UnicodeString;
+begin
+  S := TSurfaceMemory.Create(60, 20);
+  try
+    P := TChatPanel.Create(FTheme, 'info', '');
+    try
+      P.Stream.Add(ckThinking, '', 'type a prompt to start a session');
+      P.Arrange(Rc(0, 0, 60, 20));
+      P.Render(S);
+      { Read the painted row as text: asserting the STATE would pass while the
+        wrong word was drawn, which is exactly the bug this covers. }
+      Found := False;
+      for Row := 0 to 19 do
+      begin
+        Line := '';
+        for Col := 0 to 59 do
+          Line := Line + S.CellAt(Col, Row).Ch;
+        if Pos(UnicodeString('type a prompt'), Line) > 0 then
+          Found := True
+        else if Pos(UnicodeString('Thinking'), Line) > 0 then
+          Fail('the hardcoded spinner word was drawn over the notice');
+      end;
+      AssertTrue('the notice text is drawn', Found);
+    finally
+      P.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatPanelTest.TestThinkingRowWithoutABodyDrawsTheSpinner;
+var
+  P: TChatPanel;
+  S: TSurfaceMemory;
+  Row, Col: Integer;
+  Found: Boolean;
+  Line: UnicodeString;
+begin
+  S := TSurfaceMemory.Create(60, 20);
+  try
+    P := TChatPanel.Create(FTheme, 'info', '');
+    try
+      { No body: this is the live run's row, and "Thinking" belongs here. }
+      P.Stream.Add(ckThinking, '', '');
+      P.Arrange(Rc(0, 0, 60, 20));
+      P.Render(S);
+      Found := False;
+      for Row := 0 to 19 do
+      begin
+        Line := '';
+        for Col := 0 to 59 do
+          Line := Line + S.CellAt(Col, Row).Ch;
+        if Pos(UnicodeString('Thinking'), Line) > 0 then
+          Found := True;
+      end;
+      AssertTrue('the spinner word is drawn for a live run', Found);
+    finally
+      P.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatPanelTest.TestEmptyTranscriptDrawsTheLogo;
+var
+  P: TChatPanel;
+  S: TSurfaceMemory;
+  Row, Col: Integer;
+  Braille, Hint: Boolean;
+  Line, U: UnicodeString;
+begin
+  S := TSurfaceMemory.Create(80, 30);
+  try
+    P := TChatPanel.Create(FTheme, 'info', '');
+    try
+      { No stream blocks: the fresh-session state. }
+      P.Arrange(Rc(0, 0, 80, 30));
+      P.Render(S);
+      Braille := False;
+      Hint := False;
+      for Row := 0 to 29 do
+      begin
+        { UnicodeString, not string: this is an AnsiString build target, so a
+          braille codepoint cannot survive `string` and the comparison would be
+          vacuously false. }
+        Line := '';
+        for Col := 0 to 79 do
+          Line := Line + S.CellAt(Col, Row).Ch;
+        { The mark is braille block art (U+2800..U+28FF). }
+        for Col := 1 to Length(Line) do
+          if (Ord(Line[Col]) >= $2800) and (Ord(Line[Col]) <= $28FF) then
+            Braille := True;
+        if Pos(UnicodeString('Type a prompt'), Line) > 0 then
+          Hint := True;
+      end;
+      AssertTrue('the logo is drawn', Braille);
+      AssertTrue('the first-run hint is drawn', Hint);
     finally
       P.Free;
     end;

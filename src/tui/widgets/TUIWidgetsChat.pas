@@ -1170,6 +1170,16 @@ begin
       end;
     ckThinking:
       begin
+        { A ckThinking row with a BODY is a plain notice, not a live spinner:
+          the idle panel says "type a prompt to start a session" through this
+          kind, and rendering the hardcoded word over it made a fresh session
+          look like it was already thinking. The sparkle belongs only to the
+          bodiless row the run itself adds. }
+        if FBody <> '' then
+        begin
+          PutText(S, FBounds.X + 1, FBounds.Y, UnicodeString(FBody), FTheme.Muted);
+          Exit;
+        end;
         PutText(S, FBounds.X + 1, FBounds.Y, FSpark, FTheme.Accent);
         PutText(S, FBounds.X + 3, FBounds.Y, 'Thinking', FTheme.Muted);
         Exit;
