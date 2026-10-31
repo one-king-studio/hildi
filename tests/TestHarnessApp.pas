@@ -173,6 +173,8 @@ type
       the key and the composer sends the text as a PROMPT - which is how /undo,
       /redo and /revert were unreachable and got sent to the model verbatim. }
     procedure TestEveryDispatchedCommandIsOfferedByThePalette;
+    procedure TestTurnCommandsAreAbsentOnAFreshSession;
+    procedure TestNoCommandHasAnEmptyName;
     { Escape dismisses the palette and leaves the typed '/' alone, so an ordinary
       prompt may begin with a slash. It must STAY dismissed while the box holds a
       lone '/token', or the list pops back on the next keystroke. }
@@ -1675,8 +1677,7 @@ const
   { Commands offered unconditionally. /redo is deliberately absent: it appears
     only when there is something to redo, and a test asserting it is always there
     would forbid that. }
-  Dispatched: array[0..3] of string =
-    ('checkpoint', 'sessions', 'undo', 'revert');
+  Dispatched: array[0..2] of string = ('checkpoint', 'sessions', 'new');
 var
   I, J: Integer;
   Found: Boolean;
@@ -1698,6 +1699,39 @@ begin
         Found := True;
     AssertTrue('/' + Dispatched[I] + ' must be offered by the palette', Found);
   end;
+end;
+
+procedure THarnessAppTest.TestTurnCommandsAreAbsentOnAFreshSession;
+var
+  I: Integer;
+  Name: string;
+begin
+  { Nothing to act on, so nothing offered. An entry that can only open an empty
+    list invites the operator to try something that cannot work. }
+  BuildWithStore;
+  FApp.Panel.Palette.Filter('/');
+  for I := 0 to FApp.Panel.Palette.VisibleCount - 1 do
+  begin
+    Name := FApp.Panel.Palette.VisibleAt(I).Name;
+    AssertTrue('/undo is not offered on a fresh session', Name <> 'undo');
+    AssertTrue('/redo is not offered on a fresh session', Name <> 'redo');
+    AssertTrue('/revert is not offered on a fresh session', Name <> 'revert');
+  end;
+end;
+
+procedure THarnessAppTest.TestNoCommandHasAnEmptyName;
+var
+  I: Integer;
+begin
+  { THE BLANK ROW. The previous implementation pre-sized the array and left
+    Name := '' in the slots for commands that were not actionable, so hiding
+    /redo produced a visible empty "/" entry instead of a shorter list. }
+  BuildWithStore;
+  FApp.Panel.Palette.Filter('/');
+  AssertTrue('the palette has entries', FApp.Panel.Palette.VisibleCount > 0);
+  for I := 0 to FApp.Panel.Palette.VisibleCount - 1 do
+    AssertTrue('entry ' + IntToStr(I) + ' has a name',
+      FApp.Panel.Palette.VisibleAt(I).Name <> '');
 end;
 
 procedure THarnessAppTest.TestEscapeDismissesThePaletteSoSlashCanBeAPrompt;

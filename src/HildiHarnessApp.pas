@@ -971,47 +971,82 @@ begin
       Exit(True);
 end;
 
+{ The command palette's contents.
+
+  APPEND, never pre-size. The previous version did `SetLength(Result, 6)` and left
+  `Name := ''` in the slots for commands that were not actionable - and an entry
+  with an empty name renders as a BLANK `/` row, so "hide /redo" produced a
+  visibly broken list rather than a shorter one.
+
+  A command appears only when it can do something. /undo needs an undoable turn,
+  /redo needs a redoable one, /revert needs a turn to point at. Offering a command
+  that can only open an empty list is worse than absent: it invites the operator to
+  try something that cannot work. }
 function THarnessApp.DefaultCommands: TCommandArray;
+var
+  N: Integer;
+
+  procedure Add(const AName, ADescription: string);
+  begin
+    SetLength(Result, N + 1);
+    Result[N].Name := AName;
+    Result[N].Description := ADescription;
+    Inc(N);
+  end;
+
+  { A turn the operator can still walk back to: one that is not already undone. }
+  function HasUndoableTurn: Boolean;
+  var
+    Turns: TTurnRecordArray;
+    I: Integer;
+  begin
+    Result := False;
+    if FSession = nil then
+      Exit;
+    Turns := FSession.Turns;
+    for I := 0 to High(Turns) do
+      if Turns[I].Status <> tsUndone then
+        Exit(True);
+  end;
+
+  { /revert points at an EARLIER turn, so it needs more than one. }
+  function HasEarlierTurn: Boolean;
+  var
+    Turns: TTurnRecordArray;
+    I, Live: Integer;
+  begin
+    Result := False;
+    if FSession = nil then
+      Exit;
+    Turns := FSession.Turns;
+    Live := 0;
+    for I := 0 to High(Turns) do
+      if Turns[I].Status <> tsUndone then
+        Inc(Live);
+    Result := Live >= 2;
+  end;
+
 begin
   { One entry per command, no aliases: two names for one action reads as two
     actions in a list, and the palette's prefix filter already finds a command
     from '/c' or '/ch'.
 
-    EVERY dispatched command must be listed here. RunCommand is reachable only
-    through the palette, and the palette only runs a name it was given: a command
-    missing from this array cannot be typed either, because with no match the
-    palette declines the key and the composer submits the text as a PROMPT. That
-    is how /undo, /redo and /revert were unreachable - they were dispatched in
-    RunCommand but never registered, so '/undo' was sent to the model as a
-    message. }
+    EVERY dispatched command must be reachable here. RunCommand is reachable only
+    through the palette, and the palette only runs a name it was given: with no
+    match it declines the key, the composer takes Enter, and the text is submitted
+    as a PROMPT. That is how /undo once reached the model as "/undo". }
   Result := nil;
-  SetLength(Result, 6);
-  Result[0].Name := 'checkpoint';
-  Result[0].Description := 'create a checkpoint for this session';
-  Result[1].Name := 'sessions';
-  Result[1].Description := 'list and manage this workspace''s sessions';
-  Result[2].Name := 'undo';
-  Result[2].Description := 'revert the newest turn and rewind the transcript';
-  { /redo is offered only when there is something to redo. An entry that can
-    only open an empty list is worse than absent: it invites the operator to try
-    something that cannot work. HasRedoableTurn asks the same question the
-    dialog does, so the two cannot disagree about what is available. }
+  N := 0;
+  Add('checkpoint', 'create a checkpoint for this session');
+  Add('sessions', 'list and manage this workspace''s sessions');
+  Add('new', 'start a new session in this workspace');
+  { The turn-dependent three appear only when there is something to act on. }
+  if HasUndoableTurn then
+    Add('undo', 'revert the newest turn and rewind the transcript');
   if HasRedoableTurn then
-  begin
-    Result[3].Name := 'redo';
-    Result[3].Description := 're-apply the turns the last undo took away';
-  end
-  else
-  begin
-    Result[3].Name := '';
-    Result[3].Description := '';
-  end;
-  Result[4].Name := 'revert';
-  Result[4].Description := 'ask the agent to undo an earlier turn, going forwards';
-  { /new starts a fresh session in this workspace. Listed unconditionally: it
-    works while connecting, since it only needs the store. }
-  Result[5].Name := 'new';
-  Result[5].Description := 'start a new session in this workspace';
+    Add('redo', 're-apply the turns the last undo took away');
+  if HasEarlierTurn then
+    Add('revert', 'ask the agent to undo an earlier turn, going forwards');
 end;
 
 procedure THarnessApp.ComposeChanged(Sender: TObject);
