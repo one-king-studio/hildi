@@ -346,6 +346,11 @@ type
     { Run a command from the palette. }
     procedure RunCommand(const AName: string);
     function DefaultCommands: TCommandArray;
+    { Rebuild the palette's list. The list is CONDITIONAL on the session and the
+      ledger, so every point that changes either must call this: the palette is
+      built inside BuildTree, before the connect state is known, so anything
+      conditional on it would otherwise be frozen at its constructor-time value. }
+    procedure SyncCommands;
     { True when some undone turn sits above the redo floor, so /redo has work. }
     function HasRedoableTurn: Boolean;
     function GetModalActive: Boolean;
@@ -450,8 +455,16 @@ function ShouldTrimHistory(AOlderPages: Integer; ANowMs, ALastScrollMs: Int64;
   Empty parts are dropped rather than leaving a dangling separator: a session
   with no title shows just its label, and one with neither shows the id. Pure,
   so the format is testable without a widget. }
-{ Lowercase only the first character of a reason string, for "Waiting to ...". }
-function LowerFirst(const AText: string): string;
+{ How a running tool call is captioned. Every entry reads as the lead-in of a
+  sentence whose object is the reason, so "find related files" works unchanged
+  after any of them.
+
+  The entry is chosen by the CALL ID, not by the clock: a tool run states a FACT,
+  and a caption that rewords itself while the tool is still running is decoration.
+  Variety therefore shows ACROSS calls, not during one - which is what makes a
+  turn with five tool calls read as five decisions rather than five copies of one
+  phrase. Pure, so the vocabulary is testable without a turn. }
+function ToolWaitCaption(const AToolId, AWhat: string): string;
 
 function SessionDisplayName(const ALabel, ATitle, ASessionId: string): string;
 
@@ -693,6 +706,10 @@ begin
     FConnState := csIdle;
     RenderConnState;
   end;
+  { BuildTree ran inside TTuiApp.Create and populated the palette BEFORE the
+    connect state above was known, so anything DefaultCommands makes conditional
+    would be frozen at its idle-time value. Rebuild now that the state is real. }
+  SyncCommands;
 end;
 
 function THarnessApp.GetConnState: TConnState;
@@ -720,7 +737,7 @@ begin
           first-run hints. Adding a notice gave the stream a count of 1, which
           disabled that empty state - the notice and the logo were competing for
           the same screen, and the notice won by making the stream non-empty. }
-        SetState(psReady, 'idle');
+        SetState(psReady, 'Idle');
       end;
     csConnecting:
       begin
@@ -754,6 +771,9 @@ begin
   RenderHistory;
   SetState(psReady, 'Ready');
   UpdateStats;
+  { A runtime exists now, so /checkpoint becomes actionable and /new stops being
+    the idle case. The palette was built before this attach. }
+  SyncCommands;
   { Flush a prompt submitted while idle: it is the prompt the operator typed to
     trigger this connect. }
   Pending := FPendingSubmit;
@@ -857,6 +877,10 @@ begin
   RenderHistory;
   SetState(psReady, 'Ready');
   UpdateStats;
+  { The ledger just changed sessions, so the turn-dependent commands no longer
+    describe it: /undo, /redo and /revert would be offered for the OLD session's
+    turns, and /checkpoint for a runtime this session may not have yet. }
+  SyncCommands;
   { The modal raised this from inside its own event dispatch, so pop it on the
     next Step rather than freeing it mid-dispatch. }
   if FSessionsShown then
@@ -868,6 +892,9 @@ begin
   { No session/runtime yet: the operator can quit without any side effect. }
   FConnState := csIdle;
   RenderConnState;
+  { /checkpoint and /new both need a workspace or a runtime, so leaving them
+    offered here would invite a command that can only report "no store". }
+  SyncCommands;
 end;
 
 procedure THarnessApp.FailConnect(const AError: string);
@@ -875,6 +902,7 @@ begin
   FConnState := csFailed;
   FConnectError := AError;
   RenderConnState;
+  SyncCommands;
 end;
 
 destructor THarnessApp.Destroy;
@@ -1040,7 +1068,12 @@ begin
     as a PROMPT. That is how /undo once reached the model as "/undo". }
   Result := nil;
   N := 0;
-  Add('checkpoint', 'create a checkpoint for this session');
+  { /checkpoint drafts through the runtime, so it needs one: offered while
+    CONNECTING it invites a command that can only answer "no session yet". Same
+    predicate as RunCommand's own guard, so "offered" and "actionable" cannot
+    drift apart. }
+  if FDriver <> nil then
+    Add('checkpoint', 'create a checkpoint for this session');
   Add('sessions', 'list and manage this workspace''s sessions');
   { /new needs a workspace to mint the session into, which an unattached TUI does
     not have: csIdle means no session and no runtime yet. Offering it there would
@@ -1054,6 +1087,12 @@ begin
     Add('redo', 're-apply the turns the last undo took away');
   if HasEarlierTurn then
     Add('revert', 'ask the agent to undo an earlier turn, going forwards');
+end;
+
+procedure THarnessApp.SyncCommands;
+begin
+  if FPanel <> nil then
+    FPanel.Palette.SetCommands(DefaultCommands);
 end;
 
 procedure THarnessApp.ComposeChanged(Sender: TObject);
@@ -1907,14 +1946,16 @@ begin
         { A tool is running; the sparkle keeps animating because the turn is
           still in flight. Blocks are keyed by call id, so a parallel batch's
           calls each get their own block, created here in call order. }
-        { "Waiting to <reason>", not "running <tool>": the reason is a passive
-          action ("Find related files"), so it reads as the object of "Waiting
-          to". The tool NAME is an implementation detail - the operator reads the
-          decision, which is what the block's title already shows. }
+        { "<lead-in> <reason>", not "running <tool>": the reason is a passive
+          action ("Find related files"), so it reads as the object of the
+          lead-in. The tool NAME is an implementation detail - the operator reads
+          the decision, which is what the block's title already shows. The
+          lead-in varies per call (ToolWaitCaption), so a long turn does not say
+          the same four words five times. }
         if E.ToolReason <> '' then
-          SetState(psTool, 'Waiting to ' + LowerFirst(E.ToolReason))
+          SetState(psTool, ToolWaitCaption(E.ToolId, E.ToolReason))
         else
-          SetState(psTool, 'Waiting to ' + LowerFirst(E.ToolName));
+          SetState(psTool, ToolWaitCaption(E.ToolId, E.ToolName));
         { The reason is the block's title, so collapsed tool lines read as the
           story of the agent's decisions. The raw call is not shown: the result
           is the body, visible when the block is expanded. }
@@ -2011,7 +2052,7 @@ begin
           ledger moved but the display did not, which reads as "undo did
           nothing". }
         FApp.Invalidate;
-        FinishTurn(psReady, 'undone');
+        FinishTurn(psReady, 'Undone');
       end;
     teDone:
       begin
@@ -2021,7 +2062,7 @@ begin
         AddTurnDivider;
         if FSession.LastTurn.Status = tsCompleted then
           AddTurnChanges(FSession.LastTurn.Id);
-        FinishTurn(psReady, 'ready');
+        FinishTurn(psReady, 'Ready');
       end;
     teError:
       if E.ErrorCode = leCancelled then
@@ -2031,7 +2072,7 @@ begin
           back to the operator. }
         if E.Dropped then
           RollBackEarlyCancel;
-        FinishTurn(psReady, 'cancelled');
+        FinishTurn(psReady, 'Cancelled');
       end
       else
       begin
@@ -2039,7 +2080,7 @@ begin
           too, then show the error. }
         RollBackPendingResponse;
         AppendError(ErrorText(E.Text, E.Detail));
-        FinishTurn(psError, 'error');
+        FinishTurn(psError, 'Error');
       end;
   else
     ;
@@ -2156,6 +2197,34 @@ begin
   Result := AText;
   if (Result <> '') and (Result[1] >= 'A') and (Result[1] <= 'Z') then
     Result[1] := Chr(Ord(Result[1]) + 32);
+end;
+
+{ The lead-ins a running tool call may be captioned with. Each takes the reason
+  as its object, so any of them reads correctly in front of "find related files".
+
+  The index is derived from the CALL ID, not from a counter and not from the
+  clock: the same call always gets the same lead-in, so the caption never rewrites
+  itself while its tool is still running, while two calls in one turn usually
+  differ. A turn with five tool calls therefore reads as five decisions instead of
+  five copies of "Waiting to".
+
+  Held as data so the vocabulary can be extended without touching the transition. }
+const
+  ToolWaitLeads: array[0..5] of string =
+    ('Waiting to ', 'About to ', 'Getting ready to ',
+     'Preparing to ', 'Set to ', 'Lining up to ');
+
+function ToolWaitCaption(const AToolId, AWhat: string): string;
+var
+  I, H: Integer;
+begin
+  { A bounded rolling hash. The multiplication stays well inside Int32 so this
+    cannot trap under overflow checking, and the modulus keeps two adjacent call
+    ids from landing on the same lead-in. }
+  H := 0;
+  for I := 1 to Length(AToolId) do
+    H := (H * 31 + Ord(AToolId[I])) mod 65521;
+  Result := ToolWaitLeads[H mod Length(ToolWaitLeads)] + LowerFirst(AWhat);
 end;
 
 function SessionDisplayName(const ALabel, ATitle, ASessionId: string): string;
@@ -2759,6 +2828,12 @@ begin
   SetState(AState, ALabel);
   UpdateStats;
   SyncBusy;
+  { The ledger moved: a completed turn makes /undo actionable and pushes the
+    redo window, a cancel or an error may not. EVERY way a turn ends passes
+    through here, so this is the one place the command list cannot be missed -
+    before, it was rebuilt only on teUndone, so /undo did not appear until the
+    operator had already undone something. }
+  SyncCommands;
 end;
 
 procedure THarnessApp.DrainQueue;

@@ -873,7 +873,7 @@ begin
 
             { The runtime emits turn_finished after the error too; it must not
               flip the failed turn back to ready, nor end it with a divider. }
-            AssertEquals('the failed turn ends in error', 'error',
+            AssertEquals('the failed turn ends in error', 'Error',
               App.StateText);
             SawDivider := False;
             for I := 0 to App.Panel.Stream.Count - 1 do

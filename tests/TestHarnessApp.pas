@@ -106,6 +106,11 @@ type
       out ADriver: ISessionDriver; out AError: string): Boolean;
     procedure Build;
     procedure BuildWithStore;
+    { A genuinely IDLE app: a store-backed session view with no id and no driver,
+      so ConnState is csIdle. BuildWithStore is the opposite - it is fully
+      attached - and using it for an "unattached" claim is how
+      TestNewIsAbsentWhenUnattached passed while asserting a false premise. }
+    procedure BuildIdle;
     function Key(AKind: TKeyKind): TInputEvent;
     function Ch(const AText: string): TInputEvent;
     function Ctrl(const ACh: string): TInputEvent;
@@ -167,6 +172,24 @@ type
     { /new mints a session in this workspace and switches to it. }
     procedure TestNewCommandMintsAndSwitchesSession;
     procedure TestNewIsAbsentWhenUnattached;
+    procedure TestNewIsOfferedWhenAttached;
+    { /checkpoint needs a runtime to draft through, so it appears only once one is
+      attached - the same predicate RunCommand's own guard uses. }
+    procedure TestCheckpointIsAbsentWhenUnattached;
+    procedure TestCheckpointIsOfferedWhenAttached;
+    { The POSITIVE half of "only actionable entries": a palette that never offered
+      /undo or /redo at all satisfied the absence-only tests. }
+    procedure TestTurnCommandsAppearWhenActionable;
+    { The tool caption: varied across calls, stable within one, and honest about
+      its fallback. Previously only asserted by typing the expected string into
+      the panel and checking it echoed. }
+    procedure TestToolWaitCaptionVariesAcrossCalls;
+    procedure TestToolWaitCaptionIsStableForOneCall;
+    procedure TestToolWaitCaptionFallsBackToTheToolName;
+    procedure TestToolWaitCaptionReachesTheStatus;
+    { Variety proven END TO END, without consulting the composer: two calls with
+      the same reason must not produce the same caption on screen. }
+    procedure TestTwoCallsInATurnReadDifferently;
     procedure TestHeaderReadsNewSessionWithoutAnId;
     { EVERY command RunCommand dispatches must be listed in the palette. RunCommand
       is reachable only through the palette, and with no match the palette declines
@@ -518,6 +541,26 @@ begin
   AssertTrue('session opened: ' + Err, FSession <> nil);
   FApp := THarnessApp.Create(FSurface, FInput, FSession.View, LocalDriver(FSession));
   FApp.Step;
+end;
+
+procedure THarnessAppTest.BuildIdle;
+var
+  Err: string;
+begin
+  { No store path (so no session id can be minted) and NO driver: ConnState is
+    csIdle, which is the pre-connect state the palette's conditions are about. }
+  FDir := IncludeTrailingPathDelimiter(GetTempDir) + 'hh-app-' +
+    IntToStr(Random(1000000));
+  ForceDirectories(FDir);
+  FStorePath := '';
+  FFake := TFakeTransport.Create;
+  FSurface := TSurfaceMemory.Create(60, 20);
+  FInput := TInputSourceScripted.Create;
+  FSession := THarnessSession.Open(Config, Err);
+  AssertTrue('session opened: ' + Err, FSession <> nil);
+  FApp := THarnessApp.Create(FSurface, FInput, FSession.View, nil);
+  FApp.Step;
+  AssertEquals('the fixture is idle', Ord(csIdle), Ord(FApp.ConnState));
 end;
 
 function THarnessAppTest.Key(AKind: TKeyKind): TInputEvent;
@@ -1618,15 +1661,285 @@ var
 begin
   { /new mints a session in the CURRENT workspace, so an unattached TUI has
     nothing to mint into - offering it there invites a command that can only
-    report "no store". BuildWithStore leaves the app idle (no session id, no
-    driver), which is exactly that state. }
-  BuildWithStore;
+    report "no store".
+
+    BuildIdle, NOT BuildWithStore: the latter passes a driver, so it is fully
+    ATTACHED. The old version used it and passed anyway, because the palette was
+    populated inside BuildTree - before the constructor set FConnState - so every
+    conditional command was frozen at csIdle. The test asserted a false premise
+    and the bug hid it. SyncCommands exposed it. }
+  BuildIdle;
   FApp.Panel.Palette.Filter('/new');
   Found := False;
   for I := 0 to FApp.Panel.Palette.VisibleCount - 1 do
     if FApp.Panel.Palette.VisibleAt(I).Name = 'new' then
       Found := True;
   AssertFalse('/new is not offered when unattached', Found);
+end;
+
+procedure THarnessAppTest.TestNewIsOfferedWhenAttached;
+var
+  I: Integer;
+  Found: Boolean;
+begin
+  { The other half of the contract, and the half that had no test: the previous
+    suite asserted only that /new was ABSENT when unattached, so a palette that
+    never offered /new at all would have passed it. }
+  BuildWithStore;
+  FApp.Panel.Palette.Filter('/new');
+  Found := False;
+  for I := 0 to FApp.Panel.Palette.VisibleCount - 1 do
+    if FApp.Panel.Palette.VisibleAt(I).Name = 'new' then
+      Found := True;
+  AssertTrue('/new is offered once there is a workspace', Found);
+end;
+
+procedure THarnessAppTest.TestCheckpointIsAbsentWhenUnattached;
+var
+  I: Integer;
+  Name: string;
+  Seen: Boolean;
+begin
+  { /checkpoint drafts through the runtime, so an unattached TUI has nothing to
+    checkpoint and RunCommand's own guard refuses it. Offering it there is an
+    invitation to a command that can only answer "no session yet". }
+  BuildIdle;
+  FApp.Panel.Palette.Filter('/');
+  Seen := False;
+  for I := 0 to FApp.Panel.Palette.VisibleCount - 1 do
+  begin
+    Name := FApp.Panel.Palette.VisibleAt(I).Name;
+    if Name = 'checkpoint' then
+      Seen := True;
+  end;
+  AssertFalse('/checkpoint is not offered before a session exists', Seen);
+  { /sessions only reads the store, so it is genuinely available this early -
+    which is why the list is not simply empty. }
+  AssertTrue('the list is not empty', FApp.Panel.Palette.VisibleCount > 0);
+end;
+
+procedure THarnessAppTest.TestCheckpointIsOfferedWhenAttached;
+var
+  I: Integer;
+  Found: Boolean;
+begin
+  BuildWithStore;
+  FApp.Panel.Palette.Filter('/checkpoint');
+  Found := False;
+  for I := 0 to FApp.Panel.Palette.VisibleCount - 1 do
+    if FApp.Panel.Palette.VisibleAt(I).Name = 'checkpoint' then
+      Found := True;
+  AssertTrue('/checkpoint is offered once a runtime is attached', Found);
+end;
+
+procedure THarnessAppTest.TestTurnCommandsAppearWhenActionable;
+var
+  I: Integer;
+  Turns: TTurnRecordArray;
+  TurnId: Int64;
+  StoreErr: TStoreError;
+  Rec: TMessageRecord;
+  SawUndo, SawRedo: Boolean;
+begin
+  { The POSITIVE half of "only actionable entries". Every existing test asserted
+    ABSENCE on a fresh session, so a palette that never offered /undo or /redo at
+    all would have satisfied the whole suite. }
+
+  { One completed turn makes /undo actionable. }
+  BuildWithStore;
+  AssertTrue('begin turn',
+    FSession.View.Store.BeginTurn(FSession.View.SessionId, TurnId, StoreErr));
+  Rec := Default(TMessageRecord);
+  Rec.SessionId := FSession.View.SessionId;
+  Rec.TurnId := TurnId;
+  Rec.Role := mrUser;
+  Rec.Content := 'do the thing';
+  AssertTrue('message', FSession.View.Store.AppendMessage(Rec, StoreErr));
+  AssertTrue('finish',
+    FSession.View.Store.FinishTurn(TurnId, tsCompleted, 'stop', 0, '', '',
+      StoreErr));
+
+  { Drive a real turn end: FinishTurn rebuilds the palette, which is exactly the
+    choke point that was missing (the list used to be rebuilt only on teUndone). }
+  FFake.AddResponse([TextDelta('ok'), FinishFrame('stop'), DoneFrame]);
+  SubmitPrompt('hello');
+  AssertTrue('turn finished', Pump(400));
+
+  FApp.Panel.Palette.Filter('/');
+  SawUndo := False;
+  SawRedo := False;
+  for I := 0 to FApp.Panel.Palette.VisibleCount - 1 do
+  begin
+    if FApp.Panel.Palette.VisibleAt(I).Name = 'undo' then
+      SawUndo := True;
+    if FApp.Panel.Palette.VisibleAt(I).Name = 'redo' then
+      SawRedo := True;
+  end;
+  AssertTrue('/undo is offered once a turn exists to undo', SawUndo);
+  { Nothing has been undone yet, so there is nothing to redo. }
+  AssertFalse('/redo waits for an undo', SawRedo);
+
+  { Undo one, and the redo window opens while undo may close. }
+  FApp.Panel.Palette.OnRun('undo');
+  AssertTrue('the history dialog opened', FApp.ModalActive);
+  FInput.Push(Key(kkEnter));
+  FApp.Step;
+  FApp.Step;
+
+  Turns := FSession.View.Turns;
+  { TWO turns, not one: the seeded turn plus the live one just run. Assert that
+    exactly one is undone rather than reading Turns[0] - the array's order is the
+    store's, not the order the test happened to create things in, and indexing it
+    asserted an order this test never established. }
+  AssertEquals('both turns remain in the ledger', 2, Length(Turns));
+  SawUndo := False;
+  for I := 0 to High(Turns) do
+    if Turns[I].Status = tsUndone then
+      SawUndo := True;
+  AssertTrue('one turn is undone', SawUndo);
+  FApp.Panel.Palette.Filter('/');
+  SawRedo := False;
+  for I := 0 to FApp.Panel.Palette.VisibleCount - 1 do
+    if FApp.Panel.Palette.VisibleAt(I).Name = 'redo' then
+      SawRedo := True;
+  AssertTrue('/redo is offered once something is undoable-again', SawRedo);
+end;
+
+procedure THarnessAppTest.TestToolWaitCaptionVariesAcrossCalls;
+var
+  I, Distinct: Integer;
+  Seen: array of string;
+  Caption: string;
+
+  function IndexOf(const S: string): Integer;
+  var J: Integer;
+  begin
+    for J := 0 to High(Seen) do
+      if Seen[J] = S then
+        Exit(J);
+    Result := -1;
+  end;
+
+begin
+  { The caption is picked from the CALL ID, so a turn with several tool calls
+    does not repeat one phrase. A single fixed string would fail this. }
+  SetLength(Seen, 0);
+  for I := 1 to 8 do
+  begin
+    Caption := ToolWaitCaption('call-' + IntToStr(I), 'Find related files');
+    if IndexOf(Caption) < 0 then
+    begin
+      SetLength(Seen, Length(Seen) + 1);
+      Seen[High(Seen)] := Caption;
+    end;
+  end;
+  Distinct := Length(Seen);
+  AssertTrue('the caption varies across calls, not just once: ' +
+    IntToStr(Distinct) + ' distinct', Distinct > 1);
+end;
+
+procedure THarnessAppTest.TestToolWaitCaptionIsStableForOneCall;
+var
+  First, Again: string;
+  I: Integer;
+begin
+  { ONE call, one caption. A tool run states a FACT, so it must not reword itself
+    while the tool is still running - the same rule that keeps the reasoning
+    rotation off psTool. Deriving the lead from a counter or the clock would fail
+    this; deriving it from the call id cannot. }
+  First := ToolWaitCaption('call-xyz', 'Run the tests');
+  for I := 1 to 5 do
+  begin
+    Again := ToolWaitCaption('call-xyz', 'Run the tests');
+    AssertEquals('the same call always reads the same', First, Again);
+  end;
+end;
+
+procedure THarnessAppTest.TestToolWaitCaptionFallsBackToTheToolName;
+var
+  WithReason, WithName: string;
+begin
+  { No reason on the wire: the caption falls back to the tool NAME rather than
+    rendering a lead-in and nothing after it. LowerFirst lowercases only the
+    first character, so a camel-case tool name keeps its shape. }
+  WithReason := ToolWaitCaption('c1', 'Find related files');
+  AssertTrue('the reason is lowercased as the object',
+    Pos('find related files', WithReason) > 0);
+  WithName := ToolWaitCaption('c1', 'run_command');
+  AssertTrue('an already-lowercase name passes through',
+    Pos('run_command', WithName) > 0);
+  { A proper noun keeps its case after the first character. }
+  AssertTrue('only the FIRST character is lowered',
+    Pos('gitHub', ToolWaitCaption('c1', 'GitHub')) > 0);
+  { Never something for nothing: the caption always carries its object. }
+  AssertTrue('the caption is not just a lead-in', Length(WithReason) > 10);
+end;
+
+procedure THarnessAppTest.TestToolWaitCaptionReachesTheStatus;
+var
+  Call: TTurnEvent;
+  Expected: string;
+begin
+  { The end-to-end version of the assertion the suite was missing. The old test
+    typed 'Waiting to find related files' straight into the panel and checked the
+    panel echoed it, which passes no matter what the app emits. Here the event is
+    pushed the way the worker pushes it and the APP's own status is read. }
+  Build;
+  Call := Default(TTurnEvent);
+  Call.Kind := teToolCall;
+  Call.ToolId := 'call-42';
+  Call.ToolName := 'file_grep';
+  Call.ToolReason := 'Find related files';
+  FSession.Queue.Push(Call);
+  FApp.Step;
+
+  Expected := ToolWaitCaption('call-42', 'Find related files');
+  AssertEquals('the status carries the composed caption', Expected,
+    FApp.StateText);
+  AssertTrue('and it names the decision, not the tool',
+    Pos('find related files', FApp.StateText) > 0);
+  AssertTrue('the tool name is not what the operator reads',
+    Pos('file_grep', FApp.StateText) = 0);
+end;
+
+procedure THarnessAppTest.TestTwoCallsInATurnReadDifferently;
+var
+  CallA, CallB: TTurnEvent;
+  CaptionA, CaptionB: string;
+begin
+  { The operator's actual complaint - "the list is bland" - stated as a property
+    of the SCREEN rather than of the composer. Two tool calls carrying the same
+    reason must not caption themselves identically, or a long turn reads as one
+    phrase repeated. A single fixed prefix fails here. }
+  Build;
+
+  CallA := Default(TTurnEvent);
+  CallA.Kind := teToolCall;
+  CallA.ToolId := 'call-a';
+  CallA.ToolName := 'file_grep';
+  CallA.ToolReason := 'Find related files';
+  FSession.Queue.Push(CallA);
+  FApp.Step;
+  CaptionA := FApp.StateText;
+
+  CallB := Default(TTurnEvent);
+  CallB.Kind := teToolCall;
+  CallB.ToolId := 'call-b';
+  CallB.ToolName := 'file_read';
+  CallB.ToolReason := 'Find related files';
+  FSession.Queue.Push(CallB);
+  FApp.Step;
+  CaptionB := FApp.StateText;
+
+  AssertTrue('the first caption names the decision',
+    Pos('find related files', CaptionA) > 0);
+  AssertTrue('the second caption names the decision',
+    Pos('find related files', CaptionB) > 0);
+  { Not every pair can differ - six leads and any hash collide sometimes - but
+    two calls in one turn landing on the same phrase all the time is the bland
+    behaviour this replaced. Assert the vocabulary is genuinely in use. }
+  AssertTrue('two calls do not read identically: "' + CaptionA + '" vs "' +
+    CaptionB + '"', CaptionA <> CaptionB);
 end;
 
 procedure THarnessAppTest.TestHeaderReadsNewSessionWithoutAnId;
@@ -2195,7 +2508,7 @@ begin
   FFake.AddResponse([TextDelta('hi'), FinishFrame('stop'), DoneFrame]);
   SubmitPrompt('hello');
   AssertTrue('turn finished', Pump(300));
-  AssertEquals('ready state', 'ready', FApp.StateText);
+  AssertEquals('ready state', 'Ready', FApp.StateText);
 end;
 
 procedure THarnessAppTest.TestErrorStateAfterAFailedTurn;
@@ -2204,7 +2517,7 @@ begin
   FFake.FailNetwork := True;
   SubmitPrompt('hi');
   AssertTrue('turn finished', Pump(300));
-  AssertEquals('error state', 'error', FApp.StateText);
+  AssertEquals('error state', 'Error', FApp.StateText);
 end;
 
 procedure THarnessAppTest.TestErrorRollsBackStreamedBlocks;
@@ -2318,7 +2631,7 @@ begin
         Break;
       Sleep(2);
     end;
-    AssertEquals('cancelled state', 'cancelled', FApp.StateText);
+    AssertEquals('cancelled state', 'Cancelled', FApp.StateText);
   finally
     Slow.Free;
   end;
@@ -2356,7 +2669,7 @@ begin
       Sleep(2);
     end;
 
-    AssertEquals('cancelled', 'cancelled', FApp.StateText);
+    AssertEquals('cancelled', 'Cancelled', FApp.StateText);
     AssertEquals('the prompt came back', 'hello',
       string(FApp.Panel.Compose.Text));
     AssertEquals('the aborted turn left no block', 0, BlockCount);
