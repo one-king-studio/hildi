@@ -10,21 +10,29 @@ FPC      ?= fpc
 
 # Optional project-local compiler config.
 #
-# ~/.fpc.cfg (and /etc/fpc.cfg) are read before anything else, so a user-level
-# config naming one unit tree shadows a different FPC installation -- including a
-# version-managed one such as fpcenv, which then fails with "Can't find unit
-# system". Passing -n ignores the default configs and @<file> loads the one that
-# belongs to the compiler actually in use.
+# FPC reads ~/.fpc.cfg (and /etc/fpc.cfg) before anything else, so a user-level
+# config naming one unit tree shadows a DIFFERENT FPC installation. That is the
+# "Can't find unit system" failure: fpcenv's compiler starts, then is pointed at
+# the old tree's units.
 #
-# Nothing global is modified: the override applies to this project's build, only
-# when asked for.
+# Every FPC install that ships its own config keeps it at
+#   <root>/lib/fpc/etc/fpc.cfg
+# so it is derived from the compiler actually in use. When one exists, -n
+# ignores the default configs and @<file> loads the matching one. When it does
+# not (the classic ~/Library/fpc layout), FPCARGS stays empty and the previous
+# behaviour -- including a hand-written ~/.fpc.cfg -- is untouched.
 #
-#   make check FPC=$HOME/.fpcenv/current/bin/fpc \
-#              FPC_CFG=$HOME/.fpcenv/current/lib/fpc/etc/fpc.cfg
+# Nothing global is modified, and no project is affected but this one.
 #
-FPC_CFG  ?=
+# Override explicitly if the layout is unusual:
+#   make check FPC=/path/to/fpc FPC_CFG=/path/to/fpc.cfg
+#
+FPC_CFG     ?=
+FPC_ROOT_CFG := $(wildcard $(dir $(FPC))../lib/fpc/etc/fpc.cfg)
 ifneq ($(strip $(FPC_CFG)),)
 FPCARGS  := -n @$(FPC_CFG)
+else ifneq ($(strip $(FPC_ROOT_CFG)),)
+FPCARGS  := -n @$(FPC_ROOT_CFG)
 else
 FPCARGS  :=
 endif
