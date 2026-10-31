@@ -2181,7 +2181,7 @@ begin
     if FApp.Busy then
     begin
       Seen := True;
-      AssertEquals('thinking while busy', 'thinking', FApp.StateText);
+      AssertEquals('thinking while busy', 'Thinking', FApp.StateText);
       Break;
     end;
     Sleep(2);
@@ -2303,12 +2303,12 @@ begin
     FInput.Push(Key(kkEscape));
     FApp.Step;
     AssertTrue('first escape arms', FApp.InterruptArmed);
-    AssertEquals('prompt shown', 'press esc again to cancel', FApp.StateText);
+    AssertEquals('prompt shown', 'Press Esc again to cancel', FApp.StateText);
 
     FInput.Push(Key(kkEscape));
     FApp.Step;
     AssertFalse('second escape disarms', FApp.InterruptArmed);
-    AssertEquals('cancelling', 'cancelling', FApp.StateText);
+    AssertEquals('cancelling', 'Cancelling', FApp.StateText);
 
     { The cancel is seen at the worker's next loop boundary; wait for idle. }
     for I := 1 to 600 do

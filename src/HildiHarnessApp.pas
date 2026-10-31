@@ -676,7 +676,7 @@ begin
   begin
     FConnState := csConnected;
     RenderHistory;
-    SetState(psReady, 'ready');
+    SetState(psReady, 'Ready');
     UpdateStats;
   end
   else if (FSession <> nil) and FSession.HasSession then
@@ -728,7 +728,7 @@ begin
       begin
         FPanel.Stream.Add(ckError, '',
           'connection failed: ' + FConnectError);
-        SetState(psError, 'failed');
+        SetState(psError, 'Failed');
       end;
   else
     ;
@@ -749,7 +749,7 @@ begin
     way. }
   ResetWindow;
   RenderHistory;
-  SetState(psReady, 'ready');
+  SetState(psReady, 'Ready');
   UpdateStats;
   { Flush a prompt submitted while idle: it is the prompt the operator typed to
     trigger this connect. }
@@ -852,7 +852,7 @@ begin
   FConnState := csConnected;
   ResetWindow;
   RenderHistory;
-  SetState(psReady, 'ready');
+  SetState(psReady, 'Ready');
   UpdateStats;
   { The modal raised this from inside its own event dispatch, so pop it on the
     next Step rather than freeing it mid-dispatch. }
@@ -1138,7 +1138,7 @@ begin
   begin
     { The runtime drafts synchronously; show the state now so the operator sees
       the checkpoint is in progress (and not a silent freeze). }
-    SetState(psThinking, 'checkpointing');
+    SetState(psThinking, 'Checkpointing');
     FBusy := True;
     SyncBusy;
     FDriver.Checkpoint;
@@ -1291,12 +1291,12 @@ begin
       AnnounceTakeover(FSpyId, 'cancelled');
       SendSubagentCommand(scAbortSubagent, FSpyId);
       LeaveSpy;
-      SetState(psReady, 'subagent cancelled; parent notified');
+      SetState(psReady, 'Subagent cancelled; parent notified');
       Exit;
     end;
     FSpyCancelPending := True;
     FSpyCancelAt := GetTickCount64;
-    SetState(psInterrupt, 'esc again to cancel this subagent');
+    SetState(psInterrupt, 'Esc again to cancel this subagent');
     Exit;
   end;
   if not FBusy then
@@ -1311,7 +1311,7 @@ begin
     { Arm the interrupt; a second Escape within the window cancels the turn. }
     FInterruptPending := True;
     FInterruptAt := GetTickCount64;
-    SetState(psInterrupt, 'press esc again to cancel');
+    SetState(psInterrupt, 'Press Esc again to cancel');
   end;
 end;
 
@@ -1320,7 +1320,7 @@ begin
   if FDriver <> nil then
   begin
     FDriver.Interrupt;
-    SetState(psThinking, 'cancelling');
+    SetState(psThinking, 'Cancelling');
   end;
 end;
 
@@ -1332,7 +1332,7 @@ begin
     Exit;
   FInterruptPending := False;
   if FBusy then
-    SetState(psThinking, 'thinking');
+    SetState(psThinking, 'Thinking');
 end;
 
 procedure THarnessApp.RenderHistory;
@@ -1525,7 +1525,7 @@ begin
     echoed (teUserMessage), so live and replayed turns render identically. }
   FBusy := True;
   SyncBusy;
-  SetState(psThinking, 'thinking');
+  SetState(psThinking, 'Thinking');
   FAssistant := nil;
   FThought := nil;
   FlushToolOutput;
@@ -1937,7 +1937,7 @@ begin
         { The tools are done, so the next deltas belong to the following message:
           start fresh blocks, after the tool lines. The turn is still in flight,
           so the state returns to thinking. }
-        SetState(psThinking, 'thinking');
+        SetState(psThinking, 'Thinking');
         FinalizeAssistant;
         FThought := nil;
       end;
@@ -2078,7 +2078,7 @@ begin
   R.H := FSurface.Height;
   Wrap.Arrange(R);
   FApp.PushPlane(TPlane.Create(Wrap, True, True));
-  SetState(psApproval, 'approval needed');
+  SetState(psApproval, 'Approval needed');
 end;
 
 procedure THarnessApp.OnApprovalChosen(const AChoice: TApprovalChoice);
@@ -2109,11 +2109,11 @@ begin
     "approval needed" forever after answering one. The state must always be
     restored when the modal closes; FBusy only decides which state to restore. }
   if FBusy then
-    SetState(psThinking, 'thinking')
+    SetState(psThinking, 'Thinking')
   else if FSpyId <> '' then
-    SetState(psReady, 'spying')
+    SetState(psReady, 'Spying')
   else
-    SetState(psReady, 'ready');
+    SetState(psReady, 'Ready');
   ShowNextAsk;
 end;
 
@@ -2298,7 +2298,7 @@ begin
   Wrap.Arrange(R);
   FApp.PushPlane(TPlane.Create(Wrap, True, True));
   FSessionsShown := True;
-  SetState(psReady, 'sessions');
+  SetState(psReady, 'Sessions');
 end;
 
 procedure THarnessApp.CloseSessions;
@@ -2309,7 +2309,7 @@ begin
     FApp.PopPlane;
   FSessionsModal := nil;
   FSessionsShown := False;
-  SetState(psReady, 'ready');
+  SetState(psReady, 'Ready');
 end;
 
 procedure THarnessApp.ShowDiff(ATurnId: Int64; const APath: string);
@@ -2415,7 +2415,7 @@ begin
   Wrap.Arrange(R);
   FApp.PushPlane(TPlane.Create(Wrap, True, True));
   FDiffShown := True;
-  SetState(psReady, 'diff: ' + APath);
+  SetState(psReady, 'Diff: ' + APath);
 end;
 
 procedure THarnessApp.CloseDiff;
@@ -2426,7 +2426,7 @@ begin
     FApp.PopPlane;
   FDiffViewer := nil;
   FDiffShown := False;
-  SetState(psReady, 'ready');
+  SetState(psReady, 'Ready');
 end;
 
 procedure THarnessApp.ShowHistory(AIntent: THistoryIntent);
@@ -2452,7 +2452,7 @@ begin
   Wrap.Arrange(R);
   FApp.PushPlane(TPlane.Create(Wrap, True, True));
   FHistoryShown := True;
-  SetState(psReady, 'history');
+  SetState(psReady, 'History');
 end;
 
 procedure THarnessApp.RefreshHistory;
@@ -2538,7 +2538,7 @@ begin
     FApp.PopPlane;
   FHistoryModal := nil;
   FHistoryShown := False;
-  SetState(psReady, 'ready');
+  SetState(psReady, 'Ready');
 end;
 
 procedure THarnessApp.RestorePromptAfterUndo(ATurnId: Int64);
@@ -2639,7 +2639,7 @@ begin
   begin
     FSessionsModal := nil;
     FSessionsShown := False;
-    SetState(psReady, 'ready');
+    SetState(psReady, 'Ready');
   end;
 end;
 
@@ -2659,7 +2659,7 @@ begin
   begin
     FDiffViewer := nil;
     FDiffShown := False;
-    SetState(psReady, 'ready');
+    SetState(psReady, 'Ready');
   end;
 end;
 
@@ -2673,7 +2673,7 @@ begin
   begin
     FHistoryModal := nil;
     FHistoryShown := False;
-    SetState(psReady, 'ready');
+    SetState(psReady, 'Ready');
   end;
 end;
 
@@ -3373,12 +3373,12 @@ begin
           keep waiting on, and messaging, a task the operator just killed. }
         AnnounceTakeover(FSpyId, 'cancelled');
         SendSubagentCommand(scAbortSubagent, FSpyId);
-        SetState(psReady, 'subagent cancelled; parent notified');
+        SetState(psReady, 'Subagent cancelled; parent notified');
       end;
     1:
       begin
         SendSubagentCommand(scReleaseSubagent, FSpyId);
-        SetState(psReady, 'subagent released');
+        SetState(psReady, 'Subagent released');
       end;
     2:
       begin
@@ -3386,7 +3386,7 @@ begin
           parent must stop treating it as its own. }
         AnnounceTakeover(FSpyId, 'promoted');
         LeaveSpy;
-        SetState(psReady, 'subagent promoted to its own session');
+        SetState(psReady, 'Subagent promoted to its own session');
       end;
   else
     ;

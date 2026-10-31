@@ -19,7 +19,7 @@ uses
   TUISurface, TUIWidget,
   TUIWidgetsText, TUIWidgetsPanel,
   TUITheme, TUIWidgetsChat,
-  TUIGrapheme,
+  TUIGrapheme, TUIClock,
   TUIWidgetsCompose, TUIWidgetsPalette,
   TUIWidgetsActions;
 
@@ -43,6 +43,21 @@ const
     'Type a prompt and press Enter to start',
     'Shift+Enter adds a line',
     'Ctrl+? lists commands');
+
+{ What the agent is doing while it REASONS.
+
+  "Thinking" alone is dull for something that can run for a minute, so the label
+  rotates. It rotates only while psThinking - a tool run, an approval or an error
+  says exactly what it is and must not be decorated.
+
+  Held here rather than in the app so the panel owns its own vocabulary, and so a
+  test can drive the rotation without a turn. }
+const
+  ReasoningWords: array[0..4] of string =
+    ('Thinking', 'Reasoning', 'Working it out', 'Considering', 'Pondering');
+  { How often the label changes. Slower than the sparkle (90 ms): the spark is
+    motion, the word is a caption, and a caption that flickers is unreadable. }
+  ReasoningWordIntervalMs = 2600;
 
 type
   { What the run is doing, shown at the left of the toolbar. psThinking and
@@ -74,6 +89,7 @@ type
     FPageCount: Integer;
     FPageIndex: Integer;
     FStateKind: TPanelState;
+    FReasoningFromMs: Int64;   { when this reasoning run started; -1 = not reasoning }
     FStateLabel: string;
     FStateSpans: array[0..1] of TSpan;
     FSpark: UnicodeString;
@@ -504,6 +520,8 @@ end;
 function TChatPanel.Advance(const ANowMs: Int64): Boolean;
 var
   NewSpark: UnicodeString;
+  Idx: Integer;
+  Delta: Int64;
 begin
   Result := FCompose.Advance(ANowMs);
   if FMessages.Advance(ANowMs) then
@@ -514,6 +532,29 @@ begin
     if NewSpark <> FSpark then
     begin
       FSpark := NewSpark;
+      RenderState;
+      Result := True;
+    end;
+  end;
+  { While the agent REASONS, the caption rotates. Only psThinking: a tool run,
+    an approval or an error states a fact and must not be decorated. The word is
+    derived from the clock, not from a counter ticked per frame, so a missed frame
+    cannot desynchronise it - and SetState resets the origin, so every turn starts
+    on "Thinking". }
+  if (FStateKind = psThinking) and (FReasoningFromMs >= 0) then
+  begin
+    { CLAMP AT ZERO. SetState stamps the origin from the real clock, so a caller
+      that advances with a smaller value - a test driving Advance(0), or a
+      surface with its own epoch - makes the delta negative, and a negative `div`
+      then `mod` yields a NEGATIVE index. That was an ERangeError, not a wrong
+      word: the array read went out of bounds. }
+    Delta := ANowMs - FReasoningFromMs;
+    if Delta < 0 then
+      Delta := 0;
+    Idx := (Delta div ReasoningWordIntervalMs) mod Length(ReasoningWords);
+    if ReasoningWords[Idx] <> FStateLabel then
+    begin
+      FStateLabel := ReasoningWords[Idx];
       RenderState;
       Result := True;
     end;
@@ -556,6 +597,13 @@ procedure TChatPanel.SetState(AKind: TPanelState; const ALabel: string);
 begin
   FStateKind := AKind;
   FStateLabel := ALabel;
+  { Every entry into a state starts its own rotation, so "Thinking" is the first
+    word every time rather than wherever the last turn left off. -1 means "not a
+    reasoning state, do not rotate". }
+  if AKind = psThinking then
+    FReasoningFromMs := MonotonicMs
+  else
+    FReasoningFromMs := -1;
   RenderState;
   RefreshAnimation;
 end;

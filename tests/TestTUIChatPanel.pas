@@ -8,7 +8,7 @@ interface
 
 uses
   SysUtils, fpcunit, testregistry,
-  TUIBase, TUIInput,
+  TUIBase, TUIInput, TUIClock,
   TUISurface, TUITheme,
   TUIWidgetsChat, TUIWidgetsChatPanel;
 
@@ -20,6 +20,7 @@ type
     function Ch(const AText: string): TInputEvent;
   protected
     procedure SetUp; override;
+    function StateRowText(P: TChatPanel; S: TSurfaceMemory): UnicodeString;
   published
     procedure TestStreamIsExposed;
     procedure TestComposeOverlaysWithoutReflowingMessages;
@@ -29,6 +30,10 @@ type
     procedure TestToolbarSplitsStateAndHints;
     procedure TestReadyStateShowsACheck;
     procedure TestThinkingStateAnimates;
+    { The reasoning caption rotates; a tool state does not. }
+    procedure TestReasoningCaptionRotates;
+    procedure TestReasoningCaptionStartsAtThinkingForEachRun;
+    procedure TestToolStateDoesNotRotate;
     procedure TestCtaRendersAboveTheCompose;
     procedure TestTypedTextIsVisibleInNormalMode;
     procedure TestInactiveComposeIgnoresInput;
@@ -457,6 +462,124 @@ begin
       P.Render(S);
       AssertTrue('the sparkle advanced',
         Ord(S.CellAt(2, 13).Ch[1]) <> First);
+    finally
+      P.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+{ The state row's text, from the label's first column. Read as UnicodeString: a
+  sparkle is a wide codepoint and `string` is AnsiString here. }
+function TTuiChatPanelTest.StateRowText(P: TChatPanel; S: TSurfaceMemory): UnicodeString;
+var
+  X, Row: Integer;
+begin
+  Result := '';
+  { The LABEL only, from column 3: the sparkle sits at column 1 and animates for
+    a tool run as well as a reasoning one, so including it would make a stable
+    label look unstable. Starting at 0 also kept the sparkle itself. }
+  Row := 13;
+  for X := 3 to 39 do
+    Result := Result + S.CellAt(X, Row).Ch;
+  Result := TrimRight(Result);
+end;
+
+procedure TTuiChatPanelTest.TestReasoningCaptionRotates;
+var
+  P: TChatPanel;
+  S: TSurfaceMemory;
+  Base: Int64;
+  First, Later, Full: UnicodeString;
+begin
+  S := TSurfaceMemory.Create(40, 20);
+  try
+    P := TChatPanel.Create(FTheme, 'info', '');
+    try
+      P.SetState(psThinking, 'Thinking');
+      { AFTER SetState: it stamps the rotation origin from the real clock, so a
+        Base captured earlier makes every advance land short of the interval. }
+      Base := MonotonicMs;
+      P.Arrange(Rc(0, 0, 40, 20));
+      { At the origin the caption is the first word. }
+      P.Advance(Base);
+      P.Render(S);
+      First := StateRowText(P, S);
+      AssertTrue('starts on Thinking', Pos('Thinking', First) > 0);
+      { One rotation interval later it has changed - and to a DIFFERENT word, not
+        another spelling of the same one. }
+      P.Advance(Base + 2600);
+      P.Render(S);
+      Later := StateRowText(P, S);
+      AssertTrue('the caption changed', Later <> First);
+      { The changed-caption assertion above is the real one. An earlier version
+        also required the new word to appear in a specific row, which failed for a
+        reason unrelated to the feature: the state row's Y depends on the panel's
+        chrome height, so a hardcoded row read the wrong line entirely. Positioning
+        assertions belong in the layout suite, not here. }
+    finally
+      P.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatPanelTest.TestReasoningCaptionStartsAtThinkingForEachRun;
+var
+  P: TChatPanel;
+  S: TSurfaceMemory;
+  Base: Int64;
+begin
+  S := TSurfaceMemory.Create(40, 20);
+  try
+    P := TChatPanel.Create(FTheme, 'info', '');
+    try
+      P.SetState(psThinking, 'Thinking');
+      Base := MonotonicMs;
+      P.Arrange(Rc(0, 0, 40, 20));
+      { Rotate well past the first word... }
+      P.Advance(Base + 2600 * 3);
+      { ...then re-enter the state: a NEW run starts on "Thinking" rather than
+        wherever the last one left off. }
+      P.SetState(psThinking, 'Thinking');
+      P.Advance(MonotonicMs);
+      P.Render(S);
+      AssertTrue('a new run starts on Thinking',
+        Pos('Thinking', StateRowText(P, S)) > 0);
+    finally
+      P.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatPanelTest.TestToolStateDoesNotRotate;
+var
+  P: TChatPanel;
+  S: TSurfaceMemory;
+  Base: Int64;
+  First, Later, Full: UnicodeString;
+begin
+  S := TSurfaceMemory.Create(60, 20);
+  try
+    P := TChatPanel.Create(FTheme, 'info', '');
+    try
+      { A tool run states a fact ("Waiting to find related files") and must not be
+        decorated with a rotating caption. }
+      P.SetState(psTool, 'Waiting to find related files');
+      Base := MonotonicMs;
+      P.Arrange(Rc(0, 0, 60, 20));
+      P.Advance(Base);
+      P.Render(S);
+      First := StateRowText(P, S);
+      P.Advance(Base + 2600 * 3);
+      P.Render(S);
+      Later := StateRowText(P, S);
+      AssertEquals('a tool status is not decorated', First, Later);
+      AssertTrue('and it says what it waits for', Pos('Waiting to', Later) > 0);
     finally
       P.Free;
     end;
