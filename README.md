@@ -62,18 +62,72 @@ properties the mainstream ecosystem has largely abandoned.
 
 ## Build
 
-Requires Free Pascal (**3.3.1 today**; a move to the stable 3.2 line is planned)
-and a C toolchain for the vendored libraries.
+Requires **Free Pascal 3.3.1** and a C toolchain for the vendored libraries.
+(The 3.2 line is not supported: the async core uses the `reference to` syntax
+that 3.2 does not have.)
+
+### Getting Free Pascal 3.3.1
+
+3.3.1 is the development line — there is no release tarball and no distro
+package, so getting it usually means building the compiler from source. For most
+people the quickest path is [`fpcenv`](https://github.com/one-king-studio/fpcenv),
+which installs a prebuilt snapshot per-user and generates the matching `fpc.cfg`:
 
 ```sh
-make deps          # fetch and checksum sqlite, mbedtls, and a CA bundle
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/one-king-studio/fpcenv/main/install.sh | bash
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/one-king-studio/fpcenv/main/install.ps1 | iex
+```
+
+It installs under `~/.fpcenv`, puts `fpc` on your `PATH` via your shell rc, and
+leaves your system compiler alone. Open a new shell, then check:
+
+```sh
+fpc -iV            # -> 3.3.1
+fpcenv list        # installed versions
+fpcenv doctor      # diagnose PATH / config problems
+```
+
+**Two things worth knowing before you start:**
+
+- **The macOS snapshot is old** (currently Nov 2023). It works, but its RTL
+  emits warnings that `-Sew` promotes to errors during the gate. On macOS, build
+  from source if you plan to run `make check`. Linux snapshots track current.
+- **An existing `~/.fpc.cfg` shadows the new install**, because FPC reads it
+  before anything else. That produces `Can't find unit system`. The Makefile
+  handles this automatically — it derives the config from whichever `fpc` is in
+  use — but if you invoke `fpc` directly, pass `-n @~/.fpcenv/current/lib/fpc/etc/fpc.cfg`.
+
+Already have 3.3.1? Skip all of this; `make` finds it. Override the compiler
+explicitly with `make FPC=/path/to/fpc FPC_CFG=/path/to/fpc.cfg`.
+
+### Building
+
+```sh
+make deps          # fetch and verify sqlite, mbedtls, and the CA bundle
 make check         # build, then run the full suite plus the leak gate
 make tui-agent     # build and launch the terminal UI
 ```
 
+`make deps` needs `curl`, `openssl`, and `tar`. The CA bundle is committed, so
+only SQLite and mbedTLS are downloaded; both are pinned to immutable releases and
+checksum-verified.
+
 Artifacts land in `build/bin/`. `hildi` and `hildi-agent` are expected to sit
 side by side: the UI resolves the runtime as a sibling of its own executable, or
 from `HILDI_RUNTIME_BIN`.
+
+### Platform notes
+
+Built and run on **aarch64-darwin** and **aarch64-linux** (Fedora); the full
+`make check` gate is verified on macOS, and the Linux build is verified through
+`make tui-agent` launching the UI. The Linux link needs `libm` and `libgcc`,
+which the Makefile adds on non-Darwin platforms; on macOS `libSystem` provides
+both.
 
 ## Configuration
 
