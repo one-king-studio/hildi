@@ -36,7 +36,7 @@ uses
   TestAsyncFuture, TestAsyncQueue, TestAsyncTimers,
   TestAsyncObservable, TestAsyncSubject, TestAsyncOperators,
   TestAsyncTime, TestAsyncContext, TestAsyncConcurrency,
-  TestAsyncParity, TestSkills, TestWrap, TestReplyMeta, TestHandoff,
+  TestAsyncParity, TestSkills, TestSkillsFiles, TestWrap, TestReplyMeta, TestHandoff,
   TestTUISessionsModal, TestTUIDiffviewer, TestTUIHistorymodal, TestFuzzy, TestTUIActions, TestPatch, TestYAML,
   TestCommandPaths,
   SmokeProvider, TestSmokeProvider,
