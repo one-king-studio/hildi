@@ -14,6 +14,10 @@
 #include <string.h>
 #include <sys/socket.h>
 
+#ifdef __GLIBC__
+#include <malloc.h>
+#endif
+
 #include "mbedtls/ctr_drbg.h"
 #include "mbedtls/entropy.h"
 #include "mbedtls/error.h"
@@ -231,6 +235,23 @@ int hildi_tls_last_error(hildi_tls *h, char *buf, unsigned buflen) {
     buf[buflen - 1] = '\0';
   }
   return h->last_error;
+}
+
+int hildi_alloc_init(void) {
+#ifdef __GLIBC__
+  /* glibc creates one malloc arena per thread by default (cap 8 x cores). A
+     session runtime runs ~7 threads, most idle on a futex, and the only glibc
+     malloc user is the C code (vendored SQLite built with SQLITE_THREADSAFE=1,
+     and mbedTLS) -- the FPC heap is separate. Each arena reserves 64 MB of
+     address space, commits in 2 MB steps, and each committed step lands on a
+     transparent huge page, so an idle runtime measured 18.1 MB RSS with 8 arenas
+     against 7.8 MB with 2, same binary, same session. Two arenas bound the
+     contention without paying for a heap per idle thread. Must run before the
+     first thread and the first C allocation, or the arenas already exist. */
+  return mallopt(M_ARENA_MAX, 2) != 0;
+#else
+  return 0; /* no glibc: per-thread arenas are not a thing here */
+#endif
 }
 
 int hildi_sha256(const unsigned char *data, unsigned len,

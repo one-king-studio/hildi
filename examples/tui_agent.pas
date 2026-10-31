@@ -24,6 +24,12 @@ uses
   HildiHarnessApp, HildiSessionProtocol,
   HildiSessionClient;
 
+{ Process-wide allocator tuning from src/hildi_tls_shim.c (linked into this
+  program). See docs/research/memory-footprint.md. The TUI only has ~2 threads
+  so it gains little, but it keeps both programs under one policy -- and it must
+  run before the terminal is opened or any thread is created. }
+function hildi_alloc_init: Integer; cdecl; external;
+
 type
   { The lazy-connect hook: on the first prompt, create the session and spawn its
     runtime, then Attach (or FailConnect). Holds the view and app so the connect
@@ -171,6 +177,8 @@ begin
 end;
 
 begin
+  { Before any thread or C allocation: see the declaration above. }
+  hildi_alloc_init;
   RawArgs := TStringList.Create;
   try
     for I := 1 to ParamCount do

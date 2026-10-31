@@ -59,6 +59,12 @@ int hildi_tls_live_count(void);
 const unsigned char *hildi_ca_pem(void);
 unsigned             hildi_ca_pem_len(void);
 
+/* Process-wide allocator tuning for constrained targets. Call ONCE, before any
+   thread is created and before any C allocation: it only affects arenas created
+   afterwards. Idempotent. Returns 1 if the platform knob was applied, 0 if the
+   platform has none (non-glibc). Never fails the program. */
+int hildi_alloc_init(void);
+
 /* SHA-256 (via mbedTLS), for PKCE. Writes 32 bytes to out. 0 on success. */
 int hildi_sha256(const unsigned char *data, unsigned len,
                      unsigned char out[32]);
