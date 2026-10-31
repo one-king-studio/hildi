@@ -5,8 +5,13 @@ A small, portable coding agent written in Free Pascal.
 Most coding agents ship as Node, Python, or Rust applications that carry a
 runtime, a package manager, and 100–250 MB of idle overhead before they do any
 work. Hildi takes the opposite constraint: a compiled binary measured in
-single-digit megabytes, no runtime to install, and a dependency surface small
-enough to audit in an afternoon.
+single-digit megabytes, no language runtime to install, and a dependency surface
+small enough to audit in an afternoon.
+
+Vendored dependencies (SQLite, mbedTLS, the CA bundle) are linked statically, so
+there is no package to fetch at run time and no version to keep in sync. The
+platform C library — `libSystem` on macOS, glibc and `libm` on Linux — is the
+only dynamic dependency, and every platform provides it.
 
 The design follows the Delphi-era distribution ethos — compile once, ship one
 artifact, run anywhere — applied to a problem that has drifted away from it.
