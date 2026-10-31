@@ -50,6 +50,27 @@ thing approval exists to prevent. We parse and **display** it; we do not enforce
 it. If we ever do, it must be an operator decision recorded somewhere, not a
 frontmatter field.
 
+**Loading a skill is itself an approval.** A skill body can tell the agent to do
+anything, so activation is not a harmless read — it is the moment untrusted
+instructions enter the context. Two doors, one gate:
+
+| Door | What happens |
+| --- | --- |
+| The model calls `load_skill(name)` | An approval ask, offering the standard scopes. Approving at **session** scope covers only this session; approving at **workspace** scope means every session in the same workspace loads that skill without asking again. |
+| The operator types `/skill-name` | Loads immediately and records a **session**-scope approval. Typing the name *is* the approval; asking them to confirm it would be asking twice for one decision. |
+
+The scopes are the approval system's, not something new: `asSession`,
+`asWorkspace`, `asGlobal` already exist. Workspace scope is the useful default
+for a skill that is part of a project — one operator answers once, and every
+session on that repo gets it.
+
+That symmetry is the point: `/skill-name` is a shortcut for "yes, this skill,
+for this session", not a bypass. A session approval granted either way is
+indistinguishable afterwards, so the model cannot tell which door was used and
+does not need to. `/skill-name` deliberately does **not** grant workspace scope —
+an operator typing a name in one session has not consented on behalf of every
+other session in the workspace.
+
 ## Discovery
 
 Scan, in order, per scope — later scans do not override earlier ones within a
@@ -131,8 +152,12 @@ content, and a resumed session can tell skill text from conversation.
 - [ ] List bundled resources (capped) without reading them.
 - [ ] Project-level skills override user-level ones on name collision; the
       shadowed entry is logged.
-- [ ] Operator can activate explicitly: `/skill-name` adds the skill to context
-      without the model having to decide.
+- [ ] Operator can activate explicitly: `/skill-name` loads the skill **and**
+      records the same session-level approval the gate would have granted.
+      Typing the name is the approval.
+- [ ] Model-initiated `load_skill` goes through the approval gate; approving it
+      grants a session-level approval for that skill name, so a second load does
+      not re-ask.
 - [ ] Activating an already-active skill does not re-inject its body.
 - [ ] `allowed-tools` is parsed and surfaced but **never** used to widen
       approval.

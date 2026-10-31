@@ -59,16 +59,44 @@ Work TDD-first: each phase adds its tests before its implementation and runs
 - [ ] **Implement** `SkillContent` and teach `load_skill` about file skills.
 - [ ] `make check` green.
 
-## Phase 6 — catalog
+## Phase 6 — the approval gate
+
+- [ ] **Test**: a model-initiated `load_skill` raises an approval ask naming the
+      skill.
+- [ ] **Test**: a refusal is reported to the model as a refusal with the reason,
+      and the skill is not loaded.
+- [ ] **Test**: approving at SESSION scope covers this session only; another
+      session in the same workspace still asks.
+- [ ] **Test**: approving at WORKSPACE scope means another session in the same
+      workspace does **not** ask.
+- [ ] **Test**: approving at GLOBAL scope covers a session in a different
+      workspace.
+- [ ] **Test**: a second `load_skill` for the same skill does not ask again
+      within whatever scope was granted.
+- [ ] **Test**: the approval is per skill name — approving `pdf` does not permit
+      `data-analysis`.
+- [ ] **Test**: `/skill-name` records a SESSION-scope approval only, so another
+      session still asks.
+- [ ] **Implement** the ask through the existing approval seam, reusing
+      `TApprovalScope` rather than inventing a skill-specific one.
+- [ ] `make check` green.
+
+## Phase 7 — catalog
 
 - [ ] **Test**: `StableText` includes `location` per skill.
 - [ ] **Test**: a skill with `Problem` set is absent from the catalog.
+- [ ] **Test**: an already-approved skill is marked so the model knows a load
+      will not prompt.
 - [ ] **Implement** the catalog change in `HildiSkills`.
 - [ ] `make check` green.
 
-## Phase 7 — operator activation
+## Phase 8 — operator activation
 
 - [ ] **Test**: `/skill-name` loads that skill without the model acting.
+- [ ] **Test**: `/skill-name` records the same session approval the gate grants,
+      so a later model-initiated load does not ask.
+- [ ] **Test**: an unknown name is refused and lists what is available.
+- [ ] **Test**: the palette offers known skill names.
 - [ ] **Implement** the palette entry and dispatch.
 - [ ] `make check` green.
 

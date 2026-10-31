@@ -105,21 +105,43 @@ the operator needs to see *which* file and *why*.
 
 ### Activation
 
+- [ ] **`load_skill` goes through the approval gate.** A model-initiated
+      activation is an ask, like any other tool call that can change what the
+      agent is able to do. The ask offers the standard approval scopes.
+- [ ] Approving at **session** scope covers only this session.
+- [ ] Approving at **workspace** scope covers every session in the same
+      workspace: a later load from another session does not ask again.
+- [ ] Approving at **global** scope covers every workspace (the scope the
+      approval system already defines; we add no new one).
 - [ ] `load_skill` on a file skill returns:
       `<skill_content name="...">`, the body, the skill directory, and a
       `<skill_resources>` listing.
 - [ ] The resource listing is capped at `MaxListedResources` (default 50) and
-      says so when truncated.
+      says so when it truncated.
 - [ ] Resources are **listed, never read**.
 - [ ] Frontmatter is **stripped** from the returned content.
 - [ ] Re-activating an active skill returns a short "already loaded" notice
       rather than the body again.
+- [ ] A refusal is reported to the model as a refusal, with the reason, so it can
+      proceed without that skill rather than retrying blindly.
+
+### Operator activation: `/skill-name`
+
+- [ ] `/skill-name` loads that skill immediately **and** records the same
+      session-level approval the gate would have granted. Typing the name is the
+      approval; asking again would be asking the operator to confirm what they
+      just typed.
+- [ ] An unknown skill name is refused with the list of available names.
+- [ ] The palette offers known skill names, so the syntax is discoverable rather
+      than folklore.
 
 ### Catalog
 
 - [ ] `StableText` gains `location` per skill, so relative references in a body
       resolve. Without it a skill saying "run `scripts/x.py`" is unfollowable.
 - [ ] A skill with `Problem` set never appears in the catalog.
+- [ ] A skill already approved this session is marked as such in the catalog, so
+      the model knows a load will not prompt.
 
 ## Contracts & Interfaces
 
