@@ -140,10 +140,17 @@ begin
     Exit;
   end;
 
+  { TInetSocket.Host is deprecated in newer FPC 3.3.1 snapshots (2026-10-28)
+    in favour of NetworkAddress, which does not exist in older ones. Both
+    report version 3.3.1, so there is no version check that separates them --
+    the warning is suppressed at this one line instead, which is the only place
+    the deprecated member is touched. }
+  {$push}{$warn SYMBOL_DEPRECATED off}
   if Socket is TInetSocket then
     Host := TInetSocket(Socket).Host
   else
     Host := CertificateData.HostName;
+  {$pop}
 
   if hildi_tls_connect(FHandle, Integer(Socket.Handle),
     PAnsiChar(AnsiString(Host))) <> 0 then
