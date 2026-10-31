@@ -116,9 +116,17 @@ MARKDOWN_SRCS := $(wildcard $(SRC)/markdown/*.pas)
 FILEIGNORE_SRCS := $(wildcard $(SRC)/fileignore/*.pas)
 TEST_SRCS := $(wildcard $(TESTS)/*.pas)
 
-.PHONY: all test test-leak watch check release clean help libsqlite libmbedtls \
+.PHONY: all test test-leak watch check release clean help libsqlite libmbedtls deps \
         store-demo agent-cli release-agent-cli tui-demo widgets-demo layout-demo \
         headless-agent tui-agent bench perf agents agent-% mcp-smoke smoke smoke-list async-standalone async-bench async-freeze async-examples
+
+# Fetch and verify every vendored dependency. The README tells a new contributor
+# to run this first, and it used to be a silent no-op: there was no `deps` rule,
+# so make matched the `deps/` DIRECTORY and reported "Nothing to be done" while
+# fetching nothing. A missing rule that looks like success is worse than an error.
+deps: libsqlite libmbedtls
+	@scripts/fetch-cacert.sh
+	@echo "deps: okay"
 
 all: $(BIN)/hildi-demo
 
