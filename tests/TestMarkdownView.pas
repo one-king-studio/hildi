@@ -30,6 +30,7 @@ type
     procedure TestOrderedListItemWrapsUnderTheText;
     procedure TestQuoteBar;
     procedure TestRuleIsFullWidth;
+    procedure TestFrontmatterIsNotDrawn;
     procedure TestCodeFenceIsBoxed;
     procedure TestInlineCodeIsAPaddedChip;
     procedure TestBlocksAreSeparatedByABlankRow;
@@ -751,6 +752,46 @@ begin
       View.BlockLayoutBuilds(0));
   finally
     View.Free;
+  end;
+end;
+
+procedure TMarkdownViewTest.TestFrontmatterIsNotDrawn;
+var
+  S: TSurfaceMemory;
+  Y: Integer;
+  SawYaml, SawBody: Boolean;
+  View: TMarkdownView;
+begin
+  { Frontmatter is metadata, not body (v2 SPEC 10.3). RenderTree omits it for
+    the plain path; this view draws through the streaming tree, which expands
+    every top-level node, so ExpandBlock drew the YAML as a paragraph until it
+    learned to skip mnFrontmatter. }
+  View := TMarkdownView.Create;
+  try
+    View.SetSource('---' + #10 + 'title: T' + #10 + '---' + #10 + 'Body.');
+    View.Arrange(Rect(20, 8));
+    { The teeth: two top-level nodes parse (frontmatter, paragraph) but only the
+      paragraph is drawn. One block, not two. }
+    AssertEquals('only the body block is drawn', 1, View.BlockCount);
+  finally
+    View.Free;
+  end;
+
+  S := RenderSource('---' + #10 + 'title: T' + #10 + '---' + #10 + 'Body.', 20, 8);
+  try
+    SawYaml := False;
+    SawBody := False;
+    for Y := 0 to 7 do
+    begin
+      if Pos('title:', string(S.RowText(Y, 0, 20))) > 0 then
+        SawYaml := True;
+      if Pos('Body.', string(S.RowText(Y, 0, 20))) > 0 then
+        SawBody := True;
+    end;
+    AssertFalse('frontmatter YAML is not drawn', SawYaml);
+    AssertTrue('the body after it is drawn', SawBody);
+  finally
+    S.Free;
   end;
 end;
 

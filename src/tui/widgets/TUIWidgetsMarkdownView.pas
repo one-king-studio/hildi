@@ -624,6 +624,11 @@ var
   Prefix: UnicodeString;
 begin
   N := NodeOf(FDoc, AId);
+  { Frontmatter is metadata, not body. RenderTree omits it for the plain path
+    (v2 SPEC 10.3); this view must agree, or a file or reply opening with a
+    `---` block draws its YAML as text. }
+  if N.Kind = mnFrontmatter then
+    Exit;
   if N.Kind <> mnList then
   begin
     SetLength(FRenderIds, Length(FRenderIds) + 1);
