@@ -61,9 +61,19 @@ UNAME_S         := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
 SQLITE_CCFLAGS  := -O2 -DSQLITE_THREADSAFE=1 -DSQLITE_ENABLE_FTS5 -mmacosx-version-min=11.0
 MBEDTLS_CCFLAGS  := -O2 -mmacosx-version-min=11.0
+# macOS links libSystem unconditionally, which already provides the math and
+# compiler-runtime symbols. Nothing extra is needed.
+SYS_LDFLAGS     :=
 else
 SQLITE_CCFLAGS  := -O2 -fPIC -DSQLITE_THREADSAFE=1 -DSQLITE_ENABLE_FTS5
 MBEDTLS_CCFLAGS  := -O2 -fPIC
+# Linux does not: the vendored archives need symbols from two separate system
+# libraries that FPC does not add for us.
+#   -lgcc  -> __udivti3, the 64-bit division helper mbedTLS's bignum uses
+#   -lm    -> log, used by SQLite's FTS5 bm25 ranking
+# Both are present on macOS only because libSystem re-exports them, which is why
+# the missing flags went unnoticed until a Linux link.
+SYS_LDFLAGS     := -k-lm -k-lgcc
 endif
 # Link the static archive explicitly (-k), so a system libsqlite3 is never used.
 # -Fl is also required: HildiSQLITE declares `external 'sqlite3'`, which makes the
@@ -192,13 +202,13 @@ store-demo: libsqlite $(BIN)/hildi-store-demo
 
 $(BIN)/hildi-store-demo: $(EXAMPLES)/store_demo.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 agent-cli: libsqlite libmbedtls $(BIN)/hildi-agent-cli
 
 $(BIN)/hildi-agent-cli: $(EXAMPLES)/agent_cli.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(SYS_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Live MCP calibration smoke: drives the MCP client against a real MCP server
 # (the Playwright container over docker stdio). Needs Docker; not part of
@@ -208,14 +218,14 @@ mcp-smoke: libsqlite libmbedtls $(BIN)/mcp-smoke
 
 $(BIN)/mcp-smoke: $(EXAMPLES)/mcp_smoke.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(SYS_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Optimized, self-contained production binary (static SQLite, no runtime libs).
 release-agent-cli: libsqlite libmbedtls $(BIN)/hildi-agent-cli-release
 
 $(BIN)/hildi-agent-cli-release: $(EXAMPLES)/agent_cli.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(BIN) $(RELUNITS)
-	$(FPC) $(FPCARGS) $(RELEASE) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(RELUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(RELEASE) $(SQLITE_LDFLAGS) $(SYS_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(RELUNITS) -FE$(BIN) -o$@ $<
 
 $(BIN)/hildi-demo: $(EXAMPLES)/demo_harness.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
@@ -256,7 +266,7 @@ dashboard: libsqlite libmbedtls $(BIN)/hildi-dash
 
 $(BIN)/hildi-dash: $(EXAMPLES)/dashboard.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(SYS_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Layout exploration: a responsive two-column harness layout (files + editor |
 # chat column). The chat column has an optional side panel and a persistent
@@ -275,7 +285,7 @@ headless-agent: libsqlite libmbedtls $(BIN)/hildi-agent
 
 $(BIN)/hildi-agent: $(EXAMPLES)/headless_agent.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(SYS_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Full-screen agent harness (conversation + approvals + sessions). Builds and
 # runs; Ctrl-C quits. Drives the headless agent. A pure client: no engine.
@@ -285,7 +295,7 @@ tui-agent: headless-agent $(BIN)/hildi
 $(BIN)/hildi: $(EXAMPLES)/tui_agent.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	@# The TUI is a pure client: no agent, loop, tool or runtime unit links here.
-	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(SYS_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Printable wall-clock benchmark. `make bench ARGS=--real` measures the real
 # terminal; `make perf` asserts the budgets and is not part of `make check`.
@@ -390,7 +400,7 @@ async-examples: $(ASYNC_SRCS)
 
 $(BIN)/hildi-tests: $(TESTS)/HildiTests.pas $(TEST_SRCS) $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(ASYNC_SRCS) $(SHELL_SRCS) $(CHANGES_SRCS) $(MARKDOWN_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(SYS_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 test-leak: libsqlite libmbedtls $(BIN)/hildi-tests-leak
 	HEAPTRC=$(HEAPTRC) $(BIN)/hildi-tests-leak $(TESTARGS)
@@ -410,7 +420,7 @@ watch:
 
 $(BIN)/hildi-tests-leak: $(TESTS)/HildiTests.pas $(TEST_SRCS) $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(ASYNC_SRCS) $(SHELL_SRCS) $(CHANGES_SRCS) $(MARKDOWN_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
 	@mkdir -p $(BIN) $(LEAKUNITS)
-	$(FPC) $(FPCARGS) $(LEAKFLAGS) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -Fu$(TESTS) -FU$(LEAKUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(LEAKFLAGS) $(SQLITE_LDFLAGS) $(SYS_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -Fu$(TESTS) -FU$(LEAKUNITS) -FE$(BIN) -o$@ $<
 
 # Live smoke: drive the REAL headless runtime through a scripted turn against a
 # loopback fake provider. Hermetic (loopback only, ephemeral port, temp store);
@@ -424,7 +434,7 @@ smoke-list: libsqlite libmbedtls $(BIN)/hildi-smoke
 
 $(BIN)/hildi-smoke: $(EXAMPLES)/smoke.pas $(TESTS)/smoke_runner.pas $(TESTS)/smoke_provider.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(SYS_LDFLAGS) $(TLS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(TESTS) -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # All quality gates, for CI: functional tests + leak check + library isolation.
 # The two suite runs go one-process-per-suite in parallel (see
