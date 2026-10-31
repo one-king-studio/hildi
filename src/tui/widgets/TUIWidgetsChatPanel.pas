@@ -673,61 +673,18 @@ end;
   "/checkpoint to continue" nudge) is drawn as all-action: there is no binding to
   dim, and guessing one would mis-colour half a sentence. }
 procedure TChatPanel.PaintHints;
-const
-  Sep = ' · ';
-var
-  Rest, Seg: string;
-  Sp, P: Integer;
-  Spans: array of TSpan;
-  N: Integer;
-
-  procedure Add(const AText: string; const AAttr: TAttr);
-  begin
-    if AText = '' then
-      Exit;
-    SetLength(Spans, N + 1);
-    Spans[N].Text := UnicodeString(AText);
-    Spans[N].Attr := AAttr;
-    Inc(N);
-  end;
-
 begin
+  { The walk itself lives in TUIWidgetsText.HintSpans, because the subagent list
+    shows key hints too. One copy, so the two surfaces cannot drift into different
+    house styles - which is exactly how the toolbar and the empty mark ended up
+    spelling the same key two ways. }
   if FHintsText = '' then
   begin
     FHintsBlock.SetText('', FTheme.Muted);
     Exit;
   end;
-  SetLength(Spans, 0);
-  N := 0;
-  Rest := FHintsText;
-  while Rest <> '' do
-  begin
-    P := Pos(Sep, Rest);
-    if P > 0 then
-    begin
-      Seg := Copy(Rest, 1, P - 1);
-      Rest := Copy(Rest, P + Length(Sep), MaxInt);
-    end
-    else
-    begin
-      Seg := Rest;
-      Rest := '';
-    end;
-
-    Sp := Pos(' ', Seg);
-    if Sp > 1 then
-    begin
-      { The key: dim and lowercase, whatever case the caller used. }
-      Add(LowerCase(Copy(Seg, 1, Sp - 1)), FTheme.Muted);
-      Add(Copy(Seg, Sp, MaxInt), FTheme.Text);
-    end
-    else
-      Add(Seg, FTheme.Text);
-
-    if Rest <> '' then
-      Add(Sep, FTheme.Muted);
-  end;
-  FHintsBlock.SetSpans(Spans);
+  FHintsBlock.SetSpans(HintSpans(UnicodeString(FHintsText), FTheme.Muted,
+    FTheme.Text));
 end;
 
 { Keep the left status short of the right-aligned stats, so a long workspace

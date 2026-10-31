@@ -21,6 +21,8 @@ type
     Attr: TAttr;
   end;
 
+  TSpanArray = array of TSpan;
+
   TWrapMode = (wmNone, wmChar, wmWord);
   TTextAlign = (taLeft, taCenter, taRight);
 
@@ -84,7 +86,89 @@ type
     property LayoutBuilds: Integer read FLayoutBuilds;
   end;
 
+{ Split a hint line into two-tone spans. Input is one or more "key action"
+  segments separated by " · "; output is, per segment, the KEY in AKeyAttr and
+  the ACTION in AActionAttr, with the separators in AKeyAttr.
+
+  The key is CHROME - the operator learns it once - so it is passed a dim
+  attribute and lowercased here, so no caller can introduce a second house style
+  by writing "Ctrl+D". The action is a phrase, not a key, so its case is left
+  alone.
+
+  A segment with no space (a lone "/checkpoint to continue" nudge) is drawn
+  all-action: there is no binding to dim, and guessing one would mis-colour half
+  a sentence.
+
+  A plain function in the text unit rather than a method on either caller,
+  because BOTH the chat toolbar and the subagent list show key hints - and two
+  copies of this walk would drift. }
+function HintSpans(const AText: UnicodeString; const AKeyAttr,
+  AActionAttr: TAttr): TSpanArray;
+
 implementation
+
+{ Split "key action · key action" into two-tone spans. See the interface comment
+  for the rules; the walk is deliberately linear over the string - no backtracking,
+  no nested scan - because hint text is supplied by the app, and a pathological
+  separator must not be able to make the toolbar quadratic. }
+function HintSpans(const AText: UnicodeString; const AKeyAttr,
+  AActionAttr: TAttr): TSpanArray;
+var
+  { Built at RUN TIME, not declared as a typed constant. FPC does not apply the
+    source codepage to a `const Sep: UnicodeString = ' · '` initialiser, so the
+    UTF-8 bytes of the middle dot become two Latin-1 wide characters and the
+    separator never matches - every hint silently collapsed into one segment,
+    drawn all-action. A runtime assignment converts the literal properly. }
+  Sep: UnicodeString;
+  Rest, Seg, Key, Action: UnicodeString;
+  P, Sp, N: Integer;
+
+  procedure Add(const AText: UnicodeString; const AAttr: TAttr);
+  begin
+    if AText = '' then
+      Exit;
+    SetLength(Result, N + 1);
+    Result[N].Text := AText;
+    Result[N].Attr := AAttr;
+    Inc(N);
+  end;
+
+begin
+  Result := nil;
+  N := 0;
+  Sep := ' ' + UnicodeString(WideChar($00B7)) + ' ';
+  Rest := AText;
+  while Rest <> '' do
+  begin
+    P := Pos(Sep, Rest);
+    if P > 0 then
+    begin
+      Seg := Copy(Rest, 1, P - 1);
+      Rest := Copy(Rest, P + Length(Sep), MaxInt);
+    end
+    else
+    begin
+      Seg := Rest;
+      Rest := '';
+    end;
+
+    Sp := Pos(UnicodeString(' '), Seg);
+    if Sp > 1 then
+    begin
+      { The KEY is chrome: lowercased whatever the caller wrote, so there is one
+        house style. The ACTION keeps its case - it is a phrase, not a key. }
+      Key := LowerCase(Copy(Seg, 1, Sp - 1));
+      Action := Copy(Seg, Sp, MaxInt);
+      Add(Key, AKeyAttr);
+      Add(Action, AActionAttr);
+    end
+    else
+      Add(Seg, AActionAttr);
+
+    if Rest <> '' then
+      Add(Sep, AKeyAttr);
+  end;
+end;
 
 function LineWidth(const ALine: TStyledClusters): Integer;
 var

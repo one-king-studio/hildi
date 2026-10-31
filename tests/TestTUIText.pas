@@ -9,7 +9,7 @@ interface
 
 uses
   SysUtils, fpcunit, testregistry,
-  TUIBase, TUISurface,
+  TUIBase, TUISurface, TUITheme,
   TUIWidgetsText;
 
 type
@@ -27,9 +27,32 @@ type
     procedure TestStyledSpansRetainAttributes;
     procedure TestTextClippedToBounds;
     procedure TestWrapWidthOverridesMaxContent;
+    { HintSpans: the shared key/action splitter used by the chat toolbar and the
+      subagent list. Tested here because both callers depend on it agreeing. }
+    procedure TestHintSpansSplitKeyFromAction;
+    procedure TestHintSpansLowercaseTheKeyOnly;
+    procedure TestHintSpansTreatALonePhraseAsAction;
+    procedure TestHintSpansHandleMultipleSegments;
   end;
 
 implementation
+
+{ The two attributes the hint splitter is given. Built locally rather than via
+  TUITheme.MakeAttr, which is implementation-only in that unit - and the point of
+  these tests is the SPLIT, not the palette, so any two distinguishable
+  attributes would do. }
+function DimAttr: TAttr;
+begin
+  Result := Default(TAttr);
+  Result.Fg := 244;
+  Result.Style := [sfDim];
+end;
+
+function PlainAttr: TAttr;
+begin
+  Result := Default(TAttr);
+  Result.Fg := 252;
+end;
 
 function TTuiTextTest.SpanOf(const AText: UnicodeString; AFg: Byte): TSpan;
 begin
@@ -257,6 +280,77 @@ begin
   finally
     T.Free;
   end;
+end;
+
+procedure TTuiTextTest.TestHintSpansSplitKeyFromAction;
+var
+  Spans: TSpanArray;
+  KeyA, ActA: TAttr;
+begin
+  KeyA := DimAttr;
+  ActA := PlainAttr;
+  Spans := HintSpans('ctrl+d subagents', KeyA, ActA);
+  AssertEquals('two spans', 2, Length(Spans));
+  AssertEquals('the key comes first', UnicodeString('ctrl+d'), Spans[0].Text);
+  AssertEquals('the action follows', UnicodeString(' subagents'), Spans[1].Text);
+  AssertTrue('the key is dim', sfDim in Spans[0].Attr.Style);
+  AssertFalse('the action is not', sfDim in Spans[1].Attr.Style);
+  { Joining the spans must reproduce the input exactly - a splitter that loses or
+    adds a character would silently corrupt every hint on screen. }
+  AssertEquals('the split is lossless', UnicodeString('ctrl+d subagents'),
+    Spans[0].Text + Spans[1].Text);
+end;
+
+procedure TTuiTextTest.TestHintSpansLowercaseTheKeyOnly;
+var
+  Spans: TSpanArray;
+begin
+  Spans := HintSpans('Ctrl+D Release Child', DimAttr, PlainAttr);
+  AssertEquals('two spans', 2, Length(Spans));
+  AssertEquals('the key is lowercased', UnicodeString('ctrl+d'), Spans[0].Text);
+  { The action is a phrase: its case is the caller's business, not the painter's. }
+  AssertEquals('the action keeps its case', UnicodeString(' Release Child'),
+    Spans[1].Text);
+end;
+
+procedure TTuiTextTest.TestHintSpansTreatALonePhraseAsAction;
+var
+  Spans: TSpanArray;
+begin
+  { The "/checkpoint to continue" nudge is appended to the hint line: it has no
+    binding, so it must not be dimmed as though "no" were a key. }
+  Spans := HintSpans('/checkpoint to continue', DimAttr,
+    PlainAttr);
+  AssertEquals('all-action still splits at the separator', 2, Length(Spans));
+  AssertEquals('the leading token is the key', UnicodeString('/checkpoint'),
+    Spans[0].Text);
+  AssertEquals('the rest is the action', UnicodeString(' to continue'),
+    Spans[1].Text);
+  { And a phrase with NO space is one action span, not a guessed key. }
+  Spans := HintSpans('abort', DimAttr, PlainAttr);
+  AssertEquals('one span', 1, Length(Spans));
+  AssertEquals('drawn as action', UnicodeString('abort'), Spans[0].Text);
+  AssertFalse('and not dimmed', sfDim in Spans[0].Attr.Style);
+end;
+
+procedure TTuiTextTest.TestHintSpansHandleMultipleSegments;
+var
+  Spans: TSpanArray;
+  Joined: UnicodeString;
+  I: Integer;
+begin
+  Spans := HintSpans('ctrl+a abort · ctrl+r release', DimAttr,
+    PlainAttr);
+  { key, action, separator, key, action }
+  AssertEquals('five spans', 5, Length(Spans));
+  Joined := '';
+  for I := 0 to High(Spans) do
+    Joined := Joined + Spans[I].Text;
+  AssertEquals('the separators survive the split',
+    UnicodeString('ctrl+a abort · ctrl+r release'), Joined);
+  AssertEquals('the second key is split too', UnicodeString('ctrl+r'),
+    Spans[3].Text);
+  AssertFalse('the second action is not dim', sfDim in Spans[4].Attr.Style);
 end;
 
 initialization
