@@ -21,8 +21,12 @@
 # in every worktree.
 /deps/mbedtls
 
-# Vendored CA bundle (fetched by scripts/fetch-cacert.sh)
-/deps/cacert
+# Vendored CA bundle -- COMMITTED, not fetched.
+# curl.se/ca/cacert.pem is a ROLLING url: any pinned hash of it breaks every
+# fresh clone the moment a root is rotated, which is exactly what happened. The
+# bundle is 188 KB and changes a few times a year, so it is tracked to keep the
+# build hermetic and offline. Refresh it deliberately with
+# `scripts/fetch-cacert.sh --update`.
 
 # Local secrets and environment overrides
 .env
