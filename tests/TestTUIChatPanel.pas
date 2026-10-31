@@ -33,6 +33,11 @@ type
       the operator needs while something slow is running, which is exactly when
       the label is longest. }
     procedure TestLongStateLabelLeavesTheHintsOnTheRow;
+    { A keybinding is chrome: dim, and lowercase however the caller wrote it.
+      The action it performs is what the operator reads, so it is brighter. The
+      empty-session text is descriptive prose and stays uniformly styled. }
+    procedure TestHintDimsTheKeyAndBrightensTheAction;
+    procedure TestHintLowercasesTheKey;
     procedure TestReadyStateShowsACheck;
     procedure TestThinkingStateAnimates;
     { The reasoning caption rotates; a tool state does not. }
@@ -306,6 +311,96 @@ begin
         Pos('ready', S.RowText(13, 0, 20)) > 0);
       AssertTrue('hints on the right',
         Pos('hints here', S.RowText(13, 48, 12)) > 0);
+    finally
+      P.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatPanelTest.TestHintDimsTheKeyAndBrightensTheAction;
+var
+  P: TChatPanel;
+  S: TSurfaceMemory;
+  Row, Col, HintX, ActX: Integer;
+  Line: UnicodeString;
+  KeyAttr, ActAttr: TAttr;
+begin
+  { The keybinding is chrome, so it stays dim; the action is what the operator
+    reads, so it takes the ordinary text colour. Asserted on the PAINTED CELLS,
+    not on the input string - the colours are the whole point, and a test that
+    only checked the text would pass with no styling at all. }
+  S := TSurfaceMemory.Create(70, 20);
+  try
+    P := TChatPanel.Create(FTheme, 'info', 'ctrl+d subagents');
+    try
+      P.SetState(psReady, 'Ready');
+      P.Arrange(Rc(0, 0, 70, 20));
+      P.Render(S);
+      { Find the hint row and the columns of the key and the action. }
+      HintX := -1;
+      Row := -1;
+      for Col := 0 to 19 do
+      begin
+        Line := '';
+        for ActX := 0 to 69 do
+          Line := Line + S.CellAt(ActX, Col).Ch;
+        HintX := Pos(UnicodeString('ctrl+d'), Line);
+        if HintX > 0 then
+        begin
+          Row := Col;
+          Break;
+        end;
+      end;
+      AssertTrue('the hint is drawn', HintX > 0);
+      AssertTrue('the action follows it',
+        Pos(UnicodeString('subagents'), Line) > 0);
+      { 0-based cell index = Pos - 1. }
+      KeyAttr := S.CellAt(HintX - 1, Row).Attr;
+      ActX := Pos(UnicodeString('subagents'), Line);
+      ActAttr := S.CellAt(ActX - 1, Row).Attr;
+      AssertTrue('the keybinding is dim', sfDim in KeyAttr.Style);
+      AssertFalse('the action is not dim', sfDim in ActAttr.Style);
+      AssertTrue('and they are visually different', KeyAttr.Fg <> ActAttr.Fg);
+    finally
+      P.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatPanelTest.TestHintLowercasesTheKey;
+var
+  P: TChatPanel;
+  S: TSurfaceMemory;
+  Row, Col: Integer;
+  Line, All: UnicodeString;
+begin
+  { Keybindings are written lowercase everywhere in the interface. A caller that
+    passes a capitalised key must not produce a second house style. }
+  S := TSurfaceMemory.Create(70, 20);
+  try
+    P := TChatPanel.Create(FTheme, 'info', 'Ctrl+D subagents');
+    try
+      P.SetState(psReady, 'Ready');
+      P.Arrange(Rc(0, 0, 70, 20));
+      P.Render(S);
+      All := '';
+      for Row := 0 to 19 do
+      begin
+        Line := '';
+        for Col := 0 to 69 do
+          Line := Line + S.CellAt(Col, Row).Ch;
+        All := All + Line + #10;
+      end;
+      AssertTrue('the key is lowercased', Pos(UnicodeString('ctrl+d'), All) > 0);
+      AssertTrue('the capitalised form is gone',
+        Pos(UnicodeString('Ctrl+D'), All) = 0);
+      { The action is NOT lowercased: it is a sentence, not a key. }
+      AssertTrue('the action keeps its case',
+        Pos(UnicodeString('subagents'), All) > 0);
     finally
       P.Free;
     end;
