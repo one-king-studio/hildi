@@ -450,6 +450,9 @@ function ShouldTrimHistory(AOlderPages: Integer; ANowMs, ALastScrollMs: Int64;
   Empty parts are dropped rather than leaving a dangling separator: a session
   with no title shows just its label, and one with neither shows the id. Pure,
   so the format is testable without a widget. }
+{ Lowercase only the first character of a reason string, for "Waiting to ...". }
+function LowerFirst(const AText: string): string;
+
 function SessionDisplayName(const ALabel, ATitle, ASessionId: string): string;
 
 { The composer's hint line: the base hints, plus the ctrl+d segment only when the
@@ -1904,7 +1907,14 @@ begin
         { A tool is running; the sparkle keeps animating because the turn is
           still in flight. Blocks are keyed by call id, so a parallel batch's
           calls each get their own block, created here in call order. }
-        SetState(psTool, 'running ' + E.ToolName);
+        { "Waiting to <reason>", not "running <tool>": the reason is a passive
+          action ("Find related files"), so it reads as the object of "Waiting
+          to". The tool NAME is an implementation detail - the operator reads the
+          decision, which is what the block's title already shows. }
+        if E.ToolReason <> '' then
+          SetState(psTool, 'Waiting to ' + LowerFirst(E.ToolReason))
+        else
+          SetState(psTool, 'Waiting to ' + LowerFirst(E.ToolName));
         { The reason is the block's title, so collapsed tool lines read as the
           story of the agent's decisions. The raw call is not shown: the result
           is the body, visible when the block is expanded. }
@@ -2136,6 +2146,16 @@ begin
   Result := CtaHintsBase;
   if AHasSubagents then
     Result := Result + CtaHintsSubagents;
+end;
+
+{ Lowercase only the FIRST character, so a passive-action reason reads as the
+  object of "Waiting to": "Find related files" -> "find related files". Only the
+  first, so proper nouns and tool names keep their case. }
+function LowerFirst(const AText: string): string;
+begin
+  Result := AText;
+  if (Result <> '') and (Result[1] >= 'A') and (Result[1] <= 'Z') then
+    Result[1] := Chr(Ord(Result[1]) + 32);
 end;
 
 function SessionDisplayName(const ALabel, ATitle, ASessionId: string): string;
