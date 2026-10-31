@@ -124,7 +124,7 @@ begin
   try
     Pairs := ParseDotEnv(TestVar + '=new');
     AssertEquals('nothing applied', 0, ApplyEnv(Pairs));
-    AssertEquals('existing kept', 'existing', GetEnvironmentVariable(TestVar));
+    AssertEquals('existing kept', 'existing', GetProcessEnv(TestVar));
   finally
     ClearTestVar;
   end;
@@ -153,7 +153,7 @@ begin
   end;
   try
     AssertEquals('one applied', 1, LoadDotEnvFile(FileName));
-    AssertEquals('value set', 'loaded', GetEnvironmentVariable(TestVar));
+    AssertEquals('value set', 'loaded', GetProcessEnv(TestVar));
   finally
     ClearTestVar;
     DeleteFile(FileName);

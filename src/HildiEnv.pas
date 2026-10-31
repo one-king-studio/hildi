@@ -28,6 +28,12 @@ function LoadDotEnvFile(const APath: string): Integer;
   which lets a setting be migrated one variable at a time. }
 function GetEnvLegacy(const AName: string): string;
 
+{ Read a variable through the same layer this unit writes through (libc getenv
+  on unix). The RTL's GetEnvironmentVariable reads the envp snapshot from
+  process start, which on FPC/aarch64-linux does not see a value set later by
+  setenv. Use this anywhere the value may have been set in-process. }
+function GetProcessEnv(const AName: string): string;
+
 { The default store path: HILDI_STORE_PATH when set, else the user's data
   directory (XDG_DATA_HOME, defaulting to ~/.local/share/hildi). Falls back to
   the two older locations -- ~/.hildi and the pre-rename ~/.hildegard-helper --
@@ -54,6 +60,33 @@ uses
 {$ifdef unix}
 function c_setenv(Name, Value: PAnsiChar; Overwrite: cint): cint; cdecl;
   external 'c' name 'setenv';
+function c_getenv(Name: PAnsiChar): PAnsiChar; cdecl; external 'c' name 'getenv';
+{$endif}
+
+{ Read through the same layer this unit writes through.
+
+  SetProcessEnv uses libc setenv, but the RTL's GetEnvironmentVariable reads the
+  envp snapshot taken at process start -- on FPC 3.3.1/aarch64-linux the two do
+  not agree, so a variable set here was invisible to a later read here. ApplyEnv
+  then re-applied a name it had already set, breaking its own "never override
+  the shell" rule. Reading via libc getenv makes set and get consistent on every
+  platform. Variables present at process start (a shell export, a .env loaded by
+  a dotenv plugin) are in libc's environ too, so nothing is lost. }
+function GetProcessEnv(const AName: string): string;
+{$ifdef unix}
+var
+  P: PAnsiChar;
+begin
+  P := c_getenv(PAnsiChar(AnsiString(AName)));
+  if P = nil then
+    Result := ''
+  else
+    Result := string(AnsiString(P));
+end;
+{$else}
+begin
+  Result := GetEnvironmentVariable(AName);
+end;
 {$endif}
 
 function SetProcessEnv(const AName, AValue: string): Boolean;
@@ -116,7 +149,7 @@ begin
   begin
     if APairs[I].Name = '' then
       Continue;
-    if GetEnvironmentVariable(APairs[I].Name) <> '' then
+    if GetProcessEnv(APairs[I].Name) <> '' then
       Continue;                       // never override the shell
     if not SetProcessEnv(APairs[I].Name, APairs[I].Value) then
       Continue;
@@ -128,7 +161,7 @@ begin
     if Copy(APairs[I].Name, 1, 10) = 'HILDEGARD_' then
     begin
       Alias := 'HILDI_' + Copy(APairs[I].Name, 11, MaxInt);
-      if GetEnvironmentVariable(Alias) = '' then
+      if GetProcessEnv(Alias) = '' then
         SetProcessEnv(Alias, APairs[I].Value);
     end;
   end;
@@ -159,7 +192,7 @@ function GetEnvLegacy(const AName: string): string;
 var
   Legacy: string;
 begin
-  Result := GetEnvironmentVariable(AName);
+  Result := GetProcessEnv(AName);
   if Result <> '' then
     Exit;                          // the new spelling always wins
   { HILDI_<REST> -> HILDEGARD_<REST>. Only names carrying the prefix are
@@ -167,7 +200,7 @@ begin
   if Copy(AName, 1, 6) <> 'HILDI_' then
     Exit;
   Legacy := 'HILDEGARD_' + Copy(AName, 7, MaxInt);
-  Result := GetEnvironmentVariable(Legacy);
+  Result := GetProcessEnv(Legacy);
 end;
 
 function DataHome(const AXdgDataHome, AHome: string): string;

@@ -53,7 +53,7 @@ const
 implementation
 
 uses
-  ssockets;
+  ssockets, HildiEnv;
 
 { The native shim (src/hildi_tls_shim.c), linked from build/libstatic. }
 function hildi_tls_new: Pointer; cdecl; external;
@@ -247,7 +247,10 @@ end;
 
 function TLSBundleOverride: string;
 begin
-  Result := GetEnvironmentVariable('HILDI_CA_BUNDLE');
+  { Via HildiEnv, so the read agrees with the libc setenv that ApplyEnv writes
+    through. Reading the RTL directly here saw a startup snapshot on
+    FPC/aarch64-linux and ignored an override set in-process. }
+  Result := GetProcessEnv('HILDI_CA_BUNDLE');
 end;
 
 function ValidateTLSConfig(out AError: string): Boolean;
