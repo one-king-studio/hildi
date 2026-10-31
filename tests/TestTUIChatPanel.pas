@@ -49,6 +49,9 @@ type
     procedure TestThinkingRowWithoutABodyDrawsTheSpinner;
     { A fresh session's empty transcript shows the mark and the hints. }
     procedure TestEmptyTranscriptDrawsTheLogo;
+    { Every first-run hint must name a key that actually does something. "Ctrl+?"
+      advertised a key with no handler anywhere in the app. }
+    procedure TestNoHintAdvertisesADeadKey;
   end;
 
 implementation
@@ -411,6 +414,43 @@ begin
       end;
       AssertTrue('the logo is drawn', Braille);
       AssertTrue('the first-run hint is drawn', Hint);
+    finally
+      P.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatPanelTest.TestNoHintAdvertisesADeadKey;
+var
+  P: TChatPanel;
+  S: TSurfaceMemory;
+  Row, Col: Integer;
+  Line, All: UnicodeString;
+begin
+  { "Ctrl+? lists commands" was removed because nothing handles it: a hint for a
+    key that does nothing is the same defect as the inert ctrl+d hint. This pins
+    the absence, and names the key, so re-adding the line fails here rather than
+    quietly shipping another promise the app cannot keep. }
+  S := TSurfaceMemory.Create(80, 30);
+  try
+    P := TChatPanel.Create(FTheme, 'info', '');
+    try
+      P.Arrange(Rc(0, 0, 80, 30));
+      P.Render(S);
+      All := '';
+      for Row := 0 to 29 do
+      begin
+        Line := '';
+        for Col := 0 to 79 do
+          Line := Line + S.CellAt(Col, Row).Ch;
+        All := All + Line + #10;
+      end;
+      AssertTrue('Ctrl+? is not advertised', Pos(UnicodeString('Ctrl+?'), All) = 0);
+      { The hints that ARE real stay: Enter submits, Shift+Enter newlines. }
+      AssertTrue('Enter is still advertised',
+        Pos(UnicodeString('press Enter'), All) > 0);
     finally
       P.Free;
     end;

@@ -38,11 +38,16 @@ const
     '⠀⠀⠀⠀⠀⠀⢀⠠⠊⠈⠻⠾⠟⠀⠀⠘⠦⣀⠀⠀⠀⠀⠀⠀⠀⠀');
 
   { The first-run instructions, below the mark. Short: this is a resting screen,
-    not documentation. }
-  EmptyHints: array[0..2] of UnicodeString = (
+    not documentation.
+
+    Every line here must name a key that actually DOES something from this screen.
+    "Ctrl+? lists commands" was removed for that reason: no handler for it exists
+    anywhere in the app, so the hint advertised a dead key - the same defect as
+    the inert ctrl+d hint. A hint is a promise; re-add this line only together
+    with the binding. }
+  EmptyHints: array[0..1] of UnicodeString = (
     'Type a prompt and press Enter to start',
-    'Shift+Enter adds a line',
-    'Ctrl+? lists commands');
+    'Shift+Enter adds a line');
 
 { What the agent is doing while it REASONS.
 
