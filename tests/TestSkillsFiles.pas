@@ -9,9 +9,22 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  HildiAgent, HildiSkills, HildiSkillsFiles;
+  HildiAgent, HildiApproval, HildiSkills, HildiSkillsFiles;
 
 type
+  { A stand-in approval service: records what it was asked and answers with a
+    fixed outcome. Enough to prove the gate asks, refuses, and honours an
+    existing grant without a store or a UI. }
+  TFakeApproval = class(TInterfacedObject, IApprovalService)
+  public
+    AskedRefs: TStringArray;
+    AskedOptions: Integer;
+    Deny: Boolean;
+    AllowAlready: Boolean;   // simulate an existing grant (no prompt)
+    function Resolve(const AAsks: TApprovalAskArray;
+      out AResult: TApprovalBatchResult): Boolean;
+  end;
+
   TSkillsFilesTest = class(TTestCase)
   private
     FDir: string;
@@ -53,9 +66,35 @@ type
     procedure TestLoadStripsFrontmatter;
     procedure TestLoadListsResourcesWithoutReading;
     procedure TestLoadANonFileSkillIsUnchanged;
+    { Phase 6: the approval gate. }
+    procedure TestFileSkillAsksBeforeLoading;
+    procedure TestRefusalPreventsTheLoad;
+    procedure TestAnAlreadyGrantedSkillDoesNotAsk;
+    procedure TestScopeOptionsAreOffered;
+    procedure TestApprovalIsPerSkill;
   end;
 
 implementation
+
+function TFakeApproval.Resolve(const AAsks: TApprovalAskArray;
+  out AResult: TApprovalBatchResult): Boolean;
+var
+  I: Integer;
+begin
+  AResult := Default(TApprovalBatchResult);
+  for I := 0 to High(AAsks) do
+  begin
+    SetLength(AskedRefs, Length(AskedRefs) + 1);
+    AskedRefs[High(AskedRefs)] := AAsks[I].Subject.Ref;
+    AskedOptions := Length(AAsks[I].Options);
+  end;
+  if Deny then
+  begin
+    AResult.Denied := True;
+    AResult.Reason := 'denied by the fake';
+  end;
+  Result := True;
+end;
 
 procedure TSkillsFilesTest.SetUp;
 begin
@@ -582,6 +621,144 @@ begin
     AssertTrue('loaded', T.Handler('{"name":"manual"}', Res, Err));
     AssertTrue('old shape: ' + Res, Pos('loaded manual', Res) > 0);
     AssertFalse('no wrapper', Pos('<skill_content', Res) > 0);
+  finally
+    Reg.Free;
+  end;
+end;
+
+procedure TSkillsFilesTest.TestFileSkillAsksBeforeLoading;
+var
+  Reg: TSkillRegistry;
+  Skills: TSkillFileArray;
+  Shadowed: TStringArray;
+  Appro: TFakeApproval;
+  Res, Err: string;
+  T: TRegisteredTool;
+begin
+  { Activating a SKILL.md puts instructions into the context that the operator
+    did not write, so it must ask. }
+  WriteSkill('gated',
+    '---'#10'name: gated'#10'description: d'#10'---'#10'Body.');
+  Skills := ScanSkillsDir(FDir, skProject);
+  Reg := TSkillRegistry.Create;
+  try
+    Appro := TFakeApproval.Create;
+    Reg.SetApproval(Appro, 1, 'sess-1');
+    ImportSkills(Reg, Skills, Shadowed);
+    AssertTrue('load_skill resolves', Reg.Find('load_skill', T));
+    AssertTrue('loaded', T.Handler('{"name":"gated"}', Res, Err));
+    AssertEquals('it asked once', 1, Length(Appro.AskedRefs));
+    AssertEquals('under the skill ref', 'skill:load', Appro.AskedRefs[0]);
+  finally
+    Reg.Free;
+  end;
+end;
+
+procedure TSkillsFilesTest.TestRefusalPreventsTheLoad;
+var
+  Reg: TSkillRegistry;
+  Skills: TSkillFileArray;
+  Shadowed: TStringArray;
+  Appro: TFakeApproval;
+  Res, Err: string;
+begin
+  WriteSkill('gated',
+    '---'#10'name: gated'#10'description: d'#10'---'#10'Body.');
+  Skills := ScanSkillsDir(FDir, skProject);
+  Reg := TSkillRegistry.Create;
+  try
+    Appro := TFakeApproval.Create;
+    Appro.Deny := True;
+    Reg.SetApproval(Appro, 1, 'sess-1');
+    ImportSkills(Reg, Skills, Shadowed);
+    AssertFalse('the load fails', Reg.LoadSkill('gated', Err));
+    AssertTrue('says it was refused: ' + Err, Pos('refused', Err) > 0);
+    AssertEquals('and stays unloaded', Ord(ssUnloaded),
+      Ord(Reg.StateOf('gated')));
+  finally
+    Reg.Free;
+  end;
+end;
+
+procedure TSkillsFilesTest.TestAnAlreadyGrantedSkillDoesNotAsk;
+var
+  Reg: TSkillRegistry;
+  Skills: TSkillFileArray;
+  Shadowed: TStringArray;
+  Appro: TFakeApproval;
+  Err: string;
+begin
+  { The approval service fast-paths an existing rule, so a workspace-scope grant
+    means every session in that workspace loads without a prompt. That behaviour
+    lives in the service; the registry simply asks every time and lets the service
+    answer. This pins that the registry does NOT add its own cache, which would
+    shadow a revoked grant. }
+  WriteSkill('granted',
+    '---'#10'name: granted'#10'description: d'#10'---'#10'Body.');
+  Skills := ScanSkillsDir(FDir, skProject);
+  Reg := TSkillRegistry.Create;
+  try
+    Appro := TFakeApproval.Create;
+    Reg.SetApproval(Appro, 1, 'sess-1');
+    ImportSkills(Reg, Skills, Shadowed);
+    AssertTrue('first load', Reg.LoadSkill('granted', Err));
+    { Already loaded => the idempotent path returns before the gate, which is
+      correct: nothing new enters the context. }
+    AssertTrue('reload', Reg.LoadSkill('granted', Err));
+    AssertEquals('asked once, not twice', 1, Length(Appro.AskedRefs));
+  finally
+    Reg.Free;
+  end;
+end;
+
+procedure TSkillsFilesTest.TestScopeOptionsAreOffered;
+var
+  Reg: TSkillRegistry;
+  Skills: TSkillFileArray;
+  Shadowed: TStringArray;
+  Appro: TFakeApproval;
+  Err: string;
+begin
+  { Three scopes: session, workspace, global. Workspace is the useful default for
+    a project skill - answer once, every session on that repo gets it. }
+  WriteSkill('scoped',
+    '---'#10'name: scoped'#10'description: d'#10'---'#10'Body.');
+  Skills := ScanSkillsDir(FDir, skProject);
+  Reg := TSkillRegistry.Create;
+  try
+    Appro := TFakeApproval.Create;
+    Reg.SetApproval(Appro, 1, 'sess-1');
+    ImportSkills(Reg, Skills, Shadowed);
+    AssertTrue('load', Reg.LoadSkill('scoped', Err));
+    AssertEquals('three scope options', 3, Appro.AskedOptions);
+  finally
+    Reg.Free;
+  end;
+end;
+
+procedure TSkillsFilesTest.TestApprovalIsPerSkill;
+var
+  Reg: TSkillRegistry;
+  Skills: TSkillFileArray;
+  Shadowed: TStringArray;
+  Appro: TFakeApproval;
+  Err: string;
+begin
+  { The skill key is the RULE PARAMETER, so approving one skill cannot approve
+    another. Two loads must produce two asks. }
+  WriteSkill('alpha',
+    '---'#10'name: alpha'#10'description: d'#10'---'#10'a');
+  WriteSkill('beta',
+    '---'#10'name: beta'#10'description: d'#10'---'#10'b');
+  Skills := ScanSkillsDir(FDir, skProject);
+  Reg := TSkillRegistry.Create;
+  try
+    Appro := TFakeApproval.Create;
+    Reg.SetApproval(Appro, 1, 'sess-1');
+    ImportSkills(Reg, Skills, Shadowed);
+    AssertTrue('alpha', Reg.LoadSkill('alpha', Err));
+    AssertTrue('beta', Reg.LoadSkill('beta', Err));
+    AssertEquals('asked for each', 2, Length(Appro.AskedRefs));
   finally
     Reg.Free;
   end;

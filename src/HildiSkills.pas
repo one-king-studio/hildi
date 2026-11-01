@@ -20,7 +20,7 @@ interface
 
 uses
   Classes, Contnrs, SysUtils,
-  HildiLLM, HildiAgent;
+  HildiLLM, HildiAgent, HildiApproval;
 
 type
   TSkillState = (ssUnloaded, ssLoaded);
@@ -80,6 +80,11 @@ type
   TSkillRegistry = class(TInterfacedObject, IToolProvider)
   private
     FEntries: TObjectList;
+    { nil => no gate. Tests and headless callers legitimately have no approval
+      service; the gate is the caller's to supply rather than something to fake. }
+    FApproval: IApprovalService;
+    FWorkspaceId: Integer;
+    FSessionId: string;
     function IndexOfKey(const AKey: string): Integer;
     function TtlOf(const AEntry: TSkillEntry): Int64;
     function ActiveInstructions: string;
@@ -91,6 +96,15 @@ type
       GetTickCount64), not via the TUI clock - the registry must not link a TUI
       unit (the Process Split). }
     function NowMs: Int64;
+    { IS THIS LOAD ALLOWED? Activating a skill puts instructions into the context
+      that the operator did not write, so a FILE-BACKED skill is gated. The ask
+      offers the standard scopes; the approval service fast-paths an existing
+      rule, which is what makes a workspace-scope grant work for every session in
+      the workspace without any bookkeeping here.
+
+      A registry with no approval service (tests, headless callers) loads
+      directly - the gate is the caller's to supply, not something to fake. }
+    function ApproveLoad(const ASkill: TSkill; out AError: string): Boolean;
   public
     constructor Create;
     destructor Destroy; override;
@@ -98,6 +112,12 @@ type
     { Declare a skill. ASource is nil for an instruction-only skill. The same
       key twice replaces the declaration. }
     procedure Add(const ASkill: TSkill; const ASource: ISkillToolSource = nil);
+    { Supply the approval gate. Without one, a file-backed skill loads without
+      asking; with one, activation is an ask. AWorkspaceId/ASessionId identify
+      the scopes an approval can be granted at, so a workspace-scope grant is
+      honoured by every session in that workspace. }
+    procedure SetApproval(const AApproval: IApprovalService;
+      AWorkspaceId: Integer; const ASessionId: string);
     { Remove a skill by key (deactivates it first). True when it was present. }
     function Remove(const AKey: string): Boolean;
     { The declared keys, in declaration order. }
@@ -135,6 +155,9 @@ const
   DefaultSkillTtlMs = 600000;   // 10 minutes
   { The always-present activation tool's name. }
   LoadSkillToolName = 'load_skill';
+  { The approval ref for activating a skill. The skill KEY is the parameter, so
+    approving one skill never approves another. }
+  SkillLoadRef = 'skill:load';
   { The manifest header: explains the model's contract (load on demand, decay by
     idle time, and that the state shown is honest). }
   { The per-request fragment is STATE ONLY and carries no prose: the explanation
@@ -431,6 +454,84 @@ begin
   end;
 end;
 
+procedure TSkillRegistry.SetApproval(const AApproval: IApprovalService;
+  AWorkspaceId: Integer; const ASessionId: string);
+begin
+  FApproval := AApproval;
+  FWorkspaceId := AWorkspaceId;
+  FSessionId := ASessionId;
+end;
+
+function TSkillRegistry.ApproveLoad(const ASkill: TSkill;
+  out AError: string): Boolean;
+var
+  Ask: TApprovalAsk;
+  Asks: TApprovalAskArray;
+  Batch: TApprovalBatchResult;
+
+  { One option, persisted at AScope. Registered under Ref 'skill:load' with the
+    skill KEY as the parameter, so approving one skill never approves another. }
+  procedure AddOption(const AScope: TApprovalScope; const ACaption: string);
+  var
+    Opt: TApprovalOption;
+  begin
+    Opt := Default(TApprovalOption);
+    Opt.Key := 'skill_' + ACaption;
+    Opt.Caption := ACaption;
+    Opt.Persists := True;
+    Opt.Rule := DefaultApprovalRule(aeAllow);
+    Opt.Rule.Scope := AScope;
+    Opt.Rule.WorkspaceId := FWorkspaceId;
+    if AScope = asSession then
+      Opt.Rule.SessionId := FSessionId
+    else
+      Opt.Rule.SessionId := '';
+    Opt.Rule.Ref := SkillLoadRef;
+    SetLength(Opt.Rule.Params, 1);
+    Opt.Rule.Params[0] := ASkill.Key;
+    Opt.Rule.AnyParams := False;
+    SetLength(Ask.Options, Length(Ask.Options) + 1);
+    Ask.Options[High(Ask.Options)] := Opt;
+  end;
+
+begin
+  AError := '';
+  { No service => no gate. A headless caller or a test supplies none and is not
+    asked; the gate is the caller's to provide, not something to simulate. }
+  if FApproval = nil then
+    Exit(True);
+
+  Ask := Default(TApprovalAsk);
+  Ask.Summary := 'load skill "' + ASkill.Name + '"';
+  Ask.Reason := 'Loading a skill puts its instructions into the conversation.';
+  Ask.Subject.Ref := SkillLoadRef;
+  SetLength(Ask.Subject.Params, 1);
+  Ask.Subject.Params[0] := ASkill.Key;
+
+  { Once is narrowest and leads, matching the dialog's risk ordering. The scoped
+    grants follow: workspace is the useful default for a project skill - answer
+    once and every session on that repo loads it without asking. }
+  AddOption(asSession, 'once');
+  AddOption(asWorkspace, 'always in this workspace');
+  AddOption(asGlobal, 'always, everywhere');
+
+  SetLength(Asks, 1);
+  Asks[0] := Ask;
+  if not FApproval.Resolve(Asks, Batch) then
+  begin
+    AError := 'approval error: ' + Batch.Reason;
+    Exit(False);
+  end;
+  if Batch.Denied then
+  begin
+    { Reported as a refusal with its reason, so the model can proceed without the
+      skill rather than retrying blindly. }
+    AError := 'skill load refused: ' + Batch.Reason;
+    Exit(False);
+  end;
+  Result := True;
+end;
+
 function TSkillRegistry.LoadSkill(const AKey: string; out AError: string): Boolean;
 var
   I: Integer;
@@ -449,6 +550,16 @@ begin
     { Idempotent: a reload just resets the idle timer. }
     E.LastUsedMs := NowMs;
     Exit(True);
+  end;
+  { THE GATE, and only for a FILE-BACKED skill. A hand-registered or
+    provider-backed skill was installed deliberately by the operator (an MCP
+    server they configured), so it needs no per-load consent. A SKILL.md from a
+    directory - including a cloned repo's - carries instructions nobody here
+    wrote, so activating it is the moment to ask. }
+  if E.Skill.Location <> '' then
+  begin
+    if not ApproveLoad(E.Skill, AError) then
+      Exit(False);
   end;
   if E.Source <> nil then
   begin
