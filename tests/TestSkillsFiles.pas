@@ -9,7 +9,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  HildiSkillsFiles;
+  HildiSkills, HildiSkillsFiles;
 
 type
   TSkillsFilesTest = class(TTestCase)
@@ -42,6 +42,12 @@ type
     procedure TestScanListsResourcesButDoesNotReadThem;
     procedure TestScanRespectsTheDirectoryBound;
     procedure TestScanOfAMissingRootIsEmpty;
+    { Phase 4: import. }
+    procedure TestImportAddsAValidSkill;
+    procedure TestImportSkipsAnInvalidSkill;
+    procedure TestImportDerivesASnakeCaseKey;
+    procedure TestProjectScopeShadowsUserScope;
+    procedure TestImportCarriesLocationAndResources;
   end;
 
 implementation
@@ -333,6 +339,128 @@ var
 begin
   Skills := ScanSkillsDir(IncludeTrailingPathDelimiter(FDir) + 'nope', skProject);
   AssertEquals('nothing', 0, Length(Skills));
+end;
+
+procedure TSkillsFilesTest.TestImportAddsAValidSkill;
+var
+  Reg: TSkillRegistry;
+  Skills: TSkillFileArray;
+  Shadowed: TStringArray;
+  N: Integer;
+begin
+  WriteSkill('pdf-processing',
+    '---'#10'name: pdf-processing'#10'description: Extract PDF text.'#10'---'#10 +
+    'Follow these steps.');
+  Skills := ScanSkillsDir(FDir, skProject);
+  Reg := TSkillRegistry.Create;
+  try
+    N := ImportSkills(Reg, Skills, Shadowed);
+    AssertEquals('one imported', 1, N);
+    AssertEquals('no shadowing', 0, Length(Shadowed));
+    AssertEquals('unloaded', Ord(ssUnloaded),
+      Ord(Reg.StateOf('pdf_processing')));
+    AssertEquals('the body became the instructions', 'Follow these steps.',
+      Reg.InstructionsOf('pdf_processing'));
+  finally
+    Reg.Free;
+  end;
+end;
+
+procedure TSkillsFilesTest.TestImportSkipsAnInvalidSkill;
+var
+  Reg: TSkillRegistry;
+  Skills: TSkillFileArray;
+  Shadowed: TStringArray;
+  N: Integer;
+begin
+  WriteSkill('bad-name',
+    '---'#10'name: BAD'#10'description: bad'#10'---'#10'x');
+  Skills := ScanSkillsDir(FDir, skProject);
+  Reg := TSkillRegistry.Create;
+  try
+    N := ImportSkills(Reg, Skills, Shadowed);
+    AssertEquals('nothing imported', 0, N);
+  finally
+    Reg.Free;
+  end;
+end;
+
+procedure TSkillsFilesTest.TestImportDerivesASnakeCaseKey;
+var
+  Reg: TSkillRegistry;
+  Skills: TSkillFileArray;
+  Shadowed: TStringArray;
+begin
+  WriteSkill('pdf-processing',
+    '---'#10'name: pdf-processing'#10'description: d'#10'---'#10'x');
+  Skills := ScanSkillsDir(FDir, skProject);
+  Reg := TSkillRegistry.Create;
+  try
+    ImportSkills(Reg, Skills, Shadowed);
+    { The key is an approval-ref and tool-namespace token, so hyphens cannot
+      survive. Deterministic, so a rescan keeps the same approval. }
+    AssertEquals('snake case', 'pdf_processing', Reg.Keys[0]);
+    AssertEquals('the spec name is preserved verbatim',
+      'pdf-processing', Reg.NameOf('pdf_processing'));
+  finally
+    Reg.Free;
+  end;
+end;
+
+procedure TSkillsFilesTest.TestProjectScopeShadowsUserScope;
+var
+  Reg: TSkillRegistry;
+  Skills: TSkillFileArray;
+  Shadowed: TStringArray;
+  N: Integer;
+begin
+  { The spec's universal convention: project skills override user skills. The
+    shadowed one is NAMED, because silent shadowing is how an operator loses an
+    hour. }
+  SetLength(Skills, 2);
+  Skills[0] := Default(TSkillFile);
+  Skills[0].Name := 'code-review';
+  Skills[0].Description := 'project version';
+  Skills[0].Scope := skProject;
+  Skills[1] := Default(TSkillFile);
+  Skills[1].Name := 'code-review';
+  Skills[1].Description := 'user version';
+  Skills[1].Scope := skUser;
+
+  Reg := TSkillRegistry.Create;
+  try
+    N := ImportSkills(Reg, Skills, Shadowed);
+    AssertEquals('one imported', 1, N);
+    AssertEquals('the shadowed one is reported', 1, Length(Shadowed));
+    AssertTrue('and named: ' + Shadowed[0], Pos('code-review', Shadowed[0]) > 0);
+    AssertEquals('the project version won', 'project version',
+      Reg.SkillOf('code_review').Description);
+  finally
+    Reg.Free;
+  end;
+end;
+
+procedure TSkillsFilesTest.TestImportCarriesLocationAndResources;
+var
+  Reg: TSkillRegistry;
+  Skills: TSkillFileArray;
+  Shadowed: TStringArray;
+  S: TSkill;
+begin
+  WriteSkill('with-files',
+    '---'#10'name: with-files'#10'description: d'#10'---'#10'x');
+  ForceDirectories(IncludeTrailingPathDelimiter(FDir) + 'with-files/scripts');
+  Skills := ScanSkillsDir(FDir, skProject);
+  Reg := TSkillRegistry.Create;
+  try
+    ImportSkills(Reg, Skills, Shadowed);
+    S := Reg.SkillOf('with_files');
+    AssertTrue('location is carried', S.Location <> '');
+    AssertTrue('the location is the skill dir', Pos('with-files', S.Location) > 0);
+    AssertTrue('resources are carried', Length(S.Resources) > 0);
+  finally
+    Reg.Free;
+  end;
 end;
 
 initialization

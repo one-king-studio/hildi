@@ -19,7 +19,7 @@ unit HildiSkillsFiles;
 interface
 
 uses
-  Classes, SysUtils, fpjson, HildiYAML;
+  Classes, SysUtils, fpjson, HildiYAML, HildiSkills;
 
 type
   { Where a skill was found. Project scope wins a name collision. }
@@ -97,6 +97,20 @@ function ScanSkillsDir(const ARoot: string; AScope: TSkillScope;
   come first, and a later user skill with the same name does NOT override an
   earlier project one - the caller decides, but the order makes that natural. }
 function ScanSkills(const AWorkspaceRoot, AUserHome: string): TSkillFileArray;
+
+{ A skill's registry key, derived from its spec name: snake_case, so it is safe
+  in an approval ref and a tool namespace. 'pdf-processing' becomes
+  'pdf_processing'. Deterministic, so a rescan produces the same key. }
+function SkillKeyOf(const AName: string): string;
+
+{ Import the VALID skills into ARegistry. Invalid ones (Problem <> '') are
+  skipped and named in AShadowed, so a caller can report them without stopping.
+
+  On a name collision the EARLIER entry wins - ScanSkills returns project scope
+  first, so a project skill shadows a user skill of the same name. The shadowed
+  skill's qualified name is added to AShadowed. }
+function ImportSkills(const ARegistry: TSkillRegistry;
+  const ASkills: TSkillFileArray; out AShadowed: TStringArray): Integer;
 
 { True when AName satisfies the spec's naming rules. AReason names the failure
   in the operator's terms. }
@@ -596,8 +610,133 @@ begin
 end;
 
 function ScanSkills(const AWorkspaceRoot, AUserHome: string): TSkillFileArray;
+var
+  Project, User, Dirs: TSkillFileArray;
+  I, N: Integer;
+
+  procedure Append(var AInto: TSkillFileArray; const AFrom: TSkillFileArray);
+  var
+    K: Integer;
+  begin
+    for K := 0 to High(AFrom) do
+    begin
+      SetLength(AInto, Length(AInto) + 1);
+      AInto[High(AInto)] := AFrom[K];
+    end;
+  end;
+
 begin
+  { PROJECT FIRST, then user. ImportSkills keeps the earlier entry on a
+    collision, so returning project scope first is what makes project beat user
+    without a second pass. }
   Result := nil;
+  Project := nil;
+  User := nil;
+  if AWorkspaceRoot <> '' then
+  begin
+    Append(Project, ScanSkillsDir(IncludeTrailingPathDelimiter(AWorkspaceRoot) +
+      '.hildi' + PathDelim + 'skills', skProject));
+    Append(Project, ScanSkillsDir(IncludeTrailingPathDelimiter(AWorkspaceRoot) +
+      '.agents' + PathDelim + 'skills', skProject));
+  end;
+  if AUserHome <> '' then
+  begin
+    Append(User, ScanSkillsDir(IncludeTrailingPathDelimiter(AUserHome) +
+      '.hildi' + PathDelim + 'skills', skUser));
+    Append(User, ScanSkillsDir(IncludeTrailingPathDelimiter(AUserHome) +
+      '.agents' + PathDelim + 'skills', skUser));
+  end;
+  N := 0;
+  SetLength(Result, Length(Project) + Length(User));
+  for I := 0 to High(Project) do
+  begin
+    Result[N] := Project[I];
+    Inc(N);
+  end;
+  for I := 0 to High(User) do
+  begin
+    Result[N] := User[I];
+    Inc(N);
+  end;
+end;
+
+function SkillKeyOf(const AName: string): string;
+var
+  I: Integer;
+begin
+  { The key is an approval-ref and tool-namespace token, so it must be a plain
+    identifier: hyphens become underscores, and anything else that is not
+    alphanumeric is dropped. Deterministic, so a rescan yields the same key and
+    an approval granted once keeps applying. }
+  Result := '';
+  for I := 1 to Length(AName) do
+    case AName[I] of
+      'a'..'z', 'A'..'Z', '0'..'9': Result := Result + LowerCase(AName[I]);
+      '-', '_': Result := Result + '_';
+    else
+      ;   // dropped
+    end;
+  { A key must not be empty or it cannot be referenced. }
+  if Result = '' then
+    Result := 'skill';
+end;
+
+function ImportSkills(const ARegistry: TSkillRegistry;
+  const ASkills: TSkillFileArray; out AShadowed: TStringArray): Integer;
+var
+  I, J, K: Integer;
+  S: TSkill;
+  Seen: TStringArray;
+  Duplicate: Boolean;
+begin
+  Result := 0;
+  AShadowed := nil;
+  Seen := nil;
+  for I := 0 to High(ASkills) do
+  begin
+    { An invalid skill never reaches the registry. Its Problem is the caller's to
+      report; importing it would offer the model a skill whose body may be
+      truncated or whose name is unusable. }
+    if (ASkills[I].Problem <> '') or (ASkills[I].Name = '') then
+      Continue;
+
+    Duplicate := False;
+    for K := 0 to High(Seen) do
+      if Seen[K] = ASkills[I].Name then
+        Duplicate := True;
+
+    if Duplicate then
+    begin
+      { EARLIER WINS. ScanSkills returns project scope first, so the arriving
+        duplicate is the user-scope one being shadowed. Named, not silent: an
+        operator who loses an hour to silent shadowing will not trust the
+        feature again. }
+      SetLength(AShadowed, Length(AShadowed) + 1);
+      AShadowed[High(AShadowed)] := ASkills[I].Name + ' (' +
+        ASkills[I].SkillMDPath + ')';
+      Continue;
+    end;
+
+    SetLength(Seen, Length(Seen) + 1);
+    Seen[High(Seen)] := ASkills[I].Name;
+
+    S := Default(TSkill);
+    S.Key := SkillKeyOf(ASkills[I].Name);
+    S.Name := ASkills[I].Name;
+    { The spec folds "what it does" and "when to use it" into one description. }
+    S.Description := ASkills[I].Description;
+    S.Instructions := ASkills[I].Body;
+    S.Location := ASkills[I].Dir;
+    S.AllowedTools := ASkills[I].AllowedTools;
+    S.License := ASkills[I].License;
+    S.Compatibility := ASkills[I].Compatibility;
+    S.ResourcesTruncated := ASkills[I].ResourcesTruncated;
+    SetLength(S.Resources, Length(ASkills[I].Resources));
+    for J := 0 to High(ASkills[I].Resources) do
+      S.Resources[J] := ASkills[I].Resources[J];
+    ARegistry.Add(S);
+    Inc(Result);
+  end;
 end;
 
 end.

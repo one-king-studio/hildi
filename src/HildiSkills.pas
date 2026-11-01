@@ -51,6 +51,19 @@ type
     WhenToUse: string;
     Instructions: string;   // injected while loaded; '' for a tool-only skill
     TTLMs: Int64;           // idle TTL; 0 => DefaultSkillTtlMs
+    { A FILE-BACKED skill (a SKILL.md directory) carries its home, so relative
+      references in its body resolve and its bundled files can be listed.
+      Empty for a hand-registered or provider-backed skill. }
+    Location: string;
+    Resources: TStringArray;      // paths relative to Location, sorted
+    ResourcesTruncated: Boolean;
+    { Carried from the frontmatter for DISPLAY. AllowedTools in particular is
+      never consulted when deciding what to approve: the spec marks it
+      experimental, and honouring it would let a downloaded skill widen its own
+      permissions. }
+    AllowedTools: string;
+    License: string;
+    Compatibility: string;
   end;
 
   TSkillEntry = class
@@ -95,6 +108,13 @@ type
     function LoadSkill(const AKey: string; out AError: string): Boolean;
     { The current state of a declared key. }
     function StateOf(const AKey: string): TSkillState;
+    { Read back a declared skill. SkillOf returns a zeroed record for an unknown
+      key, so a caller can test Key <> '' rather than catching an exception. }
+    function SkillOf(const AKey: string): TSkill;
+    { The spec-level name (may contain hyphens) for a key. }
+    function NameOf(const AKey: string): string;
+    { The body/instructions for a key. }
+    function InstructionsOf(const AKey: string): string;
     { The rendered manifest (stable per state change). }
     function Manifest: string;
 
@@ -199,6 +219,26 @@ begin
     Result := ssUnloaded
   else
     Result := TSkillEntry(FEntries[I]).State;
+end;
+
+function TSkillRegistry.SkillOf(const AKey: string): TSkill;
+var
+  I: Integer;
+begin
+  Result := Default(TSkill);
+  I := IndexOfKey(AKey);
+  if I >= 0 then
+    Result := TSkillEntry(FEntries[I]).Skill;
+end;
+
+function TSkillRegistry.NameOf(const AKey: string): string;
+begin
+  Result := SkillOf(AKey).Name;
+end;
+
+function TSkillRegistry.InstructionsOf(const AKey: string): string;
+begin
+  Result := SkillOf(AKey).Instructions;
 end;
 
 function TSkillRegistry.Remove(const AKey: string): Boolean;
