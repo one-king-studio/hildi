@@ -144,6 +144,13 @@ type
       socket file alive after the runtime exits, and the next connect() then
       succeeds against a backlog nobody accepts ("runtime did not greet"). }
     procedure TestListenSocketIsCloseOnExec;
+
+    { The stall watchdog. The signal is NOT a timeout: a turn whose worker still
+      runs is never stalled, however long its tool call takes. Only a turn whose
+      worker already FINISHED -- so its terminal event was never drained -- can
+      stall, and that turn would otherwise stay open forever. }
+    procedure TestStalledTurnIsDetectedAfterTheGrace;
+    procedure TestARunningWorkerIsNeverStalled;
   end;
 
 implementation
@@ -1890,6 +1897,42 @@ begin
     Th.Free;
     DeleteSocket(Id);
   end;
+end;
+
+procedure TSessionRuntimeTest.TestStalledTurnIsDetectedAfterTheGrace;
+var
+  StallSince: Int64;
+begin
+  { A turn whose worker has FINISHED, observed at t=1000, with a 500ms grace:
+    not stalled yet, then stalled once the grace elapses. This is the turn that
+    would otherwise stay open forever. }
+  StallSince := 0;
+  AssertFalse('first observation starts the clock, not a verdict',
+    TurnIsStalled(True, True, 1000, StallSince, 500));
+  AssertEquals('the clock records the first observation', 1000, StallSince);
+  AssertFalse('still inside the grace',
+    TurnIsStalled(True, True, 1400, StallSince, 500));
+  AssertTrue('the grace elapsed, so the turn is stalled',
+    TurnIsStalled(True, True, 1501, StallSince, 500));
+end;
+
+procedure TSessionRuntimeTest.TestARunningWorkerIsNeverStalled;
+var
+  StallSince: Int64;
+begin
+  { The whole point of not using a timeout: a worker that is still running is
+    progress, so a tool call taking an hour must never be failed. }
+  StallSince := 0;
+  AssertFalse('a running worker is not a stall',
+    TurnIsStalled(True, False, 1000, StallSince, 500));
+  AssertEquals('and the clock is cleared', 0, StallSince);
+  { Even far past any grace, a running worker stays fine. }
+  AssertFalse('an hour into a tool call is still not a stall',
+    TurnIsStalled(True, False, 3600000, StallSince, 500));
+  AssertEquals('clock still cleared', 0, StallSince);
+  { No turn at all: nothing to stall. }
+  AssertFalse('no active turn cannot stall',
+    TurnIsStalled(False, True, 1000, StallSince, 500));
 end;
 
 initialization

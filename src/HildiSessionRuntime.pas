@@ -38,6 +38,9 @@ type
     WorkspacePath: string;      // '' => env / cwd
     StorePath: string;          // required (the runtime is store-backed)
     IdleExitMs: Integer;        // 0 => DefaultIdleExitMs
+    { How long a finished-but-undrained turn may sit before it is failed. 0 =>
+      DefaultTurnStallGraceMs. Exposed so a test can use a short grace. }
+    StallGraceMs: Integer;
     { Exit this long after the last client disconnects (ms). 0 => the default;
       negative => never (a runtime outlives its clients). }
     ClientExitGraceMs: Integer;
@@ -74,6 +77,7 @@ type
     FLoopId: string;
     FSocketPath: string;
     FIdleExitMs: Integer;
+    FStallGraceMs: Integer;
     FClientExitGraceMs: Integer;
     FLastClientCount: Integer;
     FListenFd: Integer;
@@ -84,6 +88,10 @@ type
     FSeq: Int64;
     FTurnActive: Boolean;
     FWorker: TTurnWorker;
+    { When the turn was first seen active with its worker already finished. The
+      worker can end without its terminal event being drained; without this the
+      turn stays open forever. See CheckTurnStall. }
+    FStallSince: Int64;
     { The turn in flight is a checkpoint turn: on completion the runtime records a
       checkpoint at the boundary from the assistant's reply. }
     FCheckpointTurn: Boolean;
@@ -189,6 +197,9 @@ type
     procedure StartTurn(const AText: string);
     procedure FinishTurn;
     procedure DrainTurn;
+    { Fail a turn whose worker has finished but whose terminal event was never
+      drained, so it cannot sit open forever. Never touches a running turn. }
+    procedure CheckTurnStall;
     procedure HandleTurnEvent(const AEvent: TTurnEvent);
     procedure ReapClosing;
     procedure PromoteIfPending;
@@ -227,6 +238,12 @@ const
     not strand a runtime, but long enough to cancel on a quick reattach. }
   DefaultClientExitGraceMs = 2000;
   DefaultDriveRequestMs = 30000;
+  { How long a turn may sit with its worker already finished, before the runtime
+    treats it as stalled. This is NOT a turn timeout: a turn whose worker is
+    still running is never touched, however long it takes. It only catches the
+    case where the worker ended and its terminal event was never drained, which
+    would otherwise leave the turn open forever. }
+  DefaultTurnStallGraceMs = 5000;
   { Per-client outbound ceiling; a slower observer is dropped with a gap. }
   DefaultMaxOutBytes = 262144;
   { The runtime row's updated_at is a liveness stamp, and a row is only judged
@@ -257,6 +274,18 @@ function RunSessionRuntime(const AArgs: array of string): Integer;
   runtime up regardless of the idle deadline, so it must block there too. }
 function RuntimeSelectTimeout(ATurnActive: Boolean; AClientCount: Integer;
   ARemainingMs: Int64): Integer;
+
+{ Decide whether a turn should be failed as stalled.
+
+  The signal is precise, NOT a timeout: a turn whose worker is still running is
+  never stalled, however long its tool call takes. Only a turn whose worker has
+  already FINISHED -- and whose terminal event was therefore never drained -- can
+  stall, and that turn would otherwise stay open forever.
+
+  AStallSince is the observation clock (0 = not observed yet); the function
+  updates it, so the caller stores whatever it leaves behind. }
+function TurnIsStalled(ATurnActive, AWorkerFinished: Boolean; ANowMs: Int64;
+  var AStallSince: Int64; AGraceMs: Integer): Boolean;
 
 implementation
 
@@ -317,6 +346,9 @@ begin
     Runtime.FIdleExitMs := AConfig.IdleExitMs;
     if Runtime.FIdleExitMs <= 0 then
       Runtime.FIdleExitMs := DefaultIdleExitMs;
+    Runtime.FStallGraceMs := AConfig.StallGraceMs;
+    if Runtime.FStallGraceMs <= 0 then
+      Runtime.FStallGraceMs := DefaultTurnStallGraceMs;
     Runtime.FClientExitGraceMs := AConfig.ClientExitGraceMs;
     if Runtime.FClientExitGraceMs = 0 then
       Runtime.FClientExitGraceMs := DefaultClientExitGraceMs;
@@ -850,6 +882,34 @@ begin
     if C.OutBuf <> '' then
       fpFD_SET(C.Fd, FWriteSet);
   end;
+end;
+
+function TurnIsStalled(ATurnActive, AWorkerFinished: Boolean; ANowMs: Int64;
+  var AStallSince: Int64; AGraceMs: Integer): Boolean;
+begin
+  Result := False;
+  { No turn in flight: nothing can stall, and any prior observation is stale. }
+  if not ATurnActive then
+  begin
+    AStallSince := 0;
+    Exit;
+  end;
+  { A worker still running IS progress. This is why the check is not a timeout:
+    a long tool call must never be mistaken for a stall. }
+  if not AWorkerFinished then
+  begin
+    AStallSince := 0;
+    Exit;
+  end;
+  { First observation of a finished-but-undrained turn: start the clock. }
+  if AStallSince = 0 then
+  begin
+    AStallSince := ANowMs;
+    Exit;
+  end;
+  if ANowMs - AStallSince < AGraceMs then
+    Exit;
+  Result := True;
 end;
 
 function RuntimeSelectTimeout(ATurnActive: Boolean; AClientCount: Integer;
@@ -1546,6 +1606,40 @@ begin
   FIdleDeadline := NowMs + FIdleExitMs;
 end;
 
+procedure TSessionRuntime.CheckTurnStall;
+var
+  E: TSessionEvent;
+  WorkerDone: Boolean;
+begin
+  { The signal is precise, not a timeout: a turn whose worker is still RUNNING is
+    never touched, however long its tool call takes. Only a turn whose worker has
+    already finished -- but whose terminal event was never drained -- is failed.
+    Without this, that turn stays open forever and the session looks wedged while
+    idle: no BUG, no error, just a session that never finishes its turn.
+
+    Evidence this happens: turn 1149 in session eb3fde56 never closed while all
+    six of its requests had finished, and the runtime was 14h49m old. }
+  WorkerDone := (FWorker = nil) or FWorker.Finished;
+  if not TurnIsStalled(FTurnActive, WorkerDone, NowMs, FStallSince,
+    FStallGraceMs) then
+    Exit;
+
+  { Grace expired: end the turn the same way an error would, so the transcript
+    stays consistent and the client's turn-finished handling runs unchanged. }
+  E := EmitEvent(ekError);
+  E.ErrorCode := 'turn_stalled';
+  E.Text := 'turn stalled: the worker finished but its completion was never ' +
+    'delivered, so the turn was closed';
+  E.Detail := '';
+  E.Dropped := False;
+  Broadcast(E);
+  E := EmitEvent(ekTurnFinished);
+  E.FinishReason := 'error';
+  Broadcast(E);
+  FStallSince := 0;
+  FinishTurn;
+end;
+
 procedure TSessionRuntime.DrainTurn;
 var
   Ev: TTurnEvent;
@@ -1813,6 +1907,10 @@ begin
         HandleClients;
       end;
       DrainTurn;
+      { A turn whose worker finished without its terminal event being drained
+        must not stay open forever. Precise signal: never fires on a running
+        turn, so a long tool call is not mistaken for a stall. }
+      CheckTurnStall;
       { Presence: re-stamp this runtime's row. Unconditional - see Heartbeat. }
       Heartbeat;
       { A peer's board post becomes ONE transient notice. Coalesced per tick, so
