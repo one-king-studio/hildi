@@ -12,7 +12,7 @@ uses
   HildiLLM, HildiAgent, HildiSession,
   HildiStore, HildiWorkspace,
   HildiRecallTool,
-  HildiHarnessSession, HildiHarnessView,
+  HildiHarnessSession, HildiHarnessView, HildiSkills,
   HildiSessionStore,
   HildiMCPConfig,
   HildiBoard, HildiBoardStore,
@@ -94,6 +94,10 @@ type
     procedure TestTheTurnBoundaryReclaimsADeadSessionsClaim;
     procedure TestRecallToolAbsentWithoutStore;
     procedure TestLastTurnEmptyWithoutTurns;
+    { An operator-typed skill load grants SESSION scope and loads, without
+      asking: typing the name is the approval. Deliberately not workspace scope -
+      one session's operator has not consented for the whole workspace. }
+    procedure TestOperatorSkillLoadGrantsSessionAndLoads;
     { The skill descriptions (the STABLE half of the manifest) must reach the
       loop even when no MCP server is configured. They were briefly gated on
       FMcp <> nil, which silently dropped a locally-declared skill's description:
@@ -1412,6 +1416,37 @@ begin
     AssertTrue('load ok', Session.Skills.LoadSkill('mcp_late', Err));
     AssertTrue('resolvable after load',
       Session.Loop.ResolveTool('mcp_late_echo', Tool));
+  finally
+    Session.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestOperatorSkillLoadGrantsSessionAndLoads;
+var
+  Session: THarnessSession;
+  Err: string;
+  S: TSkill;
+begin
+  { Typing a skill's name IS the approval, so the load happens without a prompt
+    and records a SESSION-scope grant. It must be readable back as the narrower
+    scope, not workspace: one operator in one session has not consented on behalf
+    of every other session in the workspace. }
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    S := Default(TSkill);
+    S.Key := 'operator_pick';
+    S.Name := 'operator-pick';
+    S.Description := 'a skill the operator named';
+    S.Instructions := 'Do it.';
+    S.Location := '/tmp/operator-pick';
+    Session.Skills.Add(S);
+
+    Err := '';
+    AssertTrue('loaded without asking: ' + Err,
+      Session.LoadSkillByName('operator_pick', Err));
+    AssertEquals('it is loaded', Ord(ssLoaded),
+      Ord(Session.Skills.StateOf('operator_pick')));
   finally
     Session.Free;
   end;

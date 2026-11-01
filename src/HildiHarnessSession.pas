@@ -205,6 +205,21 @@ type
     property TurnPool: IAsyncScheduler read FTurnPool;
     { The capability layer: skills load on demand; empty unless Lazy_MCP fills it. }
     property Skills: TSkillRegistry read FSkills;
+    { Load a skill BECAUSE THE OPERATOR NAMED IT (the `/skill-name` command).
+
+      Typing the name IS the approval, so this records a SESSION-scope rule for
+      that skill and then loads it. Deliberately not workspace scope: an operator
+      typing a name in one session has not consented on behalf of every other
+      session in the workspace.
+
+      The rule is recorded BEFORE the load, so the load is a fast-path hit rather
+      than a prompt the operator already answered by typing. }
+    function LoadSkillByName(const AKey: string; out AError: string): Boolean;
+    { A session-scope approval for one skill, recorded without loading. Public so
+      a caller can grant ahead of time (and so the behaviour is testable without
+      a UI). }
+    function GrantSkillForSession(const AKey: string;
+      out AError: string): Boolean;
     { The session's approval service, so the runtime can hand it to the
       delegation tools. }
     property ApprovalService: IApprovalService read FApprovalService;
@@ -1192,6 +1207,57 @@ begin
     the per-request fragment, so the manifest stops costing ~105 tokens on every
     request and a load only changes a few short lines. }
   ComposeStablePrompt;
+end;
+
+function THarnessSession.GrantSkillForSession(const AKey: string;
+  out AError: string): Boolean;
+var
+  Store: IApprovalStore;
+  Rule: TApprovalRule;
+  StoreErr: TStoreError;
+begin
+  { A session-scope allow rule for one skill, saved before the load so the load
+    is a fast-path hit rather than a prompt the operator already answered by
+    typing. SessionId is the APPROVAL session (the lineage root for a subagent),
+    which is exactly the identity the approval service resolves against - so this
+    grants for the same session the gate would have asked in. }
+  AError := '';
+  Rule := DefaultApprovalRule(aeAllow);
+  Rule.Scope := asSession;
+  Rule.WorkspaceId := FView.WorkspaceId;
+  Rule.SessionId := FView.SessionId;
+  Rule.Ref := SkillLoadRef;
+  SetLength(Rule.Params, 1);
+  Rule.Params[0] := AKey;
+  Rule.AnyParams := False;
+
+  if FView.Store <> nil then
+    Store := TStoreApprovalStore.Create(FView.Store)
+  else
+    Store := TMemoryApprovalStore.Create;
+  if not Store.Save(Rule, AError) then
+  begin
+    AError := 'could not record the skill approval: ' + AError;
+    Exit(False);
+  end;
+  Result := True;
+end;
+
+function THarnessSession.LoadSkillByName(const AKey: string;
+  out AError: string): Boolean;
+begin
+  { The operator named the skill, so their consent is already given: record it,
+    then load. A load that fails after the grant leaves a harmless rule behind -
+    the skill is still unloaded, and the next attempt will not prompt. }
+  AError := '';
+  if FSkills = nil then
+  begin
+    AError := 'this session has no skill registry';
+    Exit(False);
+  end;
+  if not GrantSkillForSession(AKey, AError) then
+    Exit(False);
+  Result := FSkills.LoadSkill(AKey, AError);
 end;
 
 function THarnessSession.Init(const AConfig: THarnessSessionConfig;
