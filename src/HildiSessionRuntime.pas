@@ -92,6 +92,8 @@ type
     FPendingSince: Int64;
     FNextClientId: Integer;
     FIdleDeadline: Int64;
+    { When the runtime row was last re-stamped. See HeartbeatMinMs. }
+    FHeartbeatAt: Int64;
     FLoopStarted: TSessionEvent;
     FReplay: array of TSessionEvent;
     FReplayLen: Integer;      { live entries, <= FReplayCap }
@@ -224,6 +226,13 @@ const
   DefaultDriveRequestMs = 30000;
   { Per-client outbound ceiling; a slower observer is dropped with a gap. }
   DefaultMaxOutBytes = 262144;
+  { The runtime row's updated_at is a liveness stamp, and a row is only judged
+    dead after DefaultRuntimeExpirySec = 90 s of silence (HildiTasks). Re-stamping
+    on every loop tick therefore bought nothing and cost a SQLite write per tick -
+    measured as ~3.6 MB of idle writes per 10 s, plus a WAL checkpoint every few
+    seconds. Once a second is far inside the 90 s window and cuts the write rate
+    by two orders of magnitude. }
+  HeartbeatMinMs = 1000;
   { Most turn events the replay buffer retains for a late-attaching client. The
     buffer is a ring: past this it drops the oldest, so a runtime's replay memory
     is bounded by this rather than by its longest turn. A client whose FromSeq
@@ -471,6 +480,7 @@ procedure TSessionRuntime.Heartbeat;
 var
   Row: TSessionRuntimeRow;
   Err: TStoreError;
+  Now: Int64;
 begin
   { Presence, and nothing else. RegisterRuntime upserts, so this only moves
     updated_at - which is exactly what "I am still here" means.
@@ -478,7 +488,20 @@ begin
     Unconditional in every mode on purpose. If renewal were conditional on
     multi-mode, a solo session's claims would go unrenewed, a peer would join, and
     the first reclaim would steal live work - with the mode-change notice arriving
-    AFTER the damage. Notices are conditional; liveness is not. }
+    AFTER the damage. Notices are conditional; liveness is not.
+
+    Rate-limited in TIME, not in mode - that distinction is the above property.
+    The loop ticks at ~10 ms when a turn is active and ~200 ms when idle, and this
+    used to write on every tick: a full SQLite upsert plus WAL traffic, measured
+    at ~3.6 MB per 10 s of idle. Nothing reads the stamp more finely than
+    DefaultRuntimeExpirySec = 90 s, so once a second is both safe and a hundredfold
+    cheaper. The first call always writes, so a newly bound runtime is visible
+    immediately. }
+  Now := NowMs;
+  if (FHeartbeatAt <> 0) and (Now - FHeartbeatAt < HeartbeatMinMs) then
+    Exit;
+  FHeartbeatAt := Now;
+
   Row := Default(TSessionRuntimeRow);
   Row.SessionId := FSessionId;
   {$ifdef unix}
@@ -488,8 +511,8 @@ begin
   {$endif}
   Row.SocketPath := FSocketPath;
   Row.Status := rsRunning;
-  Row.StartedAt := NowMs;   // re-stamped; the row is the live process, not history
-  Row.UpdatedAt := NowMs;
+  Row.StartedAt := Now;   // re-stamped; the row is the live process, not history
+  Row.UpdatedAt := Now;
   FSession.View.Store.RegisterRuntime(Row, Err);
 end;
 
