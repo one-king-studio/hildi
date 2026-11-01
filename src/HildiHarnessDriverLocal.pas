@@ -43,6 +43,14 @@ type
     { Redo what an undo took away, oldest first. ATurnId 0 means the oldest
       undone turn. }
     procedure Redo(ATurnId: Int64 = 0);
+    { The session's skill keys. In-process, so this reads the registry directly
+      rather than waiting for an event. }
+    procedure SkillKeys(out AKeys: TStringArray);
+    { Load a skill by key. LoadSkillByName records the session approval first, so
+      an operator-typed load does not prompt. A refusal is pushed as an error. }
+    procedure LoadSkill(const AKey: string);
+    { Unload a loaded skill by key. }
+    procedure UnloadSkill(const AKey: string);
     procedure Checkpoint;
     function PopEvent(out AEvent: TTurnEvent): Boolean;
     function Dropped: Int64;
@@ -232,6 +240,55 @@ begin
     E.Text := 'redo refused: ' + Detail;
     FSession.Queue.Push(E);
   end;
+end;
+
+procedure TLocalDriver.SkillKeys(out AKeys: TStringArray);
+begin
+  AKeys := nil;
+  if FSession.Skills <> nil then
+    AKeys := FSession.Skills.Keys;
+end;
+
+procedure TLocalDriver.LoadSkill(const AKey: string);
+var
+  E: TTurnEvent;
+  Detail: string;
+begin
+  { In-process, so this loads directly. LoadSkillByName records the session-scope
+    approval first, so an operator-typed load does not prompt - typing the key is
+    the consent. }
+  Detail := '';
+  if not FSession.LoadSkillByName(AKey, Detail) then
+  begin
+    E := Default(TTurnEvent);
+    E.Kind := teError;
+    E.Text := 'skill load refused: ' + Detail;
+    FSession.Queue.Push(E);
+    Exit;
+  end;
+  { Tell the app the catalogue moved, so the composer line redraws. }
+  E := Default(TTurnEvent);
+  E.Kind := teSkills;
+  E.SkillKeys := FSession.Skills.Keys;
+  FSession.Queue.Push(E);
+end;
+
+procedure TLocalDriver.UnloadSkill(const AKey: string);
+var
+  E: TTurnEvent;
+begin
+  if (FSession.Skills <> nil) and (not FSession.Skills.Remove(AKey)) then
+  begin
+    E := Default(TTurnEvent);
+    E.Kind := teError;
+    E.Text := 'no such skill: ' + AKey;
+    FSession.Queue.Push(E);
+    Exit;
+  end;
+  E := Default(TTurnEvent);
+  E.Kind := teSkills;
+  E.SkillKeys := FSession.Skills.Keys;
+  FSession.Queue.Push(E);
 end;
 
 function TLocalDriver.PopEvent(out AEvent: TTurnEvent): Boolean;

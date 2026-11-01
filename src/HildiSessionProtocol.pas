@@ -54,7 +54,11 @@ type
       rebuilds the transcript from the store and, after an undo, returns that
       turn's prompt to the composer - the "cancel" behaviour. Appended last so
       stored ordinals are unchanged. }
-    ekUndone);
+    ekUndone,
+    { The session's skill catalogue changed: a load, an unload, or a rescan.
+      SkillKeys is the new full list (they are few), so the client needs no delta
+      protocol. Appended last so stored ordinals are unchanged. }
+    ekSkills);
 
   { One streamed event. A flat record with optional fields, the same shape as
     TTurnEvent: only the fields named by Kind are meaningful. }
@@ -93,6 +97,10 @@ type
       deliberately not on the wire. }
     ChangeCallId: string;
     ChangeIds: TChangeIdArray;
+    { The session's skill keys after a change. A full list rather than a delta:
+      there are few skills, and a client that missed an event is corrected by the
+      next one instead of drifting. }
+    SkillKeys: TStringArray;
   end;
 
   TSessionCommandKind = (
@@ -112,7 +120,12 @@ type
     scUndo,
     { Redo a turn: re-apply what an undo took away, oldest first. Driver-only,
       and the mirror of scUndo in every respect including its ordering rule. }
-    scRedo);
+    scRedo,
+    { Skills. The runtime owns the registry, so the client only asks: scLoadSkill
+      raises the approval ask on the runtime side, and the outcome comes back as
+      an ekSkills event (or an error). Appended last so stored ordinals are
+      unchanged. }
+    scLoadSkill, scUnloadSkill, scSkills);
 
   { One client command. Id is echoed in the reply. }
   TSessionCommand = record
@@ -129,6 +142,8 @@ type
       scRedo: the oldest turn to redo; the suffix from there forward. 0 means
       the oldest undone turn. }
     TurnId: Int64;
+    { scLoadSkill/scUnloadSkill: which skill, by its registry key. }
+    SkillKey: string;
     { scCheckpoint: no payload; it starts a checkpoint turn. }
   end;
 
@@ -218,6 +233,36 @@ begin
   end;
 end;
 
+{ The same shape for strings, used for a skill-key list. Keys cannot contain a
+  comma (they are derived from the spec's a-z0-9- names), so a plain join is
+  safe. }
+function JoinStr(const AItems: array of string): string;
+var
+  I: Integer;
+begin
+  Result := '';
+  for I := 0 to High(AItems) do
+  begin
+    if I > 0 then
+      Result := Result + ',';
+    Result := Result + AItems[I];
+  end;
+end;
+
+function SplitStr(const AText: string): TStringArray;
+var
+  Parts: TStringArray;
+  I: Integer;
+begin
+  Result := nil;
+  if AText = '' then
+    Exit;
+  Parts := AText.Split([',']);
+  SetLength(Result, Length(Parts));
+  for I := 0 to High(Parts) do
+    Result[I] := Parts[I];
+end;
+
 function SplitIds(const AText: string): TChangeIdArray;
 var
   P, Start, N: Integer;
@@ -251,7 +296,7 @@ const
     'drive_requested', 'drive_granted', 'drive_released',
     'turn_finished', 'error', 'gap', 'loop_exited', 'reasoning_done',
     'tool_output', 'ambient', 'subagent', 'subagent_ask',
-    'checkpoint_committed', 'changes', 'undone');
+    'checkpoint_committed', 'changes', 'undone', 'skills');
 
   MessageKindNames: array[TSessionMessageKind] of string = (
     'hello', 'attached', 'event', 'reply', 'detached', 'error',
@@ -262,7 +307,8 @@ const
   CommandKindNames: array[TSessionCommandKind] of string = (
     'attach', 'detach', 'prompt', 'approve', 'interrupt',
     'claim_drive', 'release_drive', 'ping', 'shutdown',
-    'abort_subagent', 'release_subagent', 'checkpoint', 'undo', 'redo');
+    'abort_subagent', 'release_subagent', 'checkpoint', 'undo', 'redo',
+    'load_skill', 'unload_skill', 'skills');
 
 { --- enum <-> wire ------------------------------------------------------ }
 
@@ -671,6 +717,8 @@ begin
         PutStr(O, 'tool_id', E.ChangeCallId);
         PutStr(O, 'change_ids', JoinIds(E.ChangeIds));
       end;
+    ekSkills:
+      PutStr(O, 'skill_keys', JoinStr(E.SkillKeys));
   end;
 end;
 
@@ -796,6 +844,8 @@ begin
         E.ChangeCallId := OptStr(O, 'tool_id');
         E.ChangeIds := SplitIds(OptStr(O, 'change_ids'));
       end;
+    ekSkills:
+      E.SkillKeys := SplitStr(OptStr(O, 'skill_keys'));
   end;
   Result := True;
 end;
@@ -815,10 +865,12 @@ begin
       end;
     scAbortSubagent, scReleaseSubagent:
       PutStr(O, 'session', C.SessionId);
+    scLoadSkill, scUnloadSkill:
+      PutStr(O, 'skill_key', C.SkillKey);
     scAttach, scDetach, scInterrupt, scClaimDrive, scReleaseDrive, scPing,
     scUndo, scRedo:
       PutInt(O, 'turn_id', C.TurnId);
-    scShutdown, scCheckpoint:
+    scShutdown, scCheckpoint, scSkills:
       ;   // no payload beyond the name
   end;
 end;
@@ -853,8 +905,10 @@ begin
       C.SessionId := OptStr(O, 'session');
     scUndo, scRedo:
       C.TurnId := OptInt64(O, 'turn_id', 0);
+    scLoadSkill, scUnloadSkill:
+      C.SkillKey := OptStr(O, 'skill_key');
     scAttach, scDetach, scInterrupt, scClaimDrive, scReleaseDrive, scPing,
-    scShutdown, scCheckpoint:
+    scShutdown, scCheckpoint, scSkills:
       ;
   end;
   Result := True;

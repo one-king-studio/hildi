@@ -44,7 +44,11 @@ type
       flags are unused. The app rebuilds the transcript and, for an undo, hands
       the turn's prompt back to the composer. Appended last so stored ordinals
       are unchanged. }
-    teUndone
+    teUndone,
+    { The session's skill catalogue changed. SkillKeys is the new full list: there
+      are few skills, so a full snapshot is simpler than a delta and self-heals a
+      client that missed one. Appended last so stored ordinals are unchanged. }
+    teSkills
   );
 
   TTurnEvent = record
@@ -69,6 +73,10 @@ type
     SubLabel: string;
     SubStatus: string;
     SubSource: string;
+    { teSkills: the session's skill keys, after a load, an unload or a rescan. A
+      full list rather than a delta - there are few skills, and a client that
+      missed an event is corrected by the next one. }
+    SkillKeys: TStringArray;
   end;
 
   { A thread-safe, BOUNDED FIFO. Push from the worker thread, Pop from the UI

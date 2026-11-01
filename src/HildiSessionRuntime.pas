@@ -182,6 +182,17 @@ type
       const ACommand: TSessionCommand);
     procedure HandleReleaseSubagent(AClient: TClientConn;
       const ACommand: TSessionCommand);
+    { Skills. The runtime owns the registry, so it is the party that loads; the
+      client only asks. A refusal (unknown key, denied approval) comes back as a
+      typed error rather than a silent no-op. }
+    procedure HandleLoadSkill(AClient: TClientConn;
+      const ACommand: TSessionCommand);
+    procedure HandleUnloadSkill(AClient: TClientConn;
+      const ACommand: TSessionCommand);
+    procedure HandleListSkills(AClient: TClientConn;
+      const ACommand: TSessionCommand);
+    { Push the current catalogue to every client, after a change. }
+    procedure BroadcastSkills;
     { Drain child events for the runtime loop; relay them as events. }
     procedure DrainSubagents;
     { Test seam accessor: the session's loop. }
@@ -1133,6 +1144,12 @@ begin
       HandleAbortSubagent(AClient, ACommand);
     scReleaseSubagent:
       HandleReleaseSubagent(AClient, ACommand);
+    scLoadSkill:
+      HandleLoadSkill(AClient, ACommand);
+    scUnloadSkill:
+      HandleUnloadSkill(AClient, ACommand);
+    scSkills:
+      HandleListSkills(AClient, ACommand);
   end;
 end;
 
@@ -1310,6 +1327,66 @@ begin
   else
     StartTurn(ACommand.Text);
   ReplyTo(AClient, ACommand.Id, True, '');
+end;
+
+procedure TSessionRuntime.HandleLoadSkill(AClient: TClientConn;
+  const ACommand: TSessionCommand);
+var
+  Detail: string;
+begin
+  { The runtime owns the registry, so it loads. A model-initiated load asks; an
+    operator-typed one records the session approval first and does not. This path
+    is the operator's, so it uses LoadSkillByName. }
+  if AClient.Role <> srDrive then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'not_driver');
+    Exit;
+  end;
+  Detail := '';
+  if not FSession.LoadSkillByName(ACommand.SkillKey, Detail) then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, Detail);
+    Exit;
+  end;
+  ReplyTo(AClient, ACommand.Id, True, '');
+  BroadcastSkills;
+end;
+
+procedure TSessionRuntime.HandleUnloadSkill(AClient: TClientConn;
+  const ACommand: TSessionCommand);
+begin
+  if AClient.Role <> srDrive then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'not_driver');
+    Exit;
+  end;
+  if (FSession.Skills = nil) or (not FSession.Skills.Remove(ACommand.SkillKey))
+  then
+  begin
+    ReplyTo(AClient, ACommand.Id, False,
+      'no such skill: ' + ACommand.SkillKey);
+    Exit;
+  end;
+  ReplyTo(AClient, ACommand.Id, True, '');
+  BroadcastSkills;
+end;
+
+procedure TSessionRuntime.HandleListSkills(AClient: TClientConn;
+  const ACommand: TSessionCommand);
+begin
+  ReplyTo(AClient, ACommand.Id, True, '');
+  BroadcastSkills;
+end;
+
+procedure TSessionRuntime.BroadcastSkills;
+var
+  E: TSessionEvent;
+begin
+  if FSession.Skills = nil then
+    Exit;
+  E := EmitEvent(ekSkills);
+  E.SkillKeys := FSession.Skills.Keys;
+  Broadcast(E);
 end;
 
 procedure TSessionRuntime.HandleApprove(AClient: TClientConn;

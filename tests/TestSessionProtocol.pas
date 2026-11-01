@@ -167,6 +167,12 @@ begin
       end;
     ekUndone:
       AEvent.TurnSeq := 42;
+    ekSkills:
+      begin
+        SetLength(AEvent.SkillKeys, 2);
+        AEvent.SkillKeys[0] := 'alpha';
+        AEvent.SkillKeys[1] := 'beta';
+      end;
     ekCheckpointCommitted:
       AEvent.TurnSeq := 42;
     ekChanges:

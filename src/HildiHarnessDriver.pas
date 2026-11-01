@@ -92,7 +92,11 @@ type
     FClient: TSessionClient;
     FNextId: Integer;
     FClosed: Boolean;
+    { The last skill catalogue pushed by the runtime (ekSkills). Skills are
+      few, so a full snapshot is held rather than round-tripped on demand. }
+    FLastSkillKeys: TStringArray;
     function EnsureClient(out AError: string): Boolean;
+    procedure SendSkillCommand(AKind: TSessionCommandKind; const AKey: string);
     procedure SendCommand(AKind: TSessionCommandKind; const AText,
       AAskRef: string; const AChoice: TApprovalChoice;
       const ASessionId: string; ATurnId: Int64 = 0);
@@ -113,6 +117,15 @@ type
       means the oldest undone turn. }
     procedure Redo(ATurnId: Int64 = 0);
     procedure Checkpoint;
+    { The session's skill keys, as of the last catalogue event. A snapshot:
+      skills are few, and a client that missed an event is corrected by the
+      next one. }
+    procedure SkillKeys(out AKeys: TStringArray);
+    { Load a skill by key. The runtime asks for approval; a refusal arrives as
+      an error event, so this never reports success it cannot vouch for. }
+    procedure LoadSkill(const AKey: string);
+    { Unload a loaded skill by key. }
+    procedure UnloadSkill(const AKey: string);
     function PopEvent(out AEvent: TTurnEvent): Boolean;
     function Dropped: Int64;
     procedure Close;
@@ -334,8 +347,7 @@ end;
 
 procedure TRemoteDriver.SendCommand(AKind: TSessionCommandKind;
   const AText, AAskRef: string; const AChoice: TApprovalChoice;
-  const ASessionId: string; ATurnId: Int64);
-var
+  const ASessionId: string; ATurnId: Int64);var
   Cmd: TSessionCommand;
   Err: string;
 begin
@@ -353,6 +365,31 @@ begin
   Cmd.Choice := AChoice;
   Cmd.SessionId := ASessionId;
   Cmd.TurnId := ATurnId;
+  if not FClient.Send(Cmd) then
+  begin
+    FSink.Detached := True;
+    PushError('could not send to the runtime');
+  end;
+end;
+
+procedure TRemoteDriver.SendSkillCommand(AKind: TSessionCommandKind;
+  const AKey: string);
+var
+  Cmd: TSessionCommand;
+  Err: string;
+begin
+  { A skill command carries a KEY where the turn commands carry a turn id, so it
+    cannot reuse SendCommand's signature. }
+  if not EnsureClient(Err) then
+  begin
+    PushError(Err);
+    Exit;
+  end;
+  Inc(FNextId);
+  Cmd := Default(TSessionCommand);
+  Cmd.Kind := AKind;
+  Cmd.Id := 't' + IntToStr(FNextId);
+  Cmd.SkillKey := AKey;
   if not FClient.Send(Cmd) then
   begin
     FSink.Detached := True;
@@ -408,6 +445,24 @@ procedure TRemoteDriver.Redo(ATurnId: Int64);
 begin
   { One action: the runtime re-applies the undone turns from ATurnId forward. }
   SendCommand(scRedo, '', '', Default(TApprovalChoice), '', ATurnId);
+end;
+
+procedure TRemoteDriver.SkillKeys(out AKeys: TStringArray);
+begin
+  { The catalogue arrives by EVENT (ekSkills), so the driver holds the last one.
+    Asking the runtime synchronously would mean a round trip on the UI thread for
+    data that is already being pushed. }
+  AKeys := FLastSkillKeys;
+end;
+
+procedure TRemoteDriver.LoadSkill(const AKey: string);
+begin
+  SendSkillCommand(scLoadSkill, AKey);
+end;
+
+procedure TRemoteDriver.UnloadSkill(const AKey: string);
+begin
+  SendSkillCommand(scUnloadSkill, AKey);
 end;
 
 function TRemoteDriver.PopEvent(out AEvent: TTurnEvent): Boolean;
