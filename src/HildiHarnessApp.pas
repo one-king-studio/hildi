@@ -1076,6 +1076,21 @@ var
     Result := Live >= 2;
   end;
 
+  { /skill opens a selector, so it is worth offering only when there is something
+    to select. Asking the driver rather than the view: the TUI is a client, and
+    the view has no skills. }
+  function HasAvailableSkills: Boolean;
+  var
+    Keys: TStringArray;
+  begin
+    Result := False;
+    if FDriver = nil then
+      Exit;
+    Keys := nil;
+    FDriver.SkillKeys(Keys);
+    Result := Length(Keys) > 0;
+  end;
+
 begin
   { One entry per command, no aliases: two names for one action reads as two
     actions in a list, and the palette's prefix filter already finds a command

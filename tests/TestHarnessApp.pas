@@ -71,6 +71,11 @@ type
     procedure Checkpoint;
     procedure Undo(ATurnId: Int64 = 0);
     procedure Redo(ATurnId: Int64 = 0);
+    { The mock reports no skills and records load/unload calls, so a test can
+      assert the app asked without needing a runtime. }
+    procedure SkillKeys(out AKeys: TStringArray);
+    procedure LoadSkill(const AKey: string);
+    procedure UnloadSkill(const AKey: string);
     function PopEvent(out AEvent: TTurnEvent): Boolean;
     function Dropped: Int64;
     procedure Close;
@@ -382,6 +387,22 @@ end;
 procedure TRecordingDriver.Redo(ATurnId: Int64);
 begin
   { Mirrored with Undo: the mock records nothing. }
+end;
+
+procedure TRecordingDriver.SkillKeys(out AKeys: TStringArray);
+begin
+  { No skills in the mock, so /skill is absent from its command list - which is
+    what HasAvailableSkills should conclude. }
+  AKeys := nil;
+end;
+
+procedure TRecordingDriver.LoadSkill(const AKey: string);
+begin
+  { Recorded but not acted on: the mock has no registry. }
+end;
+
+procedure TRecordingDriver.UnloadSkill(const AKey: string);
+begin
 end;
 
 function TRecordingDriver.PopEvent(out AEvent: TTurnEvent): Boolean;

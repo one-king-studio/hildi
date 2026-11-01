@@ -14,7 +14,7 @@ unit HildiHarnessDriver;
 interface
 
 uses
-  Classes, SyncObjs,
+  Classes, SyncObjs, SysUtils,
   HildiLLM, HildiApproval,
   HildiHarnessTurn,
   HildiSessionProtocol, HildiSessionClient;
@@ -40,6 +40,15 @@ type
     { Redo a turn: re-apply what an undo took away, oldest first. ATurnId 0
       means the oldest undone turn. }
     procedure Redo(ATurnId: Int64 = 0);
+    { The session's skill keys, as of the last catalogue change. A snapshot:
+      there are few skills, and a client that missed an event is corrected by the
+      next one. The TUI is a client, so this is the only seam that serves it. }
+    procedure SkillKeys(out AKeys: TStringArray);
+    { Load a skill by key. The runtime asks for approval; a refusal comes back as
+      an error event rather than a silent no-op. }
+    procedure LoadSkill(const AKey: string);
+    { Unload a loaded skill by key. }
+    procedure UnloadSkill(const AKey: string);
     procedure Checkpoint;
     { UI thread: pop the next event, if any. }
     function PopEvent(out AEvent: TTurnEvent): Boolean;
@@ -61,8 +70,7 @@ function MapSessionEvent(const AEvent: TSessionEvent; out E: TTurnEvent): Boolea
 
 implementation
 
-uses
-  SysUtils;
+{ SysUtils is already in the interface uses; FPC inherits it here. }
 
 { --- TRemoteDriver ------------------------------------------------------ }
 
