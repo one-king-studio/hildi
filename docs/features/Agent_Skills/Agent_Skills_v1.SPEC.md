@@ -125,15 +125,28 @@ the operator needs to see *which* file and *why*.
 - [ ] A refusal is reported to the model as a refusal, with the reason, so it can
       proceed without that skill rather than retrying blindly.
 
-### Operator activation: `/skill-name`
+### Operator activation: `/skill` and `ctrl+=`
 
-- [ ] `/skill-name` loads that skill immediately **and** records the same
-      session-level approval the gate would have granted. Typing the name is the
-      approval; asking again would be asking the operator to confirm what they
-      just typed.
-- [ ] An unknown skill name is refused with the list of available names.
-- [ ] The palette offers known skill names, so the syntax is discoverable rather
-      than folklore.
+Skills are **not** command names. There is one command — `/skill` — that opens a
+skill selector, and `ctrl+=` as a shortcut to the same selector. The command's
+help text names the shortcut, so an operator who does not know it can still find
+the feature.
+
+- [ ] `/skill` opens the selector; its entry in the command list names `ctrl+=`.
+- [ ] `ctrl+=` opens the same selector directly.
+- [ ] Selecting a skill **side-loads** it and records a **session-scope**
+      approval. Typing the selector is the approval; asking again would be asking
+      the operator to confirm what they just chose.
+- [ ] **No literal marker is inserted into the prompt text.** The prompt the
+      operator typed is unchanged by loading a skill.
+- [ ] The composer renders the loaded skills **on their own line under the user
+      prompt**, each as `+<skill-name>`.
+- [ ] The turn summary renders the same line, so a resumed session shows which
+      skills a turn ran with.
+- [ ] Unloading removes the `+<skill-name>` entry.
+
+Deferred: inline prompt markers (a footnote-style token that is edited atomically
+and parsed on submit). The side-load model above does not need them.
 
 ### Catalog
 

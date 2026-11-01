@@ -73,15 +73,20 @@ other session in the workspace.
 
 ## Discovery
 
-Scan, in order, per scope — later scans do not override earlier ones within a
-scope, and project beats user:
+Scan in order; the first definition of a name wins, so project beats user:
 
 | Scope | Path |
 | --- | --- |
-| Project | `<workspace>/.hildi/skills/` |
-| Project | `<workspace>/.agents/skills/` (cross-client convention) |
-| User | `~/.hildi/skills/` |
+| Project | `<workspace>/.agents/skills/` |
+| User | `~/.local/share/hildi/skills/` (XDG data default) |
 | User | `~/.agents/skills/` (cross-client convention) |
+
+Both user paths are scanned: the XDG one is ours, the `.agents` one is how a
+skill installed by another compliant client is visible here without copying.
+
+**Resolution happens on user prompt, not at load.** The manifest is assembled
+when the operator submits, so a skill added mid-session is available on the next
+prompt without a restart.
 
 Within each directory: **subdirectories containing a file named exactly
 `SKILL.md`**. Skip `.git/`, `node_modules/`, and honour `.gitignore` (we already

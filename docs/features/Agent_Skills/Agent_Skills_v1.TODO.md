@@ -90,15 +90,34 @@ Work TDD-first: each phase adds its tests before its implementation and runs
 - [ ] **Implement** the catalog change in `HildiSkills`.
 - [ ] `make check` green.
 
-## Phase 8 — operator activation
+## Phase 8 — operator activation (`/skill` and `ctrl+=`)
 
-- [ ] **Test**: `/skill-name` loads that skill without the model acting.
-- [ ] **Test**: `/skill-name` records the same session approval the gate grants,
-      so a later model-initiated load does not ask.
-- [ ] **Test**: an unknown name is refused and lists what is available.
-- [ ] **Test**: the palette offers known skill names.
-- [ ] **Implement** the palette entry and dispatch.
+- [ ] **Test**: `/skill` opens the skill selector.
+- [ ] **Test**: `ctrl+=` opens the same selector.
+- [ ] **Test**: selecting a skill side-loads it and records a session approval.
+- [ ] **Test**: the composer text is UNCHANGED by loading a skill — no marker is
+      inserted into what the operator typed.
+- [ ] **Test**: the loaded skills render as `+<name>` on their own line under the
+      user prompt.
+- [ ] **Test**: unloading removes the `+<name>` entry.
+- [ ] **Test**: the command list's `/skill` entry names the `ctrl+=` shortcut.
+- [ ] **Implement** the selector, the shortcut, and the composer line.
 - [ ] `make check` green.
+
+## Phase 9 — turn summary
+
+- [ ] **Test**: a submitted turn shows the skills it ran with, as `+<name>`.
+- [ ] **Test**: a resumed session shows the same line for the same turn.
+- [ ] **Implement** the summary line. This is an OUT-OF-SCOPE UI change per the
+      operator: the summary needs new fields before it can render them.
+
+## Deferred — inline prompt markers
+
+A footnote-style token typed inline (skills, and later files and line numbers),
+edited atomically and parsed out of the markdown on submit. Explicitly NOT part
+of v1: the side-load model above does not need it. Recorded here so the idea is
+not lost, and because a future markdown editor for files would share the
+mechanism.
 
 ## Close-out
 
