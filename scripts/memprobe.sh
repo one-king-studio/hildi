@@ -17,7 +17,7 @@
 #   scripts/memprobe.sh [--store PATH] [--binary BIN] [--reps N] [--arena N]
 #
 # Defaults: --store  ${HILDI_STORE_PATH:-$XDG_DATA_HOME/hildi/store.db}
-#           --binary build/bin/hildi-agent (fall back to -release if present)
+#           --binary build/debug/bin/hildi-agent (fall back to -release if present)
 #           --reps   3
 #           --arena  unset (measure the binary as it ships). 1 or 2 measures a
 #                    capped run for comparison.
@@ -51,10 +51,10 @@ if [ ! -f "$STORE" ]; then
 fi
 
 if [ -z "$BINARY" ]; then
-  if [ -x build/bin/hildi-agent-release ]; then
-    BINARY=build/bin/hildi-agent-release
-  elif [ -x build/bin/hildi-agent ]; then
-    BINARY=build/bin/hildi-agent
+  if [ -x build/release/bin/hildi-agent ]; then
+    BINARY=build/release/bin/hildi-agent
+  elif [ -x build/debug/bin/hildi-agent ]; then
+    BINARY=build/debug/bin/hildi-agent
   else
     echo "memprobe: no runtime built; run 'make headless-agent'" >&2
     exit 1

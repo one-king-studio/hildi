@@ -96,7 +96,7 @@ Before adding a platform to the table above:
    the only way to catch a rendering or terminal problem.
 
 `make tui-agent` **builds and launches**; in a non-interactive shell it hangs
-forever. Use `make build/bin/hildi` to build the TUI without running it.
+forever. Use `make build/debug/bin/hildi` to build the TUI without running it.
 
 ## Related
 

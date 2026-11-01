@@ -125,9 +125,17 @@ make release-tui   # hildi,       optimized and stripped (~3.4 MB measured)
 only SQLite and mbedTLS are downloaded; both are pinned to immutable releases and
 checksum-verified.
 
-Artifacts land in `build/bin/`. `hildi` and `hildi-agent` are expected to sit
-side by side: the UI resolves the runtime as a sibling of its own executable, or
-from `HILDI_RUNTIME_BIN`.
+Artifacts land under `build/`, split by flavour so each tree can hold a matching
+pair under the canonical names:
+
+- `build/debug/bin/` — development builds (`make headless-agent`, `make build/debug/bin/hildi`)
+- `build/release/bin/` — what you ship (`make release-agent`, `make release-tui`)
+
+`hildi` and `hildi-agent` are expected to sit side by side, and the UI resolves
+the runtime as a sibling of its own executable (or from `HILDI_RUNTIME_BIN`).
+That is why the release binaries carry their plain names rather than a
+`-release` suffix: a suffixed pair would not resolve each other. Take the whole
+directory, not one binary out of it.
 
 ### Platform notes
 

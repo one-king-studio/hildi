@@ -93,7 +93,7 @@ until it passes.
 | `make release` | optimized *example* build (not a shipping artifact) |
 | `make clean` | remove build artifacts |
 
-`make build/bin/hildi` builds the TUI. Beware `make tui-agent`, which **builds
+`make build/debug/bin/hildi` builds the TUI. Beware `make tui-agent`, which **builds
 and launches** it — in a non-interactive shell that hangs forever.
 
 Parallel testing, why the gate runs it that way, and what each gate catches are

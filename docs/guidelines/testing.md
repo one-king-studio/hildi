@@ -60,7 +60,7 @@ Two reasons to prefer it while iterating, and the second is not about speed:
    is intra-process state pollution, not a real defect. Until the shared state is
    found, one-process-per-suite is the trustworthy reading.
 
-`test-parallel` refuses to start without `build/bin/hildi-agent`: the
+`test-parallel` refuses to start without `build/debug/bin/hildi-agent`: the
 integration suites spawn it, and its absence alone produces ~36 spurious
 failures. `make headless-agent` builds it.
 
@@ -96,7 +96,7 @@ run single-process except the standalone library checks.
 allocated. Run a single suite under the leak build to localise a leak:
 
 ```sh
-HEAPTRC=haltonnotreleased build/bin/hildi-tests-leak \
+HEAPTRC=haltonnotreleased build/debug/bin/hildi-tests-leak \
   --suite=TStoreTest --format=plain
 ```
 

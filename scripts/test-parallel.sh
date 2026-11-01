@@ -33,7 +33,7 @@ set -uo pipefail
 
 cd "$(dirname "$0")/.." || exit 1
 
-BIN="${HILDI_TEST_BIN:-build/bin/hildi-tests}"
+BIN="${HILDI_TEST_BIN:-build/debug/bin/hildi-tests}"
 if [ ! -x "$BIN" ]; then
   echo "test-parallel: $BIN is missing - build it first" >&2
   exit 2
@@ -42,7 +42,7 @@ fi
 # The runtime binary is spawned by the integration suites. Without it they fail
 # for a reason that has nothing to do with the code under test, which is exactly
 # the kind of noise this script exists to remove.
-RUNTIME="build/bin/hildi-agent"
+RUNTIME="build/debug/bin/hildi-agent"
 if [ ! -x "$RUNTIME" ]; then
   echo "test-parallel: $RUNTIME is missing - run 'make headless-agent' first" >&2
   echo "  (the integration suites spawn it; without it ~36 tests fail spuriously)" >&2
