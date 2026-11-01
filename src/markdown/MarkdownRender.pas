@@ -247,11 +247,15 @@ end;
 procedure TTreeRenderer.RenderList(const AId, ADepth: Integer);
 var
   N, Item, Block: TMdNode;
-  I, J: Integer;
+  I, J, Ordinal: Integer;
   Pad, Marker, Buf: UnicodeString;
   Markered: Boolean;
 begin
   N := NodeOf(FDoc, AId);
+  { The ordinal COUNTS UP per item, from the list's Start. Using N.Start for
+    every item printed the same number on each row ("1. 1. 1."), because Start
+    is the LIST's first ordinal, not the item's - see TMdNode.Start. }
+  Ordinal := N.Start;
   for I := 0 to High(N.Children) do
   begin
     Item := NodeOf(FDoc, N.Children[I]);
@@ -261,7 +265,10 @@ begin
     for J := 1 to ADepth do
       Pad := Pad + '  ';
     if N.Style = lsOrdered then
-      Marker := Pad + UnicodeString(IntToStr(N.Start)) + '. '
+    begin
+      Marker := Pad + UnicodeString(IntToStr(Ordinal)) + '. ';
+      Inc(Ordinal);
+    end
     else
       Marker := Pad + '- ';
     { The item's first paragraph shares the marker's line; further blocks indent

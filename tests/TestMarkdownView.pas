@@ -26,6 +26,9 @@ type
     procedure TestHeadingUsesTheTheme;
     procedure TestBulletPrefix;
     procedure TestOrderedPrefix;
+    { An ordered list counts up. Every existing test rendered a SINGLE item, so
+      a marker that always printed the list's Start was invisible. }
+    procedure TestOrderedListCountsUp;
     procedure TestListItemWrapsUnderTheText;
     procedure TestOrderedListItemWrapsUnderTheText;
     procedure TestQuoteBar;
@@ -154,6 +157,23 @@ begin
   try
     AssertTrue('bullet drawn', Pos(UnicodeString('•'), S.RowText(0, 0, 20)) > 0);
     AssertTrue('item text drawn', Pos('item', string(S.RowText(0, 0, 20))) > 0);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TMarkdownViewTest.TestOrderedListCountsUp;
+var
+  S: TSurfaceMemory;
+begin
+  { THE BUG: both renderers used the LIST's Start for every item, so a list
+    printed "1. 1. 1." instead of counting. A single-item list cannot show it,
+    which is why every existing test passed. }
+  S := RenderSource('1. one'#10'2. two'#10'3. three', 20, 6);
+  try
+    AssertEquals('the first item is 1', '1', string(S.CellAt(0, 0).Ch));
+    AssertEquals('the second item is 2', '2', string(S.CellAt(0, 1).Ch));
+    AssertEquals('the third item is 3', '3', string(S.CellAt(0, 2).Ch));
   finally
     S.Free;
   end;

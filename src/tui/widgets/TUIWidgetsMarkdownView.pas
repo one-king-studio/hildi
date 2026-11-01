@@ -81,6 +81,9 @@ type
     FTailText: UnicodeString;
     function GetBlockCount: Integer;
     function MakeBlock(const AId: Integer): TWidget;
+    { An ordered list item's number: its position among its listitem siblings,
+      offset by the list's Start. Derived, so no per-render counter can drift. }
+    function ItemOrdinal(AItemId: Integer): Integer;
     { A table node's rows as v1 row shapes, so TTableBlock's internals are
       untouched by the migration. }
     procedure TableRowsOf(const ATableId: Integer; out AHead: TMdTableRow;
@@ -398,6 +401,29 @@ begin
   end;
 end;
 
+function TMarkdownView.ItemOrdinal(AItemId: Integer): Integer;
+var
+  Item, Parent: TMdNode;
+  I, Seen: Integer;
+begin
+  { An ordered item's number is its position among its listitem siblings, offset
+    by the list's Start (an author may open at "3."). Derived rather than stored,
+    so there is no per-render counter to get out of step with a partial render or
+    a nested list. }
+  Item := NodeOf(FDoc, AItemId);
+  Parent := NodeOf(FDoc, Item.Parent);
+  Result := Parent.Start;
+  Seen := 0;
+  for I := 0 to High(Parent.Children) do
+  begin
+    if Parent.Children[I] = AItemId then
+      Break;
+    if NodeOf(FDoc, Parent.Children[I]).Kind = mnListItem then
+      Inc(Seen);
+  end;
+  Result := Result + Seen;
+end;
+
 function TMarkdownView.MakeBlock(const AId: Integer): TWidget;
 var
   Text: TTextBlock;
@@ -446,9 +472,13 @@ begin
     mnListItem:
       begin
         { N is a listitem; its parent is the list, which owns the style and the
-          first ordinal. }
+          first ordinal. The ORDINAL COUNTS UP per item: using the list's Start
+          for every item printed the same number on each row ("1. 1. 1."), which
+          is invisible on a single-item list - and every test used one. Derived
+          from the item's position among its listitem siblings, so it needs no
+          per-render state and stays correct however the tree was built. }
         if NodeOf(FDoc, N.Parent).Style = lsOrdered then
-          Prefix := UnicodeString(IntToStr(NodeOf(FDoc, N.Parent).Start)) + '. '
+          Prefix := UnicodeString(IntToStr(ItemOrdinal(N.Id))) + '. '
         else
           Prefix := '• ';
         Text.SetSpans(PrependSpan(

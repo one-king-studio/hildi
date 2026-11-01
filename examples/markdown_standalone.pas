@@ -143,6 +143,28 @@ begin
     (Length(Lines) > 3) and (Pos('- b', Lines[High(Lines)]) > 0),
     'no nested item');
 
+  { 5b. An ordered list COUNTS UP. Both renderers used the LIST's Start for
+        every item, so a list printed "1. 1. 1." - invisible on a single-item
+        list, which is what every existing test used. Checked here because this
+        path has no unit test; the view has its own. }
+  Lines := RenderTree(ParseTree('1. one' + #10 + '2. two' + #10 + '3. three'),
+    40);
+  Check('ordered list counts from 1',
+    (Length(Lines) >= 3) and (Pos('2. two', Lines[1]) > 0),
+    'the second item is not numbered 2');
+  Check('and reaches 3',
+    (Length(Lines) >= 3) and (Pos('3. three', Lines[2]) > 0),
+    'the third item is not numbered 3');
+
+  { 5c. A list that starts at another number keeps it, and still counts. }
+  Lines := RenderTree(ParseTree('3. three' + #10 + '4. four'), 40);
+  Check('a list honours its start ordinal',
+    (Length(Lines) >= 2) and (Pos('3. three', Lines[0]) > 0),
+    'the start ordinal was ignored');
+  Check('and counts on from it',
+    (Length(Lines) >= 2) and (Pos('4. four', Lines[1]) > 0),
+    'it did not count on from the start');
+
   { 6. Frontmatter is a NODE, queryable from the root, and the general query
        finds it too - the same mechanism a footnote table would use. }
   D2 := ParseTree('---' + #10 + 'title: T' + #10 + '---' + #10 + 'body');
