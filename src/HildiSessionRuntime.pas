@@ -205,6 +205,9 @@ type
     procedure Stop;
     property SessionId: string read FSessionId;
     property SocketPath: string read FSocketPath;
+    { Test seam: the listening descriptor, so a test can assert that it is
+      close-on-exec. -1 before Serve binds. }
+    property ListenFd: Integer read FListenFd;
     { Replay-ring observability (Runtime Replay Budget): the live event count,
       the allocated ceiling, and the seq of the oldest retained event (0 when
       empty). A runtime's replay memory is bounded by MaxReplayEvents. }
@@ -804,6 +807,13 @@ begin
   if FListenFd < 0 then
     raise Exception.Create('could not create runtime socket');
   SetNoSigPipe(FListenFd);
+  { The listening socket must not leak into children. A long-lived child (an MCP
+    stdio server, a detached subagent runtime) that inherits it keeps the socket
+    file alive after this runtime exits, and the NEXT connect() then succeeds
+    against a backlog nobody accepts -- which surfaces to the operator as
+    "runtime did not greet" rather than "no runtime". Closing on exec is what
+    makes the socket's lifetime equal this process's. }
+  SetCloseOnExec(FListenFd);
   if not MakeUnixAddr(FSocketPath, Addr, Len) then
     raise Exception.Create('runtime socket path is too long: ' + FSocketPath);
   if fpBind(FListenFd, PSockAddr(@Addr), Len) <> 0 then

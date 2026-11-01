@@ -55,6 +55,8 @@ function ReadLineTimeout(AFd, ATimeoutMs: Integer; var ABuf: AnsiString;
   out ALine: string): Boolean;
 procedure SetNonBlocking(AFd: Integer);
 procedure SetNoSigPipe(AFd: Integer);
+{ Mark a descriptor close-on-exec, so a child process cannot inherit it. }
+procedure SetCloseOnExec(AFd: Integer);
 {$ifdef unix}
 function MakeUnixAddr(const APath: string; out AAddr: TUnixSockAddr;
   out ALen: TSockLen): Boolean;
@@ -91,6 +93,11 @@ end;
 procedure SetNonBlocking(AFd: Integer);
 begin
   fpFcntl(AFd, F_SETFL, fpFcntl(AFd, F_GETFL, 0) or O_NONBLOCK);
+end;
+
+procedure SetCloseOnExec(AFd: Integer);
+begin
+  fpFcntl(AFd, F_SETFD, fpFcntl(AFd, F_GETFD, 0) or FD_CLOEXEC);
 end;
 
 {$ifdef darwin}

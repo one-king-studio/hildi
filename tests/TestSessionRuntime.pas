@@ -10,6 +10,7 @@ interface
 
 uses
   Classes, SysUtils, SyncObjs, fpcunit, testregistry,
+  {$ifdef unix}BaseUnix,{$endif}
   HildiLLM, HildiAgent, HildiApproval,
   HildiStore, HildiSession,
   HildiSessionProtocol, HildiSessionSocket,
@@ -139,6 +140,10 @@ type
       turn when no turn is active, and FinishTurn never re-checked the queue, so
       the result waited until the operator happened to type something. }
     procedure TestAmbientQueuedMidTurnStartsItsOwnTurn;
+    { The listening socket must be close-on-exec: an inherited copy keeps the
+      socket file alive after the runtime exits, and the next connect() then
+      succeeds against a backlog nobody accepts ("runtime did not greet"). }
+    procedure TestListenSocketIsCloseOnExec;
   end;
 
 implementation
@@ -1364,6 +1369,41 @@ begin
       DeleteSocket(Id);
     end;
   finally
+    Fake.Free;
+  end;
+end;
+
+procedure TSessionRuntimeTest.TestListenSocketIsCloseOnExec;
+var
+  Id: string;
+  Fake: TFakeTransport;
+  Rt: TSessionRuntime;
+  Th: TRuntimeThread;
+  Flags: Integer;
+begin
+  { An inherited listening fd keeps the socket file alive after this runtime
+    exits. The next connect() then succeeds against a backlog nobody accepts,
+    and the operator sees "runtime did not greet" instead of "no runtime". }
+  Id := NewSession;
+  Fake := TFakeTransport.Create;
+  Rt := MakeRuntime(Id, Fake);
+  Th := TRuntimeThread.Create(Rt);
+  try
+    Th.Start;
+    AssertTrue('bound', WaitForSocket(Id, 5000));
+    {$ifdef unix}
+    { Read the flag off the REAL descriptor, so this fails if SetCloseOnExec is
+      never called at the socket creation site -- calling the helper alone would
+      prove nothing. }
+    Flags := fpFcntl(Rt.ListenFd, F_GETFD, 0);
+    AssertTrue('listen fd is valid', Flags >= 0);
+    AssertTrue('listen fd is close-on-exec', (Flags and FD_CLOEXEC) <> 0);
+    {$endif}
+  finally
+    Rt.Stop;
+    WaitFinished(Th, 3000);
+    Th.Free;
+    DeleteSocket(Id);
     Fake.Free;
   end;
 end;
