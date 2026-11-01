@@ -111,6 +111,10 @@ type
       dismissed list would pop straight back and '/' could never be typed as an
       ordinary prompt. }
     FPaletteDismissed: Boolean;
+    { When True the palette is showing SKILLS rather than commands. The same
+      slider, a different list: reusing the widget is what keeps a second
+      selection surface out of the UI, and `/skill` and `ctrl+=` both flip it. }
+    FPaletteShowingSkills: Boolean;
     { A deferred close: the modal's Enter is dispatched from inside the modal, so
       popping the plane there would free the widget mid-dispatch. The swap runs
       inline; the pop waits for the next Step/OnLoop. }
@@ -227,6 +231,12 @@ type
     procedure ShowDiff(ATurnId: Int64; const APath: string);
     { The shared history dialog: open it for an intent, resolve a choice, close. }
     procedure ShowHistory(AIntent: THistoryIntent);
+    { Show the SKILLS in the command palette instead of the commands. Same
+      slider, different list - `/skill` and `ctrl+=` both land here, so the UI
+      has one selection surface rather than two. }
+    procedure ShowSkillList;
+    { Load the key the palette reported, and restore the palette to commands. }
+    procedure OnSkillPicked(const AKey: string);
     { After an undo, hand the turn's prompt back to the composer - the cancel
       behaviour - and drop any queued prompt belonging to a turn now gone. }
     procedure RestorePromptAfterUndo(ATurnId: Int64);
@@ -345,6 +355,10 @@ type
     procedure ComposeChanged(Sender: TObject);
     { Run a command from the palette. }
     procedure RunCommand(const AName: string);
+    { The palette's dispatcher. The same slider serves commands and skills, so
+      the selection means different things depending on which list is up. Routing
+      here rather than at two call sites keeps that decision in one place. }
+    procedure PaletteRun(const AName: string);
     function DefaultCommands: TCommandArray;
     { Rebuild the palette's list. The list is CONDITIONAL on the session and the
       ledger, so every point that changes either must call this: the palette is
@@ -968,8 +982,7 @@ begin
   { The command palette: registered commands, shown when the compose starts
     with '/'. }
   FPanel.Palette.SetCommands(DefaultCommands);
-  FPanel.Palette.OnRun := RunCommand;
-  { The session id and stats live on the messages panel's top border; the status
+  FPanel.Palette.OnRun := PaletteRun;  { The session id and stats live on the messages panel's top border; the status
     bar keeps the workspace. The toolbar holds the run state and the hints. }
   FStatusText := FSession.WorkspaceRoot;
   FPanel.SetStatus(FStatusText);
@@ -1121,6 +1134,12 @@ begin
     Add('redo', 're-apply the turns the last undo took away');
   if HasEarlierTurn then
     Add('revert', 'ask the agent to undo an earlier turn, going forwards');
+  { Skills are NOT command names: one command opens a selector, so a workspace
+    with twenty skills does not fill the palette with twenty entries. The
+    description names the shortcut, because an operator who does not know ctrl+=
+    should still find it here. }
+  if HasAvailableSkills then
+    Add('skill', 'load a skill (ctrl+=)');
 end;
 
 procedure THarnessApp.SyncCommands;
@@ -1158,6 +1177,17 @@ begin
   FApp.Invalidate;
 end;
 
+procedure THarnessApp.PaletteRun(const AName: string);
+begin
+  { The palette is one slider with two lists. While the skill list is up, a
+    selection is a skill KEY and means "load this"; otherwise it is a command
+    name. Routing here means the composer only ever knows about one entry point. }
+  if FPaletteShowingSkills then
+    OnSkillPicked(AName)
+  else
+    RunCommand(AName);
+end;
+
 procedure THarnessApp.RunCommand(const AName: string);
 begin
   FPanel.SetPaletteActive(False);
@@ -1179,6 +1209,14 @@ begin
   if FConnState <> csConnected then
   begin
     AppendError('not connected yet');
+    Exit;
+  end;
+  if (AName = 'skill') and (FDriver <> nil) then
+  begin
+    { NOT a modal: the command palette slides out above the composer, and skills
+      reuse it with a different list. `/skill` and `ctrl+=` both flip the same
+      slider, so there is one selection surface in the UI rather than two. }
+    ShowSkillList;
     Exit;
   end;
   if (AName = 'undo') and (FDriver <> nil) then
@@ -2748,6 +2786,51 @@ begin
   FApp.PushPlane(TPlane.Create(Wrap, True, True));
   FHistoryShown := True;
   SetState(psReady, 'History');
+end;
+
+procedure THarnessApp.ShowSkillList;
+var
+  Keys: TStringArray;
+  Commands: TCommandArray;
+  I: Integer;
+begin
+  { THE SAME SLIDER as the command list, with a different list. Not a modal: the
+    palette already slides out above the composer, filters as you type, and runs
+    the selection - so skills reuse all of that rather than growing a second
+    selection surface. }
+  if FDriver = nil then
+    Exit;
+  Keys := nil;
+  FDriver.SkillKeys(Keys);
+  if Length(Keys) = 0 then
+  begin
+    AppendError('no skills available');
+    Exit;
+  end;
+  SetLength(Commands, Length(Keys));
+  for I := 0 to High(Keys) do
+  begin
+    Commands[I].Name := Keys[I];
+    Commands[I].Description := 'load this skill';
+  end;
+  FPaletteShowingSkills := True;
+  FPanel.Palette.SetCommands(Commands);
+  FPanel.Palette.Filter('');
+  FPanel.SetPaletteActive(True);
+  FApp.Invalidate;
+end;
+
+procedure THarnessApp.OnSkillPicked(const AKey: string);
+begin
+  { Restore the palette to commands FIRST, so a failure below cannot leave the UI
+    showing a skill list that runs load commands. }
+  FPaletteShowingSkills := False;
+  FPanel.SetPaletteActive(False);
+  FPanel.Palette.SetCommands(DefaultCommands);
+  FPanel.Compose.Clear;
+  if FDriver <> nil then
+    FDriver.LoadSkill(AKey);
+  FApp.Invalidate;
 end;
 
 procedure THarnessApp.RefreshHistory;
