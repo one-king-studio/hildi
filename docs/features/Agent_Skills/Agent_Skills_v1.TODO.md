@@ -102,8 +102,30 @@ Work TDD-first: each phase adds its tests before its implementation and runs
 
 ## Close-out
 
-- [ ] Update `docs/features/FEATURES.md` with the row.
-- [ ] Update `docs/features/Skills/FEATURE.md` — it says "file-based instruction
-      packs are the next"; point it here.
-- [ ] Rename this file to `Agent_Skills_v1.DONE.md` if complete, or record what
-      remains.
+- [x] Update `docs/features/FEATURES.md` with the row.
+- [x] Update `docs/features/Skills/FEATURE.md` — it said "file-based instruction
+      packs are the next"; it now points here.
+- [ ] **The `/skill-name` palette entry and dispatch.** `LoadSkillByName` exists
+      and is tested, but nothing in the TUI calls it yet: the command is not in
+      `DefaultCommands` and `RunCommand` has no branch. Without that the operator
+      has no way to invoke it, which is the same gap that made `/undo` unreachable
+      before it was registered.
+- [ ] **`/skill-name` must not be a static palette entry.** The palette is built
+      from a fixed array; skill names are dynamic. Either the entry is created at
+      startup from the discovered keys, or the composer recognises `/<key>` when
+      it matches a known skill. Decide before wiring.
+
+## What is NOT done
+
+Everything above is real and tested at the unit level. What has **not** happened:
+
+- **No interactive verification.** Nothing has been driven in a terminal: no
+  discovery against a real `~/.agents/skills`, no approval prompt for a skill
+  load, no `/skill-name`.
+- **Nothing scans at session start.** `ScanSkills` and `ImportSkills` are never
+  called by `THarnessSession.Init` - the machinery exists and is unattached. A
+  real session today still has no file-backed skills.
+- **The recorder is not wired into `Lazy_MCP`'s reconcile path** either, so a
+  rescan after a skill is added mid-session does not happen.
+
+Those three are the difference between "the pieces work" and "the feature works".

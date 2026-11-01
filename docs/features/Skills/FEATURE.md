@@ -18,8 +18,10 @@ Our deltas from Anthropic's model, driven by our use cases:
 - **The state is always visible.** The manifest says, per skill, whether it is
   *loaded* or *unloaded*, so the model knows whether it must load it again.
 
-MCP servers are the first provider (`Lazy_MCP`); file-based instruction packs are
-the next, on the same mechanism.
+MCP servers are the first provider (`Lazy_MCP`); **third-party skills on disk are
+the second** — see [Agent Skills](../Agent_Skills/FEATURE.md), which scans
+`.hildi/skills` and `.agents/skills` for `SKILL.md` directories and feeds them
+through this same mechanism.
 
 ## Definition (matching Anthropic)
 
