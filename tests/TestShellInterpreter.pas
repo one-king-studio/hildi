@@ -48,6 +48,7 @@ type
     procedure TestCase;
     procedure TestFunction;
     procedure TestFunctionReturn;
+    procedure TestFunctionDoesNotOutliveItsScript;
     procedure TestRedirectWriteAndAppend;
     procedure TestRedirectRead;
     procedure TestStderrRedirect;
@@ -265,6 +266,19 @@ begin
     RunSrc('f() { return 3; }; f; '));
   AssertEquals('status visible', 0, RunSrc('f() { return 3; }; f || echo failed'));
   AssertEquals('recovered', 'failed' + #10, FOut);
+end;
+
+procedure TShellInterpreterTest.TestFunctionDoesNotOutliveItsScript;
+begin
+  { A function body is a reference into the parsed script, which the caller frees
+    after each run. Keeping the table across runs dispatched through a freed AST
+    and aborted with "call depth limit exceeded". A script's functions must not
+    survive it. }
+  AssertEquals('define', 0, RunSrc('f() { echo first; }; f'));
+  AssertEquals('ran', 'first' + #10, FOut);
+  FOut := '';
+  AssertEquals('gone in the next run', 127, RunSrc('f'));
+  AssertEquals('nothing ran', '', FOut);
 end;
 
 procedure TShellInterpreterTest.TestRedirectWriteAndAppend;

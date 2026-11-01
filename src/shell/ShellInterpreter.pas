@@ -1301,6 +1301,12 @@ begin
   FReturnStatus := 0;
   FRunStatus := 0;
   FAbortMessage := '';
+  { Function bodies are *references* into the parsed script, and the caller frees
+    that script after each run. Keeping the table across runs dispatched a later
+    call through a freed AST: the second RunSource on one TShell re-entered a
+    stale body and aborted with "call depth limit exceeded". A script's functions
+    do not outlive the script, so start every run with an empty table. }
+  FFunctions.Clear;
   R := ExecStatement(AScript.Root);
   AOutput := R.Stdout;
   AError := R.Stderr;
