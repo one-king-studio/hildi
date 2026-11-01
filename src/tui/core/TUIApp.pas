@@ -74,6 +74,15 @@ type
     FNeedsRepaint: Boolean;
     FScreenBg: Byte;
     FInputHook: TInputHook;
+    { Loop-rate diagnostic, enabled by HILDI_TUI_DIAG. Reports why the loop
+      chose its timeout, so an idle CPU problem can be attributed instead of
+      guessed at. Off (and all-zero) unless the environment asks for it. }
+    FDiag: Boolean;
+    FDiagLog: TextFile;
+    FDiagAt: Int64;
+    FDiagIters: Integer;
+    FDiagBusy: Integer;
+    FDiagAnim: Integer;
     procedure ArrangeBase;
     procedure ArrangePlanes;
     procedure RenderFrame;
@@ -145,6 +154,9 @@ type
 
 implementation
 
+uses
+  SysUtils;
+
 function Rect4(AX, AY, AW, AH: Integer): TRect;
 begin
   Result := Default(TRect);
@@ -192,6 +204,16 @@ begin
   FLastTickMs := 0;
   FBusy := False;
   FTerminalFocused := True;
+  FDiag := GetEnvironmentVariable('HILDI_TUI_DIAG') <> '';
+  if FDiag then
+  begin
+    AssignFile(FDiagLog, GetEnvironmentVariable('HILDI_TUI_DIAG'));
+    Rewrite(FDiagLog);
+  end;
+  FDiagAt := 0;
+  FDiagIters := 0;
+  FDiagBusy := 0;
+  FDiagAnim := 0;
   SetLength(FPlanes, 1);
   FPlanes[0] := TPlane.Create(ARoot, False);
   ArrangeBase;
@@ -206,6 +228,8 @@ destructor TTuiApp.Destroy;
 var
   I: Integer;
 begin
+  if FDiag then
+    CloseFile(FDiagLog);
   for I := 0 to High(FPlanes) do
     FPlanes[I].Free;
   inherited Destroy;
@@ -449,6 +473,34 @@ begin
     Timeout := NextFrameDelayMs;
     if Timeout < 0 then
       Timeout := IdleWaitMs;
+    { Attribute the loop rate. One line a second while HILDI_TUI_DIAG is set:
+      how many iterations, how many were busy, how many had an animation
+      registered, and the timeout the loop actually used. That distinguishes a
+      stuck busy flag from a stray registration without guessing. }
+    if FDiag then
+    begin
+      Inc(FDiagIters);
+      if FBusy then Inc(FDiagBusy);
+      if Animating then Inc(FDiagAnim);
+      if (FDiagAt <> 0) and (FNowMs - FDiagAt >= 1000) then
+      begin
+        { A real file, not StdErr: the video unit owns the console handles, so
+          a stderr write from inside the loop can vanish. FDiag is true only
+          when the file was opened, so it is the guard. }
+        if FDiag then
+        begin
+          WriteLn(FDiagLog, Format('tui-diag: %d iters/s  busy=%d anim=%d  ' +
+            'MinIntervalMs=%d focused=%s timeout=%d',
+            [FDiagIters, FDiagBusy, FDiagAnim,
+             AnimationClock.MinIntervalMs, BoolToStr(FTerminalFocused, True),
+             Timeout]));
+          Flush(FDiagLog);
+        end;
+        FDiagIters := 0; FDiagBusy := 0; FDiagAnim := 0; FDiagAt := FNowMs;
+      end
+      else if FDiagAt = 0 then
+        FDiagAt := FNowMs;
+    end;
     Handled := FInput.Wait(Timeout, E);
     if Handled then
       DispatchEvent(E);
