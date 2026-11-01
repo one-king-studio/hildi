@@ -22,6 +22,7 @@ uses
   Classes, SysUtils, TUIBase, TUIInput,
   TUISurface, TUIWidget,
   TUIGrapheme, TUITheme,
+  TUIWidgetsText,
   HildiHarnessSubagent;
 
 type
@@ -244,7 +245,10 @@ var
   Entries: TSubagentEntryArray;
   SurfaceAttr, Border, RowAttr: TAttr;
   Line: UnicodeString;
-  Key, Act: UnicodeString;
+  { The two-tone split of the CTAs: dim key, brighter action - the same rule as
+    the chat toolbar, via the shared HintSpans. }
+  Spans: TSpanArray;
+  KeyAttr, ActAttr: TAttr;
 begin
   if (FBounds.W < 4) or (FBounds.H < 4) then
     Exit;
@@ -314,14 +318,31 @@ begin
   { CTAs at the lower right. The text comes from FHints - the whole point of the
     setter. It used to test FHints for emptiness and then draw a HARDCODED
     "enter spy", so the box said "enter spy" even while a child was selected and
-    the real CTAs were set. Right-aligned as one string, in the amber, which is
-    the compose's own convention. }
+    the real CTAs were set.
+
+    Painted through the shared HintSpans splitter, so the keybinding is dim and
+    the action it performs is brighter - the same rule as the chat toolbar. It
+    used to be one uniformly amber string, which made "ctrl+a" and "abort" read
+    as a single word. The amber stays as the CONTEXT (this is not the prompt);
+    the split carries which part is a key. }
   if FHints <> '' then
   begin
     Hints := UnicodeString(FHints);
     X := R - 1 - StringWidth(Hints);
     if X > L + 3 + StringWidth(UnicodeString(FInfo)) then
-      PutText(S, X, B - 1, Hints, OnBg(FTheme.Warn, FTheme.RaisedBg));
+    begin
+      { Amber stays as the CONTEXT (this box is not the prompt); the split
+        carries which part is a key. The KEY takes the dim flag, the ACTION the
+        bold one - I had these the wrong way round first, and the test said so. }
+      KeyAttr := OnBg(WithStyle(FTheme.Warn, [sfDim]), FTheme.RaisedBg);
+      ActAttr := OnBg(WithStyle(FTheme.Warn, [sfBold]), FTheme.RaisedBg);
+      Spans := HintSpans(Hints, KeyAttr, ActAttr);
+      for I := 0 to High(Spans) do
+      begin
+        PutText(S, X, B - 1, Spans[I].Text, Spans[I].Attr);
+        Inc(X, StringWidth(Spans[I].Text));
+      end;
+    end;
   end;
 end;
 

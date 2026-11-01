@@ -38,6 +38,10 @@ type
     procedure TestSidebarSelectionMoves;
     procedure TestSidebarEnterFiresSelect;
     procedure TestSidebarEmptyState;
+    { The CTAs follow the same rule as the chat toolbar: the keybinding is dim,
+      the action it performs is brighter. They used to be one uniformly amber
+      string, so "ctrl+a" and "abort" read as a single word. }
+    procedure TestSidebarHintDimsTheKeyAndBrightensTheAction;
   end;
 
 implementation
@@ -147,6 +151,60 @@ begin
   { Enter on an empty sidebar is not an activation. }
   AssertFalse('enter not handled', FSb.HandleEvent(Key(kkEnter)));
   AssertEquals('no selection fired', 0, FRec.Ids.Count);
+end;
+
+procedure TSidebarTest.TestSidebarHintDimsTheKeyAndBrightensTheAction;
+var
+  Mem: TSurfaceMemory;
+  R: TRect;
+  Row, X, HintX, ActX: Integer;
+  Line: UnicodeString;
+  KeyAttr, ActAttr: TAttr;
+begin
+  { Two children, so a row is selected and the three chords are offered. }
+  FRoster.Apply('a', 'agent-a', 'running', 1000);
+  FRoster.Apply('b', 'agent-b', 'running', 1000);
+  FSb.SetHints('ctrl+a abort · ctrl+r release');
+  FSb.Refresh;
+
+  Mem := TSurfaceMemory.Create(60, 12);
+  try
+    R := Default(TRect);
+    R.X := 0; R.Y := 0; R.W := 60; R.H := 12;
+    FSb.Arrange(R);
+    FSb.Render(Mem);
+    { Find the CTA row and the columns of the key and the action. }
+    HintX := -1;
+    Row := -1;
+    for Row := 0 to 11 do
+    begin
+      { Built with a placeholder for an empty cell: an unwritten cell's Ch is
+        EMPTY, not a space, so concatenating Ch makes the string shorter than the
+        row and every index after the first blank maps to the wrong column. That
+        is the trap that made this assertion fail against correct code. }
+      Line := '';
+      for X := 0 to 59 do
+        if Mem.CellAt(X, Row).Ch = '' then
+          Line := Line + ' '
+        else
+          Line := Line + Mem.CellAt(X, Row).Ch;
+      HintX := Pos(UnicodeString('ctrl+a'), Line);
+      if HintX > 0 then
+        Break;
+    end;
+    AssertTrue('the CTA key is drawn', HintX > 0);
+    AssertTrue('the action follows it', Pos(UnicodeString('abort'), Line) > 0);
+
+    KeyAttr := Mem.CellAt(HintX - 1, Row).Attr;
+    ActX := Pos(UnicodeString('abort'), Line);
+    ActAttr := Mem.CellAt(ActX - 1, Row).Attr;
+    { The split must be VISIBLE: the box stays amber (it is not the prompt), but
+      the action is not dim, so the two parts read as different things. }
+    AssertTrue('the keybinding is dim', sfDim in KeyAttr.Style);
+    AssertFalse('the action is not dim', sfDim in ActAttr.Style);
+  finally
+    Mem.Free;
+  end;
 end;
 
 initialization
