@@ -252,6 +252,8 @@ type
     { Show a queued prompt (a violet 'Queued' box) at the end of the stream. }
     procedure ShowQueued(const AText: string);
     procedure ToggleSidebar(Sender: TObject);
+    { Adapter for the ctrl+= chord, which is a TNotifyEvent. }
+    procedure ShowSkillsClicked(Sender: TObject);
     procedure LayoutSidebar;
     { Each subagent row shows what its child is currently working on, so the
       list answers "which of these is doing the thing I care about". }
@@ -553,10 +555,14 @@ type
     FOnEscape: TNotifyEvent;
     FCanQuit: TQueryEvent;
     FOnToggleSidebar: TNotifyEvent;
+    FOnShowSkills: TNotifyEvent;
   public
     constructor Create(AChild: TWidget; AOnQuit, AOnEscape: TNotifyEvent;
       ACanQuit: TQueryEvent);
     procedure SetSidebarToggle(AHandler: TNotifyEvent);
+    { ctrl+= opens the skill list. A chord rather than a key because '=' must
+      stay typable in a prompt. }
+    procedure SetShowSkills(AHandler: TNotifyEvent);
     function HandleEvent(const E: TInputEvent): Boolean; override;
   end;
 
@@ -635,6 +641,11 @@ begin
   FOnToggleSidebar := AHandler;
 end;
 
+procedure TAppShell.SetShowSkills(AHandler: TNotifyEvent);
+begin
+  FOnShowSkills := AHandler;
+end;
+
 function TAppShell.HandleEvent(const E: TInputEvent): Boolean;
 begin
   if (E.Kind = ikKey) and (E.Key.Kind = kkChar) and (moCtrl in E.Key.Mods) then
@@ -664,6 +675,14 @@ begin
     { Ctrl+D is no longer a quit key: it now toggles the subagent sidebar. Quit
       stays on Ctrl-C, which is context-aware and standard. Two quit bindings
       for one action was part of how the sidebar became unreachable. }
+    { ctrl+= opens the skill list. A chord, not a bare key: '=' must stay typable
+      in a prompt, and this is the shortcut the /skill entry advertises. }
+    if (E.Key.Ch = '=') then
+    begin
+      if Assigned(FOnShowSkills) then
+        FOnShowSkills(Self);
+      Exit(True);
+    end;
   end;
   if (E.Kind = ikKey) and (E.Key.Kind = kkEscape) then
   begin
@@ -996,6 +1015,7 @@ begin
   FSidebar.Visible := False;
   Shell := TAppShell.Create(FPanel, Quit, HandleEscape, ComposeIsEmpty);
   Shell.SetSidebarToggle(ToggleSidebar);
+  Shell.SetShowSkills(ShowSkillsClicked);
   Result := TSidebarOverlay.Create(Shell, FSidebar);
 end;
 
@@ -3525,6 +3545,11 @@ end;
 function THarnessApp.SpyId: string;
 begin
   Result := FSpyId;
+end;
+
+procedure THarnessApp.ShowSkillsClicked(Sender: TObject);
+begin
+  ShowSkillList;
 end;
 
 procedure THarnessApp.ToggleSidebar(Sender: TObject);
