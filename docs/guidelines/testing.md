@@ -21,7 +21,52 @@ Useful commands:
 - `make test SUITE=A,B` - a comma-separated list
 - `make watch` - rerun on every save
 - `make test-leak` - heaptrc run; fails (exit 203) on leaks
-- `make check` - `test` + `test-leak`, the gate before considering work done
+- `make check` - all four gates: `test-parallel`, `test-leak-parallel`,
+  `shell-standalone`, `markdown-standalone`. This is the gate before
+  considering work done.
+
+## Parallel testing
+
+`make test` runs all ~2,100 tests in **one process**. `make test-parallel` runs
+each suite in **its own process**, `$(cores)` at a time:
+
+```
+make test-parallel                        # every suite, auto-discovered
+make test-parallel SUITE="TSessionRuntimeTest TBoardStoreTest"
+HILDI_TEST_JOBS=4 make test-parallel      # cap the workers
+```
+
+Measured on a 10-core machine. The timings were taken at 1,826 tests; the suite
+has since grown to 2,085, so treat them as magnitudes rather than current
+numbers:
+
+| Mode | Time | Failures |
+| --- | --- | --- |
+| `make test` (one process, `--all`) | ~169 s | see below |
+| one process per suite, serial | ~100 s | 0 |
+| one process per suite, 10-way | **~22 s** | 0 |
+
+Two reasons to prefer it while iterating, and the second is not about speed:
+
+1. **The heavy suites are I/O-bound**, not CPU-bound - they spawn subprocesses
+   and wait on Unix sockets - so they overlap almost perfectly. The five
+   heaviest (`TSessionRuntimeTest`, `THarnessDriverTest`, `TMcpClientTest`,
+   `TSubagentSupervisorTest`, `THarnessAppTest`) go from 64 s serial to 21 s
+   with all five in flight.
+
+2. **Process isolation removes a class of failure.** Running every suite in one
+   process produces failures in the TUI/harness suites that disappear when each
+   suite gets its own process - serial or parallel, same tests, same order. That
+   is intra-process state pollution, not a real defect. Until the shared state is
+   found, one-process-per-suite is the trustworthy reading.
+
+`test-parallel` refuses to start without `build/bin/hildi-agent`: the
+integration suites spawn it, and its absence alone produces ~36 spurious
+failures. `make headless-agent` builds it.
+
+It is **not a replacement for `make check`** - the gate runs both suite passes
+this way (`test-parallel` and `test-leak-parallel`), so there is nothing left to
+run single-process except the standalone library checks.
 
 ## Conventions
 
