@@ -273,8 +273,11 @@ cannot return the pages.
 **Verdict: do not adopt.** The 25 MB is addressable only by reducing the churn
 itself — a reusable buffer for streaming deltas, or a `TStringBuilder` that is
 `Clear`ed rather than freed — which needs no allocator change and puts no gate at
-risk. Experiments preserved under `build/memprobe/` (`v_leak2.pas`,
-`v_cfirst.pas`, `agent_cmem.pas`), all gitignored.
+risk. The throwaway harnesses used here (`ssechurn.pas`, `arena_bench.c`,
+`v_leak2.pas`, `v_cfirst.pas`, `agent_cmem.pas`, `envprobe.pas`) were scratch
+files under the gitignored `build/` and are **not in the repository**; each
+measurement above records the harness's shape and inputs so it can be rebuilt
+rather than merely re-run.
 
 
 

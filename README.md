@@ -139,6 +139,7 @@ both.
 | `HILDI_STORE_PATH` | Session database location |
 | `HILDI_RUNTIME_BIN` | Headless runtime to spawn |
 | `HILDI_MAX_CONTEXT_TOKENS` | Override the loop's context guard |
+| `HILDI_TUI_DIAG` | Path to a file; the TUI loop writes one line a second saying why it chose its timeout (see `docs/guidelines/tui-rendering.md`) |
 
 The store defaults to `$XDG_DATA_HOME/hildi/store.db`, i.e.
 `~/.local/share/hildi/store.db`. Older locations (`~/.hildi`,
