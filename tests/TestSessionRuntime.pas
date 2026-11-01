@@ -1404,7 +1404,7 @@ begin
       prove nothing. }
     Flags := fpFcntl(Rt.ListenFd, F_GETFD, 0);
     AssertTrue('listen fd is valid', Flags >= 0);
-    AssertTrue('listen fd is close-on-exec', (Flags and FD_CLOEXEC) <> 0);
+    AssertTrue('listen fd is close-on-exec', (Flags and FD_CLOEXEC_VALUE) <> 0);
     {$endif}
   finally
     Rt.Stop;

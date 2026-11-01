@@ -17,6 +17,10 @@ uses
 {$ifdef linux}
 const
   SendFlags = MSG_NOSIGNAL;
+  { BaseUnix exports F_SETFD/F_GETFD but not FD_CLOEXEC; the value is POSIX and
+    identical on every Linux ABI FPC targets. Upstream's c266cb6 used the name
+    without importing it, which does not compile here. }
+  FD_CLOEXEC_VALUE = 1;
 {$else}
 const
   SendFlags = 0;
@@ -97,7 +101,7 @@ end;
 
 procedure SetCloseOnExec(AFd: Integer);
 begin
-  fpFcntl(AFd, F_SETFD, fpFcntl(AFd, F_GETFD, 0) or FD_CLOEXEC);
+  fpFcntl(AFd, F_SETFD, fpFcntl(AFd, F_GETFD, 0) or FD_CLOEXEC_VALUE);
 end;
 
 {$ifdef darwin}
