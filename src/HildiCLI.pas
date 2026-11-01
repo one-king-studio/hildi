@@ -171,14 +171,17 @@ end;
 
 function UsageText: string;
 begin
+  { The heading names the project, not a binary: this text is shared by the TUI
+    (`hildi`) and the CLI (`hildi-agent-cli`), so naming either one is a lie in
+    the other. The runtime has its own usage in HildiSessionRuntime. }
   Result :=
-    'hildi-agent - a shell agent that turns instructions into work' +
+    'hildi - a shell agent that turns instructions into work' +
     LineEnding + LineEnding +
     'Usage:' + LineEnding +
-    '  hildi-agent                 interactive session' + LineEnding +
-    '  hildi-agent -p "PROMPT"     run one prompt and exit' + LineEnding +
-    '  echo "PROMPT" | hildi-agent  prompt from stdin' + LineEnding +
-    '  hildi-agent sessions        list this workspace''s sessions' +
+    '  hildi                       interactive session' + LineEnding +
+    '  hildi -p "PROMPT"           run one prompt and exit' + LineEnding +
+    '  echo "PROMPT" | hildi       prompt from stdin' + LineEnding +
+    '  hildi sessions              list this workspace''s sessions' +
     LineEnding +
     LineEnding +
     'Options:' + LineEnding +

@@ -279,6 +279,12 @@ function ResolveSubagentAutoDenyMs: Int64;
 { Parse `--session-runtime` argv and run the runtime. Returns the exit code. }
 function RunSessionRuntime(const AArgs: array of string): Integer;
 
+{ The runtime's own usage. Deliberately NOT HildiCLI.UsageText: that is the
+  client's surface (`-p`, `--attach`, `--tail`, ...) and the runtime implements
+  none of it. A help screen that lists options the program ignores is worse than
+  no help screen. }
+function RuntimeUsageText: string;
+
 { The select timeout (ms) for the runtime loop. 0 means "poll without blocking",
   which is only correct when the loop is about to exit; any other value blocks
   (bounded), so an idle runtime does not spin. A client attached keeps the
@@ -2049,6 +2055,34 @@ end;
 
 { --- RunSessionRuntime -------------------------------------------------- }
 
+function RuntimeUsageText: string;
+begin
+  Result :=
+    'hildi-agent - the headless session runtime. A client (the TUI or the CLI)' +
+    LineEnding +
+    'spawns it detached and attaches over the session''s Unix socket. It has no' +
+    LineEnding +
+    'terminal, so running it by hand only makes sense to diagnose a spawn.' +
+    LineEnding + LineEnding +
+    'Usage:' + LineEnding +
+    '  hildi-agent --session-runtime <id> --store <path> [options]' +
+    LineEnding + LineEnding +
+    'Options:' + LineEnding +
+    '  --session-runtime ID  serve this session id' + LineEnding +
+    '  --workspace PATH      the directory the session operates in' +
+    LineEnding +
+    '  --store PATH          session database (required)' + LineEnding +
+    '  --model NAME          model identifier (overrides environment)' +
+    LineEnding +
+    '  --endpoint URL        provider endpoint (overrides environment)' +
+    LineEnding +
+    '  --idle-ms N           exit after N ms with no client' + LineEnding +
+    '  --approval-root ID    root session whose approvals this session inherits' +
+    LineEnding +
+    '  -h, --help            show this help' + LineEnding + LineEnding +
+    'Configuration also comes from the environment and ./.env.';
+end;
+
 function RunSessionRuntime(const AArgs: array of string): Integer;
 var
   I: Integer;
@@ -2068,7 +2102,12 @@ begin
   I := 0;
   while I <= High(AArgs) do
   begin
-    if AArgs[I] = '--session-runtime' then
+    if (AArgs[I] = '-h') or (AArgs[I] = '--help') then
+    begin
+      WriteLn(RuntimeUsageText);
+      Exit(0);
+    end
+    else if AArgs[I] = '--session-runtime' then
     begin
       Inc(I);
       if I <= High(AArgs) then
