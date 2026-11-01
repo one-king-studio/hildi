@@ -6,18 +6,10 @@
 <title>Hildi — UI States</title>
 <style>
   :root{
-    /* The 256-colour indexes the app actually paints, resolved to hex. */
-    --bg:#1c1c1c;        /* 234 DarkBg    */
-    --sunken:#121212;    /* 233 SunkenBg  */
-    --raised:#262626;    /* 235 RaisedBg  */
-    --base:#d0d0d0;      /* 252 Text/Panel/Base */
-    --border:#585858;    /* 240 Border    */
-    --muted:#808080;     /* 244 Muted (dim) */
-    --accent:#5fd7ff;    /* 81  Accent / Title (bold) */
-    --accentsoft:#5fafd7;/* 74  AccentSoft */
-    --warn:#ffaf5f;      /* 215 Warn      */
-    --err:#ff5f5f;       /* 203 Error (bold) */
-    --ok:#87d787;        /* 114 Success (bold) */
+    --bg:#1c1c1c; --sunken:#121212; --raised:#262626;
+    --base:#d0d0d0; --border:#585858; --muted:#808080;
+    --accent:#5fd7ff; --accentsoft:#5fafd7;
+    --warn:#ffaf5f; --err:#ff5f5f; --ok:#87d787;
     --mono:"SF Mono",ui-monospace,SFMono-Regular,Menlo,Monaco,"Cascadia Mono",
       "JetBrains Mono","Fira Code","DejaVu Sans Mono","Liberation Mono",
       Consolas,"Noto Sans Mono","Courier New",monospace;
@@ -28,7 +20,7 @@
     line-height:1.55}
   header{padding:30px 24px 20px;border-bottom:1px solid var(--border);background:#161616}
   header h1{margin:0 0 6px;font-size:23px;letter-spacing:.2px}
-  header p{margin:0;color:var(--muted);font-size:14px;max-width:78ch}
+  header p{margin:0;color:var(--muted);font-size:14px;max-width:80ch}
   nav{position:sticky;top:0;z-index:5;display:flex;gap:16px;flex-wrap:wrap;
     padding:10px 24px;background:#161616ee;border-bottom:1px solid var(--border);
     backdrop-filter:blur(6px);font-size:13px}
@@ -48,159 +40,192 @@
     letter-spacing:.06em}
   td.k{font-family:var(--mono);white-space:nowrap;color:var(--base)}
 
-  /* Every surface that imitates the terminal: one cell per glyph, no ligatures,
-     no wrapping. */
-  .term,.mock,pre,.row{font-family:var(--mono);font-variant-ligatures:none;
+  /* Frames are VERBATIM captures: one cell per glyph, no ligatures, no wrap. */
+  .term{font-family:var(--mono);font-variant-ligatures:none;
     font-feature-settings:"liga" 0,"calt" 0,"dlig" 0;font-kerning:none;
-    letter-spacing:0;tab-size:4;white-space:pre;overflow-x:auto}
-
-  .term{background:var(--sunken);border:1px solid #333;border-radius:8px;
+    letter-spacing:0;tab-size:4;white-space:pre;overflow-x:auto;
+    background:var(--sunken);border:1px solid #333;border-radius:8px;
     padding:14px 16px;font-size:13px;line-height:1.42;color:var(--base);margin:10px 0}
 
-  /* Frames */
   .frame{background:var(--bg);border:1px solid var(--border);border-radius:9px;
     padding:16px 18px;margin:12px 0;overflow-x:auto}
   .frame-label{font-size:11px;color:var(--muted);text-transform:uppercase;
-    letter-spacing:.09em;margin:0 0 9px}
+    letter-spacing:.09em;margin:0 0 9px;font-family:-apple-system,sans-serif}
+  .captured{display:inline-block;font-size:10px;padding:1px 7px;border-radius:999px;
+    background:#1f3326;color:var(--ok);margin-left:8px;letter-spacing:.05em;
+    text-transform:none}
 
-  /* Terminal roles */
   .b{color:var(--border)}
   .m{color:var(--muted)}
-  .t{color:var(--accent)}          /* accent / title  */
+  .t{color:var(--accent)}
   .ok{color:var(--ok)}
   .warn{color:var(--warn)}
   .err{color:var(--err)}
-  .dim{opacity:.62}                /* the terminal's dim attribute */
   .dimk{color:var(--muted);opacity:.62}
-  .spark{color:var(--accent)}
-  .sel{background:var(--accent);color:#101010}
-  .bold{font-weight:700}
-
-  .cols{display:grid;gap:16px}
-  .c2{grid-template-columns:repeat(2,minmax(0,1fr))}
-  @media(max-width:860px){.c2{grid-template-columns:1fr}}
 
   .swatch{display:inline-block;width:11px;height:11px;border-radius:2px;
     vertical-align:-1px;margin-right:5px;border:1px solid #ffffff22}
 
   .pill{display:inline-block;font-size:11px;padding:1px 8px;border-radius:999px;
     background:#2a2a2a;color:var(--muted);margin-left:8px;vertical-align:2px}
-  .pill.new{background:#1f3326;color:var(--ok)}
 
   footer{color:var(--muted);font-size:12px;padding:22px 24px;border-top:1px solid var(--border)}
-  .hair{height:1px;background:#2a2a2a;margin:22px 0}
 </style>
 </head>
 <body>
 <header>
   <h1>Hildi — UI States</h1>
-  <p>Every screen and status the TUI can be in, drawn with the glyphs and colour
-     roles the code actually uses. Companion to
-     <code>tui_design_language.html</code>, which covers the palette and glyph
-     vocabulary; this document is about <em>states</em>.</p>
+  <p>Every screen and status the TUI can be in. <strong>The frames below are
+     verbatim captures</strong>, not drawings: they are produced by
+     <code>examples/ui_capture.pas</code> (<code>make ui-capture</code>), which
+     paints the real widgets into a memory surface via Arrange → Advance → Render
+     and dumps the cells. If a frame here disagrees with the app, the frame is
+     stale — regenerate it.</p>
 </header>
 
 <nav>
   <a href="#anatomy">Anatomy</a>
   <a href="#fresh">Fresh session</a>
+  <a href="#conversation">A turn</a>
   <a href="#toolbar">Toolbar states</a>
-  <a href="#reasoning">Reasoning rotation</a>
+  <a href="#narrow">Narrow panes</a>
+  <a href="#reasoning">Reasoning</a>
   <a href="#toolcaption">Tool captions</a>
-  <a href="#blocks">Transcript blocks</a>
-  <a href="#approval">Approval</a>
   <a href="#palette">Palette</a>
   <a href="#sidebar">Sidebar</a>
-  <a href="#modals">Sessions &amp; history</a>
   <a href="#status">Status bar</a>
-  <a href="#markdown">Markdown</a>
+  <a href="#colour">Colour roles</a>
 </nav>
 
 <main>
 
-<!-- ─────────────────────────────────────────────────────────── -->
+<!-- ─────────────────────────────────────────────────── -->
 <section id="anatomy">
   <h2>Anatomy of the shell</h2>
-  <p class="note">Four fixed regions, one flexible body. The header and status bar
-     own the session identity and its consumption; the toolbar carries what the
-     run is <em>doing</em> (left) and what the operator can <em>do</em> (right);
-     the composer overlays the transcript so typing never reflows the messages.</p>
-
-<div class="term"><span class="b">╭─ agent-1 - Fix the login redirect ────────────────────── 18% ctx ─╮</span>
-<span class="b">│</span>                                                                  <span class="b">│</span>
-<span class="b">│</span>  <span class="t bold">you</span>                                                             <span class="b">│</span>
-<span class="b">│</span>  fix the login redirect, it loops on /callback                  <span class="b">│</span>
-<span class="b">│</span>                                                                  <span class="b">│</span>
-<span class="b">│</span>  <span class="ok bold">Hildi</span>                                                           <span class="b">│</span>
-<span class="b">│</span>  The loop comes from the missing <code>state</code> check.                       <span class="b">│</span>
-<span class="b">│</span>                                                                  <span class="b">│</span>
-<span class="b">│</span>  <span class="m">▸ Editing src/auth/redirect.pas</span>                                <span class="b">│</span>
-<span class="b">│</span>  <span class="m">▸ Running make check</span>                                          <span class="b">│</span>
-<span class="b">│</span>                                                                  <span class="b">│</span>
-<span class="b">╰──────────────────────────────────────────────────────────────────╯</span>
- <span class="spark">⠸</span> <span class="m">Editing src/auth/redirect.pas</span>          <span class="dimk">shift+enter newline</span> <span class="m">·</span> <span class="dimk">ctrl+d subagents</span>
-<span class="b">╭─ prompt ─────────────────────────────────────────────────────────╮</span>
-<span class="b">│</span> <span class="t">›</span>                                                                <span class="b">│</span>
-<span class="b">╰──────────────────────────────────────────────────────────────────╯</span>
- <span class="m">~/code/hildi</span>                              <span class="m">12 turns · 18% ctx · 2.1k tok/s</span></div>
+  <p class="note">Reading the real frame below, top to bottom: a light
+     <code>╭───╮</code> transcript panel whose top border carries the session
+     identity (left) and context usage (right); the toolbar row; a
+     <strong>heavy</strong> <code>╭═══╮</code> composer; and a status row outside
+     both boxes.</p>
+  <p class="note">The heavy/light border distinction is the strongest signal in
+     the frame: light is the conversation, heavy is where you type.</p>
 
   <table>
-    <tr><th>Region</th><th>Owns</th><th>Source</th></tr>
-    <tr><td class="k">Header (border)</td><td>Session identity + context %</td>
-        <td><code>SessionDisplayName</code> → <code>&lt;label or short id&gt; - &lt;running title&gt;</code></td></tr>
+    <tr><th>Region</th><th>Owns</th><th>Border</th></tr>
+    <tr><td class="k">Header</td><td>Session identity + context %</td>
+        <td>light, <code>╭─ … ─╮</code> with title</td></tr>
     <tr><td class="k">Transcript</td><td>The conversation, blocks in order</td>
-        <td><code>TChatStream</code></td></tr>
+        <td>light; scrollbar bleeds into the right column</td></tr>
     <tr><td class="k">Toolbar</td><td>Run state (left) · key hints (right)</td>
-        <td><code>SetState</code> · <code>ComposerHints</code></td></tr>
+        <td>none — one row between the boxes</td></tr>
     <tr><td class="k">Composer</td><td>The prompt; overlays the transcript</td>
-        <td><code>TComposeBox</code></td></tr>
-    <tr><td class="k">Status bar</td><td>Workspace path (left) · metrics (right)</td>
-        <td><code>SetStatus</code> · <code>SetStats</code></td></tr>
+        <td><strong>heavy</strong>, <code>╭═══╮</code></td></tr>
+    <tr><td class="k">Status</td><td>Workspace (left) · metrics (right)</td>
+        <td>none</td></tr>
   </table>
 </section>
 
-<!-- ─────────────────────────────────────────────────────────── -->
+<!-- ─────────────────────────────────────────────────── -->
 <section id="fresh">
   <h2>Fresh session<span class="pill">empty transcript</span></h2>
-  <p class="note">Before the first block exists, the transcript draws a braille mark
-     and two first-run hints, centred by <strong>display cells</strong>. It is
-     decoration drawn in the panel, <em>not</em> a seeded stream block — so it
-     never enters the conversation and vanishes the moment the first block
-     arrives.</p>
+  <p class="note">No blocks yet, so the transcript draws a braille mark and two
+     first-run hints, centred in the pane. It is decoration painted by the panel,
+     <em>not</em> a seeded stream block — it never enters the conversation and
+     disappears at the first block.</p>
 
 <div class="frame">
-  <p class="frame-label">csIdle · no session, no runtime · state label “Idle”</p>
-<div class="term">
-
-
-                              <span class="m">⠀⠀⠀⠀⠀⠀⣀⣤⣴⡶⠶⠶⠶⣦⣤⣀⠀⠀⠀⠀⠀⠀⠀</span>
-                            <span class="m">⠀⠀⠀⠀⠀⣠⣶⣿⠟⠉⠀⢀⣤⣶⣶⣄⠻⣿⣿⣶⣄⠀⠀⠀⠀⠀</span>
-                           <span class="m">⠀⠀⠀⠀⣼⣿⡟⠁⠀⠀⣰⣿⡿⠁⠈⣿⠀⢿⣿⣿⣿⣧⡀⠀⠀⠀</span>
-                          <span class="m">⠀⠀⠀⣾⣿⡟⠀⠀⠀⢰⣿⡿⠀⠀⢠⡟⠀⠘⣿⣿⣿⣿⣧⠀⠀⠀</span>
-                          <span class="m">⠀⠀⠀⣿⡿⠀⠀⠀⠀⢸⣿⠃⠀⣠⠟⠀⠀⠀⠹⣿⣿⣿⣿⠀⠀⠀</span>
-                          <span class="m">⠀⠀⠀⢻⡇⠀⠀⠀⠀⢼⡟⢀⡴⢁⣀⡀⠀⠀⠀⠙⣿⣿⡟⠀⠀⠀</span>
-                          <span class="m">⠀⠀⠀⠀⠀⠀⠀⠀⠀⣸⡟⢁⣼⡿⠋⣿⠀⠀⠀⠀⢹⡟⠁⠀⠀⠀</span>
-                          <span class="m">⠀⠀⠀⠀⠀⠀⢀⠠⠊⠈⠻⠾⠟⠀⠀⠘⠦⣀⠀⠀⠀⠀⠀⠀⠀⠀</span>
-
-                             <span class="m">Type a prompt and press Enter to start</span>
-                                    <span class="m">Shift+Enter adds a line</span>
-</div>
+<p class="frame-label">78 × 22 · state “Idle”<span class="captured">verbatim capture</span></p>
+<div class="term">╭ agent-1 - Fix the login redirect ───────────────────────────────── 18% ctx ╮
+│                                                                            │
+│                                                                            │
+│                                                                            │
+│                          ⠀⠀⠀⠀⠀⠀⣀⣤⣴⡶⠶⠶⠶⣦⣤⣀⠀⠀⠀⠀⠀⠀⠀                           │
+│                         ⠀⠀⠀⠀⠀⣠⣶⣿⠟⠉⠀⢀⣤⣶⣶⣄⠻⣿⣿⣶⣄⠀⠀⠀⠀⠀                         │
+│                         ⠀⠀⠀⠀⣼⣿⡟⠁⠀⠀⣰⣿⡿⠁⠈⣿⠀⢿⣿⣿⣿⣧⡀⠀⠀⠀                         │
+│                         ⠀⠀⠀⣾⣿⡟⠀⠀⠀⢰⣿⡿⠀⠀⢠⡟⠀⠘⣿⣿⣿⣿⣧⠀⠀⠀                         │
+│                         ⠀⠀⠀⣿⡿⠀⠀⠀⠀⢸⣿⠃⠀⣠⠟⠀⠀⠀⠹⣿⣿⣿⣿⠀⠀⠀                         │
+│                         ⠀⠀⠀⢻⡇⠀⠀⠀⠀⢼⡟⢀⡴⢁⣀⡀⠀⠀⠀⠙⣿⣿⡟⠀⠀⠀                         │
+│                         ⠀⠀⠀⠀⠀⠀⠀⠀⠀⣸⡟⢁⣼⡿⠋⣿⠀⠀⠀⠀⢹⡟⠁⠀⠀⠀                         │
+│                         ⠀⠀⠀⠀⠀⠀⢀⠠⠊⠈⠻⠾⠟⠀⠀⠘⠦⣀⠀⠀⠀⠀⠀⠀⠀⠀                         │
+│                                                                            │
+│                   Type a prompt and press Enter to start                   │
+│                          Shift+Enter adds a line                           │
+│ ✓ Idle                                                 shift+enter newline │
+╭════════════════════════════════════════════════════════════════════════════╮
+│ █                                                                          │
+│                                                                            │
+│ Hildi                                                                      │
+╰────────────────────────────────────────────────────────────────────────────╯
+  ~/code/hildi                                            12 turns · 18% ctx  </div>
 </div>
 
   <h3>Why only two hints</h3>
-  <p class="note">Every line here must name a key that actually does something
-     <em>from this screen</em>. <code>Ctrl+? lists commands</code> was removed
-     because no handler for it exists anywhere in the app — a hint is a promise,
-     and a dead one is worse than none. This text is <strong>descriptive prose</strong>,
-     so it is styled uniformly and keeps sentence case; it is not chrome.</p>
+  <p class="note">Every line must name a key that does something <em>from this
+     screen</em>. <code>Ctrl+? lists commands</code> was removed: no handler for
+     it exists anywhere in the app. This text is descriptive prose, so it is
+     uniformly muted and keeps sentence case — it is not chrome.</p>
 </section>
 
-<!-- ─────────────────────────────────────────────────────────── -->
+<!-- ─────────────────────────────────────────────────── -->
+<section id="conversation">
+  <h2>A turn in flight<span class="pill">state “Tool”</span></h2>
+  <p class="note">Thought and tool blocks are <strong>boxed frames</strong> with a
+     title on the top border — not the one-line <code>▸ …</code> list an earlier
+     draft of this document showed. The transcript is scrolled to its tail, so the
+     user and assistant messages sit above the visible window.</p>
+  <p class="note">Note the right column: the panel's border doubles as the
+     scrollbar, and the heavy <code>┃</code> marks the thumb.</p>
+
+<div class="frame">
+<p class="frame-label">78 × 22 · a settled thought, two tool results, one running tool<span class="captured">verbatim capture</span></p>
+<div class="term">╭ agent-1 - Fix the login redirect ───────────────────────────────── 18% ctx ╮
+│ │ cannot validate it                                                     │ │
+│ ╰────────────────────────────────────────────────────────────────────────╯ │
+│                                                                            │
+│ ╭─ Reading src/auth/redirect.pas ────────────────────────────────────────╮ │
+│ │ program redirect;                                                      │ │
+│ ╰────────────────────────────────────────────────────────────────────────╯ ┃
+│                                                                            ┃
+│ ╭─ Running make check ───────────────────────────────────────────────────╮ ┃
+│ │ Number of run tests: 2090                                              │ ┃
+│ │ Number of failures: 0                                                  │ ┃
+│ │ all checks passed                                                      │ ┃
+│ ╰────────────────────────────────────────────────────────────────────────╯ ┃
+│                                                                            ┃
+│                                                                            ┃
+│ ⠋ Editing src/auth/redirect.pas     shift+enter newline · ctrl+d subagents │
+╭════════════════════════════════════════════════════════════════════════════╮
+│ █                                                                          │
+│                                                                            │
+│ Hildi                                                                      │
+╰────────────────────────────────────────────────────────────────────────────╯
+  ~/code/hildi                                            12 turns · 18% ctx  </div>
+</div>
+
+  <p class="note">The status label and the hints share the toolbar row: the label
+     at the left after one icon cell, the hints right-aligned, and both inside the
+     panel's padding. The tool caption names its subject — <code>Editing
+     src/auth/redirect.pas</code>, not “waiting to edit the file”.</p>
+</section>
+
+<!-- ─────────────────────────────────────────────────── -->
 <section id="toolbar">
-  <h2>Toolbar states</h2>
-  <p class="note">The left side states what the run <em>is</em>. The icon encodes
-     severity, the word encodes the fact. Only <code>psThinking</code> and
-     <code>psTool</code> animate; the rest are static because they state a fact
-     rather than a mood.</p>
+  <h2>Toolbar states<span class="pill">the row carrying the hints</span></h2>
+  <p class="note">The icon encodes severity, the word states the fact. Only
+     <code>psThinking</code> and <code>psTool</code> animate. Captured one state at
+     a time at the same width, so the labels can be compared directly.</p>
+
+<div class="frame">
+<p class="frame-label">eight states, 78 columns<span class="captured">verbatim capture</span></p>
+<div class="term">│ ✓ Ready                             shift+enter newline · ctrl+d subagents │
+│ ⠋ Thinking                          shift+enter newline · ctrl+d subagents │
+│ ⠋ Editing src/auth/redirect.pas     shift+enter newline · ctrl+d subagents │
+│ ? Approval needed                   shift+enter newline · ctrl+d subagents │
+│ ! Press Esc again to cancel         shift+enter newline · ctrl+d subagents │
+│ ✗ Error                             shift+enter newline · ctrl+d subagents │
+│ ✓ Cancelled                         shift+enter newline · ctrl+d subagents │
+│ ⠋ Thinking                          shift+enter newline · ctrl+d subagents │</div>
+</div>
 
   <table>
     <tr><th>Icon</th><th>Colour role</th><th>States</th></tr>
@@ -210,101 +235,72 @@
             Subagent promoted to its own session</td></tr>
     <tr><td class="k warn">?</td><td>Warn</td><td>Approval needed</td></tr>
     <tr><td class="k warn">!</td><td>Warn</td><td>Press Esc again to cancel · Esc again to cancel this subagent</td></tr>
-    <tr><td class="k err bold">✗</td><td>Error (bold)</td><td>Failed · Error</td></tr>
-    <tr><td class="k spark">⠋</td><td>Accent</td>
-        <td>Thinking · Reasoning · Cancelling · Checkpointing · &lt;connect phase&gt; ·
-            the tool captions below</td></tr>
+    <tr><td class="k err">✗</td><td>Error (bold)</td><td>Failed · Error</td></tr>
+    <tr><td class="k t">⠋</td><td>Accent</td>
+        <td>Thinking · Cancelling · Checkpointing · &lt;connect phase&gt; · tool captions</td></tr>
   </table>
-
-  <h3>The row, in each state</h3>
-  <p class="note">Right-aligned is the hint text. Keys are <strong>dim and
-     lowercase</strong>; the action they perform is brighter — a keybinding is
-     chrome, the action is what you read.</p>
-
-<div class="frame">
-<p class="frame-label">Ready — after a completed turn</p>
-<div class="term">  <span class="ok">✓</span> <span class="m">Ready</span>                                 <span class="dimk">shift+enter newline</span> <span class="m">·</span> <span class="dimk">ctrl+d subagents</span></div>
-</div>
-
-<div class="frame">
-<p class="frame-label">Thinking — the agent is reasoning (rotates, see below)</p>
-<div class="term">  <span class="spark">⠹</span> <span class="m">Thinking</span>                              <span class="dimk">shift+enter newline</span> <span class="m">·</span> <span class="dimk">ctrl+d subagents</span></div>
-</div>
-
-<div class="frame">
-<p class="frame-label">Tool — names its subject, not “waiting to…”</p>
-<div class="term">  <span class="spark">⠼</span> <span class="m">Editing src/auth/redirect.pas</span>          <span class="dimk">shift+enter newline</span> <span class="m">·</span> <span class="dimk">ctrl+d subagents</span></div>
-</div>
-
-<div class="frame">
-<p class="frame-label">Approval — a modal is up; the toolbar still states the gate</p>
-<div class="term">  <span class="warn">?</span> <span class="m">Approval needed</span>                       <span class="dimk">shift+enter newline</span></div>
-</div>
-
-<div class="frame">
-<p class="frame-label">Interrupt armed — first Esc; a second within 2 s cancels</p>
-<div class="term">  <span class="warn">!</span> <span class="m">Press Esc again to cancel</span>             <span class="dimk">shift+enter newline</span></div>
-</div>
-
-<div class="frame">
-<p class="frame-label">Cancelling → Cancelled</p>
-<div class="term">  <span class="spark">⠇</span> <span class="m">Cancelling</span>                            <span class="dimk">shift+enter newline</span>
-  <span class="ok">✓</span> <span class="m">Cancelled</span>                             <span class="dimk">shift+enter newline</span></div>
-</div>
-
-<div class="frame">
-<p class="frame-label">Error — a failed turn</p>
-<div class="term">  <span class="err bold">✗</span> <span class="m">Error</span>                                 <span class="dimk">shift+enter newline</span></div>
-</div>
-
-  <h3>Narrow panes: the label yields, never the hints</h3>
-  <p class="note">The label and the hints share one row. The hint budget is taken
-     first — it is the fixed, known-length part — and the label takes what is
-     left, clamped by display cells. At the extreme the label is dropped rather
-     than clipped to a fragment. Before this rule, a long subject label silently
-     squeezed the hints off the row and the text block <em>clipped</em> them
-     mid-word, with nothing visibly broken enough to report.</p>
-
-<div class="frame">
-<p class="frame-label">Same state, 60 columns — hints still readable</p>
-<div class="term">  <span class="spark">⠼</span> <span class="m">Editing src/auth/red…</span>   <span class="dimk">shift+enter newline</span></div>
-</div>
 </section>
 
-<!-- ─────────────────────────────────────────────────────────── -->
+<!-- ─────────────────────────────────────────────────── -->
+<section id="narrow">
+  <h2>Narrow panes<span class="pill">the label yields, never the hints</span></h2>
+  <p class="note">The hint budget is taken first — it is the fixed, known-length
+     part — and the label takes what remains, clamped by display cells. Before
+     this rule a long caption silently pushed the hints out of the row, and the
+     text block <em>clips</em> them mid-word, so there was nothing visibly broken
+     enough to report.</p>
+
+<div class="frame">
+<p class="frame-label">52 × 10 · a 46-character caption, clamped<span class="captured">verbatim capture</span></p>
+<div class="term">╭──────────────────────────────────────────────────╮
+│                                                  │
+│                                                  │
+│ ⠋ Editing src/tui/widgets/TU shift+enter newline │
+╭══════════════════════════════════════════════════╮
+│ █                                                │
+│                                                  │
+│ Hildi                                            │
+╰──────────────────────────────────────────────────╯</div>
+</div>
+
+  <p class="note">The caption is cut at <code>TU</code> and the hint still reads in
+     full. With no room at all the label is dropped rather than clipped to a
+     fragment, because a state cut to two characters says nothing.</p>
+</section>
+
+<!-- ─────────────────────────────────────────────────── -->
 <section id="reasoning">
   <h2>Reasoning caption rotation<span class="pill">psThinking only</span></h2>
-  <p class="note">While the agent reasons, the caption rotates every
+  <p class="note">While the agent reasons the caption rotates every
      <strong>2.6 s</strong>: <code>Thinking → Reasoning → Working it out →
      Considering → Pondering</code>. The word is derived from the clock, not a
-     per-frame counter, so a dropped frame cannot desynchronise it; and
-     <code>SetState</code> resets the origin, so every turn starts on “Thinking”.</p>
+     per-frame counter, so a dropped frame cannot desynchronise it, and entering
+     the state resets the origin — every turn starts on “Thinking”.</p>
   <p class="note">Only <code>psThinking</code> rotates. A tool run, an approval or
      an error states a <em>fact</em> and must not be decorated.</p>
 
 <div class="frame">
-<p class="frame-label">5 words · 2.6 s apart · then back to the start</p>
-<div class="term">  <span class="spark">⠋</span> <span class="m">Thinking</span>
-  <span class="spark">⠙</span> <span class="m">Reasoning</span>
-  <span class="spark">⠹</span> <span class="m">Working it out</span>
-  <span class="spark">⠸</span> <span class="m">Considering</span>
-  <span class="spark">⠼</span> <span class="m">Pondering</span></div>
+<p class="frame-label">the rotation, in order</p>
+<div class="term">│ ⠋ Thinking                          shift+enter newline · ctrl+d subagents │
+│ ⠙ Reasoning                         shift+enter newline · ctrl+d subagents │
+│ ⠹ Working it out                    shift+enter newline · ctrl+d subagents │
+│ ⠸ Considering                       shift+enter newline · ctrl+d subagents │
+│ ⠼ Pondering                         shift+enter newline · ctrl+d subagents │</div>
 </div>
 
   <h3>The activity spinner</h3>
-  <p class="note">Ten braille frames, one every <strong>90 ms</strong>. Shared by
-     the toolbar, the stream’s thinking row and an expanded live tool block, so
-     everything in flight beats at the same rate.</p>
-<div class="term"><span class="spark">⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏</span></div>
+  <p class="note">Ten braille frames, one every <strong>90 ms</strong>, shared by
+     the toolbar, the transcript's thinking row and an expanded live tool block,
+     so everything in flight beats at one rate.</p>
+<div class="term"><span class="t">⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏</span></div>
 </section>
 
-<!-- ─────────────────────────────────────────────────────────── -->
+<!-- ─────────────────────────────────────────────────── -->
 <section id="toolcaption">
-  <h2>Tool captions<span class="pill new">names its subject</span></h2>
-  <p class="note">The caption reads the call’s arguments and names
-     <em>the thing</em>: the file, the command, the pattern. The model’s reason is
-     used only when no subject can be named — a reason like “Read the file”
-     restates what the operator can already see.</p>
+  <h2>Tool captions<span class="pill">names its subject</span></h2>
+  <p class="note">The caption reads the call's arguments and names <em>the
+     thing</em>. The model's reason is used only when no subject can be named — a
+     reason like “Read the file” restates what is already visible.</p>
 
   <table>
     <tr><th>Tool</th><th>Caption</th></tr>
@@ -314,298 +310,95 @@
     <tr><td class="k">file_delete</td><td><code>Deleting scratch/tmp.txt</code></td></tr>
     <tr><td class="k">file_move · file_copy</td><td><code>Moving src/old.pas</code></td></tr>
     <tr><td class="k">file_mkdir</td><td><code>Creating docs/design</code></td></tr>
-    <tr><td class="k">file_list</td><td><code>Listing src</code> — or <code>Listing the workspace</code> when no path is given</td></tr>
+    <tr><td class="k">file_list</td><td><code>Listing src</code> / <code>Listing the workspace</code></td></tr>
     <tr><td class="k">file_glob</td><td><code>Finding files matching **/*.pas</code></td></tr>
     <tr><td class="k">file_grep</td><td><code>Searching for TODO</code></td></tr>
     <tr><td class="k">run_command</td><td><code>Running make check</code></td></tr>
     <tr><td class="k">recall_tool_result</td><td><code>Searching the transcript for …</code> / <code>Reading earlier output</code></td></tr>
-    <tr><td class="k">board_* · task_*</td><td><code>Posting to the board · topic</code>, <code>Claiming task · id</code>, …</td></tr>
+    <tr><td class="k">board_* · task_*</td><td><code>Posting to the board · &lt;topic&gt;</code>, <code>Claiming task · &lt;id&gt;</code></td></tr>
     <tr><td class="k">json_* · yaml_*</td><td><code>Reading package.json</code> · <code>Editing config.yaml</code></td></tr>
     <tr><td class="k">get_system_time</td><td><code>Checking the current time</code></td></tr>
-    <tr><td class="k">unknown tool</td><td>the reason, else the tool name — with one of six varied lead-ins</td></tr>
+    <tr><td class="k">unknown</td><td>the reason, else the tool name, with one of six varied lead-ins</td></tr>
   </table>
 
-<div class="frame">
-<p class="frame-label">How they read in the row</p>
-<div class="term">  <span class="spark">⠋</span> <span class="m">Reading src/hildi.pas</span>
-  <span class="spark">⠙</span> <span class="m">Searching for TODO</span>
-  <span class="spark">⠹</span> <span class="m">Running make check</span>
-  <span class="spark">⠸</span> <span class="m">Editing src/tui/widgets/TUIWidgetsChatPanel.pas</span></div>
-</div>
-
-  <h3>Long subjects are clamped, keeping the tail</h3>
-  <p class="note">48 display cells. The <em>end</em> of a path or command is what
-     identifies it, so the tail is kept and the cut prefers a path separator —
-     the result reads as a path rather than a chopped stem.</p>
-<div class="term">  <span class="spark">⠼</span> <span class="m">Editing …/widgets/TUIWidgetsChatPanel.pas</span>
-  <span class="spark">⠴</span> <span class="m">Running …-5 -- src/tui/widgets/TUIWid…</span></div>
-
-  <h3>Malformed arguments still caption</h3>
-  <p class="note">Model output is attacker-influenced and often truncated mid-call.
-     A parse failure must not break the status row — the tool <em>is</em> running.
-     It falls back to the reason, then to the tool name.</p>
+  <p class="note"><strong>Clamped at 48 display cells</strong>, keeping the
+     <em>tail</em>: the end of a path or command identifies it. The cut prefers a
+     path separator so the result reads as a path rather than a chopped stem.
+     Malformed arguments still caption — model output is frequently truncated
+     mid-call, and the tool <em>is</em> running.</p>
 </section>
 
-<!-- ─────────────────────────────────────────────────────────── -->
-<section id="blocks">
-  <h2>Transcript blocks</h2>
-  <p class="note">Ten kinds: <code>ckUser · ckAssistant · ckError · ckThought ·
-     ckTool · ckThinking · ckTurn · ckTurnChanges · ckAmbient · ckQueued ·
-     ckHandoff</code>. Every block is keyed so a live one and its replayed form
-     render identically.</p>
-
-<div class="frame">
-<p class="frame-label">User and assistant</p>
-<div class="term">  <span class="t bold">you</span>
-  fix the login redirect, it loops on /callback
-
-  <span class="ok bold">Hildi</span>
-  The loop comes from the missing <code>state</code> check. Two changes:</div>
-</div>
-
-<div class="frame">
-<p class="frame-label">Thought — a settled reasoning block, collapsed, with its duration</p>
-<div class="term">  <span class="m">▸ Thought · 4.2s</span>
-    <span class="m">the redirect fires before the session cookie is set, so…</span></div>
-</div>
-
-<div class="frame">
-<p class="frame-label">Tool — collapsed: the reason is the title, the result is the body</p>
-<div class="term">  <span class="m">▸ Editing src/auth/redirect.pas</span>
-  <span class="m">▸ Running make check</span></div>
-</div>
-
-<div class="frame">
-<p class="frame-label">Tool — expanded, streaming live</p>
-<div class="term">  <span class="m">▾</span> <span class="spark">⠸</span> <span class="m">Running make check</span>
-    <span class="m">make[1]: Entering directory</span>
-    <span class="m">Number of run tests: 2090</span>
-    <span class="m">Number of failures:  0</span>
-    <span class="m">all checks passed</span></div>
-</div>
-
-<div class="frame">
-<p class="frame-label">Tool — failed: the block itself reads as an error</p>
-<div class="term">  <span class="err">▾</span> <span class="m">Running make check</span>
-    <span class="err">Error: identifier not found "HintSpans"</span></div>
-</div>
-
-<div class="frame">
-<p class="frame-label">Error — a failed turn</p>
-<div class="term">  <span class="err">✗</span> <span class="err">connection failed: read timeout after 30s</span></div>
-</div>
-
-<div class="frame">
-<p class="frame-label">Turn divider + the change summary (absent entirely when nothing was written)</p>
-<div class="term">  <span class="b">─────────────────────────────────────────────────── 12.4s</span>
-  <span class="t">2 files changed</span>
-    <span class="m">+18  −4   src/auth/redirect.pas</span>
-    <span class="m">+3   −0   tests/TestAuth.pas</span></div>
-</div>
-
-<div class="frame">
-<p class="frame-label">Queued — a prompt submitted while a turn is in flight</p>
-<div class="term">  <span class="m">▸ queued: also add a regression test</span></div>
-</div>
-</section>
-
-<!-- ─────────────────────────────────────────────────────────── -->
-<section id="approval">
-  <h2>Approval<span class="pill">modal over a dimmed background</span></h2>
-  <p class="note">Raised by the gate before a gated tool runs. The background dims
-     so the decision is the only thing with contrast. Asks queue rather than
-     stack — a parallel batch shows them one at a time.</p>
-
-<div class="frame">
-<div class="term"><span class="dim">  <span class="b">│</span>  <span class="m">▸ Editing src/auth/redirect.pas</span>
-  <span class="b">│</span></span>
-<span class="dim"><span class="b">  │                                        </span></span>
-  <span class="b">╭──────────────────────────────────────────────╮</span>
-  <span class="b">│</span> <span class="warn bold">Approval needed</span>                              <span class="b">│</span>
-  <span class="b">│</span>                                              <span class="b">│</span>
-  <span class="b">│</span> <span class="m">file:write</span>  <span class="m">write src/auth/redirect.pas</span>       <span class="b">│</span>
-  <span class="b">│</span> <span class="m">Add the missing state check</span>                  <span class="b">│</span>
-  <span class="b">│</span>                                              <span class="b">│</span>
-  <span class="b">│</span>   <span class="ok">approve</span>   <span class="err">deny</span>                            <span class="b">│</span>
-  <span class="b">╰──────────────────────────────────────────────╯</span></div>
-</div>
-</section>
-
-<!-- ─────────────────────────────────────────────────────────── -->
+<!-- ─────────────────────────────────────────────────── -->
 <section id="palette">
   <h2>Command palette<span class="pill">actionable entries only</span></h2>
   <p class="note">Opens while the composer holds a lone <code>/token</code>.
-     Entries are <strong>appended</strong>, never pre-sized — an omitted command
-     is absent, not a blank <code>/</code> row. <code>Esc</code> dismisses it and
+     Entries are <strong>appended</strong>, never pre-sized — an omitted command is
+     absent, not a blank <code>/</code> row. <code>Esc</code> dismisses it and
      leaves the typed <code>/</code> alone, so a prompt may start with a slash.</p>
-
-<div class="frame">
-<p class="frame-label">Attached, one completed turn · /new and /checkpoint available</p>
-<div class="term"><span class="b">╭──────────────────────────────────────────────────╮</span>
-<span class="b">│</span> <span class="t">/</span>                                                <span class="b">│</span>
-<span class="b">╰──────────────────────────────────────────────────╯</span>
-<span class="b">╭──────────────────────────────────────────────────╮</span>
-<span class="b">│</span> <span class="sel">/checkpoint</span> <span class="m">create a checkpoint for this session</span>  <span class="b">│</span>
-<span class="b">│</span> <span class="t">/sessions</span>   <span class="m">list and manage this workspace's…</span>     <span class="b">│</span>
-<span class="b">│</span> <span class="t">/new</span>        <span class="m">start a new session in this workspace</span>  <span class="b">│</span>
-<span class="b">│</span> <span class="t">/undo</span>       <span class="m">revert the newest turn and rewind…</span>    <span class="b">│</span>
-<span class="b">╰──────────────────────────────────────────────────╯</span></div>
-</div>
-
-<div class="frame">
-<p class="frame-label">Fresh session · turn-dependent commands are absent, not empty</p>
-<div class="term"><span class="b">╭──────────────────────────────────────────────────╮</span>
-<span class="b">│</span> <span class="t">/sessions</span>   <span class="m">list and manage this workspace's…</span>     <span class="b">│</span>
-<span class="b">╰──────────────────────────────────────────────────╯</span>
-<span class="m">  /undo, /redo and /revert need something to act on; /checkpoint needs a</span>
-<span class="m">  runtime; /new needs a workspace. None of them are offered yet.</span></div>
-</div>
 
   <table>
     <tr><th>Command</th><th>Offered when</th></tr>
     <tr><td class="k">/sessions</td><td>always — it only reads the store</td></tr>
-    <tr><td class="k">/new</td><td>a runtime or a workspace exists (<code>ConnState ≠ csIdle</code>)</td></tr>
+    <tr><td class="k">/new</td><td>a workspace exists (<code>ConnState ≠ csIdle</code>)</td></tr>
     <tr><td class="k">/checkpoint</td><td>a runtime is attached (<code>Driver ≠ nil</code>)</td></tr>
     <tr><td class="k">/undo</td><td>a turn exists that is not already undone</td></tr>
     <tr><td class="k">/redo</td><td>an undone turn sits above the redo floor</td></tr>
-    <tr><td class="k">/revert</td><td>at least two live turns, so an earlier one exists</td></tr>
+    <tr><td class="k">/revert</td><td>at least two live turns</td></tr>
   </table>
+  <p class="note">The palette is rebuilt on every connect-state and ledger change.
+     It is populated during construction — before the connect state is known — so
+     anything conditional is stale until something resyncs it.</p>
 </section>
 
-<!-- ─────────────────────────────────────────────────────────── -->
+<!-- ─────────────────────────────────────────────────── -->
 <section id="sidebar">
-  <h2>Sidebar — the subagent list<span class="pill new">not yet two-tone</span></h2>
+  <h2>Sidebar — the subagent list<span class="pill">shown in the composer's place</span></h2>
   <p class="note">Toggled with <code>ctrl+d</code> when the session has subagents.
-     It takes the <strong>composer’s place</strong> and the composer’s chrome —
-     same rounded box, same raised background, same lower-left info line and
-     lower-right CTAs — with one deliberate difference: the border is
-     <strong>amber</strong>, because this is not the prompt. It reads as “work in
-     flight, not yours to type into”.</p>
-  <p class="note">Each row is the child’s label plus its current turn title, so the
+     It takes the composer's place and the composer's chrome, with one deliberate
+     difference: the border is <strong>amber</strong> (<code>Warn</code>), because
+     this is not the prompt — work in flight, not yours to type into.</p>
+  <p class="note">Each row is the child's label plus its current turn title, so the
      list says what each agent is <em>doing</em>. The selected child loads into the
      stream; there is no prompt here, so the view is read-only.</p>
 
-<div class="frame">
-<p class="frame-label">One child streaming · Up/Down moves the selection and loads it</p>
-<div class="term"><span class="warn">╭──────────────────────────────────────────────────────────╮</span>
-<span class="warn">│</span> <span class="m">subagents</span>                                                <span class="warn">│</span>
-<span class="warn">│</span>                                                          <span class="warn">│</span>
-<span class="warn">│</span>  <span class="m">▸</span> <span class="m">agent-a</span> · <span class="m">Reading the parser</span>                          <span class="warn">│</span>
-<span class="warn">│</span>  <span class="sel">▾ agent-b · Searching for call sites</span>                    <span class="warn">│</span>
-<span class="warn">│</span>  <span class="m">▸</span> <span class="m">agent-c</span> · <span class="m">Waiting on approval</span>                         <span class="warn">│</span>
-<span class="warn">│</span>                                                          <span class="warn">│</span>
-<span class="warn">│</span> <span class="m">hildi-sonnet</span>              <span class="warn">ctrl+a abort · ctrl+r release · ctrl+p promote</span> <span class="warn">│</span>
-<span class="warn">╰──────────────────────────────────────────────────────────╯</span></div>
-</div>
+  <table>
+    <tr><th>Key</th><th>Action</th></tr>
+    <tr><td class="k">ctrl+a</td><td>abort the selected child</td></tr>
+    <tr><td class="k">ctrl+r</td><td>release it (keeps running, detaches)</td></tr>
+    <tr><td class="k">ctrl+p</td><td>promote it to its own session</td></tr>
+    <tr><td class="k">enter</td><td>spy — no child selected</td></tr>
+  </table>
+  <p class="note">Chords, never bare letters: the list has focus while a child
+     streams, exactly when the operator is most likely to be typing at something
+     else, and a stray <code>a</code> would abort real work.</p>
 
-<div class="frame">
-<p class="frame-label">No child selected · the CTAs collapse to the one thing you can do</p>
-<div class="term"><span class="warn">╭──────────────────────────────────────────────────────────╮</span>
-<span class="warn">│</span>  <span class="m">▸</span> <span class="m">agent-a</span> · <span class="m">Reading the parser</span>                          <span class="warn">│</span>
-<span class="warn">│</span>                                                          <span class="warn">│</span>
-<span class="warn">│</span> <span class="m">hildi-sonnet</span>                                        <span class="warn">enter spy</span> <span class="warn">│</span>
-<span class="warn">╰──────────────────────────────────────────────────────────╯</span></div>
-</div>
-
-  <h3>Keys are chorded, not bare</h3>
-  <p class="note"><code>ctrl+a</code> / <code>ctrl+r</code> / <code>ctrl+p</code>,
-     never <code>a</code> / <code>r</code> / <code>p</code>: bare letters are one
-     stray keystroke from aborting or releasing a child that is mid-work, and the
-     list has focus while a child streams — exactly when the operator is most
-     likely to be typing at something else. Only the three chords are claimed, so
-     no ordinary keypress is swallowed.</p>
-  <p class="note"><strong>Current limitation.</strong> These CTAs are painted as
-     one uniformly amber string. The two-tone rule (dim key, brighter action) is
-     not applied here yet, though the shared splitter that would do it now
-     exists.</p>
+  <p class="note"><strong>Not yet captured, and not yet two-tone.</strong> This
+     surface is not in the capture harness yet, and its CTAs are painted as one
+     uniformly amber string. The two-tone rule (dim key, brighter action) is not
+     applied here — the shared splitter exists, but the sidebar does not call it.</p>
 </section>
 
-<!-- ─────────────────────────────────────────────────────────── -->
-<section id="modals">
-  <h2>Sessions &amp; history</h2>
-  <p class="note">Sessions nest under their parent, indenting the child’s title; a
-     child whose parent is not in the list is shown flat rather than dropped —
-     losing a session silently is worse than showing it un-nested.</p>
-
-<div class="frame">
-<p class="frame-label">/sessions — pinned first, then most recently updated</p>
-<div class="term">  <span class="b">╭──────────────────────────────────────────────────────────╮</span>
-  <span class="b">│</span> <span class="t bold">Sessions</span>                                                 <span class="b">│</span>
-  <span class="b">│</span>                                                          <span class="b">│</span>
-  <span class="b">│</span> <span class="sel">▸ agent-1 · Fix the login redirect          2m ago</span>       <span class="b">│</span>
-  <span class="b">│</span> <span class="m">    agent-a · Reading the parser             just now</span>     <span class="b">│</span>
-  <span class="b">│</span> <span class="m">  ▸ agent-2 · Docs sweep                       1h ago</span>      <span class="b">│</span>
-  <span class="b">│</span>                                                          <span class="b">│</span>
-  <span class="b">│</span> <span class="m">enter open · ctrl+r rename · esc close</span>                   <span class="b">│</span>
-  <span class="b">╰──────────────────────────────────────────────────────────╯</span></div>
-</div>
-
-<div class="frame">
-<p class="frame-label">/undo — pick a turn; the prompt returns to the composer for editing</p>
-<div class="term">  <span class="b">╭──────────────────────────────────────────────────────────╮</span>
-  <span class="b">│</span> <span class="t bold">Undo</span>                                                     <span class="b">│</span>
-  <span class="b">│</span>                                                          <span class="b">│</span>
-  <span class="b">│</span> <span class="sel">▸ fix the login redirect                      12.4s</span>        <span class="b">│</span>
-  <span class="b">│</span> <span class="m">  add a regression test                        8.1s</span>        <span class="b">│</span>
-  <span class="b">│</span> <span class="m">  ─── floor ───</span>                                           <span class="b">│</span>
-  <span class="b">╰──────────────────────────────────────────────────────────╯</span></div>
-</div>
-</section>
-
-<!-- ─────────────────────────────────────────────────────────── -->
+<!-- ─────────────────────────────────────────────────── -->
 <section id="status">
   <h2>Status bar</h2>
-  <p class="note">The workspace path on the left, the session’s consumption on the
-     right. When the stats would collide with the path, the path is fitted to
-     display cells rather than allowed to run into them — and dropped entirely if
-     there is no room.</p>
+  <p class="note">Workspace on the left, consumption on the right, outside both
+     boxes. When the metrics would collide with the path, the path is fitted to
+     display cells and dropped entirely if there is no room.</p>
 
 <div class="frame">
-<div class="term"> <span class="m">~/code/hildi</span>                              <span class="m">12 turns · 18% ctx · 2.1k tok/s</span></div>
+<p class="frame-label">from the captured frame<span class="captured">verbatim capture</span></p>
+<div class="term">  ~/code/hildi                                            12 turns · 18% ctx  </div>
 </div>
 
-<div class="frame">
-<p class="frame-label">Narrow — the path is fitted, the metrics survive</p>
-<div class="term"> <span class="m">~/code/hildi</span>                        <span class="m">12 turns · 18% ctx</span></div>
-</div>
-
-  <table>
-    <tr><th>Checkpoint nudge</th><th>Appears when</th></tr>
-    <tr><td class="k">… · /checkpoint to continue</td>
-        <td>context crosses the nudge threshold — appended to the hint line, advisory only</td></tr>
-  </table>
+  <p class="note">When context crosses the nudge threshold, <code>/checkpoint to
+     continue</code> is appended to the hint line — advisory only.</p>
 </section>
 
-<!-- ─────────────────────────────────────────────────────────── -->
-<section id="markdown">
-  <h2>Markdown rendering</h2>
-  <p class="note">Body text is a step dimmer than headings; bold and italic each
-     carry a colour so emphasis survives terminals that ignore italic or map bold
-     to a bright colour. Fenced code is a rounded box on the sunken surface with
-     its language on the top-right of the top border.</p>
-
-<div class="frame">
-<div class="term">  <span class="warn bold">The login redirect loop</span>
-
-  <span class="m">The loop comes from the missing</span> <span class="m" style="color:#af87d7">state</span> <span class="m">check.</span>
-  <span class="m">Two changes are needed:</span>
-
-  <span style="color:#d7af87">•</span> <span class="bold" style="color:#ffd787">Persist</span> <span class="m">the state before redirecting</span>
-  <span style="color:#d7af87">•</span> <span style="color:#87d7d7;font-style:italic">Compare</span> <span class="m">it on the callback</span>
-
-  <span class="b">  ╭─────────────────────────────────────── pascal ╮</span>
-  <span class="b">  │</span> <span class="m">if State &lt;&gt; Expected then</span>                  <span class="b">│</span>
-  <span class="b">  │</span> <span class="m">  Fail('state mismatch');</span>                 <span class="b">│</span>
-  <span class="b">  ╰────────────────────────────────────────────────╯</span>
-
-  <span style="color:#585858">│</span> <span class="m">A state parameter must be single-use.</span></div>
-</div>
-</section>
-
-<section>
+<!-- ─────────────────────────────────────────────────── -->
+<section id="colour">
   <h2>Colour roles</h2>
-  <p class="note">256-colour indexes the app paints, so a screenshot can be checked
-     against the code.</p>
+  <p class="note">The 256-colour indexes the code paints, so a rendering can be
+     checked against the theme rather than eyeballed.</p>
   <table>
     <tr><th>Role</th><th>Index</th><th>Used for</th></tr>
     <tr><td class="k"><span class="swatch" style="background:#1c1c1c"></span>Bg</td>
@@ -617,9 +410,9 @@
     <tr><td class="k"><span class="swatch" style="background:#d0d0d0"></span>Text</td>
         <td class="k">252</td><td>body text, hint actions</td></tr>
     <tr><td class="k"><span class="swatch" style="background:#585858"></span>Border</td>
-        <td class="k">240</td><td>frames, dividers</td></tr>
+        <td class="k">240</td><td>frames, dividers, the scrollbar</td></tr>
     <tr><td class="k"><span class="swatch" style="background:#808080"></span>Muted</td>
-        <td class="k">244 <span class="m">dim</span></td><td>secondary text, <strong>keybindings</strong></td></tr>
+        <td class="k">244 +dim</td><td>secondary text, <strong>keybindings</strong></td></tr>
     <tr><td class="k"><span class="swatch" style="background:#5fd7ff"></span>Accent</td>
         <td class="k">81 bold</td><td>titles, focus, the spinner</td></tr>
     <tr><td class="k"><span class="swatch" style="background:#5fafd7"></span>AccentSoft</td>
@@ -636,8 +429,8 @@
 </main>
 
 <footer>
-  Hildi · UI states · widths are illustrative; content, glyphs and colour roles
-  are taken from the source. Companion to <code>tui_design_language.html</code>.
+  Hildi · UI states · frames regenerate with <code>make ui-capture</code>.
+  Companion to <code>tui_design_language.html</code> (palette and glyphs).
 </footer>
 </body>
 </html>
