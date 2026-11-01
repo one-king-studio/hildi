@@ -113,6 +113,14 @@ make check         # build, then run the full suite plus the leak gate
 make tui-agent     # build and launch the terminal UI
 ```
 
+To produce the binaries you would actually ship, use the optimized, stripped
+targets — `-Xs` is where nearly all of the size reduction comes from:
+
+```sh
+make release-agent # hildi-agent, optimized and stripped (~3.9 MB measured)
+make release-tui   # hildi,       optimized and stripped (~3.4 MB measured)
+```
+
 `make deps` needs `curl`, `openssl`, and `tar`. The CA bundle is committed, so
 only SQLite and mbedTLS are downloaded; both are pinned to immutable releases and
 checksum-verified.

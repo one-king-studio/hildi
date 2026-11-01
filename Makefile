@@ -156,10 +156,7 @@ MARKDOWN_SRCS := $(wildcard $(SRC)/markdown/*.pas)
 FILEIGNORE_SRCS := $(wildcard $(SRC)/fileignore/*.pas)
 TEST_SRCS := $(wildcard $(TESTS)/*.pas)
 
-.PHONY: all test test-leak watch check release clean help libsqlite libmbedtls deps \
-        store-demo agent-cli release-agent-cli tui-demo widgets-demo layout-demo \
-        headless-agent tui-agent bench perf agents agent-% mcp-smoke smoke smoke-list async-standalone async-bench async-freeze async-examples \
-        probe heap-report
+.PHONY: all test test-leak watch check release clean help libsqlite libmbedtls deps store-demo agent-cli release-agent-cli release-tui release-agent tui-demo widgets-demo layout-demo headless-agent tui-agent bench perf agents agent-% mcp-smoke smoke smoke-list async-standalone async-bench async-freeze async-examples probe heap-report
 
 # Fetch and verify every vendored dependency. The README tells a new contributor
 # to run this first, and it used to be a silent no-op: there was no `deps` rule,
@@ -304,6 +301,32 @@ $(BIN)/hildi-agent: $(EXAMPLES)/headless_agent.pas $(LIB_SRCS) $(TUILIB_SRCS) $(
 # runs; Ctrl-C quits. Drives the headless agent. A pure client: no engine.
 tui-agent: headless-agent $(BIN)/hildi
 	$(BIN)/hildi $(ARGS)
+
+# Optimized builds of the two binaries the project actually SHIPS. Until these
+# existed, `make release` built hildi-demo-release (an example) and
+# release-agent-cli built the CLI, so there was no way to produce -- or measure
+# -- a release artifact of hildi or hildi-agent at all.
+#
+# -Xs strips symbols and is where most of the reduction lies: measured on
+# x86_64-linux, hildi goes 11.45 MB -> 3.40 MB and hildi-agent 15.37 MB ->
+# 3.91 MB. -Os instead of -O2 buys 0.6% on the agent, which is not worth
+# trading speed for, so RELEASE stays as it is.
+release-tui: libsqlite libmbedtls $(BIN)/hildi-release
+
+release-agent: libsqlite libmbedtls $(BIN)/hildi-agent-release
+
+# Release units go to RELUNITS, not DBGUNITS: FPC reuses a ppu only when the
+# consumer's flags match, and mixing -O2 with -O- output in one directory
+# recompiles everything on every switch. The -Fu list must match the debug
+# recipe's exactly, for the same reason -- a mismatch silently invalidates it.
+$(BIN)/hildi-agent-release: $(EXAMPLES)/headless_agent.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
+	@mkdir -p $(BIN) $(RELUNITS)
+	$(FPC) $(FPCARGS) $(RELEASE) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -FU$(RELUNITS) -FE$(BIN) -o$@ $<
+
+$(BIN)/hildi-release: $(EXAMPLES)/tui_agent.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
+	@mkdir -p $(BIN) $(RELUNITS)
+	@# The TUI is a pure client: no agent, loop, tool or runtime unit links here.
+	$(FPC) $(FPCARGS) $(RELEASE) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -FU$(RELUNITS) -FE$(BIN) -o$@ $<
 
 $(BIN)/hildi: $(EXAMPLES)/tui_agent.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(BIN) $(DBGUNITS)
@@ -539,6 +562,8 @@ help:
 	@echo "  make libsqlite                build vendored SQLite static archive"
 	@echo "  make release                  build an optimized example"
 	@echo "  make release-agent-cli        build the optimized, static CLI binary"
+	@echo "  make release-tui              build the optimized, stripped TUI binary"
+	@echo "  make release-agent            build the optimized, stripped runtime binary"
 	@echo "  make tui-demo                 build & run the interactive TUI demonstration"
 	@echo "  make widgets-demo             build & run the widget-kit demo"
 	@echo "  make layout-demo              build & run the responsive two-column layout demo"

@@ -87,7 +87,10 @@ until it passes.
 | `make test-leak-parallel` | the same leak run, one process per suite |
 | `make check` | **all gates**: both suite passes (parallel) + both library isolation checks |
 | `make watch [TARGET=test-leak]` | auto-rerun on source changes |
-| `make release` | optimized example build |
+| `make release-tui` | optimized, stripped TUI — the shipping artifact (3.4 MB) |
+| `make release-agent` | optimized, stripped runtime — the shipping artifact (3.9 MB) |
+| `make release-agent-cli` | optimized, static CLI binary |
+| `make release` | optimized *example* build (not a shipping artifact) |
 | `make clean` | remove build artifacts |
 
 `make build/bin/hildi` builds the TUI. Beware `make tui-agent`, which **builds
