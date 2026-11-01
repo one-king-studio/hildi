@@ -275,6 +275,14 @@ const
     'plainly what you left and why. Finish with a one-line summary of what you ' +
     'reverted.';
 
+{ Scan the standard skill locations for the given registry, import the valid
+  entries, and set the approval gate. AUserHome is a PARAMETER rather than read
+  inside so a test can point it at nothing and never touch the real home
+  directory. Returns how many skills were imported. }
+function DiscoverSkillFiles(ARegistry: TSkillRegistry;
+  const AWorkspaceRoot, AUserHome: string; AApproval: IApprovalService;
+  AWorkspaceId: Integer; const ASessionId: string): Integer;
+
 implementation
 
 destructor THarnessSession.Destroy;
@@ -1210,7 +1218,7 @@ begin
 end;
 
 function DiscoverSkillFiles(ARegistry: TSkillRegistry;
-  const AWorkspaceRoot: string; AApproval: IApprovalService;
+  const AWorkspaceRoot, AUserHome: string; AApproval: IApprovalService;
   AWorkspaceId: Integer; const ASessionId: string): Integer;
 var
   Found: TSkillFileArray;
@@ -1218,15 +1226,12 @@ var
 begin
   { Scan, import, and hand the registry its gate. Split out from Init so it can be
     called again later (a rescan after a skill is installed) and tested without a
-    session.
-
-    Home comes from GetUserDir rather than an env read: it is what every other
-    part of the codebase uses, and a HOME that disagrees with the rest of the
-    process is a bug we cannot fix here. }
+    session - including WITHOUT reading the real home directory, which is why the
+    home path is a parameter rather than a call to GetUserDir inside here. }
   Result := 0;
   if ARegistry = nil then
     Exit;
-  Found := ScanSkills(AWorkspaceRoot, ExcludeTrailingPathDelimiter(GetUserDir));
+  Found := ScanSkills(AWorkspaceRoot, AUserHome);
   Result := ImportSkills(ARegistry, Found, Shadowed);
   { The gate is set AFTER import so a load cannot slip through between the two:
     the registry asks on every file-backed load, and the service is already there
@@ -1485,7 +1490,8 @@ begin
     global scope. A skill whose name is shadowed by a project-scope one is
     dropped by ImportSkills and reported through AShadowed, which we discard:
     there is no operator surface for it yet. }
-  DiscoverSkillFiles(FSkills, FView.WorkspaceRoot, ApprovalService,
+  DiscoverSkillFiles(FSkills, FView.WorkspaceRoot,
+    ExcludeTrailingPathDelimiter(GetUserDir), ApprovalService,
     FView.WorkspaceId, FView.SessionId);
   FLoop.AddProvider(FSkillsKeep);
   { The board contributes its TOC through the same seam the skills manifest uses.

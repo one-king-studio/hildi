@@ -98,6 +98,10 @@ type
       asking: typing the name is the approval. Deliberately not workspace scope -
       one session's operator has not consented for the whole workspace. }
     procedure TestOperatorSkillLoadGrantsSessionAndLoads;
+    { Discovery is WIRED, not merely implemented: a SKILL.md in the workspace is
+      found, imported and gated at session open. The home path is passed in so
+      the test never reads the real home directory. }
+    procedure TestDiscoverSkillFilesImportsAndGates;
     { The skill descriptions (the STABLE half of the manifest) must reach the
       loop even when no MCP server is configured. They were briefly gated on
       FMcp <> nil, which silently dropped a locally-declared skill's description:
@@ -1449,6 +1453,43 @@ begin
       Ord(Session.Skills.StateOf('operator_pick')));
   finally
     Session.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestDiscoverSkillFilesImportsAndGates;
+var
+  Reg: TSkillRegistry;
+  SkillDir: string;
+  Fs: TFileStream;
+  Text: string;
+  N: Integer;
+begin
+  { Discovery is WIRED, not merely implemented. A SKILL.md in the workspace must
+    be found and imported, and the registry must carry the gate afterwards - a
+    file-backed skill that loaded ungated would be the hole the gate exists to
+    close. }
+  SkillDir := IncludeTrailingPathDelimiter(FDir) + '.agents' + PathDelim +
+    'skills' + PathDelim + 'wired';
+  ForceDirectories(SkillDir);
+  Text := '---'#10'name: wired'#10'description: found on disk'#10'---'#10'Body.';
+  Fs := TFileStream.Create(IncludeTrailingPathDelimiter(SkillDir) + 'SKILL.md',
+    fmCreate);
+  try
+    Fs.WriteBuffer(Text[1], Length(Text));
+  finally
+    Fs.Free;
+  end;
+
+  Reg := TSkillRegistry.Create;
+  try
+    { An empty home path: the test must not read the operator's real skills. }
+    N := DiscoverSkillFiles(Reg, FDir, '', nil, 1, 'sess-1');
+    AssertEquals('imported', 1, N);
+    AssertEquals('the key is derived', 'wired', Reg.Keys[0]);
+    AssertEquals('carries its body', 'Body.', Reg.InstructionsOf('wired'));
+    AssertTrue('and its location', Reg.SkillOf('wired').Location <> '');
+  finally
+    Reg.Free;
   end;
 end;
 
