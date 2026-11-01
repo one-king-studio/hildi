@@ -92,6 +92,23 @@ Work TDD-first: each phase adds its tests before its implementation and runs
 
 ## Phase 8 — operator activation (`/skill` and `ctrl+=`)
 
+**Blocked on a seam, not on design.** `THarnessApp` holds a `TSessionView`, which
+has no `Skills` property, and `ISessionDriver` does not expose the registry
+either. The app therefore cannot ask "what skills are available?" — needed for
+both the command list entry and the selector.
+
+Three ways in, and it is a choice rather than a puzzle:
+
+1. Put `Skills` on `ISessionDriver` (remote enforces it over the protocol — a
+   `scSkills` command; local returns its session's registry directly).
+2. Put the registry on `TSessionView`, which the app already holds.
+3. Give the app its own reference at construction, alongside `FDriver`.
+
+Option 2 is probably right — the view is the app's window onto the session, and
+the registry is session state. Option 1 is the only one that works for a purely
+remote app, which matters because the TUI is a client.
+
+- [ ] **Decide the seam above before writing any of Phase 8.**
 - [ ] **Test**: `/skill` opens the skill selector.
 - [ ] **Test**: `ctrl+=` opens the same selector.
 - [ ] **Test**: selecting a skill side-loads it and records a session approval.
