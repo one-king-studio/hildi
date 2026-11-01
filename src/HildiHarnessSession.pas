@@ -14,7 +14,7 @@ interface
 uses
   Classes, Contnrs, SysUtils,
   AsyncBase, AsyncScheduler, AsyncConcurrency,
-  HildiLLM, HildiAgent, HildiSkills,
+  HildiLLM, HildiAgent, HildiSkills, HildiSkillsFiles,
   HildiApproval,
   HildiApprovalStore, HildiCommandTool,
   HildiFiles,
@@ -1209,6 +1209,31 @@ begin
   ComposeStablePrompt;
 end;
 
+function DiscoverSkillFiles(ARegistry: TSkillRegistry;
+  const AWorkspaceRoot: string; AApproval: IApprovalService;
+  AWorkspaceId: Integer; const ASessionId: string): Integer;
+var
+  Found: TSkillFileArray;
+  Shadowed: TStringArray;
+begin
+  { Scan, import, and hand the registry its gate. Split out from Init so it can be
+    called again later (a rescan after a skill is installed) and tested without a
+    session.
+
+    Home comes from GetUserDir rather than an env read: it is what every other
+    part of the codebase uses, and a HOME that disagrees with the rest of the
+    process is a bug we cannot fix here. }
+  Result := 0;
+  if ARegistry = nil then
+    Exit;
+  Found := ScanSkills(AWorkspaceRoot, ExcludeTrailingPathDelimiter(GetUserDir));
+  Result := ImportSkills(ARegistry, Found, Shadowed);
+  { The gate is set AFTER import so a load cannot slip through between the two:
+    the registry asks on every file-backed load, and the service is already there
+    by the time any of these entries is reachable. }
+  ARegistry.SetApproval(AApproval, AWorkspaceId, ASessionId);
+end;
+
 function THarnessSession.GrantSkillForSession(const AKey: string;
   out AError: string): Boolean;
 var
@@ -1451,6 +1476,17 @@ begin
     load_skill is offered once any skill is declared. Empty by default. }
   FSkills := TSkillRegistry.Create;
   FSkillsKeep := FSkills;   // owning interface ref
+  { THIRD-PARTY SKILLS ON DISK. Scan the standard locations and import them, so a
+    SKILL.md in the repo or under ~/.local/share/hildi/skills becomes loadable
+    without any per-skill code.
+
+    The approval gate is handed to the registry here: a file-backed skill carries
+    instructions nobody here wrote, so loading one asks - at session, workspace or
+    global scope. A skill whose name is shadowed by a project-scope one is
+    dropped by ImportSkills and reported through AShadowed, which we discard:
+    there is no operator surface for it yet. }
+  DiscoverSkillFiles(FSkills, FView.WorkspaceRoot, ApprovalService,
+    FView.WorkspaceId, FView.SessionId);
   FLoop.AddProvider(FSkillsKeep);
   { The board contributes its TOC through the same seam the skills manifest uses.
     Its tools are registered directly; the provider exists for the tail. }
