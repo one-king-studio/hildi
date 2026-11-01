@@ -17,13 +17,16 @@ uses
 {$ifdef linux}
 const
   SendFlags = MSG_NOSIGNAL;
-  { BaseUnix exports F_SETFD/F_GETFD but not FD_CLOEXEC; the value is POSIX and
-    identical on every Linux ABI FPC targets. Upstream's c266cb6 used the name
-    without importing it, which does not compile here. }
+  { BaseUnix exports F_SETFD/F_GETFD but not FD_CLOEXEC on Linux; the value is
+    POSIX and identical on every ABI FPC targets. }
   FD_CLOEXEC_VALUE = 1;
 {$else}
 const
   SendFlags = 0;
+  { darwin's BaseUnix does export it, so use the real constant rather than a
+    bare 1. This must be defined for EVERY unix platform: SetCloseOnExec is not
+    conditional, so a constant scoped to linux alone fails the build on darwin. }
+  FD_CLOEXEC_VALUE = FD_CLOEXEC;
 {$endif}
 
 { The owner-only runtime directory (a short path, never $HOME). }
