@@ -27,6 +27,7 @@ type
     Env: array of string;      // optional 'NAME=VALUE' additions; nil = inherit
     WorkingDir: string;        // '' => current directory
     ReadTimeoutMs: Integer;    // 0 => DefaultStdioReadTimeoutMs
+    WriteTimeoutMs: Integer;   // 0 => DefaultStdioWriteTimeoutMs
     CloseTimeoutMs: Integer;   // bounded close-then-kill grace; 0 => default
     MaxLineBytes: Integer;     // reject a longer line; 0 => default
     MaxStderrBytes: Integer;   // bound on the retained stderr tail; 0 => default
@@ -76,6 +77,11 @@ type
 
 const
   DefaultStdioReadTimeoutMs = 30000;
+  { A child that stops draining stdin fills the pipe, and a blocking write to a
+    full pipe never returns. Measured: a 1 MB write to a child that never read
+    stdin blocked past 30s with no error. That is an unbounded wait on the
+    tool-call path, so the write side is bounded like the read side. }
+  DefaultStdioWriteTimeoutMs = 30000;
   DefaultStdioCloseTimeoutMs = 2000;
   DefaultStdioMaxLineBytes = 1 shl 20;      // 1 MiB — MCP lines are far smaller
   DefaultStdioMaxStderrBytes = 64 shl 10;   // 64 KiB retained for diagnostics
@@ -127,6 +133,8 @@ begin
   FConfig := AConfig;
   if FConfig.ReadTimeoutMs <= 0 then
     FConfig.ReadTimeoutMs := DefaultStdioReadTimeoutMs;
+  if FConfig.WriteTimeoutMs <= 0 then
+    FConfig.WriteTimeoutMs := DefaultStdioWriteTimeoutMs;
   if FConfig.CloseTimeoutMs <= 0 then
     FConfig.CloseTimeoutMs := DefaultStdioCloseTimeoutMs;
   if FConfig.MaxLineBytes <= 0 then
@@ -318,6 +326,8 @@ function TStdioChild.WriteLine(const ALine: string; out AError: string): Boolean
 var
   Data: AnsiString;
   Off, N: Integer;
+  Deadline: Int64;
+  OldFlags: Integer;
 begin
   AError := '';
   Result := False;
@@ -343,18 +353,42 @@ begin
   end;
   Data := AnsiString(ALine) + #10;
   Off := 1;
-  while Off <= Length(Data) do
-  begin
-    N := fpWrite(FProcess.Input.Handle, @Data[Off], Length(Data) - Off + 1);
-    if N > 0 then
-      Inc(Off, N)
-    else if (N < 0) and (fpGetErrno = ESysEINTR) then
-      Continue
-    else
-    begin
+  { The child's stdin is switched to non-blocking for the duration of this write.
+    -fpSelect- alone is NOT enough: it reports the pipe writable, then fpWrite on
+    a BLOCKING fd waits for the whole request, which is exactly the unbounded
+    block this fixes (measured: 1 MB to a child that never reads hung past 30s).
+    Non-blocking makes a short write return EAGAIN, which the loop retries until
+    the deadline. }
+  OldFlags := fpFcntl(FProcess.Input.Handle, F_GETFL, 0);
+  if OldFlags >= 0 then
+    fpFcntl(FProcess.Input.Handle, F_SETFL, OldFlags or O_NONBLOCK);
+  try
+    Deadline := NowMs + FConfig.WriteTimeoutMs;
+    repeat
+      N := fpWrite(FProcess.Input.Handle, @Data[Off], Length(Data) - Off + 1);
+      if N > 0 then
+      begin
+        Inc(Off, N);
+        Continue;
+      end;
+      if (N < 0) and ((fpGetErrno = ESysEINTR) or
+        (fpGetErrno = ESysEAGAIN) or (fpGetErrno = ESysEWOULDBLOCK)) then
+      begin
+        { The pipe is full: wait for it to drain, but only until the deadline. }
+        if NowMs >= Deadline then
+        begin
+          AError := 'write timed out (child is not reading its stdin)';
+          Exit;
+        end;
+        Sleep(5);
+        Continue;
+      end;
       AError := 'write failed (pipe closed)';
       Exit;
-    end;
+    until Off > Length(Data);
+  finally
+    if OldFlags >= 0 then
+      fpFcntl(FProcess.Input.Handle, F_SETFL, OldFlags);
   end;
   Result := True;
 end;

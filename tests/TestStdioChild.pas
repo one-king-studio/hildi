@@ -23,6 +23,10 @@ type
     procedure TestCloseKillsNonCooperativeChild;
     procedure TestCloseIsIdempotent;
     procedure TestNormalizeExitMapping;
+    { A child that stops draining stdin fills the pipe; a blocking write to a
+      full pipe never returns. Measured before the fix: a 1 MB write hung past
+      30s with no error. The write must bound itself instead. }
+    procedure TestWriteToStalledChildIsBounded;
   end;
 
 implementation
@@ -182,6 +186,35 @@ begin
 end;
 
 { The three TProcess.ExitStatus encodings all normalize to one convention. }
+procedure TStdioChildTest.TestWriteToStalledChildIsBounded;
+var
+  C: TStdioChildConfig;
+  Child: TStdioChild;
+  Err: string;
+  Line: string;
+  Start: Int64;
+begin
+  { The child never reads its stdin, so the pipe fills and stays full. Without a
+    bound this call never returns: measured at >30s before the fix. }
+  C := Default(TStdioChildConfig);
+  C.Executable := '/bin/sh';
+  C.Args := ['-c', 'sleep 60'];
+  C.WriteTimeoutMs := 500;
+  Err := '';
+  Child := TStdioChild.Create(C);
+  try
+    AssertTrue('started: ' + Err, Child.Start(Err));
+    Line := StringOfChar('x', 1000000);
+    Start := GetTickCount64;
+    AssertFalse('the write gives up rather than blocking', Child.WriteLine(Line, Err));
+    AssertTrue('bounded (< 5s for a 500ms timeout)',
+      GetTickCount64 - Start < 5000);
+    AssertTrue('says why: ' + Err, Pos('timed out', Err) > 0);
+  finally
+    Child.Free;
+  end;
+end;
+
 procedure TStdioChildTest.TestNormalizeExitMapping;
 begin
   AssertEquals('plain exit code', 1, NormalizeExit(1));
