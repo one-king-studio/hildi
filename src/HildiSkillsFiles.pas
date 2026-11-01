@@ -92,8 +92,8 @@ function ScanSkillsDir(const ARoot: string; AScope: TSkillScope;
   AMaxDepth: Integer = DefaultSkillScanDepth;
   AMaxDirs: Integer = DefaultSkillScanDirs): TSkillFileArray;
 
-{ Scan the four conventional skill locations: <workspace>/.hildi/skills,
-  <workspace>/.agents/skills, then the same two under AUserHome. Project entries
+{ Scan the conventional skill locations: <workspace>/.agents/skills (project),
+  then ~/.local/share/hildi/skills and ~/.agents/skills (user). Project entries
   come first, and a later user skill with the same name does NOT override an
   earlier project one - the caller decides, but the order makes that natural. }
 function ScanSkills(const AWorkspaceRoot, AUserHome: string): TSkillFileArray;
@@ -628,21 +628,23 @@ var
 begin
   { PROJECT FIRST, then user. ImportSkills keeps the earlier entry on a
     collision, so returning project scope first is what makes project beat user
-    without a second pass. }
+    without a second pass.
+
+    User skills live at the XDG data default (~/.local/share/hildi/skills) and at
+    the cross-client ~/.agents/skills. Both are scanned: the XDG path is ours, the
+    .agents path is how a skill installed by another compliant client is visible
+    here without copying. }
   Result := nil;
   Project := nil;
   User := nil;
   if AWorkspaceRoot <> '' then
-  begin
-    Append(Project, ScanSkillsDir(IncludeTrailingPathDelimiter(AWorkspaceRoot) +
-      '.hildi' + PathDelim + 'skills', skProject));
     Append(Project, ScanSkillsDir(IncludeTrailingPathDelimiter(AWorkspaceRoot) +
       '.agents' + PathDelim + 'skills', skProject));
-  end;
   if AUserHome <> '' then
   begin
     Append(User, ScanSkillsDir(IncludeTrailingPathDelimiter(AUserHome) +
-      '.hildi' + PathDelim + 'skills', skUser));
+      'local' + PathDelim + 'share' + PathDelim + 'hildi' + PathDelim +
+      'skills', skUser));
     Append(User, ScanSkillsDir(IncludeTrailingPathDelimiter(AUserHome) +
       '.agents' + PathDelim + 'skills', skUser));
   end;
