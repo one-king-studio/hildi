@@ -41,6 +41,9 @@ type
     procedure TestHashCommands;
     procedure TestOd;
     procedure TestGrep;
+    { -A/-B/-C.print the surrounding lines. The operator hit the tier refusing
+      "-A 3" outright; the flags now parse AND render. }
+    procedure TestGrepContextLines;
     procedure TestGrepRegex;
     procedure TestGrepMultipleFiles;
     procedure TestGrepRecursive;
@@ -426,6 +429,55 @@ begin
   { A missing file is an error. }
   R := RunCmd('od', ['missing.bin']);
   AssertEquals('missing exit', 2, R.ExitCode);
+end;
+
+procedure TShellCommandsTest.TestGrepContextLines;
+var
+  R: TShellResult;
+  E: string;
+begin
+  { A five-line file so before/after windows are unambiguous. Line 3 matches. }
+  FFs.WriteFile(P('ctx.txt'),
+    'one' + #10 + 'two' + #10 + 'HIT' + #10 + 'four' + #10 + 'five' + #10,
+    False, E);
+
+  { The operator's report: "-A 3" was refused by the tier as an unsupported
+    option. It must parse and render. }
+  R := RunCmd('grep', ['-A', '1', 'HIT', 'ctx.txt']);
+  AssertEquals('after-context', 'HIT' + #10 + 'four' + #10, R.Stdout);
+  AssertEquals('still a match', 0, R.ExitCode);
+
+  { The count may ride on the token, like -m1. }
+  R := RunCmd('grep', ['-A1', 'HIT', 'ctx.txt']);
+  AssertEquals('attached -A1', 'HIT' + #10 + 'four' + #10, R.Stdout);
+
+  R := RunCmd('grep', ['-B', '1', 'HIT', 'ctx.txt']);
+  AssertEquals('before-context', 'two' + #10 + 'HIT' + #10, R.Stdout);
+
+  { -C is symmetric. }
+  R := RunCmd('grep', ['-C', '1', 'HIT', 'ctx.txt']);
+  AssertEquals('both sides', 'two' + #10 + 'HIT' + #10 + 'four' + #10,
+    R.Stdout);
+
+  { Context does NOT change the exit status: a miss is still 1 with no output. }
+  R := RunCmd('grep', ['-A', '2', 'nope', 'ctx.txt']);
+  AssertEquals('a miss is still a miss', 1, R.ExitCode);
+  AssertEquals('and prints nothing', '', R.Stdout);
+
+  { With no -A/-B/-C the output is EXACTLY as before. This is the regression that
+    caught an uninitialised local: the counts must default to zero. }
+  R := RunCmd('grep', ['HIT', 'ctx.txt']);
+  AssertEquals('no context by default', 'HIT' + #10, R.Stdout);
+
+  { A bare -A with no count is an error, not a silent no-op. }
+  R := RunCmd('grep', ['-A', 'HIT', 'ctx.txt']);
+  AssertTrue('a missing count is reported', R.ExitCode <> 0);
+
+  { -l and -c suppress context: they report names and counts, not lines. }
+  R := RunCmd('grep', ['-c', '-A', '2', 'HIT', 'ctx.txt']);
+  AssertEquals('count ignores context', '1' + #10, R.Stdout);
+  R := RunCmd('grep', ['-l', '-A', '2', 'HIT', 'ctx.txt']);
+  AssertEquals('names ignore context', 'ctx.txt' + #10, R.Stdout);
 end;
 
 procedure TShellCommandsTest.TestGrep;

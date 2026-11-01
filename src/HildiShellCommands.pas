@@ -184,7 +184,12 @@ const
     (Name: 'ln'; Options: '-sf'),
     (Name: 'readlink'; Options: '-fe'),
     (Name: 'chmod'; Options: ''),
-    (Name: 'grep'; Options: '-nivlcFEGrm'),
+    { Every letter here must be one the parser actually implements, and every
+      letter the parser implements must be here - a missing one denies a flag
+      that works (q/h/o/w/x were all missing), and a stray one accepts a flag
+      that does nothing. A/B/C take a count, which the tier accepts on the token
+      (-A3) or as the next argument (-A 3). }
+    (Name: 'grep'; Options: '-nivlcFEGrmqhowxABC'),
     (Name: 'sed'; Options: '-nErei'),
     (Name: 'awk'; Options: '-F'),
     (Name: 'find'; Options: ''),
@@ -1901,7 +1906,14 @@ var
   ShowN, IgnoreCase, Invert, ListOnly, CountOnly, Fixed, Extended,
     Recursive, Quiet, NoFilename, OnlyMatch, WordMatch, LineMatch: Boolean;
   MaxCount, MatchSoFar: Integer;
+  { Context lines. -C sets both; -A/-B override their side independently,
+    matching grep: "-C 2 -A 1" gives 1 after, 2 before. }
+  AfterCtx, BeforeCtx: Integer;
   Args: TStringArray;
+  { -A/-B/-C take a count; these carry it while the flag is being decoded. }
+  N: Integer;
+  Ok: Boolean;
+  Ch: Char;
   Pattern, Data, E, Text, Full: string;
   Lines: TStringArray;
   OutText, ErrText: string;
@@ -1912,12 +1924,35 @@ var
 
   procedure ScanStream(const AText, AName: string; AShowName: Boolean);
   var
-    K, Count, M: Integer;
+    K, Count, M, CtxFrom, CtxTo: Integer;
     Ls: TStringArray;
     Hits: TStringArray;
+    UseCtx: Boolean;
+    MatchAt: Integer;   { the line of the last MATCH, which -A counts from }
+
+    { One output line, with grep's field prefixes. AMark is ':' for a match and
+      '-' for context - grep's own convention, so a reader can tell the two
+      apart without colour. }
+    procedure EmitLine(AIndex: Integer; const AMark: string);
+    begin
+      if AShowName and (not NoFilename) then
+        OutText := OutText + AName + AMark;
+      if ShowN then
+        OutText := OutText + IntToStr(AIndex + 1) + AMark;
+      OutText := OutText + Ls[AIndex] + #10;
+    end;
+
   begin
     Ls := LinesOf(AText);
     Count := 0;
+    { Context is a RENDERING concern: -A/-B/-C never change what matches or what
+      the exit status is, so all of that below stays exactly as it was without
+      them. -o, -l, -c and -q imply no context, as in grep. }
+    UseCtx := (AfterCtx > 0) or (BeforeCtx > 0);
+    if UseCtx and (ListOnly or CountOnly or Quiet or OnlyMatch) then
+      UseCtx := False;
+    CtxTo := -1;    { the last line already emitted, so none is printed twice }
+    MatchAt := -1;  { the last MATCH line; -A counts from here, not from CtxTo }
     for K := 0 to High(Ls) do
       if (MaxCount > 0) and (Count >= MaxCount) then
         Break
@@ -1938,12 +1973,38 @@ var
           end;
           Continue;
         end;
-        { -h drops the filename a multi-file search would print. }
-        if AShowName and (not NoFilename) then
-          OutText := OutText + AName + ':';
-        if ShowN then
-          OutText := OutText + IntToStr(K + 1) + ':';
-        OutText := OutText + Ls[K] + #10;
+        if UseCtx then
+        begin
+          { The -B lines, skipping anything the previous match's -A already
+            printed, and inserting grep's "--" between non-adjacent groups. }
+          CtxFrom := K - BeforeCtx;
+          if CtxFrom < 0 then
+            CtxFrom := 0;
+          if CtxFrom <= CtxTo then
+            CtxFrom := CtxTo + 1
+          else if (CtxTo >= 0) and (CtxFrom > CtxTo + 1) then
+            OutText := OutText + '--'#10;
+          for M := CtxFrom to K - 1 do
+            EmitLine(M, '-');
+          EmitLine(K, ':');
+          CtxTo := K;
+          MatchAt := K;
+        end
+        else
+        begin
+          EmitLine(K, ':');
+          MatchAt := K;
+        end;
+      end
+      else if UseCtx and (MatchAt >= 0) and (K <= MatchAt + AfterCtx)
+        and (K > CtxTo) then
+      begin
+        { A trailing -A line. The window is counted from the last MATCH, not
+          from the last line emitted - counting from CtxTo let each context line
+          extend the window, so -A1 printed the rest of the file. CtxTo still
+          guards against reprinting after a -B overlap. }
+        EmitLine(K, '-');
+        CtxTo := K;
       end;
     if Count > 0 then
       Status := 0;
@@ -2065,6 +2126,12 @@ begin
   OnlyMatch := False;
   WordMatch := False;
   LineMatch := False;
+  { Local integers are NOT zero-initialised by FPC, and the context counts gate
+    rendering. Left unset they held garbage, so a plain `grep a.*a a.txt` emitted
+    the following line as context - a regression the suite caught immediately.
+    Every other flag here has an explicit default; these now do too. }
+  AfterCtx := 0;
+  BeforeCtx := 0;
   MaxCount := 0;
   I := 0;
   while I <= High(ACall.Args) do
@@ -2119,6 +2186,37 @@ begin
                   Exit(Usage('grep: option requires an argument -- m'));
                 Inc(I);
                 MaxCount := StrToIntDef(ACall.Args[I], 0);
+              end;
+            end;
+          'A', 'B', 'C':
+            begin
+              { -A3 / -A 3 / -C2 / -C 2. The count rides on the token or is the
+                next argument; a bare -A with no count is an error, as in grep. }
+              Ch := ACall.Args[I][J];
+              Ok := False;
+              N := 0;
+              if J < Length(ACall.Args[I]) then
+              begin
+                Ok := TryStrToInt(Copy(ACall.Args[I], J + 1, MaxInt), N);
+                J := Length(ACall.Args[I]);
+              end
+              else if I < High(ACall.Args) then
+              begin
+                Ok := TryStrToInt(ACall.Args[I + 1], N);
+                if Ok then
+                  Inc(I);
+              end;
+              if (not Ok) or (N < 0) then
+                Exit(Usage('grep: option requires an argument -- ' +
+                  string(Ch)));
+              if Ch = 'A' then
+                AfterCtx := N
+              else if Ch = 'B' then
+                BeforeCtx := N
+              else
+              begin
+                AfterCtx := N;
+                BeforeCtx := N;
               end;
             end;
         end;
