@@ -139,6 +139,7 @@ type
     procedure AppendError(const AMessage, ADetail: string);
     procedure AppendAmbient(const AText, ARefSessionId, ALabel, ASource,
       AStatus: string; AElapsedMs: Int64);
+    procedure AppendSkill(const ASkillKey, AText: string);
     function BeginTurn: Int64;
     function BeginRequest(ATurnId: Int64; const AModel: string;
       AMessageCount: Integer): Int64;
@@ -169,6 +170,8 @@ type
     LastAssistant: TChatMessage;
     UserAppends: Integer;
     AmbientAppends: Integer;
+    SkillAppends: Integer;
+    LastSkillKey: string;
     LastAmbientRef: string;
     LastAmbientMs: Int64;
     constructor Create;
@@ -180,6 +183,7 @@ type
     procedure AppendError(const AMessage, ADetail: string);
     procedure AppendAmbient(const AText, ARefSessionId, ALabel, ASource,
       AStatus: string; AElapsedMs: Int64);
+    procedure AppendSkill(const ASkillKey, AText: string);
     function BeginTurn: Int64;
     function BeginRequest(ATurnId: Int64; const AModel: string;
       AMessageCount: Integer): Int64;
@@ -323,6 +327,9 @@ type
     procedure TestQueuedPromptIsInjected;
     procedure TestQueuedPromptSupersedesAToolCall;
     procedure TestQueuedPromptsStartTheNextTurn;
+    { Ambient skill bodies: WHERE the row lands is the whole contract. }
+    procedure TestOperatorSkillBodyLandsAheadOfThePrompt;
+    procedure TestToolLoadedSkillBodyLandsAfterTheToolResult;
   end;
 
 implementation
@@ -620,6 +627,11 @@ begin
   FInner.AppendAmbient(AText, ARefSessionId, ALabel, ASource, AStatus, AElapsedMs);
 end;
 
+procedure TCountingStore.AppendSkill(const ASkillKey, AText: string);
+begin
+  FInner.AppendSkill(ASkillKey, AText);
+end;
+
 function TCountingStore.BeginTurn: Int64;
 begin
   Result := FInner.BeginTurn;
@@ -704,6 +716,15 @@ begin
   LastAmbientRef := ARefSessionId;
   LastAmbientMs := AElapsedMs;
   FInner.AppendAmbient(AText, ARefSessionId, ALabel, ASource, AStatus, AElapsedMs);
+end;
+
+procedure TRecordingStore.AppendSkill(const ASkillKey, AText: string);
+begin
+  { Record it so a test can assert the body landed, and when relative to the
+    tool result - that ordering is the whole point of the queue. }
+  Inc(SkillAppends);
+  LastSkillKey := ASkillKey;
+  FInner.AppendSkill(ASkillKey, AText);
 end;
 
 function TRecordingStore.BeginTurn: Int64;
@@ -2143,6 +2164,11 @@ type
     ToolName: string;
     Fragment: string;
     Found: Integer;
+    { When set, the handler pushes a skill body onto this queue - exactly what
+      the session does on a tool-initiated load, since the registry's OnLoaded
+      fires from inside the handler. }
+    Queue: TPromptQueue;
+    SkillKey: string;
     procedure Prepare;
     function Specs: TToolSpecArray;
     function PromptFragment: string;
@@ -2168,6 +2194,12 @@ function TStubProvider.Handle(const AArgumentsJson: string;
   out AResult: string; out AError: string;
   AObserver: TToolObserver): Boolean;
 begin
+  { A tool-initiated skill load: the body is QUEUED from inside the handler,
+    which is where the registry's OnLoaded fires. The loop must place it after
+    this call's result. }
+  if (Queue <> nil) and (SkillKey <> '') then
+    Queue.PushSkill(SkillKey, '<skill_content name="' + SkillKey + '">' +
+      LineEnding + 'STUBBODY' + LineEnding + '</skill_content>');
   AResult := 'stub result';
   AError := '';
   Result := True;
@@ -3135,6 +3167,89 @@ begin
   end;
 end;
 
+
+procedure TAgentLoopTest.TestOperatorSkillBodyLandsAheadOfThePrompt;
+var
+  Rec: TRecordingStore;
+  Msgs: TChatMessageArray;
+  Answer: string;
+  Err: TLLMError;
+  I, SkillAt, PromptAt: Integer;
+begin
+  { AN OPERATOR SIDE-LOAD: the body must sit AHEAD of their prompt, so the
+    prompt is the last message in the request and in the rendered history. }
+  Rec := BuildLoopRecording;
+  FLoop.PromptQueue.PushSkill('pdf_processing',
+    '<skill_content name="pdf-processing">' + LineEnding + 'BODY' + LineEnding +
+    '</skill_content>');
+  FFake.AddResponse([TextDelta('ok'), FinishFrame('stop'), DoneFrame]);
+  AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
+
+  Msgs := Rec.Messages;
+  SkillAt := -1;
+  PromptAt := -1;
+  for I := 0 to High(Msgs) do
+  begin
+    if Pos('<skill_content', Msgs[I].Content) > 0 then
+      SkillAt := I;
+    if Msgs[I].Content = 'go' then
+      PromptAt := I;
+  end;
+  AssertTrue('the skill body was persisted', SkillAt >= 0);
+  AssertTrue('the prompt was persisted', PromptAt >= 0);
+  AssertTrue('the body sits ahead of the prompt', SkillAt < PromptAt);
+  { The prompt is the last OPERATOR-AUTHORED message: the assistant's reply comes
+    after it in the store, which is normal, but nothing may be injected after it.
+    That is what keeps the sent request ending on the user turn. }
+  for I := PromptAt + 1 to High(Msgs) do
+    AssertTrue('nothing injected after the prompt: ' + Msgs[I].Content,
+      Pos('<skill_content', Msgs[I].Content) = 0);
+  AssertEquals('recorded as a skill append, not a user append', 1,
+    Rec.SkillAppends);
+  AssertEquals('the key rides with it', 'pdf_processing', Rec.LastSkillKey);
+end;
+
+procedure TAgentLoopTest.TestToolLoadedSkillBodyLandsAfterTheToolResult;
+var
+  Rec: TRecordingStore;
+  P: TStubProvider;
+  Msgs: TChatMessageArray;
+  Answer: string;
+  Err: TLLMError;
+  I, ToolAt, SkillAt: Integer;
+begin
+  { AN AGENT-INITIATED LOAD: the body is queued from inside the tool handler and
+    must land AFTER that call's result. Landing between the assistant's
+    tool_calls message and its result is the ordering providers reject. }
+  Rec := BuildLoopRecording;
+  P := TStubProvider.Create;
+  P.ToolName := 'load_skill_stub';
+  P.Queue := FLoop.PromptQueue;
+  P.SkillKey := 'pdf_processing';
+  FLoop.AddProvider(P);
+  { No Free: the provider is passed as an interface, so adding it took its own
+    reference. The test's local is not the owner. }
+  FFake.AddResponse([ToolNameFrame(0, 'c1', 'load_skill_stub'),
+    ToolArgsFrame(0, '{"reason":"r"}'), FinishFrame('tool_calls'), DoneFrame]);
+  FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
+  AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
+
+  Msgs := Rec.Messages;
+  ToolAt := -1;
+  SkillAt := -1;
+  for I := 0 to High(Msgs) do
+  begin
+    if (Msgs[I].Role = crTool) and (Msgs[I].ToolCallId = 'c1') then
+      ToolAt := I;
+    if Pos('<skill_content', Msgs[I].Content) > 0 then
+      SkillAt := I;
+  end;
+  AssertTrue('the tool result was persisted', ToolAt >= 0);
+  AssertTrue('the skill body was persisted', SkillAt >= 0);
+  { THE ASSERTION THIS WHOLE CHANGE EXISTS FOR. }
+  AssertTrue('the body follows the tool result', SkillAt > ToolAt);
+  AssertEquals('one skill append', 1, Rec.SkillAppends);
+end;
 initialization
   RegisterTest(TAgentLoopTest);
 end.

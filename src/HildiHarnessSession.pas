@@ -57,6 +57,10 @@ type
       by refcount, never by a raw Free. }
     FSkills: TSkillRegistry;
     FSkillsKeep: IToolProvider;
+    { True while an operator-initiated load runs: that path is never inside a
+      turn, so the body can be appended directly. A tool-initiated load is
+      inside one and must be enqueued for the next request boundary. }
+    FLoadingByOperator: Boolean;
     { The change-log recorder: hears what a tool call changed and writes it down.
       Nil when the session has no store, so a database-less session records
       nothing rather than failing. }
@@ -220,6 +224,11 @@ type
       a UI). }
     function GrantSkillForSession(const AKey: string;
       out AError: string): Boolean;
+    { Deliver a loaded skill's body into the conversation. Called from the
+      registry's OnLoaded: enqueues while a turn is running (so it lands at a
+      request boundary, after the tool result), appends directly when the turn is
+      over, which is the only safe moment. }
+    procedure SkillLoaded(const ASkill: TSkill);
     { The session's approval service, so the runtime can hand it to the
       delegation tools. }
     property ApprovalService: IApprovalService read FApprovalService;
@@ -1210,6 +1219,8 @@ begin
   end;
   { Declare/replace a skill per configured server (no connect). }
   RegisterMcpSkills(FSkills, Cfg, FMcp);
+  { A load delivers the body into the conversation instead of the tail. }
+  FSkills.OnLoaded := SkillLoaded;
   { The STABLE half - each skill's description and when-to-use - goes to the
     system prompt, where stable text belongs. Only the activation state stays in
     the per-request fragment, so the manifest stops costing ~105 tokens on every
@@ -1273,6 +1284,28 @@ begin
   Result := True;
 end;
 
+procedure THarnessSession.SkillLoaded(const ASkill: TSkill);
+begin
+  { Nothing to deliver for a tool-only declaration (an MCP-style source): it has
+    no body, so there is nothing to put in the context. }
+  if ASkill.Instructions = '' then
+    Exit;
+  if (FLoop = nil) or (FConversation = nil) then
+    Exit;
+  { TWO PLACEMENTS, decided by who initiated the load.
+
+    The AGENT called load_skill: the body must land AFTER the tool result, so it
+    is queued and drained at the next request boundary - appending here would
+    interleave a user message between the assistant's tool_calls message and its
+    result, which providers reject.
+
+    The OPERATOR side-loaded it: the body goes AHEAD of their prompt, so the
+    prompt stays last in the conversation. That is a request-boundary placement
+    too, so it is queued as well - the loop drains it immediately before the
+    prompt is appended. }
+  FLoop.PromptQueue.PushSkill(ASkill.Key, RenderSkillContent(ASkill));
+end;
+
 function THarnessSession.LoadSkillByName(const AKey: string;
   out AError: string): Boolean;
 begin
@@ -1287,7 +1320,13 @@ begin
   end;
   if not GrantSkillForSession(AKey, AError) then
     Exit(False);
-  Result := FSkills.LoadSkill(AKey, AError);
+  { The operator named it, so no turn is running and the append is direct. }
+  FLoadingByOperator := True;
+  try
+    Result := FSkills.LoadSkill(AKey, AError);
+  finally
+    FLoadingByOperator := False;
+  end;
 end;
 
 function THarnessSession.Init(const AConfig: THarnessSessionConfig;

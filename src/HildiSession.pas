@@ -25,7 +25,14 @@ type
     mrSystem, mrUser, mrAssistant, mrReasoning, mrToolCall, mrTool, mrError,
     { An ambient notification: a subagent's result delivered back to the parent.
       Appended last so stored ordinals are unchanged. }
-    mrAmbient);
+    mrAmbient,
+    { A skill body injected into the context. Carries the skill KEY in
+      RefSessionId, so the loaded set can be derived from the history
+      (SELECT DISTINCT ref_session_id ... role = mrSkill) rather than tracked
+      separately - correct by construction after a load, an undo, a cancel, or a
+      checkpoint rebuild.
+    }
+    mrSkill);
 
   { tsUndone is APPENDED, never inserted: the status is persisted as its
     ordinal, so a new member in the middle would silently reinterpret every

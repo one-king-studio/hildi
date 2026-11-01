@@ -1605,6 +1605,14 @@ begin
         if Rec.Content <> '' then
           FPanel.Stream.Add(ckAmbient, Rec.LabelText + ' · ' + Rec.Status,
             Rec.Content);
+      mrSkill:
+        { A skill body that was injected into the context and stays there. Drawn
+          collapsed - it is a deliberate, potentially long block, and the
+          operator asked for what is loaded to be visible rather than in the way.
+          The key is in RefSessionId, so the title names the skill without
+          re-parsing the body. }
+        FPanel.Stream.Add(ckAmbient, 'skill · ' + Rec.RefSessionId,
+          Rec.Content);
     end;
   end;
   { The final turn's divider. }

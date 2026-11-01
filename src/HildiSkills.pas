@@ -66,6 +66,17 @@ type
     Compatibility: string;
   end;
 
+  { A skill finished ACTIVATING. Declared after TSkill (declaration order
+    matters here: the record must exist before an event can carry it).
+
+    The handler only ANNOUNCES. The body is delivered to the model by the owner
+    writing it into the conversation, and the owner must not do that from inside
+    the load_skill handler: the loop appends the tool result AFTER the handler
+    returns, so an append here would put a user message between the assistant's
+    tool_calls message and its result, which providers reject. The owner
+    therefore enqueues, and the loop drains at the next request boundary. }
+  TSkillLoadedEvent = procedure(const ASkill: TSkill) of object;
+
   TSkillEntry = class
   public
     Skill: TSkill;
@@ -85,6 +96,7 @@ type
     FApproval: IApprovalService;
     FWorkspaceId: Integer;
     FSessionId: string;
+    FOnLoaded: TSkillLoadedEvent;
     function IndexOfKey(const AKey: string): Integer;
     function TtlOf(const AEntry: TSkillEntry): Int64;
     function ActiveInstructions: string;
@@ -148,7 +160,16 @@ type
       belongs, rather than riding every request in the prompt fragment. }
 
     function StableText: string;
+
+    { Announce activation. The owner turns this into a conversation append; the
+      registry itself never touches the store. }
+    property OnLoaded: TSkillLoadedEvent read FOnLoaded write FOnLoaded;
   end;
+
+{ The activation payload for a skill: the body wrapped in <skill_content>, with
+  its directory and a listed (not read) resource set. The owner calls this to
+  inject the body into the conversation. }
+function RenderSkillContent(const ASkill: TSkill): string;
 
 const
   { The default idle TTL for a skill that does not set one. }
@@ -438,11 +459,11 @@ begin
       model tell skill instructions from conversation, and let compaction
       recognise skill content when deciding what to prune. The frontmatter is
       stripped because we already parsed it and re-sending it wastes tokens. }
-    if (I >= 0) and (TSkillEntry(FEntries[I]).Skill.Location <> '') then
-    begin
-      AResult := RenderSkillContent(TSkillEntry(FEntries[I]).Skill);
-      Exit(True);
-    end;
+    { The BODY is not returned here. It is injected into the conversation
+      instead (see TSkillLoadedEvent): returning it would put the same text in
+      the tool result AND in the context, and the tool result is the copy that
+      gets truncated at the tool-result cap. The receipt below is the transcript
+      record of what happened. }
     Names := '';
     if I >= 0 then
       for K := 0 to High(TSkillEntry(FEntries[I]).Tools) do
@@ -581,6 +602,11 @@ begin
     E.Tools := nil;
   E.State := ssLoaded;
   E.LastUsedMs := NowMs;
+  { ANNOUNCE, do not append. The owner delivers the body at a request boundary;
+    appending from here would land a user message between the assistant's
+    tool_calls message and its result. }
+  if Assigned(FOnLoaded) then
+    FOnLoaded(E.Skill);
   Result := True;
 end;
 
@@ -639,7 +665,11 @@ begin
   if FEntries.Count = 0 then
     Exit('');
   Result := Manifest;
-  Instr := ActiveInstructions;
+  { The BODY no longer rides the per-request fragment. It is injected once into
+    the conversation (an mrSkill message) and stays there, so re-sending it every
+    request only inflates the request. ActiveInstructions is now unreferenced
+    here on purpose; it is kept for the manifest's internal use. }
+  Instr := '';
   if Instr <> '' then
     Result := Result + LineEnding + Instr;
 end;

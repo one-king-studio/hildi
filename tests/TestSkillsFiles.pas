@@ -28,6 +28,12 @@ type
   TSkillsFilesTest = class(TTestCase)
   private
     FDir: string;
+    { What the registry announced on activation. The body moves HERE now, so a
+      test that wants to assert the payload builds it from this, not from the
+      tool result. }
+    FLoaded: TSkill;
+    FLoadCount: Integer;
+    procedure CaptureLoaded(const ASkill: TSkill);
     function WriteSkill(const ARelDir, AText: string): string;
     function Skill(const AName, ADesc: string): TSkillFile;
   protected
@@ -109,6 +115,12 @@ end;
 procedure TSkillsFilesTest.TearDown;
 begin
   RemoveDir(FDir);
+end;
+
+procedure TSkillsFilesTest.CaptureLoaded(const ASkill: TSkill);
+begin
+  FLoaded := ASkill;
+  Inc(FLoadCount);
 end;
 
 function TSkillsFilesTest.WriteSkill(const ARelDir, AText: string): string;
@@ -515,7 +527,7 @@ var
   Reg: TSkillRegistry;
   Skills: TSkillFileArray;
   Shadowed: TStringArray;
-  Res, Err: string;
+  Res, Err, Body: string;
   T: TRegisteredTool;
 begin
   WriteSkill('pdf-processing',
@@ -526,12 +538,21 @@ begin
   try
     ImportSkills(Reg, Skills, Shadowed);
     AssertTrue('load_skill resolves', Reg.Find('load_skill', T));
+    Reg.OnLoaded := CaptureLoaded;
     AssertTrue('loaded', T.Handler('{"name":"pdf_processing"}', Res, Err));
-    AssertTrue('wrapped: ' + Res, Pos('<skill_content', Res) > 0);
-    AssertTrue('closed', Pos('</skill_content>', Res) > 0);
-    AssertTrue('names the skill', Pos('name="pdf-processing"', Res) > 0);
-    AssertTrue('carries the body', Pos('Follow these steps.', Res) > 0);
-    AssertTrue('carries the directory', Pos('Skill directory:', Res) > 0);
+    { The tool result is now a RECEIPT: the transcript record of what happened.
+      The body is delivered by the event, so it must NOT be in the result - that
+      copy would also be truncated at the tool-result cap. }
+    AssertEquals('one activation announced', 1, FLoadCount);
+    AssertFalse('no wrapped body in the result', Pos('<skill_content', Res) > 0);
+    AssertFalse('no body text in the result', Pos('Follow these steps.', Res) > 0);
+    { The payload lives on the announced skill. }
+    Body := RenderSkillContent(FLoaded);
+    AssertTrue('wrapped: ' + Body, Pos('<skill_content', Body) > 0);
+    AssertTrue('closed', Pos('</skill_content>', Body) > 0);
+    AssertTrue('names the skill', Pos('name="pdf-processing"', Body) > 0);
+    AssertTrue('carries the body', Pos('Follow these steps.', Body) > 0);
+    AssertTrue('carries the directory', Pos('Skill directory:', Body) > 0);
   finally
     Reg.Free;
   end;
@@ -542,7 +563,7 @@ var
   Reg: TSkillRegistry;
   Skills: TSkillFileArray;
   Shadowed: TStringArray;
-  Res, Err: string;
+  Res, Err, Body: string;
   T: TRegisteredTool;
 begin
   { We already parsed the frontmatter; re-sending it wastes tokens and invites
@@ -555,10 +576,13 @@ begin
   try
     ImportSkills(Reg, Skills, Shadowed);
     AssertTrue('load_skill resolves', Reg.Find('load_skill', T));
+    Reg.OnLoaded := CaptureLoaded;
     AssertTrue('loaded', T.Handler('{"name":"with_meta"}', Res, Err));
-    AssertTrue('the body is there', Pos('Body only.', Res) > 0);
-    AssertFalse('frontmatter is gone', Pos('allowed-tools', Res) > 0);
-    AssertFalse('no name field leaked', Pos('name: with-meta', Res) > 0);
+    { The body moved to the announced skill; the result is a receipt. }
+    Body := RenderSkillContent(FLoaded);
+    AssertTrue('the body is there', Pos('Body only.', Body) > 0);
+    AssertFalse('frontmatter is gone', Pos('allowed-tools', Body) > 0);
+    AssertFalse('no name field leaked', Pos('name: with-meta', Body) > 0);
   finally
     Reg.Free;
   end;
@@ -569,7 +593,7 @@ var
   Reg: TSkillRegistry;
   Skills: TSkillFileArray;
   Shadowed: TStringArray;
-  Res, Err: string;
+  Res, Err, Body: string;
   T: TRegisteredTool;
   ScriptPath: string;
   Fs: TFileStream;
@@ -595,9 +619,12 @@ begin
   try
     ImportSkills(Reg, Skills, Shadowed);
     AssertTrue('load_skill resolves', Reg.Find('load_skill', T));
+    Reg.OnLoaded := CaptureLoaded;
     AssertTrue('loaded', T.Handler('{"name":"with_resources"}', Res, Err));
-    AssertTrue('the resource is listed', Pos('scripts/', Res) > 0);
-    AssertFalse('but NOT read', Pos(Marker, Res) > 0);
+    { The resource LISTING moved to the announced payload with the body. }
+    Body := RenderSkillContent(FLoaded);
+    AssertTrue('the resource is listed', Pos('scripts/', Body) > 0);
+    AssertFalse('but NOT read', Pos(Marker, Body) > 0);
   finally
     Reg.Free;
   end;

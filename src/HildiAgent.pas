@@ -66,6 +66,12 @@ type
       kind (mrAmbient) with the task's id, label, source, status, and elapsed. }
     procedure AppendAmbient(const AText, ARefSessionId, ALabel, ASource,
       AStatus: string; AElapsedMs: Int64);
+    { A SKILL BODY, injected into the context. Delivered to the provider as a
+      user message wrapped by the skill's <skill_content> tag - the same shape
+      the load_skill tool result used to carry - and persisted as its own kind
+      (mrSkill) with ASkillKey in RefSessionId, so the loaded set can be derived
+      from the history rather than tracked in two places. }
+    procedure AppendSkill(const ASkillKey, AText: string);
     { Turn/request audit. BeginTurn opens a loop; the user prompt is appended
       separately, linked to the open turn. Ids are 0 when not persisted. }
     function BeginTurn: Int64;
@@ -90,6 +96,7 @@ type
     procedure AppendError(const AMessage, ADetail: string);
     procedure AppendAmbient(const AText, ARefSessionId, ALabel, ASource,
       AStatus: string; AElapsedMs: Int64);
+    procedure AppendSkill(const ASkillKey, AText: string);
     function BeginTurn: Int64;
     function BeginRequest(ATurnId: Int64; const AModel: string;
       AMessageCount: Integer): Int64;
@@ -174,7 +181,7 @@ type
     board notice. A board notice is TRANSIENT: it is delivered in the tail and
     never persisted, because ten agents posting would otherwise leave 90
     permanent conversation rows that ride every later prompt. }
-  TPromptKind = (pkUser, pkAmbient, pkBoard);
+  TPromptKind = (pkUser, pkAmbient, pkBoard, pkSkill);
 
   TPromptItem = record
     Kind: TPromptKind;
@@ -206,10 +213,20 @@ type
       ACount coalesces several entries into one notice so ten agents posting is
       O(agents x ticks), not O(agents x entries). }
     procedure PushBoard(const AText: string; ACount: Integer);
+    { Queue a SKILL BODY. Delivered by the loop at a request boundary, never
+      from the tool handler: the tool result is appended after the handler
+      returns, so appending from there would interleave a user message between
+      the assistant's tool_calls message and its result. ASkillKey rides in
+      RefSessionId so the loaded set stays derivable from the history. }
+    procedure PushSkill(const ASkillKey, AText: string);
     { Remove and return every queued item, in order. }
     function DrainItems: TPromptItemArray;
     { The queued operator prompts only, in order (ambients excluded). }
     function Drain: TPromptArray;
+    { Remove and return ONLY the queued skill bodies, leaving everything else in
+      place. An operator side-load is drained with this before the prompt is
+      appended, so the skill body sits ahead of the prompt rather than after it. }
+    function DrainSkills: TPromptItemArray;
     function Pending: Boolean;
   end;
 
@@ -280,6 +297,11 @@ type
     FStore: IConversationStore;
     FTools: TToolRegistry;
     FConfig: TAgentConfig;
+    { True for the duration of a Send/SendAmbient. A skill body appended while a
+      turn is running would land between the assistant's tool_calls message and
+      its result, so the owner enqueues instead and the loop drains it at the
+      next request boundary. }
+    FTurnActive: Boolean;
     { The last request's prompt tokens, so the user-message wrapper can show the
       model its context headroom. Zero until the first request returns. }
     FLastPromptTokens: Integer;
@@ -387,6 +409,10 @@ type
     procedure PrepareProviders;
     { Prompts the operator injects into a running turn. }
     property PromptQueue: TPromptQueue read FPromptQueue;
+    { Whether a turn is in flight. An owner appending a skill body consults
+      this: mid-turn it must enqueue (so the row lands after the tool result),
+      idle it can append directly. }
+    property TurnActive: Boolean read FTurnActive;
     { STABLE prompt text appended to the system message on the way out. Set once
       per session from the providers' stable fragments; never persisted. }
     property StablePrompt: string read FStablePrompt write FStablePrompt;
@@ -844,6 +870,19 @@ begin
   Append(Msg);
 end;
 
+procedure TMemoryConversationStore.AppendSkill(const ASkillKey, AText: string);
+var
+  Msg: TChatMessage;
+begin
+  { No store: the body is the content as-is. It carries its own <skill_content>
+    wrapper already, which is what makes it survive the prewrapped check and
+    keeps the message byte-stable. }
+  Msg := Default(TChatMessage);
+  Msg.Role := crUser;
+  Msg.Content := AText;
+  Append(Msg);
+end;
+
 function TMemoryConversationStore.BeginTurn: Int64;
 begin
   FTurnMark := Length(FItems);
@@ -960,6 +999,35 @@ begin
   end;
 end;
 
+function TPromptQueue.DrainSkills: TPromptItemArray;
+var
+  Keep: TPromptItemArray;
+  I: Integer;
+begin
+  { Selective on purpose: an operator side-load must land AHEAD of their prompt,
+    but any other queued item (a subagent result, a board notice) has its own
+    correct placement and must not be dragged along by this call. }
+  Result := nil;
+  Keep := nil;
+  FLock.Acquire;
+  try
+    for I := 0 to High(FItems) do
+      if FItems[I].Kind = pkSkill then
+      begin
+        SetLength(Result, Length(Result) + 1);
+        Result[High(Result)] := FItems[I];
+      end
+      else
+      begin
+        SetLength(Keep, Length(Keep) + 1);
+        Keep[High(Keep)] := FItems[I];
+      end;
+    FItems := Keep;
+  finally
+    FLock.Release;
+  end;
+end;
+
 function TPromptQueue.Drain: TPromptArray;
 var
   Items: TPromptItemArray;
@@ -973,6 +1041,25 @@ begin
       SetLength(Result, Length(Result) + 1);
       Result[High(Result)] := Items[I].Text;
     end;
+end;
+
+procedure TPromptQueue.PushSkill(const ASkillKey, AText: string);
+var
+  Item: TPromptItem;
+begin
+  if AText = '' then
+    Exit;
+  Item := Default(TPromptItem);
+  Item.Kind := pkSkill;
+  Item.Text := AText;
+  Item.RefSessionId := ASkillKey;
+  FLock.Acquire;
+  try
+    SetLength(FItems, Length(FItems) + 1);
+    FItems[High(FItems)] := Item;
+  finally
+    FLock.Release;
+  end;
 end;
 
 function TPromptQueue.Pending: Boolean;
@@ -1135,7 +1222,12 @@ end;
 
 function IsPrewrappedUserMessage(const AContent: string): Boolean;
 begin
-  Result := (Pos('<ambient', AContent) = 1) or (Pos('<handoff', AContent) = 1);
+  { A skill body carries its own <skill_content> wrapper. Like an ambient
+    message it must get no tail: the body has to stay byte-identical across
+    requests, or the prefix cache is lost and the "never disappears" contract
+    starts costing tokens on every turn. }
+  Result := (Pos('<ambient', AContent) = 1) or (Pos('<handoff', AContent) = 1)
+    or (Pos('<skill_content', AContent) = 1);
 end;
 
 function RetryBackoffMs(AAttempt, ABaseMs, AMaxMs: Integer): Integer;
@@ -1565,14 +1657,24 @@ function TAgentLoop.Send(const AUserText: string; const AEvents: TAgentEvents;
   out AAnswer: string; out AError: TLLMError): Boolean;
 begin
   FAmbientTurn := False;
-  Result := DoSend(AUserText, AEvents, AAnswer, AError);
+  FTurnActive := True;
+  try
+    Result := DoSend(AUserText, AEvents, AAnswer, AError);
+  finally
+    FTurnActive := False;
+  end;
 end;
 
 function TAgentLoop.SendAmbient(const AEvents: TAgentEvents;
   out AAnswer: string; out AError: TLLMError): Boolean;
 begin
   FAmbientTurn := True;
-  Result := DoSend('', AEvents, AAnswer, AError);
+  FTurnActive := True;
+  try
+    Result := DoSend('', AEvents, AAnswer, AError);
+  finally
+    FTurnActive := False;
+  end;
 end;
 
 procedure TAgentLoop.DrainQueued(const AEvents: TAgentEvents);
@@ -1589,6 +1691,13 @@ begin
       { TRANSIENT by design: nothing is persisted and no message is appended. The
         notice rides the tail and is forgotten, so ten agents posting do not
         leave ninety permanent conversation rows. }
+      Continue;
+    end;
+    if Items[I].Kind = pkSkill then
+    begin
+      { A skill body IS persisted: it is meant to stay in context, and after a
+        resume it must still be there. RefSessionId carries the KEY. }
+      FStore.AppendSkill(Items[I].RefSessionId, Items[I].Text);
       Continue;
     end;
     if Items[I].Kind = pkAmbient then
@@ -1649,6 +1758,8 @@ var
   TurnOutcome: TTurnOutcome;
   Attempt, RetryWaitedMs, Delay: Integer;
   Ok: Boolean;
+  SkillItems: TPromptItemArray;
+  I: Integer;
 
   procedure FailTurn(ACode: TLLMErrorCode; const AMessage, ADetail,
     AFinishReason: string);
@@ -1715,6 +1826,13 @@ begin
     user message is appended; the first boundary drains it. }
   if not FAmbientTurn then
   begin
+    { An OPERATOR SIDE-LOAD lands AHEAD of the prompt, so the prompt stays the
+      last message in the request and in the rendered history. Queued items were
+      picked up here rather than drained with the rest, precisely so they can be
+      placed before this row instead of after it. }
+    SkillItems := FPromptQueue.DrainSkills;
+    for I := 0 to High(SkillItems) do
+      FStore.AppendSkill(SkillItems[I].RefSessionId, SkillItems[I].Text);
     UserMsg := Default(TChatMessage);
     UserMsg.Role := crUser;
     UserMsg.Content := AUserText;

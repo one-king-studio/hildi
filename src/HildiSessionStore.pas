@@ -42,6 +42,7 @@ type
     procedure AppendError(const AMessage, ADetail: string);
     procedure AppendAmbient(const AText, ARefSessionId, ALabel, ASource,
       AStatus: string; AElapsedMs: Int64);
+    procedure AppendSkill(const ASkillKey, AText: string);
     function BeginTurn: Int64;
     function BeginRequest(ATurnId: Int64; const AModel: string;
       AMessageCount: Integer): Int64;
@@ -173,6 +174,25 @@ begin
   Rec.Source := ASource;
   Rec.Status := AStatus;
   Rec.DurationMs := AElapsedMs;
+  FStore.AppendMessage(Rec, Err);
+end;
+
+procedure TSqliteConversationStore.AppendSkill(const ASkillKey, AText: string);
+var
+  Rec: TMessageRecord;
+  Err: TStoreError;
+begin
+  { The KEY rides in RefSessionId, which is what makes the loaded set derivable
+    rather than a second piece of bookkeeping that can disagree with the
+    history. TurnId is recorded normally: /undo past a load removing the body is
+    intended, and the derived set follows automatically. }
+  Rec := Default(TMessageRecord);
+  Rec.SessionId := FSessionId;
+  Rec.TurnId := FCurrentTurnId;
+  Rec.RequestId := FCurrentRequestId;
+  Rec.Role := mrSkill;
+  Rec.Content := AText;
+  Rec.RefSessionId := ASkillKey;
   FStore.AppendMessage(Rec, Err);
 end;
 
@@ -373,6 +393,17 @@ begin
         end;
       { Tool calls are consumed with their assistant message above, or
         synthesised when the assistant had no content. }
+      { A skill body IS part of the restored conversation: it was injected to
+        stay, so a resumed session must still have it. Delivered as a plain
+        user message; the body already carries its <skill_content> wrapper, so
+        it needs no reformatting here. }
+      mrSkill:
+        begin
+          Msg := Default(TChatMessage);
+          Msg.Role := crUser;
+          Msg.Content := Tail[I].Content;
+          AddMessage(Result, Msg);
+        end;
       mrReasoning, mrError:
         ;   // not part of the restored conversation
     end;
