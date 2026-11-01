@@ -72,6 +72,9 @@ type
     procedure TestAnAlreadyGrantedSkillDoesNotAsk;
     procedure TestScopeOptionsAreOffered;
     procedure TestApprovalIsPerSkill;
+    { Phase 7: the catalog. }
+    procedure TestCatalogCarriesTheLocation;
+    procedure TestCatalogOmitsNothingForAHandRegisteredSkill;
   end;
 
 implementation
@@ -759,6 +762,52 @@ begin
     AssertTrue('alpha', Reg.LoadSkill('alpha', Err));
     AssertTrue('beta', Reg.LoadSkill('beta', Err));
     AssertEquals('asked for each', 2, Length(Appro.AskedRefs));
+  finally
+    Reg.Free;
+  end;
+end;
+
+procedure TSkillsFilesTest.TestCatalogCarriesTheLocation;
+var
+  Reg: TSkillRegistry;
+  Skills: TSkillFileArray;
+  Shadowed: TStringArray;
+  Text: string;
+begin
+  { Without the location a body saying "run scripts/extract.py" is unfollowable:
+    the model has a file tool but no idea where the skill's files live. }
+  WriteSkill('located',
+    '---'#10'name: located'#10'description: has files'#10'---'#10'x');
+  Skills := ScanSkillsDir(FDir, skProject);
+  Reg := TSkillRegistry.Create;
+  try
+    ImportSkills(Reg, Skills, Shadowed);
+    Text := Reg.StableText;
+    AssertTrue('the key is listed', Pos('located', Text) > 0);
+    AssertTrue('with its location: ' + Text, Pos('(at ', Text) > 0);
+  finally
+    Reg.Free;
+  end;
+end;
+
+procedure TSkillsFilesTest.TestCatalogOmitsNothingForAHandRegisteredSkill;
+var
+  Reg: TSkillRegistry;
+  S: TSkill;
+  Text: string;
+begin
+  { A hand-registered skill has no Location; the catalog must not print an empty
+    "(at )" for it. }
+  S := Default(TSkill);
+  S.Key := 'manual';
+  S.Name := 'manual';
+  S.Description := 'a hand-registered skill';
+  Reg := TSkillRegistry.Create;
+  try
+    Reg.Add(S);
+    Text := Reg.StableText;
+    AssertTrue('listed', Pos('manual', Text) > 0);
+    AssertFalse('no empty location', Pos('(at )', Text) > 0);
   finally
     Reg.Free;
   end;

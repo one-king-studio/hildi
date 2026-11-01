@@ -348,7 +348,12 @@ var
   E: TSkillEntry;
 begin
   { The description and when-to-use per skill: stable across a session, so it
-    belongs in the system prompt rather than being re-sent on every request. }
+    belongs in the system prompt rather than being re-sent on every request.
+
+    A FILE-BACKED skill also carries its LOCATION. Without it a body saying "run
+    scripts/extract.py" is unfollowable - the model has a file tool but no idea
+    where the skill's own files live. The location is stable too, so it belongs
+    here rather than in the per-request fragment. }
   Result := '';
   for I := 0 to FEntries.Count - 1 do
   begin
@@ -358,6 +363,8 @@ begin
     Result := Result + '- ' + E.Skill.Key + ': ' + E.Skill.Description;
     if E.Skill.WhenToUse <> '' then
       Result := Result + ' ' + E.Skill.WhenToUse;
+    if E.Skill.Location <> '' then
+      Result := Result + ' (at ' + E.Skill.Location + ')';
     Result := Result + LineEnding;
   end;
 end;
