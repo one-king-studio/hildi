@@ -644,7 +644,20 @@ var
   Ok: Boolean;
   DurMs: Int64;
 begin
-  FLoop.RunOneCall(FCall, FEvents, ResultText, Ok, DurMs);
+  { Complete must run even if the handler raises, because Batch.Wait is an
+    unbounded join on the remaining count: a job that exits without completing
+    leaves the turn waiting forever. A tool handler is model-driven code, so a
+    raise here is not hypothetical. }
+  try
+    FLoop.RunOneCall(FCall, FEvents, ResultText, Ok, DurMs);
+  except
+    on E: Exception do
+    begin
+      ResultText := 'tool failed: ' + E.Message;
+      Ok := False;
+      DurMs := 0;
+    end;
+  end;
   FBatch.Complete(FIndex, ResultText, Ok, DurMs);
 end;
 
