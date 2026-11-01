@@ -31,6 +31,17 @@ type
     { Phase 2: name validation. }
     procedure TestNameRules;
     procedure TestDescriptionLength;
+    { Phase 2 remainder: the name must match its directory. }
+    procedure TestNameMustMatchItsDirectory;
+    procedure TestCompatibilityLength;
+    { Phase 3: discovery. }
+    procedure TestScanFindsSkillDirectories;
+    procedure TestScanIgnoresDirectoriesWithoutSkillMd;
+    procedure TestScanSkipsGitAndNodeModules;
+    procedure TestScanReportsAnInvalidSkillWithoutAborting;
+    procedure TestScanListsResourcesButDoesNotReadThem;
+    procedure TestScanRespectsTheDirectoryBound;
+    procedure TestScanOfAMissingRootIsEmpty;
   end;
 
 implementation
@@ -186,6 +197,142 @@ begin
   S := Skill('ok', StringOfChar('x', 1025));
   AssertTrue('over 1024 rejected',
     Pos('description', ValidateSkillFile(S)) > 0);
+end;
+
+procedure TSkillsFilesTest.TestNameMustMatchItsDirectory;
+var
+  S: TSkillFile;
+begin
+  { The spec requires it. A mismatch means a renamed folder or a copy-paste, and
+    the result is a skill that answers to a name the operator will not find. }
+  S := Skill('pdf-processing', 'does pdfs');
+  S.Dir := IncludeTrailingPathDelimiter(FDir) + 'pdf-processing';
+  AssertEquals('matches', '', ValidateSkillFile(S));
+
+  S.Dir := IncludeTrailingPathDelimiter(FDir) + 'something-else';
+  AssertTrue('mismatch is named',
+    Pos('does not match its directory', ValidateSkillFile(S)) > 0);
+end;
+
+procedure TSkillsFilesTest.TestCompatibilityLength;
+var
+  S: TSkillFile;
+begin
+  S := Skill('ok', 'a description');
+  S.Compatibility := StringOfChar('x', 500);
+  AssertEquals('exactly 500 is fine', '', ValidateSkillFile(S));
+
+  S.Compatibility := StringOfChar('x', 501);
+  AssertTrue('over 500 rejected',
+    Pos('compatibility', ValidateSkillFile(S)) > 0);
+end;
+
+{ --- Phase 3: discovery --- }
+
+procedure TSkillsFilesTest.TestScanFindsSkillDirectories;
+var
+  Skills: TSkillFileArray;
+begin
+  WriteSkill('pdf-processing',
+    '---'#10'name: pdf-processing'#10'description: Extract PDF text.'#10'---'#10'Body.');
+  WriteSkill('data-analysis',
+    '---'#10'name: data-analysis'#10'description: Charts.'#10'---'#10'Body.');
+  Skills := ScanSkillsDir(FDir, skProject);
+  AssertEquals('both found', 2, Length(Skills));
+  AssertEquals('no problems', '', Skills[0].Problem + Skills[1].Problem);
+end;
+
+procedure TSkillsFilesTest.TestScanIgnoresDirectoriesWithoutSkillMd;
+var
+  Skills: TSkillFileArray;
+begin
+  { A loose README and a directory with no SKILL.md are normal, not errors. }
+  WriteSkill('real',
+    '---'#10'name: real'#10'description: A skill.'#10'---'#10'Body.');
+  ForceDirectories(IncludeTrailingPathDelimiter(FDir) + 'not-a-skill');
+  Skills := ScanSkillsDir(FDir, skProject);
+  AssertEquals('only the real one', 1, Length(Skills));
+  AssertEquals('and it is the right one', 'real', Skills[0].Name);
+end;
+
+procedure TSkillsFilesTest.TestScanSkipsGitAndNodeModules;
+var
+  Skills: TSkillFileArray;
+begin
+  WriteSkill('.git/hidden',
+    '---'#10'name: hidden'#10'description: Should not appear.'#10'---'#10'x');
+  WriteSkill('node_modules/pkg',
+    '---'#10'name: pkg'#10'description: Should not appear.'#10'---'#10'x');
+  WriteSkill('visible',
+    '---'#10'name: visible'#10'description: Should appear.'#10'---'#10'x');
+  Skills := ScanSkillsDir(FDir, skProject);
+  AssertEquals('only the visible one', 1, Length(Skills));
+  AssertEquals('and it is visible', 'visible', Skills[0].Name);
+end;
+
+procedure TSkillsFilesTest.TestScanReportsAnInvalidSkillWithoutAborting;
+var
+  Skills: TSkillFileArray;
+begin
+  { One bad skill in a cloned repo must not take out the rest. }
+  WriteSkill('broken',
+    '---'#10'name: BROKEN Name'#10'description: bad name'#10'---'#10'x');
+  WriteSkill('good',
+    '---'#10'name: good'#10'description: A fine skill.'#10'---'#10'x');
+  Skills := ScanSkillsDir(FDir, skProject);
+  AssertEquals('both listed', 2, Length(Skills));
+  AssertTrue('one has a problem', (Skills[0].Problem <> '') or
+    (Skills[1].Problem <> ''));
+  AssertTrue('one is fine', (Skills[0].Problem = '') or
+    (Skills[1].Problem = ''));
+end;
+
+procedure TSkillsFilesTest.TestScanListsResourcesButDoesNotReadThem;
+var
+  Skills: TSkillFileArray;
+  I: Integer;
+  SawScript, SawRef: Boolean;
+begin
+  WriteSkill('with-resources',
+    '---'#10'name: with-resources'#10'description: Has files.'#10'---'#10'x');
+  ForceDirectories(IncludeTrailingPathDelimiter(FDir) + 'with-resources/scripts');
+  ForceDirectories(IncludeTrailingPathDelimiter(FDir) + 'with-resources/references');
+  Skills := ScanSkillsDir(FDir, skProject);
+  AssertEquals('one skill', 1, Length(Skills));
+  SawScript := False;
+  SawRef := False;
+  for I := 0 to High(Skills[0].Resources) do
+  begin
+    if Skills[0].Resources[I] = 'scripts/' then
+      SawScript := True;
+    if Skills[0].Resources[I] = 'references/' then
+      SawRef := True;
+  end;
+  AssertTrue('the scripts dir is listed', SawScript);
+  AssertTrue('the references dir is listed', SawRef);
+  AssertFalse('listing is not truncated', Skills[0].ResourcesTruncated);
+end;
+
+procedure TSkillsFilesTest.TestScanRespectsTheDirectoryBound;
+var
+  Skills: TSkillFileArray;
+  I: Integer;
+begin
+  { A bound that truncates rather than hangs. Depth 1 here means only the root's
+    immediate children are considered. }
+  for I := 0 to 4 do
+    WriteSkill('skill' + IntToStr(I),
+      '---'#10'name: skill' + IntToStr(I) + #10'description: d'#10'---'#10'x');
+  Skills := ScanSkillsDir(FDir, skProject, 1, 1);
+  AssertTrue('the bound cut the scan short', Length(Skills) <= 1);
+end;
+
+procedure TSkillsFilesTest.TestScanOfAMissingRootIsEmpty;
+var
+  Skills: TSkillFileArray;
+begin
+  Skills := ScanSkillsDir(IncludeTrailingPathDelimiter(FDir) + 'nope', skProject);
+  AssertEquals('nothing', 0, Length(Skills));
 end;
 
 initialization
