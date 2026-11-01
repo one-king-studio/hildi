@@ -145,6 +145,26 @@ the feature.
       skills a turn ran with.
 - [ ] Unloading removes the `+<skill-name>` entry.
 
+### The skill detail modal
+
+The `+<skill-name>` line is clickable. Clicking an entry opens a read-only modal
+for that skill, because "what did I just load into my context?" is a question the
+operator cannot otherwise answer without re-reading the directory.
+
+- [ ] A click on `+<name>` opens the modal for that skill.
+- [ ] The modal shows: the **name**, the **description**, the **additional
+      metadata** (`license`, `compatibility`, `allowed-tools`, `metadata` pairs,
+      the skill directory), and the **instructions** in a **bounded, scrollable**
+      pane.
+- [ ] **The instructions pane is bounded** — a long `SKILL.md` must not push the
+      CTAs off screen. It scrolls independently of the modal.
+- [ ] **`ctrl+u` unloads** the skill and closes the modal; the `+<name>` entry
+      disappears.
+- [ ] **`esc` dismisses** the modal and changes nothing.
+- [ ] The modal is read-only: it never edits a skill.
+- [ ] A skill with no metadata shows the fields it has and omits the rest —
+      no empty labelled rows.
+
 Deferred: inline prompt markers (a footnote-style token that is edited atomically
 and parsed on submit). The side-load model above does not need them.
 

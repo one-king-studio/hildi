@@ -104,6 +104,20 @@ Work TDD-first: each phase adds its tests before its implementation and runs
 - [ ] **Implement** the selector, the shortcut, and the composer line.
 - [ ] `make check` green.
 
+## Phase 8b — the skill detail modal
+
+- [ ] **Test**: clicking `+<name>` opens the modal for THAT skill.
+- [ ] **Test**: the modal shows name, description, metadata and instructions.
+- [ ] **Test**: the instructions pane is bounded and scrolls (a long SKILL.md must
+      not push the CTAs off screen).
+- [ ] **Test**: `ctrl+u` unloads the skill and the `+<name>` entry disappears.
+- [ ] **Test**: `esc` dismisses and changes nothing — the skill stays loaded.
+- [ ] **Test**: a skill with no optional metadata omits those rows rather than
+      showing empty labels.
+- [ ] **Implement** the modal over the existing modal pattern (`TSessionsModal`,
+      `TDiffViewer`, `THistoryModal` all share it).
+- [ ] `make check` green.
+
 ## Phase 9 — turn summary
 
 - [ ] **Test**: a submitted turn shows the skills it ran with, as `+<name>`.
