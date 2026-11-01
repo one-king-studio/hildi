@@ -296,8 +296,15 @@ reader = 8. Pool sizes are hard-coded: `TTurnPool` = 2 and `TToolPool` = 4 in
 `HildiHarnessSession`, one scheduler per turn worker in `HildiHarnessTurnWorker`.
 With the default 8 MB stack, virtual size is **456 MB while RSS is 18 MB** —
 harmless under default overcommit, fatal on a device configured with strict
-overcommit or a small `RLIMIT_AS`. Idle workers poll at `ExecutorPollMs = 10`
-and the agent pool at `WorkerPollMs = 25` — a battery cost, not a memory one.
+overcommit or a small `RLIMIT_AS`.
+
+The stacks are reservations, not the cost: an earlier version of this section
+claimed the idle workers polling at `ExecutorPollMs = 10` / `WorkerPollMs = 25`
+were "a battery cost". **That was wrong.** Measured per thread over 15 s, all
+seven workers together account for **~3 wakeups/s and 0–2 ticks** — they block
+properly and cost nothing. The idle CPU that does exist (TUI ~5.5% of a core,
+runtime ~3.7%) is on the **main thread** of each process, which is a different
+problem: see the `idle-activity` board topic.
 
 ### 6. File-backed and unavoidable-ish: ~7.6 MB
 
