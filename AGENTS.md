@@ -72,7 +72,7 @@ All artifacts land under `build/`.
 
 ### Parallel testing
 
-`make test` runs all ~1,800 tests in **one process**. `make test-parallel` runs
+`make test` runs all ~2,100 tests in **one process**. `make test-parallel` runs
 each suite in **its own process**, `$(cores)` at a time:
 
 ```
@@ -81,7 +81,9 @@ make test-parallel SUITE="TSessionRuntimeTest TBoardStoreTest"
 HILDI_TEST_JOBS=4 make test-parallel  # cap the workers
 ```
 
-Measured on a 10-core machine, 1,826 tests:
+Measured on a 10-core machine. The timings were taken at 1,826 tests; the suite
+has since grown to 2,085, so treat them as magnitudes rather than current
+numbers:
 
 | Mode | Time | Failures |
 | --- | --- | --- |

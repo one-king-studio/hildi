@@ -123,11 +123,11 @@ from `HILDI_RUNTIME_BIN`.
 
 ### Platform notes
 
-Built and run on **aarch64-darwin** and **aarch64-linux** (Fedora); the full
-`make check` gate is verified on macOS, and the Linux build is verified through
-`make tui-agent` launching the UI. The Linux link needs `libm` and `libgcc`,
-which the Makefile adds on non-Darwin platforms; on macOS `libSystem` provides
-both.
+Built and run on **aarch64-darwin**, **aarch64-linux**, and **x86_64-linux**
+(all Fedora on the Linux side); the full `make check` gate — both suite passes
+plus the library isolation checks — is verified on all three. The Linux link
+needs `libm` and `libgcc`, which the Makefile adds on non-Darwin platforms; on
+macOS `libSystem` provides both.
 
 ## Configuration
 
