@@ -55,8 +55,28 @@ type
 
   { A tool that records how many calls are in flight at once and the order they
     finish, so a fan-out can be asserted. Each call blocks on a shared gate
-    until AMaxConcurrent calls have arrived, then releases all. }
+    until ANeed calls have arrived, then releases all.
+
+    The barrier timeout is a FAILURE BOUND, not a concurrency window: on a
+    healthy parallel run the siblings arrive in microseconds and the wait
+    returns at once, so the value costs nothing when the test passes. It only
+    sets how long a genuinely serial run takes to give up -- which is why the
+    tests that EXPECT a timeout pass a short value and the ones that expect
+    overlap pass a generous one.
+
+    OverlapBarrierMs is deliberately generous: `make check` runs suites 4-way,
+    so 4 worker threads x 4 suites compete for the cores and a 500 ms bound
+    produced false failures on an idle-looking but oversubscribed machine. A
+    serial-run test still fails on TimedOut, so the verdict no longer depends on
+    the number. }
   TProbeTool = class
+  public
+    { Generous: siblings normally arrive in microseconds, so this only bounds a
+      broken (serial) build. Absorbs scheduler delay under full parallel load. }
+    const OverlapBarrierMs = 2000;
+    { Short: for the tests that EXPECT the barrier to expire, so a serial run
+      reports quickly instead of waiting out the generous bound. }
+    const TimeoutBarrierMs = 250;
   private
     FLock: TCriticalSection;
     FInFlight: Integer;
@@ -64,9 +84,11 @@ type
     FArrived: Integer;
     FGate: TSimpleEvent;
     FNeed: Integer;
+    FWaitMs: Integer;
+    FTimedOut: Boolean;
   public
     Finished: TStringList;
-    constructor Create(ANeed: Integer);
+    constructor Create(ANeed: Integer; AWaitMs: Integer);
     destructor Destroy; override;
     { Records the peak concurrency; returns the call id from the arguments so
       results can be checked in order. }
@@ -74,6 +96,9 @@ type
       out AResult: string; out AError: string;
       AObserver: TToolObserver = nil): Boolean;
     property Peak: Integer read FPeak;
+    { True if any call waited out the barrier, i.e. a sibling never arrived.
+      This is the explicit "was it serial?" signal; Peak alone infers it. }
+    property TimedOut: Boolean read FTimedOut;
   end;
 
   { Captures the raw arguments of each successful handler call. }
@@ -530,12 +555,14 @@ end;
 
 { TProbeTool }
 
-constructor TProbeTool.Create(ANeed: Integer);
+constructor TProbeTool.Create(ANeed, AWaitMs: Integer);
 begin
   inherited Create;
   FLock := TCriticalSection.Create;
   FGate := TSimpleEvent.Create;
   FNeed := ANeed;
+  FWaitMs := AWaitMs;
+  FTimedOut := False;
   FInFlight := 0;
   FPeak := 0;
   FArrived := 0;
@@ -566,10 +593,18 @@ begin
     FLock.Release;
   end;
   { Block until every expected call has arrived, so concurrency is forced: if
-    the loop ran the calls serially this would time out (each call waits for a
-    sibling that can never start). The timeout is generous for real threads
-    (they arrive in microseconds) but bounds the serial case. }
-  FGate.WaitFor(500);
+    the loop ran the calls serially this times out (each call waits for a
+    sibling that can never start). Record the expiry rather than inferring it
+    from Peak -- that is what lets the assertion be explicit. }
+  if FGate.WaitFor(FWaitMs) <> wrSignaled then
+  begin
+    FLock.Acquire;
+    try
+      FTimedOut := True;
+    finally
+      FLock.Release;
+    end;
+  end;
   FLock.Acquire;
   try
     Dec(FInFlight);
@@ -1085,7 +1120,7 @@ begin
   { Three parallel-safe calls must overlap: the probe blocks each call until all
     three have arrived, so a serial loop would time out (not reach the peak). }
   BuildLoop('', 8);
-  Probe := TProbeTool.Create(3);
+  Probe := TProbeTool.Create(3, TProbeTool.OverlapBarrierMs);
   Pool := TExecutorScheduler.Create(4, 0);
   try
     Spec := Default(TToolSpec);
@@ -1106,6 +1141,7 @@ begin
     FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
 
     AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
+    AssertFalse('no call waited out the barrier', Probe.TimedOut);
     AssertTrue('all three ran at once (peak >= 3)', Probe.Peak >= 3);
     AssertEquals('answer', 'done', Answer);
   finally
@@ -1125,7 +1161,7 @@ begin
   { Completion order is not call order; results must still be paired in call
     order (a1, a2, a3), so the next request reads correctly. }
   BuildLoop('', 8);
-  Probe := TProbeTool.Create(3);
+  Probe := TProbeTool.Create(3, TProbeTool.OverlapBarrierMs);
   Pool := TExecutorScheduler.Create(4, 0);
   try
     Spec := Default(TToolSpec);
@@ -1167,7 +1203,7 @@ begin
     order: the two safe runs each overlap, but nothing overlaps the unsafe call,
     and the result ids stay in call order. }
   BuildLoop('', 8);
-  Probe := TProbeTool.Create(2);
+  Probe := TProbeTool.Create(2, TProbeTool.OverlapBarrierMs);
   Pool := TExecutorScheduler.Create(4, 0);
   try
     Spec := Default(TToolSpec);
@@ -1210,7 +1246,7 @@ begin
   { No pool => the original serial path. The probe's gate needs two arrivals, so
     a serial run times out at 1 (never reaches 2) and the call still returns. }
   BuildLoop('', 8);
-  Probe := TProbeTool.Create(2);
+  Probe := TProbeTool.Create(2, TProbeTool.TimeoutBarrierMs);
   try
     Spec := Default(TToolSpec);
     Spec.Name := 'probe';
@@ -1227,6 +1263,7 @@ begin
       FinishFrame('tool_calls'), DoneFrame]);
     FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
     AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
+    AssertTrue('the barrier expired, as a serial run must', Probe.TimedOut);
     AssertEquals('peak stays 1 without a pool', 1, Probe.Peak);
     AssertEquals('answer', 'done', Answer);
   finally
