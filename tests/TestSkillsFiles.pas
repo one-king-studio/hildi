@@ -9,7 +9,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  HildiSkills, HildiSkillsFiles;
+  HildiAgent, HildiSkills, HildiSkillsFiles;
 
 type
   TSkillsFilesTest = class(TTestCase)
@@ -48,6 +48,11 @@ type
     procedure TestImportDerivesASnakeCaseKey;
     procedure TestProjectScopeShadowsUserScope;
     procedure TestImportCarriesLocationAndResources;
+    { Phase 5: activation payload. }
+    procedure TestLoadReturnsWrappedBodyWithDirectory;
+    procedure TestLoadStripsFrontmatter;
+    procedure TestLoadListsResourcesWithoutReading;
+    procedure TestLoadANonFileSkillIsUnchanged;
   end;
 
 implementation
@@ -458,6 +463,125 @@ begin
     AssertTrue('location is carried', S.Location <> '');
     AssertTrue('the location is the skill dir', Pos('with-files', S.Location) > 0);
     AssertTrue('resources are carried', Length(S.Resources) > 0);
+  finally
+    Reg.Free;
+  end;
+end;
+
+procedure TSkillsFilesTest.TestLoadReturnsWrappedBodyWithDirectory;
+var
+  Reg: TSkillRegistry;
+  Skills: TSkillFileArray;
+  Shadowed: TStringArray;
+  Res, Err: string;
+  T: TRegisteredTool;
+begin
+  WriteSkill('pdf-processing',
+    '---'#10'name: pdf-processing'#10'description: d'#10'---'#10 +
+    'Follow these steps.');
+  Skills := ScanSkillsDir(FDir, skProject);
+  Reg := TSkillRegistry.Create;
+  try
+    ImportSkills(Reg, Skills, Shadowed);
+    AssertTrue('load_skill resolves', Reg.Find('load_skill', T));
+    AssertTrue('loaded', T.Handler('{"name":"pdf_processing"}', Res, Err));
+    AssertTrue('wrapped: ' + Res, Pos('<skill_content', Res) > 0);
+    AssertTrue('closed', Pos('</skill_content>', Res) > 0);
+    AssertTrue('names the skill', Pos('name="pdf-processing"', Res) > 0);
+    AssertTrue('carries the body', Pos('Follow these steps.', Res) > 0);
+    AssertTrue('carries the directory', Pos('Skill directory:', Res) > 0);
+  finally
+    Reg.Free;
+  end;
+end;
+
+procedure TSkillsFilesTest.TestLoadStripsFrontmatter;
+var
+  Reg: TSkillRegistry;
+  Skills: TSkillFileArray;
+  Shadowed: TStringArray;
+  Res, Err: string;
+  T: TRegisteredTool;
+begin
+  { We already parsed the frontmatter; re-sending it wastes tokens and invites
+    the model to treat allowed-tools as a grant. }
+  WriteSkill('with-meta',
+    '---'#10'name: with-meta'#10'description: d'#10'allowed-tools: Bash(rm:*)'#10 +
+    '---'#10'Body only.');
+  Skills := ScanSkillsDir(FDir, skProject);
+  Reg := TSkillRegistry.Create;
+  try
+    ImportSkills(Reg, Skills, Shadowed);
+    AssertTrue('load_skill resolves', Reg.Find('load_skill', T));
+    AssertTrue('loaded', T.Handler('{"name":"with_meta"}', Res, Err));
+    AssertTrue('the body is there', Pos('Body only.', Res) > 0);
+    AssertFalse('frontmatter is gone', Pos('allowed-tools', Res) > 0);
+    AssertFalse('no name field leaked', Pos('name: with-meta', Res) > 0);
+  finally
+    Reg.Free;
+  end;
+end;
+
+procedure TSkillsFilesTest.TestLoadListsResourcesWithoutReading;
+var
+  Reg: TSkillRegistry;
+  Skills: TSkillFileArray;
+  Shadowed: TStringArray;
+  Res, Err: string;
+  T: TRegisteredTool;
+  ScriptPath: string;
+  Fs: TFileStream;
+  Marker: string;
+begin
+  WriteSkill('with-resources',
+    '---'#10'name: with-resources'#10'description: d'#10'---'#10'x');
+  ForceDirectories(IncludeTrailingPathDelimiter(FDir) + 'with-resources/scripts');
+  { A distinctive marker INSIDE the script: if the activation result contains it,
+    the file was read, which it must not be. }
+  Marker := 'SCRIPT-CONTENT-SHOULD-NOT-APPEAR';
+  ScriptPath := IncludeTrailingPathDelimiter(FDir) +
+    'with-resources/scripts/extract.py';
+  Fs := TFileStream.Create(ScriptPath, fmCreate);
+  try
+    Fs.WriteBuffer(Marker[1], Length(Marker));
+  finally
+    Fs.Free;
+  end;
+
+  Skills := ScanSkillsDir(FDir, skProject);
+  Reg := TSkillRegistry.Create;
+  try
+    ImportSkills(Reg, Skills, Shadowed);
+    AssertTrue('load_skill resolves', Reg.Find('load_skill', T));
+    AssertTrue('loaded', T.Handler('{"name":"with_resources"}', Res, Err));
+    AssertTrue('the resource is listed', Pos('scripts/', Res) > 0);
+    AssertFalse('but NOT read', Pos(Marker, Res) > 0);
+  finally
+    Reg.Free;
+  end;
+end;
+
+procedure TSkillsFilesTest.TestLoadANonFileSkillIsUnchanged;
+var
+  Reg: TSkillRegistry;
+  Res, Err: string;
+  T: TRegisteredTool;
+  S: TSkill;
+begin
+  { A hand-registered skill has no Location, so it must keep the old "loaded X"
+    shape. Existing callers depend on it. }
+  S := Default(TSkill);
+  S.Key := 'manual';
+  S.Name := 'manual';
+  S.Description := 'a hand-registered skill';
+  S.Instructions := 'Do it.';
+  Reg := TSkillRegistry.Create;
+  try
+    Reg.Add(S);
+    AssertTrue('load_skill resolves', Reg.Find('load_skill', T));
+    AssertTrue('loaded', T.Handler('{"name":"manual"}', Res, Err));
+    AssertTrue('old shape: ' + Res, Pos('loaded manual', Res) > 0);
+    AssertFalse('no wrapper', Pos('<skill_content', Res) > 0);
   finally
     Reg.Free;
   end;

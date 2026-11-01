@@ -266,6 +266,37 @@ begin
     Result[I] := TSkillEntry(FEntries[I]).Skill.Key;
 end;
 
+function RenderSkillContent(const ASkill: TSkill): string;
+var
+  I: Integer;
+begin
+  { The activation payload, in the shape the client guide recommends: an
+    identifying tag, the body, the skill directory (so relative references
+    resolve), and the bundled files. Resources are LISTED, not read - the model
+    fetches what it needs with its file tools.
+
+    The tag matters for two reasons beyond readability: the model can tell skill
+    instructions from conversation, and compaction can recognise skill content
+    when deciding what to prune. Losing instructions silently degrades the agent
+    with no visible error. }
+  Result := '<skill_content name="' + ASkill.Name + '">' + LineEnding;
+  Result := Result + ASkill.Instructions + LineEnding;
+  Result := Result + LineEnding;
+  Result := Result + 'Skill directory: ' + ASkill.Location + LineEnding;
+  Result := Result + 'Relative paths in this skill are relative to the skill '
+    + 'directory.' + LineEnding;
+  if Length(ASkill.Resources) > 0 then
+  begin
+    Result := Result + LineEnding + '<skill_resources>' + LineEnding;
+    for I := 0 to High(ASkill.Resources) do
+      Result := Result + '  <file>' + ASkill.Resources[I] + '</file>' + LineEnding;
+    if ASkill.ResourcesTruncated then
+      Result := Result + '  <note>the listing is incomplete</note>' + LineEnding;
+    Result := Result + '</skill_resources>' + LineEnding;
+  end;
+  Result := Result + '</skill_content>';
+end;
+
 function TSkillRegistry.Manifest: string;
 var
   I: Integer;
@@ -372,6 +403,16 @@ begin
     if not LoadSkill(Key, AError) then
       Exit(False);
     I := IndexOfKey(Key);
+    { A FILE-BACKED skill returns its body wrapped in identifying tags, with its
+      directory and a resource listing. The tags are not decoration: they let the
+      model tell skill instructions from conversation, and let compaction
+      recognise skill content when deciding what to prune. The frontmatter is
+      stripped because we already parsed it and re-sending it wastes tokens. }
+    if (I >= 0) and (TSkillEntry(FEntries[I]).Skill.Location <> '') then
+    begin
+      AResult := RenderSkillContent(TSkillEntry(FEntries[I]).Skill);
+      Exit(True);
+    end;
     Names := '';
     if I >= 0 then
       for K := 0 to High(TSkillEntry(FEntries[I]).Tools) do
