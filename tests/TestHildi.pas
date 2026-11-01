@@ -40,6 +40,9 @@ type
     procedure TestReportsExitCode;
     procedure TestStderrIsMerged;
     procedure TestTimeoutKillsProcess;
+    { A child that IGNORES SIGTERM must still be reaped. TProcess.Terminate only
+      sends SIGTERM, so the old unbounded WaitOnExit hung forever on a trap. }
+    procedure TestChildThatIgnoresSigtermIsStillReaped;
     procedure TestShellIsConfigurable;
   end;
 
@@ -190,6 +193,25 @@ begin
     AssertTrue('timed-out flag set', R.TimedOut);
     AssertEquals('timeout exit sentinel', 124, R.ExitCode);
     AssertTrue('did not wait the full sleep', GetTickCount64 - Started < 5000);
+  finally
+    R.Free;
+  end;
+end;
+
+procedure TCommandRunnerTest.TestChildThatIgnoresSigtermIsStillReaped;
+var
+  R: TCommandRunner;
+  Started: QWord;
+begin
+  { The shell traps TERM and keeps sleeping. TProcess.Terminate only sends
+    SIGTERM, so an unbounded WaitOnExit would never return. Evidence for this
+    happening in practice: this session's own stuck runtime ignored SIGTERM and
+    had to be SIGKILLed by hand. The runner must escalate and finish. }
+  Started := GetTickCount64;
+  R := RunSync('trap "" TERM; sleep 30', 250, FSink);
+  try
+    AssertTrue('reaped rather than hanging', GetTickCount64 - Started < 15000);
+    AssertTrue('reports a timeout', R.TimedOut);
   finally
     R.Free;
   end;

@@ -64,6 +64,11 @@ uses
   BaseUnix;   // for fpSelect / TFDSet in WaitReadable
 {$endif}
 
+const
+  { Grace a child gets to exit on its own after SIGTERM before SIGKILL. A command
+    that traps SIGTERM would otherwise hold WaitOnExit forever. }
+  TerminateGraceMs = 2000;
+
 { TProcess.ExitStatus is not consistent across FPC builds/platforms: on Unix it
   may be the raw wait() status (exit code shifted into the high byte, signal in
   the low bits) or an already-decoded code (negative for signal deaths). Map all
@@ -205,7 +210,25 @@ begin
       if Terminated and FProcess.Running then
         FProcess.Terminate(130);
       Drain;
-      FProcess.WaitOnExit;
+      { A child that ignores SIGTERM must not wedge the turn. TProcess.Terminate
+        only sends SIGTERM, and the plain WaitOnExit below waits forever -- a
+        command that traps or ignores SIGTERM would hang run_command
+        indefinitely. Evidence: this session's own runtime ignored SIGTERM and
+        needed SIGKILL. Escalate on the same bounded pattern TStdioChild.Close
+        uses: grace, SIGTERM, brief grace, SIGKILL, reap. }
+      if not FProcess.WaitOnExit(TerminateGraceMs) then
+      begin
+        {$ifdef unix}
+        fpKill(FProcess.ProcessID, SIGTERM);
+        if not FProcess.WaitOnExit(TerminateGraceMs) then
+        begin
+          fpKill(FProcess.ProcessID, SIGKILL);
+          FProcess.WaitOnExit;
+        end;
+        {$else}
+        FProcess.WaitOnExit;
+        {$endif}
+      end;
       FExitCode := NormalizeExit(FProcess.ExitStatus);
       if FTimedOut then
         FExitCode := 124        // conventional "timed out" sentinel
