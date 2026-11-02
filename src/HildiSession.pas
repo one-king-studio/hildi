@@ -174,7 +174,28 @@ type
 { A random 128-bit session id as 32 lowercase hex characters. }
 function NewSessionId: string;
 
+{ The short form of a session id, for display. Six characters is enough to tell
+  sessions apart in a list while staying narrow; the full id remains the
+  identity everywhere it matters (the store, the socket, the ledger).
+
+  ONE definition, because three call sites used to hardcode the same length and
+  would drift the moment one changed. }
+function ShortSessionId(const AId: string): string;
+
 implementation
+
+const
+  { Long enough to distinguish sessions in a list, short enough to leave the
+    title room. Not a hash: a prefix, so it is stable and needs no lookup. }
+  ShortSessionIdLen = 6;
+
+function ShortSessionId(const AId: string): string;
+begin
+  if Length(AId) > ShortSessionIdLen then
+    Result := Copy(AId, 1, ShortSessionIdLen)
+  else
+    Result := AId;
+end;
 
 function NewSessionId: string;
 const

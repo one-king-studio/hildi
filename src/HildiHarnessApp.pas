@@ -516,6 +516,17 @@ function ComposerHints(AHasSubagents: Boolean): string;
   child's title. Pure, so the nesting policy is testable without a modal. }
 procedure OrderByLineage(var ARows: TSessionRowArray);
 
+{ Drop delegated-subagent rows, keeping sessions the operator started. A child
+  carries a non-empty ParentSessionId. Subagents are reached through the agent
+  list, so a session list that also offered them would put a child on the same
+  footing as a real session and give one thing two surfaces.
+
+  ORPHANS KEEP THEIR ROW. A child whose parent is archived, or outside the paging
+  window, still has a non-empty ParentSessionId but no parent to nest under - and
+  it is a real, resumable session. Hiding it would make it unreachable, so the
+  rule is "no VISIBLE parent", not "never had one". }
+procedure FilterParentsOnly(var ARows: TSessionRowArray);
+
 implementation
 
 { fpjson is implementation-only: the app reads a tool call's arguments to caption
@@ -818,6 +829,12 @@ begin
     if N >= 10 then
       Break;
     if Rows[I].Id = FSession.SessionId then
+      Continue;
+    { Parent sessions ONLY. A delegated child carries its parent's id, and
+      children are reachable through the agent list (ctrl+d); offering them as
+      "continue recent" would put a subagent on the same footing as a session
+      the operator started. }
+    if Rows[I].ParentSessionId <> '' then
       Continue;
     SetLength(FRecentIds, N + 1);
     SetLength(Titles, N + 1);
@@ -2589,12 +2606,7 @@ begin
       as a broken header, not an idle one. }
     Exit('New Session');
   if Name = '' then
-  begin
-    if Length(ASessionId) > 12 then
-      Name := Copy(ASessionId, 1, 12)
-    else
-      Name := ASessionId;
-  end;
+    Name := ShortSessionId(ASessionId);
 
   if ATitle = '' then
     Result := Name
@@ -2602,6 +2614,50 @@ begin
     Result := ATitle
   else
     Result := Name + ' - ' + ATitle;
+end;
+
+procedure FilterParentsOnly(var ARows: TSessionRowArray);
+var
+  I, N, Keep: Integer;
+  Keep_: array of Boolean;
+  OutRows: TSessionRowArray;
+
+  function IdPresent(const AId: string): Boolean;
+  var
+    K: Integer;
+  begin
+    for K := 0 to High(ARows) do
+      if ARows[K].Id = AId then
+        Exit(True);
+    Result := False;
+  end;
+
+begin
+  if Length(ARows) = 0 then
+    Exit;
+  SetLength(Keep_, Length(ARows));
+  for I := 0 to High(ARows) do
+    Keep_[I] := (ARows[I].ParentSessionId = '') or
+      (not IdPresent(ARows[I].ParentSessionId));
+  N := 0;
+  for I := 0 to High(ARows) do
+    if Keep_[I] then
+      Inc(N);
+  if N = Length(ARows) then
+    Exit;   { nothing to drop: leave the array exactly as it was }
+  { COMPACT INTO A COPY, then assign. Truncating ARows first and then indexing
+    it to High(Keep_) read past the new bounds - an ERangeError the test caught
+    immediately. The copy also means the survivor order cannot be disturbed by
+    writing into the array being read. }
+  SetLength(OutRows, N);
+  Keep := 0;
+  for I := 0 to High(Keep_) do
+    if Keep_[I] then
+    begin
+      OutRows[Keep] := ARows[I];
+      Inc(Keep);
+    end;
+  ARows := OutRows;
 end;
 
 procedure OrderByLineage(var ARows: TSessionRowArray);
@@ -2707,7 +2763,13 @@ begin
     for I := 0 to High(Rows) do
       Rows[I].Title := SessionDisplayName(Rows[I].LabelText, Rows[I].Title,
         Rows[I].Id);
-    OrderByLineage(Rows);
+    { PARENT SESSIONS ONLY, the same rule as the recent list. Subagent sessions
+      are reached through the agent list, not here, so listing them would offer
+      two different surfaces for one thing and let a child be resumed as if it
+      were a session the operator started.
+      OrderByLineage is therefore moot: with no children in the list there is no
+      nesting to apply. }
+    FilterParentsOnly(Rows);
     FSessionsModal.SetRows(Rows);
   end;
 end;
@@ -3932,7 +3994,7 @@ begin
       Break;
     end;
   if Result = '' then
-    Result := Copy(FSpyId, 1, 12);
+    Result := ShortSessionId(FSpyId);
 end;
 
 procedure THarnessApp.RenderSpyHistory(const ASessionId: string);

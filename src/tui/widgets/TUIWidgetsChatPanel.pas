@@ -61,6 +61,11 @@ const
     array here; the recent-session list replaced it, and each row now names the
     key that opens it, so a separate "press Enter to start" hint would only
     repeat the composer's own affordance. }
+  { The recent list is capped so it reads as a narrow column rather than
+    stretching to whatever the widest title happens to be. The gutter is the
+    least space between a title and its key: two words that touch read as one. }
+  RecentMaxW = 50;
+  RecentMinGap = 2;
   EmptyHintStart = 'Start typing your prompt below';
   EmptyHintOr = 'Or start typing your prompt below';
   EmptyHintRecent = 'Continue recent session';
@@ -485,52 +490,65 @@ var
   { The widest recent title, so every row has the same left column and the keys
     form a true right edge. Computed once per render, not per row - a per-row
     width would make each row's key sit at its own vertical. }
+  { The title column's width, in cells.
+
+    CAPPED, not measured-and-taken. Unbounded, one long session title would drag
+    the whole block across the pane and push the keys into a ragged right edge;
+    the list is a chooser, so it stays narrow enough to read as a column.
+
+    The cap is on the WHOLE row (title + gutter + key), because that is what the
+    operator sees. The pane gets a 1-cell pad either side, so a narrow window
+    shrinks the title rather than clipping the key. }
   function RecentTableWidth: Integer;
   var
-    J, W3: Integer;
+    J, Widest, KeyW: Integer;
   begin
-    Result := 0;
+    Widest := 0;
     for J := 0 to N - 1 do
-    begin
-      W3 := StringWidth(UnicodeString(FRecentTitles[J]));
-      if W3 > Result then
-        Result := W3;
-    end;
+      if StringWidth(UnicodeString(FRecentTitles[J])) > Widest then
+        Widest := StringWidth(UnicodeString(FRecentTitles[J]));
+    { The widest key is ctrl+9; all ten are the same width, but measure rather
+      than assume so a future '+10' does not silently overflow the cap. }
+    KeyW := 0;
+    for J := 0 to N - 1 do
+      if StringWidth('ctrl+' + UnicodeString(IntToStr(J))) > KeyW then
+        KeyW := StringWidth('ctrl+' + UnicodeString(IntToStr(J)));
+    Result := Widest;
+    if Result > RecentMaxW - RecentMinGap - KeyW then
+      Result := RecentMaxW - RecentMinGap - KeyW;
+    { Fit the pane, keeping pad on both sides. }
+    if Result > B.W - 2 - RecentMinGap - KeyW then
+      Result := B.W - 2 - RecentMinGap - KeyW;
+    if Result < 1 then
+      Result := 1;
   end;
 
-  { A recent-session row, as two columns with no rules: the title LEFT, the
-    chord RIGHT and dimmed. Clamped to the pane, with the chord reserved first -
-    it is the fixed part, and losing the key would leave a row that looks
-    selectable but says nothing about how. }
+  { A recent-session row, as two columns with no rules: the title LEFT, the chord
+    RIGHT and dimmed. The title is truncated to the column; the gutter is at
+    least RecentMinGap so a truncated title never abuts its key - two words run
+    together would read as one. }
   procedure RecentRow(AIndex: Integer; ATableW: Integer);
   var
     Key, Title, Pad: UnicodeString;
-    W2, X2, KeyW, TitleW: Integer;
+    X2, KeyW, Gap: Integer;
   begin
     Key := 'ctrl+' + UnicodeString(IntToStr(AIndex));
     KeyW := StringWidth(Key);
     Title := UnicodeString(FRecentTitles[AIndex]);
-    { Left column gets the table width, less the key column and a gutter. }
-    if ATableW > B.W - 8 - KeyW then
-      ATableW := B.W - 8 - KeyW;
-    TitleW := ATableW;
-    if TitleW < 8 then
-      Exit;
-    if StringWidth(Title) > TitleW then
-      Title := FitWidth(Title, TitleW);
-    W2 := ATableW + 2 + KeyW;
-    X2 := B.X + 1 + ((B.W - 2) - W2) div 2;
+    if StringWidth(Title) > ATableW then
+      Title := FitWidth(Title, ATableW);
+    { At LEAST the minimum gap, larger when the title came up short, so the keys
+      share a right edge. }
+    Gap := ATableW - StringWidth(Title) + RecentMinGap;
+    X2 := B.X + 1 + ((B.W - 2) - (ATableW + RecentMinGap + KeyW)) div 2;
     if X2 < B.X + 1 then
       X2 := B.X + 1;
     PutText(S, X2, Top, Title, FTheme.Text);
-    { Pad to the right edge so the chord is right-aligned against the column,
-      not merely following the title at whatever length it happens to be. }
     Pad := '';
-    while StringWidth(Pad) < (ATableW - StringWidth(Title)) + 2 do
+    while StringWidth(Pad) < Gap do
       Pad := Pad + ' ';
     PutText(S, X2 + StringWidth(Title), Top, Pad, FTheme.Muted);
-    PutText(S, X2 + StringWidth(Title) + StringWidth(Pad), Top, Key,
-      FTheme.Muted);
+    PutText(S, X2 + StringWidth(Title) + Gap, Top, Key, FTheme.Muted);
     Inc(Top);
   end;
 

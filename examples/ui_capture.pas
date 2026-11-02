@@ -107,8 +107,9 @@ begin
     P.SetHeader('agent-1 - Fix the login redirect', '18% ctx');
     P.SetStatus('~/code/hildi');
     P.SetStats('12 turns · 18% ctx');
-    P.SetRecentSessions(['Fix the login redirect', 'Docs sweep',
-      'Parser rewrite']);
+    P.SetRecentSessions(['Fix the login redirect',
+      'A deliberately very long session title that must be truncated',
+      'Docs sweep']);
     P.SetState(psReady, 'Idle');
     Paint(P, W, H, 'FRESH SESSION - empty transcript, 3 recent sessions');
   finally

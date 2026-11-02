@@ -280,6 +280,10 @@ type
     { A delegated child must not read as a peer of its parent in the sessions
       list: it follows its parent, indented, at every depth. Pure policy test. }
     procedure TestSessionRowsNestUnderTheirParent;
+    { Session lists show PARENT sessions only - the recent list under the mark
+      and /sessions alike. Subagents live in the agent list. }
+    procedure TestSessionListsHideSubagents;
+    procedure TestOrphanChildKeepsItsRow;
     { A session identifies itself as `<label> - <title>` wherever it is shown:
       the label names the agent, the title says what it is doing. }
     procedure TestSessionDisplayNameJoinsLabelAndTitle;
@@ -1658,7 +1662,7 @@ begin
   AssertTrue('turn finished', Pump(300));
 
   { The id prefix is the left border title; the context the right. }
-  AssertEquals('session id on the left', Copy(FSession.View.SessionId, 1, 12),
+  AssertEquals('session id on the left', ShortSessionId(FSession.View.SessionId),
     FApp.Panel.HeaderLeft);
   AssertTrue('context tokens in the header',
     Pos('1k', FApp.Panel.HeaderRight) > 0);
@@ -1677,7 +1681,7 @@ begin
   BuildWithStore;
   { No title yet: the id prefix names the header. }
   AssertEquals('id prefix without a title',
-    Copy(FSession.View.SessionId, 1, 12), FApp.Panel.HeaderLeft);
+    ShortSessionId(FSession.View.SessionId), FApp.Panel.HeaderLeft);
 
   { An extracted title is shown beside the identifier, which falls back to the
     short session id when there is no label. Set the title directly, then trigger
@@ -1689,7 +1693,7 @@ begin
   SubmitPrompt('hello');
   AssertTrue('turn finished', Pump(300));
   AssertEquals('the title is shown beside the id',
-    Copy(FSession.View.SessionId, 1, 12) + ' - Fix the drain',
+    ShortSessionId(FSession.View.SessionId) + ' - Fix the drain',
     FApp.Panel.HeaderLeft);
 end;
 
@@ -2192,11 +2196,13 @@ begin
   Pairs[1] := '';
   AssertEquals('the idle header', 'New Session',
     SessionDisplayName('', '', ''));
-  { With an id but no label, the SHORT id names the session. }
-  AssertEquals('short id', '6b30f848217e',
+  { With an id but no label, the SHORT id names the session: SIX characters, not
+    the old twelve. Wide enough to tell sessions apart, narrow enough to leave a
+    title room in a list. }
+  AssertEquals('short id is six chars', '6b30f8',
     SessionDisplayName('', '', '6b30f848217eca30501219f2543c9e33'));
   { <name> - <running title>, which is the whole format. }
-  AssertEquals('name and title', '6b30f848217e - Doing work',
+  AssertEquals('name and title', '6b30f8 - Doing work',
     SessionDisplayName('', 'Doing work', '6b30f848217eca30501219f2543c9e33'));
   AssertEquals('label wins over id', 'agent-1 - Doing work',
     SessionDisplayName('agent-1', 'Doing work', '6b30f848217eca30501219f2543c9e33'));
@@ -3659,6 +3665,52 @@ begin
   AssertTrue('child is indented', Rows[1].Title <> 'do the thing');
 end;
 
+procedure THarnessAppTest.TestSessionListsHideSubagents;
+var
+  Rows: TSessionRowArray;
+  I: Integer;
+  Found: Boolean;
+begin
+  { A child whose parent IS listed is a subagent: reachable through the agent
+    list, so it must not appear in a session list as if the operator had started
+    it. }
+  SetLength(Rows, 3);
+  Rows[0] := RowOf('root-1', '', 'parent work', 0);
+  Rows[1] := RowOf('child-1', 'root-1', 'delegated work', 1);
+  Rows[2] := RowOf('root-2', '', 'other work', 0);
+
+  FilterParentsOnly(Rows);
+
+  AssertEquals('two rows remain', 2, Length(Rows));
+  AssertEquals('the first root stays', 'root-1', Rows[0].Id);
+  AssertEquals('the second root stays', 'root-2', Rows[1].Id);
+  { And the child is NOT among them - asserted by scanning, not by index, so the
+    check cannot pass on a lucky ordering. }
+  Found := False;
+  for I := 0 to High(Rows) do
+    if Rows[I].Id = 'child-1' then
+      Found := True;
+  AssertFalse('the subagent row is gone', Found);
+end;
+
+procedure THarnessAppTest.TestOrphanChildKeepsItsRow;
+var
+  Rows: TSessionRowArray;
+begin
+  { AN ORPHAN is a child whose parent is not in the list - archived, or outside
+    the paging window. It is still a real, resumable session, so hiding it would
+    make it unreachable. The rule is "no VISIBLE parent", not "never had one". }
+  SetLength(Rows, 2);
+  Rows[0] := RowOf('orphan-1', 'gone-parent', 'still mine', 1);
+  Rows[1] := RowOf('root-1', '', 'parent work', 0);
+
+  FilterParentsOnly(Rows);
+
+  AssertEquals('both rows remain', 2, Length(Rows));
+  AssertEquals('the orphan survives', 'orphan-1', Rows[0].Id);
+  AssertEquals('and the root', 'root-1', Rows[1].Id);
+end;
+
 procedure THarnessAppTest.TestSessionDisplayNameJoinsLabelAndTitle;
 begin
   { A session is an agent: what identifies it is the operator's name for it PLUS
@@ -3670,12 +3722,12 @@ end;
 procedure THarnessAppTest.TestSessionDisplayNameFallsBackToTheShortId;
 begin
   { No label: the short id identifies it. No title: no dangling separator. }
-  AssertEquals('short id and title', 'abcdef012345 - doing the thing',
+  AssertEquals('short id and title', 'abcdef - doing the thing',
     SessionDisplayName('', 'doing the thing', 'abcdef0123456789abcdef'));
   AssertEquals('label only, no separator', 'docs',
     SessionDisplayName('docs', '', 'abcdef0123456789abcdef'));
   { Neither label nor title still yields something identifiable. }
-  AssertEquals('id alone', 'abcdef012345',
+  AssertEquals('id alone', 'abcdef',
     SessionDisplayName('', '', 'abcdef0123456789abcdef'));
 end;
 

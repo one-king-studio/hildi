@@ -312,7 +312,7 @@ begin
       Mark := '» ';
     Line := Mark + UnicodeString(FRows[V[Idx]].Title);
     if Line = Mark then
-      Line := Mark + UnicodeString(Copy(FRows[V[Idx]].Id, 1, 12));
+      Line := Mark + UnicodeString(ShortSessionId(FRows[V[Idx]].Id));
     Chips := '';
     for K := 0 to High(FRows[V[Idx]].Keywords) do
     begin
