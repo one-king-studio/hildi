@@ -141,9 +141,10 @@ type
     TMcpTokenSource of object;
 
   { Spawns every configured server, and reconciles the live set from config at a
-    boundary. Tear-down closes them all. The manager owns the tool specs; with
-    Lazy MCP it is reached through a per-server TMcpSkillSource (see below), not
-    a turn provider - Reconcile declares runtimes without connecting. }
+    boundary. Tear-down closes them all. The manager owns the tool specs; the
+    TURN PROVIDER built over it is HildiMCPProvider, which calls OpenServer on
+    demand and closes an idle connection again. Reconcile declares runtimes
+    without connecting, which is what makes the load lazy. }
   TMcpManager = class
   private
     FApproval: IApprovalService;
@@ -197,32 +198,9 @@ type
       write FTokenSourceFor;
   end;
 
-  { One configured MCP server as a skill tool source (Lazy_MCP). Activate
-    connects + discovers via the manager; Deactivate closes. Curated metadata
-    only - the Declaration never uses a server's initialize.instructions. }
-  TMcpSkillSource = class(TInterfacedObject, ISkillToolSource)
-  private
-    FManager: TMcpManager;
-    FName: string;
-    FDescription: string;
-    FWhenToUse: string;
-  public
-    constructor Create(AManager: TMcpManager; const AName, ADescription,
-      AWhenToUse: string);
-    function Activate(out AError: string): Boolean;
-    procedure Deactivate;
-    function Specs: TToolSpecArray;
-    function Find(const AName: string; out ATool: TRegisteredTool): Boolean;
-    { The skill declaration for this server (key mcp_<name>, curated metadata). }
-    function Declaration: TSkill;
-  end;
-
-  { Declare one skill per enabled server into the registry. Re-callable at a turn
-    boundary: it replaces the MCP skills' declarations without connecting. }
-  procedure RegisterMcpSkills(const ARegistry: TSkillRegistry;
-    const AConfig: TMcpConfig; AManager: TMcpManager);
-  { The skill key for a server name: mcp_<sanitized name>. }
-  function McpSkillKey(const AServer: string): string;
+  { NOTE: TMcpSkillSource / RegisterMcpSkills / McpSkillKey lived here. MCP is a
+    tool provider now (HildiMCPProvider), not a skill source, so the whole
+    Lazy_MCP-as-skills path is gone. }
 
 { --- pure mapping (public for direct testing) --------------------------- }
 
@@ -1229,156 +1207,6 @@ end;
 function TMcpManager.Runtimes: TMcpServerRuntimeArray;
 begin
   Result := FRuntimes;
-end;
-
-{ --- TMcpSkillSource (Lazy_MCP) ----------------------------------------- }
-
-function McpSkillKey(const AServer: string): string;
-begin
-  Result := 'mcp_' + McpSanitize(AServer);
-end;
-
-{ Curated manifest metadata for a server, keyed by its (sanitized) name. A known
-  service gets a real description and when-to-use; an unknown one gets an honest
-  generic line. This is the SPEC's "curated template by known service name" - the
-  text is OURS, never the server's own initialize.instructions (a prompt-
-  injection surface). }
-procedure McpCuratedMeta(const AName: string; out ADescription,
-  AWhenToUse: string);
-var
-  Key: string;
-begin
-  Key := McpSanitize(AName);
-  if Key = 'playwright' then
-  begin
-    ADescription := 'Browser automation (navigate, click, type, snapshot).';
-    AWhenToUse := 'Use when a task needs a real browser: driving a web UI, ' +
-      'scraping a rendered page, or checking how a site behaves.';
-  end
-  else if Key = 'puppeteer' then
-  begin
-    ADescription := 'Browser automation (Chromium) via Puppeteer.';
-    AWhenToUse := 'Use when a task needs to drive a headless Chromium.';
-  end
-  else if Key = 'github' then
-  begin
-    ADescription := 'GitHub: repos, issues, pull requests, and code search.';
-    AWhenToUse := 'Use when a task concerns a GitHub repository, its issues, ' +
-      'or its pull requests.';
-  end
-  else if Key = 'notion' then
-  begin
-    ADescription := 'Notion: read and write pages and databases.';
-    AWhenToUse := 'Use when a task concerns the user''s Notion workspace.';
-  end
-  else if Key = 'filesystem' then
-  begin
-    ADescription := 'Filesystem access (read, write, move, search files).';
-    AWhenToUse := 'Use when a task needs file access outside the workspace.';
-  end
-  else if Key = 'fetch' then
-  begin
-    ADescription := 'HTTP fetch: retrieve a URL and return its content.';
-    AWhenToUse := 'Use when a task needs to retrieve a web page or API.';
-  end
-  else if Key = 'memory' then
-  begin
-    ADescription := 'A persistent knowledge graph of entities and relations.';
-    AWhenToUse := 'Use when a task needs long-term memory across sessions.';
-  end
-  else if Key = 'postgres' then
-  begin
-    ADescription := 'PostgreSQL: run read-only SQL queries.';
-    AWhenToUse := 'Use when a task needs to query a Postgres database.';
-  end
-  else if Key = 'sqlite' then
-  begin
-    ADescription := 'SQLite: query and inspect a database file.';
-    AWhenToUse := 'Use when a task concerns a SQLite database.';
-  end
-  else if Key = 'slack' then
-  begin
-    ADescription := 'Slack: read and post channel messages.';
-    AWhenToUse := 'Use when a task concerns Slack channels or messages.';
-  end
-  else
-  begin
-    ADescription := 'An MCP server (' + AName + ').';
-    AWhenToUse := 'Use when the task needs the ' + AName + ' MCP tools.';
-  end;
-end;
-
-constructor TMcpSkillSource.Create(AManager: TMcpManager;
-  const AName, ADescription, AWhenToUse: string);
-begin
-  inherited Create;
-  FManager := AManager;
-  FName := AName;
-  FDescription := ADescription;
-  FWhenToUse := AWhenToUse;
-end;
-
-function TMcpSkillSource.Activate(out AError: string): Boolean;
-begin
-  AError := '';
-  if FManager = nil then
-  begin
-    AError := 'no MCP manager';
-    Exit(False);
-  end;
-  Result := FManager.OpenServer(FName, AError);
-end;
-
-procedure TMcpSkillSource.Deactivate;
-begin
-  if FManager <> nil then
-    FManager.CloseServer(FName);
-end;
-
-function TMcpSkillSource.Specs: TToolSpecArray;
-begin
-  { The manager exposes the union of connected servers; filter to this server. }
-  Result := nil;
-  if FManager = nil then
-    Exit;
-  Result := FManager.ServerSpecs(FName);
-end;
-
-function TMcpSkillSource.Find(const AName: string;
-  out ATool: TRegisteredTool): Boolean;
-begin
-  ATool := Default(TRegisteredTool);
-  if FManager = nil then
-    Exit(False);
-  Result := FManager.Find(AName, ATool);
-end;
-
-function TMcpSkillSource.Declaration: TSkill;
-begin
-  Result := Default(TSkill);
-  Result.Key := McpSkillKey(FName);
-  Result.Name := FName;
-  Result.Description := FDescription;
-  Result.WhenToUse := FWhenToUse;
-  { No Instructions: an MCP server's text is server-authored and must never
-    reach the manifest. }
-end;
-
-procedure RegisterMcpSkills(const ARegistry: TSkillRegistry;
-  const AConfig: TMcpConfig; AManager: TMcpManager);
-var
-  I: Integer;
-  Src: TMcpSkillSource;
-  D: TSkill;
-  Desc, When: string;
-begin
-  for I := 0 to High(AConfig.Servers) do
-  begin
-    McpCuratedMeta(AConfig.Servers[I].Name, Desc, When);
-    Src := TMcpSkillSource.Create(AManager, AConfig.Servers[I].Name, Desc, When);
-    D := Src.Declaration;
-    ARegistry.Add(D, Src);
-  end;
 end;
 
 end.
