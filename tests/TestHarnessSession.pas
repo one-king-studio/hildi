@@ -102,6 +102,9 @@ type
       found, imported and gated at session open. The home path is passed in so
       the test never reads the real home directory. }
     procedure TestDiscoverSkillFilesImportsAndGates;
+    { The shipped example is not merely parseable: a real session pointed at this
+      repo finds it, which is what a reader following the docs will do. }
+    procedure TestShippedExampleIsDiscoveredByASession;
     { The skill descriptions (the STABLE half of the manifest) must reach the
       loop even when no MCP server is configured. They were briefly gated on
       FMcp <> nil, which silently dropped a locally-declared skill's description:
@@ -1512,6 +1515,38 @@ begin
     AssertEquals('the key is derived', 'wired', Reg.Keys[0]);
     AssertEquals('carries its body', 'Body.', Reg.InstructionsOf('wired'));
     AssertTrue('and its location', Reg.SkillOf('wired').Location <> '');
+  finally
+    Reg.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestShippedExampleIsDiscoveredByASession;
+var
+  Reg: TSkillRegistry;
+  N, I: Integer;
+  Keys: TStringArray;
+  Found: Boolean;
+begin
+  { The example is tested for PARSING in TestSkillsFiles, but a reader following
+    the docs does not call the parser - they open a session on this repo. This
+    checks the path they actually take: the repo root is the workspace, and
+    .agents/skills is the first place discovery looks. }
+  Reg := TSkillRegistry.Create;
+  try
+    { Empty home path: never read the operator's real skills dir. }
+    N := DiscoverSkillFiles(Reg, GetCurrentDir, '', nil, 1, 'sess-example');
+    AssertTrue('something was imported', N >= 1);
+    Keys := Reg.Keys;
+    Found := False;
+    for I := 0 to High(Keys) do
+      if Keys[I] = 'changelog_writer' then
+        Found := True;
+    AssertTrue('the example is discovered under its derived key', Found);
+    { It is a real skill, not just a name: the body came through. }
+    AssertTrue('with its body',
+      Pos('Changelog writer', Reg.InstructionsOf('changelog_writer')) > 0);
+    AssertTrue('and its location',
+      Reg.SkillOf('changelog_writer').Location <> '');
   finally
     Reg.Free;
   end;
