@@ -62,6 +62,11 @@ type
   public
     AbortedId: string;
     ReleasedId: string;
+    { What the mock claims exists, and which of those are in context. Set by a
+      test so the palette's loaded/unloaded marking is observable. }
+    Skills: TStringArray;
+    LoadedSkills: TStringArray;
+    LoadedId: string;
     procedure StartTurn(const AText: string);
     procedure QueuePrompt(const AText: string);
     procedure Interrupt;
@@ -392,14 +397,12 @@ end;
 
 procedure TRecordingDriver.SkillKeys(out AKeys: TStringArray);
 begin
-  { No skills in the mock, so /skill is absent from its command list - which is
-    what HasAvailableSkills should conclude. }
-  AKeys := nil;
+  AKeys := Skills;
 end;
 
 procedure TRecordingDriver.SkillLoadedKeys(out AKeys: TStringArray);
 begin
-  AKeys := nil;
+  AKeys := LoadedSkills;
 end;
 
 procedure TRecordingDriver.LoadSkill(const AKey: string);

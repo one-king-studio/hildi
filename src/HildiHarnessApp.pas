@@ -2819,8 +2819,10 @@ end;
 procedure THarnessApp.ShowSkillList;
 var
   Keys: TStringArray;
+  Loaded: TStringArray;
   Commands: TCommandArray;
-  I: Integer;
+  I, J: Integer;
+  InContext: Boolean;
 begin
   { THE SAME SLIDER as the command list, with a different list. Not a modal: the
     palette already slides out above the composer, filters as you type, and runs
@@ -2829,7 +2831,11 @@ begin
   if FDriver = nil then
     Exit;
   Keys := nil;
+  Loaded := nil;
   FDriver.SkillKeys(Keys);
+  { Which of them are already in the context. Marked per row so the operator can
+    see at a glance what is loaded without opening anything. }
+  FDriver.SkillLoadedKeys(Loaded);
   if Length(Keys) = 0 then
   begin
     AppendError('no skills available');
@@ -2838,8 +2844,15 @@ begin
   SetLength(Commands, Length(Keys));
   for I := 0 to High(Keys) do
   begin
+    InContext := False;
+    for J := 0 to High(Loaded) do
+      if Loaded[J] = Keys[I] then
+        InContext := True;
     Commands[I].Name := Keys[I];
-    Commands[I].Description := 'load this skill';
+    if InContext then
+      Commands[I].Description := 'loaded'
+    else
+      Commands[I].Description := 'load this skill';
   end;
   FPaletteShowingSkills := True;
   FPanel.Palette.SetCommands(Commands);
