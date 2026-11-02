@@ -41,6 +41,10 @@ type
     FVisibleCommands: TCommandArray;
     FSelected: Integer;
     FOnRun: TCommandRunEvent;
+    { The panel's title. The palette serves two lists (commands and skills), and
+      a fixed "commands" title told the operator the wrong thing on the skills
+      list. }
+    FTitle: string;
     procedure MoveSelection(ADelta: Integer);
     procedure RunSelected;
     function RowAt(AY: Integer): Integer;
@@ -49,6 +53,8 @@ type
     constructor Create(const ATheme: TTheme);
     { Replace the command set (the full list; Filter narrows the view). }
     procedure SetCommands(const ACommands: TCommandArray);
+    { What the top border calls this list: 'commands' or 'skills'. }
+    procedure SetTitle(const ATitle: string);
     { Narrow the visible commands to those whose name starts with APrefix
       (case-insensitive; a leading '/' is ignored). Empty prefix shows all. }
     procedure Filter(const APrefix: string);
@@ -120,12 +126,21 @@ begin
   inherited Create;
   FTheme := ATheme;
   FSelected := -1;
+  FTitle := 'commands';
 end;
 
 procedure TCommandPalette.SetCommands(const ACommands: TCommandArray);
 begin
   FCommands := Copy(ACommands, 0, Length(ACommands));
   Filter('');
+end;
+
+procedure TCommandPalette.SetTitle(const ATitle: string);
+begin
+  if ATitle = '' then
+    FTitle := 'commands'
+  else
+    FTitle := ATitle;
 end;
 
 procedure TCommandPalette.Filter(const APrefix: string);
@@ -270,7 +285,8 @@ begin
   PutCh(S, R, T, '╮', Border);
   for X := L + 1 to R - 1 do
     PutCh(S, X, T, '─', Border);
-  PutText(S, L + 2, T, ' commands ', OnBg(FTheme.Muted, FTheme.RaisedBg));
+  PutText(S, L + 2, T, UnicodeString(' ' + FTitle + ' '),
+    OnBg(FTheme.Muted, FTheme.RaisedBg));
 
   for I := 0 to N - 1 do
   begin

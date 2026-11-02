@@ -1193,6 +1193,15 @@ begin
       cleared: the next '/' opens the palette again. }
     FPaletteDismissed := False;
     FPanel.SetPaletteActive(False);
+    { The palette serves two lists, and this path hides it without going through
+      Escape. Leaving FPaletteShowingSkills set meant the NEXT opening showed
+      skills where the operator expected commands. }
+    if FPaletteShowingSkills then
+    begin
+      FPaletteShowingSkills := False;
+      FPanel.Palette.SetTitle('commands');
+      FPanel.Palette.SetCommands(DefaultCommands);
+    end;
   end;
   FApp.Invalidate;
 end;
@@ -1398,6 +1407,12 @@ begin
   begin
     FPanel.SetPaletteActive(False);
     FPaletteDismissed := True;
+    { The palette serves TWO lists. Dismissing the skills list must not leave it
+      armed: the next time the palette opens it has to be the command list again,
+      or the operator sees skills where they expected commands. }
+    FPaletteShowingSkills := False;
+    FPanel.Palette.SetTitle('commands');
+    FPanel.Palette.SetCommands(DefaultCommands);
     FApp.Invalidate;
     Exit;
   end;
@@ -2855,6 +2870,7 @@ begin
       Commands[I].Description := 'load this skill';
   end;
   FPaletteShowingSkills := True;
+  FPanel.Palette.SetTitle('skills');
   FPanel.Palette.SetCommands(Commands);
   FPanel.Palette.Filter('');
   FPanel.SetPaletteActive(True);
