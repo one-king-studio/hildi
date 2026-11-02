@@ -128,7 +128,7 @@ type
       raises the approval ask on the runtime side, and the outcome comes back as
       an ekSkills event (or an error). Appended last so stored ordinals are
       unchanged. }
-    scLoadSkill, scUnloadSkill, scSkills);
+    scLoadSkill, scSkills);
 
   { One client command. Id is echoed in the reply. }
   TSessionCommand = record
@@ -311,7 +311,7 @@ const
     'attach', 'detach', 'prompt', 'approve', 'interrupt',
     'claim_drive', 'release_drive', 'ping', 'shutdown',
     'abort_subagent', 'release_subagent', 'checkpoint', 'undo', 'redo',
-    'load_skill', 'unload_skill', 'skills');
+    'load_skill', 'skills');
 
 { --- enum <-> wire ------------------------------------------------------ }
 
@@ -876,7 +876,7 @@ begin
       end;
     scAbortSubagent, scReleaseSubagent:
       PutStr(O, 'session', C.SessionId);
-    scLoadSkill, scUnloadSkill:
+    scLoadSkill:
       PutStr(O, 'skill_key', C.SkillKey);
     scAttach, scDetach, scInterrupt, scClaimDrive, scReleaseDrive, scPing,
     scUndo, scRedo:
@@ -916,7 +916,7 @@ begin
       C.SessionId := OptStr(O, 'session');
     scUndo, scRedo:
       C.TurnId := OptInt64(O, 'turn_id', 0);
-    scLoadSkill, scUnloadSkill:
+    scLoadSkill:
       C.SkillKey := OptStr(O, 'skill_key');
     scAttach, scDetach, scInterrupt, scClaimDrive, scReleaseDrive, scPing,
     scShutdown, scCheckpoint, scSkills:

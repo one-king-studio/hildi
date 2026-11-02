@@ -48,8 +48,6 @@ type
       row from this; a subset rather than parallel flags so the two cannot drift. }
     procedure SkillLoadedKeys(out AKeys: TStringArray);
     procedure LoadSkill(const AKey: string);
-    { Unload a loaded skill by key. }
-    procedure UnloadSkill(const AKey: string);
     procedure Checkpoint;
     { UI thread: pop the next event, if any. }
     function PopEvent(out AEvent: TTurnEvent): Boolean;
@@ -140,8 +138,6 @@ type
     { Load a skill by key. The runtime asks for approval; a refusal arrives as
       an error event, so this never reports success it cannot vouch for. }
     procedure LoadSkill(const AKey: string);
-    { Unload a loaded skill by key. }
-    procedure UnloadSkill(const AKey: string);
     function PopEvent(out AEvent: TTurnEvent): Boolean;
     function Dropped: Int64;
     procedure Close;
@@ -500,11 +496,6 @@ end;
 procedure TRemoteDriver.LoadSkill(const AKey: string);
 begin
   SendSkillCommand(scLoadSkill, AKey);
-end;
-
-procedure TRemoteDriver.UnloadSkill(const AKey: string);
-begin
-  SendSkillCommand(scUnloadSkill, AKey);
 end;
 
 function TRemoteDriver.PopEvent(out AEvent: TTurnEvent): Boolean;

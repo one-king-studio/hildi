@@ -187,8 +187,6 @@ type
       typed error rather than a silent no-op. }
     procedure HandleLoadSkill(AClient: TClientConn;
       const ACommand: TSessionCommand);
-    procedure HandleUnloadSkill(AClient: TClientConn;
-      const ACommand: TSessionCommand);
     procedure HandleListSkills(AClient: TClientConn;
       const ACommand: TSessionCommand);
     { Push the current catalogue to every client, after a change. }
@@ -1167,8 +1165,6 @@ begin
       HandleReleaseSubagent(AClient, ACommand);
     scLoadSkill:
       HandleLoadSkill(AClient, ACommand);
-    scUnloadSkill:
-      HandleUnloadSkill(AClient, ACommand);
     scSkills:
       HandleListSkills(AClient, ACommand);
   end;
@@ -1367,25 +1363,6 @@ begin
   if not FSession.LoadSkillByName(ACommand.SkillKey, Detail) then
   begin
     ReplyTo(AClient, ACommand.Id, False, Detail);
-    Exit;
-  end;
-  ReplyTo(AClient, ACommand.Id, True, '');
-  BroadcastSkills;
-end;
-
-procedure TSessionRuntime.HandleUnloadSkill(AClient: TClientConn;
-  const ACommand: TSessionCommand);
-begin
-  if AClient.Role <> srDrive then
-  begin
-    ReplyTo(AClient, ACommand.Id, False, 'not_driver');
-    Exit;
-  end;
-  if (FSession.Skills = nil) or (not FSession.Skills.Remove(ACommand.SkillKey))
-  then
-  begin
-    ReplyTo(AClient, ACommand.Id, False,
-      'no such skill: ' + ACommand.SkillKey);
     Exit;
   end;
   ReplyTo(AClient, ACommand.Id, True, '');

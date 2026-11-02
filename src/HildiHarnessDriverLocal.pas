@@ -51,8 +51,6 @@ type
     { Load a skill by key. LoadSkillByName records the session approval first, so
       an operator-typed load does not prompt. A refusal is pushed as an error. }
     procedure LoadSkill(const AKey: string);
-    { Unload a loaded skill by key. }
-    procedure UnloadSkill(const AKey: string);
     procedure Checkpoint;
     function PopEvent(out AEvent: TTurnEvent): Boolean;
     function Dropped: Int64;
@@ -278,25 +276,6 @@ begin
     Exit;
   end;
   { Tell the app the catalogue moved, so the composer line redraws. }
-  E := Default(TTurnEvent);
-  E.Kind := teSkills;
-  E.SkillKeys := FSession.Skills.Keys;
-  E.SkillLoadedKeys := FSession.Skills.LoadedKeys;
-  FSession.Queue.Push(E);
-end;
-
-procedure TLocalDriver.UnloadSkill(const AKey: string);
-var
-  E: TTurnEvent;
-begin
-  if (FSession.Skills <> nil) and (not FSession.Skills.Remove(AKey)) then
-  begin
-    E := Default(TTurnEvent);
-    E.Kind := teError;
-    E.Text := 'no such skill: ' + AKey;
-    FSession.Queue.Push(E);
-    Exit;
-  end;
   E := Default(TTurnEvent);
   E.Kind := teSkills;
   E.SkillKeys := FSession.Skills.Keys;
