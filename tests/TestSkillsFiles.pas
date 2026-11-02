@@ -83,7 +83,7 @@ type
     procedure TestScopeOptionsAreOffered;
     procedure TestApprovalIsPerSkill;
     { Phase 7: the catalog. }
-    procedure TestCatalogCarriesTheLocation;
+    procedure TestCatalogShowsTheNameAndOmitsThePath;
     procedure TestCatalogOmitsNothingForAHandRegisteredSkill;
   end;
 
@@ -812,15 +812,19 @@ begin
   end;
 end;
 
-procedure TSkillsFilesTest.TestCatalogCarriesTheLocation;
+procedure TSkillsFilesTest.TestCatalogShowsTheNameAndOmitsThePath;
 var
   Reg: TSkillRegistry;
   Skills: TSkillFileArray;
   Shadowed: TStringArray;
   Text: string;
+  Before, After: string;
+  Err: string;
 begin
-  { Without the location a body saying "run scripts/extract.py" is unfollowable:
-    the model has a file tool but no idea where the skill's files live. }
+  { The catalogue shows the NAME the operator knows (located), not the internal
+    key, and no longer repeats the directory: the body is injected with its own
+    "Skill directory:" line, so the path here was the most prominent thing on the
+    line and pure noise. }
   WriteSkill('located',
     '---'#10'name: located'#10'description: has files'#10'---'#10'x');
   Skills := ScanSkillsDir(FDir, skProject);
@@ -828,8 +832,20 @@ begin
   try
     ImportSkills(Reg, Skills, Shadowed);
     Text := Reg.StableText;
-    AssertTrue('the key is listed', Pos('located', Text) > 0);
-    AssertTrue('with its location: ' + Text, Pos('(at ', Text) > 0);
+    AssertTrue('the name is listed', Pos('located', Text) > 0);
+    AssertFalse('and no path: ' + Text, Pos('(at ', Text) > 0);
+    AssertFalse('nor a raw directory', Pos('located/SKILL', Text) > 0);
+
+    { THE PAIRING: what the catalogue SHOWS must be loadable. Showing the name
+      without teaching the lookup would break load_skill the moment the display
+      was fixed - the model calls back with the string it was given. }
+    Before := Reg.InstructionsOf('located');
+    AssertTrue('loadable by the name shown', Reg.LoadSkill('located', Err));
+    After := Reg.InstructionsOf('located');
+    AssertEquals('the same skill', Before, After);
+    { And by the key, which stays the canonical identifier. }
+    AssertEquals('key resolves to the same entry', Ord(ssLoaded),
+      Ord(Reg.StateOf('located')));
   finally
     Reg.Free;
   end;

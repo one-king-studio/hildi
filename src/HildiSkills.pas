@@ -242,10 +242,22 @@ end;
 function TSkillRegistry.IndexOfKey(const AKey: string): Integer;
 var
   I: Integer;
+  E: TSkillEntry;
 begin
+  { Accept EITHER the key or the spec name. The catalogue now shows the name
+    (changelog-writer), and the model calls load_skill with what it was shown -
+    so refusing the name would break loading the moment the display was fixed.
+    Key first: it is the canonical identifier, and a skill whose key and name
+    differ only in punctuation must resolve by key. }
   for I := 0 to FEntries.Count - 1 do
     if TSkillEntry(FEntries[I]).Skill.Key = AKey then
       Exit(I);
+  for I := 0 to FEntries.Count - 1 do
+  begin
+    E := TSkillEntry(FEntries[I]);
+    if SameText(E.Skill.Name, AKey) then
+      Exit(I);
+  end;
   Result := -1;
 end;
 
@@ -417,11 +429,12 @@ begin
     E := TSkillEntry(FEntries[I]);
     if Result = '' then
       Result := SkillManifestHeader + LineEnding;
-    Result := Result + '- ' + E.Skill.Key + ': ' + E.Skill.Description;
+    Result := Result + '- ' + E.Skill.Name + ': ' + E.Skill.Description;
     if E.Skill.WhenToUse <> '' then
       Result := Result + ' ' + E.Skill.WhenToUse;
-    if E.Skill.Location <> '' then
-      Result := Result + ' (at ' + E.Skill.Location + ')';
+    { NO "(at <path>)" any more. The body is injected with its own
+      "Skill directory:" line, so repeating the path here was the most visually
+      prominent thing on the line and pure noise. }
     Result := Result + LineEnding;
   end;
 end;
