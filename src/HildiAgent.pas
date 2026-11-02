@@ -72,6 +72,10 @@ type
       (mrSkill) with ASkillKey in RefSessionId, so the loaded set can be derived
       from the history rather than tracked in two places. }
     procedure AppendSkill(const ASkillKey, AText: string);
+    { The skill keys whose bodies are IN THE CURRENT CONTEXT. Derived from the
+      active window, so a /checkpoint rebuild excludes whatever it archived -
+      there is no second bookkeeping to disagree with the history. }
+    function LoadedSkillKeys: TStringArray;
     { Turn/request audit. BeginTurn opens a loop; the user prompt is appended
       separately, linked to the open turn. Ids are 0 when not persisted. }
     function BeginTurn: Int64;
@@ -88,6 +92,8 @@ type
   private
     FItems: TChatMessageArray;
     FTurnMark: Integer;
+    { No rows to query back, so the loaded keys are tracked directly. }
+    FSkillKeys: TStringArray;
   public
     procedure Append(const AMessage: TChatMessage);
     function Messages: TChatMessageArray;
@@ -97,6 +103,7 @@ type
     procedure AppendAmbient(const AText, ARefSessionId, ALabel, ASource,
       AStatus: string; AElapsedMs: Int64);
     procedure AppendSkill(const ASkillKey, AText: string);
+    function LoadedSkillKeys: TStringArray;
     function BeginTurn: Int64;
     function BeginRequest(ATurnId: Int64; const AModel: string;
       AMessageCount: Integer): Int64;
@@ -873,6 +880,7 @@ end;
 procedure TMemoryConversationStore.AppendSkill(const ASkillKey, AText: string);
 var
   Msg: TChatMessage;
+  I: Integer;
 begin
   { No store: the body is the content as-is. It carries its own <skill_content>
     wrapper already, which is what makes it survive the prewrapped check and
@@ -881,6 +889,19 @@ begin
   Msg.Role := crUser;
   Msg.Content := AText;
   Append(Msg);
+  { The key is kept here because this store has no rows to query back: the
+    sqlite store derives the set from the history, and both must answer the same
+    question the same way. }
+  for I := 0 to High(FSkillKeys) do
+    if FSkillKeys[I] = ASkillKey then
+      Exit;
+  SetLength(FSkillKeys, Length(FSkillKeys) + 1);
+  FSkillKeys[High(FSkillKeys)] := ASkillKey;
+end;
+
+function TMemoryConversationStore.LoadedSkillKeys: TStringArray;
+begin
+  Result := Copy(FSkillKeys, 0, Length(FSkillKeys));
 end;
 
 function TMemoryConversationStore.BeginTurn: Int64;

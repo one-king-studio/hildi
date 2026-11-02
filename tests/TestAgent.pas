@@ -140,6 +140,7 @@ type
     procedure AppendAmbient(const AText, ARefSessionId, ALabel, ASource,
       AStatus: string; AElapsedMs: Int64);
     procedure AppendSkill(const ASkillKey, AText: string);
+    function LoadedSkillKeys: TStringArray;
     function BeginTurn: Int64;
     function BeginRequest(ATurnId: Int64; const AModel: string;
       AMessageCount: Integer): Int64;
@@ -184,6 +185,7 @@ type
     procedure AppendAmbient(const AText, ARefSessionId, ALabel, ASource,
       AStatus: string; AElapsedMs: Int64);
     procedure AppendSkill(const ASkillKey, AText: string);
+    function LoadedSkillKeys: TStringArray;
     function BeginTurn: Int64;
     function BeginRequest(ATurnId: Int64; const AModel: string;
       AMessageCount: Integer): Int64;
@@ -632,6 +634,11 @@ begin
   FInner.AppendSkill(ASkillKey, AText);
 end;
 
+function TCountingStore.LoadedSkillKeys: TStringArray;
+begin
+  Result := FInner.LoadedSkillKeys;
+end;
+
 function TCountingStore.BeginTurn: Int64;
 begin
   Result := FInner.BeginTurn;
@@ -725,6 +732,11 @@ begin
   Inc(SkillAppends);
   LastSkillKey := ASkillKey;
   FInner.AppendSkill(ASkillKey, AText);
+end;
+
+function TRecordingStore.LoadedSkillKeys: TStringArray;
+begin
+  Result := FInner.LoadedSkillKeys;
 end;
 
 function TRecordingStore.BeginTurn: Int64;

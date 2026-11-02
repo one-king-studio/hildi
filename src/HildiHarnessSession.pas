@@ -229,6 +229,9 @@ type
       request boundary, after the tool result), appends directly when the turn is
       over, which is the only safe moment. }
     procedure SkillLoaded(const ASkill: TSkill);
+    { The skill keys whose bodies are in the CURRENT context, asked of the store.
+      Wired to the registry's KeysQuery. }
+    function SkillKeysInContext: TStringArray;
     { The session's approval service, so the runtime can hand it to the
       delegation tools. }
     property ApprovalService: IApprovalService read FApprovalService;
@@ -1221,6 +1224,11 @@ begin
   RegisterMcpSkills(FSkills, Cfg, FMcp);
   { A load delivers the body into the conversation instead of the tail. }
   FSkills.OnLoaded := SkillLoaded;
+  { "Is this skill in context?" is answered by the STORE, not by a flag here: a
+    /checkpoint rebuild archives the body, and the registry must notice. Refreshed
+    once per turn in Prepare, so this costs one query per turn rather than one
+    per tool resolution. }
+  FSkills.KeysQuery := SkillKeysInContext;
   { The STABLE half - each skill's description and when-to-use - goes to the
     system prompt, where stable text belongs. Only the activation state stays in
     the per-request fragment, so the manifest stops costing ~105 tokens on every
@@ -1284,6 +1292,14 @@ begin
   Result := True;
 end;
 
+function THarnessSession.SkillKeysInContext: TStringArray;
+begin
+  if FConversation = nil then
+    Result := nil
+  else
+    Result := FConversation.LoadedSkillKeys;
+end;
+
 procedure THarnessSession.SkillLoaded(const ASkill: TSkill);
 begin
   { Nothing to deliver for a tool-only declaration (an MCP-style source): it has
@@ -1292,18 +1308,21 @@ begin
     Exit;
   if (FLoop = nil) or (FConversation = nil) then
     Exit;
-  { TWO PLACEMENTS, decided by who initiated the load.
+  { TWO PLACEMENTS, decided by whether a turn is in flight.
 
-    The AGENT called load_skill: the body must land AFTER the tool result, so it
-    is queued and drained at the next request boundary - appending here would
-    interleave a user message between the assistant's tool_calls message and its
-    result, which providers reject.
+    NO TURN RUNNING (the operator side-loaded it): append now. The prompt does
+    not exist yet, so this row is already ahead of it - which is exactly the
+    requested placement - and the derived "in context" answer is correct
+    immediately, so the panel and the manifest agree with the history at once.
 
-    The OPERATOR side-loaded it: the body goes AHEAD of their prompt, so the
-    prompt stays last in the conversation. That is a request-boundary placement
-    too, so it is queued as well - the loop drains it immediately before the
-    prompt is appended. }
-  FLoop.PromptQueue.PushSkill(ASkill.Key, RenderSkillContent(ASkill));
+    A TURN RUNNING: queue it. Appending here would interleave a user message
+    between the assistant's tool_calls message and its result; the queue drains
+    at a request boundary, which for the agent-initiated case is AFTER the tool
+    result and for a side-load is immediately BEFORE the next prompt. }
+  if not FLoop.TurnActive then
+    FConversation.AppendSkill(ASkill.Key, RenderSkillContent(ASkill))
+  else
+    FLoop.PromptQueue.PushSkill(ASkill.Key, RenderSkillContent(ASkill));
 end;
 
 function THarnessSession.LoadSkillByName(const AKey: string;

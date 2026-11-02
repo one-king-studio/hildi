@@ -43,6 +43,9 @@ type
     procedure TestCapZeroDisablesTruncation;
     procedure TestRenderStillShowsFullResult;
     procedure TestAppendAmbientRoundTrip;
+    { The point of the derived loaded set: a /checkpoint archives the body, so
+      the skill must read as reloadable rather than as loaded forever. }
+    procedure TestLoadedSkillKeysExcludesWhatACheckpointArchived;
     procedure TestComposeWrapsAmbientAsUser;
     procedure TestFormatAmbientEscapes;
   end;
@@ -636,6 +639,51 @@ begin
     AssertEquals('source', 'delegate_task', Recs[0].Source);
     AssertEquals('status', 'completed', Recs[0].Status);
     AssertEquals('elapsed', 4200, Recs[0].DurationMs);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TSessionTest.TestLoadedSkillKeysExcludesWhatACheckpointArchived;
+var
+  S: TSqliteStore;
+  Conv: TSqliteConversationStore;
+  Err: TStoreError;
+  Ws: Integer;
+  Sid: string;
+  Seq: Int64;
+  Keys: TStringArray;
+begin
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, Sid, Err);
+    Conv := TSqliteConversationStore.Create(S, Sid, 0);
+    try
+      { A body in the current window reads as loaded. }
+      Conv.AppendSkill('pdf_processing', '<skill_content>b</skill_content>');
+      Keys := Conv.LoadedSkillKeys;
+      AssertEquals('in context before the checkpoint', 1, Length(Keys));
+      AssertEquals('the key', 'pdf_processing', Keys[0]);
+
+      { A /checkpoint collapses everything at or before the boundary into the
+        summary. The body is no longer in the context, so the skill must read as
+        reloadable - otherwise load_skill short-circuits and recall silently
+        delivers nothing. This is the case the whole derived set exists for. }
+      AssertTrue('checkpoint', S.SaveCheckpoint(Sid, 'summary', Seq, Err));
+      Keys := Conv.LoadedSkillKeys;
+      AssertEquals('archived by the checkpoint, so not in context', 0,
+        Length(Keys));
+
+      { Recall: the body is written again, after the boundary, and reads as
+        loaded once more. }
+      Conv.AppendSkill('pdf_processing', '<skill_content>b2</skill_content>');
+      Keys := Conv.LoadedSkillKeys;
+      AssertEquals('recalled', 1, Length(Keys));
+      AssertEquals('same key', 'pdf_processing', Keys[0]);
+    finally
+      Conv.Free;
+    end;
   finally
     S.Free;
   end;

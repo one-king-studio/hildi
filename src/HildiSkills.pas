@@ -25,6 +25,20 @@ uses
 type
   TSkillState = (ssUnloaded, ssLoaded);
 
+  { Returns the keys whose bodies are IN THE CURRENT CONTEXT. Supplied by the
+    owner (the session), because only it knows the store - and the store, not the
+    registry, is the source of truth: a /checkpoint rebuild resumes from a
+    snapshot, so a body written before the boundary is no longer in context even
+    though it was loaded earlier.
+
+    ONE call for all keys, not one per key: this is refreshed once per turn in
+    Prepare and the result is cached, because Specs/Find/Manifest are consulted
+    on every tool resolution and a query there would be a round trip per call.
+
+    Unset means the registry falls back to its own activation state, which keeps
+    it standalone-usable for tests and headless callers. }
+  TSkillKeysQuery = function: TStringArray of object;
+
   { What a skill needs to connect and offer tools. Nil for an instruction-only
     skill (which activates with instructions alone). The registry calls
     Deactivate only on a source it Activated. }
@@ -97,9 +111,16 @@ type
     FWorkspaceId: Integer;
     FSessionId: string;
     FOnLoaded: TSkillLoadedEvent;
+    FKeysQuery: TSkillKeysQuery;
+    { The keys in context, refreshed once per turn in Prepare. Cached because
+      Specs/Find/Manifest are consulted on every tool resolution; a live query
+      there would be a store round trip per call. }
+    FLoadedKeys: TStringArray;
+    { Is this skill's body IN CONTEXT right now? The single answer every other
+      method uses, so the registry cannot disagree with itself about it. }
+    function IsLoaded(const AEntry: TSkillEntry): Boolean;
     function IndexOfKey(const AKey: string): Integer;
     function TtlOf(const AEntry: TSkillEntry): Int64;
-    function ActiveInstructions: string;
     function LoadSpec: TToolSpec;
     function HandleLoad(const AArgumentsJson: string;
       out AResult, AError: string;
@@ -164,6 +185,11 @@ type
     { Announce activation. The owner turns this into a conversation append; the
       registry itself never touches the store. }
     property OnLoaded: TSkillLoadedEvent read FOnLoaded write FOnLoaded;
+
+    { Where "in context" comes from. Unset => the registry's own activation
+      state (standalone use). Set => the store decides, refreshed once per turn
+      in Prepare. }
+    property KeysQuery: TSkillKeysQuery read FKeysQuery write FKeysQuery;
   end;
 
 { The activation payload for a skill: the body wrapped in <skill_content>, with
@@ -254,15 +280,35 @@ begin
   Entry.Source := ASource;
 end;
 
+function TSkillRegistry.IsLoaded(const AEntry: TSkillEntry): Boolean;
+var
+  J: Integer;
+begin
+  { THE STORE DECIDES, when the owner supplied a query - but only for a skill
+    that HAS a body. A tool-only source (an MCP server, today) writes no body
+    row, so the store has nothing to answer with; asking it would report every
+    such source as unloaded and silently remove its tools. Those keep their own
+    activation state until the MCP split gives them their own lifecycle. }
+  if Assigned(FKeysQuery) and (AEntry.Skill.Instructions <> '') then
+  begin
+    Result := False;
+    for J := 0 to High(FLoadedKeys) do
+      if FLoadedKeys[J] = AEntry.Skill.Key then
+        Exit(True);
+  end
+  else
+    Result := AEntry.State = ssLoaded;
+end;
+
 function TSkillRegistry.StateOf(const AKey: string): TSkillState;
 var
   I: Integer;
 begin
   I := IndexOfKey(AKey);
-  if I < 0 then
-    Result := ssUnloaded
+  if (I >= 0) and IsLoaded(TSkillEntry(FEntries[I])) then
+    Result := ssLoaded
   else
-    Result := TSkillEntry(FEntries[I]).State;
+    Result := ssUnloaded;
 end;
 
 function TSkillRegistry.SkillOf(const AKey: string): TSkill;
@@ -351,7 +397,10 @@ begin
   for I := 0 to FEntries.Count - 1 do
   begin
     E := TSkillEntry(FEntries[I]);
-    if E.State = ssLoaded then
+    { The STATE only, and it is the DERIVED state: after a /checkpoint rebuild a
+      skill that was loaded is no longer in context, and saying otherwise would
+      invite the model to rely on a body it cannot see. }
+    if IsLoaded(E) then
       State := 'loaded'
     else
       State := 'unloaded';
@@ -387,24 +436,6 @@ begin
     if E.Skill.Location <> '' then
       Result := Result + ' (at ' + E.Skill.Location + ')';
     Result := Result + LineEnding;
-  end;
-end;
-
-function TSkillRegistry.ActiveInstructions: string;
-var
-  I: Integer;
-  E: TSkillEntry;
-begin
-  Result := '';
-  for I := 0 to FEntries.Count - 1 do
-  begin
-    E := TSkillEntry(FEntries[I]);
-    if (E.State = ssLoaded) and (E.Skill.Instructions <> '') then
-    begin
-      if Result <> '' then
-        Result := Result + LineEnding;
-      Result := Result + E.Skill.Instructions;
-    end;
   end;
 end;
 
@@ -573,9 +604,14 @@ begin
     Exit(False);
   end;
   E := TSkillEntry(FEntries[I]);
-  if E.State = ssLoaded then
+  { NOT "is it activated" but "is its body in context". After a /checkpoint
+    rebuild the store no longer has the row, so this is False and the load runs
+    again - re-injecting the body. The approval gate below is a fast-path hit
+    (the session-scope rule from the first load still stands), and the source
+    activate is idempotent, so a recall re-delivers without re-prompting. }
+  if IsLoaded(E) then
   begin
-    { Idempotent: a reload just resets the idle timer. }
+    { Already in context: a reload just resets the idle timer. }
     E.LastUsedMs := NowMs;
     Exit(True);
   end;
@@ -607,6 +643,11 @@ begin
     tool_calls message and its result. }
   if Assigned(FOnLoaded) then
     FOnLoaded(E.Skill);
+  { Refresh the in-context cache NOW rather than waiting for the next turn: an
+    operator load appends immediately, and until this runs every caller would see
+    the skill as unloaded and could load it a second time. }
+  if Assigned(FKeysQuery) then
+    FLoadedKeys := FKeysQuery();
   Result := True;
 end;
 
@@ -616,7 +657,13 @@ var
   E: TSkillEntry;
   Now: Int64;
 begin
-  { Decay at the turn boundary only: unload an idle skill. }
+  { Decay at the turn boundary only: unload an idle skill - and, for a skill
+    whose body lives in the store, re-read what is actually in context. This is
+    the once-per-turn refresh that makes a /checkpoint rebuild visible: the body
+    written before the boundary is gone, so the skill reads as unloaded and can
+    be recalled. }
+  if Assigned(FKeysQuery) then
+    FLoadedKeys := FKeysQuery();
   Now := NowMs;
   for I := 0 to FEntries.Count - 1 do
   begin
@@ -647,7 +694,7 @@ begin
   for I := 0 to FEntries.Count - 1 do
   begin
     E := TSkillEntry(FEntries[I]);
-    if E.State <> ssLoaded then
+    if not IsLoaded(E) then
       Continue;
     for K := 0 to High(E.Tools) do
     begin
@@ -658,20 +705,14 @@ begin
 end;
 
 function TSkillRegistry.PromptFragment: string;
-var
-  Instr: string;
 begin
   { No skills declared: contribute no fragment (keep the prompt unchanged). }
   if FEntries.Count = 0 then
     Exit('');
+  { The STATE only. The BODY is not here at all any more: it is injected once
+    into the conversation as an mrSkill row and stays there, so re-sending it on
+    every request would only inflate the request. }
   Result := Manifest;
-  { The BODY no longer rides the per-request fragment. It is injected once into
-    the conversation (an mrSkill message) and stays there, so re-sending it every
-    request only inflates the request. ActiveInstructions is now unreferenced
-    here on purpose; it is kept for the manifest's internal use. }
-  Instr := '';
-  if Instr <> '' then
-    Result := Result + LineEnding + Instr;
 end;
 
 function TSkillRegistry.Find(const AName: string;
@@ -684,7 +725,7 @@ begin
   for I := 0 to FEntries.Count - 1 do
   begin
     E := TSkillEntry(FEntries[I]);
-    if E.State <> ssLoaded then
+    if not IsLoaded(E) then
       Continue;
     if (E.Source <> nil) and E.Source.Find(AName, ATool) then
     begin

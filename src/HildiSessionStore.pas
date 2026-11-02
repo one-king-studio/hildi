@@ -43,6 +43,9 @@ type
     procedure AppendAmbient(const AText, ARefSessionId, ALabel, ASource,
       AStatus: string; AElapsedMs: Int64);
     procedure AppendSkill(const ASkillKey, AText: string);
+    { The skill keys whose bodies are in the ACTIVE WINDOW - see the
+      implementation for why the checkpoint boundary matters. }
+    function LoadedSkillKeys: TStringArray;
     function BeginTurn: Int64;
     function BeginRequest(ATurnId: Int64; const AModel: string;
       AMessageCount: Integer): Int64;
@@ -194,6 +197,40 @@ begin
   Rec.Content := AText;
   Rec.RefSessionId := ASkillKey;
   FStore.AppendMessage(Rec, Err);
+end;
+
+function TSqliteConversationStore.LoadedSkillKeys: TStringArray;
+var
+  Recs: TMessageRecordArray;
+  Err: TStoreError;
+  I, J: Integer;
+  Key: string;
+begin
+  { THE ACTIVE WINDOW, not the whole history: after a /checkpoint the summary
+    stands in for everything at or before the boundary, so a body written earlier
+    is no longer in the context and the skill must read as reloadable. Querying
+    every row would report it as loaded forever and recall would silently do
+    nothing. }
+  Result := nil;
+  if not FStore.QueryActiveMessages(FSessionId, Recs, Err) then
+    Exit;
+  for I := 0 to High(Recs) do
+  begin
+    if Recs[I].Role <> mrSkill then
+      Continue;
+    Key := Recs[I].RefSessionId;
+    if Key = '' then
+      Continue;
+    { A skill loaded twice in one window is one entry. }
+    J := 0;
+    while (J <= High(Result)) and (Result[J] <> Key) do
+      Inc(J);
+    if J > High(Result) then
+    begin
+      SetLength(Result, Length(Result) + 1);
+      Result[High(Result)] := Key;
+    end;
+  end;
 end;
 
 function TSqliteConversationStore.BeginTurn: Int64;
