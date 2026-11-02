@@ -101,6 +101,10 @@ type
       ATimeoutMs: Integer): Boolean;
     function WaitCount(ASink: TRecordingSink; AKind: TSessionEventKind;
       ACount, ATimeoutMs: Integer): Boolean;
+    { Wait for the catalogue to report a given skill as in context. Reads the
+      wire, not the runtime's internals - the same fact the palette renders. }
+    function WaitLoaded(ASink: TRecordingSink; const AKey: string;
+      ATimeoutMs: Integer): Boolean;
     procedure DeleteSocket(const ASessionId: string);
   protected
     procedure SetUp; override;
@@ -120,6 +124,10 @@ type
       without a push on attach its cache is empty and the palette says "no skills
       available" on a session that has skills. }
     procedure TestAttachPushesTheSkillCatalogue;
+    { The load path through the runtime has never been walked: scLoadSkill ->
+      LoadSkillByName -> the body reaching the conversation. Every interactive bug
+      so far came from a path unit tests did not exercise. }
+    procedure TestLoadSkillOverTheWireLoadsIt;
     procedure TestTurnStreamsToObserver;
     procedure TestAttachMidTurnReplaysLiveTurn;
     procedure TestApprovalCrossesTheWire;
@@ -508,6 +516,29 @@ begin
   Result := False;
 end;
 
+function TSessionRuntimeTest.WaitLoaded(ASink: TRecordingSink;
+  const AKey: string; ATimeoutMs: Integer): Boolean;
+var
+  Deadline: Int64;
+  I, J: Integer;
+  E: TSessionEvent;
+begin
+  Deadline := GetTickCount64 + ATimeoutMs;
+  repeat
+    for I := 0 to ASink.Count - 1 do
+    begin
+      E := ASink.EventAt(I);
+      if E.Kind <> ekSkills then
+        Continue;
+      for J := 0 to High(E.SkillLoadedKeys) do
+        if E.SkillLoadedKeys[J] = AKey then
+          Exit(True);
+    end;
+    Sleep(10);
+  until GetTickCount64 >= Deadline;
+  Result := False;
+end;
+
 procedure TSessionRuntimeTest.TestSocketPathFitsUnixLimit;
 var
   Path: string;
@@ -694,6 +725,83 @@ begin
   finally
     Client.Free;
     Sink := nil;
+    DeleteSocket(Id);
+  end;
+end;
+
+procedure TSessionRuntimeTest.TestLoadSkillOverTheWireLoadsIt;
+var
+  Id: string;
+  Fake: TFakeTransport;
+  Rt: TSessionRuntime;
+  Th: TRuntimeThread;
+  Sink: TRecordingSink;
+  Driver: TSessionClient;
+  Err: string;
+  Cmd: TSessionCommand;
+  Reply: TSessionMessage;
+  SkillDir: string;
+  Text: string;
+  Fs: TFileStream;
+begin
+  { THE LOAD PATH, over the wire. scLoadSkill -> LoadSkillByName, which records a
+    session approval FIRST (typing the name is the consent) and only then loads,
+    so a file-backed skill must load without an approval dialog blocking the
+    test. Nothing has driven this path before - every interactive bug so far came
+    from a path the unit tests did not walk. }
+  SkillDir := IncludeTrailingPathDelimiter(FWs) + '.agents' + PathDelim +
+    'skills' + PathDelim + 'wire';
+  ForceDirectories(SkillDir);
+  Text := '---'#10'name: wire'#10'description: loadable over the wire'#10 +
+    '---'#10'Body over the wire.';
+  Fs := TFileStream.Create(IncludeTrailingPathDelimiter(SkillDir) + 'SKILL.md',
+    fmCreate);
+  try
+    Fs.WriteBuffer(Text[1], Length(Text));
+  finally
+    Fs.Free;
+  end;
+
+  Id := NewSession;
+  Fake := TFakeTransport.Create;
+  try
+    Rt := MakeRuntime(Id, Fake, 0);
+    Th := TRuntimeThread.Create(Rt);
+    try
+      Th.Start;
+      AssertTrue('bound', WaitForSocket(Id, 5000));
+      Sink := TRecordingSink.Create;
+      Driver := TSessionClient.Open(MakeClientConfig(Id, srDrive), Sink, Err);
+      AssertNotNull('driver attaches: ' + Err, Driver);
+      try
+        { The catalogue arrives on attach, which is what makes the key known. }
+        AssertTrue('catalogue pushed',
+          WaitCount(Sink, ekSkills, 1, 20000));
+
+        Cmd := Default(TSessionCommand);
+        Cmd.Kind := scLoadSkill;
+        Cmd.Id := 'l1';
+        Cmd.SkillKey := 'wire';
+        AssertTrue('load replied', Driver.SendAndWait(Cmd, 5000, Reply));
+        AssertTrue('the runtime accepted the load: ' + Reply.ErrorMessage,
+          Reply.Ok);
+
+        { The observable consequence, read off the wire rather than out of the
+          runtime's internals: the catalogue comes back with the skill marked as
+          in context. That is the same fact the palette renders. }
+        AssertTrue('catalogue reports it loaded',
+          WaitLoaded(Sink, 'wire', 5000));
+      finally
+        Driver.Free;
+        Sink := nil;
+      end;
+    finally
+      Rt.Stop;
+      WaitFinished(Th, 3000);
+      Th.Free;
+    end;
+  finally
+    Fake.Free;
     DeleteSocket(Id);
   end;
 end;
