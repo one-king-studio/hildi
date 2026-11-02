@@ -31,7 +31,7 @@ uses
   TUIWidgetsHistorymodal,
   TUIWidgetsActions,
   HildiHarnessSubagent, HildiHarnessSubagentSpy,
-  TUIWidgetsSidebar, TUIWidgetsList,
+  TUIWidgetsAgentList, TUIWidgetsList,
   HildiSessionProtocol, HildiSessionClient,
   HildiChangesStore, ChangesTypes, ChangesStore, ChangesSummary,
   HildiUTF8;
@@ -159,11 +159,11 @@ type
     { The submitted prompt and its block, so an early cancel can undo them. }
     FUserPrompt: string;
     FUserBlock: TChatItem;
-    { Subagents: the roster (fed from ekSubagent), the sidebar plane, and — in
+    { Subagents: the roster (fed from ekSubagent), the agent-list plane, and — in
       spy mode — the spied child and its observer. }
     FRoster: TSubagentRoster;
-    FSidebar: TSidebar;
-    FSidebarShown: Boolean;
+    FAgentList: TAgentList;
+    FAgentListShown: Boolean;
     FSpy: TSubagentSpy;
     FSpyId: string;
     { A child the list asked to spy, honoured after dispatch returns rather than
@@ -247,20 +247,20 @@ type
     procedure SyncHistory;
     procedure CloseDiff;
     procedure DiffClosed(Sender: TObject);
-    { Subagents: feed the roster, toggle/show the sidebar, spy on a child. }
+    { Subagents: feed the roster, toggle/show the agent list, spy on a child. }
     procedure HandleSubagentEvent(const E: TTurnEvent);
     { Show a queued prompt (a violet 'Queued' box) at the end of the stream. }
     procedure ShowQueued(const AText: string);
-    procedure ToggleSidebar(Sender: TObject);
+    procedure ToggleAgentList(Sender: TObject);
     { Adapter for the ctrl+= chord, which is a TNotifyEvent. }
     procedure ShowSkillsClicked(Sender: TObject);
-    procedure LayoutSidebar;
+    procedure LayoutAgentList;
     { Each subagent row shows what its child is currently working on, so the
       list answers "which of these is doing the thing I care about". }
     procedure RefreshSubagentTitles;
-    procedure OnSidebarSelect(const ASessionId: string);
+    procedure OnAgentListSelect(const ASessionId: string);
     { An action key from the list: 'a' abort, 'r' release, 'p' promote. }
-    procedure OnSidebarAction(const AAction: Char);
+    procedure OnAgentListAction(const AAction: Char);
     { Honour a selection the list requested during dispatch. }
     procedure ConsumePendingSelect;
     procedure LeaveSpy;
@@ -282,7 +282,7 @@ type
     procedure DrainSpy;
     procedure SendSubagentCommand(AKind: TSessionCommandKind;
       const ASessionId: string);
-    function SidebarShown: Boolean;
+    function AgentListShown: Boolean;
     function SpyId: string;
     procedure FinishTurn(AState: TPanelState; const ALabel: string);
     procedure SetState(AKind: TPanelState; const ALabel: string);
@@ -444,8 +444,8 @@ type
     property HintsText: string read FHintsText;
     { True once the first Escape has armed the interrupt. }
     property InterruptArmed: Boolean read FInterruptPending;
-    { Whether the subagent sidebar is shown. }
-    property SidebarVisible: Boolean read SidebarShown;
+    { Whether the agent list is shown. }
+    property AgentListVisible: Boolean read AgentListShown;
     { The spied child's session id, '' when not spying. }
     property SpiedSessionId: string read SpyId;
     function ConversationText: string;
@@ -554,27 +554,27 @@ type
     FOnQuit: TNotifyEvent;
     FOnEscape: TNotifyEvent;
     FCanQuit: TQueryEvent;
-    FOnToggleSidebar: TNotifyEvent;
+    FOnToggleAgentList: TNotifyEvent;
     FOnShowSkills: TNotifyEvent;
   public
     constructor Create(AChild: TWidget; AOnQuit, AOnEscape: TNotifyEvent;
       ACanQuit: TQueryEvent);
-    procedure SetSidebarToggle(AHandler: TNotifyEvent);
+    procedure SetAgentListToggle(AHandler: TNotifyEvent);
     { ctrl+= opens the skill list. A chord rather than a key because '=' must
       stay typable in a prompt. }
     procedure SetShowSkills(AHandler: TNotifyEvent);
     function HandleEvent(const E: TInputEvent): Boolean; override;
   end;
 
-  { Composites the floating sidebar over the app: the base (the chat panel) is
-    drawn first, the sidebar on top when it is visible. Input goes to the sidebar
+  { Composites the floating agent list over the app: the base (the chat panel) is
+    drawn first, the agent list on top when it is visible. Input goes to the list
     while it is shown (it is the focused overlay); otherwise to the base. Extends
     TSingleChild so the base's Advance/Animating reach the app loop. }
-  TSidebarOverlay = class(TSingleChild)
+  TAgentListOverlay = class(TSingleChild)
   private
-    FSidebar: TWidget;
+    FAgentList: TWidget;
   public
-    constructor Create(AChild, ASidebar: TWidget);
+    constructor Create(AChild, AList: TWidget);
     procedure Render(const S: ISurface); override;
     function HandleEvent(const E: TInputEvent): Boolean; override;
   end;
@@ -636,9 +636,9 @@ begin
   FCanQuit := ACanQuit;
 end;
 
-procedure TAppShell.SetSidebarToggle(AHandler: TNotifyEvent);
+procedure TAppShell.SetAgentListToggle(AHandler: TNotifyEvent);
 begin
-  FOnToggleSidebar := AHandler;
+  FOnToggleAgentList := AHandler;
 end;
 
 procedure TAppShell.SetShowSkills(AHandler: TNotifyEvent);
@@ -650,14 +650,14 @@ function TAppShell.HandleEvent(const E: TInputEvent): Boolean;
 begin
   if (E.Kind = ikKey) and (E.Key.Kind = kkChar) and (moCtrl in E.Key.Mods) then
   begin
-    { Ctrl+D toggles the subagent sidebar, NOT Ctrl+B: an integrated terminal
+    { Ctrl+D toggles the agent list, NOT Ctrl+B: an integrated terminal
       (VSCode's) claims Ctrl+B for its own sidebar and never passes it to the
       pty, so the shortcut was unreachable in the editor most operators use.
       Ctrl+D reaches us as a raw byte; it only means EOF to a shell. }
     if (E.Key.Ch = 'd') or (E.Key.Ch = 'D') then
     begin
-      if Assigned(FOnToggleSidebar) then
-        FOnToggleSidebar(Self);
+      if Assigned(FOnToggleAgentList) then
+        FOnToggleAgentList(Self);
       Exit(True);
     end;
     if (E.Key.Ch = 'c') or (E.Key.Ch = 'C') then
@@ -672,9 +672,9 @@ begin
         FOnQuit(Self);
       Exit(True);
     end;
-    { Ctrl+D is no longer a quit key: it now toggles the subagent sidebar. Quit
+    { Ctrl+D is no longer a quit key: it now toggles the agent list. Quit
       stays on Ctrl-C, which is context-aware and standard. Two quit bindings
-      for one action was part of how the sidebar became unreachable. }
+      for one action was part of how the agent list became unreachable. }
     { ctrl+= opens the skill list. A chord, not a bare key: '=' must stay typable
       in a prompt, and this is the shortcut the /skill entry advertises. }
     if (E.Key.Ch = '=') then
@@ -693,26 +693,26 @@ begin
   Result := inherited HandleEvent(E);
 end;
 
-{ TSidebarOverlay }
+{ TAgentListOverlay }
 
-constructor TSidebarOverlay.Create(AChild, ASidebar: TWidget);
+constructor TAgentListOverlay.Create(AChild, AList: TWidget);
 begin
   inherited Create(AChild);
-  FSidebar := ASidebar;
+  FAgentList := AList;
 end;
 
-procedure TSidebarOverlay.Render(const S: ISurface);
+procedure TAgentListOverlay.Render(const S: ISurface);
 begin
   inherited Render(S);
-  if (FSidebar <> nil) and FSidebar.Visible then
-    FSidebar.Render(S);
+  if (FAgentList <> nil) and FAgentList.Visible then
+    FAgentList.Render(S);
 end;
 
-function TSidebarOverlay.HandleEvent(const E: TInputEvent): Boolean;
+function TAgentListOverlay.HandleEvent(const E: TInputEvent): Boolean;
 begin
-  { While the sidebar is shown it is the focused overlay, but global keys
+  { While the agent list is shown it is the focused overlay, but global keys
     (Ctrl+B/Ctrl+C, Escape) still fall through to the base shell. }
-  if (FSidebar <> nil) and FSidebar.Visible and FSidebar.HandleEvent(E) then
+  if (FAgentList <> nil) and FAgentList.Visible and FAgentList.HandleEvent(E) then
     Exit(True);
   Result := inherited HandleEvent(E);
 end;
@@ -961,7 +961,7 @@ destructor THarnessApp.Destroy;
 begin
   CancelTurn;
   FSpy.Free;
-  FSidebar.Free;
+  FAgentList.Free;
   FRoster.Free;
   FAnsweredAsks.Free;
   FToolBlocks.Free;
@@ -1008,15 +1008,15 @@ begin
   FHintsText := ComposerHints(FRoster.Count > 0);
   FPanel.SetHints(FHintsText);
   UpdateCta;
-  FSidebar := TSidebar.Create(FTheme, FRoster);
-  FSidebar.OnSelect := OnSidebarSelect;
+  FAgentList := TAgentList.Create(FTheme, FRoster);
+  FAgentList.OnSelect := OnAgentListSelect;
   { The CTAs live in the warm box now, so the box reads the keys too. }
-  FSidebar.OnAction := OnSidebarAction;
-  FSidebar.Visible := False;
+  FAgentList.OnAction := OnAgentListAction;
+  FAgentList.Visible := False;
   Shell := TAppShell.Create(FPanel, Quit, HandleEscape, ComposeIsEmpty);
-  Shell.SetSidebarToggle(ToggleSidebar);
+  Shell.SetAgentListToggle(ToggleAgentList);
   Shell.SetShowSkills(ShowSkillsClicked);
-  Result := TSidebarOverlay.Create(Shell, FSidebar);
+  Result := TAgentListOverlay.Create(Shell, FAgentList);
 end;
 
 procedure THarnessApp.Quit(Sender: TObject);
@@ -1428,7 +1428,7 @@ begin
     A single Escape is not enough for a cancel - the same key must not both back
     out and kill work.
 
-    This check comes BEFORE the sidebar branch because subagent mode now keeps
+    This check comes BEFORE the agent-list branch because subagent mode now keeps
     the list visible while spying: both flags are true at once, and the list must
     not swallow Escape while a child is selected. }
   if FSpyId <> '' then
@@ -3464,7 +3464,7 @@ begin
   { A selection the list requested DURING dispatch is honoured HERE, after every
     widget has finished handling the key. ShowSpy closes one client, opens
     another, rebuilds the transcript and re-lays out - doing that from inside
-    TSidebar.HandleEvent re-enters the widget being dispatched and crashed. }
+    TAgentList.HandleEvent re-enters the widget being dispatched and crashed. }
   ConsumePendingSelect;
 end;
 
@@ -3527,7 +3527,7 @@ begin
   begin
     Title := '';
     if FSession.Store.SessionTitle(Entries[I].SessionId, Title, StoreErr) then
-      FSidebar.SetTurnTitle(Entries[I].SessionId, Title);
+      FAgentList.SetTurnTitle(Entries[I].SessionId, Title);
   end;
 end;
 
@@ -3544,10 +3544,10 @@ begin
           build time, when the roster was empty. }
         FHintsText := ComposerHints(FRoster.Count > 0);
         FPanel.SetHints(FHintsText);
-        if FSidebarShown then
+        if FAgentListShown then
         begin
           RefreshSubagentTitles;
-          FSidebar.Refresh;
+          FAgentList.Refresh;
         end;
       end;
     teAmbient:
@@ -3574,9 +3574,9 @@ begin
   end;
 end;
 
-function THarnessApp.SidebarShown: Boolean;
+function THarnessApp.AgentListShown: Boolean;
 begin
-  Result := FSidebarShown;
+  Result := FAgentListShown;
 end;
 
 function THarnessApp.SpyId: string;
@@ -3589,23 +3589,23 @@ begin
   ShowSkillList;
 end;
 
-procedure THarnessApp.ToggleSidebar(Sender: TObject);
+procedure THarnessApp.ToggleAgentList(Sender: TObject);
 var
   Entries: TSubagentEntryArray;
 begin
   { Ctrl+D is one key with two states: it enters subagent mode from the parent,
     and exits it from anywhere inside - list or child tail. No third behaviour
     to remember. }
-  if FSidebarShown or (FSpyId <> '') then
+  if FAgentListShown or (FSpyId <> '') then
   begin
     LeaveSubagentMode;
     Exit;
   end;
 
-  FSidebarShown := True;
-  FSidebar.Visible := True;
-  FSidebar.Refresh;
-  LayoutSidebar;
+  FAgentListShown := True;
+  FAgentList.Visible := True;
+  FAgentList.Refresh;
+  LayoutAgentList;
 
   { Spy the first child immediately. Entering the mode should show something,
     not a list beside an empty transcript waiting for a second keypress. }
@@ -3621,11 +3621,11 @@ begin
     FApp.Invalidate;
 end;
 
-procedure THarnessApp.LayoutSidebar;
+procedure THarnessApp.LayoutAgentList;
 var
   Compose: TRect;
 begin
-  if not FSidebarShown then
+  if not FAgentListShown then
     Exit;
   { The list REPLACES the composer: it takes the composer's exact bounds and
     draws the same box, so entering subagent mode does not move the transcript
@@ -3636,25 +3636,25 @@ begin
     ComposeBounds return an empty rect, and the guard below would then exit
     without ever setting them - which is why the box kept showing "enter spy"
     after a child was already selected. State first, geometry second. }
-  FSidebar.SetInfo('Hildi · ' + FSession.Model);
+  FAgentList.SetInfo('Hildi · ' + FSession.Model);
   { The CTAs live in this box, so they are always visible while in subagent
     mode - that is the point of not switching to a separate actions bar. Once a
     child is selected "enter spy" is wrong: it is already spying. }
   if FSpyId <> '' then
-    FSidebar.SetHints('ctrl+a abort · ctrl+r release · ctrl+p promote')
+    FAgentList.SetHints('ctrl+a abort · ctrl+r release · ctrl+p promote')
   else if FRoster.Count > 0 then
-    FSidebar.SetHints('enter spy')
+    FAgentList.SetHints('enter spy')
   else
-    FSidebar.SetHints('');
+    FAgentList.SetHints('');
   FPanel.Compose.Visible := False;
   if (Compose.H <= 0) or (Compose.W <= 0) then
     Exit;
-  FSidebar.Arrange(Compose);
+  FAgentList.Arrange(Compose);
 end;
 
-procedure THarnessApp.OnSidebarSelect(const ASessionId: string);
+procedure THarnessApp.OnAgentListSelect(const ASessionId: string);
 begin
-  { DEFER. This fires from inside TSidebar.HandleEvent, and ShowSpy closes a
+  { DEFER. This fires from inside TAgentList.HandleEvent, and ShowSpy closes a
     client, opens another, rebuilds the transcript and re-lays out the list -
     re-entering the widget mid-dispatch, which crashed. Record the request and
     let Step honour it once every widget has finished with the key. }
@@ -3676,7 +3676,7 @@ begin
   ShowSpy(Id);
 end;
 
-procedure THarnessApp.OnSidebarAction(const AAction: Char);
+procedure THarnessApp.OnAgentListAction(const AAction: Char);
 begin
   { Routed through OnSpyAction so the list and the old action bar share ONE
     implementation of abort/release/promote - including the takeover notice that
@@ -3730,10 +3730,10 @@ begin
     teal composer back on screen the moment the operator pressed Enter, which is
     the bug. The warm box remains, and only the messages panel swaps to this
     child's tail. }
-  FSidebarShown := True;
-  FSidebar.Visible := True;
-  FSidebar.Refresh;
-  LayoutSidebar;
+  FAgentListShown := True;
+  FAgentList.Visible := True;
+  FAgentList.Refresh;
+  LayoutAgentList;
   FPanel.SetComposeActive(False);
   { Rebuild the panel to show the child's transcript (history tail, then its live
     stream), and mark the header so the operator knows whose session this is. }
@@ -3914,8 +3914,8 @@ begin
       a child returns to the LIST, not to the composer. It also must not be
       re-arranged here - this runs from inside the list's own key handler, and
       arranging a widget mid-dispatch is what crashed. }
-    if FSidebarShown then
-      LayoutSidebar
+    if FAgentListShown then
+      LayoutAgentList
     else
     begin
       FPanel.SetActionsMode(False);
@@ -3937,8 +3937,8 @@ begin
   { The one way out of subagent mode: back to the parent's tail and the composer.
     Ctrl+D. Undoes everything entering the mode did, in one place. }
   LeaveSpy;
-  FSidebarShown := False;
-  FSidebar.Visible := False;
+  FAgentListShown := False;
+  FAgentList.Visible := False;
   FPanel.SetActionsMode(False);
   FPanel.SetComposeActive(True);
   FPanel.Compose.Visible := True;

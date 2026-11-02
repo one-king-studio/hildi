@@ -1,4 +1,4 @@
-unit TestSubagentSidebar;
+unit TestSubagentRoster;
 { fpcunit tests for the subagent roster model (HildiHarnessSubagent):
   applying status updates, terminal-entry persistence, prune, and find. }
 

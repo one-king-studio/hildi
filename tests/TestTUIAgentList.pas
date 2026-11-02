@@ -1,5 +1,5 @@
-unit TestTUISidebar;
-{ fpcunit tests for the sidebar widget (TUIWidgetsSidebar): rows from
+unit TestTUIAgentList;
+{ fpcunit tests for the agent-list widget (TUIWidgetsAgentList): rows from
   a roster, selection movement, Enter firing OnSelect, and the empty state. All
   over TSurfaceMemory — no terminal. }
 
@@ -12,7 +12,7 @@ uses
   TUIBase, TUISurface,
   TUIInput, TUITheme,
   TUIWidget,
-  HildiHarnessSubagent, TUIWidgetsSidebar;
+  HildiHarnessSubagent, TUIWidgetsAgentList;
 
 type
   TSelectRecorder = class
@@ -23,10 +23,10 @@ type
     procedure OnSelect(const ASessionId: string);
   end;
 
-  TSidebarTest = class(TTestCase)
+  TAgentListTest = class(TTestCase)
   private
     FRoster: TSubagentRoster;
-    FSb: TSidebar;
+    FSb: TAgentList;
     FRec: TSelectRecorder;
     function Surface(W, H: Integer): ISurface;
     function Key(AKind: TKeyKind): TInputEvent;
@@ -34,14 +34,14 @@ type
     procedure SetUp; override;
     procedure TearDown; override;
   published
-    procedure TestSidebarRendersRows;
-    procedure TestSidebarSelectionMoves;
-    procedure TestSidebarEnterFiresSelect;
-    procedure TestSidebarEmptyState;
+    procedure TestAgentListRendersRows;
+    procedure TestAgentListSelectionMoves;
+    procedure TestAgentListEnterFiresSelect;
+    procedure TestAgentListEmptyState;
     { The CTAs follow the same rule as the chat toolbar: the keybinding is dim,
       the action it performs is brighter. They used to be one uniformly amber
       string, so "ctrl+a" and "abort" read as a single word. }
-    procedure TestSidebarHintDimsTheKeyAndBrightensTheAction;
+    procedure TestAgentListHintDimsTheKeyAndBrightensTheAction;
   end;
 
 implementation
@@ -63,34 +63,34 @@ begin
   Ids.Add(ASessionId);
 end;
 
-function TSidebarTest.Surface(W, H: Integer): ISurface;
+function TAgentListTest.Surface(W, H: Integer): ISurface;
 begin
   Result := TSurfaceMemory.Create(W, H);
 end;
 
-function TSidebarTest.Key(AKind: TKeyKind): TInputEvent;
+function TAgentListTest.Key(AKind: TKeyKind): TInputEvent;
 begin
   Result := Default(TInputEvent);
   Result.Kind := ikKey;
   Result.Key.Kind := AKind;
 end;
 
-procedure TSidebarTest.SetUp;
+procedure TAgentListTest.SetUp;
 begin
   FRoster := TSubagentRoster.Create;
   FRec := TSelectRecorder.Create;
-  FSb := TSidebar.Create(DarkTheme, FRoster);
+  FSb := TAgentList.Create(DarkTheme, FRoster);
   FSb.OnSelect := FRec.OnSelect;
 end;
 
-procedure TSidebarTest.TearDown;
+procedure TAgentListTest.TearDown;
 begin
   FSb.Free;
   FRec.Free;
   FRoster.Free;
 end;
 
-procedure TSidebarTest.TestSidebarRendersRows;
+procedure TAgentListTest.TestAgentListRendersRows;
 var
   S: ISurface;
   Avail: TSize;
@@ -110,7 +110,7 @@ begin
   AssertEquals('measure height', 2, FSb.Measure(Avail).H);
 end;
 
-procedure TSidebarTest.TestSidebarSelectionMoves;
+procedure TAgentListTest.TestAgentListSelectionMoves;
 begin
   FRoster.Apply('a', 'alpha', 'running', 1000);
   FRoster.Apply('b', 'beta', 'running', 1000);
@@ -124,7 +124,7 @@ begin
   AssertEquals('moved back to 0', 0, FSb.Selected);
 end;
 
-procedure TSidebarTest.TestSidebarEnterFiresSelect;
+procedure TAgentListTest.TestAgentListEnterFiresSelect;
 begin
   FRoster.Apply('a', 'alpha', 'running', 1000);
   FRoster.Apply('b', 'beta', 'running', 1000);
@@ -143,17 +143,17 @@ begin
   AssertEquals('still b', 'b', FRec.Ids[1]);
 end;
 
-procedure TSidebarTest.TestSidebarEmptyState;
+procedure TAgentListTest.TestAgentListEmptyState;
 begin
   FSb.Refresh;
   AssertEquals('no rows', 0, FSb.RowCount);
   AssertEquals('no selection', -1, FSb.Selected);
-  { Enter on an empty sidebar is not an activation. }
+  { Enter on an empty agent list is not an activation. }
   AssertFalse('enter not handled', FSb.HandleEvent(Key(kkEnter)));
   AssertEquals('no selection fired', 0, FRec.Ids.Count);
 end;
 
-procedure TSidebarTest.TestSidebarHintDimsTheKeyAndBrightensTheAction;
+procedure TAgentListTest.TestAgentListHintDimsTheKeyAndBrightensTheAction;
 var
   Mem: TSurfaceMemory;
   R: TRect;
@@ -208,5 +208,5 @@ begin
 end;
 
 initialization
-  RegisterTest(TSidebarTest);
+  RegisterTest(TAgentListTest);
 end.

@@ -1,4 +1,4 @@
-unit TUIWidgetsSidebar;
+unit TUIWidgetsAgentList;
 { The subagent list, drawn in the COMPOSER's place and in the composer's own
   chrome: the same heavy-topped rounded box, the same raised background, the
   same lower-left info line and lower-right CTAs. Two things differ on purpose:
@@ -31,7 +31,7 @@ type
     'p' promote. The CTAs live in this box, so the keys must too. }
   TSubagentActionEvent = procedure(const AAction: Char) of object;
 
-  TSidebar = class(TWidget)
+  TAgentList = class(TWidget)
   private
     FTheme: TTheme;
     FRoster: TSubagentRoster;
@@ -71,7 +71,7 @@ type
 
 implementation
 
-constructor TSidebar.Create(const ATheme: TTheme; ARoster: TSubagentRoster);
+constructor TAgentList.Create(const ATheme: TTheme; ARoster: TSubagentRoster);
 begin
   inherited Create;
   FTheme := ATheme;
@@ -82,23 +82,23 @@ begin
   FTurnTitles := TStringList.Create;
 end;
 
-destructor TSidebar.Destroy;
+destructor TAgentList.Destroy;
 begin
   FTurnTitles.Free;
   inherited Destroy;
 end;
 
-procedure TSidebar.SetInfo(const AText: string);
+procedure TAgentList.SetInfo(const AText: string);
 begin
   FInfo := AText;
 end;
 
-procedure TSidebar.SetHints(const AText: string);
+procedure TAgentList.SetHints(const AText: string);
 begin
   FHints := AText;
 end;
 
-procedure TSidebar.SetTurnTitle(const ASessionId, ATitle: string);
+procedure TAgentList.SetTurnTitle(const ASessionId, ATitle: string);
 var
   I: Integer;
 begin
@@ -116,7 +116,7 @@ begin
     FTurnTitles.Add(ASessionId + '=' + ATitle);
 end;
 
-procedure TSidebar.Refresh;
+procedure TAgentList.Refresh;
 var
   N: Integer;
 begin
@@ -129,7 +129,7 @@ begin
     FSelected := 0;
 end;
 
-function TSidebar.RowCount: Integer;
+function TAgentList.RowCount: Integer;
 begin
   if FRoster = nil then
     Result := 0
@@ -137,7 +137,7 @@ begin
     Result := FRoster.Count;
 end;
 
-procedure TSidebar.Move(ADelta: Integer);
+procedure TAgentList.Move(ADelta: Integer);
 var
   N: Integer;
 begin
@@ -159,7 +159,7 @@ begin
     FSelected := N - 1;
 end;
 
-function TSidebar.StatusGlyph(AStatus: TSubagentStatus): UnicodeString;
+function TAgentList.StatusGlyph(AStatus: TSubagentStatus): UnicodeString;
 begin
   case AStatus of
     ssSpawned:   Result := '·';
@@ -172,7 +172,7 @@ begin
   end;
 end;
 
-function TSidebar.DisplayName(const AEntry: TSubagentEntry): string;
+function TAgentList.DisplayName(const AEntry: TSubagentEntry): string;
 begin
   if AEntry.LabelText <> '' then
     Result := AEntry.LabelText
@@ -182,7 +182,7 @@ begin
     Result := AEntry.SessionId;
 end;
 
-function TSidebar.RowText(const AEntry: TSubagentEntry;
+function TAgentList.RowText(const AEntry: TSubagentEntry;
   AWidth: Integer): UnicodeString;
 var
   Title: string;
@@ -214,7 +214,7 @@ begin
     Result := Copy(Result, 1, AWidth - 1) + '…';
 end;
 
-function TSidebar.Measure(const AAvail: TSize): TSize;
+function TAgentList.Measure(const AAvail: TSize): TSize;
 var
   Entries: TSubagentEntryArray;
   I, W: Integer;
@@ -238,7 +238,7 @@ begin
     Result.W := AAvail.W;
 end;
 
-procedure TSidebar.Render(const S: ISurface);
+procedure TAgentList.Render(const S: ISurface);
 var
   L, R, T, B, X, Y, I, InnerW: Integer;
   Hints: UnicodeString;
@@ -346,7 +346,7 @@ begin
   end;
 end;
 
-function TSidebar.HandleEvent(const E: TInputEvent): Boolean;
+function TAgentList.HandleEvent(const E: TInputEvent): Boolean;
 var
   Entries: TSubagentEntryArray;
 begin

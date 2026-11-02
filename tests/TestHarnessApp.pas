@@ -248,12 +248,12 @@ type
     procedure TestComposerHintsShowCtrlDOnlyWithSubagents;
     procedure TestCoarseScrollTargetMapsSegments;
     procedure TestShouldTrimHistory;
-    procedure TestSidebarTogglesWithCtrlD;
-    procedure TestSidebarRendersItsRows;
+    procedure TestAgentListTogglesWithCtrlD;
+    procedure TestAgentListRendersItsRows;
     { The list moved into the composer's place; keys must still reach it, and
       Enter on a row must open that child's spy. This is the one behaviour I
       shipped without proof. }
-    procedure TestSidebarRoutesKeysAndEntersTheSpy;
+    procedure TestAgentListRoutesKeysAndEntersTheSpy;
     { Attaching a spy mid-turn replays the child's turn from the ring, while
       RenderSpyHistory separately loads the same messages from the store. The
       transcript must contain each message ONCE - doubled content is what the
@@ -3224,24 +3224,24 @@ begin
   AssertTrue('the refusal is shown', FindText(ckError, 'cannot switch sessions'));
 end;
 
-procedure THarnessAppTest.TestSidebarTogglesWithCtrlD;
+procedure THarnessAppTest.TestAgentListTogglesWithCtrlD;
 begin
   Build;
-  AssertFalse('hidden by default', FApp.SidebarVisible);
+  AssertFalse('hidden by default', FApp.AgentListVisible);
   FInput.Push(Ctrl('d'));
   Pump(4);
-  AssertTrue('shown after ctrl+d', FApp.SidebarVisible);
+  AssertTrue('shown after ctrl+d', FApp.AgentListVisible);
   FInput.Push(Ctrl('d'));
   Pump(4);
-  AssertFalse('hidden again', FApp.SidebarVisible);
+  AssertFalse('hidden again', FApp.AgentListVisible);
 end;
 
-procedure THarnessAppTest.TestSidebarRendersItsRows;
+procedure THarnessAppTest.TestAgentListRendersItsRows;
 var
   Y: Integer;
   Found: Boolean;
 begin
-  { The regression this guards: the sidebar was created and toggled but never
+  { The regression this guards: the agent list was created and toggled but never
     drawn. With a roster entry, Ctrl+D must put the child's label on the
     surface. }
   Build;
@@ -3255,10 +3255,10 @@ begin
   for Y := 0 to FSurface.Height - 1 do
     if Pos('scan the tree', FSurface.RowText(Y, 0, FSurface.Width)) > 0 then
       Found := True;
-  AssertTrue('the sidebar row is rendered', Found);
+  AssertTrue('the agent-list row is rendered', Found);
 end;
 
-procedure THarnessAppTest.TestSidebarRoutesKeysAndEntersTheSpy;
+procedure THarnessAppTest.TestAgentListRoutesKeysAndEntersTheSpy;
 var
   Store: TSqliteStore;
   StoreCfg: TStoreConfig;
@@ -3269,7 +3269,7 @@ begin
   { The list now sits in the composer's place rather than floating over the
     transcript. What must still hold is that keys REACH it and Enter opens that
     child's spy - the routing depends on the overlay, not on the list itself, so
-    a green TSidebar unit test proves nothing about it.
+    a green TAgentList unit test proves nothing about it.
 
     A child session has to exist for the spy to open, so this needs a store. }
   BuildWithStore;
@@ -3295,10 +3295,10 @@ begin
   FInput.Push(Ctrl('d'));
   FApp.Step;
   FApp.Step;
-  AssertTrue('the list is up', FApp.SidebarVisible);
+  AssertTrue('the list is up', FApp.AgentListVisible);
 
   { Keys must reach the list through the overlay while it is visible. Down is
-    handled by TSidebar; if routing were broken this would be swallowed and the
+    handled by TAgentList; if routing were broken this would be swallowed and the
     selection would never move. }
   FInput.Push(Key(kkDown));
   FApp.Step;
@@ -3371,7 +3371,7 @@ var
   Rec: TMessageRecord;
 begin
   { A child session with a message in the store, and a roster entry so the
-    sidebar has a row. Entering it shows the child's transcript and the header
+    agent list has a row. Entering it shows the child's transcript and the header
     indicator. }
   BuildWithStore;
   StoreCfg := Default(TStoreConfig);
@@ -3781,7 +3781,7 @@ begin
 
   { The old assertion was that the actions bar replaced the compose. The point
     now is the opposite: the list stays up and there is no actions bar. }
-  AssertTrue('the list stays up while spying', FApp.SidebarVisible);
+  AssertTrue('the list stays up while spying', FApp.AgentListVisible);
   AssertFalse('no separate actions bar', FApp.Panel.ActionsMode);
 
   { The CTAs are CHORDED (ctrl+a/r/p). A bare letter must NOT trigger them: that

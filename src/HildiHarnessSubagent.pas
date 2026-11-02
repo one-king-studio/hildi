@@ -1,6 +1,6 @@
 unit HildiHarnessSubagent;
 { The subagent roster: the parent session's view of its active children, fed
-  from the runtime's ekSubagent events. The TUI sidebar renders it and lets the
+  from the runtime's ekSubagent events. The TUI agent list renders it and lets the
   operator spy on an entry.
 
   Not thread-safe: the TUI thread owns it and applies events as it drains them. }

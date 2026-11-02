@@ -31,7 +31,7 @@ uses
   TestHarnessDriver, TestJSONRPC, TestStdioChild, TestMCPConfig,
   TestMCPClient, TestSubagent, TestSubagentSupervisor,
   TestMCPCLI, TestMCPHTTP, TestMCPOAUTH, TestMCPProvider,
-  TestMCPOAUTHFlow, TestSubagentSidebar, TestTUISidebar,
+  TestMCPOAUTHFlow, TestSubagentRoster, TestTUIAgentList,
   TestSubagentSpy, TestTUIPalette, TestAsyncScheduler,
   TestAsyncFuture, TestAsyncQueue, TestAsyncTimers,
   TestAsyncObservable, TestAsyncSubject, TestAsyncOperators,
