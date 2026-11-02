@@ -25,8 +25,16 @@ uses
 
 { The start-of-session mark: drawn centred in an empty transcript. Braille block
   art, so it reads as a logo on a terminal that has no images. One string per
-  ROW, so a badly-wide row cannot shift the centring of the others. }
+  ROW, so a badly-wide row cannot shift the centring of the others.
+
+  The mark is drawn in TWO tones. The circle emblem on the left is the frame, not
+  the name, so it stays muted; the script to its right is the word, so it takes
+  the ordinary text colour, a step brighter. EmptyLogoScriptCol is the CELL at
+  which that split happens - a column of the DRAWING, not of any one row, so
+  every row breaks in the same place or the word would wobble. Cell 20 is the
+  narrowest column between the emblem and the script. }
 const
+  EmptyLogoScriptCol = 20;
   EmptyLogo: array[0..6] of UnicodeString = (
     '⠀⠀⠀⠀⠀⠀⣀⣤⣤⣤⠤⢤⣤⣤⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀',
     '⠀⠀⠀⣠⣶⡿⠛⠉⠀⣠⣴⡶⣦⡈⢿⣿⣷⣤⡀⠀⠀⠀⠀⠀⠀⢀⣴⠶⣶⡄⠀⠀⠀⠀⠀⣴⡄⠀⠀⠀⠀⠀⠀',
@@ -420,7 +428,7 @@ procedure TChatPanel.RenderEmptyMark(const S: ISurface);
 var
   B: TRect;
   TotalH, Top, I, W, X: Integer;
-  Line: UnicodeString;
+  Line, Head, Tail: UnicodeString;
 begin
   B := FMessages.Bounds;
   TotalH := Length(EmptyLogo) + Length(EmptyHints) + 2;
@@ -434,7 +442,20 @@ begin
     if W > B.W - 2 then
       Continue;   { too wide for this pane: skip the row rather than clip it }
     X := B.X + 1 + ((B.W - 2) - W) div 2;
-    PutText(S, X, Top + I, Line, FTheme.Muted);
+    { TWO-TONE. The circle emblem on the left stays MUTED - it is the frame, not
+      the name - and the script to its right is painted in the ordinary text
+      colour, a step brighter, so the word reads out of the art. Split at a FIXED
+      cell rather than by measuring each row: the boundary is a column of the
+      drawing, so every row must break at the same place or the word wobbles. }
+    if Length(Line) > EmptyLogoScriptCol then
+    begin
+      Head := Copy(Line, 1, EmptyLogoScriptCol);
+      Tail := Copy(Line, EmptyLogoScriptCol + 1, MaxInt);
+      PutText(S, X, Top + I, Head, FTheme.Muted);
+      PutText(S, X + StringWidth(Head), Top + I, Tail, FTheme.Text);
+    end
+    else
+      PutText(S, X, Top + I, Line, FTheme.Muted);
   end;
   Inc(Top, Length(EmptyLogo) + 1);
   for I := 0 to High(EmptyHints) do
