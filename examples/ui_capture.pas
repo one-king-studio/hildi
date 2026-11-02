@@ -107,8 +107,23 @@ begin
     P.SetHeader('agent-1 - Fix the login redirect', '18% ctx');
     P.SetStatus('~/code/hildi');
     P.SetStats('12 turns · 18% ctx');
+    P.SetRecentSessions(['Fix the login redirect', 'Docs sweep',
+      'Parser rewrite']);
     P.SetState(psReady, 'Idle');
-    Paint(P, W, H, 'FRESH SESSION - empty transcript - state Idle');
+    Paint(P, W, H, 'FRESH SESSION - empty transcript, 3 recent sessions');
+  finally
+    P.Free;
+  end;
+
+  { The same screen with NO recent sessions: the hint stands alone. }
+  P := TChatPanel.Create(Theme, 'Hildi', 'shift+enter newline');
+  try
+    P.SetHeader('agent-1 - Fix the login redirect', '18% ctx');
+    P.SetStatus('~/code/hildi');
+    P.SetStats('12 turns · 18% ctx');
+    P.SetRecentSessions([]);
+    P.SetState(psReady, 'Idle');
+    Paint(P, W, H, 'FRESH SESSION - no recent sessions');
   finally
     P.Free;
   end;

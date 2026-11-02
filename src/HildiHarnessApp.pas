@@ -164,6 +164,9 @@ type
     FRoster: TSubagentRoster;
     FAgentList: TAgentList;
     FAgentListShown: Boolean;
+    { Recent-session ids, parallel to the titles the panel shows on the empty
+      screen. }
+    FRecentIds: TStringArray;
     FSpy: TSubagentSpy;
     FSpyId: string;
     { A child the list asked to spy, honoured after dispatch returns rather than
@@ -259,6 +262,11 @@ type
       list answers "which of these is doing the thing I care about". }
     procedure RefreshSubagentTitles;
     procedure OnAgentListSelect(const ASessionId: string);
+    { Recent sessions under the mark on the empty screen. The panel shows the
+      TITLES and reports an index; the ids stay here, so the widget cannot open a
+      session it has no store for. }
+    procedure RefreshRecentSessions;
+    procedure OnOpenRecent(AIndex: Integer);
     { An action key from the list: 'a' abort, 'r' release, 'p' promote. }
     procedure OnAgentListAction(const AAction: Char);
     { Honour a selection the list requested during dispatch. }
@@ -777,6 +785,57 @@ begin
   RenderConnState;
 end;
 
+{ The most recent sessions in this workspace, capped at the ten chords the empty
+  screen offers. Unarchived only: an archived session is deliberately out of the
+  way, so offering it as "continue recent" would contradict the archive. }
+procedure THarnessApp.RefreshRecentSessions;
+var
+  Rows: TSessionRowArray;
+  Err: TStoreError;
+  I, N: Integer;
+  Titles: array of string;
+begin
+  FRecentIds := nil;
+  SetLength(Titles, 0);
+  if FPanel = nil then
+    Exit;
+  if (FSession = nil) or (FSession.Store = nil) then
+  begin
+    FPanel.SetRecentSessions([]);
+    Exit;
+  end;
+  if not FSession.Store.ListSessionRows(FSession.WorkspaceId, False, Rows, Err)
+  then
+  begin
+    FPanel.SetRecentSessions([]);
+    Exit;
+  end;
+  { The store returns newest first. Skip the CURRENT session: it is what the
+    screen is already showing, so "continue" it would be a no-op. }
+  N := 0;
+  for I := 0 to High(Rows) do
+  begin
+    if N >= 10 then
+      Break;
+    if Rows[I].Id = FSession.SessionId then
+      Continue;
+    SetLength(FRecentIds, N + 1);
+    SetLength(Titles, N + 1);
+    FRecentIds[N] := Rows[I].Id;
+    Titles[N] := SessionDisplayName(Rows[I].LabelText, Rows[I].Title,
+      Rows[I].Id);
+    Inc(N);
+  end;
+  FPanel.SetRecentSessions(Titles);
+end;
+
+procedure THarnessApp.OnOpenRecent(AIndex: Integer);
+begin
+  if (AIndex < 0) or (AIndex > High(FRecentIds)) then
+    Exit;
+  SwitchSession(FRecentIds[AIndex]);
+end;
+
 procedure THarnessApp.RenderConnState;
 begin
   { Replace the stream with the state's frame. While connecting the panel is
@@ -789,6 +848,7 @@ begin
           first-run hints. Adding a notice gave the stream a count of 1, which
           disabled that empty state - the notice and the logo were competing for
           the same screen, and the notice won by making the stream non-empty. }
+        RefreshRecentSessions;
         SetState(psReady, 'Idle');
       end;
     csConnecting:
@@ -1010,6 +1070,9 @@ begin
   UpdateCta;
   FAgentList := TAgentList.Create(FTheme, FRoster);
   FAgentList.OnSelect := OnAgentListSelect;
+  { ctrl+0..ctrl+9 on the empty screen: the panel reports an index, the app owns
+    the ids and performs the switch. }
+  FPanel.OnOpenRecent := OnOpenRecent;
   { The CTAs live in the warm box now, so the box reads the keys too. }
   FAgentList.OnAction := OnAgentListAction;
   FAgentList.Visible := False;

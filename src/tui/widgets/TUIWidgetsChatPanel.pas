@@ -57,17 +57,13 @@ const
     '⠀⠈⠃⠀⠀⠀⠀⣿⡗⢋⣴⡿⢻⡆⠀⠀⣠⣿⡏⠀⠀⣠⣿⡟⠁⠀⢀⣤⡾⢋⣠⡾⣿⡇⠀⢀⣼⣿⠁⠀⠀⠀⠀',
     '⠀⠀⠀⠀⢀⠤⠊⠙⠷⠾⠋⠀⠈⠳⠶⠛⠉⠙⠻⠒⠛⠉⠘⠛⠷⠚⠋⠙⠛⠋⠁⠀⠙⠓⠚⠋⠈⠛⠦⠤⠀⠀⠀');
 
-  { The first-run instructions, below the mark. Short: this is a resting screen,
-    not documentation.
-
-    Every line here must name a key that actually DOES something from this screen.
-    "Ctrl+? lists commands" was removed for that reason: no handler for it exists
-    anywhere in the app, so the hint advertised a dead key - the same defect as
-    the inert ctrl+d hint. A hint is a promise; re-add this line only together
-    with the binding. }
-  EmptyHints: array[0..1] of UnicodeString = (
-    'Type a prompt and press Enter to start',
-    'Shift+Enter adds a line');
+  { The resting line under the mark. There used to be a two-line EmptyHints
+    array here; the recent-session list replaced it, and each row now names the
+    key that opens it, so a separate "press Enter to start" hint would only
+    repeat the composer's own affordance. }
+  EmptyHintStart = 'Start typing your prompt below';
+  EmptyHintOr = 'Or start typing your prompt below';
+  EmptyHintRecent = 'Continue recent session';
 
 { What the agent is doing while it REASONS.
 
@@ -89,6 +85,10 @@ type
     psTool animate the sparkle; the others are static icons. }
   TPanelState = (psReady, psThinking, psTool, psApproval, psError, psInterrupt);
 
+  { A recent-session row was activated. AIndex is 0-based and matches the
+    ctrl+0..ctrl+9 chord shown beside it on the empty screen. }
+  TRecentOpenEvent = procedure(AIndex: Integer) of object;
+
   TChatPanel = class(TWidget)
   private
     FTheme: TTheme;
@@ -105,6 +105,11 @@ type
     FActionsMode: Boolean;
     FPalette: TCommandPalette;
     FPaletteActive: Boolean;
+    { Recent (unattached) sessions offered on the empty screen, most recent
+      first. Titles only - the host owns the ids and does the switching. Index
+      0..9 map to ctrl+0..ctrl+9. }
+    FRecentTitles: array of string;
+    FOnOpenRecent: TRecentOpenEvent;
     FStatus: TTextBlock;
     FStats: TTextBlock;
     FStatusText: string;
@@ -182,6 +187,11 @@ type
     procedure SetComposeActive(AValue: Boolean);
     { The compose's primary-action CTA (send / cancel / none). }
     procedure SetCta(AKind: TCtaKind);
+    { The recent-session list drawn under the mark. Empty means the empty screen
+      shows the prompt hint alone. }
+    procedure SetRecentSessions(const ATitles: array of string);
+    property OnOpenRecent: TRecentOpenEvent read FOnOpenRecent
+      write FOnOpenRecent;
     { Swap the compose for a CTA actions bar (a read-only view like the spy), or
       back. The bar's hints and action handler are set on the bar itself. }
     procedure SetActionsMode(AValue: Boolean);
@@ -440,7 +450,8 @@ end;
 procedure TChatPanel.RenderEmptyMark(const S: ISurface);
 var
   B: TRect;
-  TotalH, Top, I, W, X: Integer;
+  Top, I, W, X: Integer;
+  N, Avail, TotalH, TableW: Integer;
   Line, Mask, Run: UnicodeString;
   C, InRun: Integer;
   RunWord: Boolean;
@@ -454,10 +465,104 @@ var
       (AMask[AIndex] = '1');
   end;
 
+  { One centred line, in the given role. Skipped when it cannot fit, so a narrow
+    pane loses a line rather than drawing a clipped one. }
+  procedure Centre(const AText: UnicodeString; const AAttr: TAttr);
+  var
+    W2: Integer;
+  begin
+    W2 := StringWidth(AText);
+    if (W2 = 0) or (W2 > B.W - 2) then
+      Exit;
+    PutText(S, B.X + 1 + ((B.W - 2) - W2) div 2, Top, AText, AAttr);
+    Inc(Top);
+  end;
+
+  { A recent-session row: the key at the left of the block, the title beside it.
+    The pair is centred TOGETHER as one string so the keys form a column only if
+    the titles happen to match - centring each half separately would make the
+    keys jitter line to line. }
+  { The widest recent title, so every row has the same left column and the keys
+    form a true right edge. Computed once per render, not per row - a per-row
+    width would make each row's key sit at its own vertical. }
+  function RecentTableWidth: Integer;
+  var
+    J, W3: Integer;
+  begin
+    Result := 0;
+    for J := 0 to N - 1 do
+    begin
+      W3 := StringWidth(UnicodeString(FRecentTitles[J]));
+      if W3 > Result then
+        Result := W3;
+    end;
+  end;
+
+  { A recent-session row, as two columns with no rules: the title LEFT, the
+    chord RIGHT and dimmed. Clamped to the pane, with the chord reserved first -
+    it is the fixed part, and losing the key would leave a row that looks
+    selectable but says nothing about how. }
+  procedure RecentRow(AIndex: Integer; ATableW: Integer);
+  var
+    Key, Title, Pad: UnicodeString;
+    W2, X2, KeyW, TitleW: Integer;
+  begin
+    Key := 'ctrl+' + UnicodeString(IntToStr(AIndex));
+    KeyW := StringWidth(Key);
+    Title := UnicodeString(FRecentTitles[AIndex]);
+    { Left column gets the table width, less the key column and a gutter. }
+    if ATableW > B.W - 8 - KeyW then
+      ATableW := B.W - 8 - KeyW;
+    TitleW := ATableW;
+    if TitleW < 8 then
+      Exit;
+    if StringWidth(Title) > TitleW then
+      Title := FitWidth(Title, TitleW);
+    W2 := ATableW + 2 + KeyW;
+    X2 := B.X + 1 + ((B.W - 2) - W2) div 2;
+    if X2 < B.X + 1 then
+      X2 := B.X + 1;
+    PutText(S, X2, Top, Title, FTheme.Text);
+    { Pad to the right edge so the chord is right-aligned against the column,
+      not merely following the title at whatever length it happens to be. }
+    Pad := '';
+    while StringWidth(Pad) < (ATableW - StringWidth(Title)) + 2 do
+      Pad := Pad + ' ';
+    PutText(S, X2 + StringWidth(Title), Top, Pad, FTheme.Muted);
+    PutText(S, X2 + StringWidth(Title) + StringWidth(Pad), Top, Key,
+      FTheme.Muted);
+    Inc(Top);
+  end;
+
 begin
   B := FMessages.Bounds;
-  TotalH := Length(EmptyLogo) + Length(EmptyHints) + 2;
-  Top := B.Y + 1 + ((B.H - 2) - TotalH) div 2;
+  { HOW MANY RECENT ROWS FIT. The block is the mark, a blank, the heading, one
+    row per session, a blank, and the closing hint - and the hint must ALWAYS be
+    drawn, because it is the instruction that tells the operator what to do when
+    the list is not what they want. So the list gives way, not the hint: clamp N
+    to the space left after everything else. }
+  { USABLE HEIGHT, not pane height. The compose is an OVERLAY: it covers the
+    bottom rows of the messages panel, and FStream.BottomInset says how many.
+    Ignoring it drew the closing hint on the rows the composer then painted
+    over - the instruction was there, and invisible. }
+  Avail := B.H - 2 - FStream.BottomInset;
+  if Avail < Length(EmptyLogo) then
+    Avail := Length(EmptyLogo);
+  N := Length(FRecentTitles);
+  if N > 0 then
+  begin
+    { heading + blank + hint = 3 rows that are not session rows. }
+    if N > Avail - (Length(EmptyLogo) + 1) - 3 then
+      N := Avail - (Length(EmptyLogo) + 1) - 3;
+    if N < 0 then
+      N := 0;
+  end;
+  TotalH := Length(EmptyLogo) + 1;
+  if N > 0 then
+    Inc(TotalH, N + 3)
+  else
+    Inc(TotalH, 1);
+  Top := B.Y + 1 + (Avail - TotalH) div 2;
   if Top < B.Y + 1 then
     Top := B.Y + 1;
   for I := 0 to High(EmptyLogo) do
@@ -503,15 +608,20 @@ begin
     end;
   end;
   Inc(Top, Length(EmptyLogo) + 1);
-  for I := 0 to High(EmptyHints) do
+
+  { The recent sessions, if the host supplied any. The heading says what the
+    keys DO, because a bare list of titles under a logo would not explain itself. }
+  if N > 0 then
   begin
-    Line := EmptyHints[I];
-    W := StringWidth(Line);
-    if W > B.W - 2 then
-      Continue;
-    X := B.X + 1 + ((B.W - 2) - W) div 2;
-    PutText(S, X, Top + I, Line, FTheme.Muted);
-  end;
+    Centre(UnicodeString(EmptyHintRecent), FTheme.Muted);
+    TableW := RecentTableWidth;
+    for I := 0 to N - 1 do
+      RecentRow(I, TableW);
+    Inc(Top);
+    Centre(UnicodeString(EmptyHintOr), FTheme.Muted);
+  end
+  else
+    Centre(UnicodeString(EmptyHintStart), FTheme.Muted);
 end;
 
 procedure TChatPanel.Render(const S: ISurface);
@@ -526,7 +636,7 @@ begin
     decoration, so it must not become part of the conversation or scroll with it,
     and it disappears the moment the first block arrives. }
   if (FStream.Count = 0) and (FMessages.Bounds.W >= 24) and
-    (FMessages.Bounds.H >= Length(EmptyLogo) + Length(EmptyHints) + 3) then
+    (FMessages.Bounds.H >= Length(EmptyLogo) + 3) then
     RenderEmptyMark(S);
   { The left border doubles as a page gauge: one segment per page, the current
     page heavy. Only drawn for a multi-page session. }
@@ -599,10 +709,26 @@ begin
 end;
 
 function TChatPanel.HandleEvent(const E: TInputEvent): Boolean;
+var
+  Idx: Integer;
 begin
   { When the palette is up, it takes the keys first (Up/Down/Enter/Escape). }
   if FPaletteActive and FPalette.HandleEvent(E) then
     Exit(True);
+  { ctrl+0..ctrl+9 open a recent session - but ONLY while the transcript is
+    empty. Once a conversation exists those keys are not offered on screen, so
+    swallowing them here would make the panel act on something it never showed. }
+  if (E.Kind = ikKey) and (E.Key.Kind = kkChar) and (moCtrl in E.Key.Mods) and
+    (Length(E.Key.Ch) = 1) and (E.Key.Ch[1] >= '0') and (E.Key.Ch[1] <= '9') then
+  begin
+    Idx := Ord(E.Key.Ch[1]) - Ord('0');
+    if (FStream.Count = 0) and (Idx < Length(FRecentTitles)) and
+      Assigned(FOnOpenRecent) then
+    begin
+      FOnOpenRecent(Idx);
+      Exit(True);
+    end;
+  end;
   if FActionsMode then
   begin
     if FActions.HandleEvent(E) then
@@ -836,6 +962,21 @@ end;
 procedure TChatPanel.SetCta(AKind: TCtaKind);
 begin
   FCompose.Cta := AKind;
+end;
+
+{ The recent-session list shown under the mark. The panel keeps only TITLES:
+  the host owns the session rows and performs the switch, so the widget cannot
+  open a session it does not have the store for. }
+procedure TChatPanel.SetRecentSessions(const ATitles: array of string);
+var
+  I, N: Integer;
+begin
+  N := Length(ATitles);
+  if N > 10 then
+    N := 10;   { ctrl+0..ctrl+9 is the whole vocabulary }
+  SetLength(FRecentTitles, N);
+  for I := 0 to N - 1 do
+    FRecentTitles[I] := ATitles[I];
 end;
 
 procedure TChatPanel.SetActionsMode(AValue: Boolean);

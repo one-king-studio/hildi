@@ -553,7 +553,9 @@ begin
         for Col := 1 to Length(Line) do
           if (Ord(Line[Col]) >= $2800) and (Ord(Line[Col]) <= $28FF) then
             Braille := True;
-        if Pos(UnicodeString('Type a prompt'), Line) > 0 then
+        { The resting copy under the mark. It used to read "Type a prompt and
+          press Enter to start"; the recent-session list replaced that line. }
+        if Pos(UnicodeString('Start typing your prompt'), Line) > 0 then
           Hint := True;
       end;
       AssertTrue('the logo is drawn', Braille);
@@ -592,9 +594,10 @@ begin
         All := All + Line + #10;
       end;
       AssertTrue('Ctrl+? is not advertised', Pos(UnicodeString('Ctrl+?'), All) = 0);
-      { The hints that ARE real stay: Enter submits, Shift+Enter newlines. }
-      AssertTrue('Enter is still advertised',
-        Pos(UnicodeString('press Enter'), All) > 0);
+      { The resting line is still drawn - the dead-key rule must not have been
+        satisfied by deleting every hint. }
+      AssertTrue('the prompt hint is still advertised',
+        Pos(UnicodeString('start typing your prompt'), LowerCase(All)) > 0);
     finally
       P.Free;
     end;
