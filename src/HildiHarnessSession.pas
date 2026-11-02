@@ -58,6 +58,9 @@ type
     { The last shadowing report shown, so the turn-boundary rescan does not repeat
       it every turn. Empty until something is shadowed. }
     FShadowReported: string;
+    { The last prune notice shown, same reasoning as FShadowReported: the rescan
+      runs every turn. }
+    FPruneReported: string;
     FMcpTokenProviders: TObjectList;
     { The skill registry: the capability layer (manifest + load_skill + decay).
       Empty by default; Lazy_MCP fills it with one skill per MCP server. Held as
@@ -1210,22 +1213,43 @@ end;
 procedure THarnessSession.ReconcileMcpSkills;
 var
   Cfg: TMcpConfig;
-  Shadowed: TStringArray;
-  ShadowKey, ShadowText: string;
+  Shadowed, Pruned: TStringArray;
+  ShadowKey, ShadowText, PrunedKey, PrunedText: string;
   I: Integer;
 begin
   { FILE SKILLS first, and unconditionally: this runs at the turn boundary, and
     a skill added to .agents/skills mid-session used to need a restart because
     discovery only ran in Init. Re-import REPLACES each entry by key while
-    keeping its loaded state, so a rescan cannot unload something in use.
-
-    Known limit: a skill DELETED from disk stays declared. Removing entries needs
-    a set difference against what the scan found, which is a separate change. }
+    keeping its loaded state, so a rescan cannot unload something in use. }
   if FSkills <> nil then
   begin
     DiscoverSkillFiles(FSkills, FView.WorkspaceRoot,
       ExcludeTrailingPathDelimiter(GetUserDir), FApprovalService,
       FView.WorkspaceId, FView.SessionId, Shadowed);
+    { A skill DELETED from disk leaves the manifest. Its body stays in the
+      conversation - an accepted cost, since rewriting history is what
+      /checkpoint is for - but the model must stop being told about a skill whose
+      files are gone, or every tool it offers fails when called. }
+    Pruned := FSkills.PruneMissingOnDisk;
+    if Length(Pruned) > 0 then
+    begin
+      PrunedKey := '';
+      PrunedText := '';
+      for I := 0 to High(Pruned) do
+      begin
+        if PrunedKey <> '' then
+          PrunedKey := PrunedKey + '|';
+        PrunedKey := PrunedKey + Pruned[I];
+        if PrunedText <> '' then
+          PrunedText := PrunedText + LineEnding;
+        PrunedText := PrunedText + Pruned[I];
+      end;
+      if (PrunedKey <> FPruneReported) and (FConversation <> nil) then
+      begin
+        FPruneReported := PrunedKey;
+        FConversation.AppendError('skill removed from disk', PrunedText);
+      end;
+    end;
     { Say it ONCE per distinct set of shadowed skills. This runs at every turn
       boundary, so an unconditional notice would repeat forever; and silence is
       the worse bug - an operator whose user-scope skill is shadowed by a project

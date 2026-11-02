@@ -153,6 +153,14 @@ type
       AWorkspaceId: Integer; const ASessionId: string);
     { Remove a skill by key (deactivates it first). True when it was present. }
     function Remove(const AKey: string): Boolean;
+    { Drop FILE-BACKED skills whose SKILL.md no longer exists. The body stays in
+      the conversation - that is the operator's accepted cost - but the skill must
+      leave the manifest, or the model keeps being told about something it cannot
+      use. Returns the dropped keys, sorted, for a notice.
+
+      A skill with no Location (hand-registered) is never pruned: it has no file
+      to be missing. }
+    function PruneMissingOnDisk: TStringArray;
     { The declared keys, in declaration order. }
     function Keys: TStringArray;
     { The keys whose bodies are IN THE CURRENT CONTEXT. A subset of Keys, so the
@@ -353,6 +361,50 @@ begin
     E.Source.Deactivate;
   FEntries.Delete(I);
   Result := True;
+end;
+
+function TSkillRegistry.PruneMissingOnDisk: TStringArray;
+var
+  I, J: Integer;
+  E: TSkillEntry;
+  MD, Tmp: string;
+  Drop: TStringArray;
+begin
+  { Walk backwards so deleting does not skip an entry. }
+  Result := nil;
+  Drop := nil;
+  for I := FEntries.Count - 1 downto 0 do
+  begin
+    E := TSkillEntry(FEntries[I]);
+    { A declared skill with no Location has no file to be missing: it was
+      hand-registered or comes from a source, so the filesystem says nothing
+      about whether it should exist. }
+    if E.Skill.Location = '' then
+      Continue;
+    { Literal, not SkillFileName: that constant lives in HildiSkillsFiles,
+      which DEPENDS on this unit, so referencing it would be circular. }
+    MD := IncludeTrailingPathDelimiter(E.Skill.Location) + 'SKILL.md';
+    if FileExists(MD) then
+      Continue;
+    if (E.State = ssLoaded) and (E.Source <> nil) then
+      E.Source.Deactivate;
+    SetLength(Drop, Length(Drop) + 1);
+    Drop[High(Drop)] := E.Skill.Key;
+    FEntries.Delete(I);
+  end;
+  { Sorted so the notice is stable across rescans. }
+  for I := 1 to High(Drop) do
+  begin
+    J := I;
+    while (J > 0) and (Drop[J] < Drop[J - 1]) do
+    begin
+      Tmp := Drop[J];
+      Drop[J] := Drop[J - 1];
+      Drop[J - 1] := Tmp;
+      Dec(J);
+    end;
+  end;
+  Result := Drop;
 end;
 
 function TSkillRegistry.Keys: TStringArray;

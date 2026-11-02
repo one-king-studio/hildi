@@ -111,6 +111,10 @@ type
     { A user-scope skill shadowed by a project-scope one is reported, not silently
       dropped. The caller decides how often to say it. }
     procedure TestShadowedSkillIsReported;
+    { A skill deleted from disk leaves the MANIFEST at the next rescan, even
+      though its body stays in the conversation. The operator's accepted cost is
+      the stale body; being told about a skill whose files are gone is not. }
+    procedure TestSkillDeletedFromDiskLeavesTheManifest;
     { The skill descriptions (the STABLE half of the manifest) must reach the
       loop even when no MCP server is configured. They were briefly gated on
       FMcp <> nil, which silently dropped a locally-declared skill's description:
@@ -1651,6 +1655,57 @@ begin
     AssertTrue('naming it: ' + Shadowed[0], Pos('dupe', Shadowed[0]) > 0);
   finally
     Reg.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestSkillDeletedFromDiskLeavesTheManifest;
+var
+  Session: THarnessSession;
+  Err: string;
+  Keys: TStringArray;
+  I: Integer;
+  Found: Boolean;
+  SkillDir, MD, Text: string;
+  Fs: TFileStream;
+begin
+  { Install a skill, confirm the session sees it, then delete the file. The body
+    stays in the conversation - the operator's accepted cost - but the skill must
+    leave the manifest, or the model keeps being told about tools that fail. }
+  SkillDir := IncludeTrailingPathDelimiter(FDir) + '.agents' + PathDelim +
+    'skills' + PathDelim + 'doomed';
+  ForceDirectories(SkillDir);
+  MD := IncludeTrailingPathDelimiter(SkillDir) + 'SKILL.md';
+  Text := '---'#10'name: doomed'#10'description: about to vanish'#10'---'#10'x';
+  Fs := TFileStream.Create(MD, fmCreate);
+  try
+    Fs.WriteBuffer(Text[1], Length(Text));
+  finally
+    Fs.Free;
+  end;
+
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    Session.Loop.PrepareProviders;
+    Keys := Session.Skills.Keys;
+    Found := False;
+    for I := 0 to High(Keys) do
+      if Keys[I] = 'doomed' then
+        Found := True;
+    AssertTrue('discovered to begin with', Found);
+
+    { The operator deletes the skill directory. }
+    AssertTrue('file removed', DeleteFile(MD));
+
+    Session.Loop.PrepareProviders;
+    Keys := Session.Skills.Keys;
+    Found := False;
+    for I := 0 to High(Keys) do
+      if Keys[I] = 'doomed' then
+        Found := True;
+    AssertFalse('gone from the manifest after the rescan', Found);
+  finally
+    Session.Free;
   end;
 end;
 
