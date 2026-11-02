@@ -167,15 +167,45 @@ mechanism.
 
 ## What is NOT done
 
-Everything above is real and tested at the unit level. What has **not** happened:
+Corrected 2026-11-02. The previous version of this section was **wrong about the
+two most important items** and would have sent a reader to rebuild working code:
 
-- **No interactive verification.** Nothing has been driven in a terminal: no
-  discovery against a real `~/.agents/skills`, no approval prompt for a skill
-  load, no `/skill-name`.
-- **Nothing scans at session start.** `ScanSkills` and `ImportSkills` are never
-  called by `THarnessSession.Init` - the machinery exists and is unattached. A
-  real session today still has no file-backed skills.
-- **The recorder is not wired into `Lazy_MCP`'s reconcile path** either, so a
-  rescan after a skill is added mid-session does not happen.
+- it said *"Nothing scans at session start"* — discovery has been wired since
+  `c7f6975`, at `Init` **and** at every turn boundary;
+- it described `Lazy_MCP`'s rescan gap — MCP is no longer a skill at all.
 
-Those three are the difference between "the pieces work" and "the feature works".
+### Verified working in a real terminal
+
+The operator drove these by hand, which is how the following were found and
+fixed: the skill panel opens, lists skills, marks loaded state, resets to the
+command list on dismiss, and navigation wraps. Getting there also fixed a
+genuine product bug — a client that attached never received the skill catalogue
+at all, so `ctrl+=` could only ever say "no skills available".
+
+- discovery against a real `.agents/skills` (the shipped example is found)
+- the skills panel: `/skill` and `ctrl+=`
+- loaded/unloaded marking, dismiss-and-reset, and wrapping navigation
+
+### Genuinely not done
+
+- **Loading a skill by hand has never been driven.** The open path, the approval
+  prompt for a file-backed skill, and body injection are covered by unit tests
+  only. Every interactive bug so far came from a path the suite never walked, so
+  this is the most likely place for the next one.
+- **No composer `+<name>` line.** Nothing renders what is loaded above the input;
+  `+N more` truncation is part of the operator's spec and is unimplemented.
+- **No skill detail modal.** Consequence: `license`, `compatibility`,
+  `allowed-tools` and the resource list are parsed and stored but **never shown
+  anywhere**, so parsing them currently buys nothing visible.
+- **The unload machinery still exists** — `UnloadSkill`, `scUnloadSkill`, its
+  protocol branches and driver method — although skills no longer leave context.
+  Removing it is not a simple delete: `scUnloadSkill` sits **mid-enum**, between
+  `scLoadSkill` and `scSkills`, so dropping it renumbers the wire format. It needs
+  a deprecation marker or an unused slot kept, which is a decision.
+
+### Deliberate, not gaps
+
+- `allowed-tools` is parsed and displayed but **never enforced**: honouring it
+  would let a downloaded skill widen its own permissions.
+- Phase 9's turn-summary line is out of scope by the operator's decision.
+- Per-skill palette commands were replaced by `/skill` + `ctrl+=`.
