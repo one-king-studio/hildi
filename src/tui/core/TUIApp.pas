@@ -33,6 +33,11 @@ const
     interval. }
   IdleWaitMs = 250;
 
+  { The most buffered input events one loop iteration will dispatch before it
+    yields to the frame body. A keystroke must never queue behind per-frame work,
+    but an unbounded drain would let a paste starve rendering. }
+  MaxInputDrainPerLoop = 64;
+
 type
   { Returns True to stop the run loop (a signal, a quit flag). }
   TStopCheck = function: Boolean;
@@ -461,6 +466,7 @@ var
   E: TInputEvent;
   Timeout: Integer;
   Handled: Boolean;
+  Drained: Integer;
 begin
   { Draw the first frame immediately; an idle loop would otherwise wait out the
     idle timeout before anything appears. }
@@ -504,6 +510,21 @@ begin
     Handled := FInput.Wait(Timeout, E);
     if Handled then
       DispatchEvent(E);
+    { Input priority: a keystroke must never queue behind per-frame work. One
+      event per iteration meant a full Tick (DrainQueue, FlushToolOutput,
+      TrimHistory) ran between consecutive keys, so typing a burst or reaching
+      for esc-esc to cancel a long run competed with the frame body. Drain
+      everything already buffered before any frame work, bounded so a paste
+      cannot starve rendering.
+      Poll is safe here because it shares the decoder with Wait: it calls
+      ReadAvailable and then FDecoder.Next on the same instance, so a partial
+      escape sequence started by Wait resumes rather than being split. }
+    Drained := 0;
+    while (Drained < MaxInputDrainPerLoop) and FInput.Poll(E) do
+    begin
+      DispatchEvent(E);
+      Inc(Drained);
+    end;
     if Assigned(AOnLoop) then
       AOnLoop();
     FNowMs := MonotonicMs;

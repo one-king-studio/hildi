@@ -12,6 +12,16 @@ uses
   TUISurface, TUIWidget,
   TUIClock, TUIApp;
 
+var
+  { How many times StopAfterOneLoop has been asked. The run loop checks its stop
+    predicate once per iteration, so returning True on the SECOND call lets
+    exactly one full iteration run. }
+  LoopChecks: Integer;
+
+{ A TStopCheck that halts TTuiApp.Run after a single iteration, so a test can
+  exercise the production loop instead of reimplementing it via Step. }
+function StopAfterOneLoop: Boolean;
+
 type
   TAppProbe = class(TWidget)
   private
@@ -33,6 +43,10 @@ type
 
   TTuiAppTest = class(TTestCase)
   private
+    { Counts per-frame bodies, so a test can prove one loop iteration drained
+      all buffered input and then ran the frame body exactly once. }
+    FTickCount: Integer;
+    procedure CaptureTick;
     function Rc(AX, AY, AW, AH: Integer): TRect;
     function KeyEvent(AKind: TKeyKind): TInputEvent;
     function ResizeEvent(AW, AH: Integer): TInputEvent;
@@ -46,11 +60,28 @@ type
     procedure TestResizeRelayoutsRoot;
     procedure TestStepProcessesOneEvent;
     procedure TestPasteIsDispatched;
+    { The production run loop must drain buffered input BEFORE per-frame work,
+      so a keystroke never queues behind Tick (DrainQueue, FlushToolOutput,
+      TrimHistory). Without the drain, one iteration dispatched one event and
+      ran a full Tick, so typing a burst competed with the frame body and
+      esc-esc to cancel a long run felt unresponsive. }
+    procedure TestRunDrainsBufferedInputBeforePerFrameWork;
     procedure TestFrameIntervalFollowsRegistrations;
     procedure TestFocusWithdrawsAnimation;
   end;
 
 implementation
+
+function StopAfterOneLoop: Boolean;
+begin
+  Inc(LoopChecks);
+  Result := LoopChecks > 1;
+end;
+
+procedure TTuiAppTest.CaptureTick;
+begin
+  Inc(FTickCount);
+end;
 
 constructor TAppProbe.Create(AW, AH: Integer; const AMarker: UnicodeString);
 begin
@@ -145,6 +176,37 @@ begin
     AssertEquals('paste reached the root', Ord(ikPaste), Ord(Base.LastKind));
     AssertEquals('payload intact', 'hello' + #10 + 'world',
       string(Base.LastPaste));
+  finally
+    App.Free;
+  end;
+end;
+
+procedure TTuiAppTest.TestRunDrainsBufferedInputBeforePerFrameWork;
+var
+  S: TSurfaceMemory;
+  Src: TInputSourceScripted;
+  Base: TAppProbe;
+  App: TTuiApp;
+begin
+  S := TSurfaceMemory.Create(10, 4);
+  Src := TInputSourceScripted.Create;
+  Base := TAppProbe.Create(10, 4, 'B');
+  App := TTuiApp.Create(S, Src, Base);
+  try
+    { Four keys buffered before the loop starts. One iteration must dispatch all
+      of them, then run the frame body once. Before the input-priority change the
+      loop dispatched ONE event per iteration, so keys queued behind the frame
+      body and a burst felt unresponsive. }
+    Src.Push(KeyEvent(kkDown));
+    Src.Push(KeyEvent(kkDown));
+    Src.Push(KeyEvent(kkDown));
+    Src.Push(KeyEvent(kkDown));
+    LoopChecks := 0;
+    FTickCount := 0;
+    App.Run(StopAfterOneLoop, CaptureTick);
+    AssertEquals('every buffered key reached the widget tree', 4,
+      Base.HandleCount);
+    AssertEquals('the frame body ran once, not once per key', 1, FTickCount);
   finally
     App.Free;
   end;
