@@ -8,12 +8,13 @@ interface
 
 uses
   SysUtils, fpcunit, testregistry, TUIWidgetsPalette,
-  TUITheme;
+  TUITheme, TUIInput;
 
 type
   TTuiPaletteTest = class(TTestCase)
   private
     function Cmds: TCommandArray;
+    function KeyEvent(AKind: TKeyKind): TInputEvent;
   published
     procedure TestFilterEmptyShowsAll;
     procedure TestFilterByPrefix;
@@ -22,9 +23,20 @@ type
     procedure TestFilterNoMatch;
     procedure TestPaletteFilterAndSelect;
     procedure TestSelectedNameEmpty;
+    { The list WRAPS: pressing down past the last row returns to the first, and
+      up past the first goes to the last. Clamping made the operator press up N
+      times to get back to the top. }
+    procedure TestSelectionWrapsAtBothEnds;
   end;
 
 implementation
+
+function TTuiPaletteTest.KeyEvent(AKind: TKeyKind): TInputEvent;
+begin
+  Result := Default(TInputEvent);
+  Result.Kind := ikKey;
+  Result.Key.Kind := AKind;
+end;
 
 function TTuiPaletteTest.Cmds: TCommandArray;
 begin
@@ -101,6 +113,30 @@ begin
   P := TCommandPalette.Create(Default(TTheme));
   try
     AssertEquals('no commands -> empty', '', P.SelectedName);
+  finally
+    P.Free;
+  end;
+end;
+
+procedure TTuiPaletteTest.TestSelectionWrapsAtBothEnds;
+var
+  P: TCommandPalette;
+  T: TCommandArray;
+begin
+  P := TCommandPalette.Create(Default(TTheme));
+  try
+    T := Cmds;
+    P.SetCommands(T);
+    AssertEquals('starts on the first', 'checkpoint', P.SelectedName);
+    { Down past the last row returns to the first. }
+    P.HandleEvent(KeyEvent(kkDown));
+    P.HandleEvent(KeyEvent(kkDown));
+    AssertEquals('on the last', 'clear', P.SelectedName);
+    P.HandleEvent(KeyEvent(kkDown));
+    AssertEquals('down wraps to the first', 'checkpoint', P.SelectedName);
+    { Up past the first row goes to the last. }
+    P.HandleEvent(KeyEvent(kkUp));
+    AssertEquals('up wraps to the last', 'clear', P.SelectedName);
   finally
     P.Free;
   end;

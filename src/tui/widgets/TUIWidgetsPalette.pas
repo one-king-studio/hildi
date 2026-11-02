@@ -227,10 +227,13 @@ begin
     Exit;
   end;
   Inc(FSelected, ADelta);
+  { WRAP, do not clamp. A list that stops dead at the last row makes the operator
+    press up N times to get back to the top, where one more down gets there. The
+    two lists share this slider, so both get the wrapping. }
   if FSelected < 0 then
-    FSelected := 0;
-  if FSelected > N - 1 then
     FSelected := N - 1;
+  if FSelected > N - 1 then
+    FSelected := 0;
 end;
 
 procedure TCommandPalette.RunSelected;
