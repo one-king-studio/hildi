@@ -1103,6 +1103,21 @@ begin
   M.Attached.StoreHwm := Hwm;
   QueueLine(AClient, TSessionCodec.Encode(M));
   ReplayTo(AClient, ACommand.FromSeq);
+  { The skill catalogue is STATE, not a stream of changes: a client that attaches
+    now has missed every previous ekSkills broadcast, and without this its cache
+    stays empty - so the palette reports "no skills available" on a session that
+    has skills. Sent to THIS client only and not through Broadcast: it is not an
+    event that happened, it is the current picture, and pushing it into the
+    replay buffer would duplicate it for every later attach. }
+  if FSession.Skills <> nil then
+  begin
+    M := Default(TSessionMessage);
+    M.Kind := mkEvent;
+    M.Event := EmitEvent(ekSkills);
+    M.Event.SkillKeys := FSession.Skills.Keys;
+    M.Event.SkillLoadedKeys := FSession.Skills.LoadedKeys;
+    QueueLine(AClient, TSessionCodec.Encode(M));
+  end;
 end;
 
 procedure TSessionRuntime.HandleCommand(AClient: TClientConn;
