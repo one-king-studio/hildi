@@ -55,6 +55,10 @@ type
     procedure TestCompatibilityLength;
     { Phase 3: discovery. }
     procedure TestScanFindsSkillDirectories;
+    { The repo's own example skill must pass OUR validator. An example that the
+      implementation rejects is worse than no example: it teaches the format
+      wrongly and the first person to copy it hits a wall. }
+    procedure TestShippedExampleSkillParsesCleanly;
     procedure TestScanIgnoresDirectoriesWithoutSkillMd;
     procedure TestScanSkipsGitAndNodeModules;
     procedure TestScanReportsAnInvalidSkillWithoutAborting;
@@ -305,6 +309,20 @@ begin
   Skills := ScanSkillsDir(FDir, skProject);
   AssertEquals('both found', 2, Length(Skills));
   AssertEquals('no problems', '', Skills[0].Problem + Skills[1].Problem);
+end;
+
+procedure TSkillsFilesTest.TestShippedExampleSkillParsesCleanly;
+var
+  Skills: TSkillFileArray;
+begin
+  { Scans the repo's own .agents/skills. The test runner cds to the repo root,
+    so this path is stable. If someone edits the example into something invalid,
+    this fails here rather than in a user's first attempt. }
+  Skills := ScanSkillsDir('.agents/skills', skProject);
+  AssertTrue('the example is found', Length(Skills) >= 1);
+  AssertEquals('and it parses cleanly: ' + Skills[0].Problem, '',
+    Skills[0].Problem);
+  AssertEquals('named as its directory', 'changelog-writer', Skills[0].Name);
 end;
 
 procedure TSkillsFilesTest.TestScanIgnoresDirectoriesWithoutSkillMd;
