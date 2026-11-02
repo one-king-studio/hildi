@@ -105,6 +105,9 @@ type
     { The shipped example is not merely parseable: a real session pointed at this
       repo finds it, which is what a reader following the docs will do. }
     procedure TestShippedExampleIsDiscoveredByASession;
+    { A skill added to the workspace mid-session is picked up at the next turn
+      boundary, without a restart. Discovery used to run only in Init. }
+    procedure TestSkillAddedMidSessionIsPickedUpAtTheBoundary;
     { The skill descriptions (the STABLE half of the manifest) must reach the
       loop even when no MCP server is configured. They were briefly gated on
       FMcp <> nil, which silently dropped a locally-declared skill's description:
@@ -1549,6 +1552,53 @@ begin
       Reg.SkillOf('changelog_writer').Location <> '');
   finally
     Reg.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestSkillAddedMidSessionIsPickedUpAtTheBoundary;
+var
+  Session: THarnessSession;
+  Err: string;
+  Keys: TStringArray;
+  I: Integer;
+  Found: Boolean;
+  SkillDir: string;
+  Text: string;
+  Fs: TFileStream;
+begin
+  { Discovery used to run only in Init, so a skill dropped into .agents/skills
+    during a session was invisible until restart. }
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    AssertEquals('no skills to begin with', 0, Length(Session.Skills.Keys));
+
+    { The operator installs a skill mid-session. }
+    SkillDir := IncludeTrailingPathDelimiter(FDir) + '.agents' + PathDelim +
+      'skills' + PathDelim + 'later';
+    ForceDirectories(SkillDir);
+    Text := '---'#10'name: later'#10'description: added while running'#10 +
+      '---'#10'Body.';
+    Fs := TFileStream.Create(IncludeTrailingPathDelimiter(SkillDir) + 'SKILL.md',
+      fmCreate);
+    try
+      Fs.WriteBuffer(Text[1], Length(Text));
+    finally
+      Fs.Free;
+    end;
+
+    { The turn boundary is where a rescan happens. }
+    Session.Loop.PrepareProviders;
+    Keys := Session.Skills.Keys;
+    Found := False;
+    for I := 0 to High(Keys) do
+      if Keys[I] = 'later' then
+        Found := True;
+    AssertTrue('picked up at the boundary', Found);
+    AssertTrue('with its body',
+      Pos('Body.', Session.Skills.InstructionsOf('later')) > 0);
+  finally
+    Session.Free;
   end;
 end;
 

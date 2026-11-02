@@ -1207,6 +1207,21 @@ procedure THarnessSession.ReconcileMcpSkills;
 var
   Cfg: TMcpConfig;
 begin
+  { FILE SKILLS first, and unconditionally: this runs at the turn boundary, and
+    a skill added to .agents/skills mid-session used to need a restart because
+    discovery only ran in Init. Re-import REPLACES each entry by key while
+    keeping its loaded state, so a rescan cannot unload something in use.
+
+    Known limit: a skill DELETED from disk stays declared. Removing entries needs
+    a set difference against what the scan found, which is a separate change. }
+  if FSkills <> nil then
+  begin
+    DiscoverSkillFiles(FSkills, FView.WorkspaceRoot,
+      ExcludeTrailingPathDelimiter(GetUserDir), FApprovalService,
+      FView.WorkspaceId, FView.SessionId);
+    ComposeStablePrompt;
+  end;
+
   { MCP is a PROVIDER now, not a set of skills. The provider owns the whole
     lifecycle: it declares the configured servers, releases any that were
     removed, and connects to none of them (lazy is the point). }
