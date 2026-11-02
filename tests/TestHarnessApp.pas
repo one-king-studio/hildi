@@ -138,6 +138,9 @@ type
     procedure ArrangeBlock(AIndex, AWidth: Integer);
     function BlockLabel(AIndex: Integer): string;
     function BlockText(AIndex: Integer): string;
+    { The block's layout-build count: increments when its body is re-parsed, so a
+      test can prove a frame did NOT re-parse it. }
+    function BlockBuilds(AIndex: Integer): Integer;
     function BlockLive(AIndex: Integer): Boolean;
     function FindText(AKind: TChatKind; const ANeedle: string): Boolean;
     function BlockSignature: string;
@@ -163,6 +166,11 @@ type
     procedure TestEmptyToolResultShowsPlaceholder;
     procedure TestAppStreamsToolOutput;
     procedure TestStreamedToolOutputCoalescesOneAppendPerFrame;
+    { The live-output trim must not fire every frame. It routes through SetText,
+      which re-parses the whole body; with a plain "> MaxLiveChars" test the
+      marker prefix kept the body above the limit, so it re-parsed every frame at
+      the 10 ms tick -- a 64 KB markdown re-parse 100x/second on the UI thread. }
+    procedure TestLongToolOutputIsNotTrimmedEveryFrame;
     procedure TestConcurrentToolOutputRoutesPerCall;
     procedure TestLiveToolBlockIsCapped;
     procedure TestDrainStopsAtTheBudget;
@@ -728,6 +736,11 @@ begin
   Result := FApp.Panel.Stream.ItemAt(AIndex).Text;
 end;
 
+function THarnessAppTest.BlockBuilds(AIndex: Integer): Integer;
+begin
+  Result := FApp.Panel.Stream.ItemAt(AIndex).LayoutBuilds;
+end;
+
 function THarnessAppTest.BlockLive(AIndex: Integer): Boolean;
 begin
   Result := FApp.Panel.Stream.ItemAt(AIndex).Live;
@@ -1012,6 +1025,55 @@ begin
   FApp.Step;
   AssertEquals('the coalesced burst landed in one append', 'xxx',
     BlockText(BlockCount - 1));
+end;
+
+procedure THarnessAppTest.TestLongToolOutputIsNotTrimmedEveryFrame;
+var
+  Call, Chunk: TTurnEvent;
+  I, BodyLen: Integer;
+  Big, Marker: string;
+begin
+  Build;
+  Call := Default(TTurnEvent);
+  Call.Kind := teToolCall;
+  Call.ToolId := 'c';
+  Call.ToolName := 'run_command';
+  Call.ToolReason := 'build';
+  FSession.Queue.Push(Call);
+  FApp.Step;
+
+  { Push past the 64 KB cap so the trim fires once. }
+  Big := StringOfChar('x', 70000);
+  Chunk := Default(TTurnEvent);
+  Chunk.Kind := teToolOutput;
+  Chunk.ToolId := 'c';
+  Chunk.ToolName := 'run_command';
+  Chunk.Text := Big;
+  FSession.Queue.Push(Chunk);
+  FApp.Step;
+  BodyLen := Length(BlockText(BlockCount - 1));
+  AssertTrue('the block is capped', BodyLen <= 66000);
+  AssertTrue('a trim marker names the loss',
+    Pos('trimmed', BlockText(BlockCount - 1)) > 0);
+
+  { The cap is intact, but the trim must not REPEAT on the next frames. After
+    trimming to the floor there is headroom, so a few small frames must not
+    re-parse the body at all. That repetition -- not the cap -- was the cost:
+    SetText re-parses the whole body, at the 10 ms tick.
+
+    The observable is the leading trim marker, not a layout counter: LayoutBuilds
+    increments on every Arrange, so it cannot distinguish a re-parse. The marker's
+    "N earlier chars trimmed" number changes only when the trim fires again. }
+  Marker := Copy(BlockText(BlockCount - 1), 1, 60);
+  Chunk.Text := StringOfChar('y', 500);
+  for I := 1 to 3 do
+  begin
+    FSession.Queue.Push(Chunk);
+    FApp.Step;
+  end;
+  AssertEquals('the trim did not re-fire on frames under the cap',
+    Marker, Copy(BlockText(BlockCount - 1), 1, 60));
+  AssertTrue('the block stays capped', Length(BlockText(BlockCount - 1)) <= 66000);
 end;
 
 procedure THarnessAppTest.TestConcurrentToolOutputRoutesPerCall;

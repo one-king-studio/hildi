@@ -188,6 +188,9 @@ type
       unless AppendText streamed this body. }
     procedure Finalize;
     function Text: string;
+    { The body's length without copying it. Text returns a copy of the whole
+      body, so a per-frame caller that only needs the size must not use it. }
+    function TextLength: Integer;
     { Build or free the rendered body (spans or markdown). A block off the
       viewport releases it; the memoized height survives, so the scroll extent
       is unchanged. }
@@ -852,6 +855,11 @@ end;
 function TChatItem.Text: string;
 begin
   Result := FBody;
+end;
+
+function TChatItem.TextLength: Integer;
+begin
+  Result := Length(FBody);
 end;
 
 function TChatItem.LayoutBuilds: Integer;

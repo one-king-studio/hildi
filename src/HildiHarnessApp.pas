@@ -3297,8 +3297,21 @@ end;
 procedure THarnessApp.FlushToolOutput;
 const
   { The live block keeps only its tail; a huge command must not grow it without
-    limit. Older text is trimmed, with a marker naming how much went. }
+    limit. Older text is trimmed, with a marker naming how much went.
+
+    The cap stays exactly as it was -- TestLiveToolBlockIsCapped pins it -- but
+    the trim must not REPEAT on every frame. It routes through TChatItem.SetText,
+    which re-parses the whole body (MarkdownView.SetSource: FreeChildren,
+    ResetStream, re-parse, SyncChildren). Trimming to exactly MaxLiveChars left
+    the body a marker's width ABOVE the cap, so the very next frame tripped the
+    test again: at the 10 ms tick that was a 64 KB markdown re-parse 100 times a
+    second on the UI thread.
+
+    Trim instead to a floor well below the cap, so it takes TrimFloorChars worth
+    of new output before the trim is due again. The cap is unchanged; only the
+    frequency of the expensive path drops. }
   MaxLiveChars = 65536;
+  TrimFloorChars = 49152;
 var
   Pair: TPair<string, string>;
   Block: TChatItem;
@@ -3313,10 +3326,12 @@ begin
       (not FToolBlocks.TryGetValue(Pair.Key, Block)) then
       Continue;
     Block.AppendText(Pair.Value);
-    Text := Block.Text;
-    if Length(Text) > MaxLiveChars then
+    { TextLength, not Text: Text copies the whole body, so measuring with it
+      cost a 64 KB string copy on every frame even when no trim was due. }
+    if Block.TextLength > MaxLiveChars then
     begin
-      Excess := Length(Text) - MaxLiveChars;
+      Text := Block.Text;
+      Excess := Length(Text) - TrimFloorChars;
       Block.SetText('[' + IntToStr(Excess) + ' earlier chars trimmed]' + #10 +
         Utf8From(Text, Excess));
     end;
