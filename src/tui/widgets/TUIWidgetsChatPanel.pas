@@ -27,14 +27,27 @@ uses
   art, so it reads as a logo on a terminal that has no images. One string per
   ROW, so a badly-wide row cannot shift the centring of the others.
 
-  The mark is drawn in TWO tones. The circle emblem on the left is the frame, not
-  the name, so it stays muted; the script to its right is the word, so it takes
-  the ordinary text colour, a step brighter. EmptyLogoScriptCol is the CELL at
-  which that split happens - a column of the DRAWING, not of any one row, so
-  every row breaks in the same place or the word would wobble. Cell 20 is the
-  narrowest column between the emblem and the script. }
+  The mark is drawn in TWO tones, decided CELL BY CELL from EmptyLogoWordMask:
+  the circle emblem is the frame, not the name, so it stays muted, while the
+  letters take the ordinary text colour, a step brighter. A single split column
+  cannot do this - the swash sweeps UNDER the circle, so a column cuts through
+  the middle of a letter. The mask follows the drawing instead. }
 const
-  EmptyLogoScriptCol = 20;
+  { Which cells of EmptyLogo are the WORD and which are the CIRCLE.
+    '1' = letter (painted brighter), '0' = circle (muted), '.' = blank.
+    Derived from a mask image of the art with the circle removed, aligned
+    dot-for-dot against the logo - so the tone follows the DRAWING rather
+    than a column, and the swash that sweeps under the circle keeps its
+    own tone cell by cell. }
+  EmptyLogoWordMask: array[0..6] of UnicodeString = (
+    '......0000000000...........................',
+    '...00000.0000000000......11111.....11......',
+    '.0000..1110.10000000...111010.....110......',
+    '.000...110.110.00011..110110.....110.110...',
+    '.00....10110....0010..11110..111110..10....',
+    '.00....1011110..110..1110.11111110.1110....',
+    '....0111110.1111111111111111110.11101111...');
+
   EmptyLogo: array[0..6] of UnicodeString = (
     '⠀⠀⠀⠀⠀⠀⣀⣤⣤⣤⠤⢤⣤⣤⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀',
     '⠀⠀⠀⣠⣶⡿⠛⠉⠀⣠⣴⡶⣦⡈⢿⣿⣷⣤⡀⠀⠀⠀⠀⠀⠀⢀⣴⠶⣶⡄⠀⠀⠀⠀⠀⣴⡄⠀⠀⠀⠀⠀⠀',
@@ -428,7 +441,19 @@ procedure TChatPanel.RenderEmptyMark(const S: ISurface);
 var
   B: TRect;
   TotalH, Top, I, W, X: Integer;
-  Line, Head, Tail: UnicodeString;
+  Line, Mask, Run: UnicodeString;
+  C, InRun: Integer;
+  RunWord: Boolean;
+
+  { True when this cell is part of the WORD rather than the circle. A missing or
+    short mask row falls back to muted, so a mismatched mask can never paint art
+    brighter than intended. }
+  function IsWord(const AMask: UnicodeString; AIndex: Integer): Boolean;
+  begin
+    Result := (AIndex >= 1) and (AIndex <= Length(AMask)) and
+      (AMask[AIndex] = '1');
+  end;
+
 begin
   B := FMessages.Bounds;
   TotalH := Length(EmptyLogo) + Length(EmptyHints) + 2;
@@ -442,20 +467,40 @@ begin
     if W > B.W - 2 then
       Continue;   { too wide for this pane: skip the row rather than clip it }
     X := B.X + 1 + ((B.W - 2) - W) div 2;
-    { TWO-TONE. The circle emblem on the left stays MUTED - it is the frame, not
-      the name - and the script to its right is painted in the ordinary text
-      colour, a step brighter, so the word reads out of the art. Split at a FIXED
-      cell rather than by measuring each row: the boundary is a column of the
-      drawing, so every row must break at the same place or the word wobbles. }
-    if Length(Line) > EmptyLogoScriptCol then
-    begin
-      Head := Copy(Line, 1, EmptyLogoScriptCol);
-      Tail := Copy(Line, EmptyLogoScriptCol + 1, MaxInt);
-      PutText(S, X, Top + I, Head, FTheme.Muted);
-      PutText(S, X + StringWidth(Head), Top + I, Tail, FTheme.Text);
-    end
+    if I <= High(EmptyLogoWordMask) then
+      Mask := EmptyLogoWordMask[I]
     else
-      PutText(S, X, Top + I, Line, FTheme.Muted);
+      Mask := '';
+    { TWO-TONE, CELL BY CELL. The circle emblem is the frame, not the name, so it
+      stays MUTED; the letters take the ordinary text colour, a step brighter.
+      Driving this from a MASK rather than a split column matters because the
+      swash sweeps UNDER the circle: a column would cut through the middle of a
+      letter, while the mask follows the drawing itself.
+
+      Consecutive cells of the same tone are emitted as ONE PutText, so a run of
+      letters is a single write rather than one per cell. }
+    C := 1;
+    while C <= Length(Line) do
+    begin
+      RunWord := IsWord(Mask, C);
+      Run := '';
+      InRun := C;
+      while (C <= Length(Line)) and (IsWord(Mask, C) = RunWord) do
+      begin
+        Run := Run + Line[C];
+        Inc(C);
+      end;
+      if Run <> '' then
+      begin
+        if RunWord then
+          PutText(S, X, Top + I, Run, FTheme.Text)
+        else
+          PutText(S, X, Top + I, Run, FTheme.Muted);
+        Inc(X, StringWidth(Run));
+      end;
+      if C = InRun then
+        Break;   { defensive: never spin if the run consumed nothing }
+    end;
   end;
   Inc(Top, Length(EmptyLogo) + 1);
   for I := 0 to High(EmptyHints) do

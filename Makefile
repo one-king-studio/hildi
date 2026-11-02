@@ -569,3 +569,8 @@ ui-capture: $(BIN)/ui-capture
 $(BIN)/ui-capture: $(EXAMPLES)/ui_capture.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
 	$(FPC) $(FPCARGS) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+
+# Regenerate the empty-session mark from docs/design/logo.txt, which holds the
+# artefact as editable PICTURES rather than braille inside a Pascal string.
+logo:
+	python3 scripts/gen-logo.py
