@@ -1182,6 +1182,11 @@ begin
     FFake.AddResponse([TextDelta('done'), FinishFrame('stop'), DoneFrame]);
     AssertTrue('send ok', FLoop.Send('go', nil, Answer, Err));
 
+    { Same reason as TestParallelToolCallsRunConcurrently: without this, a
+      barrier that expired would let all three run SERIALLY and still deliver
+      results in call order -- the test would pass while no longer testing
+      concurrency at all. Peak/order alone cannot tell the two apart. }
+    AssertFalse('no call waited out the barrier', Probe.TimedOut);
     AssertEquals('first result is a1', 'a1', ToolCallIdAt(FFake.LastBody, 2));
     AssertEquals('second is a2', 'a2', ToolCallIdAt(FFake.LastBody, 3));
     AssertEquals('third is a3', 'a3', ToolCallIdAt(FFake.LastBody, 4));
