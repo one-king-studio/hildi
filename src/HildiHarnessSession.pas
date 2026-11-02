@@ -55,6 +55,9 @@ type
       decay policy to serve two incompatible needs. }
     FMcpProvider: TMcpProvider;
     FMcpProviderKeep: IToolProvider;
+    { The last shadowing report shown, so the turn-boundary rescan does not repeat
+      it every turn. Empty until something is shadowed. }
+    FShadowReported: string;
     FMcpTokenProviders: TObjectList;
     { The skill registry: the capability layer (manifest + load_skill + decay).
       Empty by default; Lazy_MCP fills it with one skill per MCP server. Held as
@@ -302,7 +305,8 @@ const
   directory. Returns how many skills were imported. }
 function DiscoverSkillFiles(ARegistry: TSkillRegistry;
   const AWorkspaceRoot, AUserHome: string; AApproval: IApprovalService;
-  AWorkspaceId: Integer; const ASessionId: string): Integer;
+  AWorkspaceId: Integer; const ASessionId: string;
+  out AShadowed: TStringArray): Integer;
 
 implementation
 
@@ -1206,6 +1210,9 @@ end;
 procedure THarnessSession.ReconcileMcpSkills;
 var
   Cfg: TMcpConfig;
+  Shadowed: TStringArray;
+  ShadowKey, ShadowText: string;
+  I: Integer;
 begin
   { FILE SKILLS first, and unconditionally: this runs at the turn boundary, and
     a skill added to .agents/skills mid-session used to need a restart because
@@ -1218,7 +1225,34 @@ begin
   begin
     DiscoverSkillFiles(FSkills, FView.WorkspaceRoot,
       ExcludeTrailingPathDelimiter(GetUserDir), FApprovalService,
-      FView.WorkspaceId, FView.SessionId);
+      FView.WorkspaceId, FView.SessionId, Shadowed);
+    { Say it ONCE per distinct set of shadowed skills. This runs at every turn
+      boundary, so an unconditional notice would repeat forever; and silence is
+      the worse bug - an operator whose user-scope skill is shadowed by a project
+      one just sees it not work, with no explanation. }
+    ShadowKey := '';
+    for I := 0 to High(Shadowed) do
+    begin
+      if ShadowKey <> '' then
+        ShadowKey := ShadowKey + '|';
+      ShadowKey := ShadowKey + Shadowed[I];
+    end;
+    if (ShadowKey <> '') and (ShadowKey <> FShadowReported) then
+    begin
+      FShadowReported := ShadowKey;
+      if FConversation <> nil then
+      begin
+        ShadowText := '';
+        for I := 0 to High(Shadowed) do
+        begin
+          if ShadowText <> '' then
+            ShadowText := ShadowText + LineEnding;
+          ShadowText := ShadowText + Shadowed[I];
+        end;
+        FConversation.AppendError('shadowed by a project-scope skill',
+          ShadowText);
+      end;
+    end;
     ComposeStablePrompt;
   end;
 
@@ -1235,7 +1269,8 @@ end;
 
 function DiscoverSkillFiles(ARegistry: TSkillRegistry;
   const AWorkspaceRoot, AUserHome: string; AApproval: IApprovalService;
-  AWorkspaceId: Integer; const ASessionId: string): Integer;
+  AWorkspaceId: Integer; const ASessionId: string;
+  out AShadowed: TStringArray): Integer;
 var
   Found: TSkillFileArray;
   Shadowed: TStringArray;
@@ -1249,6 +1284,11 @@ begin
     Exit;
   Found := ScanSkills(AWorkspaceRoot, AUserHome);
   Result := ImportSkills(ARegistry, Found, Shadowed);
+  { Reported through the out parameter instead of being dropped, so the owner can
+    tell the operator that a user-scope skill was shadowed by a project one. Left
+    to the CALLER because discovery runs at every turn boundary since the rescan
+    landed - the caller decides whether a given shadowing is worth saying again. }
+  AShadowed := Shadowed;
   { The gate is set AFTER import so a load cannot slip through between the two:
     the registry asks on every file-backed load, and the service is already there
     by the time any of these entries is reachable. }
@@ -1359,6 +1399,7 @@ var
   AgentConfig: TAgentConfig;
   Conv: TSqliteConversationStore;
   McpCfg: TMcpConfig;
+  ShadowedAtInit: TStringArray;
   Cap: Integer;
 begin
   Result := False;
@@ -1548,11 +1589,11 @@ begin
     The approval gate is handed to the registry here: a file-backed skill carries
     instructions nobody here wrote, so loading one asks - at session, workspace or
     global scope. A skill whose name is shadowed by a project-scope one is
-    dropped by ImportSkills and reported through AShadowed, which we discard:
-    there is no operator surface for it yet. }
+    dropped by ImportSkills and reported through AShadowed; the turn-boundary
+    rescan reports it once (see ReconcileMcpSkills). }
   DiscoverSkillFiles(FSkills, FView.WorkspaceRoot,
     ExcludeTrailingPathDelimiter(GetUserDir), ApprovalService,
-    FView.WorkspaceId, FView.SessionId);
+    FView.WorkspaceId, FView.SessionId, ShadowedAtInit);
   FLoop.AddProvider(FSkillsKeep);
   { MCP registers with the loop HERE, after it exists; creating the provider
     earlier is fine but AddProvider is not. }

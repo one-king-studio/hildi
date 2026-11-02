@@ -108,6 +108,9 @@ type
     { A skill added to the workspace mid-session is picked up at the next turn
       boundary, without a restart. Discovery used to run only in Init. }
     procedure TestSkillAddedMidSessionIsPickedUpAtTheBoundary;
+    { A user-scope skill shadowed by a project-scope one is reported, not silently
+      dropped. The caller decides how often to say it. }
+    procedure TestShadowedSkillIsReported;
     { The skill descriptions (the STABLE half of the manifest) must reach the
       loop even when no MCP server is configured. They were briefly gated on
       FMcp <> nil, which silently dropped a locally-declared skill's description:
@@ -1492,6 +1495,7 @@ var
   SkillDir: string;
   Fs: TFileStream;
   Text: string;
+  Shadowed: TStringArray;
   N: Integer;
 begin
   { Discovery is WIRED, not merely implemented. A SKILL.md in the workspace must
@@ -1513,7 +1517,7 @@ begin
   Reg := TSkillRegistry.Create;
   try
     { An empty home path: the test must not read the operator's real skills. }
-    N := DiscoverSkillFiles(Reg, FDir, '', nil, 1, 'sess-1');
+    N := DiscoverSkillFiles(Reg, FDir, '', nil, 1, 'sess-1', Shadowed);
     AssertEquals('imported', 1, N);
     AssertEquals('the key is derived', 'wired', Reg.Keys[0]);
     AssertEquals('carries its body', 'Body.', Reg.InstructionsOf('wired'));
@@ -1528,6 +1532,7 @@ var
   Reg: TSkillRegistry;
   N, I: Integer;
   Keys: TStringArray;
+  Shadowed: TStringArray;
   Found: Boolean;
 begin
   { The example is tested for PARSING in TestSkillsFiles, but a reader following
@@ -1537,7 +1542,8 @@ begin
   Reg := TSkillRegistry.Create;
   try
     { Empty home path: never read the operator's real skills dir. }
-    N := DiscoverSkillFiles(Reg, GetCurrentDir, '', nil, 1, 'sess-example');
+    N := DiscoverSkillFiles(Reg, GetCurrentDir, '', nil, 1, 'sess-example',
+      Shadowed);
     AssertTrue('something was imported', N >= 1);
     Keys := Reg.Keys;
     Found := False;
@@ -1599,6 +1605,52 @@ begin
       Pos('Body.', Session.Skills.InstructionsOf('later')) > 0);
   finally
     Session.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestShadowedSkillIsReported;
+var
+  Reg: TSkillRegistry;
+  Shadowed: TStringArray;
+  N: Integer;
+  HomeDir, SkillDir: string;
+  Text: string;
+  Fs: TFileStream;
+
+  procedure WriteAt(const ADir, AName: string);
+  var
+    S: string;
+  begin
+    ForceDirectories(ADir);
+    S := '---'#10'name: ' + AName + #10'description: d'#10'---'#10'Body.';
+    Fs := TFileStream.Create(IncludeTrailingPathDelimiter(ADir) + 'SKILL.md',
+      fmCreate);
+    try
+      Fs.WriteBuffer(S[1], Length(S));
+    finally
+      Fs.Free;
+    end;
+  end;
+
+begin
+  { A user-scope skill shadowed by a project-scope one used to vanish with no
+    explanation: the operator's skill simply did not work. Discovery now reports
+    it and the caller decides how often to say so. }
+  HomeDir := IncludeTrailingPathDelimiter(FDir) + 'home';
+  WriteAt(IncludeTrailingPathDelimiter(HomeDir) + '.agents' + PathDelim +
+    'skills' + PathDelim + 'dupe', 'dupe');
+  WriteAt(IncludeTrailingPathDelimiter(FDir) + '.agents' + PathDelim +
+    'skills' + PathDelim + 'dupe', 'dupe');
+
+  Reg := TSkillRegistry.Create;
+  try
+    N := DiscoverSkillFiles(Reg, FDir, HomeDir, nil, 1, 'sess-shadow', Shadowed);
+    AssertEquals('only the project one imports', 1, N);
+    AssertEquals('and the shadowed one is reported, not dropped', 1,
+      Length(Shadowed));
+    AssertTrue('naming it: ' + Shadowed[0], Pos('dupe', Shadowed[0]) > 0);
+  finally
+    Reg.Free;
   end;
 end;
 
