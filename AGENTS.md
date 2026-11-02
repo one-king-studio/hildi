@@ -94,6 +94,10 @@ until it passes.
 | `make release` | optimized *example* build (not a shipping artifact) |
 | `make clean` | remove build artifacts |
 
+To sync with upstream: `scripts/sync.sh` (add `--check` to run the gate after).
+It picks fast-forward vs rebase from ahead/behind, backs local commits up to a
+bundle before rebasing, and refuses a dirty tree. 
+
 `make build/debug/bin/hildi` builds the TUI. Beware `make tui-agent`, which **builds
 and launches** it — in a non-interactive shell that hangs forever.
 
