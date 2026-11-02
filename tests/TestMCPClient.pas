@@ -9,7 +9,7 @@ interface
 
 uses
   SysUtils, Classes, fpcunit, testregistry,
-  HildiMCPClient, HildiMCPConfig,
+  HildiMCPClient, HildiMCPConfig, HildiMCPProvider,
   HildiSkills,
   HildiAgent, HildiLLM, HildiApproval;
 
@@ -47,8 +47,8 @@ type
     procedure TestLazyReconcileDeclaresWithoutConnecting;
     procedure TestLazyOpenServerConnects;
     procedure TestLazyCloseServerDisconnects;
-    procedure TestRegisterMcpSkillsDeclaresUnloaded;
-    procedure TestCuratedManifestMetadata;
+    procedure TestProviderDeclaresClosedAndOpensOnLoad;
+    procedure TestCuratedCatalogueIsStableText;
   end;
 
 implementation
@@ -489,60 +489,73 @@ begin
   end;
 end;
 
-procedure TMcpClientTest.TestRegisterMcpSkillsDeclaresUnloaded;
+procedure TMcpClientTest.TestProviderDeclaresClosedAndOpensOnLoad;
 var
   Mgr: TMcpManager;
   Approval: IApprovalService;
-  Reg: TSkillRegistry;
-  Err: string;
+  P: TMcpProvider;
+  T: TRegisteredTool;
+  Res, Err: string;
 begin
+  { MCP is a PROVIDER now, not a set of skills. The declaration is lazy: the name
+    is known, the tools are absent, and load_mcp is what connects. }
   Approval := TFakeApproval.Create(True);
   Mgr := TMcpManager.Create(Default(TMcpConfig), Approval, nil);
-  Reg := TSkillRegistry.Create;
   try
     Mgr.Lazy := True;
     Mgr.Reconcile(McpCfg('fake', StandardScript));
-    RegisterMcpSkills(Reg, McpCfg('fake', StandardScript), Mgr);
-    AssertEquals('declared unloaded', Ord(ssUnloaded), Ord(Reg.StateOf('mcp_fake')));
-    AssertTrue('in the manifest', Pos('mcp_fake', Reg.Manifest) > 0);
-    { Loading connects and the tools appear. }
-    AssertTrue('load', Reg.LoadSkill('mcp_fake', Err));
-    AssertTrue('tools after load', Pos('mcp_fake_echo',
-      Reg.Specs[1].Name) >= 0);
+    P := TMcpProvider.Create(Mgr, McpCfg('fake', StandardScript));
+    try
+      AssertEquals('declared', 1, Length(P.Names));
+      AssertTrue('closed to begin with',
+        Pos('state="closed"', P.StatusText) > 0);
+      AssertEquals('nothing open', 0, Length(P.OpenNames));
+      { load_mcp connects, and the tools appear. }
+      AssertTrue('load_mcp resolves', P.Find(LoadMcpToolName, T));
+      AssertTrue('open', T.Handler('{"name":"fake"}', Res, Err));
+      AssertEquals('now open', 1, Length(P.OpenNames));
+      AssertTrue('tools after open', Pos('mcp_fake_echo',
+        P.Specs[1].Name) >= 0);
+      AssertTrue('status says open', Pos('state="open"', P.StatusText) > 0);
+    finally
+      P.Free;
+    end;
   finally
-    Reg.Free;
     Mgr.Free;
   end;
 end;
 
-procedure TMcpClientTest.TestCuratedManifestMetadata;
+procedure TMcpClientTest.TestCuratedCatalogueIsStableText;
 var
   Mgr: TMcpManager;
   Approval: IApprovalService;
-  Reg: TSkillRegistry;
-  Manifest: string;
+  P: TMcpProvider;
+  Frag: string;
 begin
   { A known service gets curated metadata; an unknown one gets an honest generic
     line. Server-authored text is never used (there is none to use here). }
   Approval := TFakeApproval.Create(True);
   Mgr := TMcpManager.Create(Default(TMcpConfig), Approval, nil);
-  Reg := TSkillRegistry.Create;
   try
     Mgr.Lazy := True;
     Mgr.Reconcile(McpCfg('playwright', StandardScript));
-    RegisterMcpSkills(Reg, McpCfg('playwright', StandardScript), Mgr);
-    Manifest := Reg.Manifest;
-    AssertTrue('the per-request fragment carries state only',
-      Pos('<skill name="mcp_playwright" state="unloaded"/>', Manifest) > 0);
-    { Curated metadata is STABLE text and lives in the system prompt now. }
-    AssertTrue('curated description for a known service',
-      Pos('Browser automation', Reg.StableText) > 0);
-    AssertFalse('not the generic placeholder',
-      Pos('MCP server playwright.', Reg.StableText) > 0);
-    AssertTrue('and the fragment does not repeat it',
-      Pos('Browser automation', Manifest) = 0);
+    P := TMcpProvider.Create(Mgr, McpCfg('playwright', StandardScript));
+    try
+      { Curated metadata is STABLE text and lives in the system prompt. }
+      AssertTrue('curated description for a known service',
+        Pos('Browser automation', P.StableText) > 0);
+      AssertFalse('not the generic placeholder',
+        Pos('MCP server playwright.', P.StableText) > 0);
+      { The per-request fragment is STATUS only, and does not repeat it. }
+      Frag := P.PromptFragment;
+      AssertTrue('status names the server: ' + Frag,
+        Pos('name="playwright"', Frag) > 0);
+      AssertFalse('and the fragment does not repeat the description',
+        Pos('Browser automation', Frag) > 0);
+    finally
+      P.Free;
+    end;
   finally
-    Reg.Free;
     Mgr.Free;
   end;
 end;

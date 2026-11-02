@@ -1306,6 +1306,9 @@ var
   Tool: TRegisteredTool;
   T: TRegisteredTool;
   Res: string;
+  Keys: TStringArray;
+  I: Integer;
+  IsSkill: Boolean;
   Script: string;
 const
   Q = #39;
@@ -1343,14 +1346,18 @@ begin
       tools are absent until load_mcp opens it. }
     AssertFalse('mcp tool absent before load',
       Session.Loop.ResolveTool('mcp_fake_echo', Tool));
-    { It is a PROVIDER entry now, not a skill: it must not appear in the skill
-      manifest, and its status lives on the provider. }
+    { It is a PROVIDER entry now, not a skill: it must not appear among the
+      skill keys, and its status lives on the provider. }
     AssertTrue('the provider declares it', Session.McpProvider <> nil);
     AssertEquals('one server declared', 1,
       Length(Session.McpProvider.Names));
     AssertEquals('the server', 'fake', Session.McpProvider.Names[0]);
-    AssertFalse('not in the skill manifest',
-      Pos('mcp_fake', Session.Skills.Manifest) > 0);
+    Keys := Session.Skills.Keys;
+    IsSkill := False;
+    for I := 0 to High(Keys) do
+      if Keys[I] = 'mcp_fake' then
+        IsSkill := True;
+    AssertFalse('not a skill at all', IsSkill);
     AssertTrue('reported closed',
       Pos('state="closed"', Session.McpProvider.StatusText) > 0);
     { load_mcp opens it and registers its tools. }
@@ -1432,7 +1439,6 @@ begin
     Names := Session.McpProvider.Names;
     AssertEquals('picked up by the provider at the boundary', 1, Length(Names));
     AssertEquals('the server', 'late', Names[0]);
-    AssertFalse('not a skill', Pos('mcp_late', Session.Skills.Manifest) > 0);
     AssertTrue('still closed (lazy)', Length(Session.McpProvider.OpenNames) = 0);
     AssertTrue('load_mcp resolves', Session.McpProvider.Find(LoadMcpToolName, T));
     AssertTrue('opened', T.Handler('{"name":"late"}', Res, Err));

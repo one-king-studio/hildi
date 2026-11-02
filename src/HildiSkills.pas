@@ -172,8 +172,6 @@ type
     function NameOf(const AKey: string): string;
     { The body/instructions for a key. }
     function InstructionsOf(const AKey: string): string;
-    { The rendered manifest (stable per state change). }
-    function Manifest: string;
 
     { IToolProvider }
     procedure Prepare;
@@ -209,18 +207,13 @@ const
   { The approval ref for activating a skill. The skill KEY is the parameter, so
     approving one skill never approves another. }
   SkillLoadRef = 'skill:load';
-  { The manifest header: explains the model's contract (load on demand, decay by
-    idle time, and that the state shown is honest). }
-  { The per-request fragment is STATE ONLY and carries no prose: the explanation
-    of what skills are and how to load them lives in the stable text (the system
-    prompt), where it is sent once and cached. }
-  SkillStateHeader = '<skills>';
-  SkillStateFooter = '</skills>';
-
-  { The explanation, once per session, alongside the descriptions. }
+  { The explanation, once per session, alongside the descriptions. It must be
+    TRUE: skills no longer decay (only MCP connections do), so the old text
+    claiming idle unload, and pointing at a state line that no longer exists,
+    would have told the model to look for something it cannot see. }
   SkillManifestHeader =
-    'Skills you can load on demand with load_skill. A skill is unloaded when it ' +
-    'has been idle, so check the state here before relying on its tools:';
+    'Skills you can load on demand with load_skill. A loaded skill stays in ' +
+    'your context for the rest of the session:';
 
 implementation
 
@@ -404,31 +397,6 @@ begin
     Result := Result + '</skill_resources>' + LineEnding;
   end;
   Result := Result + '</skill_content>';
-end;
-
-function TSkillRegistry.Manifest: string;
-var
-  I: Integer;
-  E: TSkillEntry;
-  State: string;
-begin
-  Result := SkillStateHeader + LineEnding;
-  for I := 0 to FEntries.Count - 1 do
-  begin
-    E := TSkillEntry(FEntries[I]);
-    { The STATE only, and it is the DERIVED state: after a /checkpoint rebuild a
-      skill that was loaded is no longer in context, and saying otherwise would
-      invite the model to rely on a body it cannot see. }
-    if IsLoaded(E) then
-      State := 'loaded'
-    else
-      State := 'unloaded';
-    { The STATE only. Descriptions live in the system prompt (StableText), so
-      this fragment is small and changes only when activation does. }
-    Result := Result + '<skill name="' + E.Skill.Key + '" state="' + State +
-      '"/>' + LineEnding;
-  end;
-  Result := Result + SkillStateFooter;
 end;
 
 function TSkillRegistry.StableText: string;
@@ -725,13 +693,14 @@ end;
 
 function TSkillRegistry.PromptFragment: string;
 begin
-  { No skills declared: contribute no fragment (keep the prompt unchanged). }
-  if FEntries.Count = 0 then
-    Exit('');
-  { The STATE only. The BODY is not here at all any more: it is injected once
-    into the conversation as an mrSkill row and stays there, so re-sending it on
-    every request would only inflate the request. }
-  Result := Manifest;
+  { NOTHING rides the per-request fragment any more.
+
+    The BODY is injected once into the conversation as an mrSkill row and stays
+    there, so re-sending it would only inflate the request. The STATE line that
+    used to live here is gone too: a loaded skill's body is visibly in context,
+    so restating "loaded" costs tokens to tell the model something it can see.
+    The catalogue (descriptions) lives in StableText, in the system prompt. }
+  Result := '';
 end;
 
 function TSkillRegistry.Find(const AName: string;

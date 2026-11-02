@@ -39,9 +39,9 @@ type
     { Phase 1: declaration. }
     procedure TestAddDeclaresUnloaded;
     procedure TestAddReplacesSameKey;
-    { Phase 2: manifest. }
-    procedure TestManifestListsAllUnloaded;
-    procedure TestManifestStateChangeIsOneLine;
+    { Phase 2: what rides the request (nothing) and what is stable text. }
+    procedure TestFragmentIsEmptyAndCatalogueIsStableText;
+    procedure TestStateIsDerivedNotFragmented;
     { Phase 3: load_skill. }
     procedure TestSpecsIsLoadSkillOnlyWhenEmpty;
     procedure TestEmptyRegistryContributesNothing;
@@ -166,41 +166,39 @@ begin
   end;
 end;
 
-procedure TSkillsTest.TestManifestListsAllUnloaded;
+procedure TSkillsTest.TestFragmentIsEmptyAndCatalogueIsStableText;
 var
   R: TSkillRegistry;
-  M, S: string;
+  F, S, Err: string;
 begin
   R := TSkillRegistry.Create;
   try
     R.Add(MakeSkill('alpha'));
     R.Add(MakeSkill('beta'));
-    { The per-request fragment carries STATE only: descriptions moved to the
-      system prompt so they are not re-sent on every request. }
-    M := R.Manifest;
-    AssertTrue('alpha listed with state', Pos('<skill name="alpha" state="unloaded"/>', M) > 0);
-    AssertTrue('beta listed with state', Pos('<skill name="beta" state="unloaded"/>', M) > 0);
-    AssertTrue('alpha before beta', Pos('alpha', M) < Pos('beta', M));
-    { The stable text carries the descriptions and when-to-use. }
+    { NOTHING rides the per-request fragment any more. The body is injected once
+      into the conversation, and the state line is gone: a loaded skill's body is
+      visibly in context, so restating "loaded" would cost tokens to say what the
+      model can already see. }
+    R.LoadSkill('alpha', Err);
+    F := R.PromptFragment;
+    AssertEquals('the fragment is empty', '', F);
+    { The CATALOGUE is still how the model learns a skill exists, and it lives in
+      the system prompt where it is sent once and cached. }
     S := R.StableText;
     AssertTrue('alpha description is stable text',
       Pos('does alpha things', S) > 0);
     AssertTrue('beta description is stable text',
       Pos('does beta things', S) > 0);
     AssertTrue('when-to-use', Pos('use when alpha', S) > 0);
-    { And the fragment does NOT repeat them. }
-    AssertTrue('the fragment carries no description',
-      Pos('does alpha things', M) = 0);
   finally
     R.Free;
   end;
 end;
 
-procedure TSkillsTest.TestManifestStateChangeIsOneLine;
+procedure TSkillsTest.TestStateIsDerivedNotFragmented;
 var
   R: TSkillRegistry;
   Src: TFakeSource;
-  Before, After: string;
   Err: string;
 begin
   R := TSkillRegistry.Create;
@@ -208,12 +206,14 @@ begin
     Src := TFakeSource.Create('alpha');
     R.Add(MakeSkill('alpha'), Src);
     R.Add(MakeSkill('beta'));
-    Before := R.Manifest;
-    R.LoadSkill('alpha', Err);
-    After := R.Manifest;
-    AssertTrue('before: alpha unloaded', Pos('<skill name="alpha" state="unloaded"/>', Before) > 0);
-    AssertTrue('after: alpha loaded', Pos('<skill name="alpha" state="loaded"/>', After) > 0);
-    AssertTrue('beta unchanged', Pos('<skill name="beta" state="unloaded"/>', After) > 0);
+    { State still has to be knowable - the panel marks rows from it and the load
+      path short-circuits on it - but it is reporting, not prompt text. }
+    AssertEquals('unloaded before', Ord(ssUnloaded), Ord(R.StateOf('alpha')));
+    AssertTrue('load ok', R.LoadSkill('alpha', Err));
+    AssertEquals('loaded after', Ord(ssLoaded), Ord(R.StateOf('alpha')));
+    AssertEquals('beta untouched', Ord(ssUnloaded), Ord(R.StateOf('beta')));
+    { And none of it rides the request. }
+    AssertEquals('no fragment either way', '', R.PromptFragment);
   finally
     R.Free;
   end;
