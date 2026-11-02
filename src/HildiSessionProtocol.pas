@@ -101,6 +101,9 @@ type
       there are few skills, and a client that missed an event is corrected by the
       next one instead of drifting. }
     SkillKeys: TStringArray;
+    { The subset of SkillKeys whose bodies are IN CONTEXT. A subset rather than
+      a parallel flags array, so it cannot drift out of order with SkillKeys. }
+    SkillLoadedKeys: TStringArray;
   end;
 
   TSessionCommandKind = (
@@ -718,7 +721,12 @@ begin
         PutStr(O, 'change_ids', JoinIds(E.ChangeIds));
       end;
     ekSkills:
-      PutStr(O, 'skill_keys', JoinStr(E.SkillKeys));
+      begin
+        PutStr(O, 'skill_keys', JoinStr(E.SkillKeys));
+        { A separate key rather than a flags array: absent in an older peer's
+          payload, which decodes to "none loaded" and degrades honestly. }
+        PutStr(O, 'skill_loaded', JoinStr(E.SkillLoadedKeys));
+      end;
   end;
 end;
 
@@ -845,7 +853,10 @@ begin
         E.ChangeIds := SplitIds(OptStr(O, 'change_ids'));
       end;
     ekSkills:
-      E.SkillKeys := SplitStr(OptStr(O, 'skill_keys'));
+      begin
+        E.SkillKeys := SplitStr(OptStr(O, 'skill_keys'));
+        E.SkillLoadedKeys := SplitStr(OptStr(O, 'skill_loaded'));
+      end;
   end;
   Result := True;
 end;

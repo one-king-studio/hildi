@@ -74,6 +74,7 @@ type
     { The mock reports no skills and records load/unload calls, so a test can
       assert the app asked without needing a runtime. }
     procedure SkillKeys(out AKeys: TStringArray);
+    procedure SkillLoadedKeys(out AKeys: TStringArray);
     procedure LoadSkill(const AKey: string);
     procedure UnloadSkill(const AKey: string);
     function PopEvent(out AEvent: TTurnEvent): Boolean;
@@ -393,6 +394,11 @@ procedure TRecordingDriver.SkillKeys(out AKeys: TStringArray);
 begin
   { No skills in the mock, so /skill is absent from its command list - which is
     what HasAvailableSkills should conclude. }
+  AKeys := nil;
+end;
+
+procedure TRecordingDriver.SkillLoadedKeys(out AKeys: TStringArray);
+begin
   AKeys := nil;
 end;
 

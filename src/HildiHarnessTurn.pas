@@ -77,6 +77,10 @@ type
       full list rather than a delta - there are few skills, and a client that
       missed an event is corrected by the next one. }
     SkillKeys: TStringArray;
+    { teSkills: the subset of SkillKeys whose bodies are IN CONTEXT. A subset
+      rather than a parallel flags array, so it cannot drift out of order with
+      SkillKeys. }
+    SkillLoadedKeys: TStringArray;
   end;
 
   { A thread-safe, BOUNDED FIFO. Push from the worker thread, Pop from the UI

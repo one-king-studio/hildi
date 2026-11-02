@@ -1386,6 +1386,7 @@ begin
     Exit;
   E := EmitEvent(ekSkills);
   E.SkillKeys := FSession.Skills.Keys;
+  E.SkillLoadedKeys := FSession.Skills.LoadedKeys;
   Broadcast(E);
 end;
 

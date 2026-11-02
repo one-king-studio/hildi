@@ -172,6 +172,10 @@ begin
         SetLength(AEvent.SkillKeys, 2);
         AEvent.SkillKeys[0] := 'alpha';
         AEvent.SkillKeys[1] := 'beta';
+        { One of the two is in context: the wire must carry the SUBSET, so the
+          panel can mark rows without a second request. }
+        SetLength(AEvent.SkillLoadedKeys, 1);
+        AEvent.SkillLoadedKeys[0] := 'beta';
       end;
     ekCheckpointCommitted:
       AEvent.TurnSeq := 42;
@@ -245,6 +249,15 @@ begin
       Ord(K), Ord(D.Event.Kind));
     AssertEquals('seq preserved for ' + SessionEventKindToWire(K), 7,
       D.Event.Seq);
+    { The loaded subset must survive the wire, or the panel cannot mark a row as
+      in context. Asserted per-kind so a regression names the event. }
+    if K = ekSkills then
+    begin
+      AssertEquals('skill keys preserved', 2, Length(D.Event.SkillKeys));
+      AssertEquals('loaded subset preserved', 1,
+        Length(D.Event.SkillLoadedKeys));
+      AssertEquals('the loaded key', 'beta', D.Event.SkillLoadedKeys[0]);
+    end;
   end;
 end;
 

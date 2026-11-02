@@ -46,6 +46,8 @@ type
     { The session's skill keys. In-process, so this reads the registry directly
       rather than waiting for an event. }
     procedure SkillKeys(out AKeys: TStringArray);
+    { The subset in context. In-process, so this is the registry's derived answer. }
+    procedure SkillLoadedKeys(out AKeys: TStringArray);
     { Load a skill by key. LoadSkillByName records the session approval first, so
       an operator-typed load does not prompt. A refusal is pushed as an error. }
     procedure LoadSkill(const AKey: string);
@@ -249,6 +251,15 @@ begin
     AKeys := FSession.Skills.Keys;
 end;
 
+procedure TLocalDriver.SkillLoadedKeys(out AKeys: TStringArray);
+begin
+  { In-process, so this asks the registry - which derives the answer from the
+    store, so it already reflects a /checkpoint rebuild. }
+  AKeys := nil;
+  if FSession.Skills <> nil then
+    AKeys := FSession.Skills.LoadedKeys;
+end;
+
 procedure TLocalDriver.LoadSkill(const AKey: string);
 var
   E: TTurnEvent;
@@ -270,6 +281,7 @@ begin
   E := Default(TTurnEvent);
   E.Kind := teSkills;
   E.SkillKeys := FSession.Skills.Keys;
+  E.SkillLoadedKeys := FSession.Skills.LoadedKeys;
   FSession.Queue.Push(E);
 end;
 
@@ -288,6 +300,7 @@ begin
   E := Default(TTurnEvent);
   E.Kind := teSkills;
   E.SkillKeys := FSession.Skills.Keys;
+  E.SkillLoadedKeys := FSession.Skills.LoadedKeys;
   FSession.Queue.Push(E);
 end;
 

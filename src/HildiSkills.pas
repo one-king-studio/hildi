@@ -155,6 +155,10 @@ type
     function Remove(const AKey: string): Boolean;
     { The declared keys, in declaration order. }
     function Keys: TStringArray;
+    { The keys whose bodies are IN THE CURRENT CONTEXT. A subset of Keys, so the
+      UI can mark each row without a parallel flags array that could drift out of
+      order. }
+    function LoadedKeys: TStringArray;
 
     { Activate by key. False + AError (structured) on unknown key or a source
       failure; nothing changes on failure. Resets the idle timer. }
@@ -354,6 +358,21 @@ begin
   SetLength(Result, FEntries.Count);
   for I := 0 to FEntries.Count - 1 do
     Result[I] := TSkillEntry(FEntries[I]).Skill.Key;
+end;
+
+function TSkillRegistry.LoadedKeys: TStringArray;
+var
+  I: Integer;
+begin
+  { Derived, not stored: IsLoaded is the single answer, so this cannot disagree
+    with what the manifest says or with what the store holds. }
+  Result := nil;
+  for I := 0 to FEntries.Count - 1 do
+    if IsLoaded(TSkillEntry(FEntries[I])) then
+    begin
+      SetLength(Result, Length(Result) + 1);
+      Result[High(Result)] := TSkillEntry(FEntries[I]).Skill.Key;
+    end;
 end;
 
 function RenderSkillContent(const ASkill: TSkill): string;

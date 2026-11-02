@@ -44,8 +44,9 @@ type
       there are few skills, and a client that missed an event is corrected by the
       next one. The TUI is a client, so this is the only seam that serves it. }
     procedure SkillKeys(out AKeys: TStringArray);
-    { Load a skill by key. The runtime asks for approval; a refusal comes back as
-      an error event rather than a silent no-op. }
+    { The subset of SkillKeys whose bodies are IN CONTEXT. The panel marks each
+      row from this; a subset rather than parallel flags so the two cannot drift. }
+    procedure SkillLoadedKeys(out AKeys: TStringArray);
     procedure LoadSkill(const AKey: string);
     { Unload a loaded skill by key. }
     procedure UnloadSkill(const AKey: string);
@@ -83,6 +84,11 @@ type
   public
     Detached: Boolean;
     DetachedReason: string;
+    { The last catalogue snapshot, held here because this is where the events
+      arrive. The driver reads through its sink rather than the sink reaching
+      back into the driver. }
+    LastSkillKeys: TStringArray;
+    LastSkillLoadedKeys: TStringArray;
     constructor Create(AQueue: TTurnQueue);
     procedure OnHello(const AHello: TSessionHello);
     procedure OnAttached(const AAttached: TSessionAttached);
@@ -100,9 +106,9 @@ type
     FClient: TSessionClient;
     FNextId: Integer;
     FClosed: Boolean;
-    { The last skill catalogue pushed by the runtime (ekSkills). Skills are
-      few, so a full snapshot is held rather than round-tripped on demand. }
-    FLastSkillKeys: TStringArray;
+    { The skill catalogue is held on the SINK, which is where the ekSkills events
+      arrive; the accessors below read through it rather than caching a second
+      copy that could drift. }
     function EnsureClient(out AError: string): Boolean;
     procedure SendSkillCommand(AKind: TSessionCommandKind; const AKey: string);
     procedure SendCommand(AKind: TSessionCommandKind; const AText,
@@ -129,6 +135,8 @@ type
       skills are few, and a client that missed an event is corrected by the
       next one. }
     procedure SkillKeys(out AKeys: TStringArray);
+    { The subset in context, from the same ekSkills snapshot. }
+    procedure SkillLoadedKeys(out AKeys: TStringArray);
     { Load a skill by key. The runtime asks for approval; a refusal arrives as
       an error event, so this never reports success it cannot vouch for. }
     procedure LoadSkill(const AKey: string);
@@ -157,6 +165,14 @@ procedure TRemoteSink.OnEvent(const AEvent: TSessionEvent);
 var
   E: TTurnEvent;
 begin
+  { The catalogue is a full snapshot, so the sink just replaces what it held. It
+    is captured HERE rather than in MapSessionEvent, which is a plain function
+    with no access to the sink. }
+  if AEvent.Kind = ekSkills then
+  begin
+    LastSkillKeys := AEvent.SkillKeys;
+    LastSkillLoadedKeys := AEvent.SkillLoadedKeys;
+  end;
   if MapSessionEvent(AEvent, E) then
     FQueue.Push(E);
 end;
@@ -265,6 +281,14 @@ begin
       begin
         E.Kind := teUndone;
         E.ElapsedMs := AEvent.TurnSeq;   { the turn moved to }
+      end;
+    ekSkills:
+      begin
+        { Only the EVENT fields here: MapSessionEvent is a plain function with no
+          sink, so the catalogue capture happens in OnEvent. }
+        E.Kind := teSkills;
+        E.SkillKeys := AEvent.SkillKeys;
+        E.SkillLoadedKeys := AEvent.SkillLoadedKeys;
       end;
   else
     { loop_started, turn_started, approval_resolved, drive_*, gap, loop_exited:
@@ -457,10 +481,20 @@ end;
 
 procedure TRemoteDriver.SkillKeys(out AKeys: TStringArray);
 begin
-  { The catalogue arrives by EVENT (ekSkills), so the driver holds the last one.
-    Asking the runtime synchronously would mean a round trip on the UI thread for
-    data that is already being pushed. }
-  AKeys := FLastSkillKeys;
+  { The catalogue arrives by EVENT (ekSkills) and is held on the sink. Asking the
+    runtime synchronously would mean a round trip on the UI thread for data that
+    is already being pushed. FSink is nil once the driver closes, which reads as
+    "no catalogue" rather than crashing. }
+  AKeys := nil;
+  if FSink <> nil then
+    AKeys := FSink.LastSkillKeys;
+end;
+
+procedure TRemoteDriver.SkillLoadedKeys(out AKeys: TStringArray);
+begin
+  AKeys := nil;
+  if FSink <> nil then
+    AKeys := FSink.LastSkillLoadedKeys;
 end;
 
 procedure TRemoteDriver.LoadSkill(const AKey: string);
