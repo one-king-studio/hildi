@@ -674,11 +674,17 @@ begin
     AssertNotNull('client attaches: ' + Err, Client);
     AssertTrue('attached', Sink.AttachedSeen);
     { THE ASSERTION: the catalogue arrives without the client asking. Without it
-      the palette reports "no skills available" on a session that has one. Wait:
-      OnEvent runs on the client's READER thread, so reading Count immediately
-      raced the push and failed for the wrong reason. }
+      the palette reports "no skills available" on a session that has one.
+
+      The push is not racy - HandleAttach queues mkAttached, the replay, then
+      ekSkills, in that order, so the events are ordered on the wire. What takes
+      time is everything BEFORE that: this test spawns a real runtime process and
+      completes a socket handshake. Under the 10-way parallel gate that pipeline
+      has been observed at 3.19s, which is why the timeout is generous rather
+      than tight. Passes 3/3 in isolation at 0.2s; the headroom is for the gate,
+      not for the logic. }
     AssertTrue('the catalogue was pushed on attach',
-      WaitCount(Sink, ekSkills, 1, 3000));
+      WaitCount(Sink, ekSkills, 1, 20000));
     Saw := False;
     for I := 0 to Sink.Count - 1 do
       if (Sink.EventAt(I).Kind = ekSkills) and
