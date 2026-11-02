@@ -163,7 +163,7 @@ MARKDOWN_SRCS := $(wildcard $(SRC)/markdown/*.pas)
 FILEIGNORE_SRCS := $(wildcard $(SRC)/fileignore/*.pas)
 TEST_SRCS := $(wildcard $(TESTS)/*.pas)
 
-.PHONY: all test test-leak watch check release clean help libsqlite libmbedtls deps store-demo agent-cli release-agent-cli release-tui release-agent tui-demo widgets-demo layout-demo headless-agent tui-agent bench perf agents agent-% mcp-smoke smoke smoke-list async-standalone async-bench async-freeze async-examples probe heap-report
+.PHONY: all test test-leak watch check release clean help libsqlite libmbedtls deps store-demo agent-cli release-agent-cli release-tui release-agent tui-agent-release tui-demo widgets-demo layout-demo headless-agent tui-agent bench perf agents agent-% mcp-smoke smoke smoke-list async-standalone async-bench async-freeze async-examples probe heap-report
 
 # Fetch and verify every vendored dependency. The README tells a new contributor
 # to run this first, and it used to be a silent no-op: there was no `deps` rule,
@@ -321,6 +321,13 @@ tui-agent: headless-agent $(DEBUG_BIN)/hildi
 release-tui: libsqlite libmbedtls $(RELEASE_BIN)/hildi
 
 release-agent: libsqlite libmbedtls $(RELEASE_BIN)/hildi-agent
+
+# The launch shortcut, matching `make tui-agent` for the shipped build: build
+# BOTH halves of the pair, then run the UI. Both halves matter -- the UI spawns
+# its runtime as a sibling, so running it with only hildi present would fail at
+# the first turn. Ctrl-C quits.
+tui-agent-release: release-agent release-tui
+	$(RELEASE_BIN)/hildi $(ARGS)
 
 # Release artefacts carry their CANONICAL names -- no -release suffix. The
 # flavour is expressed by the directory instead: build/release/bin holds the
@@ -582,6 +589,7 @@ help:
 	@echo "  make release-agent-cli        build the optimized, static CLI binary"
 	@echo "  make release-tui              build the optimized, stripped TUI binary"
 	@echo "  make release-agent            build the optimized, stripped runtime binary"
+	@echo "  make tui-agent-release [ARGS=...] build & run the release pair (shipped build)"
 	@echo "  make tui-demo                 build & run the interactive TUI demonstration"
 	@echo "  make widgets-demo             build & run the widget-kit demo"
 	@echo "  make layout-demo              build & run the responsive two-column layout demo"

@@ -89,6 +89,7 @@ until it passes.
 | `make watch [TARGET=test-leak]` | auto-rerun on source changes |
 | `make release-tui` | optimized, stripped TUI — the shipping artifact (3.4 MB) |
 | `make release-agent` | optimized, stripped runtime — the shipping artifact (3.9 MB) |
+| `make tui-agent-release [ARGS=...]` | build **both** release binaries, then run the UI (release twin of `make tui-agent`) |
 | `make release-agent-cli` | optimized, static CLI binary |
 | `make release` | optimized *example* build (not a shipping artifact) |
 | `make clean` | remove build artifacts |
