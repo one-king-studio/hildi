@@ -115,6 +115,11 @@ type
     procedure TestStaleSocketRecovered;
     procedure TestSecondRuntimeExits;
     procedure TestSpawnAndAttach;
+    { A client that attaches must learn the skill catalogue. Skills are STATE, not
+      a stream of changes: a fresh client has missed every prior broadcast, so
+      without a push on attach its cache is empty and the palette says "no skills
+      available" on a session that has skills. }
+    procedure TestAttachPushesTheSkillCatalogue;
     procedure TestTurnStreamsToObserver;
     procedure TestAttachMidTurnReplaysLiveTurn;
     procedure TestApprovalCrossesTheWire;
@@ -630,6 +635,56 @@ begin
     AssertTrue('hello from the spawned runtime', Sink.HelloSeen);
     AssertTrue('attached to the spawned runtime', Sink.AttachedSeen);
     AssertEquals('granted drive', Ord(srDrive), Ord(Client.Role));
+  finally
+    Client.Free;
+    Sink := nil;
+    DeleteSocket(Id);
+  end;
+end;
+
+procedure TSessionRuntimeTest.TestAttachPushesTheSkillCatalogue;
+var
+  Id, SkillDir, Text: string;
+  Sink: TRecordingSink;
+  Client: TSessionClient;
+  Err: string;
+  I: Integer;
+  Saw: Boolean;
+  Fs: TFileStream;
+begin
+  { A skill on disk in the workspace, so the session has one to report. }
+  SkillDir := IncludeTrailingPathDelimiter(FWs) + '.agents' + PathDelim +
+    'skills' + PathDelim + 'attached';
+  ForceDirectories(SkillDir);
+  Text := '---'#10'name: attached'#10'description: present on disk'#10'---'#10 +
+    'Body.';
+  Fs := TFileStream.Create(IncludeTrailingPathDelimiter(SkillDir) + 'SKILL.md',
+    fmCreate);
+  try
+    Fs.WriteBuffer(Text[1], Length(Text));
+  finally
+    Fs.Free;
+  end;
+
+  Id := NewSession;
+  DeleteSocket(Id);
+  Sink := TRecordingSink.Create;
+  Client := TSessionClient.Open(MakeClientConfig(Id, srDrive, True), Sink, Err);
+  try
+    AssertNotNull('client attaches: ' + Err, Client);
+    AssertTrue('attached', Sink.AttachedSeen);
+    { THE ASSERTION: the catalogue arrives without the client asking. Without it
+      the palette reports "no skills available" on a session that has one. Wait:
+      OnEvent runs on the client's READER thread, so reading Count immediately
+      raced the push and failed for the wrong reason. }
+    AssertTrue('the catalogue was pushed on attach',
+      WaitCount(Sink, ekSkills, 1, 3000));
+    Saw := False;
+    for I := 0 to Sink.Count - 1 do
+      if (Sink.EventAt(I).Kind = ekSkills) and
+        (Length(Sink.EventAt(I).SkillKeys) > 0) then
+        Saw := True;
+    AssertTrue('and it names the skill on disk', Saw);
   finally
     Client.Free;
     Sink := nil;
