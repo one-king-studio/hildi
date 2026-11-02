@@ -225,6 +225,9 @@ type
       prompt may begin with a slash. It must STAY dismissed while the box holds a
       lone '/token', or the list pops back on the next keystroke. }
     procedure TestEscapeDismissesThePaletteSoSlashCanBeAPrompt;
+    { The panel marks each skill row, so the operator can see what is already in
+      context without opening anything. }
+    procedure TestSkillListMarksLoadedUnloaded;
     procedure TestStatusShowsWorkspaceAndConsumption;
     procedure TestStatusSumsTurns;
     procedure TestResumeHeaderMatchesLive;
@@ -2256,6 +2259,65 @@ begin
   FInput.Push(Ch('/'));
   FApp.Step;
   AssertTrue('a new slash opens it again', FApp.Panel.PaletteActive);
+end;
+
+procedure THarnessAppTest.TestSkillListMarksLoadedUnloaded;
+var
+  I: Integer;
+  AlphaDesc, BetaDesc, GammaDesc: string;
+  SawAlpha, SawBeta, SawGamma: Boolean;
+begin
+  { The panel has to answer "what is already in the context?" without opening
+    anything. One fixed description cannot: an operator would re-load a skill
+    that is already there. }
+  BuildWithStore;
+  FRecording := TRecordingDriver.Create;
+  SetLength(FRecording.Skills, 3);
+  FRecording.Skills[0] := 'alpha';
+  FRecording.Skills[1] := 'beta';
+  FRecording.Skills[2] := 'gamma';
+  { Two of the three are in context. Not all, and not none: a marking that is
+    always the same string would pass an all-loaded or none-loaded case. }
+  SetLength(FRecording.LoadedSkills, 2);
+  FRecording.LoadedSkills[0] := 'alpha';
+  FRecording.LoadedSkills[1] := 'gamma';
+  FApp.Attach(FSession.View, FRecording);
+
+  { Drive the real entry point (/skill) rather than the private ShowSkillList, so
+    this covers the command wiring too. }
+  FApp.Panel.Palette.OnRun('skill');
+
+  SawAlpha := False;
+  SawBeta := False;
+  SawGamma := False;
+  AlphaDesc := '';
+  BetaDesc := '';
+  GammaDesc := '';
+  for I := 0 to FApp.Panel.Palette.VisibleCount - 1 do
+  begin
+    if FApp.Panel.Palette.VisibleAt(I).Name = 'alpha' then
+    begin
+      SawAlpha := True;
+      AlphaDesc := FApp.Panel.Palette.VisibleAt(I).Description;
+    end
+    else if FApp.Panel.Palette.VisibleAt(I).Name = 'beta' then
+    begin
+      SawBeta := True;
+      BetaDesc := FApp.Panel.Palette.VisibleAt(I).Description;
+    end
+    else if FApp.Panel.Palette.VisibleAt(I).Name = 'gamma' then
+    begin
+      SawGamma := True;
+      GammaDesc := FApp.Panel.Palette.VisibleAt(I).Description;
+    end;
+  end;
+
+  AssertTrue('alpha listed', SawAlpha);
+  AssertTrue('beta listed', SawBeta);
+  AssertTrue('gamma listed', SawGamma);
+  AssertEquals('a loaded skill says so', 'loaded', AlphaDesc);
+  AssertEquals('an unloaded skill invites a load', 'load this skill', BetaDesc);
+  AssertEquals('and it is per row, not one shared string', 'loaded', GammaDesc);
 end;
 
 procedure THarnessAppTest.TestResumeHeaderMatchesLive;
