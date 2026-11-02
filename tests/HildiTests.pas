@@ -30,7 +30,7 @@ uses
   TestSessionSocket,
   TestHarnessDriver, TestJSONRPC, TestStdioChild, TestMCPConfig,
   TestMCPClient, TestSubagent, TestSubagentSupervisor,
-  TestMCPCLI, TestMCPHTTP, TestMCPOAUTH,
+  TestMCPCLI, TestMCPHTTP, TestMCPOAUTH, TestMCPProvider,
   TestMCPOAUTHFlow, TestSubagentSidebar, TestTUISidebar,
   TestSubagentSpy, TestTUIPalette, TestAsyncScheduler,
   TestAsyncFuture, TestAsyncQueue, TestAsyncTimers,

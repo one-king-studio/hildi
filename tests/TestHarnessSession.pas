@@ -14,7 +14,7 @@ uses
   HildiRecallTool,
   HildiHarnessSession, HildiHarnessView, HildiSkills,
   HildiSessionStore,
-  HildiMCPConfig,
+  HildiMCPConfig, HildiMCPProvider,
   HildiBoard, HildiBoardStore,
   HildiTasks, HildiTasksStore,
   ChangesTypes, ChangesText, ChangesStore,
@@ -1304,6 +1304,8 @@ var
   Row: TMcpServerRow;
   Session: THarnessSession;
   Tool: TRegisteredTool;
+  T: TRegisteredTool;
+  Res: string;
   Script: string;
 const
   Q = #39;
@@ -1337,15 +1339,24 @@ begin
   Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
   AssertTrue('opened: ' + Err, Session <> nil);
   try
-    { Lazy: the server is declared as a skill but NOT connected, so its tools
-      are absent until a load. }
+    { Lazy: the server is DECLARED by the provider but NOT connected, so its
+      tools are absent until load_mcp opens it. }
     AssertFalse('mcp tool absent before load',
       Session.Loop.ResolveTool('mcp_fake_echo', Tool));
-    AssertTrue('declared as a skill',
+    { It is a PROVIDER entry now, not a skill: it must not appear in the skill
+      manifest, and its status lives on the provider. }
+    AssertTrue('the provider declares it', Session.McpProvider <> nil);
+    AssertEquals('one server declared', 1,
+      Length(Session.McpProvider.Names));
+    AssertEquals('the server', 'fake', Session.McpProvider.Names[0]);
+    AssertFalse('not in the skill manifest',
       Pos('mcp_fake', Session.Skills.Manifest) > 0);
-    { Loading the skill connects it and registers its tools. }
-    AssertTrue('load ok', Session.Skills.LoadSkill('mcp_fake', Err));
-    AssertTrue('mcp tool resolvable after load',
+    AssertTrue('reported closed',
+      Pos('state="closed"', Session.McpProvider.StatusText) > 0);
+    { load_mcp opens it and registers its tools. }
+    AssertTrue('load_mcp resolves', Session.McpProvider.Find(LoadMcpToolName, T));
+    AssertTrue('opened', T.Handler('{"name":"fake"}', Res, Err));
+    AssertTrue('mcp tool resolvable after open',
       Session.Loop.ResolveTool('mcp_fake_echo', Tool));
   finally
     Session.Free;
@@ -1374,6 +1385,9 @@ var
   StoreCfg: TStoreConfig;
   StoreErr: TStoreError;
   Row: TMcpServerRow;
+  Names: TStringArray;
+  T: TRegisteredTool;
+  Res: string;
   Script: string;
 const
   Q = #39;
@@ -1412,13 +1426,17 @@ begin
       Store.Free;
     end;
 
-    { The next turn's boundary reconcile picks it up as a skill (declared, not
-      connected); loading it registers the tools. }
+    { The next turn's boundary reconcile picks it up on the PROVIDER (declared,
+      not connected); load_mcp opens it and registers the tools. }
     Session.Loop.PrepareProviders;
-    AssertTrue('picked up as a skill at the boundary',
-      Pos('mcp_late', Session.Skills.Manifest) > 0);
-    AssertTrue('load ok', Session.Skills.LoadSkill('mcp_late', Err));
-    AssertTrue('resolvable after load',
+    Names := Session.McpProvider.Names;
+    AssertEquals('picked up by the provider at the boundary', 1, Length(Names));
+    AssertEquals('the server', 'late', Names[0]);
+    AssertFalse('not a skill', Pos('mcp_late', Session.Skills.Manifest) > 0);
+    AssertTrue('still closed (lazy)', Length(Session.McpProvider.OpenNames) = 0);
+    AssertTrue('load_mcp resolves', Session.McpProvider.Find(LoadMcpToolName, T));
+    AssertTrue('opened', T.Handler('{"name":"late"}', Res, Err));
+    AssertTrue('resolvable after open',
       Session.Loop.ResolveTool('mcp_late_echo', Tool));
   finally
     Session.Free;

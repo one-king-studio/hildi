@@ -31,7 +31,7 @@ uses
   HildiWorkspaceChanges,
   HildiRecallTool, HildiHarnessTurn,
   HildiHarnessView,
-  HildiMCPConfig, HildiMCPClient,
+  HildiMCPConfig, HildiMCPClient, HildiMCPProvider,
   HildiMCPTransport, HildiMCPOAUTHFlow,
   HildiShellCommands, HildiShellTier,
   HildiShellExecutor;
@@ -50,6 +50,11 @@ type
     FFileTool: TFileTool;
     FRecallTool: TRecallTool;
     FMcp: TMcpManager;
+    { MCP servers are a TOOL PROVIDER, not skills: no body, lazy open, released
+      when idle, with their own live status. Sharing the skill record forced one
+      decay policy to serve two incompatible needs. }
+    FMcpProvider: TMcpProvider;
+    FMcpProviderKeep: IToolProvider;
     FMcpTokenProviders: TObjectList;
     { The skill registry: the capability layer (manifest + load_skill + decay).
       Empty by default; Lazy_MCP fills it with one skill per MCP server. Held as
@@ -207,8 +212,12 @@ type
     property Gate: TApprovalGate read FGate;
     { The shared executor the turn worker runs on. }
     property TurnPool: IAsyncScheduler read FTurnPool;
-    { The capability layer: skills load on demand; empty unless Lazy_MCP fills it. }
+    { The capability layer: skills load on demand. MCP is NOT here - it is a
+      separate provider with its own lazy-open / idle-release lifecycle. }
     property Skills: TSkillRegistry read FSkills;
+    { MCP servers as a provider: lazy open, idle release, live status. Nil when
+      the session has no store to read MCP config from. }
+    property McpProvider: TMcpProvider read FMcpProvider;
     { Load a skill BECAUSE THE OPERATOR NAMED IT (the `/skill-name` command).
 
       Typing the name IS the approval, so this records a SESSION-scope rule for
@@ -307,6 +316,11 @@ procedure THarnessSession.Close;
 begin
   FLoop.Free;
   FLoop := nil;
+  { The provider holds a RAW TMcpManager pointer, so it must go BEFORE the
+    manager is freed. Releasing it after would leave its destructor reading freed
+    memory - the access violations I hit on the first attempt. }
+  FMcpProviderKeep := nil;
+  FMcpProvider := nil;
   FMcp.Free;
   FMcp := nil;
   FMcpTokenProviders.Free;
@@ -1192,47 +1206,15 @@ end;
 procedure THarnessSession.ReconcileMcpSkills;
 var
   Cfg: TMcpConfig;
-  I, J: Integer;
-  Key: string;  Present: Boolean;
-  Keys: TStringArray;
 begin
-  if (FSkills = nil) or (FMcp = nil) then
+  { MCP is a PROVIDER now, not a set of skills. The provider owns the whole
+    lifecycle: it declares the configured servers, releases any that were
+    removed, and connects to none of them (lazy is the point). }
+  if (FMcp = nil) or (FMcpProvider = nil) then
     Exit;
   Cfg := McpConfigSource;
-  { Reconcile the manager's runtime set from the config first (lazy: it adds or
-    drops runtimes but does not connect). This is what lets a server added after
-    open be loadable. }
   FMcp.Reconcile(Cfg);
-  { Remove MCP skills whose server is gone or disabled. }
-  Keys := FSkills.Keys;
-  for I := 0 to High(Keys) do
-  begin
-    Key := Keys[I];
-    if Copy(Key, 1, 4) <> 'mcp_' then
-      Continue;
-    Present := False;
-    for J := 0 to High(Cfg.Servers) do
-      if McpSkillKey(Cfg.Servers[J].Name) = Key then
-      begin
-        Present := True;
-        Break;
-      end;
-    if not Present then
-      FSkills.Remove(Key);
-  end;
-  { Declare/replace a skill per configured server (no connect). }
-  RegisterMcpSkills(FSkills, Cfg, FMcp);
-  { A load delivers the body into the conversation instead of the tail. }
-  FSkills.OnLoaded := SkillLoaded;
-  { "Is this skill in context?" is answered by the STORE, not by a flag here: a
-    /checkpoint rebuild archives the body, and the registry must notice. Refreshed
-    once per turn in Prepare, so this costs one query per turn rather than one
-    per tool resolution. }
-  FSkills.KeysQuery := SkillKeysInContext;
-  { The STABLE half - each skill's description and when-to-use - goes to the
-    system prompt, where stable text belongs. Only the activation state stays in
-    the per-request fragment, so the manifest stops costing ~105 tokens on every
-    request and a load only changes a few short lines. }
+  FMcpProvider.Reconcile(Cfg);
   ComposeStablePrompt;
 end;
 
@@ -1514,6 +1496,11 @@ begin
     FMcp := TMcpManager.Create(McpCfg, ApprovalService, McpEvent,
       McpTokenSourceFor);
     FMcp.Lazy := True;
+    { The provider takes a RAW manager pointer, so the manager must outlive it:
+      Close releases the provider first. Registration with the loop happens AFTER
+      the loop exists - adding it here crashed, because FLoop is assigned later. }
+    FMcpProvider := TMcpProvider.Create(FMcp, McpCfg);
+    FMcpProviderKeep := FMcpProvider;
   end;
 
   AgentConfig := Default(TAgentConfig);
@@ -1552,6 +1539,15 @@ begin
     ExcludeTrailingPathDelimiter(GetUserDir), ApprovalService,
     FView.WorkspaceId, FView.SessionId);
   FLoop.AddProvider(FSkillsKeep);
+  { MCP registers with the loop HERE, after it exists; creating the provider
+    earlier is fine but AddProvider is not. }
+  if FMcpProviderKeep <> nil then
+    FLoop.AddProvider(FMcpProviderKeep);
+  { Both hooks belong HERE, not in the MCP reconcile: a session with no MCP
+    configured still needs a loaded skill to reach the context, and still needs
+    its in-context state derived from the store. }
+  FSkills.OnLoaded := SkillLoaded;
+  FSkills.KeysQuery := SkillKeysInContext;
   { The board contributes its TOC through the same seam the skills manifest uses.
     Its tools are registered directly; the provider exists for the tail. }
   if FBoardTools <> nil then
