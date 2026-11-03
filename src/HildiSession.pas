@@ -94,6 +94,12 @@ type
     Seq: Int64;
     Status: TTurnStatus;
     Prompt: string;         // derived: the turn's first user message
+    { The turn's SUMMARY, when its reply carried frontmatter. Stored on the turn
+      rather than re-derived from the assistant message: recall is a column read,
+      and the pair is indexed in turns_fts so it is searchable. Empty when the
+      reply had no frontmatter - a caller falls back to Prompt. }
+    SummaryTitle: string;
+    SummaryKeywords: string;
     FinishReason: string;
     ErrorCode: Integer;
     ErrorMessage: string;

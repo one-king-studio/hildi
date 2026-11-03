@@ -294,6 +294,13 @@ type
       The summary stands in for every message with seq <= ASeq. }
     function SaveCheckpoint(const ASessionId, ASummary: string;
       out ASeq: Int64; out AError: TStoreError): Boolean;
+    { Record a turn's SUMMARY (the frontmatter title and keywords from its
+      reply) on the turn row, and index it. Stored rather than re-derived: recall
+      becomes a column read, and the pair is searchable through turns_fts. Called
+      once the reply is known; a turn with no frontmatter simply has empty
+      columns. }
+    function SetTurnSummary(ATurnId: Int64; const ATitle, AKeywords: string;
+      out AError: TStoreError): Boolean;
     { The most recent checkpoint; seNotFound when none. }
     function LatestCheckpoint(const ASessionId: string;
       out ASnap: TCheckpointRecord; out AError: TStoreError): Boolean;
@@ -392,7 +399,7 @@ end;
 function DefaultMigrations: TMigrationArray;
 begin
   Result := nil;
-  SetLength(Result, 20);
+  SetLength(Result, 21);
   Result[0].Version := 1;
   Result[0].Name := 'session history';
   Result[0].Statements := [
@@ -830,6 +837,27 @@ begin
   Result[19].Name := 'redo floor';
   Result[19].Statements := [
     'ALTER TABLE sessions ADD COLUMN redo_floor INTEGER NOT NULL DEFAULT 0'
+  ];
+  { The turn's SUMMARY, stored ON the turn rather than dug out of its assistant
+    reply. The reply carries the frontmatter title and keywords, but reading them
+    back meant finding that message and re-parsing it on every render - the same
+    information the turn already records metrics for. Storing it makes recall a
+    column read and makes it searchable. }
+  Result[20].Version := 21;
+  Result[20].Name := 'turn summary on the turn';
+  Result[20].Statements := [
+    'ALTER TABLE turns ADD COLUMN summary_title TEXT NOT NULL DEFAULT ''''',
+    'ALTER TABLE turns ADD COLUMN summary_keywords TEXT NOT NULL DEFAULT ''''',
+    { A turn's OWN search index. messages_fts indexes conversation content; a
+      turn's title and keywords are metadata about the turn, and an operator
+      searching for what they did wants the turn, not the message that happened
+      to contain the words. }
+    'CREATE VIRTUAL TABLE turns_fts USING fts5(' +
+      'summary_title, summary_keywords, session_id UNINDEXED, ' +
+      'turn_id UNINDEXED, tokenize=''unicode61'')',
+    'INSERT INTO turns_fts ' +
+      '(summary_title, summary_keywords, session_id, turn_id) ' +
+      'SELECT summary_title, summary_keywords, session_id, id FROM turns'
   ];
 end;
 
@@ -2497,7 +2525,8 @@ begin
       't.cached_tokens, t.reasoning_tokens, t.created_at, t.finished_at, ' +
       't.duration_ms, ' +
       'COALESCE((SELECT m.content FROM messages m WHERE m.turn_id = t.id ' +
-        'AND m.role = 1 ORDER BY m.seq LIMIT 1), '''') ' +
+        'AND m.role = 1 ORDER BY m.seq LIMIT 1), ''''), ' +
+      't.summary_title, t.summary_keywords ' +
       'FROM turns t WHERE t.session_id = ? ORDER BY t.seq');
     try
       if not Stmt.Valid then
@@ -2526,6 +2555,8 @@ begin
         Rec.FinishedAtMs := Stmt.ColInt64(16);
         Rec.DurationMs := Stmt.ColInt64(17);
         Rec.Prompt := Stmt.ColText(18);
+        Rec.SummaryTitle := Stmt.ColText(19);
+        Rec.SummaryKeywords := Stmt.ColText(20);
         SetLength(ATurns, N + 1);
         ATurns[N] := Rec;
         Inc(N);
@@ -2584,6 +2615,8 @@ begin
       ATurn.FinishedAtMs := Stmt.ColInt64(16);
       ATurn.DurationMs := Stmt.ColInt64(17);
       ATurn.Prompt := Stmt.ColText(18);
+      ATurn.SummaryTitle := Stmt.ColText(19);
+      ATurn.SummaryKeywords := Stmt.ColText(20);
     finally
       Stmt.Free;
     end;
@@ -3260,6 +3293,68 @@ begin
         ACount := Stmt.ColInt(0);
     finally
       Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.SetTurnSummary(ATurnId: Int64;
+  const ATitle, AKeywords: string; out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    if ATurnId <= 0 then
+      Exit(Fail(AError, seInvalidArgument, 'turn id is required', ''));
+    { The columns on the turn, then the search index. Both, because a title the
+      operator can see but cannot search is half a feature. }
+    Stmt := TStmt.Create(FDb,
+      'UPDATE turns SET summary_title = ?, summary_keywords = ? WHERE id = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not set the turn summary',
+          DbErrorText));
+      Stmt.BindText(1, ATitle);
+      Stmt.BindText(2, AKeywords);
+      Stmt.BindInt64(3, ATurnId);
+      Stmt.Step;
+    finally
+      Stmt.Free;
+    end;
+    { Replaced rather than appended: SetTurnSummary may run more than once for a
+      turn (a retry, a re-fold), and a stale row would make one turn match twice. }
+    Stmt := TStmt.Create(FDb,
+      'DELETE FROM turns_fts WHERE turn_id = ?');
+    try
+      if Stmt.Valid then
+      begin
+        Stmt.BindText(1, IntToStr(ATurnId));
+        Stmt.Step;
+      end;
+    finally
+      Stmt.Free;
+    end;
+    if (ATitle <> '') or (AKeywords <> '') then
+    begin
+      Stmt := TStmt.Create(FDb,
+        'INSERT INTO turns_fts (summary_title, summary_keywords, session_id, ' +
+        'turn_id) SELECT summary_title, summary_keywords, session_id, ' +
+        'CAST(id AS TEXT) FROM turns WHERE id = ?');
+      try
+        if Stmt.Valid then
+        begin
+          Stmt.BindInt64(1, ATurnId);
+          Stmt.Step;
+        end;
+      finally
+        Stmt.Free;
+      end;
     end;
     Result := True;
   finally
