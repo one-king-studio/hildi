@@ -29,6 +29,7 @@ uses
   TUIWidgetsSessionsModal,
   TUIWidgetsDiffviewer,
   TUIWidgetsHistorymodal,
+  TUIWidgetsSkillmodal,
   TUIWidgetsActions,
   HildiHarnessSubagent, HildiHarnessSubagentSpy,
   TUIWidgetsAgentList, TUIWidgetsList,
@@ -98,6 +99,11 @@ type
     { The shared history dialog (/undo, /redo, /revert): the same list, three
       actions. nil when closed. }
     FHistoryModal: THistoryModal;
+    { The skill detail dialog, opened from the composer's loaded-skills row or
+      the skills panel. nil when closed. Its detail arrives as a teSkillDetail
+      event, because the wire carries only identifiers in the catalogue. }
+    FSkillModal: TSkillModal;
+    FCloseSkillModal: Boolean;
     FHistoryShown: Boolean;
     FHistoryIntent: THistoryIntent;
     FDiffShown: Boolean;
