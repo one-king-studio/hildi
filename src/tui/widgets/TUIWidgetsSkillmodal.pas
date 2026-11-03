@@ -147,7 +147,7 @@ end;
 
 procedure TSkillModal.Render(const S: ISurface);
 var
-  L, R, T, B, Y, I, N: Integer;
+  L, R, T, B, Y, I, N, CtaX: Integer;
   Bg, BorderAttr, TitleAttr, LabelAttr, ValueAttr, BodyAttr: TAttr;
   Lines: TStringArray;
   Line, Title, Cta: string;
@@ -244,15 +244,18 @@ begin
     end;
   end;
 
-  { The CTA row, always on the bottom border's inner row so a long body cannot
-    push it away. }
+  { The action row, always on the bottom border's inner row so a long body cannot
+    push it away, and right-aligned to match the skills panel's hint row. }
   if CanLoad then
-    Cta := ' enter: load   esc: dismiss '
+    Cta := 'enter use  esc cancel'
   else if FDetail.Loaded then
-    Cta := ' loaded   esc: dismiss '
+    Cta := 'loaded  esc cancel'
   else
-    Cta := ' esc: dismiss ';
-  PutText(S, L + 2, B - 1, UnicodeString(Cta), LabelAttr);
+    Cta := 'esc cancel';
+  CtaX := R - 1 - Length(Cta);
+  if CtaX < L + 2 then
+    CtaX := L + 2;
+  PutText(S, CtaX, B - 1, UnicodeString(Cta), LabelAttr);
 end;
 
 function TSkillModal.HandleEvent(const E: TInputEvent): Boolean;

@@ -41,6 +41,10 @@ type
     FVisibleCommands: TCommandArray;
     FSelected: Integer;
     FOnRun: TCommandRunEvent;
+    { A SECOND action on the selected row. The skills panel has two useful verbs
+      - load and review - so the palette offers both rather than making review a
+      separate screen. Unset on the command list, where enter is the only verb. }
+    FOnReview: TCommandRunEvent;
     { The panel's title. The palette serves two lists (commands and skills), and
       a fixed "commands" title told the operator the wrong thing on the skills
       list. }
@@ -48,6 +52,10 @@ type
     procedure MoveSelection(ADelta: Integer);
     procedure RunSelected;
     function RowAt(AY: Integer): Integer;
+    { What the SELECTED row can do, for the hint line. Empty when there is no
+      selection. Changes with the selection: an unloaded skill can be reviewed
+      and used, a loaded one only used. }
+    function SelectedHints: string;
     function PaletteWidth: Integer;
   public
     constructor Create(const ATheme: TTheme);
@@ -67,6 +75,8 @@ type
     function HandleEvent(const E: TInputEvent): Boolean; override;
     property Theme: TTheme read FTheme write FTheme;
     property OnRun: TCommandRunEvent read FOnRun write FOnRun;
+    { ctrl+r on the selected row. Unset means the palette has one verb. }
+    property OnReview: TCommandRunEvent read FOnReview write FOnReview;
   end;
 
 { The commands whose name starts with APrefix (case-insensitive, leading '/'
@@ -160,6 +170,20 @@ begin
     Result := '';
 end;
 
+function TCommandPalette.SelectedHints: string;
+begin
+  Result := '';
+  if (FSelected < 0) or (FSelected > High(FVisibleCommands)) then
+    Exit;
+  { "Review" is only offered where a second action exists. On the command list
+    enter is the only verb, so a hint naming a key that does nothing would be
+    worse than none. }
+  if Assigned(FOnReview) then
+    Result := 'ctrl+r review  enter use'
+  else
+    Result := 'enter use';
+end;
+
 function TCommandPalette.VisibleCount: Integer;
 begin
   Result := Length(FVisibleCommands);
@@ -251,9 +275,9 @@ end;
 
 procedure TCommandPalette.Render(const S: ISurface);
 var
-  L, R, T, X, I, N, RowY, SelBg: Integer;
+  L, R, T, X, I, N, RowY, SelBg, HintY, HX: Integer;
   Bg, Border, NameAttr, DetailAttr, SelNameAttr, SelDetailAttr: TAttr;
-  Name, Detail: string;
+  Name, Detail, Hint: string;
 begin
   if (FBounds.W < 4) or (FBounds.H < 2) then
     Exit;
@@ -261,8 +285,10 @@ begin
   R := FBounds.X + FBounds.W - 1;
   T := FBounds.Y;
   N := Length(FVisibleCommands);
-  if N > FBounds.H - 1 then
-    N := FBounds.H - 1;
+  { Reserve the LAST row for the shortcut hints, so a long list cannot push them
+    off the panel. }
+  if N > FBounds.H - 2 then
+    N := FBounds.H - 2;
 
   { The ambient palette: the raised background and the violet border, so it
     reads as system functionality. }
@@ -310,7 +336,7 @@ begin
           PutText(S, R - 2 - Length(Detail), RowY, UnicodeString(Detail),
             SelDetailAttr);
     end
-    else
+      else
     begin
       PutText(S, L + 2, RowY, UnicodeString(Name), NameAttr);
       { The description, right-aligned, muted, when it fits clear of the name. }
@@ -318,6 +344,25 @@ begin
         if R - 2 - Length(Detail) > L + 2 + Length(Name) + 2 then
           PutText(S, R - 2 - Length(Detail), RowY, UnicodeString(Detail),
             DetailAttr);
+    end;
+  end;
+
+  { The shortcut hints, on the LAST row, right-aligned. They describe what the
+    selected row can do, so they change with the selection: an unloaded skill can
+    be reviewed and used, a loaded one can only be used. A row with nothing to
+    offer says so rather than showing a key that would do nothing. }
+  if FBounds.H >= 2 then
+  begin
+    HintY := FBounds.Y + FBounds.H - 1;
+    PutCh(S, L, HintY, '│', Border);
+    PutCh(S, R, HintY, '│', Border);
+    Hint := SelectedHints;
+    if Hint <> '' then
+    begin
+      HX := R - 1 - Length(Hint);
+      if HX < L + 1 then
+        HX := L + 1;
+      PutText(S, HX, HintY, UnicodeString(Hint), DetailAttr);
     end;
   end;
 end;
@@ -355,6 +400,15 @@ begin
       kkEnter:
         begin
           RunSelected;
+          Exit(True);
+        end;
+      kkChar:
+        { ctrl+r reviews the selected row. A chord, so 'r' stays typable when
+          filtering the list - which is the whole reason to avoid a bare key. }
+        if (E.Key.Ch = 'r') and (moCtrl in E.Key.Mods) and
+          Assigned(FOnReview) and (SelectedName <> '') then
+        begin
+          FOnReview(SelectedName);
           Exit(True);
         end;
     else

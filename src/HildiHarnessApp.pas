@@ -383,6 +383,8 @@ type
       the selection means different things depending on which list is up. Routing
       here rather than at two call sites keeps that decision in one place. }
     procedure PaletteRun(const AName: string);
+    { ctrl+r on a skill row: show the skill's detail before loading it. }
+    procedure PaletteReview(const AName: string);
     function DefaultCommands: TCommandArray;
     { Rebuild the palette's list. The list is CONDITIONAL on the session and the
       ledger, so every point that changes either must call this: the palette is
@@ -1092,8 +1094,9 @@ begin
   { The command palette: registered commands, shown when the compose starts
     with '/'. }
   FPanel.Palette.SetCommands(DefaultCommands);
-  FPanel.Palette.OnRun := PaletteRun;  { The session id and stats live on the messages panel's top border; the status
-    bar keeps the workspace. The toolbar holds the run state and the hints. }
+  FPanel.Palette.OnRun := PaletteRun;
+  { ctrl+r on a skill row reviews it instead of loading it. }
+  FPanel.Palette.OnReview := PaletteReview;
   FStatusText := FSession.WorkspaceRoot;
   FPanel.SetStatus(FStatusText);
   FHintsText := ComposerHints(FRoster.Count > 0);
@@ -1298,6 +1301,20 @@ begin
     end;
   end;
   FApp.Invalidate;
+end;
+
+procedure THarnessApp.PaletteReview(const AName: string);
+begin
+  { ctrl+r on a skill row: show what the skill is before loading it. Only
+    meaningful on the skills list, so on the command list it does nothing. }
+  if FPaletteShowingSkills and (FDriver <> nil) then
+  begin
+    FPanel.SetPaletteActive(False);
+    FPaletteShowingSkills := False;
+    FPanel.Palette.SetTitle('commands');
+    FPanel.Palette.SetCommands(DefaultCommands);
+    FDriver.SkillDetail(AName);
+  end;
 end;
 
 procedure THarnessApp.PaletteRun(const AName: string);
