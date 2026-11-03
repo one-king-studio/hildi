@@ -22,7 +22,7 @@ uses
   TUIBase, TUIInput,
   TUISurface, TUIWidget,
   TUITheme, TUIGrapheme,
-  TUIWidgetsText,
+  TUIWidgetsText, TUIWidgetsMarkdownView, TUIWidgetsScroll,
   MarkdownTree, MarkdownRender;
 
 type
@@ -58,23 +58,20 @@ type
   private
     FTheme: TTheme;
     FDetail: TSkillDetail;
-    FScroll: Integer;
     FOnLoad: TSkillLoadEvent;
-    { The body rendered from markdown at the last width it was laid out for.
-      Recomputed when the width changes, not per frame: ParseTree is not cheap
-      and a dialog repaints on every keystroke elsewhere in the app. }
-    FBodyLines: TStringArray;
-    FBodyWidth: Integer;
-    { The body is the only unbounded part; the metadata rows are fixed. A long
-      SKILL.md must scroll rather than push the CTAs off the screen. }
-    procedure EnsureBodyLines(AWidth: Integer);
-    function BodyRows: Integer;
-    function VisibleBodyRows: Integer;
-    function MaxScroll: Integer;
-    procedure ScrollBy(ADelta: Integer);
+    { The body is STYLED markdown inside a scroll container. TMarkdownView is the
+      same widget the file viewer uses, so this dialog renders markdown properly -
+      headings, emphasis, code, lists - AND scrolls, instead of painting
+      pre-rendered plain lines with a hand-rolled scroll offset. }
+    FMarkdown: TMarkdownView;
+    FBody: TScrollContainer;
+    { Where the body starts, so Render knows what the container covers. }
+    FBodyTop: Integer;
     function CanLoad: Boolean;
   public
     constructor Create(const ATheme: TTheme);
+    destructor Destroy; override;
+    procedure Arrange(const ABounds: TRect); override;
     procedure SetDetail(const ADetail: TSkillDetail);
     { Echoed back when the operator activates the load CTA. }
     function DetailKey: string;
@@ -90,15 +87,25 @@ constructor TSkillModal.Create(const ATheme: TTheme);
 begin
   inherited Create;
   FTheme := ATheme;
-  FScroll := 0;
+  FMarkdown := TMarkdownView.Create;
+  FBody := TScrollContainer.Create(FMarkdown, smAuto, smNever);
+end;
+
+destructor TSkillModal.Destroy;
+begin
+  { FBody owns FMarkdown. }
+  FBody.Free;
+  inherited Destroy;
 end;
 
 procedure TSkillModal.SetDetail(const ADetail: TSkillDetail);
 begin
   FDetail := ADetail;
-  { A new skill opens at the top; carrying the previous scroll would land the
+  { A new skill opens at the TOP: carrying the previous scroll would land the
     operator mid-way through a document they have not read. }
-  FScroll := 0;
+  FMarkdown.SetSource(FDetail.Body);
+  FMarkdown.FinishSource;
+  FBody.ScrollTo(0, 0);
 end;
 
 function TSkillModal.DetailKey: string;
@@ -106,62 +113,44 @@ begin
   Result := FDetail.Key;
 end;
 
-function TSkillModal.BodyRows: Integer;
-begin
-  { The RENDERED line count, not the raw body's. Markdown rendering WRAPS, so a
-    long paragraph becomes several lines; counting the source split instead made
-    MaxScroll too small and the operator could not reach the end of the body. }
-  EnsureBodyLines(FBodyWidth);
-  Result := Length(FBodyLines);
-end;
-
-function TSkillModal.VisibleBodyRows: Integer;
-begin
-  Result := FBounds.H - SkillModalChromeRows;
-  if Result < 1 then
-    Result := 1;
-end;
-
-function TSkillModal.MaxScroll: Integer;
-begin
-  Result := BodyRows - VisibleBodyRows;
-  if Result < 0 then
-    Result := 0;
-end;
-
-procedure TSkillModal.ScrollBy(ADelta: Integer);
-begin
-  Inc(FScroll, ADelta);
-  if FScroll < 0 then
-    FScroll := 0;
-  if FScroll > MaxScroll then
-    FScroll := MaxScroll;
-end;
-
-procedure TSkillModal.EnsureBodyLines(AWidth: Integer);
+procedure TSkillModal.Arrange(const ABounds: TRect);
 var
-  Doc: TMdDocument;
-  Rendered: TMdLineArray;
-  I: Integer;
+  InnerW, Y, I, MetaH, BodyH: Integer;
+  R: TRect;
 begin
-  { RenderTree parses the markdown AND wraps to AWidth, so this is both the
-    markdown rendering and the word-wrapping in one pass. Frontmatter is not
-    rendered: it is metadata, and the dialog shows the parsed fields above. }
-  if (AWidth = FBodyWidth) and (Length(FBodyLines) > 0) then
-    Exit;
-  FBodyWidth := AWidth;
-  FBodyLines := nil;
-  if FDetail.Body = '' then
-    Exit;
-  Doc := ParseTree(FDetail.Body);
-  try
-    Rendered := RenderTree(Doc, AWidth);
-  finally
-    Doc.Free;
-  end;
-  SetLength(FBodyLines, Length(Rendered));
-  for I := 0 to High(Rendered) do
-    FBodyLines[I] := Rendered[I];
+  inherited Arrange(ABounds);
+  InnerW := ABounds.W - 4;
+  if InnerW < 1 then
+    InnerW := 1;
+
+  { The metadata lines are drawn as plain text in Render, one row each, so the
+    body starts below them. Counted here because Render needs to know where the
+    container sits. }
+  { Counted from the FIELDS, matching what Render draws: two rows per optional
+    pair (caption + value), and the Files list takes one row plus one per entry. }
+  MetaH := 0;
+  if FDetail.Description <> '' then
+    Inc(MetaH, 2);
+  if FDetail.License <> '' then
+    Inc(MetaH, 2);
+  if FDetail.Compatibility <> '' then
+    Inc(MetaH, 2);
+  if FDetail.AllowedTools <> '' then
+    Inc(MetaH, 2);
+  if Length(FDetail.Resources) > 0 then
+    Inc(MetaH, 1 + Length(FDetail.Resources));
+  Y := ABounds.Y + 1 + MetaH;
+  FBodyTop := Y;
+
+  BodyH := ABounds.Y + ABounds.H - SkillModalChromeRows - Y;
+  if BodyH < 1 then
+    BodyH := 1;
+  R := Default(TRect);
+  R.X := ABounds.X + 2;
+  R.Y := Y;
+  R.W := InnerW;
+  R.H := BodyH;
+  FBody.Arrange(R);
 end;
 
 function TSkillModal.CanLoad: Boolean;
@@ -269,22 +258,11 @@ begin
     end;
   end;
 
-  { The body: MARKDOWN, word-wrapped by RenderTree at the dialog's inner width,
-    then scrolled. A raw line split would have shown the markdown source - the
-    asterisks and hashes - rather than the document. }
-  BodyTop := Y + 1;
-  if BodyTop < B - 1 then
-  begin
-    EnsureBodyLines(R - L - 4);
-    N := 0;
-    I := FScroll;
-    while (I <= High(FBodyLines)) and (BodyTop + N < B - 1) do
-    begin
-      PutText(S, L + 2, BodyTop + N, UnicodeString(FBodyLines[I]), BodyAttr);
-      Inc(I);
-      Inc(N);
-    end;
-  end;
+  { The body is the STYLED markdown view inside its scroll container, arranged
+    in Arrange and drawn here. It renders headings, emphasis, code and lists
+    properly and handles its own scrolling, so there is no line-splitting or
+    offset arithmetic left in this unit. }
+  FBody.Render(S);
 
   { The action row, always on the bottom border's inner row so a long body cannot
     push it away. Right-aligned to match the panel's hint row, and TWO-TONE
@@ -321,12 +299,10 @@ begin
         Visible := False;
         Result := True;
       end;
-    kkUp: begin ScrollBy(-1); Result := True; end;
-    kkDown: begin ScrollBy(1); Result := True; end;
-    kkPageUp: begin ScrollBy(-VisibleBodyRows); Result := True; end;
-    kkPageDown: begin ScrollBy(VisibleBodyRows); Result := True; end;
-    kkHome: begin FScroll := 0; Result := True; end;
-    kkEnd: begin FScroll := MaxScroll; Result := True; end;
+    { Scrolling belongs to the container: it owns the clamp, the scrollbar and
+      the wheel. Anything it does not consume is not ours. }
+    kkUp, kkDown, kkPageUp, kkPageDown, kkHome, kkEnd:
+      Result := FBody.HandleEvent(E);
     kkEnter:
       if CanLoad then
       begin
