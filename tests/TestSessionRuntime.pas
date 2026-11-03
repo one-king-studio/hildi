@@ -128,6 +128,10 @@ type
       LoadSkillByName -> the body reaching the conversation. Every interactive bug
       so far came from a path unit tests did not exercise. }
     procedure TestLoadSkillOverTheWireLoadsIt;
+    { scSkillDetail answers the asking client with ONE skill's detail. The
+      fetch-on-demand seam exists so a multi-KB body crosses the wire only when a
+      dialog opens, and nothing had driven it. }
+    procedure TestSkillDetailOverTheWire;
     procedure TestTurnStreamsToObserver;
     procedure TestAttachMidTurnReplaysLiveTurn;
     procedure TestApprovalCrossesTheWire;
@@ -791,6 +795,91 @@ begin
           in context. That is the same fact the palette renders. }
         AssertTrue('catalogue reports it loaded',
           WaitLoaded(Sink, 'wire', 5000));
+      finally
+        Driver.Free;
+        Sink := nil;
+      end;
+    finally
+      Rt.Stop;
+      WaitFinished(Th, 3000);
+      Th.Free;
+    end;
+  finally
+    Fake.Free;
+    DeleteSocket(Id);
+  end;
+end;
+
+procedure TSessionRuntimeTest.TestSkillDetailOverTheWire;
+var
+  Id: string;
+  Fake: TFakeTransport;
+  Rt: TSessionRuntime;
+  Th: TRuntimeThread;
+  Sink: TRecordingSink;
+  Driver: TSessionClient;
+  Err: string;
+  Cmd: TSessionCommand;
+  Reply: TSessionMessage;
+  SkillDir, Text: string;
+  Fs: TFileStream;
+  I: Integer;
+  D: TSessionEvent;
+  Found: Boolean;
+begin
+  { The fetch-on-demand seam, driven end to end: a client asks for ONE skill and
+    the runtime answers that client only. Nothing had exercised scSkillDetail. }
+  SkillDir := IncludeTrailingPathDelimiter(FWs) + '.agents' + PathDelim +
+    'skills' + PathDelim + 'detailed';
+  ForceDirectories(SkillDir);
+  Text := '---'#10'name: detailed'#10'description: has metadata'#10 +
+    'license: Apache-2.0'#10'---'#10'Body of the detailed skill.';
+  Fs := TFileStream.Create(IncludeTrailingPathDelimiter(SkillDir) + 'SKILL.md',
+    fmCreate);
+  try
+    Fs.WriteBuffer(Text[1], Length(Text));
+  finally
+    Fs.Free;
+  end;
+
+  Id := NewSession;
+  Fake := TFakeTransport.Create;
+  try
+    Rt := MakeRuntime(Id, Fake, 0);
+    Th := TRuntimeThread.Create(Rt);
+    try
+      Th.Start;
+      AssertTrue('bound', WaitForSocket(Id, 5000));
+      Sink := TRecordingSink.Create;
+      Driver := TSessionClient.Open(MakeClientConfig(Id, srDrive), Sink, Err);
+      AssertNotNull('driver attaches: ' + Err, Driver);
+      try
+        Cmd := Default(TSessionCommand);
+        Cmd.Kind := scSkillDetail;
+        Cmd.Id := 'd1';
+        Cmd.SkillKey := 'detailed';
+        AssertTrue('detail replied', Driver.SendAndWait(Cmd, 5000, Reply));
+        AssertTrue('the runtime answered: ' + Reply.ErrorMessage, Reply.Ok);
+
+        AssertTrue('a detail event arrived',
+          WaitCount(Sink, ekSkillDetail, 1, 20000));
+        Found := False;
+        for I := 0 to Sink.Count - 1 do
+          if Sink.EventAt(I).Kind = ekSkillDetail then
+          begin
+            D := Sink.EventAt(I);
+            Found := True;
+            { The fields the dialog shows, asserted from what crossed the wire
+              rather than from the runtime's internals. }
+            AssertEquals('key', 'detailed', D.SkillDetailKey);
+            AssertEquals('name', 'detailed', D.SkillName);
+            AssertEquals('description', 'has metadata', D.SkillDescription);
+            AssertEquals('license', 'Apache-2.0', D.SkillLicense);
+            AssertTrue('body carried: ' + D.SkillBody,
+              Pos('Body of the detailed skill.', D.SkillBody) > 0);
+            AssertFalse('not loaded yet', D.SkillIsLoaded);
+          end;
+        AssertTrue('the detail event was found', Found);
       finally
         Driver.Free;
         Sink := nil;
