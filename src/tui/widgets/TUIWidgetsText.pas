@@ -105,6 +105,15 @@ type
 function HintSpans(const AText: UnicodeString; const AKeyAttr,
   AActionAttr: TAttr): TSpanArray;
 
+{ Paint spans left-to-right at (X, Y), returning the width drawn. The shared
+  renderer for two-tone hint text: the palette's hint row and the skill dialog's
+  action row both need it, and a second copy of this walk would drift. }
+function PaintSpans(const S: ISurface; AX, AY: Integer;
+  const ASpans: TSpanArray): Integer;
+
+{ The display width of a span array, so a caller can right-align before painting. }
+function SpansWidth(const ASpans: TSpanArray): Integer;
+
 implementation
 
 { Split "key action · key action" into two-tone spans. See the interface comment
@@ -168,6 +177,35 @@ begin
     if Rest <> '' then
       Add(Sep, AKeyAttr);
   end;
+end;
+
+function PaintSpans(const S: ISurface; AX, AY: Integer;
+  const ASpans: TSpanArray): Integer;
+var
+  I, X: Integer;
+begin
+  { Paint left to right, advancing by DISPLAY WIDTH rather than string length: a
+    wide glyph occupies two columns, so a length step would overlap the next
+    span. This is the shared renderer for the palette hint row and the skill
+    dialog's action row. }
+  X := AX;
+  for I := 0 to High(ASpans) do
+  begin
+    if ASpans[I].Text = '' then
+      Continue;
+    PutText(S, X, AY, ASpans[I].Text, ASpans[I].Attr);
+    X := X + StringWidth(ASpans[I].Text);
+  end;
+  Result := X - AX;
+end;
+
+function SpansWidth(const ASpans: TSpanArray): Integer;
+var
+  I: Integer;
+begin
+  Result := 0;
+  for I := 0 to High(ASpans) do
+    Result := Result + StringWidth(ASpans[I].Text);
 end;
 
 function LineWidth(const ALine: TStyledClusters): Integer;

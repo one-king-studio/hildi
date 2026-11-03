@@ -23,7 +23,7 @@ interface
 uses
   Classes, SysUtils, TUIBase, TUIInput,
   TUISurface, TUIWidget,
-  TUITheme, HildiFuzzy;
+  TUITheme, HildiFuzzy, TUIWidgetsText;
 
 type
   TCommand = record
@@ -368,6 +368,7 @@ var
   L, R, T, X, I, N, RowY, SelBg, HintY, HX: Integer;
   Bg, Border, NameAttr, DetailAttr, SelNameAttr, SelDetailAttr: TAttr;
   Name, Detail, Hint: string;
+  Spans: TSpanArray;
 begin
   if (FBounds.W < 4) or (FBounds.H < 2) then
     Exit;
@@ -453,10 +454,14 @@ begin
     Hint := SelectedHints;
     if Hint <> '' then
     begin
-      HX := R - 1 - Length(Hint);
+      { Two-tone through the shared splitter: the keybinding dim, the action
+        lighter. The same walk the chat toolbar uses, so the house style cannot
+        drift between surfaces. }
+      Spans := HintSpans(UnicodeString(Hint), FTheme.Muted, FTheme.Text);
+      HX := R - 1 - SpansWidth(Spans);
       if HX < L + 1 then
         HX := L + 1;
-      PutText(S, HX, HintY, UnicodeString(Hint), DetailAttr);
+      PaintSpans(S, HX, HintY, Spans);
     end;
   end;
 end;
