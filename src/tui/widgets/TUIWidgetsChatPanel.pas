@@ -117,6 +117,10 @@ type
     FOnOpenRecent: TRecentOpenEvent;
     FStatus: TTextBlock;
     FStats: TTextBlock;
+    { The loaded-skills line, one row above the toolbar. Empty when nothing is
+      loaded, so the composer gains no empty row. }
+    FLoadedSkills: TTextBlock;
+    FLoadedSkillsText: string;
     FStatusText: string;
     FStatsText: string;
     FHeaderLeft: string;
@@ -188,6 +192,10 @@ type
     procedure SetState(AKind: TPanelState; const ALabel: string);
     { The right of the toolbar: the interaction hints. }
     procedure SetHints(const AText: string);
+    { The loaded-skills line above the toolbar: "+name +name +2 more", or '' to
+      hide the row entirely. The host formats it (FormatLoadedSkillsLine) so the
+      truncation rule stays testable without a terminal. }
+    procedure SetLoadedSkills(const AText: string);
     { Disable input while a turn runs, keeping whatever was typed. }
     procedure SetComposeActive(AValue: Boolean);
     { The compose's primary-action CTA (send / cancel / none). }
@@ -326,6 +334,7 @@ begin
   FStatus := TTextBlock.Create([], wmNone);
   FStats := TTextBlock.Create([], wmNone);
   FStats.Align := taRight;
+  FLoadedSkills := TTextBlock.Create([], wmNone);
 
   FStateKind := psReady;
   FStateLabel := 'ready';
@@ -445,6 +454,12 @@ begin
     MEASURED width, so clamping the label afterwards changes the text but leaves
     the hints column still squeezed to whatever the wide label left. }
   FitToolbar;
+  { The loaded-skills row sits directly above the toolbar; empty text collapses
+    it to height 0 so it draws nothing rather than a permanent blank line. }
+  if FLoadedSkillsText = '' then
+    FLoadedSkills.Arrange(Rc(ChromeX, ComposeY - 2, ChromeW, 0))
+  else
+    FLoadedSkills.Arrange(Rc(ChromeX, ComposeY - 2, ChromeW, 1));
   FCta.Arrange(Rc(ChromeX, ComposeY - 1, ChromeW, 1));
   FitStatus;
 end;
@@ -682,6 +697,7 @@ begin
     end;
   end;
   FCta.Render(S);
+  FLoadedSkills.Render(S);
   { Only the active bottom panel is drawn: the actions bar would otherwise paint
     an empty frame over the compose box (the panel renders its children
     directly, without the Visible check a TContainer would apply). }
@@ -823,6 +839,14 @@ begin
   FStatsText := AText;
   FStats.SetText(AText, FTheme.Muted);
   FitStatus;
+end;
+
+procedure TChatPanel.SetLoadedSkills(const AText: string);
+begin
+  { Empty hides the row: an empty line above the composer would be a permanent
+    blank gap in every session that loads nothing. }
+  FLoadedSkillsText := AText;
+  FLoadedSkills.SetText(AText, FTheme.Muted);
 end;
 
 procedure TChatPanel.SetHeader(const ALeft, ARight: string);
