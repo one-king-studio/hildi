@@ -58,7 +58,10 @@ type
     { The session's skill catalogue changed: a load, an unload, or a rescan.
       SkillKeys is the new full list (they are few), so the client needs no delta
       protocol. Appended last so stored ordinals are unchanged. }
-    ekSkills);
+    ekSkills,
+    { One skill's full detail, answering scSkillDetail. Appended last so stored
+      ordinals are unchanged. }
+    ekSkillDetail);
 
   { One streamed event. A flat record with optional fields, the same shape as
     TTurnEvent: only the fields named by Kind are meaningful. }
@@ -104,6 +107,19 @@ type
     { The subset of SkillKeys whose bodies are IN CONTEXT. A subset rather than
       a parallel flags array, so it cannot drift out of order with SkillKeys. }
     SkillLoadedKeys: TStringArray;
+    { ekSkillDetail: one skill, for the detail dialog. Sent only in answer to
+      scSkillDetail, so the catalogue event stays a list of identifiers and a
+      multi-KB body crosses the wire only when someone opens a dialog. }
+    SkillDetailKey: string;
+    SkillName: string;
+    SkillDescription: string;
+    SkillLicense: string;
+    SkillCompatibility: string;
+    SkillAllowedTools: string;
+    SkillLocation: string;
+    SkillResources: TStringArray;
+    SkillBody: string;
+    SkillIsLoaded: Boolean;
   end;
 
   TSessionCommandKind = (
@@ -128,7 +144,7 @@ type
       raises the approval ask on the runtime side, and the outcome comes back as
       an ekSkills event (or an error). Appended last so stored ordinals are
       unchanged. }
-    scLoadSkill, scSkills);
+    scLoadSkill, scSkills, scSkillDetail);
 
   { One client command. Id is echoed in the reply. }
   TSessionCommand = record
@@ -299,7 +315,7 @@ const
     'drive_requested', 'drive_granted', 'drive_released',
     'turn_finished', 'error', 'gap', 'loop_exited', 'reasoning_done',
     'tool_output', 'ambient', 'subagent', 'subagent_ask',
-    'checkpoint_committed', 'changes', 'undone', 'skills');
+    'checkpoint_committed', 'changes', 'undone', 'skills', 'skill_detail');
 
   MessageKindNames: array[TSessionMessageKind] of string = (
     'hello', 'attached', 'event', 'reply', 'detached', 'error',
@@ -311,7 +327,7 @@ const
     'attach', 'detach', 'prompt', 'approve', 'interrupt',
     'claim_drive', 'release_drive', 'ping', 'shutdown',
     'abort_subagent', 'release_subagent', 'checkpoint', 'undo', 'redo',
-    'load_skill', 'skills');
+    'load_skill', 'skills', 'skill_detail');
 
 { --- enum <-> wire ------------------------------------------------------ }
 
@@ -727,6 +743,19 @@ begin
           payload, which decodes to "none loaded" and degrades honestly. }
         PutStr(O, 'skill_loaded', JoinStr(E.SkillLoadedKeys));
       end;
+    ekSkillDetail:
+      begin
+        PutStr(O, 'skill_key', E.SkillDetailKey);
+        PutStr(O, 'skill_name', E.SkillName);
+        PutStr(O, 'skill_description', E.SkillDescription);
+        PutStr(O, 'skill_license', E.SkillLicense);
+        PutStr(O, 'skill_compatibility', E.SkillCompatibility);
+        PutStr(O, 'skill_allowed_tools', E.SkillAllowedTools);
+        PutStr(O, 'skill_location', E.SkillLocation);
+        PutStr(O, 'skill_resources', JoinStr(E.SkillResources));
+        PutStr(O, 'skill_body', E.SkillBody);
+        O.Add('skill_loaded_now', E.SkillIsLoaded);
+      end;
   end;
 end;
 
@@ -857,6 +886,19 @@ begin
         E.SkillKeys := SplitStr(OptStr(O, 'skill_keys'));
         E.SkillLoadedKeys := SplitStr(OptStr(O, 'skill_loaded'));
       end;
+    ekSkillDetail:
+      begin
+        E.SkillDetailKey := OptStr(O, 'skill_key');
+        E.SkillName := OptStr(O, 'skill_name');
+        E.SkillDescription := OptStr(O, 'skill_description');
+        E.SkillLicense := OptStr(O, 'skill_license');
+        E.SkillCompatibility := OptStr(O, 'skill_compatibility');
+        E.SkillAllowedTools := OptStr(O, 'skill_allowed_tools');
+        E.SkillLocation := OptStr(O, 'skill_location');
+        E.SkillResources := SplitStr(OptStr(O, 'skill_resources'));
+        E.SkillBody := OptStr(O, 'skill_body');
+        E.SkillIsLoaded := OptBool(O, 'skill_loaded_now', False);
+      end;
   end;
   Result := True;
 end;
@@ -876,7 +918,7 @@ begin
       end;
     scAbortSubagent, scReleaseSubagent:
       PutStr(O, 'session', C.SessionId);
-    scLoadSkill:
+    scLoadSkill, scSkillDetail:
       PutStr(O, 'skill_key', C.SkillKey);
     scAttach, scDetach, scInterrupt, scClaimDrive, scReleaseDrive, scPing,
     scUndo, scRedo:
@@ -916,7 +958,7 @@ begin
       C.SessionId := OptStr(O, 'session');
     scUndo, scRedo:
       C.TurnId := OptInt64(O, 'turn_id', 0);
-    scLoadSkill:
+    scLoadSkill, scSkillDetail:
       C.SkillKey := OptStr(O, 'skill_key');
     scAttach, scDetach, scInterrupt, scClaimDrive, scReleaseDrive, scPing,
     scShutdown, scCheckpoint, scSkills:

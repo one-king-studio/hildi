@@ -27,6 +27,7 @@ uses
   HildiSessionProtocol, HildiSessionSocket,
   HildiSessionClient,
   HildiHarnessSession, HildiHarnessView,
+  HildiSkills,
   HildiHarnessTurn,
   HildiHarnessTurnWorker,
   HildiReplyMeta,
@@ -188,6 +189,11 @@ type
     procedure HandleLoadSkill(AClient: TClientConn;
       const ACommand: TSessionCommand);
     procedure HandleListSkills(AClient: TClientConn;
+      const ACommand: TSessionCommand);
+    { Answer scSkillDetail: one skill's full detail, sent only to the asking
+      client. Fetch-on-demand rather than in the catalogue, so a multi-KB body
+      crosses the wire only when a dialog actually opens. }
+    procedure HandleSkillDetail(AClient: TClientConn;
       const ACommand: TSessionCommand);
     { Push the current catalogue to every client, after a change. }
     procedure BroadcastSkills;
@@ -1167,6 +1173,8 @@ begin
       HandleLoadSkill(AClient, ACommand);
     scSkills:
       HandleListSkills(AClient, ACommand);
+    scSkillDetail:
+      HandleSkillDetail(AClient, ACommand);
   end;
 end;
 
@@ -1374,6 +1382,47 @@ procedure TSessionRuntime.HandleListSkills(AClient: TClientConn;
 begin
   ReplyTo(AClient, ACommand.Id, True, '');
   BroadcastSkills;
+end;
+
+procedure TSessionRuntime.HandleSkillDetail(AClient: TClientConn;
+  const ACommand: TSessionCommand);
+var
+  E: TSessionEvent;
+  S: TSkill;
+  M: TSessionMessage;
+begin
+  { Answer to the ASKING client only, and not through Broadcast: this is a
+    request/response, not a state change every client needs. Putting it in the
+    replay buffer would replay the body to every later attach. }
+  if (FSession.Skills = nil) or (ACommand.SkillKey = '') then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'no such skill: ' + ACommand.SkillKey);
+    Exit;
+  end;
+  S := FSession.Skills.SkillOf(ACommand.SkillKey);
+  if S.Key = '' then
+  begin
+    ReplyTo(AClient, ACommand.Id, False,
+      'no such skill: ' + ACommand.SkillKey);
+    Exit;
+  end;
+  ReplyTo(AClient, ACommand.Id, True, '');
+  E := Default(TSessionEvent);
+  E := EmitEvent(ekSkillDetail);
+  E.SkillDetailKey := S.Key;
+  E.SkillName := S.Name;
+  E.SkillDescription := S.Description;
+  E.SkillLicense := S.License;
+  E.SkillCompatibility := S.Compatibility;
+  E.SkillAllowedTools := S.AllowedTools;
+  E.SkillLocation := S.Location;
+  E.SkillResources := S.Resources;
+  E.SkillBody := S.Instructions;
+  E.SkillIsLoaded := FSession.Skills.StateOf(S.Key) = ssLoaded;
+  M := Default(TSessionMessage);
+  M.Kind := mkEvent;
+  M.Event := E;
+  QueueLine(AClient, TSessionCodec.Encode(M));
 end;
 
 procedure TSessionRuntime.BroadcastSkills;

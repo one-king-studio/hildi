@@ -177,6 +177,21 @@ begin
         SetLength(AEvent.SkillLoadedKeys, 1);
         AEvent.SkillLoadedKeys[0] := 'beta';
       end;
+    ekSkillDetail:
+      begin
+        AEvent.SkillDetailKey := 'alpha';
+        AEvent.SkillName := 'alpha';
+        AEvent.SkillDescription := 'does a thing';
+        AEvent.SkillLicense := 'Apache-2.0';
+        AEvent.SkillCompatibility := 'needs git';
+        AEvent.SkillAllowedTools := 'Bash(ls)';
+        AEvent.SkillLocation := '/tmp/alpha';
+        SetLength(AEvent.SkillResources, 2);
+        AEvent.SkillResources[0] := 'scripts/run.sh';
+        AEvent.SkillResources[1] := 'references/doc.md';
+        AEvent.SkillBody := 'step one' + #10 + 'step two';
+        AEvent.SkillIsLoaded := True;
+      end;
     ekCheckpointCommitted:
       AEvent.TurnSeq := 42;
     ekChanges:
