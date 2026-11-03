@@ -3196,7 +3196,13 @@ begin
     R := Default(THistoryRow);
     R.TurnId := Turns[I].Id;
     R.Seq := Turns[I].Seq;
-    R.Title := Turns[I].Prompt;
+    { The turn's SUMMARY title when it has one, the prompt as backup. The title
+      says what the turn was ABOUT; a list of prompts reads as twenty
+      near-identical openers. Both are stored on the turn, so this is two column
+      reads rather than a re-parse. }
+    R.Title := Turns[I].SummaryTitle;
+    if R.Title = '' then
+      R.Title := Turns[I].Prompt;
     if R.Title = '' then
       R.Title := '(no prompt recorded)';
     R.Undone := (Turns[I].Status = tsUndone);
