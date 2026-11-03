@@ -48,6 +48,8 @@ type
     { The composer line: a pure function of the loaded names, so the truncation
       rule is testable without a terminal. }
     procedure TestLoadedSkillsLineTruncates;
+    { The click hit-test: which skill a column of that line resolves to. }
+    procedure TestLoadedSkillsHitKey;
     procedure TestFindResolvesLoadSkill;
     procedure TestLoadActivatesAndReportsTools;
     procedure TestLoadUnknownKeyErrors;
@@ -300,6 +302,45 @@ begin
   { A cap of 1 is honoured, and the overflow counts the rest. }
   AssertEquals('cap of one', '+alpha +4 more',
     FormatLoadedSkillsLine(Names, 1));
+end;
+
+procedure TSkillsTest.TestLoadedSkillsHitKey;
+var
+  Names: TStringArray;
+begin
+  { The row is a TTextBlock with no per-span regions, so the clickable columns
+    are computed from the same layout the formatter emits. "+alpha +beta" is
+       0..5   alpha   ('+alpha')
+       6      the separator
+       7..11  beta    ('+beta')
+    An off-by-one here would make the last character of a name dead, or make the
+    separator open the wrong dialog. }
+  SetLength(Names, 2);
+  Names[0] := 'alpha';
+  Names[1] := 'beta';
+
+  AssertEquals('start of the first', 'alpha', LoadedSkillsHitKey(Names, 0));
+  AssertEquals('last char of the first', 'alpha',
+    LoadedSkillsHitKey(Names, 5));
+  AssertEquals('the separator is a miss', '', LoadedSkillsHitKey(Names, 6));
+  AssertEquals('start of the second', 'beta', LoadedSkillsHitKey(Names, 7));
+  AssertEquals('last char of the second', 'beta',
+    LoadedSkillsHitKey(Names, 11));
+  AssertEquals('past the end is a miss', '', LoadedSkillsHitKey(Names, 12));
+  AssertEquals('before the start is a miss', '', LoadedSkillsHitKey(Names, -1));
+
+  { An overflow token is a MISS: "+2 more" opens the panel, which is the caller's
+    decision, not a skill. }
+  SetLength(Names, 5);
+  Names[0] := 'alpha';
+  Names[1] := 'beta';
+  Names[2] := 'gamma';
+  Names[3] := 'delta';
+  Names[4] := 'epsilon';
+  AssertEquals('a shown name still hits', 'gamma',
+    LoadedSkillsHitKey(Names, 14));
+  AssertEquals('the overflow is not a skill', '',
+    LoadedSkillsHitKey(Names, 20));
 end;
 
 procedure TSkillsTest.TestLoadActivatesAndReportsTools;

@@ -205,7 +205,45 @@ const
 function FormatLoadedSkillsLine(const ANames: TStringArray;
   AMax: Integer = 3): string;
 
+{ Which skill, if any, a click at AColumn of the loaded-skills line hits. Returns
+  the skill KEY, or '' for a miss or for the "+N more" overflow - the caller
+  decides what "+N more" means, since that is a panel rather than a skill.
+
+  A pure function of the names and the column, so the hit region is testable
+  without a terminal: the row is a TTextBlock with no per-span regions, so the
+  columns have to be computed rather than queried. }
+function LoadedSkillsHitKey(const ANames: TStringArray; AColumn: Integer;
+  AMax: Integer = 3): string;
+
 implementation
+
+function LoadedSkillsHitKey(const ANames: TStringArray; AColumn: Integer;
+  AMax: Integer): string;
+var
+  I, Shown, X, Width: Integer;
+begin
+  Result := '';
+  if (AColumn < 0) or (Length(ANames) = 0) then
+    Exit;
+  if AMax < 1 then
+    AMax := 1;
+  Shown := Length(ANames);
+  if Shown > AMax then
+    Shown := AMax;
+  { Walk the SAME layout FormatLoadedSkillsLine emits: each entry is "+name",
+    separated by one space. The columns are computed, not queried, because the
+    row is a TTextBlock with no per-span regions. }
+  X := 0;
+  for I := 0 to Shown - 1 do
+  begin
+    Width := Length(ANames[I]) + 1;   { '+' + the name }
+    if (AColumn >= X) and (AColumn < X + Width) then
+      Exit(ANames[I]);
+    X := X + Width + 1;               { the separating space }
+  end;
+  { Past the entries lies "+N more", which is a MISS here: opening the panel is
+    the caller's decision, not a skill. }
+end;
 
 function FormatLoadedSkillsLine(const ANames: TStringArray;
   AMax: Integer): string;
