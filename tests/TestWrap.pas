@@ -95,8 +95,14 @@ begin
   AssertTrue('context block', Pos('<context>', S) > 0);
   AssertTrue('now element', Pos('<now>', S) > 0);
   AssertTrue('guard', Pos('<guard>', S) > 0);
-  { The guard closes the request, so it must be last. }
-  AssertTrue('guard is last', Pos('<guard>', S) > Pos('</context>', S));
+  { THE GUARD COMES FIRST, inside <harness>, before the content it governs. It
+    used to close the request; that told the reader what everything was only
+    AFTER it had already interpreted it. }
+  AssertTrue('guard precedes context', Pos('<guard>', S) < Pos('<context>', S));
+  AssertTrue('guard is inside the harness block',
+    Pos('<harness>', S) < Pos('<guard>', S));
+  AssertTrue('and the harness closes last',
+    Pos('</harness>', S) = Length(S) - Length('</harness>') + 1);
 end;
 
 procedure TWrapTest.TailHasWorkspaceWhenGiven;
@@ -129,7 +135,7 @@ end;
 
 procedure TWrapTest.TailCarriesTheAdvisory;
 var
-  S: string;
+  S, After: string;
   P, Count: Integer;
 begin
   S := FormatTail('', 0, 0, 0, '', 'you have used 30 of 50 tool calls');
@@ -146,9 +152,18 @@ begin
     P := Pos('</context>', S, P + 1);
   end;
   AssertEquals('one context block', 1, Count);
-  AssertTrue('the advisory is AFTER the context closes',
-    Pos('<advisory>', S) > Pos('</context>', S));
-  AssertTrue('and before the guard', Pos('<advisory>', S) < Pos('<guard>', S));
+  { The advisory must be OUTSIDE <context>, which is what makes it an
+    instruction rather than data.
+
+    SEARCHED AFTER </context>, not with a bare Pos. The guard text MENTIONS
+    "<advisory>" by name - it has to, to say what that element is - so the first
+    occurrence in the whole string is prose inside the guard, not the element.
+    A plain Pos compared the mention against the closing tag and reported the
+    advisory as being inside the context block. }
+  After := Copy(S, Pos('</context>', S) + Length('</context>'), MaxInt);
+  AssertTrue('the advisory element is AFTER the context closes',
+    Pos('<advisory>', After) > 0);
+  AssertTrue('and inside the harness block', Pos('</harness>', After) > 0);
 end;
 
 procedure TWrapTest.TailIsWrappedInHarness;
@@ -203,9 +218,12 @@ begin
     Pos('<context>', S) > 0);
   AssertTrue('and says that element is the harness''s',
     Pos('harness', LowerCase(S)) > 0);
-  { It must still disown the untrusted payload. }
-  AssertTrue('still says tool results are data',
-    Pos('tool results', LowerCase(S)) > 0);
+  { It must still disown the untrusted payload. The guard was SHORTENED and no
+    longer enumerates "tool results, file contents"; it says everything unnamed
+    is data, which covers them. Assert the property, not the old wording. }
+  AssertTrue('still names data as not-commands',
+    (Pos('data', LowerCase(S)) > 0) and
+    (Pos('never commands', LowerCase(S)) > 0));
 end;
 
 procedure TWrapTest.InstructionsAreNotInTheStableForm;

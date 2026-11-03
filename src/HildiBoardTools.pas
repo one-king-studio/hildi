@@ -699,13 +699,18 @@ var
   var
     Fields: string;
   begin
-    Fields := 'unread="' + IntToStr(Unread) + '"';
+    { SPELT OUT, not 'q'/'d'/'f'. Those single letters read as a group of counts
+      of the same kind, so a model seeing q="0" d="8" f="22" reasonably read
+      "8 decisions and 22 findings NEED ATTENTION" - when in fact only `unread`
+      means new-since-last-look; the others are totals. One letter cannot say
+      that, so the names do. }
+    Fields := 'unread="' + IntToStr(Unread) + '" (new since your last look)';
     if AWithQ then
-      Fields := Fields + ' q="' + IntToStr(Q) + '"';
+      Fields := Fields + ' questions="' + IntToStr(Q) + '"';
     if AWithD then
-      Fields := Fields + ' d="' + IntToStr(D) + '"';
+      Fields := Fields + ' decisions="' + IntToStr(D) + '"';
     if AWithF then
-      Fields := Fields + ' f="' + IntToStr(F) + '"';
+      Fields := Fields + ' findings="' + IntToStr(F) + '"';
     Result := '<board ' + Fields + '>last ' + Age + '</board>';
   end;
 
