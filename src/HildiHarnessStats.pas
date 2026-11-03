@@ -155,9 +155,20 @@ end;
 
 function FormatSessionStats(const ATurn: TTurnRecord): string;
 begin
-  Result := '';
-  if ATurn.Id = 0 then
-    Exit;
+  { ZEROS, NOT A BLANK LINE, for a session with no requests yet.
+
+    Returning '' left the status bar's right side empty before the first request,
+    which reads as a broken render rather than as "nothing consumed". The operator
+    asked for zeros, and they are also the honest reading: the session HAS
+    consumed 0 in and 0 out. An empty region states nothing; `0 in · 0 out` states
+    the fact.
+
+    `Id = 0` still means no requests (the store sets it only when RequestCount > 0),
+    so it now only suppresses the CACHED segment via the PromptTokens guard below.
+
+    Deliberately NOT applied to FormatTurnStats: that describes a specific turn,
+    and with no turn there is nothing to describe - a row of zeros under a divider
+    would be noise. }
   Result := FormatTokens(ATurn.Usage.PromptTokens) + ' in · ' +
     FormatTokens(ATurn.Usage.CompletionTokens) + ' out';
   if ATurn.Usage.PromptTokens > 0 then

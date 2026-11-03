@@ -119,9 +119,21 @@ begin
 end;
 
 procedure THarnessStatsTest.TestFormatSessionStatsEmpty;
+var
+  S: string;
 begin
-  AssertEquals('no requests, no line', '',
-    FormatSessionStats(Default(TTurnRecord)));
+  { ZEROS, not a blank line. An empty right-hand region in the status bar reads
+    as a broken render; `0 in · 0 out` is the honest statement that nothing has
+    been consumed yet. The operator asked for this explicitly. }
+  S := FormatSessionStats(Default(TTurnRecord));
+  AssertTrue('a session with no requests still shows a line: ' + S, S <> '');
+  AssertTrue('and it says 0 in', Pos('0 in', S) > 0);
+  AssertTrue('and 0 out', Pos('0 out', S) > 0);
+  { The cached percentage is meaningless at zero and must not appear: 0/0 is not
+    0%, it is undefined. }
+  AssertFalse('no cached percentage with no tokens', Pos('cached', S) > 0);
+  { The rest of the line is still real: no duration and no requests yet. }
+  AssertTrue('still reports the request count', Pos('0 req', S) > 0);
 end;
 
 procedure THarnessStatsTest.TestFormatDurationMs;
