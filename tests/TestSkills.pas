@@ -9,7 +9,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  HildiLLM, HildiAgent, HildiSkills;
+  HildiLLM, HildiAgent, HildiSkills, HildiHarnessTurn;
 
 type
   { A fake tool source: records Activate/Deactivate, offers one tool, and can be

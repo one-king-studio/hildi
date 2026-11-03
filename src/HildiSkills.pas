@@ -215,9 +215,6 @@ function RenderSkillContent(const ASkill: TSkill): string;
   asked for roughly three, so a workspace with twenty loaded skills does not eat
   the composer. The overflow counts EVERY remaining skill, not the overflow
   beyond the cap - "+2 more" over three shown means five loaded. }
-function FormatLoadedSkillsLine(const ANames: TStringArray;
-  AMax: Integer = 3): string;
-
 const
   { The default idle TTL for a skill that does not set one. }
   DefaultSkillTtlMs = 600000;   // 10 minutes
@@ -472,29 +469,6 @@ begin
     Result := Result + '</skill_resources>' + LineEnding;
   end;
   Result := Result + '</skill_content>';
-end;
-
-function FormatLoadedSkillsLine(const ANames: TStringArray;
-  AMax: Integer): string;
-var
-  I, Shown: Integer;
-begin
-  Result := '';
-  if Length(ANames) = 0 then
-    Exit;
-  if AMax < 1 then
-    AMax := 1;
-  Shown := Length(ANames);
-  if Shown > AMax then
-    Shown := AMax;
-  for I := 0 to Shown - 1 do
-  begin
-    if Result <> '' then
-      Result := Result + ' ';
-    Result := Result + '+' + ANames[I];
-  end;
-  if Length(ANames) > AMax then
-    Result := Result + ' +' + IntToStr(Length(ANames) - AMax) + ' more';
 end;
 
 function TSkillRegistry.StableText: string;

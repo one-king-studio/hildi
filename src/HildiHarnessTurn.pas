@@ -175,7 +175,44 @@ const
     tool cannot grow the queue without limit. }
   TurnQueueCapacity = 4096;
 
+{ The composer's loaded-skills line: "+name +name +2 more", or '' when nothing is
+  loaded so the composer gains no empty row.
+
+  Lives HERE rather than in HildiSkills because the app cannot import that unit:
+  HildiSkills uses HildiAgent, and the Process Split forbids HildiHarnessApp from
+  reaching the agent. TSplitBoundaryTest caught exactly that when this was first
+  put in HildiSkills. This unit is pure - HildiLLM and HildiApproval only.
+
+  AMax is how many names show before the overflow collapses; the operator asked
+  for roughly three. The overflow counts the REMAINDER, so five names at cap
+  three reads "+2 more". }
+function FormatLoadedSkillsLine(const ANames: TStringArray;
+  AMax: Integer = 3): string;
+
 implementation
+
+function FormatLoadedSkillsLine(const ANames: TStringArray;
+  AMax: Integer): string;
+var
+  I, Shown: Integer;
+begin
+  Result := '';
+  if Length(ANames) = 0 then
+    Exit;
+  if AMax < 1 then
+    AMax := 1;
+  Shown := Length(ANames);
+  if Shown > AMax then
+    Shown := AMax;
+  for I := 0 to Shown - 1 do
+  begin
+    if Result <> '' then
+      Result := Result + ' ';
+    Result := Result + '+' + ANames[I];
+  end;
+  if Length(ANames) > AMax then
+    Result := Result + ' +' + IntToStr(Length(ANames) - AMax) + ' more';
+end;
 
 { TTurnQueue }
 

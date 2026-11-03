@@ -2275,6 +2275,11 @@ begin
         AppendError(ErrorText(E.Text, E.Detail));
         FinishTurn(psError, 'Error');
       end;
+    teSkills:
+      { The catalogue changed: refresh the composer's loaded-skills row. The
+        event carries the loaded SUBSET, so the row is a pure function of it and
+        needs no second request. }
+      FPanel.SetLoadedSkills(FormatLoadedSkillsLine(E.SkillLoadedKeys));
   else
     ;
   end;
