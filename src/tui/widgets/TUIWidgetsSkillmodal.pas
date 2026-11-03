@@ -46,6 +46,9 @@ type
 
 const
   SkillModalChromeRows = 5;   // top border, title, hint row, bottom border, pad
+  { The dialog takes at most this share of the screen height, so it never fills
+    the frame and the transcript stays visible behind it. }
+  SkillModalMaxHeightPercent = 80;
   SkillModalMinWidth = 30;
 
 type
@@ -140,8 +143,13 @@ begin
   Result.W := AAvail.W - 6;
   if Result.W < SkillModalMinWidth then
     Result.W := AAvail.W;
-  Result.H := AAvail.H - 4;
+  { At most 80% of the height, so the dialog never fills the frame: the
+    transcript showing behind it is what says "modal". The body scrolls inside
+    whatever is left. }
+  Result.H := (AAvail.H * SkillModalMaxHeightPercent) div 100;
   if Result.H < SkillModalChromeRows + 3 then
+    Result.H := AAvail.H;
+  if Result.H > AAvail.H then
     Result.H := AAvail.H;
 end;
 
