@@ -560,7 +560,7 @@ const
     can only open an empty list is noise, and the operator asked for it to be
     absent rather than inert. }
   CtaHintsBase = 'shift+enter newline';
-  CtaHintsSubagents = ' · ctrl+d subagents';
+  CtaHintsSubagents = '   ctrl+d subagents';
   { How long the first Escape stays armed before the interrupt prompt expires. }
   InterruptWindowMs = 2000;
   { The first frame loads at most this many messages of the active window (the
@@ -3956,7 +3956,7 @@ begin
     mode - that is the point of not switching to a separate actions bar. Once a
     child is selected "enter spy" is wrong: it is already spying. }
   if FSpyId <> '' then
-    FAgentList.SetHints('ctrl+a abort · ctrl+r release · ctrl+p promote')
+    FAgentList.SetHints('ctrl+a abort   ctrl+r release   ctrl+p promote')
   else if FRoster.Count > 0 then
     FAgentList.SetHints('enter spy')
   else

@@ -412,9 +412,9 @@ begin
   { Two-tone via the modal's footer splitter. The separator is the dot, NOT two
     spaces: HintSpans joins on it, and two spaces renders the whole line flat. }
   if CanLoad then
-    SetFooter('enter use · esc cancel')
+    SetFooter('enter use   esc cancel')
   else if FContent.FDetail.Loaded then
-    SetFooter('loaded · esc cancel')
+    SetFooter('loaded   esc cancel')
   else
     SetFooter('esc cancel');
 end;
