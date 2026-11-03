@@ -131,6 +131,18 @@ begin
   S := FormatTail('', 0, 100, 1000, '', '');
   AssertTrue('usage when known', Pos('<usage used="100" limit="1000">10%</usage>',
     S) > 0);
+  { ZERO TOKENS MEANS UNKNOWN, and is omitted rather than reported.
+
+    The count comes from the last COMPLETED response, and the tail is built
+    before the request goes out - so a session's first request has no previous
+    measurement. Rendering that as `used="0" ... 0%` states "the context is
+    empty" as fact, which is not merely wrong but indistinguishable from a real
+    reading of zero. The operator caught this in a live session. }
+  S := FormatTail('', 0, 0, 1000, '', '');
+  AssertTrue('zero tokens is unknown, so no usage element',
+    Pos('<usage', S) = 0);
+  { The limit alone is not a measurement. }
+  AssertFalse('and no 0% is reported', Pos('0%', S) > 0);
 end;
 
 procedure TWrapTest.TailCarriesTheAdvisory;

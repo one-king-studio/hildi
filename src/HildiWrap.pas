@@ -199,7 +199,17 @@ begin
   if AWorkspace <> '' then
     Body := Body + '  <workspace>' + EscapeXmlContent(AWorkspace) +
       '</workspace>' + LineEnding;
-  if ALimitTokens > 0 then
+  { OMITTED WHEN UNKNOWN, not reported as zero.
+
+    AUsageTokens is the prompt-token count from the LAST COMPLETED response
+    (`FLastPromptTokens` in agent), and the tail is built BEFORE the request goes
+    out. So on a session's first request there is no previous measurement and the
+    value is still 0 - which rendered as `used="0" ... 0%`, a sentinel presented
+    as a measurement a reader has no way to tell from "the context is empty".
+
+    A real request always consumes prompt tokens, so a literal 0 can only mean
+    unknown. Say nothing instead: the same rule <workspace> already follows. }
+  if (ALimitTokens > 0) and (AUsageTokens > 0) then
     Body := Body + Format('  <usage used="%d" limit="%d">%d%%</usage>',
       [AUsageTokens, ALimitTokens,
        (AUsageTokens * 100) div ALimitTokens]) + LineEnding;
