@@ -1,18 +1,20 @@
 unit TUIWidgetsModal;
-{ A reusable scrollable modal: a framed dialog whose CONTENT scrolls as one,
-  with a fixed footer row that the content cannot push away.
+{ The modal every dialog here shares.
 
-  Every dialog in this toolkit had grown its own copy of the frame drawing, its
-  own body area and its own idea of what "at most 80% of the screen" means. The
-  skill dialog needed the whole content - fields AND markdown - to scroll
-  together under ONE scrollbar, and doing that per-dialog would have been a
-  fourth copy.
+  TModal owns what all four dialogs had been re-implementing: the border, the
+  title, the 80% height cap, and a footer drawn ON the bottom border - the house
+  idiom, since THistoryModal paints its CTA over the border rather than on a row
+  above it.
 
-  So: a subclass supplies a single content widget and a footer string. This unit
-  owns the frame, the height cap, the scroll container and the footer row.
+  SCROLLING IS A PARAMETER, not a subclass. Pass a content widget and the modal
+  wraps it in one scroll container, so a dialog whose content overflows scrolls
+  as a whole under a single scrollbar while the footer stays in the frame. Pass
+  no content, and a subclass arranges its own rows inside the frame - which is
+  what the history, sessions and approval dialogs do.
 
-  A subclass does not draw its frame, arrange its content, or handle scrolling -
-  it builds content and reports a footer. That is the whole contract. }
+  A subclass supplies a title, a footer string and optionally one content
+  widget. It never draws a frame, arranges the scroll region, or handles
+  scrolling. }
 
 {$mode delphi}{$H+}{$codepage utf8}
 
@@ -27,144 +29,166 @@ uses
 
 const
   { A dialog takes at most this share of the screen, so the transcript stays
-    visible behind it and the operator knows it is an overlay. }
+    visible behind it and it reads as an overlay. }
   ModalMaxHeightPercent = 80;
-  { Top border, the footer row, the bottom border. }
-  ModalChromeRows = 3;
+  { Top border and bottom border. The footer rides the bottom border, so it costs
+    no extra row. }
+  ModalChromeRows = 2;
   ModalMinWidth = 24;
-  { The footer text is inset from the frame by this much on the right. }
+  { The footer is inset from the right corner by this much. }
   ModalFooterPad = 1;
-  { Content is inset from the frame by this much on each side. }
-  ModalContentPad = 1;
 
 type
-  TScrollModal = class(TWidget)
+  { The modal every dialog here shares. It owns the border, the title, the 80%
+    height cap, and a footer drawn ON the bottom border - the house idiom, since
+    THistoryModal paints its CTA over the border rather than on a row above it.
+
+    SCROLLING IS A PARAMETER, not a subclass: pass AScrollable and the content is
+    wrapped in one scroll container, so a dialog whose content overflows scrolls
+    as a whole under one scrollbar while the footer stays in the frame. Pass
+    False, or no content at all, and the subclass arranges its own rows inside
+    the frame - which is what the history, sessions and approval dialogs do.
+
+    A subclass supplies a title, a footer string and optionally one content
+    widget. It never draws a frame or handles scrolling. }
+  TModal = class(TWidget)
   private
     FTheme: TTheme;
     FTitle: string;
-    { The one scrollable region. It owns the content widget. }
-    FScroll: TScrollContainer;
-    FContent: TWidget;
     FFooter: TSpanArray;
-    function FrameBg: TAttr;
-    function BorderAttr: TAttr;
-    function TitleAttr: TAttr;
-    function FooterKeyAttr: TAttr;
-    function FooterActionAttr: TAttr;
+    FContent: TWidget;
+    FScroll: TScrollContainer;
+    FScrollable: Boolean;
   protected
-    { The theme, for a subclass that draws inside the content area. }
+    function FrameBg: TAttr; virtual;
+    function BorderAttr: TAttr; virtual;
+    function TitleAttr: TAttr; virtual;
+    function FooterKeyAttr: TAttr; virtual;
+    function FooterActionAttr: TAttr; virtual;
+    { The theme, for a subclass drawing inside the frame. }
     property Theme: TTheme read FTheme;
-    { Called after Arrange, with the width the content was given, so a subclass
-      can rebuild content that depends on width. Empty by default. }
+    { The inner area: inside the border, above the bottom border row. }
+    function InnerRect: TRect;
+    { Draw the frame and the title. Call FIRST in a subclass's Render. }
+    procedure PaintFrame(const S: ISurface);
+    function FooterX: Integer;
+    { Called once the content width is known, so a subclass can re-wrap. }
     procedure ContentWidthChanged(AWidth: Integer); virtual;
+    procedure ArrangeContent(const AInner: TRect); virtual;
   public
-    { AContent is owned by the modal: it is handed to the scroll container, which
-      frees it. }
-    constructor Create(const ATheme: TTheme; AContent: TWidget);
+    { AContent is OWNED by the modal when given. AScrollable wraps it in one
+      scroll container; without it the content is arranged directly. }
+    constructor Create(const ATheme: TTheme; AContent: TWidget = nil;
+      AScrollable: Boolean = True);
     destructor Destroy; override;
-
-    { What the top border says. }
     procedure SetTitle(const AText: string);
-    { The footer CTA: two-tone, split on ' · ' by the shared HintSpans walker. }
+    { The footer CTA: two-tone, split on ' middle-dot ' by the shared HintSpans
+      walker. Empty means no footer and a plain bottom border. }
     procedure SetFooter(const AText: string);
-    { Re-read the footer from a subclass, after its state changed. }
-    procedure RefreshFooter;
-
     function Measure(const AAvail: TSize): TSize; override;
     procedure Arrange(const ABounds: TRect); override;
     procedure Render(const S: ISurface); override;
     function HandleEvent(const E: TInputEvent): Boolean; override;
-
-    { The scrollable region, for a subclass that needs to reset the offset. }
     procedure ScrollToTop;
   end;
 
 implementation
 
-constructor TScrollModal.Create(const ATheme: TTheme; AContent: TWidget);
+constructor TModal.Create(const ATheme: TTheme; AContent: TWidget;
+  AScrollable: Boolean);
 begin
   inherited Create;
   FTheme := ATheme;
+  FTitle := '';
+  FFooter := nil;
   FContent := AContent;
-  if FContent <> nil then
+  FScrollable := AScrollable;
+  if (FContent <> nil) and FScrollable then
     FScroll := TScrollContainer.Create(FContent, smAuto, smNever)
   else
     FScroll := nil;
-  FTitle := '';
-  FFooter := nil;
 end;
 
-destructor TScrollModal.Destroy;
+destructor TModal.Destroy;
 begin
-  { FScroll owns FContent. }
-  FScroll.Free;
+  { The container owns the content; without one, the modal does. }
+  if FScroll <> nil then
+    FScroll.Free
+  else
+    FContent.Free;
   inherited Destroy;
 end;
 
-function TScrollModal.FrameBg: TAttr;
+function TModal.FrameBg: TAttr;
 begin
   Result := OnBg(FTheme.Text, FTheme.RaisedBg);
 end;
 
-function TScrollModal.BorderAttr: TAttr;
+function TModal.BorderAttr: TAttr;
 begin
   Result := OnBg(FTheme.Border, FTheme.RaisedBg);
 end;
 
-function TScrollModal.TitleAttr: TAttr;
+function TModal.TitleAttr: TAttr;
 begin
-  Result := OnBg(FTheme.Accent, FTheme.RaisedBg);
+  { TITLE, not Accent: every dialog here titles with Title. Accent is the
+    focus/selection colour and made a heading read as an active control. }
+  Result := OnBg(FTheme.Title, FTheme.RaisedBg);
 end;
 
-function TScrollModal.FooterKeyAttr: TAttr;
+function TModal.FooterKeyAttr: TAttr;
 begin
-  { The keybinding is chrome, so it sits a tone back; it carries the modal's own
-    background because PaintSpans only sets the foreground. }
+  { The keybinding is chrome, so it sits a tone back. It carries the frame's own
+    background because PaintSpans sets only the foreground. }
   Result := OnBg(FTheme.Muted, FTheme.RaisedBg);
 end;
 
-function TScrollModal.FooterActionAttr: TAttr;
+function TModal.FooterActionAttr: TAttr;
 begin
   Result := OnBg(FTheme.Text, FTheme.RaisedBg);
 end;
 
-procedure TScrollModal.ContentWidthChanged(AWidth: Integer);
-begin
-  { Nothing by default. A subclass that wraps content to width overrides this;
-    Arrange calls it once the real width is known. }
-  if AWidth < 0 then
-    ;
-end;
-
-procedure TScrollModal.SetTitle(const AText: string);
+procedure TModal.SetTitle(const AText: string);
 begin
   FTitle := AText;
 end;
 
-procedure TScrollModal.SetFooter(const AText: string);
+procedure TModal.SetFooter(const AText: string);
 begin
   FFooter := HintSpans(UnicodeString(AText), FooterKeyAttr, FooterActionAttr);
 end;
 
-procedure TScrollModal.RefreshFooter;
+procedure TModal.ContentWidthChanged(AWidth: Integer);
 begin
-  { Nothing to rebuild unless a subclass set text it wants re-split. Kept as a
-    hook so a subclass can call it after changing its own state. }
+  { Nothing by default: a subclass whose content re-wraps overrides this. }
+  if AWidth < 0 then
+    ;
 end;
 
-procedure TScrollModal.ScrollToTop;
+procedure TModal.ScrollToTop;
 begin
   if FScroll <> nil then
     FScroll.ScrollTo(0, 0);
 end;
 
-function TScrollModal.Measure(const AAvail: TSize): TSize;
+function TModal.InnerRect: TRect;
+begin
+  Result := Default(TRect);
+  if (FBounds.W < 2) or (FBounds.H < 3) then
+    Exit;
+  Result.X := FBounds.X + 1;
+  Result.Y := FBounds.Y + 1;
+  Result.W := FBounds.W - 2;
+  Result.H := FBounds.H - 2;
+end;
+
+function TModal.Measure(const AAvail: TSize): TSize;
 begin
   Result := Default(TSize);
   Result.W := AAvail.W - 6;
   if Result.W < ModalMinWidth then
     Result.W := AAvail.W;
-  { Capped, so the transcript shows behind it. The content scrolls inside. }
+  { Capped, so the transcript shows behind it. }
   Result.H := (AAvail.H * ModalMaxHeightPercent) div 100;
   if Result.H < ModalChromeRows + 3 then
     Result.H := AAvail.H;
@@ -172,59 +196,45 @@ begin
     Result.H := AAvail.H;
 end;
 
-procedure TScrollModal.Arrange(const ABounds: TRect);
+function TModal.FooterX: Integer;
 var
-  InnerW, ContentH, ContentY: Integer;
-  R: TRect;
+  Right: Integer;
 begin
-  inherited Arrange(ABounds);
-  if FScroll = nil then
-    Exit;
-  InnerW := ABounds.W - 2 * ModalContentPad - 1;
-  if InnerW < 1 then
-    InnerW := 1;
-  ContentY := ABounds.Y + 1;                    { below the top border }
-  { The footer row is the inner row above the bottom border, and the content
-    stops above it so the CTAs are never scrolled away. }
-  ContentH := (ABounds.Y + ABounds.H - 1) - 1 - ContentY;
-  if ContentH < 1 then
-    ContentH := 1;
-  R := Default(TRect);
-  R.X := ABounds.X + ModalContentPad + 1;
-  R.Y := ContentY;
-  R.W := InnerW;
-  R.H := ContentH;
-  FScroll.Arrange(R);
-  ContentWidthChanged(InnerW);
+  Right := FBounds.X + FBounds.W - 1 - ModalFooterPad;
+  Result := Right - SpansWidth(FFooter);
+  if Result < FBounds.X + 2 then
+    Result := FBounds.X + 2;
 end;
 
-procedure TScrollModal.Render(const S: ISurface);
+procedure TModal.PaintFrame(const S: ISurface);
 var
-  L, R, T, B, I, FX: Integer;
+  L, R, T, B, I: Integer;
+  Attr: TAttr;
   Title: string;
 begin
-  if (FBounds.W < 8) or (FBounds.H < ModalChromeRows) then
+  if (FBounds.W < 6) or (FBounds.H < ModalChromeRows) then
     Exit;
   L := FBounds.X;
   R := FBounds.X + FBounds.W - 1;
   T := FBounds.Y;
   B := FBounds.Y + FBounds.H - 1;
+  Attr := BorderAttr;
 
   S.FillRect(FBounds, FrameBg);
 
-  PutCh(S, L, T, '╭', BorderAttr);
-  PutCh(S, R, T, '╮', BorderAttr);
-  PutCh(S, L, B, '╰', BorderAttr);
-  PutCh(S, R, B, '╯', BorderAttr);
+  PutCh(S, L, T, '╭', Attr);
+  PutCh(S, R, T, '╮', Attr);
+  PutCh(S, L, B, '╰', Attr);
+  PutCh(S, R, B, '╯', Attr);
   for I := L + 1 to R - 1 do
   begin
-    PutCh(S, I, T, '─', BorderAttr);
-    PutCh(S, I, B, '─', BorderAttr);
+    PutCh(S, I, T, '─', Attr);
+    PutCh(S, I, B, '─', Attr);
   end;
   for I := T + 1 to B - 1 do
   begin
-    PutCh(S, L, I, '│', BorderAttr);
-    PutCh(S, R, I, '│', BorderAttr);
+    PutCh(S, L, I, '│', Attr);
+    PutCh(S, R, I, '│', Attr);
   end;
 
   if FTitle <> '' then
@@ -232,25 +242,48 @@ begin
     Title := ' ' + FTitle + ' ';
     PutText(S, L + 2, T, UnicodeString(Title), TitleAttr);
   end;
-
-  { The whole content, under one scrollbar. }
-  if FScroll <> nil then
-    FScroll.Render(S);
-
-  { The footer, right-aligned on its own row, always visible. }
-  if Length(FFooter) > 0 then
-  begin
-    FX := R - ModalFooterPad - SpansWidth(FFooter);
-    if FX < L + 2 then
-      FX := L + 2;
-    PaintSpans(S, FX, B - 1, FFooter);
-  end;
 end;
 
-function TScrollModal.HandleEvent(const E: TInputEvent): Boolean;
+procedure TModal.ArrangeContent(const AInner: TRect);
+begin
+  if FScroll <> nil then
+    FScroll.Arrange(AInner)
+  else if FContent <> nil then
+    FContent.Arrange(AInner);
+end;
+
+procedure TModal.Arrange(const ABounds: TRect);
+var
+  Inner: TRect;
+begin
+  inherited Arrange(ABounds);
+  Inner := InnerRect;
+  if (Inner.W < 1) or (Inner.H < 1) then
+    Exit;
+  { The content runs the full inner height: the footer lives on the border row,
+    so it costs no inner space and content can never push the CTAs away. }
+  ArrangeContent(Inner);
+  ContentWidthChanged(Inner.W);
+end;
+
+procedure TModal.Render(const S: ISurface);
+begin
+  PaintFrame(S);
+  if FScroll <> nil then
+    FScroll.Render(S)
+  else if FContent <> nil then
+    FContent.Render(S);
+  { The footer sits ON the bottom border row, not above it: that is this
+    toolkit's idiom, and a footer on an inner row leaves a full border line under
+    the CTAs so the dialog reads as a different kind. }
+  if (Length(FFooter) > 0) and (FBounds.H >= ModalChromeRows) then
+    PaintSpans(S, FooterX, FBounds.Y + FBounds.H - 1, FFooter);
+end;
+
+function TModal.HandleEvent(const E: TInputEvent): Boolean;
 begin
   { Scrolling belongs to the container: it owns the clamp, the scrollbar and the
-    wheel. A subclass handles its own keys FIRST and falls back to this. }
+    wheel. A subclass handles its own keys first and falls back to this. }
   Result := False;
   if FScroll <> nil then
     Result := FScroll.HandleEvent(E);
