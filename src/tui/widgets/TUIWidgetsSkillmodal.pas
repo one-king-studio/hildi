@@ -51,9 +51,13 @@ type
   TSkillLoadEvent = procedure(const AKey: string) of object;
 
 const
-  { One column of inline padding inside a value's sunken pane, so text never
-    touches the darker background's edge. }
+  { Inline padding INSIDE a value's pane, so the text never touches the edge of
+    the darker background. Applied on both sides. }
   SkillValuePad = 1;
+  { The pane's own gap from the right edge of the content area, so the tinted
+    block does not run into the scrollbar column. Separate from SkillValuePad
+    because these are two different gaps: text-to-pane, and pane-to-margin. }
+  SkillPaneRightGap = 1;
 
 type
   { The CONTENT of the skill dialog: the field block and the markdown body,
@@ -177,7 +181,11 @@ var
     FKinds[High(FKinds)] := 0;
     Doc := ParseTree(AValue);
     try
-      Rendered := RenderTree(Doc, AWidth - 2 * SkillValuePad);
+      { Wrapped to leave a column of padding inside the pane on EACH side, and
+        the pane's own right gap. Wrapping to AWidth - 2*Pad was the bug: the
+        text then ended exactly on the pane's right edge, so the tinted block ran
+        straight into the first glyph with no breathing room. }
+      Rendered := RenderTree(Doc, AWidth - 2 * SkillValuePad - SkillPaneRightGap);
     finally
       Doc.Free;
     end;
@@ -280,7 +288,10 @@ begin
   R := Default(TRect);
   R.X := ABounds.X;
   R.Y := BodyY;
-  R.W := ABounds.W;
+  { The body is wrapped short of the scrollbar column too, so markdown text and
+    code fences keep the same right gap the value panes get. The pane fill already
+    stops there; without this the CONTENT still ran to the edge. }
+  R.W := ABounds.W - SkillPaneRightGap;
   R.H := BodyH;
   FMarkdown.Arrange(R);
 end;
@@ -321,7 +332,7 @@ begin
             coloured text rather than a field. }
           { The pane ends one column short, so text and background both keep
             clear of the scrollbar column on the right. }
-          S.FillRect(Rc(X, Y, W - SkillValuePad, 1), PaneAttr);
+          S.FillRect(Rc(X, Y, W - SkillPaneRightGap, 1), PaneAttr);
           Line := UnicodeString(FLines[I]);
           PutText(S, X + SkillValuePad, Y, Line, ValueAttr);
         end;
@@ -335,7 +346,7 @@ begin
     as the prompt FIELD. Markdown blocks draw with sfScreenBg, so they inherit
     this fill; fenced code keeps its own CodeBackdrop one step darker again. }
   if FBodyH > 0 then
-    S.FillRect(Rc(FBounds.X, FBodyTop, FBounds.W - SkillValuePad, FBodyH),
+    S.FillRect(Rc(FBounds.X, FBodyTop, FBounds.W - SkillPaneRightGap, FBodyH),
       PaneAttr);
   FMarkdown.Render(S);
 end;

@@ -40,6 +40,9 @@ const
   ModalMinWidth = 24;
   { The footer is inset from the right corner by this much. }
   ModalFooterPad = 1;
+  { Spaces between CTA pairs. TApprovalModal uses three; there is no dot, which
+    is the house style the operator asked to match. }
+  FooterGap = 3;
   { Inline padding between the left border and the content. }
   ModalContentPad = 1;
 
@@ -60,10 +63,21 @@ type
   private
     FTheme: TTheme;
     FTitle: string;
-    FFooter: TSpanArray;
+    { The footer as explicit KEY/ACTION pairs, the shape TApprovalModal uses:
+      a dim key, its action in normal text, then plain spaces before the next
+      pair. No dot separator - the approval dialog is the house style and it uses
+      spacing, not punctuation, to separate the groups. }
+    FFooterKeys: TStringArray;
+    FFooterActions: TStringArray;
     FContent: TWidget;
     FScroll: TScrollContainer;
     FScrollable: Boolean;
+    { The footer's clickable segments: one per 'key action' group, with the
+      screen X each was drawn at. Built during Render, because the position is
+      only known once the frame is laid out. }
+    { Where each pair was drawn, filled during Render. }
+    FSegX: array of Integer;
+    FSegW: array of Integer;
   protected
     function FrameBg: TAttr; virtual;
     function BorderAttr: TAttr; virtual;
@@ -76,6 +90,7 @@ type
     function InnerRect: TRect;
     { Draw the frame and the title. Call FIRST in a subclass's Render. }
     procedure PaintFrame(const S: ISurface);
+    function FooterWidth: Integer;
     function FooterX: Integer;
     { Called once the content width is known, so a subclass can re-wrap. }
     procedure ContentWidthChanged(AWidth: Integer); virtual;
@@ -84,6 +99,9 @@ type
       paints its own rows overrides this. Render calls it BETWEEN the frame and
       the footer, so nothing a subclass draws can land on the CTAs. }
     procedure RenderContent(const S: ISurface); virtual;
+    { A footer segment was clicked. AKey is the segment's KEY, so a subclass maps
+      'enter' and 'esc' to its own actions and ignores the rest. }
+    procedure FooterClicked(const AKey: string); virtual;
   public
     { AContent is OWNED by the modal when given. AScrollable wraps it in one
       scroll container; without it the content is arranged directly. }
@@ -109,7 +127,8 @@ begin
   inherited Create;
   FTheme := ATheme;
   FTitle := '';
-  FFooter := nil;
+  FFooterKeys := nil;
+  FFooterActions := nil;
   FContent := AContent;
   FScrollable := AScrollable;
   if (FContent <> nil) and FScrollable then
@@ -165,8 +184,42 @@ begin
 end;
 
 procedure TModal.SetFooter(const AText: string);
+var
+  Segs: TStringArray;
+  I, P: Integer;
+  Seg: string;
 begin
-  FFooter := HintSpans(UnicodeString(AText), FooterKeyAttr, FooterActionAttr);
+  { Input is the readable 'enter use \u00b7 esc cancel' form - the DOT is in the
+    caller's string, not in the rendering. Each segment splits at its first space
+    into a key and an action, matching how TApprovalModal lays out 'enter' plus
+    ' accept'. }
+  FFooterKeys := nil;
+  FFooterActions := nil;
+  if AText = '' then
+    Exit;
+  Segs := AText.Split([' ' + string(UTF8Encode(UnicodeString(WideChar($00B7)))) + ' ']);
+  for I := 0 to High(Segs) do
+  begin
+    Seg := Trim(Segs[I]);
+    if Seg = '' then
+      Continue;
+    P := Pos(' ', Seg);
+    if P > 0 then
+    begin
+      SetLength(FFooterKeys, Length(FFooterKeys) + 1);
+      SetLength(FFooterActions, Length(FFooterActions) + 1);
+      FFooterKeys[High(FFooterKeys)] := Copy(Seg, 1, P - 1);
+      FFooterActions[High(FFooterActions)] := Copy(Seg, P, MaxInt);
+    end
+    else
+    begin
+      { A lone phrase with no key: all action, no binding to dim. }
+      SetLength(FFooterKeys, Length(FFooterKeys) + 1);
+      SetLength(FFooterActions, Length(FFooterActions) + 1);
+      FFooterKeys[High(FFooterKeys)] := '';
+      FFooterActions[High(FFooterActions)] := Seg;
+    end;
+  end;
 end;
 
 procedure TModal.ContentWidthChanged(AWidth: Integer);
@@ -197,7 +250,7 @@ begin
   { The footer is FIXED: its rows are reserved here, so the scrolled content
     ends above them rather than running underneath. }
   Result.H := FBounds.H - ModalChromeRows;
-  if Length(FFooter) > 0 then
+  if Length(FFooterKeys) > 0 then
     Dec(Result.H, ModalFooterRows);
 end;
 
@@ -215,12 +268,28 @@ begin
     Result.H := AAvail.H;
 end;
 
+{ The total width of the footer: each pair's key and action, plus the gaps
+  between pairs. Used to right-align it and to lay it out in Render, so the two
+  cannot disagree. }
+function TModal.FooterWidth: Integer;
+var
+  I: Integer;
+begin
+  Result := 0;
+  for I := 0 to High(FFooterKeys) do
+  begin
+    if I > 0 then
+      Inc(Result, FooterGap);
+    Inc(Result, Length(FFooterKeys[I]) + Length(FFooterActions[I]));
+  end;
+end;
+
 function TModal.FooterX: Integer;
 var
   Right: Integer;
 begin
   Right := FBounds.X + FBounds.W - 1 - ModalFooterPad;
-  Result := Right - SpansWidth(FFooter);
+  Result := Right - FooterWidth;
   if Result < FBounds.X + 2 then
     Result := FBounds.X + 2;
 end;
@@ -276,6 +345,10 @@ begin
       exactly this - the chat panel uses them for the compose overlay. }
     FScroll.TrackTop := 1;
     FScroll.TrackBottom := 1;
+    { No track: the bar sits ON the border column, and a painted track would
+      overwrite the box-drawing rule. Only the thumb shows. The property's own
+      comment says to set this when the bar sits on a border. }
+    FScroll.TrackVisible := False;
     FScroll.Arrange(AInner);
   end
   else if FContent <> nil then
@@ -306,7 +379,7 @@ end;
 
 procedure TModal.Render(const S: ISurface);
 var
-  L, R, I, DivY: Integer;
+  L, R, I, DivY, FX, W: Integer;
 begin
   PaintFrame(S);
   RenderContent(S);
@@ -314,7 +387,7 @@ begin
     row, both above the bottom border. The divider is what separates the scrolling
     content from the actions - without it the CTAs read as the last line of
     content rather than as chrome that is always there. }
-  if (Length(FFooter) > 0) and
+  if (Length(FFooterKeys) > 0) and
     (FBounds.H >= ModalChromeRows + ModalFooterRows) then
   begin
     DivY := FBounds.Y + FBounds.H - 1 - ModalFooterRows;
@@ -324,15 +397,68 @@ begin
     PutCh(S, R, DivY, '┤', BorderAttr);
     for I := L + 1 to R - 1 do
       PutCh(S, I, DivY, '─', BorderAttr);
-    PaintSpans(S, FooterX, DivY + 1, FFooter);
+
+    { Each pair: the key dim, its action in normal text, then plain SPACES before
+      the next pair - exactly how TApprovalModal lays out 'enter' + ' accept'. No
+      dot: spacing separates the groups, which is the house style the operator
+      asked to match. The X each pair started at is remembered for hit-testing. }
+    FX := FooterX;
+    FSegX := nil;
+    FSegW := nil;
+    for I := 0 to High(FFooterKeys) do
+    begin
+      if I > 0 then
+        Inc(FX, FooterGap);
+      SetLength(FSegX, Length(FSegX) + 1);
+      SetLength(FSegW, Length(FSegW) + 1);
+      FSegX[High(FSegX)] := FX;
+      W := 0;
+      if FFooterKeys[I] <> '' then
+      begin
+        PutText(S, FX, DivY + 1, UnicodeString(FFooterKeys[I]), FooterKeyAttr);
+        Inc(FX, Length(FFooterKeys[I]));
+        Inc(W, Length(FFooterKeys[I]));
+      end;
+      PutText(S, FX, DivY + 1, UnicodeString(FFooterActions[I]),
+        FooterActionAttr);
+      Inc(FX, Length(FFooterActions[I]));
+      Inc(W, Length(FFooterActions[I]));
+      FSegW[High(FSegW)] := W;
+    end;
   end;
 end;
 
+procedure TModal.FooterClicked(const AKey: string);
+begin
+  { Nothing by default: a subclass maps the key to its own action. }
+  if AKey = '' then
+    ;
+end;
+
 function TModal.HandleEvent(const E: TInputEvent): Boolean;
+var
+  I, FY: Integer;
 begin
   { Scrolling belongs to the container: it owns the clamp, the scrollbar and the
     wheel. A subclass handles its own keys first and falls back to this. }
   Result := False;
+  { A click on the FIXED footer. Checked before the scroller, since the footer is
+    chrome outside the scroll region and must win. }
+  if (E.Kind = ikMouse) and (E.Mouse.Button = mbLeft) and
+    (Length(FFooterKeys) > 0) then
+  begin
+    FY := FBounds.Y + FBounds.H - 1 - ModalFooterRows + 1;
+    if E.Mouse.Y = FY then
+      for I := 0 to High(FSegX) do
+        if (E.Mouse.X >= FSegX[I]) and (E.Mouse.X < FSegX[I] + FSegW[I]) then
+        begin
+          { The click reports the pair's KEY, so a subclass maps 'enter' or 'esc'
+            to its own action. A pair with no key cannot be clicked. }
+          if FFooterKeys[I] <> '' then
+            FooterClicked(FFooterKeys[I]);
+          Exit(True);
+        end;
+  end;
   if FScroll <> nil then
     Result := FScroll.HandleEvent(E);
 end;
