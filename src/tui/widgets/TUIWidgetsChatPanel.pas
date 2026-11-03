@@ -185,6 +185,8 @@ type
     { The messages panel's bounds, so the host can map a click on the left-border
       paginator to a page. }
     function MessagesBounds: TRect;
+    { The loaded-skills row, for host hit-testing. Height 0 when collapsed. }
+    function LoadedSkillsBounds: TRect;
     { The compose's bounds, so a host can put a panel IN the composer's place
       (the subagent list) instead of floating it over the transcript. }
     function ComposeBounds: TRect;
@@ -731,6 +733,15 @@ end;
 function TChatPanel.ComposeBounds: TRect;
 begin
   Result := FCompose.Bounds;
+end;
+
+function TChatPanel.LoadedSkillsBounds: TRect;
+begin
+  { Zero height when the row is collapsed, so a host hit-testing it sees nothing
+    clickable - which is correct: there is no line to click. }
+  Result := FLoadedSkills.Bounds;
+  if FLoadedSkillsText = '' then
+    Result.H := 0;
 end;
 
 procedure TChatPanel.SetPageIndex(AIndex: Integer);

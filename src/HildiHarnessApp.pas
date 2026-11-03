@@ -3555,11 +3555,35 @@ function THarnessApp.PageScrub(const E: TInputEvent): Boolean;
 var
   B: TRect;
   H, I, Seg, Target, SessionIndex: Integer;
+  Keys: TStringArray;
+  Key: string;
 begin
+  Result := False;
+  { The loaded-skills row comes FIRST: it must be hit-tested before PageScrub's
+    early exit on a single-page session, or clicking a skill would do nothing on
+    any session that has not been checkpointed. }
+  if (E.Kind = ikMouse) and (E.Mouse.Button = mbLeft) and
+    (FDriver <> nil) then
+  begin
+    B := FPanel.LoadedSkillsBounds;
+    if (B.H > 0) and (E.Mouse.Y = B.Y) and (E.Mouse.X >= B.X) and
+      (E.Mouse.X < B.X + B.W) then
+    begin
+      FDriver.SkillLoadedKeys(Keys);
+      Key := LoadedSkillsHitKey(Keys, E.Mouse.X - B.X);
+      if Key = '' then
+        { The overflow token or a gap: open the panel, which is where the full
+          list lives. A miss on the row still consumes the click. }
+        ShowSkillList
+      else
+        { The detail arrives as an event; ShowSkillDetail opens it. }
+        FDriver.SkillDetail(Key);
+      Exit(True);
+    end;
+  end;
   { The left border of the messages panel is a coarse scrollbar: one segment per
     page, the current page heavy. A press or drag on it scrolls to that segment's
     fraction of the content; the last segment reaches the end. }
-  Result := False;
   if (E.Kind <> ikMouse) or (FPageCount < 2) then
     Exit;
   if FPageDragging then
