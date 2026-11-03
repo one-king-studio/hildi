@@ -78,6 +78,10 @@ type
     { Called once the content width is known, so a subclass can re-wrap. }
     procedure ContentWidthChanged(AWidth: Integer); virtual;
     procedure ArrangeContent(const AInner: TRect); virtual;
+    { Draw the content area. Default renders the content widget; a subclass that
+      paints its own rows overrides this. Render calls it BETWEEN the frame and
+      the footer, so nothing a subclass draws can land on the CTAs. }
+    procedure RenderContent(const S: ISurface); virtual;
   public
     { AContent is OWNED by the modal when given. AScrollable wraps it in one
       scroll container; without it the content is arranged directly. }
@@ -263,6 +267,14 @@ begin
     FContent.Arrange(AInner);
 end;
 
+procedure TModal.RenderContent(const S: ISurface);
+begin
+  if FScroll <> nil then
+    FScroll.Render(S)
+  else if FContent <> nil then
+    FContent.Render(S);
+end;
+
 procedure TModal.Arrange(const ABounds: TRect);
 var
   Inner: TRect;
@@ -282,10 +294,7 @@ var
   L, R, I, DivY: Integer;
 begin
   PaintFrame(S);
-  if FScroll <> nil then
-    FScroll.Render(S)
-  else if FContent <> nil then
-    FContent.Render(S);
+  RenderContent(S);
   { The FIXED footer, as TApprovalModal lays it out: a DIVIDER row, then the CTA
     row, both above the bottom border. The divider is what separates the scrolling
     content from the actions - without it the CTAs read as the last line of
