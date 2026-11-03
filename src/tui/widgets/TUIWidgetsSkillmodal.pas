@@ -67,6 +67,12 @@ type
     FBody: TScrollContainer;
     { Where the body starts, so Render knows what the container covers. }
     FBodyTop: Integer;
+    { The metadata block, PRE-WRAPPED in Arrange and drawn by Render. Building it
+      once means the height Arrange reserves and the rows Render paints cannot
+      disagree - the bug the palette had when Measure and Render disagreed. }
+    FMetaLines: TStringArray;
+    FMetaIsValue: array of Boolean;
+    procedure BuildMeta(AWidth: Integer);
     function CanLoad: Boolean;
   public
     constructor Create(const ATheme: TTheme);
@@ -82,6 +88,17 @@ type
   end;
 
 implementation
+
+{ A rect constructor. Local because each TUI unit carries its own; there is no
+  shared one and importing a unit for four lines is not worth it. }
+function Rc(AX, AY, AW, AH: Integer): TRect;
+begin
+  Result := Default(TRect);
+  Result.X := AX;
+  Result.Y := AY;
+  Result.W := AW;
+  Result.H := AH;
+end;
 
 constructor TSkillModal.Create(const ATheme: TTheme);
 begin
@@ -113,6 +130,81 @@ begin
   Result := FDetail.Key;
 end;
 
+{ Wrap the metadata block to AWidth. Each value is word-wrapped, so a long
+  description occupies the rows it actually needs - the earlier single-line
+  PutText ran under the right border. }
+procedure TSkillModal.BuildMeta(AWidth: Integer);
+var
+  Doc: TMdDocument;
+  Rendered: TMdLineArray;
+  I: Integer;
+
+  procedure AddLine(const AText: string; AIsValue: Boolean);
+  var
+    Lines: TMdLineArray;
+    K: Integer;
+  begin
+    if AText = '' then
+      Exit;
+    Rendered := nil;
+    Doc := ParseTree(AText);
+    try
+      Lines := RenderTree(Doc, AWidth);
+    finally
+      Doc.Free;
+    end;
+    for K := 0 to High(Lines) do
+    begin
+      SetLength(FMetaLines, Length(FMetaLines) + 1);
+      FMetaLines[High(FMetaLines)] := Lines[K];
+      SetLength(FMetaIsValue, Length(FMetaIsValue) + 1);
+      FMetaIsValue[High(FMetaIsValue)] := AIsValue;
+    end;
+  end;
+
+begin
+  FMetaLines := nil;
+  FMetaIsValue := nil;
+  { Captions are drawn as plain chrome rows; values are WRAPPED markdown, so a
+    value containing `code` or **emphasis** reads as such rather than as its
+    source. }
+  if FDetail.Description <> '' then
+  begin
+    AddLine('Description', False);
+    AddLine(FDetail.Description, True);
+  end;
+  if FDetail.License <> '' then
+  begin
+    AddLine('License', False);
+    AddLine(FDetail.License, True);
+  end;
+  if FDetail.Compatibility <> '' then
+  begin
+    AddLine('Compatibility', False);
+    AddLine(FDetail.Compatibility, True);
+  end;
+  if FDetail.AllowedTools <> '' then
+  begin
+    { Labelled as not enforced: it is displayed and never consulted. }
+    AddLine('Allowed tools (not enforced)', False);
+    AddLine(FDetail.AllowedTools, True);
+  end;
+  if FDetail.Location <> '' then
+  begin
+    AddLine('Directory', False);
+    AddLine(FDetail.Location, True);
+  end;
+  if Length(FDetail.Resources) > 0 then
+  begin
+    AddLine('Files', False);
+    for I := 0 to High(FDetail.Resources) do
+      AddLine(FDetail.Resources[I], True);
+  end;
+  { I is used above; keep the compiler honest about the loop variable. }
+  if I < 0 then
+    ;
+end;
+
 procedure TSkillModal.Arrange(const ABounds: TRect);
 var
   InnerW, Y, I, MetaH, BodyH: Integer;
@@ -128,17 +220,10 @@ begin
     container sits. }
   { Counted from the FIELDS, matching what Render draws: two rows per optional
     pair (caption + value), and the Files list takes one row plus one per entry. }
-  MetaH := 0;
-  if FDetail.Description <> '' then
-    Inc(MetaH, 2);
-  if FDetail.License <> '' then
-    Inc(MetaH, 2);
-  if FDetail.Compatibility <> '' then
-    Inc(MetaH, 2);
-  if FDetail.AllowedTools <> '' then
-    Inc(MetaH, 2);
-  if Length(FDetail.Resources) > 0 then
-    Inc(MetaH, 1 + Length(FDetail.Resources));
+  { Built HERE, at the width it will be drawn at, so the rows Arrange reserves
+    and the rows Render paints come from one source. }
+  BuildMeta(InnerW);
+  MetaH := Length(FMetaLines);
   Y := ABounds.Y + 1 + MetaH;
   FBodyTop := Y;
 
@@ -190,12 +275,17 @@ begin
   T := FBounds.Y;
   B := FBounds.Y + FBounds.H - 1;
 
-  Bg := OnBg(FTheme.Panel, FTheme.RaisedBg);
+  { The modal is the RAISED tone; its field values and the markdown body sit one
+    step darker on SUNKEN. Markdown blocks are drawn with sfScreenBg, so they
+    take whatever is behind them - which is why the body needs a real fill rather
+    than just darker text. Fenced code keeps its own CodeBackdrop, already one
+    step darker again, so it still reads as a distinct surface. }
+  Bg := OnBg(FTheme.Text, FTheme.RaisedBg);
   BorderAttr := OnBg(FTheme.Border, FTheme.RaisedBg);
   TitleAttr := OnBg(FTheme.Accent, FTheme.RaisedBg);
   LabelAttr := OnBg(FTheme.Muted, FTheme.RaisedBg);
-  ValueAttr := OnBg(FTheme.Text, FTheme.RaisedBg);
-  BodyAttr := OnBg(FTheme.Text, FTheme.RaisedBg);
+  ValueAttr := OnBg(FTheme.Text, FTheme.SunkenBg);
+  BodyAttr := OnBg(FTheme.Text, FTheme.SunkenBg);
 
   S.FillRect(FBounds, Bg);
   PutCh(S, L, T, '╭', BorderAttr);
@@ -217,46 +307,25 @@ begin
   PutText(S, L + 2, T, UnicodeString(Title), TitleAttr);
 
   Y := T + 1;
-  { Optional rows are OMITTED, not blanked: an empty "License:" label tells the
-    operator nothing and reads as a bug. }
-  if FDetail.Description <> '' then
+  { The metadata block, drawn from the lines BuildMeta wrapped. CAPTIONS are
+    modal-tone chrome; VALUES get the sunken surface, one step darker, so the
+    shape of "field / value" is legible without a border per field. The fill
+    runs the width of each value row, not the whole dialog: only the content is
+    inset, the modal frame stays raised. }
+  for I := 0 to High(FMetaLines) do
   begin
-    PutText(S, L + 2, Y, UnicodeString('Description'), LabelAttr);
-    PutText(S, L + 2, Y + 1, UnicodeString(FDetail.Description), ValueAttr);
-    Inc(Y, 2);
-  end;
-  if FDetail.License <> '' then
-  begin
-    PutText(S, L + 2, Y, UnicodeString('License'), LabelAttr);
-    PutText(S, L + 2, Y + 1, UnicodeString(FDetail.License), ValueAttr);
-    Inc(Y, 2);
-  end;
-  if FDetail.Compatibility <> '' then
-  begin
-    PutText(S, L + 2, Y, UnicodeString('Compatibility'), LabelAttr);
-    PutText(S, L + 2, Y + 1, UnicodeString(FDetail.Compatibility), ValueAttr);
-    Inc(Y, 2);
-  end;
-  if FDetail.AllowedTools <> '' then
-  begin
-    { Shown with a caveat, because it is displayed but never enforced. }
-    PutText(S, L + 2, Y, UnicodeString('Allowed tools (not enforced)'),
-      LabelAttr);
-    PutText(S, L + 2, Y + 1, UnicodeString(FDetail.AllowedTools), ValueAttr);
-    Inc(Y, 2);
-  end;
-  if Length(FDetail.Resources) > 0 then
-  begin
-    PutText(S, L + 2, Y, UnicodeString('Files'), LabelAttr);
-    Inc(Y);
-    for I := 0 to High(FDetail.Resources) do
+    if Y >= B - 1 then
+      Break;
+    if FMetaIsValue[I] then
     begin
-      if Y >= B - 1 then
-        Break;
-      PutText(S, L + 4, Y, UnicodeString(FDetail.Resources[I]), ValueAttr);
-      Inc(Y);
-    end;
+      S.FillRect(Rc(L + 2, Y, R - L - 3, 1), OnBg(FTheme.Text, FTheme.SunkenBg));
+      PutText(S, L + 2, Y, UnicodeString(FMetaLines[I]), ValueAttr);
+    end
+    else
+      PutText(S, L + 2, Y, UnicodeString(FMetaLines[I]), LabelAttr);
+    Inc(Y);
   end;
+  Inc(Y);
 
   { The body is the STYLED markdown view inside its scroll container, arranged
     in Arrange and drawn here. It renders headings, emphasis, code and lists
