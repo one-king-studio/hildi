@@ -254,6 +254,14 @@ type
     procedure CloseHistory;
     procedure OnHistoryChoose(const ATurnId: Int64);
     procedure SyncHistory;
+    { The skill detail dialog: show one skill's detail, close it, and reconcile
+      the plane like SyncDiff. The detail arrives as an event, because the wire
+      carries only identifiers in the catalogue. }
+    procedure ShowSkillDetail(const E: TTurnEvent);
+    procedure SkillModalLoad(const AKey: string);
+    procedure CloseSkillModal;
+    procedure SkillModalClosed(Sender: TObject);
+    procedure SyncSkillModal;
     procedure CloseDiff;
     procedure DiffClosed(Sender: TObject);
     { Subagents: feed the roster, toggle/show the agent list, spy on a child. }
@@ -2286,6 +2294,11 @@ begin
         event carries the loaded SUBSET, so the row is a pure function of it and
         needs no second request. }
       FPanel.SetLoadedSkills(FormatLoadedSkillsLine(E.SkillLoadedKeys));
+    teSkillDetail:
+      { One skill's detail, answering a request the app made. Opening the dialog
+        here rather than at the click keeps the app on ONE path whether the
+        driver answered in-process or over the wire. }
+      ShowSkillDetail(E);
   else
     ;
   end;
@@ -2928,6 +2941,79 @@ begin
   FApp.PushPlane(TPlane.Create(Wrap, True, True));
   FDiffShown := True;
   SetState(psReady, 'Diff: ' + APath);
+end;
+
+procedure THarnessApp.ShowSkillDetail(const E: TTurnEvent);
+var
+  Wrap: TContainer;
+  R: TRect;
+  D: TSkillDetail;
+begin
+  { The detail arrived as an event, so the app opens the dialog here for local
+    and remote drivers alike - one path, not two. }
+  if FApp.ModalActive then
+    Exit;
+  D := Default(TSkillDetail);
+  D.Key := E.SkillDetailKey;
+  D.Name := E.SkillName;
+  D.Description := E.SkillDescription;
+  D.License := E.SkillLicense;
+  D.Compatibility := E.SkillCompatibility;
+  D.AllowedTools := E.SkillAllowedTools;
+  D.Location := E.SkillLocation;
+  D.Resources := E.SkillResources;
+  D.Body := E.SkillBody;
+  D.Loaded := E.SkillIsLoaded;
+
+  FSkillModal := TSkillModal.Create(FTheme);
+  FSkillModal.SetDetail(D);
+  FSkillModal.OnLoad := SkillModalLoad;
+  FSkillModal.Visible := True;
+  Wrap := TContainer.Create([Fill(1), Auto, Fill(1)], [Fill(1), Auto, Fill(1)]);
+  Wrap.Add(FSkillModal, 1, 1);
+  R := Default(TRect);
+  R.W := FSurface.Width;
+  R.H := FSurface.Height;
+  Wrap.Arrange(R);
+  FApp.PushPlane(TPlane.Create(Wrap, True, True));
+  SetState(psReady, 'Skill: ' + D.Name);
+end;
+
+procedure THarnessApp.SkillModalLoad(const AKey: string);
+begin
+  { The dialog reports; the host acts. Deferred close, then load. }
+  FCloseSkillModal := True;
+  if FDriver <> nil then
+    FDriver.LoadSkill(AKey);
+end;
+
+procedure THarnessApp.SkillModalClosed(Sender: TObject);
+begin
+  { Escape inside the dialog: its own handler is dispatching, so the pop waits
+    for SyncSkillModal. Same discipline as the diff pane. }
+  FCloseSkillModal := True;
+end;
+
+procedure THarnessApp.CloseSkillModal;
+begin
+  if FApp.ModalActive then
+    FApp.PopPlane;
+  FSkillModal := nil;
+  SetState(psReady, 'Ready');
+end;
+
+procedure THarnessApp.SyncSkillModal;
+begin
+  if FCloseSkillModal then
+  begin
+    FCloseSkillModal := False;
+    CloseSkillModal;
+    Exit;
+  end;
+  { An unhandled Escape pops the plane in TTuiApp without telling the app; clear
+    the dangling widget so the state does not lie. }
+  if (FSkillModal <> nil) and (not FApp.ModalActive) then
+    FSkillModal := nil;
 end;
 
 procedure THarnessApp.CloseDiff;
