@@ -286,6 +286,12 @@ type
     { Fail the turn once the running context (the latest request's prompt
       tokens) exceeds this. 0 takes the default; negative disables. }
     MaxContextTokens: Integer;
+    { The RESUME seed: the last request's prompt tokens, read back from the store
+      for an existing session. The loop otherwise starts at 0 and reports
+      `used="0"` in the tail until a request completes - so a restarted binary
+      showed an empty context graph on a session that had been using most of its
+      window. 0 means genuinely unknown (a brand-new session). }
+    PriorPromptTokens: Integer;
     { Followup requests allowed for one truncated response before the turn fails
       with leTruncated. 0 takes the default; negative disables continuation. }
     MaxContinuations: Integer;
@@ -1188,6 +1194,10 @@ begin
   FConfig := AConfig;
   FPromptQueue := TPromptQueue.Create;
   FLastTurnDropped := False;
+  { A resumed session already has a context; start from the measured value rather
+    than 0. Without this the tail renders `used="0"` and the header graph reads
+    empty until the first request of the new process completes. }
+  FLastPromptTokens := FConfig.PriorPromptTokens;
   if FConfig.SoftToolLimit <= 0 then
     FConfig.SoftToolLimit := DefaultSoftToolLimit;
   if FConfig.HardToolLimit <= 0 then

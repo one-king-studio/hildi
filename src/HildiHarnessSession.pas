@@ -1736,6 +1736,13 @@ begin
   { The tool-call budget keeps its agent default; the context cap comes from the
     view (which resolved the config, env, or the default). }
   AgentConfig.MaxContextTokens := FView.MaxContextTokens;
+  { SEED THE CONTEXT FROM THE STORE. A resumed session already has a context in
+    play; the loop would otherwise start at 0 and both the tail's
+    `used="..."` and the header graph would read empty until the first request of
+    THIS process completed - which is exactly what the operator saw after
+    restarting the binary on a session that was 77% full. }
+  if FView.Store <> nil then
+    AgentConfig.PriorPromptTokens := FView.SessionTotals.ContextTokens;
   { State the workspace root in the user turn's <context>, so the model grounds
     shell paths instead of guessing one. }
   AgentConfig.WorkspaceRoot := FView.WorkspaceRoot;

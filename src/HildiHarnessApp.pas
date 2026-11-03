@@ -2219,6 +2219,15 @@ begin
           AppendToolResult(Block, E.Text);
         end;
         FToolPending.Remove(E.ToolId);
+        { LIVE CONSUMPTION. A tool result means the loop finished a REQUEST, and
+          every request writes its usage row (HildiAgent.pas: FinishRequest), so
+          the store already holds the new totals. Until this call the status bar
+          and header only refreshed at turn boundaries - which, on a turn with
+          five tool calls, meant the graph sat still for minutes and then jumped.
+
+          Cheap: one aggregate query, on an event that happens once per tool
+          round, not per frame. }
+        UpdateStats;
         { The tools are done, so the next deltas belong to the following message:
           start fresh blocks, after the tool lines. The turn is still in flight,
           so the state returns to thinking. }
