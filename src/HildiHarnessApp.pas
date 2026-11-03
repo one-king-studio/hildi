@@ -1297,6 +1297,10 @@ begin
     begin
       FPaletteShowingSkills := False;
       FPanel.Palette.SetTitle('commands');
+      { The VERBS must be reset too. Restoring only the title and the list left
+        the skills panel's ctrl+r verb armed, so the command list showed the
+        skills hint - and reopening with / kept showing it. }
+      FPanel.Palette.SetSingleVerb(PaletteRun, 'select');
       FPanel.Palette.SetCommands(DefaultCommands);
     end;
   end;
@@ -1312,6 +1316,7 @@ begin
     FPanel.SetPaletteActive(False);
     FPaletteShowingSkills := False;
     FPanel.Palette.SetTitle('commands');
+    FPanel.Palette.SetSingleVerb(PaletteRun, 'select');
     FPanel.Palette.SetCommands(DefaultCommands);
     FDriver.SkillDetail(AName);
   end;
@@ -1418,7 +1423,12 @@ end;
 
 procedure THarnessApp.UpdateCta;
 begin
-  if not ComposeIsEmpty then
+  { While a list panel is open the composer's CTA is wrong: enter runs a COMMAND
+    or loads a SKILL, not sends. The panel's own hint row says what enter does,
+    so the composer shows none rather than a contradicting "enter send". }
+  if FPanel.PaletteActive then
+    FPanel.SetCta(ckNone)
+  else if not ComposeIsEmpty then
     FPanel.SetCta(ckSend)
   else if FBusy then
     FPanel.SetCta(ckCancel)

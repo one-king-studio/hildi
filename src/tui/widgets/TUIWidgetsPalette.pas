@@ -69,7 +69,9 @@ type
     procedure EnsureVisible;
     function VisibleRows: Integer;
     function RowAt(AY: Integer): Integer;
-    { The hint row: every verb, then the default, right-aligned. }
+    { The hint row: every verb, then the default, right-aligned. Returns
+      UnicodeString because the separator is a middle dot - as AnsiString it
+      degrades to '?', which is exactly what showed on screen. }
     function SelectedHints: string;
     function ChordOf(const E: TInputEvent): string;
     function PaletteWidth: Integer;
@@ -254,32 +256,25 @@ end;
 function TCommandPalette.SelectedHints: string;
 var
   I: Integer;
-  { Built at RUN TIME, not written as a literal: assigning a UnicodeString
-    literal into an AnsiString result raises a lossy-conversion warning, which
-    this project treats as an error. HintSpans builds its separator the same way
-    for the same reason - FPC does not apply the source codepage to a typed
-    constant. }
-  Sep: UnicodeString;
+  Sep: string;
 begin
-  { Built from the panel's VERBS, so a third list panel needs no palette change:
-    it declares its chords and captions and the hint row follows.
-
-    Segments are separated by ' · ', the separator HintSpans recognises. Two
-    spaces instead would make the WHOLE line one segment, so only the first key
-    got its own tone and the rest was drawn as one action - which is why the
-    command panel's "enter select" did not read as two-tone. }
-  Sep := ' ' + UnicodeString(WideChar($00B7)) + ' ';
+  { The middle dot, built from UTF8Encode rather than a literal: a ' \u00b7 '
+    literal assigned into an AnsiString result is a lossy conversion, which this
+    project treats as an error. UTF8Encode produces the correct bytes without a
+    round-trip through the AnsiString codepage, which is what degraded the dot
+    to '?' on screen. }
+  Sep := UTF8Encode(UnicodeString(' ') + WideChar($00B7) + ' ');
   Result := '';
   if (FSelected < 0) or (FSelected > High(FVisibleCommands)) then
     Exit;
   for I := 0 to High(FVerbs) do
   begin
     if Result <> '' then
-      Result := Result + string(Sep);
+      Result := Result + Sep;
     Result := Result + FVerbs[I].Chord + ' ' + FVerbs[I].Caption;
   end;
   if Result <> '' then
-    Result := Result + string(Sep);
+    Result := Result + Sep;
   Result := Result + 'enter ' + FDefaultCaption;
 end;
 
@@ -379,7 +374,8 @@ procedure TCommandPalette.Render(const S: ISurface);
 var
   L, R, T, X, I, N, RowY, SelBg, HintY, HX: Integer;
   Bg, Border, NameAttr, DetailAttr, SelNameAttr, SelDetailAttr: TAttr;
-  Name, Detail, Hint: string;
+  Name, Detail: string;
+  Hint: UnicodeString;
   Spans: TSpanArray;
 begin
   if (FBounds.W < 4) or (FBounds.H < 2) then
@@ -463,7 +459,7 @@ begin
     HintY := FBounds.Y + FBounds.H - 1;
     PutCh(S, L, HintY, '│', Border);
     PutCh(S, R, HintY, '│', Border);
-    Hint := SelectedHints;
+    Hint := UnicodeString(SelectedHints);
     if Hint <> '' then
     begin
       { Two-tone through the shared splitter: the keybinding dim, the action
