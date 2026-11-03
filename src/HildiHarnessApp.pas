@@ -3027,6 +3027,14 @@ begin
     CloseSkillModal;
     Exit;
   end;
+  { The dialog hides itself on Escape or on use. Nothing wires an OnClose event,
+    so this is where the plane is actually popped - otherwise the widget
+    disappears and an empty plane stays over the transcript. }
+  if (FSkillModal <> nil) and (not FSkillModal.Visible) then
+  begin
+    CloseSkillModal;
+    Exit;
+  end;
   { An unhandled Escape pops the plane in TTuiApp without telling the app; clear
     the dangling widget so the state does not lie. }
   if (FSkillModal <> nil) and (not FApp.ModalActive) then
@@ -3726,6 +3734,7 @@ begin
   CloseModal;
   SyncSessionsModal;
   SyncDiff;
+  SyncSkillModal;
   SyncHistory;
   CheckInterruptWindow;
   DrainQueue;
