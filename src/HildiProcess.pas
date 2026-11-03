@@ -19,6 +19,11 @@ type
   TOutputEvent = procedure(const AId: string; AKind: TOutputKind;
     const AText: string; AExitCode: Integer) of object;
 
+  { A "should I stop?" probe. Declared HERE rather than reusing the agent's,
+    because that one lives in HildiAgent and the Process Split forbids this leaf
+    unit depending on it. }
+  TProcessCancelCheck = function: Boolean of object;
+
   TCommandRunner = class(TThread)
   private
     FId: string;
@@ -45,6 +50,14 @@ type
       const AShellExecutable: string = '/bin/bash';
       const AShellSwitch: string = '-c');
     procedure Cancel;
+    { Wait, but stop early on a cancel. Returns True when the wait ended BECAUSE
+      of the cancel, so the caller can tell a cancelled run from a finished one.
+
+      Cancel itself only calls Terminate; the escalation that makes Terminate
+      actually kill a stubborn child (SIGTERM, grace, SIGKILL, reap) already
+      lives in Execute and is not duplicated here. }
+    function WaitForCancellable(ACancel: TProcessCancelCheck;
+      APollMs: Integer = 0): Boolean;
     property Id: string read FId;
     property ExitCode: Integer read FExitCode;
     property TimedOut: Boolean read FTimedOut;
@@ -68,6 +81,10 @@ const
   { Grace a child gets to exit on its own after SIGTERM before SIGKILL. A command
     that traps SIGTERM would otherwise hold WaitOnExit forever. }
   TerminateGraceMs = 2000;
+
+  { How often a cancellable wait re-checks the probe. Short enough that `esc esc`
+    feels immediate, long enough not to spin a core. }
+  ProcessCancelPollMs = 50;
 
 { TProcess.ExitStatus is not consistent across FPC builds/platforms: on Unix it
   may be the raw wait() status (exit code shifted into the high byte, signal in
@@ -106,6 +123,29 @@ end;
 procedure TCommandRunner.Cancel;
 begin
   Terminate;
+end;
+
+function TCommandRunner.WaitForCancellable(ACancel: TProcessCancelCheck;
+  APollMs: Integer): Boolean;
+begin
+  Result := False;
+  if APollMs <= 0 then
+    APollMs := ProcessCancelPollMs;
+  { Poll in slices rather than joining outright. TThread.WaitFor has no timeout,
+    so joining would mean a cancel could never be noticed while a long command
+    runs - which is exactly the case this exists for. }
+  while not Finished do
+  begin
+    if Assigned(ACancel) and ACancel() then
+    begin
+      Cancel;
+      Exit(True);
+    end;
+    Sleep(APollMs);
+  end;
+  { A cancel that landed while the child was on its way out still counts. }
+  if Assigned(ACancel) and ACancel() then
+    Result := True;
 end;
 
 procedure TCommandRunner.Emit(AKind: TOutputKind; const AText: string;

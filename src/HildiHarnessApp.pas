@@ -207,6 +207,10 @@ type
     { Queued prompts shown as 'Queued' boxes at the end of the stream, removed
       when they are injected as a real user turn. }
     FQueuedBlocks: array of TChatItem;
+    { The TEXT of those queued prompts, parallel to FQueuedBlocks. Kept because a
+      cancel hands them back to the composer, and a rendered block's text is not
+      reliably the string that was submitted. }
+    FQueuedPrompts: TStringArray;
     { The driver's dropped-event count at the last check, so the app warns the
       operator once when streamed output was dropped (the mailbox bound). }
     FLastDropped: Int64;
@@ -340,6 +344,9 @@ type
     procedure AddAssistantBlock(const AContent: string);
     { Put text at the front of the compose box, keeping whatever is typed. }
     procedure PrependCompose(const AText: string);
+    { Hand every queued prompt back to the composer, stacked with a blank line
+      between them, when a turn is cancelled. }
+    procedure RestoreQueuedToCompose;
     { Undo the current turn's UI after an early cancel and restore the prompt. }
     procedure RollBackEarlyCancel;
     { Drop the in-flight assistant/thinking blocks of a pending response that was
@@ -1589,6 +1596,9 @@ procedure THarnessApp.InterruptTurn;
 begin
   if FDriver <> nil then
   begin
+    { The driver's Interrupt sets the worker's cancel flag. The command tool's
+      probe consults that SAME flag (see the session's CommandCancelProbe), so a
+      long `run_command` dies now rather than when the command finishes. }
     FDriver.Interrupt;
     SetState(psThinking, 'Cancelling');
   end;
@@ -2060,6 +2070,41 @@ begin
     FPanel.Compose.Edit.SetText(UnicodeString(AText) + #10 + Existing);
 end;
 
+{ Restore the QUEUED prompts to the composer, stacked with a BLANK LINE between
+  each, because each one is a separate message the operator meant to send.
+
+  Ordered oldest first, and placed ahead of anything already typed: the queue was
+  in arrival order, and the operator's next action is to re-send them. Blank-line
+  separation rather than a bare newline because two prompts on adjacent lines read
+  as one two-line message. }
+procedure THarnessApp.RestoreQueuedToCompose;
+var
+  I, K: Integer;
+  Stacked: string;
+begin
+  if Length(FQueuedPrompts) = 0 then
+    Exit;
+  Stacked := '';
+  for I := 0 to High(FQueuedPrompts) do
+  begin
+    if FQueuedPrompts[I] = '' then
+      Continue;
+    if Stacked <> '' then
+      Stacked := Stacked + #10#10;   { the blank line the operator asked for }
+    Stacked := Stacked + FQueuedPrompts[I];
+  end;
+  FQueuedPrompts := nil;
+  if Stacked = '' then
+    Exit;
+  { The queued blocks are gone from the transcript: they are now the composer's
+    text, not part of the conversation. }
+  for K := 0 to High(FQueuedBlocks) do
+    if FQueuedBlocks[K] <> nil then
+      FPanel.Stream.Remove(FQueuedBlocks[K]);
+  FQueuedBlocks := nil;
+  PrependCompose(Stacked);
+end;
+
 procedure THarnessApp.RollBackEarlyCancel;
 begin
   if FAssistant <> nil then
@@ -2315,6 +2360,11 @@ begin
           back to the operator. }
         if E.Dropped then
           RollBackEarlyCancel;
+        { CANCEL PIERCES THE QUEUE. Anything still waiting was never sent, so it
+          is the operator's text, not conversation: hand it back, stacked, rather
+          than losing it when the turn ends. Ordered oldest-first and placed
+          ahead of anything already typed. }
+        RestoreQueuedToCompose;
         FinishTurn(psReady, 'Cancelled');
       end
       else
@@ -3827,6 +3877,9 @@ begin
   Block := FPanel.Stream.Add(ckQueued, 'Queued', AText);
   SetLength(FQueuedBlocks, Length(FQueuedBlocks) + 1);
   FQueuedBlocks[High(FQueuedBlocks)] := Block;
+  { The text, kept alongside: a cancel hands these back to the composer. }
+  SetLength(FQueuedPrompts, Length(FQueuedPrompts) + 1);
+  FQueuedPrompts[High(FQueuedPrompts)] := AText;
   FApp.Invalidate;
 end;
 

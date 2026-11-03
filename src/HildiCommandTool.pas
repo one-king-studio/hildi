@@ -83,7 +83,13 @@ type
   { Runs one command through TCommandRunner, streaming its output to the
     observer and collecting it for the result. }
   TProcessCommandExecutor = class(TInterfacedObject, ICommandExecutor)
+  private
+    { The cancel probe for the command in flight. Nil means "never cancel",
+      which is what every test double and the CLI want. }
+    FCancel: TProcessCancelCheck;
   public
+    { The probe the in-flight command consults. }
+    property Cancel: TProcessCancelCheck read FCancel write FCancel;
     function OwnsApproval(const ACommand: string; AMode: TCommandMode;
       out AWhy: string): Boolean;
     { AChanges (may be nil) collects every filesystem write the call makes. }
@@ -98,9 +104,14 @@ type
     FConfig: TCommandToolConfig;
     FService: IApprovalService;
     FExecutor: ICommandExecutor;
+    { The cancel probe for a command in flight. The harness sets it for the turn;
+      nil means "never cancel", which is what every unit test and the CLI want. }
+    FCancel: TProcessCancelCheck;
   public
     constructor Create(const AConfig: TCommandToolConfig;
       AService: IApprovalService; AExecutor: ICommandExecutor = nil);
+    { The probe the in-flight command consults. }
+    property Cancel: TProcessCancelCheck read FCancel write FCancel;
     { Registers run_command with the registry. }
     procedure Register(ATools: TToolRegistry);
     { Matches TToolHandler; registered by Register. Public for direct testing. }
@@ -1072,7 +1083,7 @@ var
   Runner: TCommandRunner;
   Before, After: TWorkspaceSnapshot;
   ExitCode: Integer;
-  TimedOut: Boolean;
+  TimedOut, WasCancelled: Boolean;
 begin
   AExecution := Default(TCommandExecution);
   { A spawned command writes behind our back, so the only record is a
@@ -1087,11 +1098,15 @@ begin
       Collector.OnOutput, AProfile.Executable, AProfile.Switch);
     try
       Runner.Start;
-      Runner.WaitFor;
+      WasCancelled := Runner.WaitForCancellable(FCancel);
       AExecution.Output := Collector.Take(ExitCode, TimedOut);
       AExecution.ExitCode := ExitCode;
       AExecution.TimedOut := TimedOut;
-      AExecution.Cancelled := False;
+      AExecution.Cancelled := WasCancelled;
+      { 130 is the conventional "cancelled" code, distinct from 124 (timeout), so
+        a caller can tell a cancel from a command that ran out of time. }
+      if WasCancelled then
+        AExecution.ExitCode := 130;
       AExecution.Started := True;
       AExecution.Error := '';
       Result := True;

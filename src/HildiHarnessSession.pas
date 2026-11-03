@@ -34,7 +34,7 @@ uses
   HildiMCPConfig, HildiMCPClient, HildiMCPProvider,
   HildiMCPTransport, HildiMCPOAUTHFlow,
   HildiShellCommands, HildiShellTier,
-  HildiShellExecutor;
+  HildiShellExecutor, HildiProcess;
 type
   { The loop side of one session. Owns a TSessionView for the workspace, store,
     identity, history, and metrics. Not thread-safe except that Queue/Gate are
@@ -102,6 +102,10 @@ type
     FChangeStore: IChangeStore;
     FLoop: TAgentLoop;
     FQueue: TTurnQueue;
+    { Should an in-flight command stop? Set by Interrupt, cleared when a turn
+      starts. The command tool polls this from its own thread, so a cancel
+      reaches a running child without the tool knowing what a turn is. }
+    FCommandCancelled: Boolean;
     { The system prompt this session assembled, kept so a test can assert WHERE a
       block landed - the split between the frozen system message and the
       per-turn stable text is the whole point of the design. }
@@ -179,6 +183,17 @@ type
     { Rebuild the per-turn stable text now. Called at every turn boundary; public
       so a test can exercise one turn's refresh without driving a whole turn. }
     procedure RecomposePrompt;
+    { Should an in-flight command stop? Set by Interrupt; cleared when a turn
+      starts. Read by the command tool's probe, on the tool's thread. }
+    function GetCancelProbe: TProcessCancelCheck;
+    function CommandCancelProbe: Boolean;
+    { Called by Interrupt: makes the in-flight `run_command` terminate instead of
+      running to completion. Cleared at each turn start. }
+    procedure CancelInFlightCommand;
+    { Should an in-flight tool stop? Set by Interrupt, cleared when a turn starts.
+      The command tool polls this, so a cancel reaches a running child process
+      without the tool knowing what a worker or a turn is. }
+    property CancelProbe: TProcessCancelCheck read GetCancelProbe;
     { Anchor the change rows written by the tool call AToolCallId to the message
       row it produced, so a diff can be shown under the call that made it. The
       rows exist already; the message may not, which is why the runtime calls this
@@ -1304,6 +1319,31 @@ begin
   ComposeStablePrompt;
 end;
 
+function THarnessSession.CommandCancelProbe: Boolean;
+begin
+  { THE LOOP'S OWN CHECK, which the worker sets to its cancel flag at turn start
+    and clears at turn end (HildiHarnessTurnWorker: FLoop.CancelCheck := Cancelled).
+    Consulting it here means the in-flight tool sees exactly the same signal the
+    request boundary does - one source, so a cancel cannot reach one and miss the
+    other. FCommandCancelled is the session-level override for a cancel issued
+    while no worker is attached. }
+  Result := FCommandCancelled;
+  if (not Result) and (FLoop <> nil) and Assigned(FLoop.CancelCheck) then
+    Result := FLoop.CancelCheck();
+end;
+
+function THarnessSession.GetCancelProbe: TProcessCancelCheck;
+begin
+  Result := CommandCancelProbe;
+end;
+
+{ Set when the operator interrupts. The command tool's probe reads it, so a
+  `run_command` in flight terminates instead of running to completion. }
+procedure THarnessSession.CancelInFlightCommand;
+begin
+  FCommandCancelled := True;
+end;
+
 procedure THarnessSession.ComposeStablePrompt;
 var
   Mode: TCoordinationMode;
@@ -1676,6 +1716,12 @@ begin
   else
     FCommandTool := TCommandTool.Create(ToolConfig, ApprovalService);
   FCommandTool.Register(FTools);
+  { THE ONE WIRING THAT ACTIVATES TOOL CANCEL. The probe is the session's own
+    flag, set by Interrupt and cleared at each turn start, so the command in
+    flight can see a cancel from another thread without the tool knowing anything
+    about workers or turns. Nil would mean "never cancel", which is what the CLI
+    and every test double want - this only opts the live TUI path in. }
+  FCommandTool.Cancel := CancelProbe;
 
   FileConfig := Default(TFileToolConfig);
   FileConfig.Root := FView.WorkspaceRoot;

@@ -1461,6 +1461,18 @@ begin
   if N = 0 then
     Exit;
 
+  { A CANCEL BEFORE DISPATCH. The calls were announced but nothing has run yet;
+    if the operator already cancelled, do not start work whose results nobody
+    wants. Each call still gets a result row, so the transcript keeps its shape. }
+  if Assigned(FCancel) and FCancel() then
+  begin
+    for I := 0 to N - 1 do
+      if Assigned(AEvents.OnToolResult) then
+        AEvents.OnToolResult(ACalls[I].Id, ACalls[I].Name, 'cancelled', False);
+    AAllOk := False;
+    Exit;
+  end;
+
   { Emit every call up front, in call order, so the UI creates the tool blocks
     in order regardless of completion order. }
   for I := 0 to N - 1 do

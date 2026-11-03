@@ -310,6 +310,9 @@ type
       undo on a conversational turn. }
     procedure TestUndoShrinksTheStreamAndRestoresThePrompt;
     procedure TestSubmitWhileBusyQueuesThePrompt;
+    { Cancel PIERCES the queue: anything still waiting is the operator's text, so
+      it goes back to the composer stacked with a blank line between items. }
+    procedure TestCancelRestoresQueuedPromptsToTheComposer;
     procedure TestPasteInsertsIntoTheCompose;
     procedure TestCtrlCQuitsOnlyWhenComposeIsEmpty;
     procedure TestApprovalDimsTheBackground;
@@ -4105,6 +4108,67 @@ begin
   FApp.SetConnectPhase('loading history');
   AssertTrue('the phase is shown', FindText(ckThinking, 'loading history'));
   AssertFalse('the old label is gone', FindText(ckThinking, 'connecting'));
+end;
+
+
+procedure THarnessAppTest.TestCancelRestoresQueuedPromptsToTheComposer;
+var
+  Slow: TSlowChunks;
+  I: Integer;
+  Text: string;
+begin
+  { THE OPERATOR'S CASE. A long turn is running; two more prompts are queued; a
+    cancel must (a) stop the turn and (b) hand BOTH queued prompts back to the
+    composer, oldest first, separated by a BLANK LINE - two prompts on adjacent
+    lines would read as one two-line message. }
+  Build;
+  Slow := TSlowChunks.Create(80);
+  try
+    FFake.AfterChunk := Slow.AfterChunk;
+    FFake.AddResponse([TextDelta('working'), FinishFrame('stop'), DoneFrame]);
+    SubmitPrompt('long running');
+    for I := 1 to 300 do
+    begin
+      FApp.Step;
+      if FApp.Busy then
+        Break;
+      Sleep(2);
+    end;
+    AssertTrue('turn in flight', FApp.Busy);
+
+    SubmitPrompt('queued message 1');
+    SubmitPrompt('queued message 2');
+
+    { esc esc cancels. }
+    FInput.Push(Key(kkEscape));
+    FApp.Step;
+    FInput.Push(Key(kkEscape));
+    FApp.Step;
+    for I := 1 to 800 do
+    begin
+      FApp.Step;
+      if not FApp.Busy then
+        Break;
+      Sleep(2);
+    end;
+
+    AssertFalse('the turn was cancelled', FApp.Busy);
+    Text := string(FApp.Panel.Compose.Text);
+    AssertTrue('the first queued prompt came back: ' + Text,
+      Pos('queued message 1', Text) > 0);
+    AssertTrue('and the second too', Pos('queued message 2', Text) > 0);
+    { The BLANK LINE between them, in that order. This is the specific shape the
+      operator asked for, so assert the exact stacked pair as a SUBSTRING rather
+      than the whole composer: an early cancel also hands back the in-flight
+      prompt (`RollBackEarlyCancel`), which is the behaviour the operator pointed
+      at as the model for this one - so the composer legitimately holds more than
+      the two queued items. Asserting whole-string equality failed on exactly
+      that, correctly. }
+    AssertTrue('stacked with a blank line, oldest first: ' + Text,
+      Pos('queued message 1' + #10#10 + 'queued message 2', Text) > 0);
+  finally
+    Slow.Free;
+  end;
 end;
 
 initialization
