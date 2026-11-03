@@ -58,6 +58,9 @@ const
     block does not run into the scrollbar column. Separate from SkillValuePad
     because these are two different gaps: text-to-pane, and pane-to-margin. }
   SkillPaneRightGap = 1;
+  { The column the scrollbar occupies. The content reserves it in Measure, since
+    the container arranges the child at the MEASURED width - see the note there. }
+  SkillScrollReserve = 1;
 
 type
   { The CONTENT of the skill dialog: the field block and the markdown body,
@@ -106,6 +109,10 @@ type
     function DetailKey: string;
     property OnLoad: TSkillLoadEvent read FOnLoad write FOnLoad;
     function HandleEvent(const E: TInputEvent): Boolean; override;
+  protected
+    { A CTA was clicked. TModal reports the KEY of the pair, so this maps 'enter'
+      to load and 'esc' to dismiss - the same actions the keys perform. }
+    procedure FooterClicked(const AKey: string); override;
   end;
 
 implementation
@@ -258,14 +265,24 @@ end;
 function TSkillContent.Measure(const AAvail: TSize): TSize;
 var
   Sz: TSize;
+  W: Integer;
 begin
   Result := Default(TSize);
   if AAvail.W < 1 then
     Exit;
-  Result.W := AAvail.W;
-  Build(AAvail.W);
+  { One column NARROWER than the space offered. The scroll container arranges its
+    child at the width the child MEASURES, and when the bar shows its viewport is
+    one column narrower than the bounds - so measuring at the full width made the
+    content exactly one column too wide and it ran under the bar. THIS is why the
+    right padding kept disappearing: the pane fill was correct, but the content's
+    own bounds already reached the bar's column. }
+  W := AAvail.W - SkillScrollReserve;
+  if W < 1 then
+    W := 1;
+  Result.W := W;
+  Build(W);
   Sz := Default(TSize);
-  Sz.W := AAvail.W;
+  Sz.W := W;
   Result.H := Length(FLines) + FMarkdown.Measure(Sz).H;
 end;
 
@@ -396,6 +413,20 @@ begin
     SetFooter('loaded · esc cancel')
   else
     SetFooter('esc cancel');
+end;
+
+procedure TSkillModal.FooterClicked(const AKey: string);
+begin
+  { The click and the key must do the same thing - a CTA that behaves differently
+    from the key printed on it is worse than one that does nothing. }
+  if AKey = 'esc' then
+    Visible := False
+  else if (AKey = 'enter') and CanLoad then
+  begin
+    Visible := False;
+    if Assigned(FOnLoad) then
+      FOnLoad(FContent.FDetail.Key);
+  end;
 end;
 
 function TSkillModal.HandleEvent(const E: TInputEvent): Boolean;
