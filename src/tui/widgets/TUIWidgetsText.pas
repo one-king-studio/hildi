@@ -124,12 +124,10 @@ function HintSpans(const AText: UnicodeString; const AKeyAttr,
   AActionAttr: TAttr): TSpanArray;
 var
   { Built at RUN TIME, not declared as a typed constant. FPC does not apply the
-    source codepage to a `const Sep: UnicodeString = ' · '` initialiser, so the
-    UTF-8 bytes of the middle dot become two Latin-1 wide characters and the
-    separator never matches - every hint silently collapsed into one segment,
-    drawn all-action. A runtime assignment converts the literal properly. }
+    source codepage to a constant initialiser, so the UTF-8 bytes of a separator
+    become two Latin-1 wide characters and it never matches. }
   Sep: UnicodeString;
-  Rest, Seg, Key, Action: UnicodeString;
+  Rest, Seg, Key, Action, Split: UnicodeString;
   P, Sp, N: Integer;
 
   procedure Add(const AText: UnicodeString; const AAttr: TAttr);
@@ -142,6 +140,43 @@ var
     Inc(N);
   end;
 
+  { Collapse a run of spaces to one, so a group gap is not carried into the drawn
+    text. }
+  function Collapse(const AText: UnicodeString): UnicodeString;
+  var
+    K: Integer;
+    Prev: Boolean;
+  begin
+    Result := '';
+    Prev := False;
+    for K := 1 to Length(AText) do
+      if AText[K] = ' ' then
+      begin
+        if not Prev then
+          Result := Result + ' ';
+        Prev := True;
+      end
+      else
+      begin
+        Result := Result + AText[K];
+        Prev := False;
+      end;
+  end;
+
+  { The next group boundary, or 0. TWO OR MORE SPACES separate groups - the
+    approval dialog's house style, which the operator asked every CTA to adopt -
+    and the middle dot is still accepted so existing call sites keep working. }
+  function NextSep(const AText: UnicodeString): Integer;
+  var
+    K: Integer;
+  begin
+    Result := Pos(Sep, AText);
+    for K := 1 to Length(AText) - 1 do
+      if (AText[K] = ' ') and (AText[K + 1] = ' ') then
+        if (Result = 0) or (K < Result) then
+          Exit(K);
+  end;
+
 begin
   Result := nil;
   N := 0;
@@ -149,17 +184,35 @@ begin
   Rest := AText;
   while Rest <> '' do
   begin
-    P := Pos(Sep, Rest);
+    P := NextSep(Rest);
+    { What separated the groups, so it can be re-emitted: a splitter that drops
+      characters would silently corrupt every hint on screen. }
+    Split := '';
     if P > 0 then
     begin
       Seg := Copy(Rest, 1, P - 1);
-      Rest := Copy(Rest, P + Length(Sep), MaxInt);
+      if Copy(Rest, P, Length(Sep)) = Sep then
+      begin
+        Split := Sep;
+        Rest := Copy(Rest, P + Length(Sep), MaxInt);
+      end
+      else
+      begin
+        { A run of spaces separates the groups; ONE space is re-emitted, so the
+          drawn hint has a normal gap rather than a hole. }
+        Split := ' ';
+        while (P <= Length(Rest)) and (Rest[P] = ' ') do
+          Inc(P);
+        Rest := Copy(Rest, P, MaxInt);
+      end;
     end
     else
     begin
       Seg := Rest;
       Rest := '';
     end;
+    if Seg = '' then
+      Continue;
 
     Sp := Pos(UnicodeString(' '), Seg);
     if Sp > 1 then
@@ -167,15 +220,16 @@ begin
       { The KEY is chrome: lowercased whatever the caller wrote, so there is one
         house style. The ACTION keeps its case - it is a phrase, not a key. }
       Key := LowerCase(Copy(Seg, 1, Sp - 1));
-      Action := Copy(Seg, Sp, MaxInt);
+      Action := Collapse(Copy(Seg, Sp, MaxInt));
       Add(Key, AKeyAttr);
       Add(Action, AActionAttr);
     end
     else
-      Add(Seg, AActionAttr);
+      Add(Collapse(Seg), AActionAttr);
 
-    if Rest <> '' then
-      Add(Sep, AKeyAttr);
+    { Re-emit the separator so joining the spans reproduces the input. }
+    if (Rest <> '') and (Split <> '') then
+      Add(Split, AKeyAttr);
   end;
 end;
 
