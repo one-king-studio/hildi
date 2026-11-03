@@ -22,6 +22,7 @@ uses
   TUIBase, TUIInput,
   TUISurface, TUIWidget,
   TUITheme, TUIGrapheme,
+  TUIWidgetsText,
   MarkdownTree, MarkdownRender;
 
 type
@@ -190,8 +191,8 @@ procedure TSkillModal.Render(const S: ISurface);
 var
   L, R, T, B, Y, I, N, CtaX: Integer;
   Bg, BorderAttr, TitleAttr, LabelAttr, ValueAttr, BodyAttr: TAttr;
-  Lines: TStringArray;
-  Line, Title, Cta: string;
+  Title, Cta: string;
+  Spans: TSpanArray;
   BodyTop: Integer;
 begin
   if (FBounds.W < 12) or (FBounds.H < SkillModalChromeRows) then
@@ -287,17 +288,21 @@ begin
   end;
 
   { The action row, always on the bottom border's inner row so a long body cannot
-    push it away, and right-aligned to match the skills panel's hint row. }
+    push it away. Right-aligned to match the panel's hint row, and TWO-TONE
+    through the shared splitter: the keybinding dim, the action lighter. A bare
+    "loaded  esc cancel" has no key on the first segment, so HintSpans draws it
+    all-action - which is right, there is no binding there. }
   if CanLoad then
-    Cta := 'enter use  esc cancel'
+    Cta := 'enter use · esc cancel'
   else if FDetail.Loaded then
-    Cta := 'loaded  esc cancel'
+    Cta := 'loaded · esc cancel'
   else
     Cta := 'esc cancel';
-  CtaX := R - 1 - Length(Cta);
+  Spans := HintSpans(UnicodeString(Cta), FTheme.Muted, ValueAttr);
+  CtaX := R - 1 - SpansWidth(Spans);
   if CtaX < L + 2 then
     CtaX := L + 2;
-  PutText(S, CtaX, B - 1, UnicodeString(Cta), LabelAttr);
+  PaintSpans(S, CtaX, B - 1, Spans);
 end;
 
 function TSkillModal.HandleEvent(const E: TInputEvent): Boolean;
