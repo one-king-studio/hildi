@@ -355,6 +355,10 @@ begin
   FPalette.Free;
   FStatus.Free;
   FStats.Free;
+  { The loaded-skills row. Missed when it was added in c4c856f - every sibling
+    block was freed and this one was not, which the leak gate caught as rc=203
+    in three suites that construct this panel. }
+  FLoadedSkills.Free;
   inherited Destroy;
 end;
 
