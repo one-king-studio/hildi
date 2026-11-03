@@ -1,17 +1,21 @@
 unit TUIWidgetsSkillmodal;
 { The skill detail dialog: one skill's name, description, metadata, and full
-  body, with a CTA to load it when it is not already in context.
+  SKILL.md body - the body rendered as MARKDOWN, and the whole thing scrollable.
 
-  It BROWSES and reports; it does not load. The operator pressing "load" closes
-  the dialog and hands the key back to the host, exactly as THistoryModal
+  The FRAME is not here. TSkillModal descends from TModal, which owns the border,
+  the title, the 80% height cap and the FIXED CTA footer with its divider. This
+  unit supplies only the CONTENT: the field block and the markdown body, stacked
+  inside the modal's single scroll container so they scroll together.
+
+  It BROWSES and reports; it does not load. The operator pressing "enter use"
+  closes the dialog and hands the key back to the host, exactly as THistoryModal
   reports a turn id and lets the host undo. That keeps the widget free of the
   registry, the driver and the approval gate.
 
-  Rows are handed in already resolved as a plain record of strings. That is not
-  only tidiness: HildiSkills uses HildiAgent, and the Process Split forbids
-  HildiHarnessApp (and therefore anything it draws with) from reaching the
-  agent. Taking TSkill here would break the split, which TSplitBoundaryTest
-  enforces. }
+  Rows are handed in already resolved as a plain record of strings: HildiSkills
+  uses HildiAgent, and the Process Split forbids HildiHarnessApp (and anything it
+  draws with) from reaching the agent. Taking TSkill here would break the split,
+  which TSplitBoundaryTest enforces. }
 
 {$mode delphi}{$H+}{$codepage utf8}
 
@@ -22,7 +26,7 @@ uses
   TUIBase, TUIInput,
   TUISurface, TUIWidget,
   TUITheme, TUIGrapheme,
-  TUIWidgetsText, TUIWidgetsMarkdownView, TUIWidgetsScroll,
+  TUIWidgetsText, TUIWidgetsModal, TUIWidgetsMarkdownView, TUIWidgetsScroll,
   MarkdownTree, MarkdownRender;
 
 type
@@ -47,50 +51,63 @@ type
   TSkillLoadEvent = procedure(const AKey: string) of object;
 
 const
-  SkillModalChromeRows = 5;   // top border, title, hint row, bottom border, pad
-  { The dialog takes at most this share of the screen height, so it never fills
-    the frame and the transcript stays visible behind it. }
-  SkillModalMaxHeightPercent = 80;
-  SkillModalMinWidth = 30;
+  { One column of inline padding inside a value's sunken pane, so text never
+    touches the darker background's edge. }
+  SkillValuePad = 1;
 
 type
-  TSkillModal = class(TWidget)
+  { The CONTENT of the skill dialog: the field block and the markdown body,
+    stacked. It is what TModal scrolls.
+
+    It is a widget rather than draw calls inside the modal because TModal takes
+    ONE content widget and gives it a single scroll region. Splitting the fields
+    and the body into two independently-scrolled areas is what the operator
+    explicitly did not want. }
+  TSkillContent = class(TWidget)
   private
     FTheme: TTheme;
     FDetail: TSkillDetail;
-    FOnLoad: TSkillLoadEvent;
-    { The body is STYLED markdown inside a scroll container. TMarkdownView is the
-      same widget the file viewer uses, so this dialog renders markdown properly -
-      headings, emphasis, code, lists - AND scrolls, instead of painting
-      pre-rendered plain lines with a hand-rolled scroll offset. }
     FMarkdown: TMarkdownView;
-    FBody: TScrollContainer;
-    { Where the body starts, so Render knows what the container covers. }
+    { Pre-built rows. Built in Arrange at the width they will be drawn at, so
+      the height reserved and the rows painted come from ONE source - the bug the
+      palette had when Measure and Render disagreed. }
+    FLines: TStringArray;
+    FKinds: array of Byte;      // 0 caption, 1 value, 2 gap
+    FBuildWidth: Integer;
     FBodyTop: Integer;
-    { The metadata block, PRE-WRAPPED in Arrange and drawn by Render. Building it
-      once means the height Arrange reserves and the rows Render paints cannot
-      disagree - the bug the palette had when Measure and Render disagreed. }
-    FMetaLines: TStringArray;
-    FMetaIsValue: array of Boolean;
-    procedure BuildMeta(AWidth: Integer);
-    function CanLoad: Boolean;
+    FBodyH: Integer;
+    procedure Build(AWidth: Integer);
+    function MetaRows: Integer;
   public
     constructor Create(const ATheme: TTheme);
     destructor Destroy; override;
+    procedure SetDetail(const ADetail: TSkillDetail);
+    procedure ScrollTop;
+    function Measure(const AAvail: TSize): TSize; override;
     procedure Arrange(const ABounds: TRect); override;
+    procedure Render(const S: ISurface); override;
+    function HandleEvent(const E: TInputEvent): Boolean; override;
+  end;
+
+  TSkillModal = class(TModal)
+  private
+    FContent: TSkillContent;
+    FOnLoad: TSkillLoadEvent;
+    function CanLoad: Boolean;
+    procedure RefreshFooter;
+  public
+    constructor Create(const ATheme: TTheme);
     procedure SetDetail(const ADetail: TSkillDetail);
     { Echoed back when the operator activates the load CTA. }
     function DetailKey: string;
     property OnLoad: TSkillLoadEvent read FOnLoad write FOnLoad;
-    function Measure(const AAvail: TSize): TSize; override;
-    procedure Render(const S: ISurface); override;
     function HandleEvent(const E: TInputEvent): Boolean; override;
   end;
 
 implementation
 
-{ A rect constructor. Local because each TUI unit carries its own; there is no
-  shared one and importing a unit for four lines is not worth it. }
+{ A rect constructor. Local because each TUI unit carries its own; importing a
+  unit for four lines is not worth it. }
 function Rc(AX, AY, AW, AH: Integer): TRect;
 begin
   Result := Default(TRect);
@@ -100,289 +117,288 @@ begin
   Result.H := AH;
 end;
 
-constructor TSkillModal.Create(const ATheme: TTheme);
+{ --- TSkillContent ------------------------------------------------------- }
+
+constructor TSkillContent.Create(const ATheme: TTheme);
 begin
   inherited Create;
   FTheme := ATheme;
   FMarkdown := TMarkdownView.Create;
-  FBody := TScrollContainer.Create(FMarkdown, smAuto, smNever);
+  FBuildWidth := -1;
 end;
 
-destructor TSkillModal.Destroy;
+destructor TSkillContent.Destroy;
 begin
-  { FBody owns FMarkdown. }
-  FBody.Free;
+  FMarkdown.Free;
   inherited Destroy;
+end;
+
+procedure TSkillContent.SetDetail(const ADetail: TSkillDetail);
+begin
+  FDetail := ADetail;
+  FMarkdown.SetSource(FDetail.Body);
+  FMarkdown.FinishSource;
+  { A new skill opens at the TOP: carrying the previous scroll would land the
+    operator mid-way through a document they have not read. }
+  FBuildWidth := -1;
+end;
+
+procedure TSkillContent.ScrollTop;
+begin
+  FBuildWidth := -1;
+end;
+
+procedure TSkillContent.Build(AWidth: Integer);
+var
+  Doc: TMdDocument;
+  Rendered: TMdLineArray;
+
+  procedure AddGap;
+  begin
+    SetLength(FLines, Length(FLines) + 1);
+    FLines[High(FLines)] := '';
+    SetLength(FKinds, Length(FKinds) + 1);
+    FKinds[High(FKinds)] := 2;
+  end;
+
+  { A caption row, then the value WRAPPED as markdown so `code` and **emphasis**
+    read as such rather than as their source. }
+  procedure AddField(const ACaption, AValue: string);
+  var
+    K: Integer;
+  begin
+    if AValue = '' then
+      Exit;
+    if Length(FLines) > 0 then
+      AddGap;
+    SetLength(FLines, Length(FLines) + 1);
+    FLines[High(FLines)] := ACaption;
+    SetLength(FKinds, Length(FKinds) + 1);
+    FKinds[High(FKinds)] := 0;
+    Doc := ParseTree(AValue);
+    try
+      Rendered := RenderTree(Doc, AWidth - 2 * SkillValuePad);
+    finally
+      Doc.Free;
+    end;
+    for K := 0 to High(Rendered) do
+    begin
+      SetLength(FLines, Length(FLines) + 1);
+      FLines[High(FLines)] := Rendered[K];
+      SetLength(FKinds, Length(FKinds) + 1);
+      FKinds[High(FKinds)] := 1;
+    end;
+  end;
+
+  procedure AddList(const ACaption: string; const AValues: TStringArray);
+  var
+    K: Integer;
+  begin
+    if Length(AValues) = 0 then
+      Exit;
+    if Length(FLines) > 0 then
+      AddGap;
+    SetLength(FLines, Length(FLines) + 1);
+    FLines[High(FLines)] := ACaption;
+    SetLength(FKinds, Length(FKinds) + 1);
+    FKinds[High(FKinds)] := 0;
+    for K := 0 to High(AValues) do
+    begin
+      SetLength(FLines, Length(FLines) + 1);
+      FLines[High(FLines)] := AValues[K];
+      SetLength(FKinds, Length(FKinds) + 1);
+      FKinds[High(FKinds)] := 1;
+    end;
+  end;
+
+begin
+  if AWidth = FBuildWidth then
+    Exit;
+  FBuildWidth := AWidth;
+  FLines := nil;
+  FKinds := nil;
+
+  AddField('Description', FDetail.Description);
+  AddField('License', FDetail.License);
+  AddField('Compatibility', FDetail.Compatibility);
+  { Labelled as not enforced: it is displayed and never consulted. }
+  AddField('Allowed tools (not enforced)', FDetail.AllowedTools);
+  AddField('Directory', FDetail.Location);
+  AddList('Files', FDetail.Resources);
+  { The prompt caption: the body below it is the skill's instructions, and naming
+    them is what tells the operator the markdown is the thing that gets loaded. }
+  SetLength(FLines, Length(FLines) + 1);
+  FLines[High(FLines)] := 'Prompt';
+  SetLength(FKinds, Length(FKinds) + 1);
+  FKinds[High(FKinds)] := 0;
+end;
+
+function TSkillContent.MetaRows: Integer;
+var
+  I: Integer;
+begin
+  Result := 0;
+  for I := 0 to High(FKinds) do
+    if FKinds[I] <> 0 then
+      Inc(Result);   // value rows and gaps both take a row
+end;
+
+function TSkillContent.Measure(const AAvail: TSize): TSize;
+var
+  Sz: TSize;
+begin
+  Result := Default(TSize);
+  if AAvail.W < 1 then
+    Exit;
+  Result.W := AAvail.W;
+  Build(AAvail.W);
+  Sz := Default(TSize);
+  Sz.W := AAvail.W;
+  Result.H := Length(FLines) + FMarkdown.Measure(Sz).H;
+end;
+
+procedure TSkillContent.Arrange(const ABounds: TRect);
+var
+  R: TRect;
+  Sz: TSize;
+  BodyY, BodyH: Integer;
+begin
+  inherited Arrange(ABounds);
+  Build(ABounds.W);
+  BodyY := ABounds.Y + Length(FLines);
+  Sz := Default(TSize);
+  Sz.W := ABounds.W;
+  BodyH := FMarkdown.Measure(Sz).H;
+  if BodyH < 1 then
+    BodyH := 1;
+  FBodyTop := BodyY;
+  FBodyH := BodyH;
+  R := Default(TRect);
+  R.X := ABounds.X;
+  R.Y := BodyY;
+  R.W := ABounds.W;
+  R.H := BodyH;
+  FMarkdown.Arrange(R);
+end;
+
+procedure TSkillContent.Render(const S: ISurface);
+var
+  I, X, Y, W: Integer;
+  CaptionAttr, ValueAttr, PaneAttr: TAttr;
+  Line: UnicodeString;
+begin
+  if (FBounds.W < 4) or (FBounds.H < 1) then
+    Exit;
+  X := FBounds.X;
+  W := FBounds.W;
+  CaptionAttr := OnBg(FTheme.Muted, FTheme.RaisedBg);
+  ValueAttr := OnBg(FTheme.Text, FTheme.SunkenBg);
+  PaneAttr := OnBg(FTheme.Text, FTheme.SunkenBg);
+
+  Y := FBounds.Y;
+  for I := 0 to High(FLines) do
+  begin
+    if Y >= FBounds.Y + FBounds.H then
+      Break;
+    case FKinds[I] of
+      0:
+        { A caption is chrome on the modal's own tone. }
+        PutText(S, X, Y, UnicodeString(FLines[I]), CaptionAttr);
+      1:
+        begin
+          { A value gets the SUNKEN pane across the FULL width, with one column
+            of inline padding so the text never touches the darker edge. Filling
+            only the text's own width is what made earlier values look like
+            coloured text rather than a field. }
+          S.FillRect(Rc(X, Y, W, 1), PaneAttr);
+          Line := UnicodeString(FLines[I]);
+          PutText(S, X + SkillValuePad, Y, Line, ValueAttr);
+        end;
+      2:
+        ;   // a gap row: counted, never drawn
+    end;
+    Inc(Y);
+  end;
+
+  { The BODY on the same sunken tone across its whole area, so the markdown reads
+    as the prompt FIELD. Markdown blocks draw with sfScreenBg, so they inherit
+    this fill; fenced code keeps its own CodeBackdrop one step darker again. }
+  if FBodyH > 0 then
+    S.FillRect(Rc(FBounds.X, FBodyTop, FBounds.W, FBodyH), PaneAttr);
+  FMarkdown.Render(S);
+end;
+
+function TSkillContent.HandleEvent(const E: TInputEvent): Boolean;
+begin
+  Result := FMarkdown.HandleEvent(E);
+end;
+
+{ --- TSkillModal --------------------------------------------------------- }
+
+constructor TSkillModal.Create(const ATheme: TTheme);
+begin
+  FContent := TSkillContent.Create(ATheme);
+  { Scrollable: the field block and the body scroll together under ONE bar, and
+    TModal keeps the CTA footer fixed below them. }
+  inherited Create(ATheme, FContent, True);
+  FOnLoad := nil;
 end;
 
 procedure TSkillModal.SetDetail(const ADetail: TSkillDetail);
 begin
-  FDetail := ADetail;
-  { A new skill opens at the TOP: carrying the previous scroll would land the
-    operator mid-way through a document they have not read. }
-  FMarkdown.SetSource(FDetail.Body);
-  FMarkdown.FinishSource;
-  FBody.ScrollTo(0, 0);
+  FContent.SetDetail(ADetail);
+  SetTitle('skill: ' + ADetail.Name);
+  RefreshFooter;
 end;
 
 function TSkillModal.DetailKey: string;
 begin
-  Result := FDetail.Key;
-end;
-
-{ Wrap the metadata block to AWidth. Each value is word-wrapped, so a long
-  description occupies the rows it actually needs - the earlier single-line
-  PutText ran under the right border. }
-procedure TSkillModal.BuildMeta(AWidth: Integer);
-var
-  Doc: TMdDocument;
-  Rendered: TMdLineArray;
-  I: Integer;
-
-  procedure AddLine(const AText: string; AIsValue: Boolean);
-  var
-    Lines: TMdLineArray;
-    K: Integer;
-  begin
-    if AText = '' then
-      Exit;
-    Rendered := nil;
-    Doc := ParseTree(AText);
-    try
-      Lines := RenderTree(Doc, AWidth);
-    finally
-      Doc.Free;
-    end;
-    for K := 0 to High(Lines) do
-    begin
-      SetLength(FMetaLines, Length(FMetaLines) + 1);
-      FMetaLines[High(FMetaLines)] := Lines[K];
-      SetLength(FMetaIsValue, Length(FMetaIsValue) + 1);
-      FMetaIsValue[High(FMetaIsValue)] := AIsValue;
-    end;
-  end;
-
-begin
-  FMetaLines := nil;
-  FMetaIsValue := nil;
-  { Captions are drawn as plain chrome rows; values are WRAPPED markdown, so a
-    value containing `code` or **emphasis** reads as such rather than as its
-    source. }
-  if FDetail.Description <> '' then
-  begin
-    AddLine('Description', False);
-    AddLine(FDetail.Description, True);
-  end;
-  if FDetail.License <> '' then
-  begin
-    AddLine('License', False);
-    AddLine(FDetail.License, True);
-  end;
-  if FDetail.Compatibility <> '' then
-  begin
-    AddLine('Compatibility', False);
-    AddLine(FDetail.Compatibility, True);
-  end;
-  if FDetail.AllowedTools <> '' then
-  begin
-    { Labelled as not enforced: it is displayed and never consulted. }
-    AddLine('Allowed tools (not enforced)', False);
-    AddLine(FDetail.AllowedTools, True);
-  end;
-  if FDetail.Location <> '' then
-  begin
-    AddLine('Directory', False);
-    AddLine(FDetail.Location, True);
-  end;
-  if Length(FDetail.Resources) > 0 then
-  begin
-    AddLine('Files', False);
-    for I := 0 to High(FDetail.Resources) do
-      AddLine(FDetail.Resources[I], True);
-  end;
-  { I is used above; keep the compiler honest about the loop variable. }
-  if I < 0 then
-    ;
-end;
-
-procedure TSkillModal.Arrange(const ABounds: TRect);
-var
-  InnerW, Y, I, MetaH, BodyH: Integer;
-  R: TRect;
-begin
-  inherited Arrange(ABounds);
-  InnerW := ABounds.W - 4;
-  if InnerW < 1 then
-    InnerW := 1;
-
-  { The metadata lines are drawn as plain text in Render, one row each, so the
-    body starts below them. Counted here because Render needs to know where the
-    container sits. }
-  { Counted from the FIELDS, matching what Render draws: two rows per optional
-    pair (caption + value), and the Files list takes one row plus one per entry. }
-  { Built HERE, at the width it will be drawn at, so the rows Arrange reserves
-    and the rows Render paints come from one source. }
-  BuildMeta(InnerW);
-  MetaH := Length(FMetaLines);
-  Y := ABounds.Y + 1 + MetaH;
-  FBodyTop := Y;
-
-  BodyH := ABounds.Y + ABounds.H - SkillModalChromeRows - Y;
-  if BodyH < 1 then
-    BodyH := 1;
-  R := Default(TRect);
-  R.X := ABounds.X + 2;
-  R.Y := Y;
-  R.W := InnerW;
-  R.H := BodyH;
-  FBody.Arrange(R);
+  Result := FContent.FDetail.Key;
 end;
 
 function TSkillModal.CanLoad: Boolean;
 begin
   { Nothing to do when it is already in context, and a skill with no key cannot
     be addressed. }
-  Result := (not FDetail.Loaded) and (FDetail.Key <> '');
+  Result := (not FContent.FDetail.Loaded) and (FContent.FDetail.Key <> '');
 end;
 
-function TSkillModal.Measure(const AAvail: TSize): TSize;
+procedure TSkillModal.RefreshFooter;
 begin
-  Result.W := AAvail.W - 6;
-  if Result.W < SkillModalMinWidth then
-    Result.W := AAvail.W;
-  { At most 80% of the height, so the dialog never fills the frame: the
-    transcript showing behind it is what says "modal". The body scrolls inside
-    whatever is left. }
-  Result.H := (AAvail.H * SkillModalMaxHeightPercent) div 100;
-  if Result.H < SkillModalChromeRows + 3 then
-    Result.H := AAvail.H;
-  if Result.H > AAvail.H then
-    Result.H := AAvail.H;
-end;
-
-procedure TSkillModal.Render(const S: ISurface);
-var
-  L, R, T, B, Y, I, N, CtaX: Integer;
-  Bg, BorderAttr, TitleAttr, LabelAttr, ValueAttr, BodyAttr: TAttr;
-  Title, Cta: string;
-  Spans: TSpanArray;
-  BodyTop: Integer;
-begin
-  if (FBounds.W < 12) or (FBounds.H < SkillModalChromeRows) then
-    Exit;
-  L := FBounds.X;
-  R := FBounds.X + FBounds.W - 1;
-  T := FBounds.Y;
-  B := FBounds.Y + FBounds.H - 1;
-
-  { The modal is the RAISED tone; its field values and the markdown body sit one
-    step darker on SUNKEN. Markdown blocks are drawn with sfScreenBg, so they
-    take whatever is behind them - which is why the body needs a real fill rather
-    than just darker text. Fenced code keeps its own CodeBackdrop, already one
-    step darker again, so it still reads as a distinct surface. }
-  Bg := OnBg(FTheme.Text, FTheme.RaisedBg);
-  BorderAttr := OnBg(FTheme.Border, FTheme.RaisedBg);
-  TitleAttr := OnBg(FTheme.Accent, FTheme.RaisedBg);
-  LabelAttr := OnBg(FTheme.Muted, FTheme.RaisedBg);
-  ValueAttr := OnBg(FTheme.Text, FTheme.SunkenBg);
-  BodyAttr := OnBg(FTheme.Text, FTheme.SunkenBg);
-
-  S.FillRect(FBounds, Bg);
-  PutCh(S, L, T, '╭', BorderAttr);
-  PutCh(S, R, T, '╮', BorderAttr);
-  PutCh(S, L, B, '╰', BorderAttr);
-  PutCh(S, R, B, '╯', BorderAttr);
-  for I := L + 1 to R - 1 do
-  begin
-    PutCh(S, I, T, '─', BorderAttr);
-    PutCh(S, I, B, '─', BorderAttr);
-  end;
-  for I := T + 1 to B - 1 do
-  begin
-    PutCh(S, L, I, '│', BorderAttr);
-    PutCh(S, R, I, '│', BorderAttr);
-  end;
-
-  Title := ' skill: ' + FDetail.Name + ' ';
-  PutText(S, L + 2, T, UnicodeString(Title), TitleAttr);
-
-  Y := T + 1;
-  { The metadata block, drawn from the lines BuildMeta wrapped. CAPTIONS are
-    modal-tone chrome; VALUES get the sunken surface, one step darker, so the
-    shape of "field / value" is legible without a border per field. The fill
-    runs the width of each value row, not the whole dialog: only the content is
-    inset, the modal frame stays raised. }
-  for I := 0 to High(FMetaLines) do
-  begin
-    if Y >= B - 1 then
-      Break;
-    if FMetaIsValue[I] then
-    begin
-      S.FillRect(Rc(L + 2, Y, R - L - 3, 1), OnBg(FTheme.Text, FTheme.SunkenBg));
-      PutText(S, L + 2, Y, UnicodeString(FMetaLines[I]), ValueAttr);
-    end
-    else
-      PutText(S, L + 2, Y, UnicodeString(FMetaLines[I]), LabelAttr);
-    Inc(Y);
-  end;
-  Inc(Y);
-
-  { The body is the STYLED markdown view inside its scroll container, arranged
-    in Arrange and drawn here. It renders headings, emphasis, code and lists
-    properly and handles its own scrolling, so there is no line-splitting or
-    offset arithmetic left in this unit. }
-  FBody.Render(S);
-
-  { The action row, always on the bottom border's inner row so a long body cannot
-    push it away. Right-aligned to match the panel's hint row, and TWO-TONE
-    through the shared splitter: the keybinding dim, the action lighter. A bare
-    "loaded  esc cancel" has no key on the first segment, so HintSpans draws it
-    all-action - which is right, there is no binding there. }
+  { Two-tone via the modal's footer splitter. The separator is the dot, NOT two
+    spaces: HintSpans joins on it, and two spaces renders the whole line flat. }
   if CanLoad then
-    Cta := 'enter use · esc cancel'
-  else if FDetail.Loaded then
-    Cta := 'loaded · esc cancel'
+    SetFooter('enter use · esc cancel')
+  else if FContent.FDetail.Loaded then
+    SetFooter('loaded · esc cancel')
   else
-    Cta := 'esc cancel';
-  { Both attrs carry the dialog's own background: PaintSpans sets only the
-    foreground, so a bare colour left the row on whatever background the fill
-    gave it and the CTA read as a stripe - the same bug the panel's hint row had. }
-  Spans := HintSpans(UnicodeString(Cta),
-    OnBg(FTheme.Muted, FTheme.RaisedBg),
-    OnBg(FTheme.Text, FTheme.RaisedBg));
-  CtaX := R - 1 - SpansWidth(Spans);
-  if CtaX < L + 2 then
-    CtaX := L + 2;
-  PaintSpans(S, CtaX, B - 1, Spans);
+    SetFooter('esc cancel');
 end;
 
 function TSkillModal.HandleEvent(const E: TInputEvent): Boolean;
 begin
   Result := False;
-  if E.Kind <> ikKey then
-    Exit;
-  case E.Key.Kind of
-    kkEscape:
-      begin
-        { Dismiss changes nothing: the skill stays as it was. }
-        Visible := False;
-        Result := True;
-      end;
-    { Scrolling belongs to the container: it owns the clamp, the scrollbar and
-      the wheel. Anything it does not consume is not ours. }
-    kkUp, kkDown, kkPageUp, kkPageDown, kkHome, kkEnd:
-      Result := FBody.HandleEvent(E);
-    kkEnter:
-      if CanLoad then
-      begin
-        Visible := False;
-        if Assigned(FOnLoad) then
-          FOnLoad(FDetail.Key);
-        Result := True;
-      end;
-  else
-    ;
-  end;
+  if E.Kind = ikKey then
+    case E.Key.Kind of
+      kkEscape:
+        begin
+          { Dismiss changes nothing: the skill stays as it was. }
+          Visible := False;
+          Exit(True);
+        end;
+      kkEnter:
+        if CanLoad then
+        begin
+          Visible := False;
+          if Assigned(FOnLoad) then
+            FOnLoad(FContent.FDetail.Key);
+          Exit(True);
+        end;
+    else
+      ;
+    end;
+  { Everything else - arrows, page keys, the wheel - goes to the scroller. }
+  Result := inherited HandleEvent(E);
 end;
 
 end.
