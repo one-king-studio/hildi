@@ -21,7 +21,8 @@ uses
   Classes, SysUtils,
   TUIBase, TUIInput,
   TUISurface, TUIWidget,
-  TUITheme, TUIGrapheme;
+  TUITheme, TUIGrapheme,
+  MarkdownTree, MarkdownRender;
 
 type
   { One skill as the dialog shows it. The host fills this from the registry; the
@@ -58,8 +59,14 @@ type
     FDetail: TSkillDetail;
     FScroll: Integer;
     FOnLoad: TSkillLoadEvent;
+    { The body rendered from markdown at the last width it was laid out for.
+      Recomputed when the width changes, not per frame: ParseTree is not cheap
+      and a dialog repaints on every keystroke elsewhere in the app. }
+    FBodyLines: TStringArray;
+    FBodyWidth: Integer;
     { The body is the only unbounded part; the metadata rows are fixed. A long
       SKILL.md must scroll rather than push the CTAs off the screen. }
+    procedure EnsureBodyLines(AWidth: Integer);
     function BodyRows: Integer;
     function VisibleBodyRows: Integer;
     function MaxScroll: Integer;
@@ -129,6 +136,32 @@ begin
     FScroll := 0;
   if FScroll > MaxScroll then
     FScroll := MaxScroll;
+end;
+
+procedure TSkillModal.EnsureBodyLines(AWidth: Integer);
+var
+  Doc: TMdDocument;
+  Rendered: TMdLineArray;
+  I: Integer;
+begin
+  { RenderTree parses the markdown AND wraps to AWidth, so this is both the
+    markdown rendering and the word-wrapping in one pass. Frontmatter is not
+    rendered: it is metadata, and the dialog shows the parsed fields above. }
+  if (AWidth = FBodyWidth) and (Length(FBodyLines) > 0) then
+    Exit;
+  FBodyWidth := AWidth;
+  FBodyLines := nil;
+  if FDetail.Body = '' then
+    Exit;
+  Doc := ParseTree(FDetail.Body);
+  try
+    Rendered := RenderTree(Doc, AWidth);
+  finally
+    Doc.Free;
+  end;
+  SetLength(FBodyLines, Length(Rendered));
+  for I := 0 to High(Rendered) do
+    FBodyLines[I] := Rendered[I];
 end;
 
 function TSkillModal.CanLoad: Boolean;
@@ -236,17 +269,18 @@ begin
     end;
   end;
 
-  { The body, clipped to what is left and scrolled. }
+  { The body: MARKDOWN, word-wrapped by RenderTree at the dialog's inner width,
+    then scrolled. A raw line split would have shown the markdown source - the
+    asterisks and hashes - rather than the document. }
   BodyTop := Y + 1;
-  if (FDetail.Body <> '') and (BodyTop < B - 1) then
+  if BodyTop < B - 1 then
   begin
-    Lines := FDetail.Body.Split([#10]);
+    EnsureBodyLines(R - L - 4);
     N := 0;
     I := FScroll;
-    while (I <= High(Lines)) and (BodyTop + N < B - 1) do
+    while (I <= High(FBodyLines)) and (BodyTop + N < B - 1) do
     begin
-      Line := Lines[I];
-      PutText(S, L + 2, BodyTop + N, UnicodeString(Line), BodyAttr);
+      PutText(S, L + 2, BodyTop + N, UnicodeString(FBodyLines[I]), BodyAttr);
       Inc(I);
       Inc(N);
     end;
