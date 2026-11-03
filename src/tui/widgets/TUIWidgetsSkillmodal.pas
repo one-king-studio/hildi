@@ -225,6 +225,10 @@ begin
   AddField('Allowed tools (not enforced)', FDetail.AllowedTools);
   AddField('Directory', FDetail.Location);
   AddList('Files', FDetail.Resources);
+  { A gap ABOVE the prompt label too: the body is a different kind of content
+    from the fields, and running it straight after the last field made the label
+    read as another field name. }
+  AddGap;
   { The prompt caption: the body below it is the skill's instructions, and naming
     them is what tells the operator the markdown is the thing that gets loaded. }
   SetLength(FLines, Length(FLines) + 1);
@@ -292,8 +296,13 @@ begin
   X := FBounds.X;
   W := FBounds.W;
   CaptionAttr := OnBg(FTheme.Muted, FTheme.RaisedBg);
-  ValueAttr := OnBg(FTheme.Text, FTheme.SunkenBg);
-  PaneAttr := OnBg(FTheme.Text, FTheme.SunkenBg);
+  ValueAttr := OnBg(FTheme.Text, FTheme.Bg);
+  { FTheme.Bg, not SunkenBg. The tones descend 235 (raised) / 234 (Bg) / 233
+    (sunken), and the operator found the sunken pane one step too dark against the
+    modal. Bg is the mid tone, and it is mid in the light theme too (254/253/252)
+    rather than an accident of the dark palette. Fenced code keeps CodeBackdrop,
+    one step below, so it still reads as its own surface. }
+  PaneAttr := OnBg(FTheme.Text, FTheme.Bg);
 
   Y := FBounds.Y;
   for I := 0 to High(FLines) do
@@ -310,7 +319,9 @@ begin
             of inline padding so the text never touches the darker edge. Filling
             only the text's own width is what made earlier values look like
             coloured text rather than a field. }
-          S.FillRect(Rc(X, Y, W, 1), PaneAttr);
+          { The pane ends one column short, so text and background both keep
+            clear of the scrollbar column on the right. }
+          S.FillRect(Rc(X, Y, W - SkillValuePad, 1), PaneAttr);
           Line := UnicodeString(FLines[I]);
           PutText(S, X + SkillValuePad, Y, Line, ValueAttr);
         end;
@@ -324,7 +335,8 @@ begin
     as the prompt FIELD. Markdown blocks draw with sfScreenBg, so they inherit
     this fill; fenced code keeps its own CodeBackdrop one step darker again. }
   if FBodyH > 0 then
-    S.FillRect(Rc(FBounds.X, FBodyTop, FBounds.W, FBodyH), PaneAttr);
+    S.FillRect(Rc(FBounds.X, FBodyTop, FBounds.W - SkillValuePad, FBodyH),
+      PaneAttr);
   FMarkdown.Render(S);
 end;
 

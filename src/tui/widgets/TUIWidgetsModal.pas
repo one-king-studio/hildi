@@ -140,9 +140,11 @@ end;
 
 function TModal.TitleAttr: TAttr;
 begin
-  { TITLE, not Accent: every dialog here titles with Title. Accent is the
-    focus/selection colour and made a heading read as an active control. }
-  Result := OnBg(FTheme.Title, FTheme.RaisedBg);
+  { Plain TEXT, not FTheme.Title. Title is a blue accent (81 dark / 25 light) and
+    the operator asked for normal text: the frame should look like a container,
+    not like it is highlighting its own name. Bold keeps it readable as a heading
+    without adding a colour. }
+  Result := OnBg(WithStyle(FTheme.Text, [sfBold]), FTheme.RaisedBg);
 end;
 
 function TModal.FooterKeyAttr: TAttr;
