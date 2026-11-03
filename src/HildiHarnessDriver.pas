@@ -291,6 +291,22 @@ begin
         E.SkillKeys := AEvent.SkillKeys;
         E.SkillLoadedKeys := AEvent.SkillLoadedKeys;
       end;
+    ekSkillDetail:
+      begin
+        { One skill, answering a SkillDetail request. Copied straight across: the
+          mapping is field-for-field, and the dialog is the only consumer. }
+        E.Kind := teSkillDetail;
+        E.SkillDetailKey := AEvent.SkillDetailKey;
+        E.SkillName := AEvent.SkillName;
+        E.SkillDescription := AEvent.SkillDescription;
+        E.SkillLicense := AEvent.SkillLicense;
+        E.SkillCompatibility := AEvent.SkillCompatibility;
+        E.SkillAllowedTools := AEvent.SkillAllowedTools;
+        E.SkillLocation := AEvent.SkillLocation;
+        E.SkillResources := AEvent.SkillResources;
+        E.SkillBody := AEvent.SkillBody;
+        E.SkillIsLoaded := AEvent.SkillIsLoaded;
+      end;
   else
     { loop_started, turn_started, approval_resolved, drive_*, gap, loop_exited:
       nothing for the UI to render; a gap is resynced from the ledger. Do NOT
