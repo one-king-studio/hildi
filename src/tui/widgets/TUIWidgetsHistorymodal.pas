@@ -88,6 +88,8 @@ type
 
 const
   HistoryMinWidth = 56;
+  { Inline padding inside the frame, so a row never touches the border. }
+  HistoryRowPad = 2;
   { Borders (2) + title + footer. }
   HistoryChromeRows = 4;
 
@@ -219,6 +221,23 @@ begin
     Result.H := AAvail.H;
 end;
 
+{ Fit ALine into AWidth display columns, with an ellipsis when it does not fit.
+  The history dialog had NO truncation at all: a long turn title ran straight
+  over the right border. Truncating on DISPLAY width rather than length, because
+  a wide glyph is two columns and a length cut would still overflow. }
+function FitLine(const ALine: UnicodeString; AWidth: Integer): UnicodeString;
+var
+  I: Integer;
+begin
+  Result := ALine;
+  if (AWidth < 2) or (StringWidth(Result) <= AWidth) then
+    Exit;
+  I := Length(Result);
+  while (I > 0) and (StringWidth(Copy(Result, 1, I)) > AWidth - 1) do
+    Dec(I);
+  Result := Copy(Result, 1, I) + UnicodeString(WideChar($2026));
+end;
+
 procedure THistoryModal.Render(const S: ISurface);
 var
   L, R, T, B, X, Y, I, Index: Integer;
@@ -226,6 +245,7 @@ var
     OkAttr, UndoneAttr: TAttr;
   Row: THistoryRow;
   Line, Stats, Badge, Num: string;
+  ULine: UnicodeString;
 begin
   if (FBounds.W < 12) or (FBounds.H < HistoryChromeRows) then
     Exit;
@@ -297,21 +317,30 @@ begin
       if Badge <> '' then
         Line := Line + '  [' + Badge + ']';
 
+      { Stay inside the frame: RowPad of inline padding on each side, and a
+        truncated title rather than one that runs over the right border. The
+        dialog had no truncation at all before this. }
+      ULine := FitLine(UnicodeString(Line),
+        (R - HistoryRowPad) - (L + HistoryRowPad) + 1);
+
       if not Row.Selectable then
       begin
         { Visible but not actionable: the operator needs to see the turn exists
           and why Enter will not take it. }
-        PutText(S, L + 2, Y, UnicodeString(Line), DimAttr);
+        PutText(S, L + HistoryRowPad, Y, ULine, DimAttr);
       end
       else if Index = FSelected then
       begin
-        PutText(S, L, Y, StringOfChar(WideChar(' '), FBounds.W), SelAttr);
-        PutText(S, L + 1, Y, UnicodeString('>' + Line), SelAttr);
+        { The highlight covers the row INSIDE the border, and the text is inset
+          so it does not touch the edge of its own background. Writing FBounds.W
+          blanks over both border columns. }
+        PutText(S, L + 1, Y, StringOfChar(WideChar(' '), FBounds.W - 2), SelAttr);
+        PutText(S, L + HistoryRowPad, Y, UnicodeString('>') + ULine, SelAttr);
       end
       else if Row.Undone then
-        PutText(S, L + 2, Y, UnicodeString(Line), UndoneAttr)
+        PutText(S, L + HistoryRowPad, Y, ULine, UndoneAttr)
       else
-        PutText(S, L + 2, Y, UnicodeString(Line), NormalAttr);
+        PutText(S, L + HistoryRowPad, Y, ULine, NormalAttr);
     end;
 
   PutText(S, L + 2, B, UnicodeString(IntentVerb), OkAttr);
