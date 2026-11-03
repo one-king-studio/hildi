@@ -45,6 +45,9 @@ type
     { Phase 3: load_skill. }
     procedure TestSpecsIsLoadSkillOnlyWhenEmpty;
     procedure TestEmptyRegistryContributesNothing;
+    { The composer line: a pure function of the loaded names, so the truncation
+      rule is testable without a terminal. }
+    procedure TestLoadedSkillsLineTruncates;
     procedure TestFindResolvesLoadSkill;
     procedure TestLoadActivatesAndReportsTools;
     procedure TestLoadUnknownKeyErrors;
@@ -261,6 +264,42 @@ begin
   finally
     R.Free;
   end;
+end;
+
+procedure TSkillsTest.TestLoadedSkillsLineTruncates;
+var
+  Names: TStringArray;
+begin
+  { Nothing loaded -> no line at all, so the composer gains no empty row. }
+  Names := nil;
+  AssertEquals('empty', '', FormatLoadedSkillsLine(Names));
+
+  { Under the cap: every name shown, no overflow token. }
+  SetLength(Names, 2);
+  Names[0] := 'alpha';
+  Names[1] := 'beta';
+  AssertEquals('two', '+alpha +beta', FormatLoadedSkillsLine(Names));
+
+  { Exactly at the cap: still no overflow, which is the off-by-one worth pinning. }
+  SetLength(Names, 3);
+  Names[0] := 'alpha';
+  Names[1] := 'beta';
+  Names[2] := 'gamma';
+  AssertEquals('three', '+alpha +beta +gamma', FormatLoadedSkillsLine(Names));
+
+  { Over the cap: three shown and the remainder counted. }
+  SetLength(Names, 5);
+  Names[0] := 'alpha';
+  Names[1] := 'beta';
+  Names[2] := 'gamma';
+  Names[3] := 'delta';
+  Names[4] := 'epsilon';
+  AssertEquals('truncated', '+alpha +beta +gamma +2 more',
+    FormatLoadedSkillsLine(Names));
+
+  { A cap of 1 is honoured, and the overflow counts the rest. }
+  AssertEquals('cap of one', '+alpha +4 more',
+    FormatLoadedSkillsLine(Names, 1));
 end;
 
 procedure TSkillsTest.TestLoadActivatesAndReportsTools;
