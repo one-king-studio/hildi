@@ -2652,6 +2652,7 @@ begin
       'COALESCE(SUM(r.reasoning_tokens), 0), ' +
       '(SELECT COALESCE(r2.prompt_tokens, 0) FROM requests r2 ' +
         'JOIN turns t3 ON t3.id = r2.turn_id WHERE t3.session_id = ? ' +
+        'AND r2.prompt_tokens > 0 ' +
         'ORDER BY r2.id DESC LIMIT 1), ' +
       '(SELECT COALESCE(SUM(t2.duration_ms), 0) FROM turns t2 ' +
         'WHERE t2.session_id = ?) ' +

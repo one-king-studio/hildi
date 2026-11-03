@@ -60,6 +60,10 @@ type
     procedure TestSessionTotalsContextAndGenerated;
     procedure TestSessionTotalsContextIsTheLatestRequest;
     procedure TestSessionTotalsEmpty;
+    { An IN-FLIGHT request has no token count yet, so the context figure must
+      come from the last COMPLETED one. Otherwise the header graph blanks every
+      time a request starts. }
+    procedure TestContextIgnoresARequestInFlight;
 
     procedure TestRuntimeMigrationIsAdditive;
     procedure TestRuntimeRowRoundTrip;
@@ -1055,6 +1059,47 @@ begin
     { The billed totals still span every page. }
     AssertEquals('billed prompt across pages', 62, Totals.Usage.PromptTokens);
     AssertEquals('requests across pages', 3, Totals.RequestCount);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestContextIgnoresARequestInFlight;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws: Integer;
+  Sid: string;
+  T1, T2, R: Int64;
+  Totals: TTurnRecord;
+begin
+  { THE GLITCH THE OPERATOR SAW. `BeginRequest` inserts a row with ZERO tokens;
+    `FinishRequest` fills it in. The context figure was "the newest request row",
+    so while a request was in flight the newest row read 0 and the graph blanked
+    - every single turn, for the whole duration of each request. }
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, Sid, Err);
+    S.BeginTurn(Sid, T1, Err);
+    S.BeginRequest(T1, 'm', 1, R, Err);
+    S.FinishRequest(R, True, 'stop', 0, '', '',
+      MakeUsage(30, 1, 31, 0, 0), 1, 1, Err);
+    S.FinishTurn(T1, tsCompleted, 'stop', 0, '', '', Err);
+
+    { A new turn, request STARTED but not finished: the row exists at 0 tokens. }
+    S.BeginTurn(Sid, T2, Err);
+    S.BeginRequest(T2, 'm', 1, R, Err);
+
+    AssertTrue('totals', S.SessionTotals(Sid, Totals, Err));
+    AssertEquals('the context comes from the last COMPLETED request, not the ' +
+      'in-flight zero one', 30, Totals.ContextTokens);
+    { TWO rows: the completed one and the in-flight one. RequestCount is a row
+      count, so it includes a started-but-unfinished request - my first version
+      asserted 1 and was wrong, not the code. The DISTINCTION that matters is the
+      context figure, which must skip the zero row. }
+    AssertEquals('the in-flight request is still counted as a row', 2,
+      Totals.RequestCount);
   finally
     S.Free;
   end;
