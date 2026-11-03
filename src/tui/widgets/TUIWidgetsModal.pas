@@ -31,9 +31,12 @@ const
   { A dialog takes at most this share of the screen, so the transcript stays
     visible behind it and it reads as an overlay. }
   ModalMaxHeightPercent = 80;
-  { Top border and bottom border. The footer rides the bottom border, so it costs
-    no extra row. }
+  { Top border and bottom border. }
   ModalChromeRows = 2;
+  { The FIXED footer: a divider row and the CTA row, both above the bottom
+    border. Content scrolls above them and can never cover them - which is the
+    point of a footer. }
+  ModalFooterRows = 2;
   ModalMinWidth = 24;
   { The footer is inset from the right corner by this much. }
   ModalFooterPad = 1;
@@ -179,7 +182,11 @@ begin
   Result.X := FBounds.X + 1;
   Result.Y := FBounds.Y + 1;
   Result.W := FBounds.W - 2;
-  Result.H := FBounds.H - 2;
+  { The footer is FIXED: its rows are reserved here, so the scrolled content
+    ends above them rather than running underneath. }
+  Result.H := FBounds.H - ModalChromeRows;
+  if Length(FFooter) > 0 then
+    Dec(Result.H, ModalFooterRows);
 end;
 
 function TModal.Measure(const AAvail: TSize): TSize;
@@ -271,17 +278,30 @@ begin
 end;
 
 procedure TModal.Render(const S: ISurface);
+var
+  L, R, I, DivY: Integer;
 begin
   PaintFrame(S);
   if FScroll <> nil then
     FScroll.Render(S)
   else if FContent <> nil then
     FContent.Render(S);
-  { The footer sits ON the bottom border row, not above it: that is this
-    toolkit's idiom, and a footer on an inner row leaves a full border line under
-    the CTAs so the dialog reads as a different kind. }
-  if (Length(FFooter) > 0) and (FBounds.H >= ModalChromeRows) then
-    PaintSpans(S, FooterX, FBounds.Y + FBounds.H - 1, FFooter);
+  { The FIXED footer, as TApprovalModal lays it out: a DIVIDER row, then the CTA
+    row, both above the bottom border. The divider is what separates the scrolling
+    content from the actions - without it the CTAs read as the last line of
+    content rather than as chrome that is always there. }
+  if (Length(FFooter) > 0) and
+    (FBounds.H >= ModalChromeRows + ModalFooterRows) then
+  begin
+    DivY := FBounds.Y + FBounds.H - 1 - ModalFooterRows;
+    L := FBounds.X;
+    R := FBounds.X + FBounds.W - 1;
+    PutCh(S, L, DivY, '├', BorderAttr);
+    PutCh(S, R, DivY, '┤', BorderAttr);
+    for I := L + 1 to R - 1 do
+      PutCh(S, I, DivY, '─', BorderAttr);
+    PaintSpans(S, FooterX, DivY + 1, FFooter);
+  end;
 end;
 
 function TModal.HandleEvent(const E: TInputEvent): Boolean;
