@@ -922,15 +922,19 @@ end;
   dim, and guessing one would mis-colour half a sentence. }
 procedure TChatPanel.PaintHints;
 begin
-  { The walk itself lives in TUIWidgetsText.HintSpans, because the subagent list
-    shows key hints too. One copy, so the two surfaces cannot drift into different
-    house styles - which is exactly how the toolbar and the empty mark ended up
-    spelling the same key two ways. }
-  if FHintsText = '' then
+  { While a list panel is open, the composer's hints describe keys that would go
+    to the PANEL, not to the composer - "enter send" was showing under the
+    command list, where enter runs a command. Suppressed rather than swapped:
+    the panel's own hint row is what the operator needs to read. }
+  if FPaletteActive or (FHintsText = '') then
   begin
     FHintsBlock.SetText('', FTheme.Muted);
     Exit;
   end;
+  { The walk itself lives in TUIWidgetsText.HintSpans, because the subagent list
+    shows key hints too. One copy, so the two surfaces cannot drift into different
+    house styles - which is exactly how the toolbar and the empty mark ended up
+    spelling the same key two ways. }
   FHintsBlock.SetSpans(HintSpans(UnicodeString(FHintsText), FTheme.Muted,
     FTheme.Text));
 end;
@@ -1008,7 +1012,14 @@ end;
 
 procedure TChatPanel.SetPaletteActive(AValue: Boolean);
 begin
+  if FPaletteActive = AValue then
+    Exit;
   FPaletteActive := AValue;
+  { Repaint the hints immediately: opening a panel must clear the composer's
+    "enter send" before the panel is drawn, and closing it must bring them back.
+    Without this the suppression waits for an unrelated repaint, so the stale
+    hint sits under the open panel. }
+  PaintHints;
 end;
 
 function TChatPanel.PaletteActive: Boolean;

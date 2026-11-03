@@ -254,20 +254,32 @@ end;
 function TCommandPalette.SelectedHints: string;
 var
   I: Integer;
+  { Built at RUN TIME, not written as a literal: assigning a UnicodeString
+    literal into an AnsiString result raises a lossy-conversion warning, which
+    this project treats as an error. HintSpans builds its separator the same way
+    for the same reason - FPC does not apply the source codepage to a typed
+    constant. }
+  Sep: UnicodeString;
 begin
   { Built from the panel's VERBS, so a third list panel needs no palette change:
-    it declares its chords and captions and the hint row follows. }
+    it declares its chords and captions and the hint row follows.
+
+    Segments are separated by ' · ', the separator HintSpans recognises. Two
+    spaces instead would make the WHOLE line one segment, so only the first key
+    got its own tone and the rest was drawn as one action - which is why the
+    command panel's "enter select" did not read as two-tone. }
+  Sep := ' ' + UnicodeString(WideChar($00B7)) + ' ';
   Result := '';
   if (FSelected < 0) or (FSelected > High(FVisibleCommands)) then
     Exit;
   for I := 0 to High(FVerbs) do
   begin
     if Result <> '' then
-      Result := Result + '  ';
+      Result := Result + string(Sep);
     Result := Result + FVerbs[I].Chord + ' ' + FVerbs[I].Caption;
   end;
   if Result <> '' then
-    Result := Result + '  ';
+    Result := Result + string(Sep);
   Result := Result + 'enter ' + FDefaultCaption;
 end;
 
@@ -455,9 +467,12 @@ begin
     if Hint <> '' then
     begin
       { Two-tone through the shared splitter: the keybinding dim, the action
-        lighter. The same walk the chat toolbar uses, so the house style cannot
-        drift between surfaces. }
-      Spans := HintSpans(UnicodeString(Hint), FTheme.Muted, FTheme.Text);
+        lighter. Both attrs carry the PANEL's background - PaintSpans only sets
+        the foreground, so an attr built on a bare colour would leave the row
+        with whatever background the fill gave it and read as a stripe. }
+      Spans := HintSpans(UnicodeString(Hint),
+        OnBg(FTheme.Muted, FTheme.RaisedBg),
+        OnBg(FTheme.Text, FTheme.RaisedBg));
       HX := R - 1 - SpansWidth(Spans);
       if HX < L + 1 then
         HX := L + 1;
