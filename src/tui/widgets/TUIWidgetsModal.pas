@@ -40,6 +40,8 @@ const
   ModalMinWidth = 24;
   { The footer is inset from the right corner by this much. }
   ModalFooterPad = 1;
+  { Inline padding between the left border and the content. }
+  ModalContentPad = 1;
 
 type
   { The modal every dialog here shares. It owns the border, the title, the 80%
@@ -183,9 +185,13 @@ begin
   Result := Default(TRect);
   if (FBounds.W < 2) or (FBounds.H < 3) then
     Exit;
-  Result.X := FBounds.X + 1;
+  { The content rect runs to the RIGHT BORDER column rather than one short of
+    it: the scroll container puts its bar at its own right edge, and the operator
+    wants the bar ON the border. The left edge is inset so text never touches the
+    left border. }
+  Result.X := FBounds.X + 1 + ModalContentPad;
   Result.Y := FBounds.Y + 1;
-  Result.W := FBounds.W - 2;
+  Result.W := FBounds.W - 1 - ModalContentPad;
   { The footer is FIXED: its rows are reserved here, so the scrolled content
     ends above them rather than running underneath. }
   Result.H := FBounds.H - ModalChromeRows;
@@ -262,7 +268,14 @@ end;
 procedure TModal.ArrangeContent(const AInner: TRect);
 begin
   if FScroll <> nil then
-    FScroll.Arrange(AInner)
+  begin
+    { The bar starts one row below the top border, clear of the rounded corner,
+      and stops one row above the footer divider. TrackTop/TrackBottom exist for
+      exactly this - the chat panel uses them for the compose overlay. }
+    FScroll.TrackTop := 1;
+    FScroll.TrackBottom := 1;
+    FScroll.Arrange(AInner);
+  end
   else if FContent <> nil then
     FContent.Arrange(AInner);
 end;
