@@ -278,6 +278,10 @@ type
       out AError: TStoreError): Boolean;
     function QueryMessages(const ASessionId: string;
       out AMessages: TMessageRecordArray; out AError: TStoreError): Boolean;
+    { A turn's final assistant reply, or '' when it has none. One column, so a
+      caller can extract the frontmatter summary without loading the history. }
+    function TurnReply(ATurnId: Int64; out AText: string;
+      out AError: TStoreError): Boolean;
     { One message by id, scoped to a session; seNotFound if absent. }
     function QueryMessage(const ASessionId: string; AId: Int64;
       out AMessage: TMessageRecord; out AError: TStoreError): Boolean;
@@ -3291,6 +3295,39 @@ begin
       Stmt.BindText(1, ASessionId);
       if Stmt.Step = SQLITE_ROW then
         ACount := Stmt.ColInt(0);
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.TurnReply(ATurnId: Int64; out AText: string;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AText := '';
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    { The LAST assistant row of the turn: continuations append more than one, and
+      it is the final one that carries the completed reply. }
+    Stmt := TStmt.Create(FDb,
+      'SELECT content FROM messages WHERE turn_id = ? AND role = ? ' +
+      'ORDER BY seq DESC LIMIT 1');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not read the turn reply',
+          DbErrorText));
+      Stmt.BindInt64(1, ATurnId);
+      Stmt.BindInt(2, Ord(mrAssistant));
+      if Stmt.Step = SQLITE_ROW then
+        AText := Stmt.ColText(0);
     finally
       Stmt.Free;
     end;
