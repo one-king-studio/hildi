@@ -107,13 +107,12 @@ begin
 end;
 
 function TSkillModal.BodyRows: Integer;
-var
-  S: TStringArray;
 begin
-  if FDetail.Body = '' then
-    Exit(0);
-  S := FDetail.Body.Split([#10]);
-  Result := Length(S);
+  { The RENDERED line count, not the raw body's. Markdown rendering WRAPS, so a
+    long paragraph becomes several lines; counting the source split instead made
+    MaxScroll too small and the operator could not reach the end of the body. }
+  EnsureBodyLines(FBodyWidth);
+  Result := Length(FBodyLines);
 end;
 
 function TSkillModal.VisibleBodyRows: Integer;
@@ -298,7 +297,12 @@ begin
     Cta := 'loaded · esc cancel'
   else
     Cta := 'esc cancel';
-  Spans := HintSpans(UnicodeString(Cta), FTheme.Muted, ValueAttr);
+  { Both attrs carry the dialog's own background: PaintSpans sets only the
+    foreground, so a bare colour left the row on whatever background the fill
+    gave it and the CTA read as a stripe - the same bug the panel's hint row had. }
+  Spans := HintSpans(UnicodeString(Cta),
+    OnBg(FTheme.Muted, FTheme.RaisedBg),
+    OnBg(FTheme.Text, FTheme.RaisedBg));
   CtaX := R - 1 - SpansWidth(Spans);
   if CtaX < L + 2 then
     CtaX := L + 2;
