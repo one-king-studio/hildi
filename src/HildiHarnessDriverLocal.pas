@@ -11,7 +11,7 @@ interface
 uses
   HildiApproval, HildiHarnessTurn,
   HildiHarnessDriver, HildiHarnessSession,
-  HildiSession,
+  HildiSession, HildiSkills,
   HildiStore;
 
 { The in-process driver over a session that has a built loop. }
@@ -48,6 +48,9 @@ type
     procedure SkillKeys(out AKeys: TStringArray);
     { The subset in context. In-process, so this is the registry's derived answer. }
     procedure SkillLoadedKeys(out AKeys: TStringArray);
+    { One skill's detail, pushed as an event so the app has one code path for the
+      dialog whether the driver is local or remote. }
+    procedure SkillDetail(const AKey: string);
     { Load a skill by key. LoadSkillByName records the session approval first, so
       an operator-typed load does not prompt. A refusal is pushed as an error. }
     procedure LoadSkill(const AKey: string);
@@ -247,6 +250,33 @@ begin
   AKeys := nil;
   if FSession.Skills <> nil then
     AKeys := FSession.Skills.Keys;
+end;
+
+procedure TLocalDriver.SkillDetail(const AKey: string);
+var
+  E: TTurnEvent;
+  S: TSkill;
+begin
+  { In-process there is no round trip: the registry has the answer now. It is
+    still pushed as an event rather than returned, so the app has ONE code path
+    for the dialog whether the driver is local or remote. }
+  if FSession.Skills <> nil then
+  begin
+    E := Default(TTurnEvent);
+    E.Kind := teSkillDetail;
+    S := FSession.Skills.SkillOf(AKey);
+    E.SkillDetailKey := S.Key;
+    E.SkillName := S.Name;
+    E.SkillDescription := S.Description;
+    E.SkillLicense := S.License;
+    E.SkillCompatibility := S.Compatibility;
+    E.SkillAllowedTools := S.AllowedTools;
+    E.SkillLocation := S.Location;
+    E.SkillResources := S.Resources;
+    E.SkillBody := S.Instructions;
+    E.SkillIsLoaded := FSession.Skills.StateOf(S.Key) = ssLoaded;
+    FSession.Queue.Push(E);
+  end;
 end;
 
 procedure TLocalDriver.SkillLoadedKeys(out AKeys: TStringArray);

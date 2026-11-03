@@ -48,7 +48,10 @@ type
     { The session's skill catalogue changed. SkillKeys is the new full list: there
       are few skills, so a full snapshot is simpler than a delta and self-heals a
       client that missed one. Appended last so stored ordinals are unchanged. }
-    teSkills
+    teSkills,
+    { One skill's full detail, answering a SkillDetail request. Appended last so
+      stored ordinals are unchanged. }
+    teSkillDetail
   );
 
   TTurnEvent = record
@@ -81,6 +84,19 @@ type
       rather than a parallel flags array, so it cannot drift out of order with
       SkillKeys. }
     SkillLoadedKeys: TStringArray;
+    { teSkillDetail: one skill, for the detail dialog. A separate event rather
+      than part of the catalogue, so a multi-KB body crosses the wire only when
+      someone opens a dialog - the catalogue is pushed on every attach and load. }
+    SkillDetailKey: string;
+    SkillName: string;
+    SkillDescription: string;
+    SkillLicense: string;
+    SkillCompatibility: string;
+    SkillAllowedTools: string;
+    SkillLocation: string;
+    SkillResources: TStringArray;
+    SkillBody: string;
+    SkillIsLoaded: Boolean;
   end;
 
   { A thread-safe, BOUNDED FIFO. Push from the worker thread, Pop from the UI

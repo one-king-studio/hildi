@@ -47,6 +47,9 @@ type
     { The subset of SkillKeys whose bodies are IN CONTEXT. The panel marks each
       row from this; a subset rather than parallel flags so the two cannot drift. }
     procedure SkillLoadedKeys(out AKeys: TStringArray);
+    { Ask the runtime for ONE skill's detail. Fire-and-forget: the answer arrives
+      as a teSkillDetail event, so the client never blocks the UI thread. }
+    procedure SkillDetail(const AKey: string);
     procedure LoadSkill(const AKey: string);
     procedure Checkpoint;
     { UI thread: pop the next event, if any. }
@@ -135,6 +138,8 @@ type
     procedure SkillKeys(out AKeys: TStringArray);
     { The subset in context, from the same ekSkills snapshot. }
     procedure SkillLoadedKeys(out AKeys: TStringArray);
+    { Ask the runtime for one skill's detail; the answer arrives as an event. }
+    procedure SkillDetail(const AKey: string);
     { Load a skill by key. The runtime asks for approval; a refusal arrives as
       an error event, so this never reports success it cannot vouch for. }
     procedure LoadSkill(const AKey: string);
@@ -484,6 +489,11 @@ begin
   AKeys := nil;
   if FSink <> nil then
     AKeys := FSink.LastSkillKeys;
+end;
+
+procedure TRemoteDriver.SkillDetail(const AKey: string);
+begin
+  SendSkillCommand(scSkillDetail, AKey);
 end;
 
 procedure TRemoteDriver.SkillLoadedKeys(out AKeys: TStringArray);

@@ -66,6 +66,8 @@ type
       test so the palette's loaded/unloaded marking is observable. }
     Skills: TStringArray;
     LoadedSkills: TStringArray;
+    { Which skill detail the app asked for, so a test can assert the request. }
+    DetailRequested: string;
     LoadedId: string;
     procedure StartTurn(const AText: string);
     procedure QueuePrompt(const AText: string);
@@ -80,6 +82,8 @@ type
       assert the app asked without needing a runtime. }
     procedure SkillKeys(out AKeys: TStringArray);
     procedure SkillLoadedKeys(out AKeys: TStringArray);
+    { Records the request; the mock has no skill bodies to hand back. }
+    procedure SkillDetail(const AKey: string);
     procedure LoadSkill(const AKey: string);
     procedure UnloadSkill(const AKey: string);
     function PopEvent(out AEvent: TTurnEvent): Boolean;
@@ -418,6 +422,13 @@ end;
 procedure TRecordingDriver.SkillLoadedKeys(out AKeys: TStringArray);
 begin
   AKeys := LoadedSkills;
+end;
+
+procedure TRecordingDriver.SkillDetail(const AKey: string);
+begin
+  { Records the request. The mock holds no bodies, so no event is pushed - the
+    app's request is what a test asserts here. }
+  DetailRequested := AKey;
 end;
 
 procedure TRecordingDriver.LoadSkill(const AKey: string);
