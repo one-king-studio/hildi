@@ -305,10 +305,14 @@ begin
   R := Default(TRect);
   R.X := ABounds.X;
   R.Y := BodyY;
-  { The body is wrapped short of the scrollbar column too, so markdown text and
-    code fences keep the same right gap the value panes get. The pane fill already
-    stops there; without this the CONTENT still ran to the edge. }
-  R.W := ABounds.W - SkillPaneRightGap;
+  { The body is a FIELD VALUE like any other, so it gets the same inline padding
+    INSIDE its pane: one column in from the left, and the width reduced by both
+    pads plus the pane's right gap. Without this the markdown sat flush against
+    the tinted edge - the panes above had padding, the Prompt did not. }
+  R.X := ABounds.X + SkillValuePad;
+  R.W := ABounds.W - SkillPaneRightGap - 2 * SkillValuePad;
+  if R.W < 1 then
+    R.W := 1;
   R.H := BodyH;
   FMarkdown.Arrange(R);
 end;
