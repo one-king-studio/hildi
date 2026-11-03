@@ -229,7 +229,11 @@ begin
   for I := L + 1 to R - 1 do
   begin
     PutCh(S, I, T, '─', Attr);
-    PutCh(S, I, B, '─', Attr);
+    { A HEAVY bottom edge, as TApprovalModal draws it. Every other dialog here
+      used a single line, which is why the dialogs did not look like one family:
+      the approval dialog's double rule is what makes it read as a committed
+      action rather than an ordinary panel. }
+    PutCh(S, I, B, '═', Attr);
   end;
   for I := T + 1 to B - 1 do
   begin
