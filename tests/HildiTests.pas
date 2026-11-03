@@ -32,7 +32,7 @@ uses
   TestMCPClient, TestSubagent, TestSubagentSupervisor,
   TestMCPCLI, TestMCPHTTP, TestMCPOAUTH, TestMCPProvider,
   TestMCPOAUTHFlow, TestSubagentRoster, TestTUIAgentList,
-  TestSubagentSpy, TestTUIPalette, TestAsyncScheduler,
+  TestSubagentSpy, TestTUIPalette, TestSkillModal, TestAsyncScheduler,
   TestAsyncFuture, TestAsyncQueue, TestAsyncTimers,
   TestAsyncObservable, TestAsyncSubject, TestAsyncOperators,
   TestAsyncTime, TestAsyncContext, TestAsyncConcurrency,
