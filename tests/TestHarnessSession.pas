@@ -28,6 +28,7 @@ type
     FDir: string;
     FStorePath: string;
     FTransports: TObjectList<TFakeTransport>;
+    procedure WriteFileText(const APath, AText: string);
     function Config(const AStorePath, ASessionId: string;
       AResume: Boolean): THarnessSessionConfig;
     function WriteText(const AName, AContent: string): string;
@@ -49,6 +50,13 @@ type
     { The task list's tools and its stable prose, in a real session. }
     procedure TestTaskToolsRegisteredWithStore;
     procedure TestTheCoordinationTextRidesTheSystemPrompt;
+    { AGENTS.md: read from the workspace root, tagged with its source, and
+      re-read per turn so an edit is picked up without a restart. }
+    procedure TestAgentsMdRidesTheStablePrompt;
+    procedure TestAgentsMdIsTaggedWithItsSource;
+    procedure TestAgentsMdFallsBackToReadme;
+    procedure TestAgentsMdAbsentLeavesNoBlock;
+    procedure TestAgentsMdIsRepublishedAfterAnEdit;
     { A revived session must be told it was away, what it missed, and what it
       lost. }
     procedure TestARevivedSessionIsToldItWasAway;
@@ -149,6 +157,21 @@ begin
     DeleteFile(FStorePath);
   if DirectoryExists(FDir) then
     RemoveDir(FDir);
+end;
+
+{ Write a text file, creating parent directories. Small local helper so the
+  AGENTS.md tests read as prose rather than as stream plumbing. }
+procedure THarnessSessionTest.WriteFileText(const APath, AText: string);
+var
+  FS: TFileStream;
+begin
+  FS := TFileStream.Create(APath, fmCreate);
+  try
+    if AText <> '' then
+      FS.WriteBuffer(AText[1], Length(AText));
+  finally
+    FS.Free;
+  end;
 end;
 
 function THarnessSessionTest.Config(const AStorePath, ASessionId: string;
@@ -1145,12 +1168,18 @@ begin
   AssertTrue('opened: ' + Err, Session <> nil);
   try
     AssertTrue('the loop is built', Session.Loop <> nil);
-    P := Session.Loop.StablePrompt;
+    { The board's and task list's RULES are static, so they now ride the SYSTEM
+      prompt and are sent once. The per-turn stable text carries only the mode
+      line, because that is the part a peer attaching mid-session can change. }
+    P := Session.SystemPromptText;
     AssertTrue('the task list is explained: ' + P, Pos('task_claim', P) > 0);
     AssertTrue('and the board too', Pos('board_post', P) > 0);
-    { One block carries both plus the protocol rules and the detected mode, so
-      the answer to "am I alone?" is stated once, not twice. }
     AssertTrue('the protocol is stated', Pos('Claim before you change', P) > 0);
+    { And the mode line is NOT in the system prompt: it would be frozen there. }
+    AssertTrue('the mode line is not frozen into the system prompt',
+      Pos('You are ALONE in this workspace', P) = 0);
+    AssertTrue('but it does ride the stable text',
+      Pos('You are ALONE in this workspace', Session.Loop.StablePrompt) > 0);
   finally
     Session.Free;
   end;
@@ -1260,13 +1289,13 @@ begin
   AssertTrue('opened: ' + Err, Session <> nil);
   try
     AssertTrue('the loop is built', Session.Loop <> nil);
-    { The stable prompt is never empty now: the shell guidance rides it
-      unconditionally, because a session with no store can still run composed
-      commands and must be told which ones stay in the gated tier. }
+    { The shell guidance is STATIC - generated from the dispatch table and fed by
+      no session state - so it now rides the SYSTEM prompt, where it is sent once
+      and cached, rather than costing every turn. }
     AssertTrue('the shell guidance is present',
-      Pos('Prefer the built-in shell', Session.Loop.StablePrompt) > 0);
+      Pos('Prefer the built-in shell', Session.SystemPromptText) > 0);
     AssertTrue('and names commands',
-      Pos('grep', Session.Loop.StablePrompt) > 0);
+      Pos('grep', Session.SystemPromptText) > 0);
   finally
     Session.Free;
   end;
@@ -1704,6 +1733,116 @@ begin
       if Keys[I] = 'doomed' then
         Found := True;
     AssertFalse('gone from the manifest after the rescan', Found);
+  finally
+    Session.Free;
+  end;
+end;
+
+{ --- AGENTS.md ---------------------------------------------------------- }
+
+procedure THarnessSessionTest.TestAgentsMdRidesTheStablePrompt;
+var
+  Session: THarnessSession;
+  Err: string;
+begin
+  WriteFileText(IncludeTrailingPathDelimiter(FDir) + 'AGENTS.md',
+    '# House rules' + #10 + 'Always run make check before reporting done.');
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    AssertTrue('the file content is in the stable prompt',
+      Pos('Always run make check before reporting done',
+        Session.Loop.StablePrompt) > 0);
+    { It is workspace CONTEXT, so it must not be frozen into the system prompt:
+      the operator edits it between turns and expects that to take effect. }
+    AssertFalse('and not frozen into the system prompt',
+      Pos('Always run make check before reporting done',
+        Session.SystemPromptText) > 0);
+  finally
+    Session.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestAgentsMdIsTaggedWithItsSource;
+var
+  Session: THarnessSession;
+  Err: string;
+begin
+  WriteFileText(IncludeTrailingPathDelimiter(FDir) + 'AGENTS.md', 'be brief');
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    { The wrapper is what keeps the harness's own rules authoritative: the text
+      is named as FILE CONTENTS and explicitly subordinated, so a repository
+      cannot issue instructions of its own. }
+    AssertTrue('wrapped in an element',
+      Pos('<agents_md source="AGENTS.md">', Session.Loop.StablePrompt) > 0);
+    AssertTrue('and closed', Pos('</agents_md>', Session.Loop.StablePrompt) > 0);
+    AssertTrue('named as context, not instructions',
+      Pos('not instructions from the harness', Session.Loop.StablePrompt) > 0);
+  finally
+    Session.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestAgentsMdFallsBackToReadme;
+var
+  Session: THarnessSession;
+  Err: string;
+begin
+  { No AGENTS.md: the README stands in, and the prompt says WHICH file it came
+    from - an agent-directed file and a human-facing one weigh differently. }
+  WriteFileText(IncludeTrailingPathDelimiter(FDir) + 'README.md',
+    'Build with make check.');
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    AssertTrue('the README content is used',
+      Pos('Build with make check', Session.Loop.StablePrompt) > 0);
+    AssertTrue('and its own name is reported',
+      Pos('source="README.md"', Session.Loop.StablePrompt) > 0);
+  finally
+    Session.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestAgentsMdAbsentLeavesNoBlock;
+var
+  Session: THarnessSession;
+  Err: string;
+begin
+  { Absent is normal, not an error: nothing is injected and no empty wrapper
+    is left behind. }
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    AssertFalse('no block at all',
+      Pos('<agents_md', Session.Loop.StablePrompt) > 0);
+  finally
+    Session.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestAgentsMdIsRepublishedAfterAnEdit;
+var
+  Session: THarnessSession;
+  Err: string;
+begin
+  { THE POINT OF RE-READING PER TURN: the operator edits the file mid-session and
+    the next turn sees it. A version read once at Init would go stale silently. }
+  WriteFileText(IncludeTrailingPathDelimiter(FDir) + 'AGENTS.md', 'FIRST-VERSION');
+  Session := THarnessSession.Open(Config(FStorePath, '', False), Err);
+  AssertTrue('opened: ' + Err, Session <> nil);
+  try
+    AssertTrue('the first version is present',
+      Pos('FIRST-VERSION', Session.Loop.StablePrompt) > 0);
+    WriteFileText(IncludeTrailingPathDelimiter(FDir) + 'AGENTS.md',
+      'SECOND-VERSION');
+    Session.RecomposePrompt;
+    AssertTrue('the edit is picked up',
+      Pos('SECOND-VERSION', Session.Loop.StablePrompt) > 0);
+    AssertFalse('and the old text is gone',
+      Pos('FIRST-VERSION', Session.Loop.StablePrompt) > 0);
   finally
     Session.Free;
   end;

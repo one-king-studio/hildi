@@ -124,6 +124,16 @@ function DetectCoordinationMode(const AStore: TSqliteStore;
 function CoordinationPromptFor(AMode: TCoordinationMode;
   AReason: TCoordinationReason): string;
 
+{ The STATIC half: what the board and the task list ARE, and the rules that hold
+  whether or not anyone is watching. It never varies, so it belongs in the system
+  prompt - sent once and cached - not in the per-turn stable text. }
+function CoordinationRulesText: string;
+
+{ The MODE line: which half of the rules applies right now. The only part that can
+  change mid-session (a peer attaching), which is why it stays per-turn. }
+function CoordinationModeLine(AMode: TCoordinationMode;
+  AReason: TCoordinationReason): string;
+
 implementation
 
 function DetectCoordinationMode(const AStore: TSqliteStore;
@@ -193,16 +203,30 @@ begin
   end;
 end;
 
+function CoordinationRulesText: string;
+begin
+  Result := CoordinationStableText;
+end;
+
+function CoordinationModeLine(AMode: TCoordinationMode;
+  AReason: TCoordinationReason): string;
+begin
+  if AReason = crUnknown then
+    Exit(UnknownModeText);
+  case AMode of
+    cmSingle: Result := SingleModeText;
+    cmMulti: Result := MultiModeText;
+  end;
+end;
+
 function CoordinationPromptFor(AMode: TCoordinationMode;
   AReason: TCoordinationReason): string;
 begin
-  Result := CoordinationStableText + LineEnding + LineEnding;
-  if AReason = crUnknown then
-    Exit(Result + UnknownModeText);
-  case AMode of
-    cmSingle: Result := Result + SingleModeText;
-    cmMulti: Result := Result + MultiModeText;
-  end;
+  { Both halves, for callers that want them together. The SESSION splits them:
+    the rules are static (system prompt, sent once) and the mode line is not
+    (per-turn stable text, because a peer can attach mid-session). }
+  Result := CoordinationStableText + LineEnding + LineEnding +
+    CoordinationModeLine(AMode, AReason);
 end;
 
 end.
