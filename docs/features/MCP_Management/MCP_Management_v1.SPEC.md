@@ -1,30 +1,41 @@
 # MCP Management Dialog v1 — SPEC
 
-## 1. The two statuses, and why they are different
+## 1. Three states, and why conflating them makes the UI lie
 
-This is the design's load-bearing distinction. Conflating them produces a UI
-that lies.
+The design's load-bearing distinction. There are **three** independent facts
+about a server, not two, and each answers a different question.
 
-| | Connection | Activation |
-| --- | --- | --- |
-| Question | Is the transport up right now? | Is this server in play for this session? |
-| Source of truth | A **live probe** of the manager's runtime state | The session's resolved config |
-| Changes when | A transport dies, an OAuth token expires, a probe fails | The operator enables/disables, or the config is rescanned |
-| Cost to answer | A round trip plus (possibly) a spawn or HTTP call | A store read |
-| Persisted? | **No** — observed, never stored | Yes (`enabled` column) |
+| | Connection | Enabled | Active |
+| --- | --- | --- | --- |
+| Question | Is the transport up right now? | May the LLM use it? | Is it loaded into this session's context? |
+| Source of truth | A **live probe**, by the manager | The `mcp_servers` row | The session's loaded set |
+| Persisted? | **No** — observed, never stored | Yes (`enabled`) | No — in-context state, derived from the store |
+| Changes when | A transport dies, a token expires, a probe fails | The operator edits the record | `load_mcp` loads it; a checkpoint rewinds context |
+| Cost | A probe (possibly a spawn or HTTP call) | A store read | A store read |
+| Visible to the model? | No | Yes — it is in the manifest | Yes — its body is in context |
 
-A server can be:
+**Enabled** is the manifest question. An enabled server is listed and callable
+with `load_mcp`.
 
-- **connected + active** — normal.
-- **connected + inactive** — transport is fine, the session isn't using it. This
-  is the lazy-loading case and is *not* an error.
-- **disconnected + active** — the session wants it and it is down. This is the
-  one that needs the operator's attention, and the one `r` fixes.
-- **disconnected + inactive** — dormant. No action implied.
+**Active** is the context question. An active server's instructions are in the
+session's context right now. A server can be enabled and inactive — that is the
+normal lazy case, not an error — and unenabled means it is not offered at all.
 
-The dialog must make "down" and "not in use" visually distinct, because
-`state="closed"` in the harness context today means both and the operator cannot
-tell them apart.
+**Connection** is the transport question, and only a probe answers it.
+
+The eight combinations are not eight UI states; three columns of two-ish values
+is enough, and the one that matters is **enabled + disconnected**, which is the
+only combination where something is promised and unavailable.
+
+### 1.1 Scope, and precedence
+
+A record is **workspace-only or global**. When a key exists in both, the
+**workspace record wins** — no merge, no per-field override. One record is
+authoritative for a key in a given workspace, so a name can never resolve to two
+definitions.
+
+This mirrors `ResolveMcpConfig`'s existing behaviour and is why the dialog shows
+the winning record's scope, not both.
 
 ## 2. Where each piece lives
 
@@ -79,19 +90,30 @@ TSessionCommandKind = (
 ```pascal
 TMcpConnection = (mcUnknown, mcConnected, mcDisconnected);
 
+{ Whether a remote server needs OAuth, learned when the record is added so the
+  dialog can say so without probing. }
+TMcpAuthKind = (maNone, maOAuth);
+
 TMcpRowStatus = record
   Key: string;             // the unique key
-  Label: string;           // '' => render the key
+  LabelText: string;       // '' => render the key
   Description: string;     // '' => render nothing; "when to use"
   Transport: TMcpTransportKind;
+  Scope: TMcpScope;        // which record won: workspace or global
   Connection: TMcpConnection;   // mcUnknown until a probe answers
-  Active: Boolean;              // for this session
-  Error: string;                // '' unless the last probe/reconnect failed
+  Enabled: Boolean;        // may the LLM use it (manifest)
+  Active: Boolean;         // loaded into this session's context
+  Auth: TMcpAuthKind;      // OAuth required? learned at add time
+  Error: string;           // '' unless the last probe/reconnect failed
 end;
 ```
 
 `mcUnknown` matters: the list arrives before any probe, and rendering a
 not-yet-probed server as `disconnected` would be a false claim.
+
+`Enabled` and `Active` are **separate booleans**, not one tri-state, because they
+are asked by different consumers: the manifest reads `Enabled`, the loaded set
+reads `Active`.
 
 ## 4. Schema: two new columns
 
@@ -121,19 +143,23 @@ the feature that pays off even if the dialog is never opened.
 
 ## 5. Probing
 
-**Trigger:** the dialog's open, and the explicit `r` action. Nothing else.
+**Owner:** the `TMcpManager`, on an as-needed basis. Not the runtime, not the TUI,
+not a timer. The manager owns connection lifecycle, so it owns the probe, and
+`hildi-agent-cli mcp probe` can reuse it.
 
-**Shape:** `scMcpProbe` with an empty key means *all servers*. The runtime answers
-with one `ekMcpProbeResult` carrying a row per server, or one row per server in a
-single event — one event is simpler and the count is small (a handful).
+**Trigger:** the dialog's open, and the explicit `r` action. Nothing else. No
+polling, ever — the harness already has enough periodic work, and a probe may
+spawn a process or make an HTTP call.
 
-**Bounded:** each probe is `OpenServer`-style with the existing `ListTimeoutMs`,
-and the whole sweep is bounded so a wedged server cannot stall the dialog
-indefinitely. A server that times out reports `mcDisconnected` with
-`Error = 'probe timed out'`, not an exception.
+**Shape:** `scMcpProbe` with an empty key means *all servers*. The runtime asks the
+manager and answers with **one** `ekMcpProbeResult` carrying a row per server.
+
+**Bounded:** each probe uses the existing `ListTimeoutMs`, and the whole sweep is
+bounded so a wedged server cannot stall the dialog. A server that times out
+reports `mcDisconnected` with `Error = 'probe timed out'`, never an exception.
 
 **Off the UI thread:** the TUI sends `scMcpProbe` and renders `mcUnknown` until
-`ekMcpProbeResult` arrives. It never blocks waiting.
+`ekMcpProbeResult` arrives. It never blocks.
 
 ## 6. Reconnect
 
@@ -169,9 +195,27 @@ Fields, in the order the dialog asks for them:
 Validation reuses `ValidateMcpServerRow`, so the dialog and the CLI cannot
 disagree. On failure the form stays open with the message against the field.
 
-**Scope:** writes to the **workspace** scope when a workspace is present, else
-global. A future version can offer the choice; v1 picks the narrow one so a
-mistake cannot affect every workspace.
+**Scope:** the form offers **workspace** or **global**, defaulting to workspace
+when one is present. The choice is recorded on the row, and a key already present
+in the other scope does not block the add — it shadows it for this workspace,
+which is the defined precedence, so the form says so rather than refusing.
+
+### 7.1 Adding never connects
+
+Add **writes a record**. It does not open the transport. That is deliberate:
+connecting is `r`'s job, and an add that connects would block the dialog on a
+spawn or an OAuth browser flow.
+
+The one exception is a **remote (HTTP) server, which is auth-checked at add time**
+so the dialog can record whether OAuth is required. That check is a probe of the
+authorization requirement, not a connection: it must be bounded by
+`ListTimeoutMs` and must fail open — if the check cannot determine the answer,
+save the row with `Auth = maNone` and let the first `r` discover the truth. A
+record that cannot be saved because an auth probe failed would be worse than an
+imprecise `Auth` field.
+
+`TMcpServerRow` therefore carries `Auth: TMcpAuthKind`, persisted, so the list can
+show "needs auth" without probing every time.
 
 ## 8. The dialog
 

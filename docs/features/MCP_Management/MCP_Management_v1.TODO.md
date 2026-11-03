@@ -88,12 +88,27 @@ silent breakage (enum/name arrays).
 
 ## Open questions to settle during implementation
 
-1. **Does the store own `enabled`, or the session?** Activation reads as
-   per-session but is stored per-row (`enabled`). If a session can disable a
-   server without changing the row, that is a second source of truth and needs
-   its own field. Settle before Phase 3, because it changes `TMcpRowStatus`.
-2. **Where does the probe's bounded sweep live?** The manager or the runtime.
-   Prefer the manager, so the CLI can reuse it.
-3. **Adding over HTTP with OAuth** — does `OpenServer` trigger a browser flow, and
-   is that acceptable to block on during a probe? Probably not; if it does, add
-   must save-and-defer rather than connect.
+1. ~~Does the store own `enabled`, or the session?~~ **Settled.** The record owns
+   `enabled` (may the LLM use it — manifest + `load_mcp`). `active` is separate:
+   is it loaded into the session's context. Two booleans, two consumers.
+2. ~~Where does the probe's bounded sweep live?~~ **Settled.** The
+   `TMcpManager`, on an as-needed basis.
+3. ~~Does adding over HTTP with OAuth block?~~ **Settled.** Add writes a record
+   and never connects; a remote server gets a **bounded auth check** at add time
+   so `Auth` is known without probing, and that check fails open.
+
+## Decided
+
+- **No curated metadata table.** `McpCuratedMeta` is deleted. Every MCP is a row
+  in `mcp_servers`; nothing hardcoded may compete with a stored definition, so a
+  name can never resolve to two descriptions. **Templates** (a later phase) may
+  pre-fill the add form, but a template is a starting point — once added, the
+  record is the only definition.
+  Blast radius: one call site (`HildiMCPProvider.pas:178`), the declaration and
+  body, and two assertions in `TestMCPProvider.pas`.
+- **Three states, not two.** `Connection` (probed), `Enabled` (record), `Active`
+  (session context). See SPEC §1.
+- **Scope precedence.** Workspace wins over global for the same key — whole
+  record, no field merge. The dialog names the winning scope.
+- **`TMcpServerConfig` must carry `LabelText`, `Description`, `Auth`**, because
+  the provider now reads the record rather than the table.
