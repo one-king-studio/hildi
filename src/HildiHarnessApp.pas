@@ -1094,9 +1094,9 @@ begin
   { The command palette: registered commands, shown when the compose starts
     with '/'. }
   FPanel.Palette.SetCommands(DefaultCommands);
-  FPanel.Palette.OnRun := PaletteRun;
-  { ctrl+r on a skill row reviews it instead of loading it. }
-  FPanel.Palette.OnReview := PaletteReview;
+  { The command list has ONE verb: enter selects. Declared explicitly so a panel
+    that switches lists cannot leave another panel's chords armed. }
+  FPanel.Palette.SetSingleVerb(PaletteRun, 'select');
   FStatusText := FSession.WorkspaceRoot;
   FPanel.SetStatus(FStatusText);
   FHintsText := ComposerHints(FRoster.Count > 0);
@@ -3083,6 +3083,7 @@ var
   Keys: TStringArray;
   Loaded: TStringArray;
   Commands: TCommandArray;
+  SkillVerbs: TCommandVerbArray;
   I, J: Integer;
   InContext: Boolean;
 begin
@@ -3118,6 +3119,14 @@ begin
   end;
   FPaletteShowingSkills := True;
   FPanel.Palette.SetTitle('skills');
+  { TWO verbs on the skills list: ctrl+r reviews, enter uses. Declaring them here
+    rather than in the palette is what lets a third list panel exist later
+    without touching the palette at all. }
+  SetLength(SkillVerbs, 1);
+  SkillVerbs[0].Chord := 'ctrl+r';
+  SkillVerbs[0].Caption := 'review';
+  SkillVerbs[0].OnAction := PaletteReview;
+  FPanel.Palette.SetVerbs(SkillVerbs, 'use');
   FPanel.Palette.SetCommands(Commands);
   FPanel.Palette.Filter('');
   FPanel.SetPaletteActive(True);
