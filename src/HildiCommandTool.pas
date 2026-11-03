@@ -1452,6 +1452,13 @@ begin
       if Execution.ExitCode <> 0 then
         AResult := AResult + LineEnding + '[exit ' +
           IntToStr(Execution.ExitCode) + ']';
+      { A CANCELLED command says so in words. `[exit 130]` alone is a number the
+        model has to decode, and the loop ends the turn rather than continuing -
+        so this row is the one trace that the work was interrupted. Naming it
+        means a later resume understands why the command produced nothing. }
+      if Execution.Cancelled then
+        AResult := AResult + LineEnding +
+          '[cancelled: the operator interrupted this command; it did not finish]';
       { The change note is deliberately NOT part of AResult. What a call wrote is
         ambient context, not output: the operator reads a tool block to see what
         the command printed, and a `[changed: ...]` line is bookkeeping that

@@ -100,6 +100,9 @@ type
     procedure TestOutputIsTruncatedWithMarker;
     procedure TestOutputTruncationKeepsUtf8Whole;
     procedure TestTimeoutReports124;
+    { A CANCEL is named in words, not left as a bare exit code: the loop ends the
+      turn, so this row is the only trace that the work was interrupted. }
+    procedure TestCancelledCommandSaysSo;
     procedure TestHandlerNeverRaises;
     procedure TestCommandPreservesUtf8;
     procedure TestProcessExecutorRunsCommand;
@@ -936,6 +939,28 @@ begin
   try
     AssertTrue('ok', Tool.Run('{"command":"sleep 9","reason":"r"}', R, E));
     AssertTrue('reports 124', Pos('[exit 124]', R) > 0);
+  finally
+    Tool.Free;
+  end;
+end;
+
+procedure TCommandToolTest.TestCancelledCommandSaysSo;
+var
+  Tool: TCommandTool;
+  R, E: string;
+begin
+  AddRule(aeAllow, 'run_command:sleep', [], True);
+  FExecutor.ResultExec.Output := '';
+  FExecutor.ResultExec.ExitCode := 130;
+  FExecutor.ResultExec.Cancelled := True;
+  Tool := BuildTool(nil, 0);
+  try
+    AssertTrue('ok', Tool.Run('{"command":"sleep 9","reason":"r"}', R, E));
+    AssertTrue('reports the conventional cancel code', Pos('[exit 130]', R) > 0);
+    { And in words. `[exit 130]` alone is a number the model has to decode. }
+    AssertTrue('and names the interruption: ' + R,
+      Pos('[cancelled:', R) > 0);
+    AssertTrue('saying it did not finish', Pos('did not finish', R) > 0);
   finally
     Tool.Free;
   end;
