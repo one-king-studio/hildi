@@ -46,6 +46,8 @@ type
     { The point of the derived loaded set: a /checkpoint archives the body, so
       the skill must read as reloadable rather than as loaded forever. }
     procedure TestLoadedSkillKeysExcludesWhatACheckpointArchived;
+    { The turn summary is stored on the turn, and searchable. }
+    procedure TestTurnSummaryIsStoredAndReadBack;
     procedure TestComposeWrapsAmbientAsUser;
     procedure TestFormatAmbientEscapes;
   end;
@@ -639,6 +641,42 @@ begin
     AssertEquals('source', 'delegate_task', Recs[0].Source);
     AssertEquals('status', 'completed', Recs[0].Status);
     AssertEquals('elapsed', 4200, Recs[0].DurationMs);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TSessionTest.TestTurnSummaryIsStoredAndReadBack;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Ws: Integer;
+  Sid: string;
+  TurnId: Int64;
+  Reply: string;
+  Turns: TTurnRecordArray;
+begin
+  { The summary lives ON the turn, so the history list is a column read rather
+    than a re-parse of the assistant reply. }
+  S := OpenStore;
+  try
+    S.EnsureWorkspace('/tmp', Ws, Err);
+    S.CreateSession(Ws, Sid, Err);
+    TurnId := 0;
+    AssertTrue('a turn opened', S.BeginTurn(Sid, TurnId, Err));
+    AssertTrue('with an id', TurnId > 0);
+
+    AssertTrue('reply readable', S.TurnReply(TurnId, Reply, Err));
+    AssertEquals('no reply yet', '', Reply);
+
+    AssertTrue('summary written', S.SetTurnSummary(TurnId, 'A fine title',
+      'alpha beta', Err));
+
+    AssertTrue('turns queried', S.QueryTurns(Sid, Turns, Err));
+    AssertEquals('one turn', 1, Length(Turns));
+    AssertEquals('the title round-trips', 'A fine title', Turns[0].SummaryTitle);
+    AssertEquals('the keywords round-trip', 'alpha beta',
+      Turns[0].SummaryKeywords);
   finally
     S.Free;
   end;
