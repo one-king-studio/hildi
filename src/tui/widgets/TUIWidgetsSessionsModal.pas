@@ -13,7 +13,7 @@ uses
   Classes, SysUtils,
   TUIBase, TUIInput,
   TUISurface, TUIWidget,
-  TUITheme, TUIGrapheme,
+  TUITheme, TUIGrapheme, TUIWidgetsModal,
   HildiFuzzy,
   HildiSession;
 
@@ -27,9 +27,8 @@ type
     from the management actions, which write a store row. }
   TSessionActivateEvent = procedure(const ASessionId: string) of object;
 
-  TSessionsModal = class(TWidget)
+  TSessionsModal = class(TModal)
   private
-    FTheme: TTheme;
     FRows: TSessionRowArray;
     FCurrent: string;
     FSelected: Integer;
@@ -63,8 +62,10 @@ type
     { Enter on the selected row: open that session. Not fired for an empty list. }
     property OnActivate: TSessionActivateEvent read FOnActivate write FOnActivate;
     function Measure(const AAvail: TSize): TSize; override;
-    procedure Render(const S: ISurface); override;
     function HandleEvent(const E: TInputEvent): Boolean; override;
+  protected
+    { Rows only: TModal owns the frame, the title and the fixed CTA footer. }
+    procedure RenderContent(const S: ISurface); override;
   end;
 
 const
@@ -110,9 +111,24 @@ begin
 end;
 
 constructor TSessionsModal.Create(const ATheme: TTheme);
+var
+  I: Integer;
+  Footer: string;
 begin
-  inherited Create;
-  FTheme := ATheme;
+  { No content widget: this dialog draws its own rows and moves its own
+    selection, so it wants TModal's frame and fixed footer, not a container. }
+  inherited Create(ATheme, nil, False);
+  SetTitle('Sessions');
+  { The footer table becomes the modal's key/action pairs, joined by the space
+    runs the shared splitter understands - no punctuation on screen. }
+  Footer := '';
+  for I := Low(SessionsFooter) to High(SessionsFooter) do
+  begin
+    if Footer <> '' then
+      Footer := Footer + '   ';
+    Footer := Footer + SessionsFooter[I].Key + SessionsFooter[I].Action;
+  end;
+  SetFooter(Footer);
   FRows := nil;
   FSelected := 0;
 end;
@@ -244,10 +260,10 @@ begin
     Result := AFalse;
 end;
 
-procedure TSessionsModal.Render(const S: ISurface);
+procedure TSessionsModal.RenderContent(const S: ISurface);
 var
   L, R, T, B, X, Row, I, Idx, First, Shown, K: Integer;
-  Bg, BorderAttr, TitleAttr, NormalAttr, MutedAttr, ActiveAttr, DimAttr: TAttr;
+  NormalAttr, MutedAttr, ActiveAttr, DimAttr: TAttr;
   V: TArray<Integer>;
   Line, Chips, Mark: UnicodeString;
 begin
@@ -258,30 +274,17 @@ begin
   T := FBounds.Y;
   B := FBounds.Y + FBounds.H - 1;
 
-  Bg := OnBg(FTheme.Text, FTheme.RaisedBg);
-  BorderAttr := OnBg(FTheme.Border, FTheme.RaisedBg);
-  TitleAttr := OnBg(FTheme.Title, FTheme.RaisedBg);
-  NormalAttr := OnBg(FTheme.Text, FTheme.RaisedBg);
-  MutedAttr := OnBg(FTheme.Muted, FTheme.RaisedBg);
-  ActiveAttr := OnBg(FTheme.AccentSoft, FTheme.RaisedBg);
-  DimAttr := OnBg(FTheme.Muted, FTheme.RaisedBg);
+  NormalAttr := OnBg(Theme.Text, Theme.RaisedBg);
+  MutedAttr := OnBg(Theme.Muted, Theme.RaisedBg);
+  ActiveAttr := OnBg(Theme.AccentSoft, Theme.RaisedBg);
+  DimAttr := OnBg(Theme.Muted, Theme.RaisedBg);
 
-  S.FillRect(FBounds, Bg);
-  PutCh(S, L, T, '╭', BorderAttr);
-  PutCh(S, R, T, '╮', BorderAttr);
-  PutCh(S, L, B, '╰', BorderAttr);
-  PutCh(S, R, B, '╯', BorderAttr);
-  for X := L + 1 to R - 1 do
-  begin
-    PutCh(S, X, T, '─', BorderAttr);
-    PutCh(S, X, B, '─', BorderAttr);
-  end;
-  for X := T + 1 to B - 1 do
-  begin
-    PutCh(S, L, X, '│', BorderAttr);
-    PutCh(S, R, X, '│', BorderAttr);
-  end;
-  PutText(S, L + 2, T, ' Sessions ', TitleAttr);
+  { The frame, the title and the CTA footer belong to TModal; this draws the
+    filter line and the rows, inside the frame it drew. FBounds is the whole
+    modal, so the top border is at T and the footer's divider row is
+    B - ModalFooterRows. }
+  T := FBounds.Y;
+  B := FBounds.Y + FBounds.H - 1;
 
   { The filter line. }
   if FRenaming then
@@ -293,7 +296,10 @@ begin
         IfThenStr(FShowArchived, '   [archived shown]', '')), MutedAttr);
 
   V := VisibleRows;
-  Shown := B - T - 4;   { rows between the filter and the footer }
+  { Rows between the filter line and the footer. The footer is ModalFooterRows
+    tall (divider + CTA) and sits above the bottom border, so it costs more than
+    the old hand-drawn single row did. }
+  Shown := (B - ModalFooterRows) - (T + 1);
   if Shown < 1 then
     Shown := 1;
   First := 0;
@@ -332,21 +338,8 @@ begin
       PutText(S, L + 2 + StringWidth(Line) + 2, Row, Chips, MutedAttr);
   end;
 
-  { Footer, right-aligned: keys dimmed, actions normal (the approval modal's
-    convention). }
-  Row := B - 1;
-  X := R - 1 - StringWidth(UnicodeString(FooterGap)) - SessionsFooterWidth;
-  if X < L + 2 then
-    X := L + 2;
-  for I := Low(SessionsFooter) to High(SessionsFooter) do
-  begin
-    if I > Low(SessionsFooter) then
-      Inc(X, StringWidth(UnicodeString(FooterGap)));
-    PutText(S, X, Row, UnicodeString(SessionsFooter[I].Key), DimAttr);
-    Inc(X, StringWidth(UnicodeString(SessionsFooter[I].Key)));
-    PutText(S, X, Row, UnicodeString(SessionsFooter[I].Action), NormalAttr);
-    Inc(X, StringWidth(UnicodeString(SessionsFooter[I].Action)));
-  end;
+  { The CTA footer is TModal's: it draws the divider and the pairs, and owns the
+    click regions. }
 end;
 
 function TSessionsModal.HandleEvent(const E: TInputEvent): Boolean;
