@@ -8,7 +8,7 @@ interface
 
 uses
   SysUtils, fpcunit, testregistry, TUIWidgetsPalette,
-  TUITheme, TUIInput;
+  TUITheme, TUIInput, TUIBase, TUISurface;
 
 type
   TTuiPaletteTest = class(TTestCase)
@@ -27,6 +27,10 @@ type
       up past the first goes to the last. Clamping made the operator press up N
       times to get back to the top. }
     procedure TestSelectionWrapsAtBothEnds;
+    { The panel's height must leave a row for EVERY command AND the hint row.
+      Reported live: typing /ski showed only /skill, which was drawn on the row
+      the hints then covered - so the only match was invisible. }
+    procedure TestSingleMatchIsVisibleAboveTheHintRow;
   end;
 
 implementation
@@ -138,6 +142,59 @@ begin
     P.HandleEvent(KeyEvent(kkUp));
     AssertEquals('up wraps to the last', 'clear', P.SelectedName);
   finally
+    P.Free;
+  end;
+end;
+
+procedure TTuiPaletteTest.TestSingleMatchIsVisibleAboveTheHintRow;
+var
+  P: TCommandPalette;
+  T: TCommandArray;
+  Mem: TSurfaceMemory;
+  R: TRect;
+  H, Row: Integer;
+  Line: UnicodeString;
+  SawName, SawHint: Boolean;
+begin
+  { Reported live: typing /ski matched only /skill, and it was INVISIBLE - drawn
+    on the row the hint line then painted over. The height and the render
+    disagreed: Measure returned border + N, while Render reserved the last row
+    for hints, leaving N-1 rows for commands. With a single match that is zero.
+
+    This asserts on the RENDERED surface rather than on Measure, because the bug
+    was the two disagreeing - a Measure-only test would have passed. }
+  P := TCommandPalette.Create(Default(TTheme));
+  Mem := TSurfaceMemory.Create(40, 10);
+  try
+    SetLength(T, 1);
+    T[0].Name := 'skill';
+    T[0].Description := 'load a skill';
+    P.SetCommands(T);
+    { Give it exactly the height it asks for, as the panel host does. }
+    R := Default(TRect);
+    R.W := 40;
+    R.H := 10;
+    H := P.Measure(Default(TSize)).H;
+    R.H := H;
+    P.Arrange(R);
+    P.Render(Mem);
+
+    SawName := False;
+    SawHint := False;
+    for Row := 0 to H - 1 do
+    begin
+      Line := Mem.RowText(Row, 0, 40);
+      if Pos('/skill', Line) > 0 then
+        SawName := True;
+      if Pos('enter', Line) > 0 then
+        SawHint := True;
+    end;
+    { Both, on different rows: the command visible AND the hint present. }
+    AssertTrue('the single match is rendered', SawName);
+    AssertTrue('the hint row is rendered too', SawHint);
+    AssertTrue('and the panel is tall enough for both', H >= 3);
+  finally
+    Mem.Free;
     P.Free;
   end;
 end;

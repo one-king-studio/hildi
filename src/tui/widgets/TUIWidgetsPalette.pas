@@ -317,9 +317,11 @@ begin
   N := Length(FVisibleCommands);
   if N > PaletteMaxRows then
     N := PaletteMaxRows;
-  { A top border row, then one row per command. No bottom border: the tray
-    slides out from the composer below it. }
-  Result.H := N + 1;
+  { A top border row, one row per command, and a RESERVED row for the shortcut
+    hints. The hint row must be counted here: the render reserves the panel's
+    last row for it, so a height of N+1 left only N-1 rows for commands and the
+    last one - or, with a single command, the ONLY one - was clipped away. }
+  Result.H := N + 2;
 end;
 
 procedure TCommandPalette.MoveSelection(ADelta: Integer);
