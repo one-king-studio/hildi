@@ -30,7 +30,7 @@ uses
   HildiCoordination,
   HildiWorkspaceChanges,
   HildiRecallTool, HildiHarnessTurn,
-  HildiHarnessView,
+  HildiHarnessView, HildiReplyMeta,
   HildiMCPConfig, HildiMCPClient, HildiMCPProvider,
   HildiMCPTransport, HildiMCPOAUTHFlow,
   HildiShellCommands, HildiShellTier,
@@ -665,6 +665,11 @@ begin
 end;
 
 procedure THarnessSession.NoteTurnFinished(ATurnId: Int64);
+var
+  Reply, KW: string;
+  ReplyErr: TStoreError;
+  Meta: TReplyMeta;
+  I: Integer;
 begin
   { Fold the turn into one net row per path. This is the turn-boundary, not the
     next turn's opening: the summary must be complete when the turn ends, and a
@@ -673,6 +678,32 @@ begin
     turn over. }
   if (FRecorder <> nil) and (ATurnId <> 0) then
     FRecorder.FlushTurn;
+
+  { The turn's SUMMARY, stored on the turn row so recall is a column read and the
+    title/keywords are searchable. Read the reply's frontmatter here, at the turn
+    boundary, because this is the first moment the completed reply exists and the
+    last moment a caller could change it. Swallowed: a turn must not fail over a
+    summary. }
+  if (FView <> nil) and (FView.Store <> nil) and (ATurnId <> 0) then
+  begin
+    if FView.Store.TurnReply(ATurnId, Reply, ReplyErr) and (Reply <> '') then
+    begin
+      Meta := ExtractReplyMeta(Reply);
+      if Meta.HasMeta then
+      begin
+        { The keywords come back as an array; stored space-joined, which is what
+          a person would search for anyway. }
+        KW := '';
+        for I := 0 to High(Meta.Keywords) do
+        begin
+          if KW <> '' then
+            KW := KW + ' ';
+          KW := KW + Meta.Keywords[I];
+        end;
+        FView.Store.SetTurnSummary(ATurnId, Meta.Title, KW, ReplyErr);
+      end;
+    end;
+  end;
 end;
 
 procedure THarnessSession.AnchorChanges(const AToolCallId: string);
