@@ -1407,11 +1407,12 @@ begin
     { Not a file row (the `N more files` tail, or the frame): fall through to the
       toggle so a click on the block still expands it. }
   end;
-  if not (FKind in [ckThought, ckTool, ckAmbient, ckHandoff]) then
-    Exit;
-  if FLive then
-    Exit;   { a live block is not toggleable; it settles when the stream ends }
-  if (E.Kind = ikMouse) and (E.Mouse.Button = mbLeft) and
+  { A toggle is offered ONLY to the kinds that have one. These were early
+    Exits, and that was a bug: an assistant prose block - the most common thing
+    an operator wants to copy - returned here and never reached the forwarding
+    below, so selection silently did nothing on every answer. }
+  if (FKind in [ckThought, ckTool, ckAmbient, ckHandoff]) and (not FLive) and
+    (E.Kind = ikMouse) and (E.Mouse.Button = mbLeft) and
     (E.Mouse.X >= FBounds.X) and (E.Mouse.Y >= FBounds.Y) and
     (E.Mouse.X < FBounds.X + FBounds.W) and (E.Mouse.Y < FBounds.Y + FBounds.H)
   then
