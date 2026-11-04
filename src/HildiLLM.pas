@@ -107,12 +107,32 @@ type
   { Consulted between stream reads; True abandons the request as cancelled. }
   TLLMCancelCheck = function: Boolean of object;
 
+  { One optional request parameter. TRI-STATE on purpose: `Set_ = False` means
+    the key is absent from the JSON body, which is a different request from a key
+    present and zero. A sentinel - 0 meaning "unset" - would be a lie, because a
+    temperature of 0 is a real and very different setting. }
+  TLLMParam = record
+    Set_: Boolean;
+    Value: Double;      // numeric parameters; integers carried here too
+  end;
+
   TLLMConfig = record
     Endpoint: string;
     Model: string;
     ApiKey: string;
     ConnectTimeoutMs: Integer;
     ReadTimeoutMs: Integer;
+    { Optional request parameters. Unset => the key is not sent at all, so the
+      provider's own default applies. Resolved from HILDI_LLM_* by
+      ResolveLLMConfig; an explicitly set field is never overwritten. }
+    Temperature: TLLMParam;        // 0..2
+    TopP: TLLMParam;               // 0..1
+    MaxTokens: TLLMParam;          // integer > 0
+    FrequencyPenalty: TLLMParam;   // -2..2
+    PresencePenalty: TLLMParam;    // -2..2
+    Seed: TLLMParam;               // integer >= 0
+    { Empty => no `stop` key. Sent as a JSON ARRAY when non-empty. }
+    Stop: TStringArray;
   end;
 
   TLLMTransport = class
@@ -144,6 +164,10 @@ type
     FTransport: TLLMTransport;
     FOwnsTransport: Boolean;
     FCancel: TLLMCancelCheck;
+    { A parameter that is present but unparseable. Carried out of Create because
+      a constructor cannot fail, then reported from Complete - which already has
+      an out AError: TLLMError - so the failure still happens before any I/O. }
+    FConfigError: string;
     function Endpoint: string;
     function GetModel: string;
   public
@@ -161,6 +185,16 @@ type
   end;
 
 function ResolveLLMConfig(const AConfig: TLLMConfig): TLLMConfig;
+{ Resolve the optional request parameters, and REPORT rather than coerce. Fills
+  any unset parameter from its HILDI_LLM_* variable (with the HILDEGARD_* legacy
+  fallback), leaving a field the caller already set untouched. Returns False and
+  fills AError - naming the variable and the offending text - when a value is
+  present but unparseable or out of range. A value outside the documented range
+  is never clamped: substituting a number the operator did not ask for is a
+  silent behaviour change, which is worse than refusing.
+  A pure function of the environment, so the whole policy is testable. }
+function ResolveLLMParams(var AConfig: TLLMConfig;
+  out AError: string): Boolean;
 function RoleToString(ARole: TChatRole): string;
 
 { A failure's display text: the message, plus the cause after a colon when there
@@ -295,6 +329,146 @@ begin
     Result.ConnectTimeoutMs := DefaultConnectTimeoutMs;
   if Result.ReadTimeoutMs <= 0 then
     Result.ReadTimeoutMs := DefaultReadTimeoutMs;
+end;
+
+{ --- optional request parameters ---------------------------------------- }
+
+const
+  { Documented provider conventions. Enforced as OUR policy so a typo is a
+    configuration error rather than a silently odd request. }
+  MinTemperature = 0.0;
+  MaxTemperature = 2.0;
+  MinProbability = 0.0;
+  MaxProbability = 1.0;
+  MinPenalty = -2.0;
+  MaxPenalty = 2.0;
+
+function ParamVar(const AName: string): string;
+begin
+  Result := 'HILDI_LLM_' + AName;
+end;
+
+{ Read one optional numeric parameter. Absent => leave the field unset. Present
+  but unparseable or out of range => False with a message naming the variable. }
+function ReadNumericParam(const AEnvName: string; AMin, AMax: Double;
+  var AParam: TLLMParam; out AError: string): Boolean;
+var
+  Raw: string;
+  V: Double;
+  FS: TFormatSettings;
+begin
+  Result := True;
+  if AParam.Set_ then
+    Exit;                       // an explicit config is a decision, not a default
+  Raw := GetEnvLegacy(ParamVar(AEnvName));
+  if Raw = '' then
+    Exit;
+  { JSONFormatSettings, not the locale default: on a comma-decimal locale
+    StrToFloat('0.2') would parse as 2 or fail outright, so a value read here
+    would disagree with the '.' the body is written with. }
+  FS := DefaultFormatSettings;
+  FS.DecimalSeparator := '.';
+  FS.ThousandSeparator := #0;
+  if not TryStrToFloat(Raw, V, FS) then
+  begin
+    AError := ParamVar(AEnvName) + ' is not a number: "' + Raw + '"';
+    Exit(False);
+  end;
+  if (V < AMin) or (V > AMax) then
+  begin
+    { NOT clamped. Substituting a value the operator did not ask for is a silent
+      behaviour change, which is worse than refusing. }
+    AError := Format('%s is out of range (%g..%g): "%s"',
+      [ParamVar(AEnvName), AMin, AMax, Raw]);
+    Exit(False);
+  end;
+  AParam.Set_ := True;
+  AParam.Value := V;
+end;
+
+{ An integer parameter: 1.5 is an error, not a truncation. }
+function ReadIntegerParam(const AEnvName: string; AMin: Double;
+  var AParam: TLLMParam; out AError: string): Boolean;
+var
+  Raw: string;
+  V: Int64;
+begin
+  Result := True;
+  if AParam.Set_ then
+    Exit;
+  Raw := GetEnvLegacy(ParamVar(AEnvName));
+  if Raw = '' then
+    Exit;
+  if not TryStrToInt64(Raw, V) then
+  begin
+    AError := ParamVar(AEnvName) + ' is not a whole number: "' + Raw + '"';
+    Exit(False);
+  end;
+  if V < AMin then
+  begin
+    AError := Format('%s is out of range (%g..): "%s"',
+      [ParamVar(AEnvName), AMin, Raw]);
+    Exit(False);
+  end;
+  AParam.Set_ := True;
+  AParam.Value := V;
+end;
+
+function SplitStop(const ARaw: string): TStringArray;
+var
+  Parts: TStringArray;
+  I, N: Integer;
+begin
+  Result := nil;
+  Parts := ARaw.Split([',']);
+  N := 0;
+  SetLength(Result, Length(Parts));
+  for I := 0 to High(Parts) do
+  begin
+    if Trim(Parts[I]) = '' then
+      Continue;                 // a stop list that yields nothing is unset
+    Result[N] := Trim(Parts[I]);
+    Inc(N);
+  end;
+  SetLength(Result, N);
+end;
+
+function ResolveLLMParams(var AConfig: TLLMConfig;
+  out AError: string): Boolean;
+var
+  Raw: string;
+  Cfg: TLLMConfig;
+  Ok: Boolean;
+begin
+  { Resolve into a copy so a failure leaves the caller's config untouched, then
+    publish only on success. A half-resolved config is not a state anyone
+    should be able to observe. }
+  Cfg := AConfig;
+  AError := '';
+  Ok := ReadNumericParam('TEMPERATURE', MinTemperature, MaxTemperature,
+    Cfg.Temperature, AError);
+  if Ok then
+    Ok := ReadNumericParam('TOP_P', MinProbability, MaxProbability,
+      Cfg.TopP, AError);
+  if Ok then
+    Ok := ReadIntegerParam('MAX_TOKENS', 1, Cfg.MaxTokens, AError);
+  if Ok then
+    Ok := ReadNumericParam('FREQUENCY_PENALTY', MinPenalty, MaxPenalty,
+      Cfg.FrequencyPenalty, AError);
+  if Ok then
+    Ok := ReadNumericParam('PRESENCE_PENALTY', MinPenalty, MaxPenalty,
+      Cfg.PresencePenalty, AError);
+  if Ok then
+    Ok := ReadIntegerParam('SEED', 0, Cfg.Seed, AError);
+  if Ok and (Length(Cfg.Stop) = 0) then
+  begin
+    Raw := GetEnvLegacy(ParamVar('STOP'));
+    if Raw <> '' then
+      Cfg.Stop := SplitStop(Raw);
+  end;
+  if Ok then
+    AConfig := Cfg;
+  Result := Ok;
 end;
 
 function RoleToString(ARole: TChatRole): string;
@@ -761,6 +935,7 @@ var
   Tools: TJSONArray;
   MObj, TObj, FnObj, Opts: TJSONObject;
   CallObj: TJSONArray;
+  StopArr: TJSONArray;
   I, J: Integer;
   Params: TJSONData;
 begin
@@ -773,6 +948,33 @@ begin
     Opts := TJSONObject.Create;
     Opts.Add('include_usage', True);
     Root.Add('stream_options', Opts);
+
+    { OPTIONAL REQUEST PARAMETERS. Emitted only when set, so nothing here changes
+      the body for an install that configures none of them. Placed before
+      `messages` to keep the large arrays last, which is also the order the
+      parameters read in. }
+    if AConfig.Temperature.Set_ then
+      Root.Add('temperature', AConfig.Temperature.Value);
+    if AConfig.TopP.Set_ then
+      Root.Add('top_p', AConfig.TopP.Value);
+    if AConfig.MaxTokens.Set_ then
+      Root.Add('max_tokens', Int64(Round(AConfig.MaxTokens.Value)));
+    if AConfig.FrequencyPenalty.Set_ then
+      Root.Add('frequency_penalty', AConfig.FrequencyPenalty.Value);
+    if AConfig.PresencePenalty.Set_ then
+      Root.Add('presence_penalty', AConfig.PresencePenalty.Value);
+    if AConfig.Seed.Set_ then
+      Root.Add('seed', Int64(Round(AConfig.Seed.Value)));
+    if Length(AConfig.Stop) > 0 then
+    begin
+      { Always an array. OpenAI accepts a bare string too, but an array is what
+        every compatible endpoint handles and it removes the ambiguity of a
+        single stop that itself contains a comma. }
+      StopArr := TJSONArray.Create;
+      for I := 0 to High(AConfig.Stop) do
+        StopArr.Add(AConfig.Stop[I]);
+      Root.Add('stop', StopArr);
+    end;
 
     Msgs := TJSONArray.Create;
     for I := 0 to High(ARequest.Messages) do
@@ -834,6 +1036,12 @@ constructor TLLMClient.Create(const AConfig: TLLMConfig;
 begin
   inherited Create;
   FConfig := ResolveLLMConfig(AConfig);
+  { Resolve the optional request parameters too, and remember a complaint rather
+    than raising: Create has no failure channel, so the error is reported from
+    Complete, before any network I/O. }
+  FConfigError := '';
+  if not ResolveLLMParams(FConfig, FConfigError) then
+    ;  // FConfigError is reported from Complete
   if ATransport = nil then
   begin
     FTransport := TFPHTTPTransport.Create;
@@ -884,6 +1092,13 @@ var
 begin
   AResult := Default(TChatResult);
   AError := OkLLM;
+  { A parameter that was present but unparseable. Reported here, before any I/O,
+    because Create has no failure channel. }
+  if FConfigError <> '' then
+  begin
+    AError := ErrLLM(leConfig, 'invalid request parameter', FConfigError);
+    Exit(False);
+  end;
   if Length(ARequest.Messages) = 0 then
   begin
     AError := ErrLLM(leConfig, 'no messages to send', '');

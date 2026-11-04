@@ -46,6 +46,17 @@ type
   published
     procedure TestConfigResolutionPrefersExplicit;
     procedure TestConfigResolutionReadsEnvironment;
+    { Request parameters: absent means omitted, never a sentinel. }
+    procedure TestNoParameterKeysByDefault;
+    procedure TestTemperatureZeroIsSent;
+    procedure TestEachNumericParameterIsSerialised;
+    procedure TestStopBecomesAnArray;
+    procedure TestEmptyStopIsOmitted;
+    procedure TestUnparseableValueIsAConfigError;
+    procedure TestOutOfRangeValueIsRejectedNotClamped;
+    procedure TestLegacyEnvSpellingIsHonoured;
+    procedure TestNewEnvSpellingWins;
+    procedure TestExplicitConfigIsNotOverwrittenByTheEnvironment;
     procedure TestMissingApiKeyFailsBeforeRequest;
     procedure TestRequestSerializationIncludesModelMessagesAndTools;
     procedure TestRequestSerializationIncludesToolCallsAndToolResults;
@@ -143,6 +154,17 @@ procedure TLLMClientTest.TearDown;
 begin
   SetEnv('HILDI_LLM_API_KEY', '');
   SetEnv('HILDI_LLM_MODEL', '');
+  { The request-parameter tests set these, and the environment outlives a test
+    method: one test's 5.0 temperature was reaching the next one and turning it
+    into a range error. Clear every variable the suite touches. }
+  SetEnv('HILDI_LLM_TEMPERATURE', '');
+  SetEnv('HILDI_LLM_TOP_P', '');
+  SetEnv('HILDI_LLM_MAX_TOKENS', '');
+  SetEnv('HILDI_LLM_STOP', '');
+  SetEnv('HILDI_LLM_FREQUENCY_PENALTY', '');
+  SetEnv('HILDI_LLM_PRESENCE_PENALTY', '');
+  SetEnv('HILDI_LLM_SEED', '');
+  SetEnv('HILDEGARD_LLM_TEMPERATURE', '');
 end;
 
 function TLLMClientTest.MakeClient(out AFake: TFakeTransport;
@@ -150,6 +172,12 @@ function TLLMClientTest.MakeClient(out AFake: TFakeTransport;
 var
   Cfg: TLLMConfig;
 begin
+  { FPC does not zero-initialise managed locals, and TLLMConfig now holds seven
+    tri-state records: a garbage Set_ reads as "the caller chose this", so
+    ResolveLLMParams skips the environment and the test asserts against junk.
+    This bit twice - a phantom `temperature` in the default-path test, and 0
+    instead of 0.25 in the numeric one. }
+  Cfg := Default(TLLMConfig);
   Cfg.Endpoint := 'https://example.test/v1/chat/completions';
   Cfg.Model := AModel;
   Cfg.ApiKey := AKey;
@@ -200,6 +228,236 @@ begin
   AssertEquals('model from env', 'env-model', R.Model);
   AssertEquals('key from env', 'env-key', R.ApiKey);
   AssertEquals('default endpoint', DefaultLLMEndpoint, R.Endpoint);
+end;
+
+{ --- request parameters -------------------------------------------------- }
+
+procedure TLLMClientTest.TestNoParameterKeysByDefault;
+var
+  Fake: TFakeTransport;
+  Client: TLLMClient;
+  Res: TChatResult;
+  Err: TLLMError;
+  Root: TJSONObject;
+  Keys: array[0..6] of string = ('temperature', 'top_p', 'max_tokens', 'stop',
+    'frequency_penalty', 'presence_penalty', 'seed');
+  I: Integer;
+begin
+  { The default path must not drift. With nothing configured the body is what it
+    always was - this is the test that fails if a sentinel zero ever creeps in. }
+  Client := MakeClient(Fake, 'm', 'k');
+  try
+    Fake.AddChunk(FinishFrame('stop'));
+    Fake.AddChunk(DoneFrame);
+    AssertTrue('complete', Client.Complete(UserRequest('hi'), nil, Res, Err));
+    Root := TJSONObject(GetJSON(Fake.LastBody));
+    try
+      for I := 0 to High(Keys) do
+        AssertTrue('absent: ' + Keys[I], Root.Find(Keys[I]) = nil);
+    finally
+      Root.Free;
+    end;
+  finally
+    Client.Free;
+    Fake.Free;
+  end;
+end;
+
+procedure TLLMClientTest.TestTemperatureZeroIsSent;
+var
+  Fake: TFakeTransport;
+  Client: TLLMClient;
+  Res: TChatResult;
+  Err: TLLMError;
+  Root: TJSONObject;
+  V: TJSONData;
+begin
+  { A zero temperature is a real, very different request from an unset one.
+    Tri-state, not a sentinel - a design using Value: Double with 0 meaning
+    "unset" would fail exactly here. }
+  SetEnv('HILDI_LLM_TEMPERATURE', '0');
+  Client := MakeClient(Fake, 'm', 'k');
+  try
+    Fake.AddChunk(FinishFrame('stop'));
+    Fake.AddChunk(DoneFrame);
+    AssertTrue('complete', Client.Complete(UserRequest('hi'), nil, Res, Err));
+    Root := TJSONObject(GetJSON(Fake.LastBody));
+    try
+      V := Root.Find('temperature');
+      AssertTrue('present', V <> nil);
+      AssertEquals('a number', Ord(jtNumber), Ord(V.JSONType));
+      AssertEquals('zero', 0.0, V.AsFloat);
+    finally
+      Root.Free;
+    end;
+  finally
+    Client.Free;
+    Fake.Free;
+  end;
+end;
+
+procedure TLLMClientTest.TestEachNumericParameterIsSerialised;
+var
+  Fake: TFakeTransport;
+  Client: TLLMClient;
+  Res: TChatResult;
+  Err: TLLMError;
+  Root: TJSONObject;
+begin
+  SetEnv('HILDI_LLM_TEMPERATURE', '0.25');
+  SetEnv('HILDI_LLM_TOP_P', '0.9');
+  SetEnv('HILDI_LLM_MAX_TOKENS', '4096');
+  SetEnv('HILDI_LLM_FREQUENCY_PENALTY', '0.5');
+  SetEnv('HILDI_LLM_PRESENCE_PENALTY', '-0.5');
+  SetEnv('HILDI_LLM_SEED', '42');
+  Client := MakeClient(Fake, 'm', 'k');
+  try
+    Fake.AddChunk(FinishFrame('stop'));
+    Fake.AddChunk(DoneFrame);
+    AssertTrue('complete', Client.Complete(UserRequest('hi'), nil, Res, Err));
+    Root := TJSONObject(GetJSON(Fake.LastBody));
+    try
+      AssertEquals('temperature', 0.25, Root.Find('temperature').AsFloat);
+      AssertEquals('top_p', 0.9, Root.Find('top_p').AsFloat);
+      { An integer on the wire, not 4096.0: some providers reject a float where
+        the schema says integer. }
+      AssertEquals('max_tokens', 4096, Root.Find('max_tokens').AsInteger);
+      AssertEquals('frequency_penalty', 0.5,
+        Root.Find('frequency_penalty').AsFloat);
+      AssertEquals('presence_penalty', -0.5,
+        Root.Find('presence_penalty').AsFloat);
+      AssertEquals('seed', 42, Root.Find('seed').AsInteger);
+    finally
+      Root.Free;
+    end;
+  finally
+    Client.Free;
+    Fake.Free;
+  end;
+end;
+
+procedure TLLMClientTest.TestStopBecomesAnArray;
+var
+  Fake: TFakeTransport;
+  Client: TLLMClient;
+  Res: TChatResult;
+  Err: TLLMError;
+  Root: TJSONObject;
+  Arr: TJSONArray;
+begin
+  { Always an array, never a bare string: every OpenAI-compatible endpoint
+    accepts both, and an array avoids the ambiguity of one stop containing a
+    comma. }
+  SetEnv('HILDI_LLM_STOP', 'STOP,</answer>');
+  Client := MakeClient(Fake, 'm', 'k');
+  try
+    Fake.AddChunk(FinishFrame('stop'));
+    Fake.AddChunk(DoneFrame);
+    AssertTrue('complete', Client.Complete(UserRequest('hi'), nil, Res, Err));
+    Root := TJSONObject(GetJSON(Fake.LastBody));
+    try
+      AssertTrue('is an array', Root.Find('stop') is TJSONArray);
+      Arr := TJSONArray(Root.Find('stop'));
+      AssertEquals('two entries', 2, Arr.Count);
+      AssertEquals('first', 'STOP', Arr.Strings[0]);
+      AssertEquals('second', '</answer>', Arr.Strings[1]);
+    finally
+      Root.Free;
+    end;
+  finally
+    Client.Free;
+    Fake.Free;
+  end;
+end;
+
+procedure TLLMClientTest.TestEmptyStopIsOmitted;
+var
+  Cfg, R: TLLMConfig;
+  E: string;
+  Ok: Boolean;
+begin
+  { A stop list that yields no entries is the same as unset, not an empty
+    array. Empty segments are dropped rather than sent as "". }
+  SetEnv('HILDI_LLM_STOP', ' , ,');
+  E := '';
+  Cfg := Default(TLLMConfig);
+  Ok := ResolveLLMParams(Cfg, E);
+  AssertTrue('resolution succeeds: ' + E, Ok);
+  R := Cfg;
+  AssertEquals('no stop entries', 0, Length(R.Stop));
+end;
+
+procedure TLLMClientTest.TestUnparseableValueIsAConfigError;
+var
+  Cfg: TLLMConfig;
+  E: string;
+begin
+  E := '';
+  { Reported, never coerced: a value the operator did not ask for is a silent
+    behaviour change. The variable is named so it can be fixed without guessing. }
+  SetEnv('HILDI_LLM_TEMPERATURE', 'warm');
+  Cfg := Default(TLLMConfig);
+  AssertFalse('rejected', ResolveLLMParams(Cfg, E));
+  AssertTrue('names the variable: ' + E, Pos('HILDI_LLM_TEMPERATURE', E) > 0);
+  AssertTrue('carries the offending text: ' + E, Pos('warm', E) > 0);
+end;
+
+procedure TLLMClientTest.TestOutOfRangeValueIsRejectedNotClamped;
+var
+  Cfg: TLLMConfig;
+  E: string;
+begin
+  E := '';
+  { Clamping would substitute a value the operator did not choose. 5.0 is not a
+    temperature; say so. }
+  SetEnv('HILDI_LLM_TEMPERATURE', '5.0');
+  Cfg := Default(TLLMConfig);
+  AssertFalse('rejected', ResolveLLMParams(Cfg, E));
+  AssertTrue('names the variable: ' + E, Pos('HILDI_LLM_TEMPERATURE', E) > 0);
+end;
+
+procedure TLLMClientTest.TestLegacyEnvSpellingIsHonoured;
+var
+  Cfg: TLLMConfig;
+  E: string;
+begin
+  E := '';
+  { Same rename tolerance as HILDI_LLM_MODEL: an existing install's .env keeps
+    working after the rename. }
+  SetEnv('HILDEGARD_LLM_TEMPERATURE', '0.3');
+  Cfg := Default(TLLMConfig);
+  AssertTrue('resolved: ' + E, ResolveLLMParams(Cfg, E));
+  AssertTrue('set from the legacy spelling', Cfg.Temperature.Set_);
+  AssertEquals('value', 0.3, Cfg.Temperature.Value);
+end;
+
+procedure TLLMClientTest.TestNewEnvSpellingWins;
+var
+  Cfg: TLLMConfig;
+  E: string;
+begin
+  E := '';
+  SetEnv('HILDEGARD_LLM_TEMPERATURE', '0.3');
+  SetEnv('HILDI_LLM_TEMPERATURE', '0.7');
+  Cfg := Default(TLLMConfig);
+  AssertTrue('resolved: ' + E, ResolveLLMParams(Cfg, E));
+  AssertEquals('the new name wins', 0.7, Cfg.Temperature.Value);
+end;
+
+procedure TLLMClientTest.TestExplicitConfigIsNotOverwrittenByTheEnvironment;
+var
+  Cfg: TLLMConfig;
+  E: string;
+begin
+  E := '';
+  { An explicit config is a decision; the environment is a default. The decision
+    wins, which is the same precedence model and key already follow. }
+  SetEnv('HILDI_LLM_TEMPERATURE', '1.5');
+  Cfg := Default(TLLMConfig);
+  Cfg.Temperature.Set_ := True;
+  Cfg.Temperature.Value := 0.2;
+  AssertTrue('resolved: ' + E, ResolveLLMParams(Cfg, E));
+  AssertEquals('explicit value kept', 0.2, Cfg.Temperature.Value);
 end;
 
 procedure TLLMClientTest.TestMissingApiKeyFailsBeforeRequest;
