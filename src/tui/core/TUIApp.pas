@@ -79,6 +79,10 @@ type
     FNeedsRepaint: Boolean;
     FScreenBg: Byte;
     FInputHook: TInputHook;
+    { Copy the selection when the mouse button comes up. On by default: the
+      gesture that makes a selection is the gesture that delivers it, so there
+      is no keybinding to discover and none to be unreachable. }
+    FCopyOnRelease: Boolean;
     { Loop-rate diagnostic, enabled by HILDI_TUI_DIAG. Reports why the loop
       chose its timeout, so an idle CPU problem can be attributed instead of
       guessed at. Off (and all-zero) unless the environment asks for it. }
@@ -119,6 +123,10 @@ type
       receives input, so the key acts on what the operator is looking at.
       Returns False when nothing was selected. }
     function CopySelection: Boolean;
+
+    { Copy on mouse release. Default True; set False to require an explicit
+      key, or for a host that wants its own gesture. }
+    property CopyOnRelease: Boolean read FCopyOnRelease write FCopyOnRelease;
     procedure Stop;
 
     { One iteration: process at most one input event (or resize), lay out on
@@ -206,6 +214,7 @@ begin
     a change; do not mark the layout dirty, or the first Step would re-arrange. }
   FLayoutDirty := False;
   FNeedsRepaint := True;
+  FCopyOnRelease := True;
   FScreenBg := 0;
   if ATickMs < 1 then
     ATickMs := DefaultTickMs;
@@ -375,10 +384,18 @@ begin
       else
         FPlanes[0].Root.HandleEvent(E);
     ikMouse:
-      if ModalActive then
-        FPlanes[High(FPlanes)].Root.HandleEvent(E)
-      else
-        FPlanes[0].Root.HandleEvent(E);
+      begin
+        if ModalActive then
+          FPlanes[High(FPlanes)].Root.HandleEvent(E)
+        else
+          FPlanes[0].Root.HandleEvent(E);
+        { AFTER dispatch, so the release has already ended the drag and the
+          selection is final. CopySelection is a no-op when nothing usable is
+          selected, which is what makes a plain click harmless: an empty OSC 52
+          write would CLEAR the operator's clipboard. }
+        if FCopyOnRelease and (E.Mouse.Action = maRelease) then
+          CopySelection;
+      end;
     ikFocus:
       SetTerminalFocused(E.Focused);
   else
