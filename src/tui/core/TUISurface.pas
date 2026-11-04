@@ -28,6 +28,10 @@ type
     procedure Resize(AWidth, AHeight: Integer);
     procedure Clear(const AAttr: TAttr);
     procedure Put(X, Y: Integer; const ACell: TCell);
+    { Read a cell back. Anything that RECOLOURS rather than draws needs this -
+      a selection highlight keeps the glyph and changes only its attribute.
+      Outside the surface, returns a blank cell. }
+    function Get(X, Y: Integer): TCell;
     procedure FillRect(const R: TRect; const AAttr: TAttr);
     procedure DimRect(const R: TRect);
     procedure PushClip(const R: TRect);
@@ -84,6 +88,10 @@ type
     function Height: Integer;
     procedure Clear(const AAttr: TAttr);
     procedure Put(X, Y: Integer; const ACell: TCell);
+    { Read a cell back. Anything that RECOLOURS rather than draws needs this -
+      a selection highlight keeps the glyph and changes only its attribute.
+      Outside the surface, returns a blank cell. }
+    function Get(X, Y: Integer): TCell;
     procedure FillRect(const R: TRect; const AAttr: TAttr);
     procedure DimRect(const R: TRect);
     procedure PushClip(const R: TRect);
@@ -226,6 +234,13 @@ begin
   if not InClip(X, Y) then
     Exit;
   FCells[IndexOf(X, Y)] := ACell;
+end;
+
+function TSurfaceMemory.Get(X, Y: Integer): TCell;
+begin
+  Result := Default(TCell);
+  if (X >= 0) and (Y >= 0) and (X < FWidth) and (Y < FHeight) then
+    Result := FCells[IndexOf(X, Y)];
 end;
 
 procedure TSurfaceMemory.FillRect(const R: TRect; const AAttr: TAttr);

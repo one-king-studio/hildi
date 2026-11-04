@@ -43,6 +43,7 @@ type
     function Height: Integer;
     procedure Clear(const AAttr: TAttr);
     procedure Put(X, Y: Integer; const ACell: TCell);
+    function Get(X, Y: Integer): TCell;
     procedure FillRect(const R: TRect; const AAttr: TAttr);
     procedure DimRect(const R: TRect);
     procedure PushClip(const R: TRect);
@@ -211,6 +212,14 @@ begin
   if (X < 0) or (Y < 0) or (X >= FWidth) or (Y >= FHeight) then
     Exit;
   FCells[IndexOf(X, Y)] := ACell;
+end;
+
+function TSurfaceVideo.Get(X, Y: Integer): TCell;
+begin
+  Result := Default(TCell);
+  if (X < 0) or (Y < 0) or (X >= FWidth) or (Y >= FHeight) then
+    Exit;
+  Result := FCells[IndexOf(X, Y)];
 end;
 
 procedure TSurfaceVideo.Clear(const AAttr: TAttr);
