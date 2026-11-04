@@ -22,7 +22,7 @@ interface
 uses
   Classes, Contnrs, SysUtils, SyncObjs,
   {$ifdef unix}BaseUnix, Sockets,{$endif}
-  HildiLLM, HildiAgent, HildiApproval,
+  HildiLLM, HildiAgent, HildiApproval, HildiMCPConfig,
   HildiStore, HildiSession,
   HildiSessionProtocol, HildiSessionSocket,
   HildiSessionClient,
@@ -195,6 +195,14 @@ type
       crosses the wire only when a dialog actually opens. }
     procedure HandleSkillDetail(AClient: TClientConn;
       const ACommand: TSessionCommand);
+    { Answer scMcpList: every server with BOTH status columns. Connection is
+      mcUnknown here — only a probe answers it, and a list must not invent one.
+      Active comes from TMcpProvider.OpenNames, which reads FOpen. }
+    procedure HandleMcpList(AClient: TClientConn;
+      const ACommand: TSessionCommand);
+    { Build the row for one stored server, given the active set. }
+    function McpRowFor(const ARow: TMcpServerRow;
+      const AActiveSet: TStringArray): TMcpRowStatus;
     { Push the current catalogue to every client, after a change. }
     procedure BroadcastSkills;
     { Drain child events for the runtime loop; relay them as events. }
@@ -1175,12 +1183,14 @@ begin
       HandleListSkills(AClient, ACommand);
     scSkillDetail:
       HandleSkillDetail(AClient, ACommand);
-    { MCP management: the wire is in place (Phase 2) and the handlers are Phase 3.
-      Replying with a named error rather than falling through keeps the case
-      exhaustive and tells a client exactly why, instead of looking like a hang. }
-    scMcpList, scMcpProbe, scMcpReconnect, scMcpAdd:
+    scMcpList:
+      HandleMcpList(AClient, ACommand);
+    { Probe, reconnect and add are Phase 3 and still unimplemented. Replying with
+      a named error rather than falling through keeps the case exhaustive and
+      tells a client exactly why, instead of looking like a hang. }
+    scMcpProbe, scMcpReconnect, scMcpAdd:
       SendError(AClient, 'not_implemented',
-        'mcp management is not implemented yet', '');
+        'mcp probe, reconnect and add are not implemented yet', '');
   end;
 end;
 
@@ -1425,6 +1435,77 @@ begin
   E.SkillResources := S.Resources;
   E.SkillBody := S.Instructions;
   E.SkillIsLoaded := FSession.Skills.StateOf(S.Key) = ssLoaded;
+  M := Default(TSessionMessage);
+  M.Kind := mkEvent;
+  M.Event := E;
+  QueueLine(AClient, TSessionCodec.Encode(M));
+end;
+
+function TSessionRuntime.McpRowFor(const ARow: TMcpServerRow;
+  const AActiveSet: TStringArray): TMcpRowStatus;
+var
+  I: Integer;
+begin
+  Result := Default(TMcpRowStatus);
+  Result.Key := ARow.Name;
+  Result.LabelText := ARow.LabelText;
+  Result.Description := ARow.Description;
+  Result.Scope := ARow.Scope;
+  Result.Transport := ARow.Transport;
+  Result.Enabled := ARow.Enabled;
+  Result.Auth := ARow.Auth;
+  { mcUnknown, never mcDisconnected: a list has not probed anything, and
+    claiming "down" for a server nobody asked about would be a lie the dialog
+    then acts on. scMcpProbe is the only thing that may answer this. }
+  Result.Connection := mcUnknown;
+  { Active = the server's transport is open for THIS session, which is what
+    load_mcp changes and what TTL decay closes. TMcpProvider.OpenNames is the
+    single source; deriving it from the store instead would confuse "enabled"
+    with "loaded". }
+  Result.Active := False;
+  for I := 0 to High(AActiveSet) do
+    if SameText(AActiveSet[I], ARow.Name) then
+    begin
+      Result.Active := True;
+      Break;
+    end;
+end;
+
+procedure TSessionRuntime.HandleMcpList(AClient: TClientConn;
+  const ACommand: TSessionCommand);
+var
+  Rows: TMcpServerRowArray;
+  Err: TStoreError;
+  Live: TStringArray;
+  E: TSessionEvent;
+  M: TSessionMessage;
+  I: Integer;
+begin
+  if (FSession = nil) or (FSession.View = nil) or
+    (FSession.View.Store = nil) then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'no store');
+    Exit;
+  end;
+  Rows := nil;
+  if not FSession.View.Store.ListMcpServers(Rows, Err) then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'could not list mcp servers');
+    Exit;
+  end;
+  { The active set comes from the provider, which owns FOpen. A nil provider
+    means no MCP is in play, which is honestly "nothing active". }
+  Live := nil;
+  if FSession.McpProvider <> nil then
+    Live := FSession.McpProvider.OpenNames;
+  E := EmitEvent(ekMcpList);
+  SetLength(E.McpRows, Length(Rows));
+  for I := 0 to High(Rows) do
+    E.McpRows[I] := McpRowFor(Rows[I], Live);
+  ReplyTo(AClient, ACommand.Id, True, '');
+  { Answer the ASKING client only: this is a request/response, and replaying it
+    into the ring would hand a later attach a snapshot that may be minutes
+    stale, presented as current. }
   M := Default(TSessionMessage);
   M.Kind := mkEvent;
   M.Event := E;

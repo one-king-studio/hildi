@@ -92,6 +92,11 @@ type
     Transport: TMcpTransportKind;
     Connection: TMcpConnection;  // mcUnknown until a probe answers
     Enabled: Boolean;            // in the manifest; callable with load_mcp
+    { Loaded into THIS session's context right now. Separate from Enabled because
+      they are asked by different consumers: the manifest reads Enabled, the
+      loaded set reads Active. A server can be enabled and inactive - the normal
+      lazy case, not an error. Sourced from TMcpProvider.OpenNames. }
+    Active: Boolean;
     Auth: TMcpAuthKind;          // learned when the record was added
     Error: string;               // '' unless the last probe/reconnect failed
   end;
