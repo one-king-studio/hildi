@@ -31,6 +31,10 @@ type
     procedure TestUnknownServerIsRefusedWithoutOpening;
     procedure TestLoadMcpRequiresAName;
     procedure TestDescriptionComesFromTheRecordOnly;
+    { An undescribed server must render as its NAME, not "name: " with a bare
+      colon. Migration v22 defaults every existing row to '', so this is the
+      common case the moment it lands, not an edge case. }
+    procedure TestAnUndescribedServerRendersWithoutATrailingColon;
   end;
 
 function McpConfigFor(const ANames: array of string): TMcpConfig;
@@ -215,6 +219,28 @@ begin
     S := P.StableText;
     AssertFalse('no invented description for a known name: ' + S,
       Pos('Browser automation', S) > 0);
+  finally
+    P.Free;
+  end;
+end;
+
+procedure TMcpProviderTest.TestAnUndescribedServerRendersWithoutATrailingColon;
+var
+  Cfg: TMcpConfig;
+  P: TMcpProvider;
+  S: string;
+begin
+  { Migration v22 defaults every existing row's description to '', so an
+    undescribed server is the COMMON case the moment this lands. "name: " with a
+    bare colon reads as a truncated or corrupt line, so the name stands alone. }
+  Cfg := McpConfigFor(['browser']);
+  Cfg.Servers[0].Description := '';
+  P := TMcpProvider.Create(nil, Cfg);
+  try
+    S := P.StableText;
+    AssertTrue('the server is still named: ' + S, Pos('- browser', S) > 0);
+    AssertFalse('no dangling colon after the name: ' + S,
+      Pos('- browser:', S) > 0);
   finally
     P.Free;
   end;

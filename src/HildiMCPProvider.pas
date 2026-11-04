@@ -340,7 +340,13 @@ begin
   begin
     if Result = '' then
       Result := 'MCP servers you can open with load_mcp:' + LineEnding;
-    Result := Result + '- ' + FNames[I] + ': ' + FDescriptions[I];
+    { The description is OPTIONAL - a record may carry none, and an older row
+      predates the column entirely. Rendering "name: " with a bare colon reads
+      as a truncated line, so an undescribed server is just its name. }
+    if FDescriptions[I] <> '' then
+      Result := Result + '- ' + FNames[I] + ': ' + FDescriptions[I]
+    else
+      Result := Result + '- ' + FNames[I];
     if FWhenToUse[I] <> '' then
       Result := Result + ' ' + FWhenToUse[I];
     Result := Result + LineEnding;
