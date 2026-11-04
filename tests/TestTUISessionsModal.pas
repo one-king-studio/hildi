@@ -11,7 +11,7 @@ uses
   Classes, SysUtils, fpcunit, testregistry,
   TUIBase, TUIInput,
   TUISurface, TUIWidget,
-  TUITheme, HildiSession,
+  TUITheme,
   TUIWidgetsSessionsModal;
 
 type
@@ -33,7 +33,7 @@ type
     function Key(AKind: TKeyKind): TInputEvent;
     function Ch(const AText: string): TInputEvent;
     function Ctrl(const AText: string): TInputEvent;
-    function Row(const AId, ATitle: string; APinned, AArchived: Boolean): TSessionRow;
+    function Row(const AId, ATitle: string; APinned, AArchived: Boolean): TSessionViewRow;
   protected
     procedure SetUp; override;
     procedure TearDown; override;
@@ -108,9 +108,9 @@ begin
 end;
 
 function TSessionsModalTest.Row(const AId, ATitle: string; APinned,
-  AArchived: Boolean): TSessionRow;
+  AArchived: Boolean): TSessionViewRow;
 begin
-  Result := Default(TSessionRow);
+  Result := Default(TSessionViewRow);
   Result.Id := AId;
   Result.Title := ATitle;
   Result.Pinned := APinned;
@@ -140,7 +140,7 @@ end;
 
 procedure TSessionsModalTest.TestFilterMatchesTitleKeywordAndId;
 var
-  R: TSessionRow;
+  R: TSessionViewRow;
 begin
   R := Row('deadbeef01', 'Fix the drain', False, False);
   SetLength(R.Keywords, 1);

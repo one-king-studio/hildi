@@ -14,8 +14,28 @@ uses
   TUIBase, TUIInput,
   TUISurface, TUIWidget,
   TUITheme, TUIGrapheme, TUIWidgetsModal,
-  HildiFuzzy,
-  HildiSession;
+  FuzzyMath;
+
+type
+  { One row as the modal needs it: already resolved for DISPLAY. This is the
+    TUI's own type rather than the store's TSessionRow, so the widget tier has no
+    dependency on the application (and none on the database). The host maps its
+    richer row onto this - only these five fields are ever read here. }
+  TSessionViewRow = record
+    Id: string;
+    Title: string;
+    Keywords: TStringArray;
+    Pinned: Boolean;
+    Archived: Boolean;
+  end;
+  TSessionViewRowArray = array of TSessionViewRow;
+
+  { Long enough to tell sessions apart in a list, short enough to leave the title
+    room. A prefix, not a hash, so it is stable and needs no lookup. Duplicated
+    from the app layer deliberately: a display truncation is the widget's
+    business, and importing the session unit for six characters is what made
+    this tier unexportable. }
+function ShortId(const AId: string): string;
 
 type
   { A row action; the host performs the store write and re-reads the rows. }
@@ -29,7 +49,7 @@ type
 
   TSessionsModal = class(TModal)
   private
-    FRows: TSessionRowArray;
+    FRows: TSessionViewRowArray;
     FCurrent: string;
     FSelected: Integer;
     FFilter: string;
@@ -49,7 +69,7 @@ type
   public
     constructor Create(const ATheme: TTheme);
     { Replace the row set (already resolved: title, keywords, flags). }
-    procedure SetRows(const ARows: TSessionRowArray);
+    procedure SetRows(const ARows: TSessionViewRowArray);
     procedure SetCurrent(const ASessionId: string);
     { The number of rows that pass the current filter. }
     function VisibleCount: Integer;
@@ -96,6 +116,17 @@ function SessionsFooterWidth: Integer;
 
 implementation
 
+const
+  ShortIdLen = 6;
+
+function ShortId(const AId: string): string;
+begin
+  if Length(AId) > ShortIdLen then
+    Result := Copy(AId, 1, ShortIdLen)
+  else
+    Result := AId;
+end;
+
 function SessionsFooterWidth: Integer;
 var
   I: Integer;
@@ -133,7 +164,7 @@ begin
   FSelected := 0;
 end;
 
-procedure TSessionsModal.SetRows(const ARows: TSessionRowArray);
+procedure TSessionsModal.SetRows(const ARows: TSessionViewRowArray);
 begin
   FRows := ARows;
   if FSelected > VisibleCount - 1 then
@@ -318,7 +349,7 @@ begin
       Mark := '» ';
     Line := Mark + UnicodeString(FRows[V[Idx]].Title);
     if Line = Mark then
-      Line := Mark + UnicodeString(ShortSessionId(FRows[V[Idx]].Id));
+      Line := Mark + UnicodeString(ShortId(FRows[V[Idx]].Id));
     Chips := '';
     for K := 0 to High(FRows[V[Idx]].Keywords) do
     begin

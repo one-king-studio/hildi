@@ -1,4 +1,4 @@
-unit TUIWidgetsAgentList;
+unit HildiAgentList;
 { The subagent list, drawn in the COMPOSER's place and in the composer's own
   chrome: the same heavy-topped rounded box, the same raised background, the
   same lower-left info line and lower-right CTAs. Two things differ on purpose:

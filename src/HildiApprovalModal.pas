@@ -1,4 +1,4 @@
-unit TUIWidgetsApprovalModal;
+unit HildiApprovalModal;
 { The approval dialog: a modal box for one TApprovalAsk, drawn to the design in
   docs/design/chat_panel_tui.md.
 

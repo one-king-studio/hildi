@@ -1,5 +1,5 @@
 unit TestFuzzy;
-{ fpcunit tests for HildiFuzzy: the subsequence matcher, its
+{ fpcunit tests for FuzzyMath: the subsequence matcher, its
   scoring (so results rank sensibly), and the stable ranker. }
 
 {$mode delphi}{$H+}
@@ -8,7 +8,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  HildiFuzzy;
+  FuzzyMath;
 
 type
   TFuzzyTest = class(TTestCase)

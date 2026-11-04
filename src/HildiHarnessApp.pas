@@ -18,7 +18,7 @@ uses
   TUIWidgetsText, TUIWidgetsChat,
   TUIWidgetsCompose, TUIWidgetsChatPanel,
   TUIWidgetsPalette,
-  TUIWidgetsApprovalModal,
+  HildiApprovalModal,
   TUIWidgetsPanel, TUITheme,
   TUIApp, HildiHarnessTurn,
   HildiHarnessDriver, HildiHarnessView,
@@ -32,7 +32,7 @@ uses
   TUIWidgetsSkillmodal,
   TUIWidgetsActions,
   HildiHarnessSubagent, HildiHarnessSubagentSpy,
-  TUIWidgetsAgentList, TUIWidgetsList,
+  HildiAgentList, TUIWidgetsList,
   HildiSessionProtocol, HildiSessionClient,
   HildiChangesStore, ChangesTypes, ChangesStore, ChangesSummary,
   HildiUTF8;
@@ -549,6 +549,12 @@ procedure OrderByLineage(var ARows: TSessionRowArray);
   it is a real, resumable session. Hiding it would make it unreachable, so the
   rule is "no VISIBLE parent", not "never had one". }
 procedure FilterParentsOnly(var ARows: TSessionRowArray);
+
+{ Project the store's rows onto the TUI's view rows. The modal reads only id,
+  title, keywords, pinned and archived; everything else (lineage, timestamps,
+  labels) stays in the app, which is what keeps the widget tier free of both the
+  session unit and the store. }
+function ToViewRows(const ARows: TSessionRowArray): TSessionViewRowArray;
 
 implementation
 
@@ -2770,6 +2776,22 @@ begin
   ARows := OutRows;
 end;
 
+function ToViewRows(const ARows: TSessionRowArray): TSessionViewRowArray;
+var
+  I: Integer;
+begin
+  Result := nil;
+  SetLength(Result, Length(ARows));
+  for I := 0 to High(ARows) do
+  begin
+    Result[I].Id := ARows[I].Id;
+    Result[I].Title := ARows[I].Title;
+    Result[I].Keywords := ARows[I].Keywords;
+    Result[I].Pinned := ARows[I].Pinned;
+    Result[I].Archived := ARows[I].Archived;
+  end;
+end;
+
 procedure OrderByLineage(var ARows: TSessionRowArray);
 var
   i, j, N, W: Integer;
@@ -2880,7 +2902,10 @@ begin
       OrderByLineage is therefore moot: with no children in the list there is no
       nesting to apply. }
     FilterParentsOnly(Rows);
-    FSessionsModal.SetRows(Rows);
+    { The modal takes the TUI's own view row, not the store's richer one, so
+      the widget tier needs no session or store unit. Only five fields cross:
+      id, title, keywords, pinned, archived. }
+    FSessionsModal.SetRows(ToViewRows(Rows));
   end;
 end;
 

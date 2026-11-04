@@ -1,4 +1,4 @@
-unit HildiFuzzy;
+unit FuzzyMath;
 { Case-insensitive fuzzy (subsequence) matching for typeahead filters.
 
   A needle matches a haystack when every needle character appears in the

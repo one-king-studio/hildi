@@ -1,5 +1,5 @@
 unit TestTUIApprovalModal;
-{ fpcunit tests for TUIWidgetsApprovalModal: option selection, scope,
+{ fpcunit tests for HildiApprovalModal: option selection, scope,
   deny, the reason line, wrapped/compacted details, and safe handling of an
   empty ask. No terminal. }
 
@@ -12,7 +12,7 @@ uses
   TUIBase, TUIInput,
   TUISurface, TUIWidget,
   TUITheme,
-  HildiApproval, TUIWidgetsApprovalModal;
+  HildiApproval, HildiApprovalModal;
 
 type
   TChoiceRecorder = class

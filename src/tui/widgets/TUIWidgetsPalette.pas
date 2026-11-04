@@ -23,7 +23,7 @@ interface
 uses
   Classes, SysUtils, TUIBase, TUIInput,
   TUISurface, TUIWidget,
-  TUITheme, HildiFuzzy, TUIWidgetsText;
+  TUITheme, FuzzyMath, TUIWidgetsText;
 
 type
   TCommand = record

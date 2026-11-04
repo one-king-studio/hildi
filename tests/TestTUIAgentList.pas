@@ -1,5 +1,5 @@
 unit TestTUIAgentList;
-{ fpcunit tests for the agent-list widget (TUIWidgetsAgentList): rows from
+{ fpcunit tests for the agent-list widget (HildiAgentList): rows from
   a roster, selection movement, Enter firing OnSelect, and the empty state. All
   over TSurfaceMemory — no terminal. }
 
@@ -12,7 +12,7 @@ uses
   TUIBase, TUISurface,
   TUIInput, TUITheme,
   TUIWidget,
-  HildiHarnessSubagent, TUIWidgetsAgentList;
+  HildiHarnessSubagent, HildiAgentList;
 
 type
   TSelectRecorder = class
