@@ -26,6 +26,14 @@ type
     WorkspaceId: Integer;   // 0 for global (and agent)
     AgentId: string;        // '' unless agent scope (reserved; agent support later)
     Name: string;
+    { A human-facing label. '' => render the name. Optional by design: most
+      servers are known by their key and a label would be noise. Named LabelText,
+      not Label: `label` is a reserved word in Pascal. }
+    LabelText: string;
+    { WHEN to use this server, in one line. Not decoration: it reaches the model
+      through the harness context as use="...", so tool selection is informed
+      rather than guessed from the name. '' => omitted entirely. }
+    Description: string;
     Transport: TMcpTransportKind;  // mtStdio (default) or mtHttp
     Command: string;        // stdio
     Args: array of string;  // stdio
@@ -44,6 +52,11 @@ type
   { The effective server, after resolution. }
   TMcpServerConfig = record
     Name: string;
+    { From the record, never from a hardcoded table: an MCP is defined by its DB
+      row and nothing else may compete with it. '' => the provider renders the
+      name alone. }
+    LabelText: string;
+    Description: string;
     Transport: TMcpTransportKind;
     Command: string;
     Args: array of string;

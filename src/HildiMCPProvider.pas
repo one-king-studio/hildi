@@ -82,70 +82,10 @@ type
     property TtlMs: Int64 read FTtlMs write FTtlMs;
   end;
 
-{ The curated metadata for a server, by service name. Ours, never the server's.
-  An unknown service gets an honest generic line rather than a guess. }
-procedure McpCuratedMeta(const AName: string; out ADescription,
-  AWhenToUse: string);
-
 implementation
 
 uses
   fpjson, jsonparser;
-
-procedure McpCuratedMeta(const AName: string; out ADescription,
-  AWhenToUse: string);
-var
-  Key: string;
-begin
-  Key := LowerCase(AName);
-  if Pos('playwright', Key) > 0 then
-  begin
-    ADescription := 'Browser automation (navigate, click, type, snapshot).';
-    AWhenToUse := 'Use when a task needs a real browser: driving a web UI, ' +
-      'scraping a rendered page, or checking how a site behaves.';
-  end
-  else if Pos('puppeteer', Key) > 0 then
-  begin
-    ADescription := 'Browser automation (Chromium) via Puppeteer.';
-    AWhenToUse := 'Use when a task needs to drive a headless Chromium.';
-  end
-  else if Pos('github', Key) > 0 then
-  begin
-    ADescription := 'GitHub: repos, issues, pull requests, and code search.';
-    AWhenToUse := 'Use when a task concerns a GitHub repository, its issues, ' +
-      'or its pull requests.';
-  end
-  else if Pos('notion', Key) > 0 then
-  begin
-    ADescription := 'Notion: read and write pages and databases.';
-    AWhenToUse := 'Use when a task concerns the user''s Notion workspace.';
-  end
-  else if Pos('filesystem', Key) > 0 then
-  begin
-    ADescription := 'Filesystem access (read, write, move, search files).';
-    AWhenToUse := 'Use when a task needs file access outside the workspace.';
-  end
-  else if Pos('fetch', Key) > 0 then
-  begin
-    ADescription := 'HTTP fetch: retrieve a URL and return its content.';
-    AWhenToUse := 'Use when a task needs to retrieve a web page or API.';
-  end
-  else if Pos('memory', Key) > 0 then
-  begin
-    ADescription := 'A persistent knowledge graph of entities and relations.';
-    AWhenToUse := 'Use when a task needs long-term memory across sessions.';
-  end
-  else if Pos('postgres', Key) > 0 then
-  begin
-    ADescription := 'PostgreSQL: run read-only SQL queries.';
-    AWhenToUse := 'Use when a task needs to query a Postgres database.';
-  end
-  else
-  begin
-    ADescription := 'An MCP server named ' + AName + '.';
-    AWhenToUse := 'Use when a task needs the tools this server provides.';
-  end;
-end;
 
 constructor TMcpProvider.Create(AManager: TMcpManager;
   const AConfig: TMcpConfig);
@@ -175,15 +115,17 @@ begin
 
   for I := 0 to High(AConfig.Servers) do
   begin
-    McpCuratedMeta(AConfig.Servers[I].Name, Desc, When);
     SetLength(FNames, Length(FNames) + 1);
     SetLength(FDescriptions, Length(FDescriptions) + 1);
     SetLength(FWhenToUse, Length(FWhenToUse) + 1);
     SetLength(FOpen, Length(FOpen) + 1);
     SetLength(FLastUsedMs, Length(FLastUsedMs) + 1);
     FNames[High(FNames)] := AConfig.Servers[I].Name;
-    FDescriptions[High(FDescriptions)] := Desc;
-    FWhenToUse[High(FWhenToUse)] := When;
+    { From the record. A server with no stored description simply has none: the
+      manifest then carries the name alone, which is honest. No table may supply
+      a description a record did not choose. }
+    FDescriptions[High(FDescriptions)] := AConfig.Servers[I].Description;
+    FWhenToUse[High(FWhenToUse)] := '';
     FOpen[High(FOpen)] := False;
     FLastUsedMs[High(FLastUsedMs)] := 0;
   end;

@@ -48,7 +48,7 @@ type
     procedure TestLazyOpenServerConnects;
     procedure TestLazyCloseServerDisconnects;
     procedure TestProviderDeclaresClosedAndOpensOnLoad;
-    procedure TestCuratedCatalogueIsStableText;
+    procedure TestCatalogueDescriptionComesFromTheRecord;
   end;
 
 implementation
@@ -525,27 +525,30 @@ begin
   end;
 end;
 
-procedure TMcpClientTest.TestCuratedCatalogueIsStableText;
+procedure TMcpClientTest.TestCatalogueDescriptionComesFromTheRecord;
 var
   Mgr: TMcpManager;
   Approval: IApprovalService;
   P: TMcpProvider;
   Frag: string;
+  Cfg: TMcpConfig;
 begin
-  { A known service gets curated metadata; an unknown one gets an honest generic
-    line. Server-authored text is never used (there is none to use here). }
+  { There is no curated table any more. A server's description is whatever its
+    RECORD says: an undescribed server renders as its name alone, which is honest
+    — the old table described 'playwright' by name-matching and left a server
+    called 'browser' generic, which is exactly the heuristic this replaced. }
   Approval := TFakeApproval.Create(True);
   Mgr := TMcpManager.Create(Default(TMcpConfig), Approval, nil);
   try
     Mgr.Lazy := True;
     Mgr.Reconcile(McpCfg('playwright', StandardScript));
-    P := TMcpProvider.Create(Mgr, McpCfg('playwright', StandardScript));
+    Cfg := McpCfg('playwright', StandardScript);
+    Cfg.Servers[0].Description := 'Browser automation (navigate, click).';
+    P := TMcpProvider.Create(Mgr, Cfg);
     try
-      { Curated metadata is STABLE text and lives in the system prompt. }
-      AssertTrue('curated description for a known service',
+      { The description is STABLE text and lives in the system prompt. }
+      AssertTrue('the record description is in the catalogue',
         Pos('Browser automation', P.StableText) > 0);
-      AssertFalse('not the generic placeholder',
-        Pos('MCP server playwright.', P.StableText) > 0);
       { The per-request fragment is STATUS only, and does not repeat it. }
       Frag := P.PromptFragment;
       AssertTrue('status names the server: ' + Frag,

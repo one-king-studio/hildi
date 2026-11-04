@@ -403,7 +403,7 @@ end;
 function DefaultMigrations: TMigrationArray;
 begin
   Result := nil;
-  SetLength(Result, 21);
+  SetLength(Result, 22);
   Result[0].Version := 1;
   Result[0].Name := 'session history';
   Result[0].Statements := [
@@ -862,6 +862,22 @@ begin
     'INSERT INTO turns_fts ' +
       '(summary_title, summary_keywords, session_id, turn_id) ' +
       'SELECT summary_title, summary_keywords, session_id, id FROM turns'
+  ];
+  { v22: a human-facing label, a "when to use this" description, and a learned
+    auth requirement on an MCP server. All additive and defaulting to a neutral
+    value, so every existing row stays valid. The description is not decoration:
+    it reaches the model via the harness context (see TMcpProvider.StatusText),
+    so tool selection is informed rather than guessed from the server's name.
+
+    Renumbered from 21: main claimed 21 for the turn summary while this branch
+    was open, and a DUPLICATE version number is silently skipped by a database
+    already at that version, so the columns would never be added. }
+  Result[21].Version := 22;
+  Result[21].Name := 'mcp label, description and auth';
+  Result[21].Statements := [
+    'ALTER TABLE mcp_servers ADD COLUMN label TEXT NOT NULL DEFAULT ''''',
+    'ALTER TABLE mcp_servers ADD COLUMN description TEXT NOT NULL DEFAULT ''''',
+    'ALTER TABLE mcp_servers ADD COLUMN auth INTEGER NOT NULL DEFAULT 0'
   ];
 end;
 
@@ -1707,7 +1723,7 @@ begin
     Stmt := TStmt.Create(FDb,
       'SELECT id, scope, workspace_id, agent_id, name, command, args, env, ' +
       'cwd, enabled, list_timeout_ms, call_timeout_ms, created_at, ' +
-      'transport, url, headers ' +
+      'transport, url, headers, label, description ' +
       'FROM mcp_servers ' +
       'WHERE scope = 0 OR (scope = 1 AND workspace_id = ?) ' +
       'OR (scope = 2 AND agent_id = ? AND ? <> '''')');
@@ -1737,6 +1753,8 @@ begin
         Row.Transport := TMcpTransportKind(Stmt.ColInt(13));
         Row.Url := Stmt.ColText(14);
         DecodeMcpStrings(Stmt.ColText(15), Row.Headers);
+        Row.LabelText := Stmt.ColText(16);
+        Row.Description := Stmt.ColText(17);
         SetLength(ARows, N + 1);
         ARows[N] := Row;
         Inc(N);
@@ -1766,15 +1784,16 @@ begin
     Stmt := TStmt.Create(FDb,
       'INSERT INTO mcp_servers (scope, workspace_id, agent_id, name, command, ' +
       'args, env, cwd, enabled, list_timeout_ms, call_timeout_ms, created_at, ' +
-      'transport, url, headers) ' +
-      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
+      'transport, url, headers, label, description) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
       'ON CONFLICT(scope, workspace_id, agent_id, name) DO UPDATE SET ' +
       'command = excluded.command, args = excluded.args, env = excluded.env, ' +
       'cwd = excluded.cwd, enabled = excluded.enabled, ' +
       'list_timeout_ms = excluded.list_timeout_ms, ' +
       'call_timeout_ms = excluded.call_timeout_ms, ' +
       'transport = excluded.transport, url = excluded.url, ' +
-      'headers = excluded.headers');
+      'headers = excluded.headers, label = excluded.label, ' +
+      'description = excluded.description');
     try
       if not Stmt.Valid then
         Exit(Fail(AError, seError, 'could not save mcp server', DbErrorText));
@@ -1793,6 +1812,8 @@ begin
       Stmt.BindInt(13, Ord(ARow.Transport));
       Stmt.BindText(14, ARow.Url);
       Stmt.BindText(15, EncodeMcpStrings(ARow.Headers));
+      Stmt.BindText(16, ARow.LabelText);
+      Stmt.BindText(17, ARow.Description);
       if Stmt.Step <> SQLITE_DONE then
         Exit(Fail(AError, seError, 'could not save mcp server', DbErrorText));
     finally
@@ -1851,7 +1872,7 @@ begin
     Stmt := TStmt.Create(FDb,
       'SELECT id, scope, workspace_id, agent_id, name, command, args, env, ' +
       'cwd, enabled, list_timeout_ms, call_timeout_ms, created_at, ' +
-      'transport, url, headers ' +
+      'transport, url, headers, label, description ' +
       'FROM mcp_servers');
     try
       if not Stmt.Valid then
@@ -1876,6 +1897,8 @@ begin
         Row.Transport := TMcpTransportKind(Stmt.ColInt(13));
         Row.Url := Stmt.ColText(14);
         DecodeMcpStrings(Stmt.ColText(15), Row.Headers);
+        Row.LabelText := Stmt.ColText(16);
+        Row.Description := Stmt.ColText(17);
         SetLength(ARows, N + 1);
         ARows[N] := Row;
         Inc(N);

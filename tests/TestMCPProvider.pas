@@ -30,7 +30,7 @@ type
     procedure TestLoadMcpIsAlwaysOffered;
     procedure TestUnknownServerIsRefusedWithoutOpening;
     procedure TestLoadMcpRequiresAName;
-    procedure TestCuratedMetaIsOursNotTheServers;
+    procedure TestDescriptionComesFromTheRecordOnly;
   end;
 
 function McpConfigFor(const ANames: array of string): TMcpConfig;
@@ -97,16 +97,20 @@ end;
 
 procedure TMcpProviderTest.TestStableTextCarriesTheCatalogue;
 var
+  Cfg: TMcpConfig;
   P: TMcpProvider;
   S: string;
 begin
   { The catalogue is stable text: it belongs in the system prompt. It must name
-    each server and carry OUR curated description. }
-  P := TMcpProvider.Create(nil, CfgOf(['playwright']));
+    each server and carry the description ITS RECORD holds — there is no curated
+    table any more, so an undescribed server renders as its name alone. }
+  Cfg := CfgOf(['playwright']);
+  Cfg.Servers[0].Description := 'Browser automation (navigate, click, snapshot).';
+  P := TMcpProvider.Create(nil, Cfg);
   try
     S := P.StableText;
     AssertTrue('names the server: ' + S, Pos('playwright', S) > 0);
-    AssertTrue('carries the curated description',
+    AssertTrue('carries the record description: ' + S,
       Pos('Browser automation', S) > 0);
     AssertTrue('says how to open it', Pos('load_mcp', S) > 0);
   finally
@@ -182,17 +186,38 @@ begin
   end;
 end;
 
-procedure TMcpProviderTest.TestCuratedMetaIsOursNotTheServers;
+procedure TMcpProviderTest.TestDescriptionComesFromTheRecordOnly;
 var
-  Desc, When: string;
+  Cfg: TMcpConfig;
+  P: TMcpProvider;
+  S: string;
 begin
-  { A known service gets real text; an unknown one gets an honest generic line
-    rather than a guess. Neither ever comes from the server. }
-  McpCuratedMeta('playwright', Desc, When);
-  AssertTrue('playwright described', Pos('Browser automation', Desc) > 0);
-  McpCuratedMeta('totally-unknown-service', Desc, When);
-  AssertTrue('unknown still described honestly',
-    Pos('totally-unknown-service', Desc) > 0);
+  { No hardcoded table: a server's description is whatever its record says, even
+    for a name a lookup table would have recognised. The old table described
+    'playwright' and left 'browser' generic; that heuristic is gone. }
+  Cfg := McpConfigFor(['playwright']);
+  Cfg.Servers[0].Description := 'Drives a real browser.';
+  P := TMcpProvider.Create(nil, Cfg);
+  try
+    S := P.StableText;
+    AssertTrue('the record supplies the description: ' + S,
+      Pos('Drives a real browser.', S) > 0);
+  finally
+    P.Free;
+  end;
+
+  { A record with no description must NOT inherit one from anywhere: the manifest
+    names the server alone, which is honest. }
+  Cfg := McpConfigFor(['playwright']);
+  Cfg.Servers[0].Description := '';
+  P := TMcpProvider.Create(nil, Cfg);
+  try
+    S := P.StableText;
+    AssertFalse('no invented description for a known name: ' + S,
+      Pos('Browser automation', S) > 0);
+  finally
+    P.Free;
+  end;
 end;
 
 initialization
