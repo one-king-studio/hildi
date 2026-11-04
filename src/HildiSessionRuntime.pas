@@ -1175,6 +1175,12 @@ begin
       HandleListSkills(AClient, ACommand);
     scSkillDetail:
       HandleSkillDetail(AClient, ACommand);
+    { MCP management: the wire is in place (Phase 2) and the handlers are Phase 3.
+      Replying with a named error rather than falling through keeps the case
+      exhaustive and tells a client exactly why, instead of looking like a hang. }
+    scMcpList, scMcpProbe, scMcpReconnect, scMcpAdd:
+      SendError(AClient, 'not_implemented',
+        'mcp management is not implemented yet', '');
   end;
 end;
 

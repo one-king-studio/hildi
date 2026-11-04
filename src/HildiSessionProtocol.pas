@@ -15,7 +15,7 @@ interface
 
 uses
   SysUtils,
-  HildiApproval, HildiLLM;
+  HildiApproval, HildiLLM, HildiMCPConfig;
 
 type
   { The row ids a tool call's changes carry. The event transports these, never
@@ -61,7 +61,42 @@ type
     ekSkills,
     { One skill's full detail, answering scSkillDetail. Appended last so stored
       ordinals are unchanged. }
-    ekSkillDetail);
+    ekSkillDetail,
+    { The MCP server list, answering scMcpList (and re-answered after a
+      successful add). Carries one row per server with BOTH status columns:
+      connection (probed) and enabled (the record), so the client never has to
+      infer one from the other. Appended last so stored ordinals are unchanged. }
+    ekMcpList,
+    { Fresh connection results, answering scMcpProbe. One row per server probed.
+      Never broadcast: a probe is a request/response, and replaying it to a later
+      attach would report a stale connection state as if it were current. }
+    ekMcpProbeResult,
+    { One server's state after a reconnect. Activation is deliberately NOT part of
+      this event: reconnecting a transport must not change whether the server is
+      loaded into the session's context. }
+    ekMcpReconnectDone);
+
+  { Whether a server's TRANSPORT is up. Observed by a probe, never stored: a
+    persisted connection state is a lie the moment the transport dies. }
+  TMcpConnection = (mcUnknown, mcConnected, mcDisconnected);
+
+  { One server as the dialog needs it: identity, both status columns, and the
+    last error if a probe failed. Connection and Enabled are separate fields
+    because they answer different questions - "is it up" versus "may the LLM use
+    it" - and collapsing them is what made state="closed" ambiguous. }
+  TMcpRowStatus = record
+    Key: string;
+    LabelText: string;           // '' => render the key
+    Description: string;         // '' => render nothing
+    Scope: TMcpScope;
+    Transport: TMcpTransportKind;
+    Connection: TMcpConnection;  // mcUnknown until a probe answers
+    Enabled: Boolean;            // in the manifest; callable with load_mcp
+    Auth: TMcpAuthKind;          // learned when the record was added
+    Error: string;               // '' unless the last probe/reconnect failed
+  end;
+
+  TMcpRowStatusArray = array of TMcpRowStatus;
 
   { One streamed event. A flat record with optional fields, the same shape as
     TTurnEvent: only the fields named by Kind are meaningful. }
@@ -120,6 +155,11 @@ type
     SkillResources: TStringArray;
     SkillBody: string;
     SkillIsLoaded: Boolean;
+    { ekMcpList / ekMcpProbeResult / ekMcpReconnectDone: the rows. A full array
+      rather than a delta, for the same reason SkillKeys is a full list - there
+      are a handful of servers, and a client that missed an event is corrected by
+      the next one instead of drifting. }
+    McpRows: TMcpRowStatusArray;
   end;
 
   TSessionCommandKind = (
@@ -144,7 +184,14 @@ type
       raises the approval ask on the runtime side, and the outcome comes back as
       an ekSkills event (or an error). Appended last so stored ordinals are
       unchanged. }
-    scLoadSkill, scSkills, scSkillDetail);
+    scLoadSkill, scSkills, scSkillDetail,
+    { MCP management. The runtime owns the manager, so the client asks:
+      scMcpList carries the rows and both status columns, scMcpProbe asks for a
+      fresh connection probe (an empty key means every server), scMcpReconnect
+      reopens one dropped transport WITHOUT touching activation, and scMcpAdd
+      validates and saves one record. Appended last so stored ordinals are
+      unchanged. }
+    scMcpList, scMcpProbe, scMcpReconnect, scMcpAdd);
 
   { One client command. Id is echoed in the reply. }
   TSessionCommand = record
@@ -163,6 +210,9 @@ type
     TurnId: Int64;
     { scLoadSkill/scUnloadSkill: which skill, by its registry key. }
     SkillKey: string;
+    { scMcpProbe / scMcpReconnect: which server. An EMPTY key on scMcpProbe
+      means every server, so a dialog opening costs one command, not N. }
+    McpKey: string;
     { scCheckpoint: no payload; it starts a checkpoint turn. }
   end;
 
@@ -224,6 +274,13 @@ function SessionRoleFromWire(const AValue: string;
 function SessionEventKindToWire(AKind: TSessionEventKind): string;
 function SessionEventKindFromWire(const AValue: string;
   out AKind: TSessionEventKind): Boolean;
+
+{ Connection state on the wire, by NAME not ordinal: a stored or logged value
+  then stays readable, and an unknown name decodes to mcUnknown rather than
+  silently becoming mcDisconnected. }
+function McpConnectionToWire(AValue: TMcpConnection): string;
+function McpConnectionFromWire(const AValue: string;
+  out AConnection: TMcpConnection): Boolean;
 function SessionCommandKindToWire(AKind: TSessionCommandKind): string;
 function SessionCommandKindFromWire(const AValue: string;
   out AKind: TSessionCommandKind): Boolean;
@@ -306,6 +363,85 @@ begin
     end;
 end;
 
+{ The MCP row array as JSON. One function for encode and one for decode, so the
+  field names exist in exactly one place - a hand-rolled pair drifts, and the
+  drift shows up as a silently defaulted field rather than an error. }
+function EncodeMcpRows(const ARows: TMcpRowStatusArray): TJSONArray; forward;
+function DecodeMcpRows(const AData: TJSONData): TMcpRowStatusArray; forward;
+
+{ Forward: the JSON put/opt helpers are defined further down, and this codec
+  needs them. Pascal requires declaration before use. }
+procedure PutStr(O: TJSONObject; const AName, AValue: string); forward;
+procedure PutInt(O: TJSONObject; const AName: string; AValue: Int64); forward;
+procedure PutBool(O: TJSONObject; const AName: string; AValue: Boolean); forward;
+function OptStr(O: TJSONObject; const AName: string): string; forward;
+function OptInt64(O: TJSONObject; const AName: string; ADefault: Int64): Int64; forward;
+function OptBool(O: TJSONObject; const AName: string;
+  ADefault: Boolean): Boolean; forward;
+
+function EncodeMcpRows(const ARows: TMcpRowStatusArray): TJSONArray;
+var
+  I: Integer;
+  Row: TJSONObject;
+  R: TMcpRowStatus;
+begin
+  Result := TJSONArray.Create;
+  for I := 0 to High(ARows) do
+  begin
+    R := ARows[I];
+    Row := TJSONObject.Create;
+    PutStr(Row, 'key', R.Key);
+    if R.LabelText <> '' then
+      PutStr(Row, 'label', R.LabelText);
+    if R.Description <> '' then
+      PutStr(Row, 'description', R.Description);
+    PutInt(Row, 'scope', Ord(R.Scope));
+    PutInt(Row, 'transport', Ord(R.Transport));
+    PutStr(Row, 'connection', McpConnectionToWire(R.Connection));
+    PutBool(Row, 'enabled', R.Enabled);
+    PutInt(Row, 'auth', Ord(R.Auth));
+    if R.Error <> '' then
+      PutStr(Row, 'error', R.Error);
+    Result.Add(Row);
+  end;
+end;
+
+function DecodeMcpRows(const AData: TJSONData): TMcpRowStatusArray;
+var
+  Arr: TJSONArray;
+  I: Integer;
+  Row: TJSONObject;
+  R: TMcpRowStatus;
+begin
+  Result := nil;
+  if not (AData is TJSONArray) then
+    Exit;
+  Arr := TJSONArray(AData);
+  SetLength(Result, Arr.Count);
+  for I := 0 to Arr.Count - 1 do
+  begin
+    R := Default(TMcpRowStatus);
+    if Arr.Items[I] is TJSONObject then
+    begin
+      Row := TJSONObject(Arr.Items[I]);
+      R.Key := OptStr(Row, 'key');
+      R.LabelText := OptStr(Row, 'label');
+      R.Description := OptStr(Row, 'description');
+      R.Scope := TMcpScope(OptInt64(Row, 'scope', 0));
+      R.Transport := TMcpTransportKind(OptInt64(Row, 'transport', 0));
+      { An unreadable or ABSENT connection decodes to mcUnknown, never to
+        mcDisconnected: "we have not probed" and "the probe failed" are different
+        claims and only one of them is honest here. }
+      if not McpConnectionFromWire(OptStr(Row, 'connection'), R.Connection) then
+        R.Connection := mcUnknown;
+      R.Enabled := OptBool(Row, 'enabled', False);
+      R.Auth := TMcpAuthKind(OptInt64(Row, 'auth', 0));
+      R.Error := OptStr(Row, 'error');
+    end;
+    Result[I] := R;
+  end;
+end;
+
 const
   EventKindNames: array[TSessionEventKind] of string = (
     'loop_started', 'turn_started', 'user_message',
@@ -315,7 +451,8 @@ const
     'drive_requested', 'drive_granted', 'drive_released',
     'turn_finished', 'error', 'gap', 'loop_exited', 'reasoning_done',
     'tool_output', 'ambient', 'subagent', 'subagent_ask',
-    'checkpoint_committed', 'changes', 'undone', 'skills', 'skill_detail');
+    'checkpoint_committed', 'changes', 'undone', 'skills', 'skill_detail',
+    'mcp_list', 'mcp_probe_result', 'mcp_reconnect_done');
 
   MessageKindNames: array[TSessionMessageKind] of string = (
     'hello', 'attached', 'event', 'reply', 'detached', 'error',
@@ -327,7 +464,8 @@ const
     'attach', 'detach', 'prompt', 'approve', 'interrupt',
     'claim_drive', 'release_drive', 'ping', 'shutdown',
     'abort_subagent', 'release_subagent', 'checkpoint', 'undo', 'redo',
-    'load_skill', 'skills', 'skill_detail');
+    'load_skill', 'skills', 'skill_detail',
+    'mcp_list', 'mcp_probe', 'mcp_reconnect', 'mcp_add');
 
 { --- enum <-> wire ------------------------------------------------------ }
 
@@ -372,6 +510,35 @@ begin
     end;
   AKind := ekError;
   Result := False;
+end;
+
+function McpConnectionToWire(AValue: TMcpConnection): string;
+begin
+  case AValue of
+    mcConnected:    Result := 'connected';
+    mcDisconnected: Result := 'disconnected';
+  else
+    Result := 'unknown';
+  end;
+end;
+
+function McpConnectionFromWire(const AValue: string;
+  out AConnection: TMcpConnection): Boolean;
+begin
+  Result := True;
+  if AValue = 'connected' then
+    AConnection := mcConnected
+  else if AValue = 'disconnected' then
+    AConnection := mcDisconnected
+  else if AValue = 'unknown' then
+    AConnection := mcUnknown
+  else
+  begin
+    { An unrecognised value is NOT a disconnect: callers get mcUnknown and a
+      False so a future state cannot be misread as "down". }
+    AConnection := mcUnknown;
+    Result := False;
+  end;
 end;
 
 function SessionCommandKindToWire(AKind: TSessionCommandKind): string;
@@ -756,6 +923,10 @@ begin
         PutStr(O, 'skill_body', E.SkillBody);
         O.Add('skill_loaded_now', E.SkillIsLoaded);
       end;
+    { MCP. The rows are few (a handful of servers), so the whole array rides on
+      the event rather than a delta protocol - the same choice ekSkills made. }
+    ekMcpList, ekMcpProbeResult, ekMcpReconnectDone:
+      O.Add('mcp_rows', EncodeMcpRows(E.McpRows));
   end;
 end;
 
@@ -899,6 +1070,10 @@ begin
         E.SkillBody := OptStr(O, 'skill_body');
         E.SkillIsLoaded := OptBool(O, 'skill_loaded_now', False);
       end;
+    { MCP. Decoded through the shared row codec so the field names live in one
+      place; an absent array decodes to nil, which renders as "no servers". }
+    ekMcpList, ekMcpProbeResult, ekMcpReconnectDone:
+      E.McpRows := DecodeMcpRows(NodeOf(O, 'mcp_rows'));
   end;
   Result := True;
 end;
@@ -923,7 +1098,13 @@ begin
     scAttach, scDetach, scInterrupt, scClaimDrive, scReleaseDrive, scPing,
     scUndo, scRedo:
       PutInt(O, 'turn_id', C.TurnId);
-    scShutdown, scCheckpoint, scSkills:
+    { An empty McpKey on scMcpProbe means EVERY server, so the key is omitted
+      rather than sent empty - PutStr already drops an empty value. }
+    scMcpProbe, scMcpReconnect:
+      PutStr(O, 'mcp_key', C.McpKey);
+    scMcpAdd:
+      ;   // the record rides the store, not this command (see scMcpAdd docs)
+    scShutdown, scCheckpoint, scSkills, scMcpList:
       ;   // no payload beyond the name
   end;
 end;
@@ -960,8 +1141,12 @@ begin
       C.TurnId := OptInt64(O, 'turn_id', 0);
     scLoadSkill, scSkillDetail:
       C.SkillKey := OptStr(O, 'skill_key');
+    { An absent mcp_key is meaningful: on scMcpProbe it means EVERY server, so
+      decoding an empty string is correct rather than a fallback. }
+    scMcpProbe, scMcpReconnect:
+      C.McpKey := OptStr(O, 'mcp_key');
     scAttach, scDetach, scInterrupt, scClaimDrive, scReleaseDrive, scPing,
-    scShutdown, scCheckpoint, scSkills:
+    scShutdown, scCheckpoint, scSkills, scMcpList, scMcpAdd:
       ;
   end;
   Result := True;

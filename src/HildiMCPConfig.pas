@@ -19,6 +19,11 @@ type
   { How the client reaches the server. }
   TMcpTransportKind = (mtStdio, mtHttp);
 
+  { Whether a REMOTE server requires OAuth, learned by an add-time check so the
+    dialog can report it without connecting. maNone is also the fail-open value:
+    a check that cannot answer leaves maNone rather than refusing to save. }
+  TMcpAuthKind = (maNone, maOAuth);
+
   { A stored server definition, as read from any source. }
   TMcpServerRow = record
     Id: Integer;
@@ -34,6 +39,10 @@ type
       through the harness context as use="...", so tool selection is informed
       rather than guessed from the name. '' => omitted entirely. }
     Description: string;
+    { What an add-time check learned about a REMOTE server, so the dialog can say
+      "needs auth" without probing. maNone for stdio and for a check that could
+      not answer (it fails open). }
+    Auth: TMcpAuthKind;
     Transport: TMcpTransportKind;  // mtStdio (default) or mtHttp
     Command: string;        // stdio
     Args: array of string;  // stdio

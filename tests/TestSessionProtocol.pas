@@ -9,7 +9,7 @@ interface
 
 uses
   SysUtils, fpcunit, testregistry,
-  HildiApproval, HildiLLM,
+  HildiApproval, HildiLLM, HildiMCPConfig,
   HildiSessionProtocol;
 
 type
@@ -200,6 +200,30 @@ begin
         SetLength(AEvent.ChangeIds, 2);
         AEvent.ChangeIds[0] := 11;
         AEvent.ChangeIds[1] := 12;
+      end;
+    { MCP: fill EVERY field, so the round trip proves each one survives. A row
+      with a populated description and an explicit connection state is what the
+      dialog actually reads, so that is what the fixture must carry. }
+    ekMcpList, ekMcpProbeResult, ekMcpReconnectDone:
+      begin
+        SetLength(AEvent.McpRows, 2);
+        AEvent.McpRows[0].Key := 'browser';
+        AEvent.McpRows[0].LabelText := 'Browser';
+        AEvent.McpRows[0].Description := 'control the user''s Chrome';
+        AEvent.McpRows[0].Scope := msWorkspace;
+        AEvent.McpRows[0].Transport := mtStdio;
+        AEvent.McpRows[0].Connection := mcConnected;
+        AEvent.McpRows[0].Enabled := True;
+        AEvent.McpRows[0].Auth := maNone;
+        { The second row carries the fields that are easy to lose: an error, an
+          OAuth requirement, and an UNKNOWN connection - the state that must not
+          be confused with "disconnected". }
+        AEvent.McpRows[1].Key := 'toughleaf';
+        AEvent.McpRows[1].Connection := mcUnknown;
+        AEvent.McpRows[1].Transport := mtHttp;
+        AEvent.McpRows[1].Auth := maOAuth;
+        AEvent.McpRows[1].Enabled := False;
+        AEvent.McpRows[1].Error := 'probe timed out';
       end;
   end;
 end;
