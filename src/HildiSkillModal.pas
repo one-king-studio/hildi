@@ -1,4 +1,4 @@
-unit TUIWidgetsSkillmodal;
+unit HildiSkillModal;
 { The skill detail dialog: one skill's name, description, metadata, and full
   SKILL.md body - the body rendered as MARKDOWN, and the whole thing scrollable.
 

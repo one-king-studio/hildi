@@ -1,4 +1,4 @@
-unit TUIWidgetsCompose;
+unit HildiCompose;
 { The chat input box: a raised, heavy-topped panel wrapping a TTextEdit, so the
   caret, wrapping, word motion and selection come from the editor.
 

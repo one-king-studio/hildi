@@ -14,7 +14,7 @@ uses
   TUIBase, TUIInput,
   TUISurface, TUIWidget,
   TUIWidgetsText, TUIWidgetsScroll,
-  TUITheme, TUIWidgetsChat,
+  TUITheme, HildiChat,
   TUIApp;
 
 type

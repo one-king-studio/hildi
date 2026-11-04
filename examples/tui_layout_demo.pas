@@ -43,8 +43,8 @@ uses
   TUISurfaceVideo, TUIInputTerminal,
   TUITheme, TUIWidgetsPanel,
   TUIWidgetsList, TUIWidgetsScroll,
-  TUIWidgetsChat, TUIWidgetsCompose,
-  TUIWidgetsChatPanel;
+  HildiChat, HildiCompose,
+  HildiChatPanel;
 
 const
   WideThreshold = 180;     // two columns appear above this width

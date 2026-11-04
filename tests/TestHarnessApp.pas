@@ -13,7 +13,7 @@ uses
   HildiLLM, HildiAgent, HildiApproval,
   TUIBase, TUIInput,
   TUISurface, TUIWidget,
-  TUIWidgetsChat,
+  HildiChat,
   HildiHarnessTurn, HildiHarnessSession,
   HildiHarnessView,
   HildiHarnessDriver, HildiHarnessDriverLocal,
@@ -2120,13 +2120,13 @@ begin
     reached and the test passed for the wrong reason - it was exercising the
     fallback, not the clamp. }
   Long := 'git log --oneline --stat --follow --all --graph --decorate -- ' +
-    'src/tui/widgets/TUIWidgetsChatPanel.pas';
+    'src/tui/widgets/HildiChatPanel.pas';
   Caption := ToolActivityCaption('run_command', '{"command":"' + Long + '"}',
     '', 'c1');
   AssertTrue('the caption is bounded: ' + IntToStr(Length(Caption)),
     Length(Caption) <= 48 + Length('...') + Length('Running '));
   AssertTrue('the tail is kept, not the head: ' + Caption,
-    Pos('TUIWidgetsChatPanel.pas', Caption) > 0);
+    Pos('HildiChatPanel.pas', Caption) > 0);
   AssertTrue('it is a clamped subject, not the fallback',
     Pos('Running ', Caption) = 1);
 end;

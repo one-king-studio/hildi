@@ -15,8 +15,8 @@ uses
   HildiLLM, HildiApproval,
   TUIBase, TUIInput,
   TUISurface, TUIWidget,
-  TUIWidgetsText, TUIWidgetsChat,
-  TUIWidgetsCompose, TUIWidgetsChatPanel,
+  TUIWidgetsText, HildiChat,
+  HildiCompose, HildiChatPanel,
   TUIWidgetsPalette,
   HildiApprovalModal,
   TUIWidgetsPanel, TUITheme,
@@ -26,10 +26,10 @@ uses
   HildiBoard, HildiBoardStore,
   HildiHarnessStats, HildiSession,
   HildiReplyMeta,
-  TUIWidgetsSessionsModal,
+  HildiSessionsModal,
   TUIWidgetsDiffviewer,
-  TUIWidgetsHistorymodal,
-  TUIWidgetsSkillmodal,
+  HildiHistoryModal,
+  HildiSkillModal,
   TUIWidgetsActions,
   HildiHarnessSubagent, HildiHarnessSubagentSpy,
   HildiAgentList, TUIWidgetsList,
@@ -2582,8 +2582,8 @@ begin
 end;
 
 { Shorten a subject to something a one-line toolbar can hold. Done at a path
-  separator where possible, so "src/tui/widgets/TUIWidgetsChatPanel.pas" becomes
-  ".../widgets/TUIWidgetsChatPanel.pas" rather than a chopped-off stem. }
+  separator where possible, so "src/tui/widgets/HildiChatPanel.pas" becomes
+  ".../widgets/HildiChatPanel.pas" rather than a chopped-off stem. }
 function ClampSubject(const AText: string): string;
 var
   Start, I: Integer;

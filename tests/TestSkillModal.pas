@@ -1,5 +1,5 @@
 unit TestSkillModal;
-{ fpcunit tests for TUIWidgetsSkillmodal: the skill detail dialog.
+{ fpcunit tests for HildiSkillModal: the skill detail dialog.
 
   No terminal and no registry: the dialog takes a plain TSkillDetail record, so
   everything here is a check on what it REPORTS, not on how it looks. }
@@ -11,7 +11,7 @@ interface
 uses
   SysUtils, fpcunit, testregistry,
   TUIBase, TUIInput, TUITheme,
-  TUIWidgetsSkillmodal;
+  HildiSkillModal;
 
 type
   { Records what the dialog asked to load. A class, not an anonymous method:

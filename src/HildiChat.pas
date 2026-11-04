@@ -1,4 +1,4 @@
-unit TUIWidgetsChat;
+unit HildiChat;
 { The chat stream: a scrolling column of message blocks for the harness UI.
 
   A block is a raised user bubble, plain assistant text, a dimmed collapsible

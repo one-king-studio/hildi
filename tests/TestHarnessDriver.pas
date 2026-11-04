@@ -18,7 +18,7 @@ uses
   HildiHarnessDriver,
   HildiHarnessDriverLocal,
   TUIBase, TUIInput,
-  TUISurface, TUIWidgetsChat,
+  TUISurface, HildiChat,
   HildiHarnessApp,
   HildiWorkspace, LLMFakes;
 

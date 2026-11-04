@@ -1,5 +1,5 @@
 unit TestTUIChat;
-{ fpcunit tests for TUIWidgetsChat: the mutable message blocks and
+{ fpcunit tests for HildiChat: the mutable message blocks and
   the scrolling stream. Rendering is asserted through TSurfaceMemory. }
 
 {$mode delphi}{$H+}{$codepage utf8}
@@ -10,7 +10,7 @@ uses
   SysUtils, fpcunit, testregistry,
   TUIBase, TUIInput,
   TUISurface, TUITheme,
-  TUIClock, TUIWidgetsChat;
+  TUIClock, HildiChat;
 
 type
   TTuiChatTest = class(TTestCase)

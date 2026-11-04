@@ -1,4 +1,4 @@
-unit TUIWidgetsHistorymodal;
+unit HildiHistoryModal;
 { The shared history dialog: the captured turns, newest first, with each turn's
   file stats. `/undo`, `/redo` and `/revert` all open it, because the operator is
   answering one question - WHICH TURN? - three times, and only the action

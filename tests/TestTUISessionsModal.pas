@@ -1,5 +1,5 @@
 unit TestTUISessionsModal;
-{ fpcunit tests for the /sessions modal (TUIWidgetsSessionsModal):
+{ fpcunit tests for the /sessions modal (HildiSessionsModal):
   filtering, navigation, the archived toggle, and the row actions. Headless,
   against TSurfaceMemory and scripted input. }
 
@@ -12,7 +12,7 @@ uses
   TUIBase, TUIInput,
   TUISurface, TUIWidget,
   TUITheme,
-  TUIWidgetsSessionsModal;
+  HildiSessionsModal;
 
 type
   TSessionsModalTest = class(TTestCase)

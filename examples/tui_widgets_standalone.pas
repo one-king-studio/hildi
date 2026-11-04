@@ -20,17 +20,16 @@ uses
   {$ifdef unix}cthreads, cwstring,{$endif}   // cthreads first; cwstring for Unicode
   SysUtils,
   TUIBase, TUIInput, TUISurface, TUITheme, TUIWidget,
-  TUIWidgetsText,
-  TUIWidgetsPanel,
-  { Every widget unit, so a single app-coupled import anywhere in the tier
-    fails this build. Listing only the ones this program uses would leave the
-    rest unchecked - and the rest are exactly the coupled ones. }
-  TUIWidgetsButton, TUIWidgetsChat, TUIWidgetsChatPanel, TUIWidgetsCompose,
+  { EVERY unit in src/tui/**, listed deliberately. The gate must prove the whole
+    tier is exportable, so listing only what this program uses would leave the
+    rest unchecked - and an unlisted unit is an unproven one. The six Hildi
+    domain widgets (chat, compose, the three dialogs) are NOT here: they live in
+    src/ beside the harness, because they are Hildi's, not the library's. }
+  TUIWidgetsText, TUIWidgetsPanel, TUIWidgetsButton, TUIWidgetsActions,
   TUIWidgetsDiffviewer, TUIWidgetsEdit, TUIWidgetsFileviewer, TUIWidgetsFocus,
-  TUIWidgetsHistorymodal, TUIWidgetsList, TUIWidgetsMarkdownView,
-  TUIWidgetsMdtheme, TUIWidgetsModal, TUIWidgetsPalette, TUIWidgetsProgress,
-  TUIWidgetsPrompt, TUIWidgetsScroll, TUIWidgetsSessionsModal,
-  TUIWidgetsSkillmodal, TUIWidgetsSpinner;
+  TUIWidgetsList, TUIWidgetsMarkdownView, TUIWidgetsMdtheme, TUIWidgetsModal,
+  TUIWidgetsPalette, TUIWidgetsProgress, TUIWidgetsPrompt, TUIWidgetsScroll,
+  TUIWidgetsSpinner;
 
 var
   Failures: Integer;

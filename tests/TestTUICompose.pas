@@ -1,5 +1,5 @@
 unit TestTUICompose;
-{ fpcunit tests for TUIWidgetsCompose: the input box chrome, growth,
+{ fpcunit tests for HildiCompose: the input box chrome, growth,
   and the submit rule. Rendering is asserted through TSurfaceMemory. }
 
 {$mode delphi}{$H+}{$codepage utf8}
@@ -10,7 +10,7 @@ uses
   SysUtils, fpcunit, testregistry,
   TUIBase, TUIInput,
   TUISurface, TUITheme,
-  TUIWidgetsCompose;
+  HildiCompose;
 
 type
   TTuiComposeTest = class(TTestCase)

@@ -1,4 +1,4 @@
-unit TUIWidgetsChatPanel;
+unit HildiChatPanel;
 { The chat column: a bordered messages panel holding a TChatStream, a compose
   box that overlays it as it grows, a toolbar strip above the compose, and a
   two-part status line below.
@@ -18,9 +18,9 @@ uses
   TUIBase, TUIInput,
   TUISurface, TUIWidget,
   TUIWidgetsText, TUIWidgetsPanel,
-  TUITheme, TUIWidgetsChat,
+  TUITheme, HildiChat,
   TUIGrapheme, TUIClock,
-  TUIWidgetsCompose, TUIWidgetsPalette,
+  HildiCompose, TUIWidgetsPalette,
   TUIWidgetsActions;
 
 { The start-of-session mark: drawn centred in an empty transcript. Braille block
@@ -965,7 +965,7 @@ end;
   rather than an obvious break.
 
   That collision got much easier to hit once the label started naming its subject
-  ("Editing src/tui/widgets/TUIWidgetsChatPanel.pas"). The hints are key reminders
+  ("Editing src/tui/widgets/HildiChatPanel.pas"). The hints are key reminders
   the operator needs WHILE a long operation runs, which is exactly when the label
   is longest, so the label yields.
 

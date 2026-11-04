@@ -1,4 +1,4 @@
-unit TUIWidgetsSessionsModal;
+unit HildiSessionsModal;
 { The /sessions modal: list the workspace's sessions, search them, and manage a
   row (rename, pin/unpin, archive/restore). It reads the titles and keywords
   Reply Metadata persists; it does not derive them. Opening a session is out of

@@ -1,5 +1,5 @@
 unit TestTUIChatPanel;
-{ fpcunit tests for TUIWidgetsChatPanel: the composed chat column,
+{ fpcunit tests for HildiChatPanel: the composed chat column,
   the overlay compose, and the status line. }
 
 {$mode delphi}{$H+}{$codepage utf8}
@@ -10,7 +10,7 @@ uses
   SysUtils, fpcunit, testregistry,
   TUIBase, TUIInput, TUIClock,
   TUISurface, TUITheme,
-  TUIWidgetsChat, TUIWidgetsChatPanel;
+  HildiChat, HildiChatPanel;
 
 type
   TTuiChatPanelTest = class(TTestCase)
@@ -430,7 +430,7 @@ begin
     P := TChatPanel.Create(FTheme, 'info', 'shift+enter newline');
     try
       P.SetState(psTool,
-        'Editing src/tui/widgets/TUIWidgetsChatPanel.pas');
+        'Editing src/tui/widgets/HildiChatPanel.pas');
       P.Arrange(Rc(0, 0, 60, 20));
       P.Render(S);
       { Read the toolbar row as text and look for the hint's FIRST word: a hint

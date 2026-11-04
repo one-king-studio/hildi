@@ -1,5 +1,5 @@
 unit TestTUIHistorymodal;
-{ fpcunit tests for the shared history dialog (TUIWidgetsHistorymodal): one
+{ fpcunit tests for the shared history dialog (HildiHistoryModal): one
   list, three intents, newest first, unselectable rows skipped. Headless, against
   TSurfaceMemory and scripted input. }
 
@@ -12,7 +12,7 @@ uses
   TUIBase, TUIInput,
   TUISurface, TUIWidget,
   TUITheme,
-  TUIWidgetsHistorymodal;
+  HildiHistoryModal;
 
 type
   THistoryModalTest = class(TTestCase)

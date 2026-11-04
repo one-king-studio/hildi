@@ -20,7 +20,7 @@ uses
   {$ifdef unix}cwstring,{$endif}
   SysUtils,
   TUIBase, TUISurface, TUIWidget, TUITheme,
-  TUIWidgetsChat, TUIWidgetsChatPanel;
+  HildiChat, HildiChatPanel;
 
 const
   W = 78;
@@ -242,7 +242,7 @@ var
 begin
   P := TChatPanel.Create(Theme, 'Hildi', 'shift+enter newline');
   try
-    P.SetState(psTool, 'Editing src/tui/widgets/TUIWidgetsChatPanel.pas');
+    P.SetState(psTool, 'Editing src/tui/widgets/HildiChatPanel.pas');
     Paint(P, 52, 10, 'NARROW 52 cols - long label + hints');
   finally
     P.Free;
