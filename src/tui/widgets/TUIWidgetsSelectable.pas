@@ -33,9 +33,11 @@ type
   private
     FSelection: TSelection;
     FDragging: Boolean;
-    { Surface coordinates of content cell (0, 0). A widget inside a scrolled
-      container sets this once per frame so the highlight lands on the cells it
-      actually painted. }
+    { Surface coordinates of content cell (0, 0). Defaults to the widget's own
+      top-left after Arrange - which is right for a plain leaf AND for a child of
+      a scrolling container, since such a child is arranged at its scrolled
+      position. A composite that insets its content (a bordered panel) overrides
+      it with SetContentOrigin. }
     FContentX, FContentY: Integer;
     FHighlight: TAttr;
     FSelectable: Boolean;
@@ -54,6 +56,7 @@ type
       highlight must ask rather than assume. Default: the widget's left edge. }
     function RowOriginX(ARow: Integer): Integer; virtual;
   public
+    procedure Arrange(const ABounds: TRect); override;
     { No theme: selection is a behaviour, not a look. The host sets Highlight, so
       a widget that already owns a theme does not have to hand one over. }
     constructor Create;
@@ -78,7 +81,7 @@ type
     { Put the selection on the terminal clipboard and say whether anything was
       copied. False means there was nothing usable - the caller shows nothing,
       rather than reporting an error for a no-op. }
-    function CopySelection(const S: ISurface): Boolean;
+    function CopySelection(const S: ISurface): Boolean; override;
     function HandleEvent(const E: TInputEvent): Boolean; override;
     property Selection: TSelection read FSelection;
     property Dragging: Boolean read FDragging;
@@ -123,6 +126,16 @@ procedure TSelectable.SetContentOrigin(AX, AY: Integer);
 begin
   FContentX := AX;
   FContentY := AY;
+end;
+
+procedure TSelectable.Arrange(const ABounds: TRect);
+begin
+  inherited Arrange(ABounds);
+  { Content starts where the widget does unless someone says otherwise. Leaving
+    this at 0,0 was a real bug: a widget at surface Y=50 mapped a click to row
+    50 and painted its highlight 50 rows above its own text. }
+  FContentX := ABounds.X;
+  FContentY := ABounds.Y;
 end;
 
 function TSelectable.PosAt(AX, AY: Integer): TTextPos;

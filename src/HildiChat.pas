@@ -600,7 +600,12 @@ begin
       FMarkdown := TMarkdownView.Create;
   end
   else
+  begin
     FText := TTextBlock.Create([], wmWord);
+    { Body text is copyable; chrome is not. Only the plain-text path needs this -
+      the markdown path enables it on each block it builds. }
+    FText.Selectable := True;
+  end;
 end;
 
 { The markdown theme for an ambient box: the default palette rebased onto the

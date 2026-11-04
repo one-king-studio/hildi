@@ -692,6 +692,9 @@ begin
       Inc(X, CW);
     end;
   end;
+  { After the text, before the clip is released: the highlight recolours cells
+    that are already there, so it must be last. }
+  RenderSelection(S);
   S.PopClip;
 end;
 

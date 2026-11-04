@@ -114,6 +114,11 @@ type
     procedure PushPlane(const APlane: TPlane);
     procedure PopPlane;
     function ModalActive: Boolean;
+    { Copy whatever the active tree has selected onto the terminal clipboard.
+      Walks the modal plane when one is up, else the base - the same plane that
+      receives input, so the key acts on what the operator is looking at.
+      Returns False when nothing was selected. }
+    function CopySelection: Boolean;
     procedure Stop;
 
     { One iteration: process at most one input event (or resize), lay out on
@@ -281,6 +286,17 @@ begin
     SetLength(FPlanes, Length(FPlanes) - 1);
     Invalidate;
   end;
+end;
+
+function TTuiApp.CopySelection: Boolean;
+begin
+  Result := False;
+  if Length(FPlanes) = 0 then
+    Exit;
+  if ModalActive then
+    Result := FPlanes[High(FPlanes)].Root.CopySelection(FSurface)
+  else
+    Result := FPlanes[0].Root.CopySelection(FSurface);
 end;
 
 function TTuiApp.ModalActive: Boolean;

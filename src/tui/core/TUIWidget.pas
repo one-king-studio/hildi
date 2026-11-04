@@ -40,6 +40,11 @@ type
       same space as Bounds, so a widget whose clickable shape differs from its
       rectangle overrides this rather than re-testing bounds itself. }
     function HitTest(AX, AY: Integer): Boolean; virtual;
+    { If this widget (or a descendant) holds a copyable selection, put it on the
+      clipboard and return True. Default: nothing to copy. Containers recurse,
+      so the host does not need to know the tree's shape - which is what lets a
+      copy key stay one line in the app. }
+    function CopySelection(const S: ISurface): Boolean; virtual;
     { Update time-based content to ANowMs. Default: no-op. Must not arrange; the
       app calls this once per frame. Returns True when the content changed, so
       the app repaints only the frames that actually differ. }
@@ -105,6 +110,7 @@ type
     procedure Arrange(const ABounds: TRect); override;
     procedure Render(const S: ISurface); override;
     function HandleEvent(const E: TInputEvent): Boolean; override;
+    function CopySelection(const S: ISurface): Boolean; override;
     function Advance(const ANowMs: Int64): Boolean; override;
     function Animating: Boolean; override;
   end;
@@ -154,6 +160,11 @@ begin
 end;
 
 function TWidget.HandleEvent(const E: TInputEvent): Boolean;
+begin
+  Result := False;
+end;
+
+function TWidget.CopySelection(const S: ISurface): Boolean;
 begin
   Result := False;
 end;
@@ -460,6 +471,17 @@ begin
     if FWidgets[I].Visible then
       FWidgets[I].Render(S);
   S.PopClip;
+end;
+
+function TContainer.CopySelection(const S: ISurface): Boolean;
+var
+  I: Integer;
+begin
+  { Reverse Add order, like mouse dispatch: the topmost usable selection wins. }
+  for I := FCount - 1 downto 0 do
+    if FWidgets[I].Visible and FWidgets[I].CopySelection(S) then
+      Exit(True);
+  Result := False;
 end;
 
 function TContainer.HandleEvent(const E: TInputEvent): Boolean;

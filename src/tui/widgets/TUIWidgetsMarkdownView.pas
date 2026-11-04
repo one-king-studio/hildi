@@ -453,6 +453,7 @@ begin
   end;
 
   Text := TTextBlock.Create([], wmWord);
+  Text.Selectable := True;
   case N.Kind of
     mnHorizontalRule:
       { The view draws the rule itself; this only claims one row. }
@@ -965,6 +966,7 @@ begin
           Spans := nil;
       end;
       FCells[I] := TTextBlock.Create(Spans, wmWord);
+      FCells[I].Selectable := True;
       Txt := SpanListText(Spans);
       FNatW[I] := StringWidth(Txt);
       FMinW[I] := TextLongestWord(Txt);

@@ -275,6 +275,7 @@ type
     procedure ToggleAgentList(Sender: TObject);
     { Adapter for the ctrl+= chord, which is a TNotifyEvent. }
     procedure ShowSkillsClicked(Sender: TObject);
+    procedure CopySelectionClicked(Sender: TObject);
     procedure LayoutAgentList;
     { Each subagent row shows what its child is currently working on, so the
       list answers "which of these is doing the thing I care about". }
@@ -604,6 +605,7 @@ type
     FCanQuit: TQueryEvent;
     FOnToggleAgentList: TNotifyEvent;
     FOnShowSkills: TNotifyEvent;
+    FOnCopySelection: TNotifyEvent;
   public
     constructor Create(AChild: TWidget; AOnQuit, AOnEscape: TNotifyEvent;
       ACanQuit: TQueryEvent);
@@ -611,6 +613,7 @@ type
     { ctrl+= opens the skill list. A chord rather than a key because '=' must
       stay typable in a prompt. }
     procedure SetShowSkills(AHandler: TNotifyEvent);
+    procedure SetCopySelection(AHandler: TNotifyEvent);
     function HandleEvent(const E: TInputEvent): Boolean; override;
   end;
 
@@ -694,6 +697,11 @@ begin
   FOnShowSkills := AHandler;
 end;
 
+procedure TAppShell.SetCopySelection(AHandler: TNotifyEvent);
+begin
+  FOnCopySelection := AHandler;
+end;
+
 function TAppShell.HandleEvent(const E: TInputEvent): Boolean;
 begin
   if (E.Kind = ikKey) and (E.Key.Kind = kkChar) and (moCtrl in E.Key.Mods) then
@@ -723,6 +731,15 @@ begin
     { Ctrl+D is no longer a quit key: it now toggles the agent list. Quit
       stays on Ctrl-C, which is context-aware and standard. Two quit bindings
       for one action was part of how the agent list became unreachable. }
+    { Ctrl+Y copies the current text selection. A chord, because a bare 'y' must
+      stay typable. Ctrl+C is taken: it clears the compose, or quits when that is
+      empty, so overloading it would make copying a coin flip. }
+    if (E.Key.Ch = 'y') or (E.Key.Ch = 'Y') then
+    begin
+      if Assigned(FOnCopySelection) then
+        FOnCopySelection(Self);
+      Exit(True);
+    end;
     { ctrl+= opens the skill list. A chord, not a bare key: '=' must stay typable
       in a prompt, and this is the shortcut the /skill entry advertises. }
     if (E.Key.Ch = '=') then
@@ -1126,6 +1143,7 @@ begin
   Shell := TAppShell.Create(FPanel, Quit, HandleEscape, ComposeIsEmpty);
   Shell.SetAgentListToggle(ToggleAgentList);
   Shell.SetShowSkills(ShowSkillsClicked);
+  Shell.SetCopySelection(CopySelectionClicked);
   Result := TAgentListOverlay.Create(Shell, FAgentList);
 end;
 
@@ -3981,6 +3999,14 @@ end;
 function THarnessApp.SpyId: string;
 begin
   Result := FSpyId;
+end;
+
+procedure THarnessApp.CopySelectionClicked(Sender: TObject);
+begin
+  { The tree walk finds whichever text widget holds a usable selection. Nothing
+    selected is a silent no-op: an empty OSC 52 write would CLEAR the operator's
+    clipboard, which must never be the result of pressing a key. }
+  FApp.CopySelection;
 end;
 
 procedure THarnessApp.ShowSkillsClicked(Sender: TObject);
