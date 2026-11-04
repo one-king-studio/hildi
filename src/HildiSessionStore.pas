@@ -9,7 +9,7 @@ unit HildiSessionStore;
 interface
 
 uses
-  SysUtils, HildiAgent, HildiLLM,
+  SysUtils, HildiAgent, LLMClient,
   HildiStore, HildiSession,
   HildiRecallTool, HildiAmbient,
   HildiWrap, HildiHandoff;

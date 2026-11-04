@@ -10,7 +10,7 @@ program mcp_session_check;
 uses
   {$ifdef unix}cthreads, cwstring,{$endif}   // cthreads first: sync primitives
   SysUtils,
-  HildiLLM, HildiAgent,
+  LLMClient, HildiAgent,
   HildiHarnessSession, HildiHarnessView;
 
 var

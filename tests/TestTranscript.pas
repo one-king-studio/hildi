@@ -8,7 +8,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  HildiANSI, HildiTranscript, HildiLLM;
+  HildiANSI, HildiTranscript, LLMClient;
 
 type
   TTranscriptTest = class(TTestCase)

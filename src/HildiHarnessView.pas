@@ -9,7 +9,7 @@ interface
 
 uses
   Classes, SysUtils,
-  HildiLLM, HildiWorkspace, HildiStore,
+  LLMClient, HildiWorkspace, HildiStore,
   HildiSession;
 
 type

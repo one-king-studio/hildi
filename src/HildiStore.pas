@@ -17,7 +17,7 @@ interface
 
 uses
   Classes, SysUtils, SyncObjs,
-  HildiSQLITE, HildiApproval, HildiLLM,
+  HildiSQLITE, HildiApproval, LLMClient,
   HildiSession, HildiMCPConfig;
 
 type

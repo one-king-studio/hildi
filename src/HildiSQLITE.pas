@@ -57,6 +57,15 @@ function sqlite3_bind_int(stmt: Psqlite3_stmt; idx: cint; value: cint): cint;
   cdecl; external 'sqlite3';
 function sqlite3_bind_int64(stmt: Psqlite3_stmt; idx: cint;
   value: sqlite3_int64): cint; cdecl; external 'sqlite3';
+{ Needed by the provider table, whose parameter columns are NULLABLE on purpose:
+  a NULL parameter means "omit the key from the request", which is a different
+  thing from a zero. Without bind_null there is no way to express the former. }
+function sqlite3_bind_double(stmt: Psqlite3_stmt; idx: cint; value: cdouble): cint;
+  cdecl; external 'sqlite3';
+function sqlite3_bind_null(stmt: Psqlite3_stmt; idx: cint): cint;
+  cdecl; external 'sqlite3';
+function sqlite3_column_double(stmt: Psqlite3_stmt; idx: cint): cdouble;
+  cdecl; external 'sqlite3';
 function sqlite3_column_text(stmt: Psqlite3_stmt; idx: cint): PAnsiChar;
   cdecl; external 'sqlite3';
 function sqlite3_column_int(stmt: Psqlite3_stmt; idx: cint): cint;

@@ -7,7 +7,7 @@ unit LLMFakes;
 interface
 
 uses
-  Classes, SysUtils, Generics.Collections, fpjson, HildiLLM;
+  Classes, SysUtils, Generics.Collections, fpjson, LLMClient;
 
 type
   { Replays canned SSE chunks to the client. Either a flat chunk list reused for

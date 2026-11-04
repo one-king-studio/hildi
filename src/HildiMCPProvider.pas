@@ -29,7 +29,7 @@ interface
 
 uses
   Classes, SysUtils,
-  HildiLLM, HildiAgent,
+  LLMClient, HildiAgent,
   HildiMCPClient, HildiMCPConfig;
 
 const

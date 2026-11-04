@@ -14,7 +14,7 @@ interface
 uses
   Classes, Contnrs, SysUtils,
   AsyncBase, AsyncScheduler, AsyncConcurrency,
-  HildiLLM, HildiAgent, HildiSkills, HildiSkillsFiles,
+  LLMClient, HildiAgent, HildiSkills, HildiSkillsFiles,
   HildiApproval,
   HildiApprovalStore, HildiCommandTool,
   HildiFiles,

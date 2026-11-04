@@ -18,7 +18,7 @@ interface
 uses
   Classes, SysUtils, SyncObjs,
   AsyncQueue,
-  HildiLLM, HildiApproval,
+  LLMClient, HildiApproval,
   { For TMcpRowStatusArray. A deliberately dependency-free unit: the row type is
     shared with the wire codec rather than declared twice. }
   HildiMCPConfig;
@@ -214,7 +214,7 @@ const
   Lives HERE rather than in HildiSkills because the app cannot import that unit:
   HildiSkills uses HildiAgent, and the Process Split forbids HildiHarnessApp from
   reaching the agent. TSplitBoundaryTest caught exactly that when this was first
-  put in HildiSkills. This unit is pure - HildiLLM and HildiApproval only.
+  put in HildiSkills. This unit is pure - LLMClient and HildiApproval only.
 
   AMax is how many names show before the overflow collapses; the operator asked
   for roughly three. The overflow counts the REMAINDER, so five names at cap

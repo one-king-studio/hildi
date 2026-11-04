@@ -10,7 +10,7 @@ uses
   Classes, SysUtils, SyncObjs, fpcunit, testregistry,
   {$ifdef unix}BaseUnix,{$endif}
   HildiSQLITE,
-  HildiStore, HildiSession, HildiLLM,
+  HildiStore, HildiSession, LLMClient,
   HildiMCPConfig;
 
 type
@@ -38,6 +38,20 @@ type
     procedure TestCredentialsPersistAcrossReopen;
 
     procedure TestSettingSetGetOverwriteDelete;
+
+    { Provider records. The round-trip tests exist to pin the tri-state: a NULL
+      parameter must come back ABSENT, and a configured 0.0 must come back
+      configured. Those are different requests. }
+    procedure TestProviderRoundTripsEveryParameter;
+    procedure TestZeroTemperatureSurvivesAsConfiguredNotNull;
+    procedure TestNullParameterComesBackAbsent;
+    procedure TestSaveProviderUpdatesByNameInsteadOfDuplicating;
+    procedure TestListProvidersIsOrderedByName;
+    procedure TestActivatingAProviderLeavesExactlyOneActive;
+    procedure TestActivateUnknownProviderChangesNothing;
+    procedure TestDeleteActiveProviderLeavesNoActiveRow;
+    procedure TestProviderSecretRoundTrips;
+    procedure TestMissingProviderSecretIsEmptyNotAnError;
     procedure TestSettingMissingReturnsNotFound;
     procedure TestParameterizedValuesWithQuotesRoundTrip;
 
@@ -353,6 +367,259 @@ begin
 end;
 
 { --- requests / queue --- }
+
+procedure TStoreTest.TestProviderRoundTripsEveryParameter;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Row, Got: TProviderRow;
+begin
+  Err := Default(TStoreError);
+  S := OpenStore;
+  try
+    Row := Default(TProviderRow);
+    Row.Name := 'fireworks';
+    Row.Endpoint := 'https://api.fireworks.ai/inference/v1/chat/completions';
+    Row.Model := 'accounts/fireworks/models/x';
+    Row.Temperature := 0.25;  Row.HasTemperature := True;
+    Row.TopP := 0.9;          Row.HasTopP := True;
+    Row.MaxTokens := 4096;    Row.HasMaxTokens := True;
+    Row.FrequencyPenalty := 0.5;  Row.HasFrequencyPenalty := True;
+    Row.PresencePenalty := -0.5;  Row.HasPresencePenalty := True;
+    Row.Seed := 42;           Row.HasSeed := True;
+    SetLength(Row.Stop, 2);
+    Row.Stop[0] := 'STOP';
+    Row.Stop[1] := '</answer>';
+    AssertTrue('saved: ' + Err.Message, S.SaveProvider(Row, Err));
+
+    AssertTrue('loaded: ' + Err.Message, S.LoadProvider('fireworks', Got, Err));
+    AssertEquals('endpoint', Row.Endpoint, Got.Endpoint);
+    AssertEquals('model', Row.Model, Got.Model);
+    AssertEquals('temperature', 0.25, Got.Temperature);
+    AssertEquals('top_p', 0.9, Got.TopP);
+    AssertEquals('max_tokens', 4096, Got.MaxTokens);
+    AssertEquals('frequency_penalty', 0.5, Got.FrequencyPenalty);
+    AssertEquals('presence_penalty', -0.5, Got.PresencePenalty);
+    AssertEquals('seed', 42, Got.Seed);
+    AssertEquals('two stops', 2, Length(Got.Stop));
+    AssertEquals('stop 0', 'STOP', Got.Stop[0]);
+    AssertEquals('stop 1', '</answer>', Got.Stop[1]);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestZeroTemperatureSurvivesAsConfiguredNotNull;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Row, Got: TProviderRow;
+begin
+  Err := Default(TStoreError);
+  { THE round-trip trap. A configured 0.0 temperature must come back configured.
+    A `NOT NULL DEFAULT 0` column, or a reader that skips ColIsNull, would make
+    "deliberately deterministic" indistinguishable from "not configured" - and
+    the request would then omit the key entirely. }
+  S := OpenStore;
+  try
+    Row := Default(TProviderRow);
+    Row.Name := 'deterministic';
+    Row.Temperature := 0.0;
+    Row.HasTemperature := True;
+    AssertTrue('saved: ' + Err.Message, S.SaveProvider(Row, Err));
+    AssertTrue('loaded: ' + Err.Message, S.LoadProvider('deterministic', Got, Err));
+    AssertTrue('still CONFIGURED, not absent', Got.HasTemperature);
+    AssertEquals('and its value is zero', 0.0, Got.Temperature);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestNullParameterComesBackAbsent;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Row, Got: TProviderRow;
+begin
+  Err := Default(TStoreError);
+  S := OpenStore;
+  try
+    Row := Default(TProviderRow);
+    Row.Name := 'bare';
+    AssertTrue('saved: ' + Err.Message, S.SaveProvider(Row, Err));
+    AssertTrue('loaded: ' + Err.Message, S.LoadProvider('bare', Got, Err));
+    AssertFalse('temperature absent', Got.HasTemperature);
+    AssertFalse('top_p absent', Got.HasTopP);
+    AssertFalse('max_tokens absent', Got.HasMaxTokens);
+    AssertFalse('seed absent', Got.HasSeed);
+    AssertEquals('no stop entries', 0, Length(Got.Stop));
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestSaveProviderUpdatesByNameInsteadOfDuplicating;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Row, Got: TProviderRow;
+  Rows: TProviderRowArray;
+begin
+  Err := Default(TStoreError);
+  S := OpenStore;
+  try
+    Row := Default(TProviderRow);
+    Row.Name := 'p';
+    Row.Model := 'first';
+    AssertTrue('insert: ' + Err.Message, S.SaveProvider(Row, Err));
+    Row.Model := 'second';
+    AssertTrue('update: ' + Err.Message, S.SaveProvider(Row, Err));
+    AssertTrue('list: ' + Err.Message, S.ListProviders(Rows, Err));
+    AssertEquals('one row, not two', 1, Length(Rows));
+    AssertTrue('load: ' + Err.Message, S.LoadProvider('p', Got, Err));
+    AssertEquals('the later value', 'second', Got.Model);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestListProvidersIsOrderedByName;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Row: TProviderRow;
+  Rows: TProviderRowArray;
+begin
+  S := OpenStore;
+  try
+    Row := Default(TProviderRow);
+    Row.Name := 'zeta';   AssertTrue('z', S.SaveProvider(Row, Err));
+    Row.Name := 'alpha';  AssertTrue('a', S.SaveProvider(Row, Err));
+    Row.Name := 'mid';    AssertTrue('m', S.SaveProvider(Row, Err));
+    AssertTrue('list: ' + Err.Message, S.ListProviders(Rows, Err));
+    AssertEquals('three', 3, Length(Rows));
+    AssertEquals('alpha', 'alpha', Rows[0].Name);
+    AssertEquals('mid', 'mid', Rows[1].Name);
+    AssertEquals('zeta', 'zeta', Rows[2].Name);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestActivatingAProviderLeavesExactlyOneActive;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Row, Got: TProviderRow;
+  Rows: TProviderRowArray;
+  I, ActiveCount: Integer;
+begin
+  S := OpenStore;
+  try
+    Row := Default(TProviderRow);
+    Row.Name := 'one';  AssertTrue('one', S.SaveProvider(Row, Err));
+    Row.Name := 'two';  AssertTrue('two', S.SaveProvider(Row, Err));
+    AssertTrue('activate one: ' + Err.Message, S.SetActiveProvider('one', Err));
+    AssertTrue('activate two: ' + Err.Message, S.SetActiveProvider('two', Err));
+    { The partial unique index makes a second active row impossible; this asserts
+      the switch really is a switch. }
+    AssertTrue('list: ' + Err.Message, S.ListProviders(Rows, Err));
+    ActiveCount := 0;
+    for I := 0 to High(Rows) do
+      if Rows[I].Active then
+        Inc(ActiveCount);
+    AssertEquals('exactly one active', 1, ActiveCount);
+    AssertTrue('active: ' + Err.Message, S.ActiveProvider(Got, Err));
+    AssertEquals('and it is the last one set', 'two', Got.Name);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestActivateUnknownProviderChangesNothing;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Row, Got: TProviderRow;
+begin
+  Err := Default(TStoreError);
+  S := OpenStore;
+  try
+    Row := Default(TProviderRow);
+    Row.Name := 'real';
+    AssertTrue('save', S.SaveProvider(Row, Err));
+    AssertTrue('activate real', S.SetActiveProvider('real', Err));
+    AssertFalse('unknown name fails', S.SetActiveProvider('nope', Err));
+    { And the real one is STILL active: a failed switch must not leave the
+      install with no provider. }
+    AssertTrue('still active', S.ActiveProvider(Got, Err));
+    AssertEquals('real', 'real', Got.Name);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestDeleteActiveProviderLeavesNoActiveRow;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Row, Got: TProviderRow;
+begin
+  Err := Default(TStoreError);
+  S := OpenStore;
+  try
+    Row := Default(TProviderRow);
+    Row.Name := 'gone';
+    AssertTrue('save', S.SaveProvider(Row, Err));
+    AssertTrue('activate', S.SetActiveProvider('gone', Err));
+    AssertTrue('delete', S.DeleteProvider('gone', Err));
+    { Allowed, and it leaves no active row; resolution falls through to the
+      environment rather than failing the session. }
+    AssertFalse('no active provider', S.ActiveProvider(Got, Err));
+    AssertEquals('reported as not-found', Ord(seNotFound), Ord(Err.Code));
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestProviderSecretRoundTrips;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Secret: string;
+begin
+  Err := Default(TStoreError);
+  S := OpenStore;
+  try
+    AssertTrue('set: ' + Err.Message, S.SetProviderSecret('p', 'sk-abc', Err));
+    AssertTrue('get: ' + Err.Message, S.ProviderSecret('p', Secret, Err));
+    AssertEquals('the secret', 'sk-abc', Secret);
+    { Overwrite, not duplicate. }
+    AssertTrue('overwrite', S.SetProviderSecret('p', 'sk-def', Err));
+    AssertTrue('get again', S.ProviderSecret('p', Secret, Err));
+    AssertEquals('the new secret', 'sk-def', Secret);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestMissingProviderSecretIsEmptyNotAnError;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Secret: string;
+begin
+  Err := Default(TStoreError);
+  S := OpenStore;
+  try
+    { A provider with no stored key is a normal state - the environment may carry
+      it - so this is '' and success, not a failure. }
+    AssertTrue('succeeds: ' + Err.Message, S.ProviderSecret('none', Secret, Err));
+    AssertEquals('empty', '', Secret);
+  finally
+    S.Free;
+  end;
+end;
 
 procedure TStoreTest.TestSettingSetGetOverwriteDelete;
 var

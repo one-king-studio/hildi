@@ -1,4 +1,4 @@
-unit HildiLLM;
+unit LLMClient;
 { OpenAI-compatible chat client with SSE streaming. Builds a chat-completions
   request, streams the response through an injectable transport, surfaces text
   deltas, accumulates tool-call deltas by index, and maps the finish reason and
@@ -10,7 +10,7 @@ unit HildiLLM;
 interface
 
 uses
-  Classes, SysUtils, HildiEnv;
+  Classes, SysUtils, LLMEnv;
 
 type
   TChatRole = (crSystem, crUser, crAssistant, crTool);
@@ -222,7 +222,7 @@ const
 implementation
 
 uses
-  fpjson, jsonparser, fphttpclient, HildiTLS;
+  fpjson, jsonparser, fphttpclient, LLMTLS;
 
 type
   { Forwards each response-body chunk to a callback while capturing a bounded

@@ -9,7 +9,7 @@ interface
 
 uses
   SysUtils, fpcunit, testregistry,
-  HildiApproval, HildiLLM, HildiMCPConfig,
+  HildiApproval, LLMClient, HildiMCPConfig,
   HildiSessionProtocol;
 
 type

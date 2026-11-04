@@ -11,7 +11,7 @@ interface
 uses
   Classes, SysUtils, SyncObjs, fpcunit, testregistry,
   {$ifdef unix}BaseUnix,{$endif}
-  HildiLLM, HildiAgent, HildiApproval,
+  LLMClient, HildiAgent, HildiApproval,
   HildiStore, HildiSession,
   HildiMCPConfig,
   HildiSessionProtocol, HildiSessionSocket,

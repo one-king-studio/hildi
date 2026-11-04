@@ -10,7 +10,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  HildiAgent, HildiLLM, HildiApproval,
+  HildiAgent, LLMClient, HildiApproval,
   HildiSubagent;
 
 type

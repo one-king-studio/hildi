@@ -11,7 +11,7 @@ program mcp_http_call;
 uses
   {$ifdef unix}cthreads, cwstring,{$endif}
   SysUtils,
-  HildiAgent, HildiLLM, HildiApproval,
+  HildiAgent, LLMClient, HildiApproval,
   HildiMCPClient, HildiMCPConfig;
 
 type

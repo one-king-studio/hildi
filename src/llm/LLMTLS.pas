@@ -1,4 +1,4 @@
-unit HildiTLS;
+unit LLMTLS;
 { A TSSLSocketHandler backed by the vendored mbedTLS shim, registered as the
   process default TLS handler so TFPHTTPClient uses it with no HTTP-client
   change. This is the only Pascal unit that knows about mbedTLS; it holds an
@@ -53,7 +53,7 @@ const
 implementation
 
 uses
-  ssockets, HildiEnv;
+  ssockets, LLMEnv;
 
 { The native shim (src/hildi_tls_shim.c), linked from build/libstatic. }
 function hildi_tls_new: Pointer; cdecl; external;

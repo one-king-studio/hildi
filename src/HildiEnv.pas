@@ -1,37 +1,37 @@
 unit HildiEnv;
-{ Minimal .env loader. Parses NAME=VALUE lines and applies them to the process
-  environment without overriding variables that are already set (the safe
-  precedence for secrets). Parsing is a pure function; applying is separate. }
+{ Application environment policy.
+
+  THE PRIMITIVES MOVED TO THE LIBRARY. Parsing a .env, applying it, and reading
+  a variable with the pre-rename fallback are provider-library concerns and now
+  live in src/llm/LLMEnv.pas. This unit re-exports them so every existing caller
+  and test is unchanged, and adds the policy that is genuinely application-level:
+  where the store file lives.
+
+  That split is what keeps src/llm/ free of the application's filesystem layout,
+  which is the whole point of the library. Kept as a re-export rather than a
+  copy: two implementations of "never override the shell" would drift. }
 
 {$mode delphi}{$H+}
 
 interface
 
 uses
-  SysUtils;
+  SysUtils, LLMEnv;
 
 type
-  TEnvPair = record
-    Name: string;
-    Value: string;
-  end;
-
-  TEnvPairArray = array of TEnvPair;
+  { Re-exported so a caller that already names these types keeps compiling
+    against the same declarations the library uses. }
+  TEnvPair = LLMEnv.TEnvPair;
+  TEnvPairArray = LLMEnv.TEnvPairArray;
 
 function ParseDotEnv(const AText: string): TEnvPairArray;
 function ApplyEnv(const APairs: TEnvPairArray): Integer;
 function LoadDotEnvFile(const APath: string): Integer;
 
-{ Read AName, falling back to the pre-rename spelling when it is unset, so an
-  operator's existing .env or shell profile keeps working across the rename.
-  HILDI_LLM_MODEL falls back to HILDEGARD_LLM_MODEL. The new name always wins,
-  which lets a setting be migrated one variable at a time. }
+{ Read AName, falling back to the pre-rename spelling when it is unset. }
 function GetEnvLegacy(const AName: string): string;
 
-{ Read a variable through the same layer this unit writes through (libc getenv
-  on unix). The RTL's GetEnvironmentVariable reads the envp snapshot from
-  process start, which on FPC/aarch64-linux does not see a value set later by
-  setenv. Use this anywhere the value may have been set in-process. }
+{ Read a variable through the layer this unit writes through. }
 function GetProcessEnv(const AName: string): string;
 
 { The default store path: HILDI_STORE_PATH when set, else the user's data
@@ -54,153 +54,29 @@ function ResolveStorePath(const AEnvValue, AXdgDataHome, AHome: string;
 
 implementation
 
-uses
-  Classes, ctypes;
-
-{$ifdef unix}
-function c_setenv(Name, Value: PAnsiChar; Overwrite: cint): cint; cdecl;
-  external 'c' name 'setenv';
-function c_getenv(Name: PAnsiChar): PAnsiChar; cdecl; external 'c' name 'getenv';
-{$endif}
-
-{ Read through the same layer this unit writes through.
-
-  SetProcessEnv uses libc setenv, but the RTL's GetEnvironmentVariable reads the
-  envp snapshot taken at process start -- on FPC 3.3.1/aarch64-linux the two do
-  not agree, so a variable set here was invisible to a later read here. ApplyEnv
-  then re-applied a name it had already set, breaking its own "never override
-  the shell" rule. Reading via libc getenv makes set and get consistent on every
-  platform. Variables present at process start (a shell export, a .env loaded by
-  a dotenv plugin) are in libc's environ too, so nothing is lost. }
-function GetProcessEnv(const AName: string): string;
-{$ifdef unix}
-var
-  P: PAnsiChar;
-begin
-  P := c_getenv(PAnsiChar(AnsiString(AName)));
-  if P = nil then
-    Result := ''
-  else
-    Result := string(AnsiString(P));
-end;
-{$else}
-begin
-  Result := GetEnvironmentVariable(AName);
-end;
-{$endif}
-
-function SetProcessEnv(const AName, AValue: string): Boolean;
-begin
-  {$ifdef unix}
-  Result := c_setenv(PAnsiChar(AnsiString(AName)),
-    PAnsiChar(AnsiString(AValue)), 1) = 0;
-  {$else}
-  Result := False;
-  {$endif}
-end;
-
 function ParseDotEnv(const AText: string): TEnvPairArray;
-const
-  SingleQuote = #39;
-  DoubleQuote = #34;
-var
-  Lines: TStringList;
-  I, P: Integer;
-  Line, Name, Value: string;
 begin
-  Result := nil;
-  Lines := TStringList.Create;
-  try
-    Lines.Text := AText;
-    for I := 0 to Lines.Count - 1 do
-    begin
-      Line := Trim(Lines[I]);
-      if (Line = '') or (Line[1] = '#') then
-        Continue;
-      if Copy(Line, 1, 7) = 'export ' then
-        Line := Trim(Copy(Line, 8, MaxInt));
-      P := Pos('=', Line);
-      if P <= 0 then
-        Continue;
-      Name := Trim(Copy(Line, 1, P - 1));
-      Value := Trim(Copy(Line, P + 1, MaxInt));
-      if Name = '' then
-        Continue;
-      if (Length(Value) >= 2) and
-        (((Value[1] = SingleQuote) and (Value[Length(Value)] = SingleQuote)) or
-         ((Value[1] = DoubleQuote) and (Value[Length(Value)] = DoubleQuote))) then
-        Value := Copy(Value, 2, Length(Value) - 2);
-      SetLength(Result, Length(Result) + 1);
-      Result[High(Result)].Name := Name;
-      Result[High(Result)].Value := Value;
-    end;
-  finally
-    Lines.Free;
-  end;
+  Result := LLMEnv.ParseDotEnv(AText);
 end;
 
 function ApplyEnv(const APairs: TEnvPairArray): Integer;
-var
-  I: Integer;
-  Alias: string;
 begin
-  Result := 0;
-  for I := 0 to High(APairs) do
-  begin
-    if APairs[I].Name = '' then
-      Continue;
-    if GetProcessEnv(APairs[I].Name) <> '' then
-      Continue;                       // never override the shell
-    if not SetProcessEnv(APairs[I].Name, APairs[I].Value) then
-      Continue;
-    Inc(Result);
-    { A .env written before the Hildi rename still says HILDEGARD_*. Alias each
-      such name to its HILDI_ spelling so an existing file keeps working, and a
-      file may mix old and new freely. The new spelling always wins: an alias is
-      only written when the target is still unset. }
-    if Copy(APairs[I].Name, 1, 10) = 'HILDEGARD_' then
-    begin
-      Alias := 'HILDI_' + Copy(APairs[I].Name, 11, MaxInt);
-      if GetProcessEnv(Alias) = '' then
-        SetProcessEnv(Alias, APairs[I].Value);
-    end;
-  end;
+  Result := LLMEnv.ApplyEnv(APairs);
 end;
 
 function LoadDotEnvFile(const APath: string): Integer;
-var
-  Content: TStringList;
 begin
-  Result := 0;
-  if (APath = '') or not FileExists(APath) then
-    Exit;
-  Content := TStringList.Create;
-  try
-    try
-      Content.LoadFromFile(APath);
-      Result := ApplyEnv(ParseDotEnv(Content.Text));
-    except
-      on E: Exception do
-        Result := 0;               // a bad .env must never crash startup
-    end;
-  finally
-    Content.Free;
-  end;
+  Result := LLMEnv.LoadDotEnvFile(APath);
 end;
 
 function GetEnvLegacy(const AName: string): string;
-var
-  Legacy: string;
 begin
-  Result := GetProcessEnv(AName);
-  if Result <> '' then
-    Exit;                          // the new spelling always wins
-  { HILDI_<REST> -> HILDEGARD_<REST>. Only names carrying the prefix are
-    candidates, so a stray call cannot accidentally read an unrelated var. }
-  if Copy(AName, 1, 6) <> 'HILDI_' then
-    Exit;
-  Legacy := 'HILDEGARD_' + Copy(AName, 7, MaxInt);
-  Result := GetProcessEnv(Legacy);
+  Result := LLMEnv.GetEnvLegacy(AName);
+end;
+
+function GetProcessEnv(const AName: string): string;
+begin
+  Result := LLMEnv.GetProcessEnv(AName);
 end;
 
 function DataHome(const AXdgDataHome, AHome: string): string;

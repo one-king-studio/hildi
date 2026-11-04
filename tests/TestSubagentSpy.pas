@@ -14,7 +14,7 @@ uses
   HildiSessionProtocol, HildiSessionClient,
   HildiSessionSocket, HildiSessionRuntime,
   HildiHarnessTurn, HildiHarnessSubagentSpy,
-  HildiLLM, LLMFakes;
+  LLMClient, LLMFakes;
 
 type
   TRuntimeThread = class(TThread)

@@ -15,7 +15,7 @@ unit HildiSubagent;
 interface
 
 uses
-  HildiAgent, HildiLLM, HildiApproval;
+  HildiAgent, LLMClient, HildiApproval;
 
 const
   SubagentDelegateTool = 'delegate_task';

@@ -21,7 +21,7 @@ uses
   HildiSessionSocket, HildiSessionRuntime,
   HildiSubagent, HildiSubagentSupervisor,
   HildiApproval,
-  HildiLLM, LLMFakes;
+  LLMClient, LLMFakes;
 
 type
   TRuntimeThread = class(TThread)

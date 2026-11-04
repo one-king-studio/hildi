@@ -12,7 +12,7 @@ interface
 
 uses
   Classes, SysUtils, fpjson, jsonparser,
-  HildiLLM, HildiAgent, HildiApproval,
+  LLMClient, HildiAgent, HildiApproval,
   HildiBoard, HildiBoardStore;
 
 type

@@ -22,7 +22,7 @@ interface
 uses
   Classes, Contnrs, SysUtils, SyncObjs,
   {$ifdef unix}BaseUnix, Sockets,{$endif}
-  HildiLLM, HildiAgent, HildiApproval, HildiMCPConfig, HildiMCPClient,
+  LLMClient, HildiAgent, HildiApproval, HildiMCPConfig, HildiMCPClient,
   HildiStore, HildiSession,
   HildiSessionProtocol, HildiSessionSocket,
   HildiSessionClient,

@@ -1,5 +1,5 @@
 unit TestLLM;
-{ fpcunit tests for HildiLLM, driven entirely by a fake transport
+{ fpcunit tests for LLMClient, driven entirely by a fake transport
   that replays canned SSE chunks. No network access. }
 
 {$mode delphi}{$H+}
@@ -8,7 +8,7 @@ interface
 
 uses
   Classes, SysUtils, ctypes, fpcunit, testregistry, fpjson, jsonparser,
-  HildiLLM, LLMFakes;
+  LLMClient, LLMFakes;
 
 type
   TTextCollector = class

@@ -21,7 +21,7 @@ uses
   SysUtils, Classes, ctypes, DateUtils, SyncObjs, Process,
   {$ifdef unix}BaseUnix,{$endif}
   HildiANSI, HildiEnv, HildiCLI,
-  HildiTranscript, HildiLLM, HildiAgent,
+  HildiTranscript, LLMClient, HildiAgent,
   HildiCommandPolicy, HildiCommandTool,
   HildiFiles,
   HildiApproval, HildiApprovalStore,

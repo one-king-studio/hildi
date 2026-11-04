@@ -12,7 +12,7 @@ interface
 
 uses
   Classes, SysUtils, DateUtils, Generics.Collections,
-  HildiLLM, HildiApproval,
+  LLMClient, HildiApproval,
   TUIBase, TUIInput,
   TUISurface, TUIWidget,
   TUIWidgetsText, HildiChat,

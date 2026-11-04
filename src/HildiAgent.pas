@@ -11,7 +11,7 @@ interface
 uses
   Classes, SysUtils, SyncObjs,
   AsyncBase, AsyncScheduler,
-  HildiLLM, HildiSession,
+  LLMClient, HildiSession,
   HildiAmbient, HildiWrap;
 
 type

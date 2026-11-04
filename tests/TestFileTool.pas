@@ -10,7 +10,7 @@ interface
 uses
   Classes, SysUtils, fpcunit, testregistry,
   {$ifdef unix}BaseUnix,{$endif}
-  HildiLLM, HildiAgent, HildiApproval,
+  LLMClient, HildiAgent, HildiApproval,
   HildiWorkspace, HildiWorkspaceChanges,
   HildiFiles;
 

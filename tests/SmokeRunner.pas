@@ -18,7 +18,7 @@ interface
 
 uses
   Classes, SysUtils, Process, SyncObjs, fpjson,
-  HildiLLM, HildiSessionProtocol,
+  LLMClient, HildiSessionProtocol,
   HildiSessionClient,
   HildiSessionSocket, HildiApproval,
   HildiStore, HildiSessionStore,

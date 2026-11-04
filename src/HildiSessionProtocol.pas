@@ -15,7 +15,7 @@ interface
 
 uses
   SysUtils,
-  HildiApproval, HildiLLM, HildiMCPConfig;
+  HildiApproval, LLMClient, HildiMCPConfig;
 
 type
   { The row ids a tool call's changes carry. The event transports these, never

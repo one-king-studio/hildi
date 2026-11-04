@@ -11,7 +11,7 @@ uses
   SysUtils, Classes, fpcunit, testregistry,
   HildiMCPClient, HildiMCPConfig, HildiMCPProvider,
   HildiSkills,
-  HildiAgent, HildiLLM, HildiApproval;
+  HildiAgent, LLMClient, HildiApproval;
 
 type
   { An approval service that allows or denies everything. }

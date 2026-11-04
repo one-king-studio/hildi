@@ -20,7 +20,7 @@ interface
 
 uses
   Classes, Contnrs, SysUtils,
-  HildiLLM, HildiAgent, HildiApproval;
+  LLMClient, HildiAgent, HildiApproval;
 
 type
   TSkillState = (ssUnloaded, ssLoaded);

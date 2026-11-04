@@ -14,7 +14,7 @@ interface
 uses
   SysUtils, Classes, fpcunit, testregistry,
   HildiMCPClient, HildiMCPConfig, HildiMCPProvider,
-  HildiAgent, HildiLLM, HildiApproval;
+  HildiAgent, LLMClient, HildiApproval;
 
 type
   TMcpProviderTest = class(TTestCase)

@@ -17,7 +17,7 @@ interface
 
 uses
   Classes, SysUtils, SyncObjs,
-  HildiAgent, HildiLLM,
+  HildiAgent, LLMClient,
   HildiCommandPolicy, HildiApproval,
   HildiCommandPaths, HildiShellEffects,
   HildiProcess, HildiWorkspaceChanges,

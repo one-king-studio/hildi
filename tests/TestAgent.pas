@@ -8,7 +8,7 @@ interface
 uses
   Classes, SysUtils, SyncObjs, fpcunit, testregistry, fpjson, jsonparser,
   AsyncScheduler, AsyncConcurrency,
-  HildiLLM, HildiAgent, HildiSession,
+  LLMClient, HildiAgent, HildiSession,
   LLMFakes;
 
 type

@@ -14,7 +14,7 @@ interface
 
 uses
   Classes, SysUtils, fpjson, regexpr,
-  HildiLLM, HildiAgent, HildiApproval,
+  LLMClient, HildiAgent, HildiApproval,
   HildiWorkspace, HildiWorkspaceChanges,
   HildiYAML, HildiPatch;
 

@@ -9,7 +9,7 @@ interface
 
 uses
   Classes, SysUtils, SyncObjs, fpcunit, testregistry,
-  HildiLLM, HildiAgent, HildiApproval,
+  LLMClient, HildiAgent, HildiApproval,
   HildiStore, HildiSession,
   HildiSessionProtocol, HildiSessionSocket,
   HildiSessionClient, HildiSessionRuntime,

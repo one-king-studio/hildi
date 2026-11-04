@@ -12,7 +12,7 @@ interface
 
 uses
   Classes, SysUtils,
-  HildiAgent, HildiLLM, HildiApproval,
+  HildiAgent, LLMClient, HildiApproval,
   HildiSkills,
   HildiStdioChild, HildiJSONRPC,
   HildiMCPTransport, HildiMCPHTTP,

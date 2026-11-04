@@ -14,7 +14,7 @@ interface
 
 uses
   SysUtils, fpjson, jsonparser, HildiStore,
-  HildiSession, HildiLLM, HildiAgent;
+  HildiSession, LLMClient, HildiAgent;
 
 const
   RecallToolName = 'recall_tool_result';

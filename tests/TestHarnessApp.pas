@@ -10,7 +10,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry, Generics.Collections,
-  HildiLLM, HildiAgent, HildiApproval,
+  LLMClient, HildiAgent, HildiApproval,
   TUIBase, TUIInput,
   TUISurface, TUIWidget,
   HildiChat,

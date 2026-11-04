@@ -68,7 +68,7 @@ function Sha256(const AData: string): TBytes;
 implementation
 
 uses
-  Classes, StrUtils, fpjson, jsonparser, fphttpclient, HildiTLS;
+  Classes, StrUtils, fpjson, jsonparser, fphttpclient, LLMTLS;
 
 function hildi_sha256(data: PByte; len: Cardinal;
   out_: PByte): Integer; cdecl; external;

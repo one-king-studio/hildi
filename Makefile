@@ -160,6 +160,10 @@ SHELL_SRCS := $(wildcard $(SRC)/shell/*.pas)
 TUILIB_SRCS := $(wildcard $(SRC)/tui/core/*.pas) $(wildcard $(SRC)/tui/terminal/*.pas) $(wildcard $(SRC)/tui/widgets/*.pas)
 CHANGES_SRCS := $(wildcard $(SRC)/changes/*.pas)
 MARKDOWN_SRCS := $(wildcard $(SRC)/markdown/*.pas)
+# src/llm is the provider library: the LLM client, the provider seam and the TLS
+# layer, with no dependency on the harness. LIB_SRCS does not recurse, so every
+# compile line needs -Fu$(SRC)/llm and every target that links it needs LLM_SRCS.
+LLM_SRCS := $(wildcard $(SRC)/llm/*.pas)
 FUZZY_SRCS := $(wildcard $(SRC)/fuzzy/*.pas)
 FILEIGNORE_SRCS := $(wildcard $(SRC)/fileignore/*.pas)
 TEST_SRCS := $(wildcard $(TESTS)/*.pas)
@@ -220,13 +224,13 @@ store-demo: libsqlite $(DEBUG_BIN)/hildi-store-demo
 
 $(DEBUG_BIN)/hildi-store-demo: $(EXAMPLES)/store_demo.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR)
 	@mkdir -p $(DEBUG_BIN) $(DBGUNITS)
-	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/llm -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$@ $<
 
 agent-cli: libsqlite libmbedtls $(DEBUG_BIN)/hildi-agent-cli
 
 $(DEBUG_BIN)/hildi-agent-cli: $(EXAMPLES)/agent_cli.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(DEBUG_BIN) $(DBGUNITS)
-	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/llm -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$@ $<
 
 # Live MCP calibration smoke: drives the MCP client against a real MCP server
 # (the Playwright container over docker stdio). Needs Docker; not part of
@@ -249,18 +253,14 @@ $(DEBUG_BIN)/mcp-probe: $(EXAMPLES)/mcp_probe.pas $(LIB_SRCS) $(TUILIB_SRCS) $(M
 
 $(DEBUG_BIN)/mcp-smoke: $(EXAMPLES)/mcp_smoke.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ)
 	@mkdir -p $(DEBUG_BIN) $(DBGUNITS)
-	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/llm -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$@ $<
 
 # Optimized, self-contained production binary (static SQLite, no runtime libs).
 release-agent-cli: libsqlite libmbedtls $(DEBUG_BIN)/hildi-agent-cli-release
 
 $(DEBUG_BIN)/hildi-agent-cli-release: $(EXAMPLES)/agent_cli.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(DEBUG_BIN) $(RELUNITS)
-	$(FPC) $(FPCARGS) $(RELEASE) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -FU$(RELUNITS) -FE$(DEBUG_BIN) -o$@ $<
-
-$(DEBUG_BIN)/hildi-demo: $(EXAMPLES)/demo_harness.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
-	@mkdir -p $(DEBUG_BIN) $(DBGUNITS)
-	$(FPC) $(FPCARGS) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(RELEASE) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/llm -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -FU$(RELUNITS) -FE$(DEBUG_BIN) -o$@ $<
 
 # Interactive TUI demonstration: build, then run it in the terminal.
 tui-demo: $(DEBUG_BIN)/hildi-demo
@@ -268,7 +268,7 @@ tui-demo: $(DEBUG_BIN)/hildi-demo
 
 $(DEBUG_BIN)/hildi-demo: $(EXAMPLES)/tui_demo.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
 	@mkdir -p $(DEBUG_BIN) $(DBGUNITS)
-	$(FPC) $(FPCARGS) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/llm -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$@ $<
 
 # Widget-kit demo: a list, a preview panel, and focusable buttons. Builds and
 # runs; Tab/Shift-Tab or click to focus, Enter/Space to activate, q to quit.
@@ -277,7 +277,7 @@ widgets-demo: $(DEBUG_BIN)/hildi-widgets-demo
 
 $(DEBUG_BIN)/hildi-widgets-demo: $(EXAMPLES)/tui_widgets_demo.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
 	@mkdir -p $(DEBUG_BIN) $(DBGUNITS)
-	$(FPC) $(FPCARGS) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/llm -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$@ $<
 
 # The library's own tour. Builds against src/tui/** ALONE - no -Fu$(SRC) - so if
 # a library widget ever reaches into the application this stops compiling.
@@ -296,7 +296,7 @@ dashboard-mock: $(DEBUG_BIN)/hildi-dash-mock
 
 $(DEBUG_BIN)/hildi-dash-mock: $(EXAMPLES)/dashboard_mock.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
 	@mkdir -p $(DEBUG_BIN) $(DBGUNITS)
-	$(FPC) $(FPCARGS) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/llm -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$@ $<
 
 # The real dashboard: opens this workspace's store and draws it. A viewer with
 # one write deferred; it links no agent-loop unit, the same closure discipline
@@ -306,7 +306,7 @@ dashboard: libsqlite libmbedtls $(DEBUG_BIN)/hildi-dash
 
 $(DEBUG_BIN)/hildi-dash: $(EXAMPLES)/dashboard.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP)
 	@mkdir -p $(DEBUG_BIN) $(DBGUNITS)
-	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/llm -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$@ $<
 
 # Layout exploration: a responsive two-column harness layout (files + editor |
 # chat column). The chat column has an optional side panel and a persistent
@@ -317,7 +317,7 @@ layout-demo: $(DEBUG_BIN)/hildi-layout-demo
 
 $(DEBUG_BIN)/hildi-layout-demo: $(EXAMPLES)/tui_layout_demo.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
 	@mkdir -p $(DEBUG_BIN) $(DBGUNITS)
-	$(FPC) $(FPCARGS) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/llm -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$@ $<
 
 # Headless agent: hosts a session's runtime; spawned detached by the TUI or the
 # CLI. No terminal. A client finds it as a sibling (or via HILDI_RUNTIME_BIN).
@@ -325,7 +325,7 @@ headless-agent: libsqlite libmbedtls $(DEBUG_BIN)/hildi-agent
 
 $(DEBUG_BIN)/hildi-agent: $(EXAMPLES)/headless_agent.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(DEBUG_BIN) $(DBGUNITS)
-	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/llm -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$@ $<
 
 # Full-screen agent harness (conversation + approvals + sessions). Builds and
 # runs; Ctrl-C quits. Drives the headless agent. A pure client: no engine.
@@ -364,22 +364,22 @@ tui-agent-release: release-agent release-tui
 # recipe's exactly, for the same reason -- a mismatch silently invalidates it.
 $(RELEASE_BIN)/hildi-agent: $(EXAMPLES)/headless_agent.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(RELEASE_BIN) $(RELUNITS)
-	$(FPC) $(FPCARGS) $(RELEASE) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -FU$(RELUNITS) -FE$(RELEASE_BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(RELEASE) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/llm -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -FU$(RELUNITS) -FE$(RELEASE_BIN) -o$@ $<
 
 $(RELEASE_BIN)/hildi: $(EXAMPLES)/tui_agent.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(RELEASE_BIN) $(RELUNITS)
 	@# The TUI is a pure client: no agent, loop, tool or runtime unit links here.
-	$(FPC) $(FPCARGS) $(RELEASE) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -FU$(RELUNITS) -FE$(RELEASE_BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(RELEASE) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/llm -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -FU$(RELUNITS) -FE$(RELEASE_BIN) -o$@ $<
 
 $(DEBUG_BIN)/hildi-release: $(EXAMPLES)/tui_agent.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(DEBUG_BIN) $(RELUNITS)
 	@# The TUI is a pure client: no agent, loop, tool or runtime unit links here.
-	$(FPC) $(FPCARGS) $(RELEASE) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -FU$(RELUNITS) -FE$(DEBUG_BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(RELEASE) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/llm -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -FU$(RELUNITS) -FE$(DEBUG_BIN) -o$@ $<
 
 $(DEBUG_BIN)/hildi: $(EXAMPLES)/tui_agent.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ)
 	@mkdir -p $(DEBUG_BIN) $(DBGUNITS)
 	@# The TUI is a pure client: no agent, loop, tool or runtime unit links here.
-	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/llm -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$@ $<
 
 # Printable wall-clock benchmark. `make bench ARGS=--real` measures the real
 # terminal; `make perf` asserts the budgets and is not part of `make check`.
@@ -391,7 +391,7 @@ perf: $(DEBUG_BIN)/hildi-bench
 
 $(DEBUG_BIN)/hildi-bench: $(EXAMPLES)/tui_bench.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
 	@mkdir -p $(DEBUG_BIN) $(DBGUNITS)
-	$(FPC) $(FPCARGS) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/llm -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$@ $<
 
 test: libsqlite libmbedtls $(DEBUG_BIN)/hildi-tests
 	$(DEBUG_BIN)/hildi-tests $(TESTARGS)
@@ -460,6 +460,15 @@ markdown-standalone: $(MARKDOWN_SRCS)
 	$(FPC) $(FPCARGS) $(DEBUG) -Fu$(SRC)/markdown -FU$(BUILD)/units/markdown -FE$(DEBUG_BIN) -o$(DEBUG_BIN)/markdown-standalone $(EXAMPLES)/markdown_standalone.pas
 	$(DEBUG_BIN)/markdown-standalone
 
+# The same gate for the LLM/Provider library: compile and run a program that uses
+# ONLY src/llm, with no harness unit on the search path. This is the library's
+# central claim - that it is pure and the application owns persistence and policy
+# - and a dependency on HildiStore or HildiAgent fails the build right here.
+llm-standalone: $(LLM_SRCS)
+	@mkdir -p $(DEBUG_BIN) $(DBGUNITS)
+	$(FPC) $(FPCARGS) $(DEBUG) -Fu$(SRC)/llm -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$(DEBUG_BIN)/llm-standalone $(EXAMPLES)/llm_standalone.pas
+	$(DEBUG_BIN)/llm-standalone
+
 # A visible demo of the STREAMING parser: feed a document a few characters at a
 # time and watch finalised blocks accumulate while the open tail stays raw text.
 #   make markdown-stream-demo
@@ -504,7 +513,7 @@ async-examples: $(ASYNC_SRCS)
 
 $(DEBUG_BIN)/hildi-tests: $(TESTS)/HildiTests.pas $(TEST_SRCS) $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(ASYNC_SRCS) $(SHELL_SRCS) $(CHANGES_SRCS) $(MARKDOWN_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
 	@mkdir -p $(DEBUG_BIN) $(DBGUNITS)
-	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -Fu$(TESTS) -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$@ $<
+$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/llm -Fu$(SRC)/tui -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -Fu$(TESTS) -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$@ $<
 
 test-leak: libsqlite libmbedtls $(DEBUG_BIN)/hildi-tests-leak
 	HEAPTRC=$(HEAPTRC) $(DEBUG_BIN)/hildi-tests-leak $(TESTARGS)
@@ -524,7 +533,7 @@ watch:
 
 $(DEBUG_BIN)/hildi-tests-leak: $(TESTS)/HildiTests.pas $(TEST_SRCS) $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(ASYNC_SRCS) $(SHELL_SRCS) $(CHANGES_SRCS) $(MARKDOWN_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ) $(TLS_TEST_SERVER_OBJ)
 	@mkdir -p $(DEBUG_BIN) $(LEAKUNITS)
-	$(FPC) $(FPCARGS) $(LEAKFLAGS) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -Fu$(TESTS) -FU$(LEAKUNITS) -FE$(DEBUG_BIN) -o$@ $<
+$(FPC) $(FPCARGS) $(LEAKFLAGS) $(SQLITE_LDFLAGS) -k$(abspath $(TLS_TEST_SERVER_OBJ)) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/llm -Fu$(SRC)/tui -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -Fu$(TESTS) -FU$(LEAKUNITS) -FE$(DEBUG_BIN) -o$@ $<
 
 # Live smoke: drive the REAL headless runtime through a scripted turn against a
 # loopback fake provider. Hermetic (loopback only, ephemeral port, temp store);
@@ -538,7 +547,7 @@ smoke-list: libsqlite libmbedtls $(DEBUG_BIN)/hildi-smoke
 
 $(DEBUG_BIN)/hildi-smoke: $(EXAMPLES)/smoke.pas $(TESTS)/SmokeRunner.pas $(TESTS)/SmokeProvider.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ)
 	@mkdir -p $(DEBUG_BIN) $(DBGUNITS)
-	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(TESTS) -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/llm -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(TESTS) -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$@ $<
 
 # Heap probe: the runtime built with heaptrc, so an exiting process reports every
 # allocation it made and what it never freed. Used to answer "is the accrued RSS
@@ -552,7 +561,7 @@ probe: libsqlite libmbedtls $(DEBUG_BIN)/hildi-agent-probe
 
 $(DEBUG_BIN)/hildi-agent-probe: $(EXAMPLES)/headless_agent.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(ASYNC_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ)
 	@mkdir -p $(DEBUG_BIN) $(LEAKUNITS)
-	$(FPC) $(FPCARGS) $(LEAKFLAGS) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -FU$(LEAKUNITS) -FE$(DEBUG_BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(LEAKFLAGS) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/llm -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -Fu$(SRC)/async -Fu$(SRC)/shell -Fu$(SRC)/changes -Fu$(SRC)/markdown -Fu$(SRC)/fileignore -FU$(LEAKUNITS) -FE$(DEBUG_BIN) -o$@ $<
 
 # All quality gates, for CI: functional tests + leak check + library isolation.
 # The two suite runs go one-process-per-suite in parallel (see
@@ -561,7 +570,7 @@ $(DEBUG_BIN)/hildi-agent-probe: $(EXAMPLES)/headless_agent.pas $(LIB_SRCS) $(TUI
 # single-process run of the whole suite report failures that are not real.
 check: test-parallel test-leak-parallel shell-standalone markdown-standalone \
 	tui-standalone tui-widgets-standalone tui-widgets-markdown-standalone \
-	changes-standalone
+	llm-standalone changes-standalone
 
 # The same functional suite, one process per suite, in parallel. Measured on a
 # 10-core machine: ~169 s and 36 spurious failures as one process, ~22 s and 0
@@ -577,7 +586,7 @@ release: $(DEBUG_BIN)/hildi-demo-release
 
 $(DEBUG_BIN)/hildi-demo-release: $(EXAMPLES)/demo_harness.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
 	@mkdir -p $(DEBUG_BIN) $(RELUNITS)
-	$(FPC) $(FPCARGS) $(RELEASE) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -FU$(RELUNITS) -FE$(DEBUG_BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(RELEASE) -Fu$(SRC) -Fu$(SRC)/llm -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -FU$(RELUNITS) -FE$(DEBUG_BIN) -o$@ $<
 
 clean:
 	rm -rf $(BUILD)
@@ -664,7 +673,7 @@ ui-capture: $(BIN)/ui-capture
 
 $(BIN)/ui-capture: $(EXAMPLES)/ui_capture.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
 	@mkdir -p $(BIN) $(DBGUNITS)
-	$(FPC) $(FPCARGS) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
+	$(FPC) $(FPCARGS) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/llm -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(BIN) -o$@ $<
 
 # Regenerate the empty-session mark from docs/design/logo.txt, which holds the
 # artefact as editable PICTURES rather than braille inside a Pascal string.

@@ -14,7 +14,7 @@ unit HildiTranscript;
 interface
 
 uses
-  Classes, SysUtils, HildiANSI, HildiLLM;
+  Classes, SysUtils, HildiANSI, LLMClient;
 
 type
   TTranscriptOptions = record

@@ -9,7 +9,7 @@ interface
 
 uses
   Classes, SysUtils, StrUtils, fpcunit, testregistry,
-  HildiLLM, HildiAgent, HildiApproval,
+  LLMClient, HildiAgent, HildiApproval,
   HildiStore, HildiBoard, HildiBoardStore,
   HildiBoardTools;
 

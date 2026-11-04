@@ -15,7 +15,7 @@ interface
 
 uses
   Classes, SyncObjs, SysUtils,
-  HildiLLM, HildiApproval,
+  LLMClient, HildiApproval,
   HildiHarnessTurn,
   { For TMcpRowStatusArray, which the sink holds and the turn event carries. }
   HildiMCPConfig,

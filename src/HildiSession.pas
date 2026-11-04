@@ -16,7 +16,7 @@ unit HildiSession;
 interface
 
 uses
-  SysUtils, HildiLLM;
+  SysUtils, LLMClient;
 
 type
   { One block in a session's history. Tool calls are messages in their own

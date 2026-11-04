@@ -9,7 +9,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry, Generics.Collections,
-  HildiLLM, HildiAgent, HildiSession,
+  LLMClient, HildiAgent, HildiSession,
   HildiStore, HildiWorkspace,
   HildiRecallTool,
   HildiHarnessSession, HildiHarnessView, HildiSkills,

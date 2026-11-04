@@ -1,5 +1,5 @@
 unit TestTLS;
-{ fpcunit tests for HildiTLS and the vendored mbedTLS shim. The
+{ fpcunit tests for LLMTLS and the vendored mbedTLS shim. The
   loopback tests drive the real handler against a test-only mbedTLS server
   (tests/tls_test_server.c) on 127.0.0.1: no network, no committed key. }
 
@@ -9,7 +9,7 @@ interface
 
 uses
   Classes, SysUtils, ctypes, fpcunit, testregistry,
-  sslsockets, ssockets, fphttpclient, HildiTLS, HildiLLM;
+  sslsockets, ssockets, fphttpclient, LLMTLS, LLMClient;
 
 type
   TTlsTest = class(TTestCase)

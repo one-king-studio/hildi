@@ -57,7 +57,7 @@ const
 implementation
 
 uses
-  fphttpclient, HildiTLS;
+  fphttpclient, LLMTLS;
 
 constructor THttpTransport.Create(const AConfig: THttpTransportConfig);
 begin
