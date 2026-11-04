@@ -516,7 +516,8 @@ $(DEBUG_BIN)/hildi-agent-probe: $(EXAMPLES)/headless_agent.pas $(LIB_SRCS) $(TUI
 # scripts/test-parallel.sh): ~21 s each instead of ~169 s and ~103 s, and the
 # isolation also removes the intra-process state pollution that makes a
 # single-process run of the whole suite report failures that are not real.
-check: test-parallel test-leak-parallel shell-standalone markdown-standalone
+check: test-parallel test-leak-parallel shell-standalone markdown-standalone \
+	tui-standalone changes-standalone
 
 # The same functional suite, one process per suite, in parallel. Measured on a
 # 10-core machine: ~169 s and 36 spurious failures as one process, ~22 s and 0
