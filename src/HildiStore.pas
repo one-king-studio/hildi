@@ -51,6 +51,31 @@ type
     AccountId: string;
   end;
 
+  { A named provider definition. Each parameter carries its own Has* flag
+    because the column is NULLABLE on purpose: NULL is the SQL spelling of the
+    request-parameter tri-state, and a zero temperature is a real, different
+    setting from an absent one. A sentinel here would be the same lie the
+    environment layer already refuses to tell. }
+  TProviderRow = record
+    Id: Integer;
+    Name: string;              // unique; the key every other surface uses
+    Endpoint: string;
+    Model: string;
+    Temperature: Double;       HasTemperature: Boolean;
+    TopP: Double;              HasTopP: Boolean;
+    MaxTokens: Integer;        HasMaxTokens: Boolean;
+    FrequencyPenalty: Double;  HasFrequencyPenalty: Boolean;
+    PresencePenalty: Double;   HasPresencePenalty: Boolean;
+    Seed: Integer;             HasSeed: Boolean;
+    Stop: TStringArray;        // empty => no stop key
+    Active: Boolean;
+    CreatedAt: Int64;
+    UpdatedAt: Int64;
+    LastUsedAt: Int64;         // 0 => never
+  end;
+
+  TProviderRowArray = array of TProviderRow;
+
   TMigration = record
     Version: Integer;
     Name: string;
@@ -127,6 +152,32 @@ type
       out AError: TStoreError): Boolean;
     { Every row, for management/UI. }
     function ListMcpServers(out ARows: TMcpServerRowArray;
+      out AError: TStoreError): Boolean;
+
+    { --- provider records ------------------------------------------------- }
+    { Upsert by name. A name identifies a provider everywhere, so an existing
+      name updates rather than duplicating. }
+    function SaveProvider(const ARow: TProviderRow;
+      out AError: TStoreError): Boolean;
+    function LoadProvider(const AName: string; out ARow: TProviderRow;
+      out AError: TStoreError): Boolean;
+    function ListProviders(out ARows: TProviderRowArray;
+      out AError: TStoreError): Boolean;
+    function DeleteProvider(const AName: string;
+      out AError: TStoreError): Boolean;
+    { Marks AName active and every other row inactive in ONE transaction, so the
+      partial unique index can never be observed broken. An unknown name is
+      seNotFound and changes nothing. }
+    function SetActiveProvider(const AName: string;
+      out AError: TStoreError): Boolean;
+    { The active row. False with seNotFound when none is marked. }
+    function ActiveProvider(out ARow: TProviderRow;
+      out AError: TStoreError): Boolean;
+    { The API key for a named provider, kept out of TProviderRow so a row can be
+      listed and edited without ever loading a secret. '' when none is stored. }
+    function ProviderSecret(const AName: string; out ASecret: string;
+      out AError: TStoreError): Boolean;
+    function SetProviderSecret(const AName, ASecret: string;
       out AError: TStoreError): Boolean;
 
     { OAuth tokens for a server (keyed by scope/workspace/name). }
@@ -403,7 +454,7 @@ end;
 function DefaultMigrations: TMigrationArray;
 begin
   Result := nil;
-  SetLength(Result, 22);
+  SetLength(Result, 23);
   Result[0].Version := 1;
   Result[0].Name := 'session history';
   Result[0].Statements := [
@@ -879,6 +930,44 @@ begin
     'ALTER TABLE mcp_servers ADD COLUMN description TEXT NOT NULL DEFAULT ''''',
     'ALTER TABLE mcp_servers ADD COLUMN auth INTEGER NOT NULL DEFAULT 0'
   ];
+  { PROVIDERS: a named provider definition, so the endpoint, model and request
+    parameters stop living only in the environment.
+
+    Numbered 23 and placed at INDEX 22: the MCP lane took version 22 at index
+    21, and both lanes independently wrote to Result[21]. A merge that kept both
+    lines would have silently dropped one - the array is positional, so two
+    blocks at one index means one never runs, with no error and no failing test.
+
+    EVERY PARAMETER COLUMN IS NULLABLE ON PURPOSE. NULL is the SQL spelling of
+    the request-parameter tri-state: absent means "omit the key, let the provider
+    decide". The obvious `NOT NULL DEFAULT 0` would make every provider a
+    zero-temperature provider, which is a real and very different setting.
+
+    `active` carries a PARTIAL UNIQUE INDEX rather than a convention: at most one
+    row may have active = 1, enforced by the database instead of by code that
+    remembers to clear the old flag. }
+  Result[22].Version := 23;
+  Result[22].Name := 'providers';
+  Result[22].Statements := [
+    'CREATE TABLE providers (' +
+      'id INTEGER PRIMARY KEY AUTOINCREMENT, ' +
+      'name TEXT NOT NULL UNIQUE, ' +
+      'endpoint TEXT NOT NULL DEFAULT '''', ' +
+      'model TEXT NOT NULL DEFAULT '''', ' +
+      'temperature REAL, ' +
+      'top_p REAL, ' +
+      'max_tokens INTEGER, ' +
+      'frequency_penalty REAL, ' +
+      'presence_penalty REAL, ' +
+      'seed INTEGER, ' +
+      'stop TEXT NOT NULL DEFAULT ''[]'', ' +
+      'active INTEGER NOT NULL DEFAULT 0, ' +
+      'created_at INTEGER NOT NULL, ' +
+      'updated_at INTEGER NOT NULL, ' +
+      'last_used_at INTEGER NOT NULL DEFAULT 0)',
+    'CREATE UNIQUE INDEX idx_providers_one_active ON providers (active) ' +
+      'WHERE active = 1'
+  ];
 end;
 
 function StoreSchemaVersion: Integer;
@@ -906,10 +995,19 @@ type
     procedure BindText(AIndex: Integer; const AValue: string);
     procedure BindInt(AIndex: Integer; AValue: Integer);
     procedure BindInt64(AIndex: Integer; AValue: Int64);
+    { NULLABLE bindings, for a column where NULL is a MEANING rather than a
+      missing value: the provider parameter columns use NULL to say "not
+      configured, omit the key", which a zero cannot express. }
+    procedure BindDouble(AIndex: Integer; AValue: Double);
+    procedure BindNull(AIndex: Integer);
     function Step: Integer;
     function ColText(AIndex: Integer): string;
     function ColInt(AIndex: Integer): Integer;
     function ColInt64(AIndex: Integer): Int64;
+    function ColFloat(AIndex: Integer): Double;
+    { True when the column is SQL NULL. The value readers cannot tell a NULL
+      from a zero, so this is the only reliable way to distinguish them. }
+    function ColIsNull(AIndex: Integer): Boolean;
   end;
 
 constructor TStmt.Create(ADb: Psqlite3; const ASQL: string);
@@ -967,14 +1065,36 @@ begin
     Result := string(AnsiString(P));
 end;
 
-function TStmt.ColInt(AIndex: Integer): Integer;
-begin
+function TStmt.ColInt(AIndex: Integer): Integer;begin
   Result := sqlite3_column_int(FStmt, AIndex);
 end;
 
 function TStmt.ColInt64(AIndex: Integer): Int64;
 begin
   Result := sqlite3_column_int64(FStmt, AIndex);
+end;
+
+procedure TStmt.BindDouble(AIndex: Integer; AValue: Double);
+begin
+  sqlite3_bind_double(FStmt, AIndex, AValue);
+end;
+
+procedure TStmt.BindNull(AIndex: Integer);
+begin
+  sqlite3_bind_null(FStmt, AIndex);
+end;
+
+function TStmt.ColFloat(AIndex: Integer): Double;
+begin
+  { A NULL column reads as 0.0 here, which is exactly why ColIsNull exists: the
+    provider parameter columns use NULL to mean "absent", and a 0.0 value is a
+    different, real setting. Read the flag before trusting the number. }
+  Result := sqlite3_column_double(FStmt, AIndex);
+end;
+
+function TStmt.ColIsNull(AIndex: Integer): Boolean;
+begin
+  Result := sqlite3_column_type(FStmt, AIndex) = SQLITE_NULL;
 end;
 
 { --- TSqliteStore ------------------------------------------------------- }
@@ -4329,6 +4449,420 @@ begin
       Stmt.Free;
     end;
     Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+{ --- provider records ---------------------------------------------------- }
+
+const
+  ProviderColumns =
+    'id, name, endpoint, model, temperature, top_p, max_tokens, ' +
+    'frequency_penalty, presence_penalty, seed, stop, active, ' +
+    'created_at, updated_at, last_used_at';
+
+{ Epoch SECONDS, matching every other *_at column in this schema. NowMs returns
+  milliseconds and is the wrong unit here. }
+function NowUtcEpochSec: Int64;
+begin
+  Result := Round((Now - EncodeDate(1970, 1, 1)) * 86400);
+end;
+
+{ The settings key under which a provider's API key lives. Keeping the secret in
+  `settings` rather than a column on `providers` is what lets a row be listed and
+  edited without ever loading a key. }
+function ProviderSecretKey(const AName: string): string;
+begin
+  Result := 'provider_secret:' + AName;
+end;
+
+{ Bind a parameter that may be ABSENT. NULL, not 0: absent means "omit the key
+  from the request", and a zero temperature is a real, different setting. }
+procedure BindNullableFloat(Stmt: TStmt; AIndex: Integer; AValue: Double;
+  AHas: Boolean);
+begin
+  if AHas then
+    Stmt.BindDouble(AIndex, AValue)
+  else
+    Stmt.BindNull(AIndex);
+end;
+
+procedure BindNullableInt(Stmt: TStmt; AIndex: Integer; AValue: Integer;
+  AHas: Boolean);
+begin
+  if AHas then
+    Stmt.BindInt(AIndex, AValue)
+  else
+    Stmt.BindNull(AIndex);
+end;
+
+{ Read a row from a statement positioned after the SELECT. Column order is the
+  one ProviderColumns declares, asserted by the round-trip test. }
+function ReadProviderRow(Stmt: TStmt): TProviderRow;
+begin
+  Result := Default(TProviderRow);
+  Result.Id := Stmt.ColInt(0);
+  Result.Name := Stmt.ColText(1);
+  Result.Endpoint := Stmt.ColText(2);
+  Result.Model := Stmt.ColText(3);
+  { The Has* flags are what make NULL mean "absent" rather than "zero". A NULL
+    column and a 0.0 both arrive as 0 from sqlite3_column_double, so the column
+    TYPE is the only reliable signal - read it, not the value. }
+  Result.HasTemperature := not Stmt.ColIsNull(4);
+  Result.Temperature := Stmt.ColFloat(4);
+  Result.HasTopP := not Stmt.ColIsNull(5);
+  Result.TopP := Stmt.ColFloat(5);
+  Result.HasMaxTokens := not Stmt.ColIsNull(6);
+  Result.MaxTokens := Stmt.ColInt(6);
+  Result.HasFrequencyPenalty := not Stmt.ColIsNull(7);
+  Result.FrequencyPenalty := Stmt.ColFloat(7);
+  Result.HasPresencePenalty := not Stmt.ColIsNull(8);
+  Result.PresencePenalty := Stmt.ColFloat(8);
+  Result.HasSeed := not Stmt.ColIsNull(9);
+  Result.Seed := Stmt.ColInt(9);
+  DecodeMcpStrings(Stmt.ColText(10), Result.Stop);
+  Result.Active := Stmt.ColInt(11) <> 0;
+  Result.CreatedAt := Stmt.ColInt64(12);
+  Result.UpdatedAt := Stmt.ColInt64(13);
+  Result.LastUsedAt := Stmt.ColInt64(14);
+end;
+
+function TSqliteStore.SaveProvider(const ARow: TProviderRow;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+  Now2: Int64;
+  ExistingId: Integer;
+  Q: TStmt;
+begin
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    if Trim(ARow.Name) = '' then
+      Exit(Fail(AError, seInvalidArgument, 'provider name is required', ''));
+    Now2 := NowUtcEpochSec;
+
+    { Preserve created_at and the active flag across an update: the row's own
+      fields must not be able to demote the active provider by accident, which
+      is SetActiveProvider's job. }
+    ExistingId := 0;
+    Q := TStmt.Create(FDb, 'SELECT id, created_at FROM providers WHERE name = ?');
+    try
+      if not Q.Valid then
+        Exit(Fail(AError, seError, 'could not save provider', DbErrorText));
+      Q.BindText(1, ARow.Name);
+      if Q.Step = SQLITE_ROW then
+        ExistingId := Q.ColInt(0);
+    finally
+      Q.Free;
+    end;
+
+    if ExistingId = 0 then
+    begin
+      Stmt := TStmt.Create(FDb,
+        'INSERT INTO providers (name, endpoint, model, temperature, top_p, ' +
+        'max_tokens, frequency_penalty, presence_penalty, seed, stop, active, ' +
+        'created_at, updated_at, last_used_at) ' +
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    end
+    else
+      Stmt := TStmt.Create(FDb,
+        'UPDATE providers SET endpoint = ?, model = ?, temperature = ?, ' +
+        'top_p = ?, max_tokens = ?, frequency_penalty = ?, ' +
+        'presence_penalty = ?, seed = ?, stop = ?, updated_at = ? ' +
+        'WHERE name = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not save provider', DbErrorText));
+      if ExistingId = 0 then
+      begin
+        Stmt.BindText(1, ARow.Name);
+        Stmt.BindText(2, ARow.Endpoint);
+        Stmt.BindText(3, ARow.Model);
+        BindNullableFloat(Stmt, 4, ARow.Temperature, ARow.HasTemperature);
+        BindNullableFloat(Stmt, 5, ARow.TopP, ARow.HasTopP);
+        BindNullableInt(Stmt, 6, ARow.MaxTokens, ARow.HasMaxTokens);
+        BindNullableFloat(Stmt, 7, ARow.FrequencyPenalty,
+          ARow.HasFrequencyPenalty);
+        BindNullableFloat(Stmt, 8, ARow.PresencePenalty,
+          ARow.HasPresencePenalty);
+        BindNullableInt(Stmt, 9, ARow.Seed, ARow.HasSeed);
+        Stmt.BindText(10, EncodeMcpStrings(ARow.Stop));
+        Stmt.BindInt(11, Ord(ARow.Active));
+        Stmt.BindInt64(12, Now2);
+        Stmt.BindInt64(13, Now2);
+        Stmt.BindInt64(14, ARow.LastUsedAt);
+      end
+      else
+      begin
+        Stmt.BindText(1, ARow.Endpoint);
+        Stmt.BindText(2, ARow.Model);
+        BindNullableFloat(Stmt, 3, ARow.Temperature, ARow.HasTemperature);
+        BindNullableFloat(Stmt, 4, ARow.TopP, ARow.HasTopP);
+        BindNullableInt(Stmt, 5, ARow.MaxTokens, ARow.HasMaxTokens);
+        BindNullableFloat(Stmt, 6, ARow.FrequencyPenalty,
+          ARow.HasFrequencyPenalty);
+        BindNullableFloat(Stmt, 7, ARow.PresencePenalty,
+          ARow.HasPresencePenalty);
+        BindNullableInt(Stmt, 8, ARow.Seed, ARow.HasSeed);
+        Stmt.BindText(9, EncodeMcpStrings(ARow.Stop));
+        Stmt.BindInt64(10, Now2);
+        Stmt.BindText(11, ARow.Name);
+      end;
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not save provider', DbErrorText));
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.LoadProvider(const AName: string; out ARow: TProviderRow;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  ARow := Default(TProviderRow);
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb, 'SELECT ' + ProviderColumns +
+      ' FROM providers WHERE name = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not load provider', DbErrorText));
+      Stmt.BindText(1, AName);
+      if Stmt.Step <> SQLITE_ROW then
+        Exit(Fail(AError, seNotFound, 'no such provider', AName));
+      ARow := ReadProviderRow(Stmt);
+      Result := True;
+    finally
+      Stmt.Free;
+    end;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.ListProviders(out ARows: TProviderRowArray;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+  N: Integer;
+begin
+  AError := OkError;
+  ARows := nil;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    { Name order: stable, and what a management list wants. Not "active first",
+      because a list that reorders as the active one changes is harder to use. }
+    Stmt := TStmt.Create(FDb, 'SELECT ' + ProviderColumns +
+      ' FROM providers ORDER BY name');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not list providers', DbErrorText));
+      N := 0;
+      while Stmt.Step = SQLITE_ROW do
+      begin
+        SetLength(ARows, N + 1);
+        ARows[N] := ReadProviderRow(Stmt);
+        Inc(N);
+      end;
+      Result := True;
+    finally
+      Stmt.Free;
+    end;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.DeleteProvider(const AName: string;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb, 'DELETE FROM providers WHERE name = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not delete provider', DbErrorText));
+      Stmt.BindText(1, AName);
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not delete provider', DbErrorText));
+      { Deleting the active provider is allowed and leaves no active row;
+        resolution then falls through to the environment. Reported as not-found
+        so a UI can say so, but the delete itself is not undone. }
+      Result := sqlite3_changes(FDb) > 0;
+      if not Result then
+        Fail(AError, seNotFound, 'no such provider', AName);
+    finally
+      Stmt.Free;
+    end;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.SetActiveProvider(const AName: string;
+  out AError: TStoreError): Boolean;
+var
+  Clear, SetIt: TStmt;
+begin
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    { One transaction, clear-then-set. The partial unique index would reject a
+      set while another row is still active, so the pair must be atomic or every
+      switch would fail. }
+    if not DoExec('BEGIN IMMEDIATE', AError) then
+      Exit(False);
+    try
+      SetIt := TStmt.Create(FDb,
+        'UPDATE providers SET active = 1, updated_at = ? WHERE name = ?');
+      try
+        if not SetIt.Valid then
+          Exit(Fail(AError, seError, 'could not activate provider', DbErrorText));
+        Clear := TStmt.Create(FDb,
+          'UPDATE providers SET active = 0 WHERE name <> ?');
+        try
+          if not Clear.Valid then
+            Exit(Fail(AError, seError, 'could not activate provider',
+              DbErrorText));
+          Clear.BindText(1, AName);
+          if Clear.Step <> SQLITE_DONE then
+            Exit(Fail(AError, seError, 'could not activate provider',
+              DbErrorText));
+        finally
+          Clear.Free;
+        end;
+        SetIt.BindInt64(1, NowUtcEpochSec);
+        SetIt.BindText(2, AName);
+        if SetIt.Step <> SQLITE_DONE then
+          Exit(Fail(AError, seError, 'could not activate provider', DbErrorText));
+        if sqlite3_changes(FDb) = 0 then
+        begin
+          { Roll back rather than leave every provider inactive: an unknown name
+            must change nothing. }
+          DoExec('ROLLBACK', AError);
+          AError := OkError;
+          Exit(Fail(AError, seNotFound, 'no such provider', AName));
+        end;
+      finally
+        SetIt.Free;
+      end;
+      if not DoExec('COMMIT', AError) then
+        Exit(False);
+      Result := True;
+    except
+      DoExec('ROLLBACK', AError);
+      raise;
+    end;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.ActiveProvider(out ARow: TProviderRow;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  ARow := Default(TProviderRow);
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb, 'SELECT ' + ProviderColumns +
+      ' FROM providers WHERE active = 1');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not load active provider',
+          DbErrorText));
+      if Stmt.Step <> SQLITE_ROW then
+        Exit(Fail(AError, seNotFound, 'no active provider', ''));
+      ARow := ReadProviderRow(Stmt);
+      Result := True;
+    finally
+      Stmt.Free;
+    end;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.ProviderSecret(const AName: string; out ASecret: string;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  ASecret := '';
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb,
+      'SELECT value FROM settings WHERE key = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not load provider secret',
+          DbErrorText));
+      Stmt.BindText(1, ProviderSecretKey(AName));
+      Result := True;
+      if Stmt.Step = SQLITE_ROW then
+        ASecret := Stmt.ColText(0);
+    finally
+      Stmt.Free;
+    end;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.SetProviderSecret(const AName, ASecret: string;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb,
+      'INSERT INTO settings (key, value) VALUES (?, ?) ' +
+      'ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not save provider secret',
+          DbErrorText));
+      Stmt.BindText(1, ProviderSecretKey(AName));
+      Stmt.BindText(2, ASecret);
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not save provider secret',
+          DbErrorText));
+      Result := True;
+    finally
+      Stmt.Free;
+    end;
   finally
     FLock.Release;
   end;
