@@ -26,6 +26,7 @@ type
     procedure Arrange(const ABounds: TRect); override;
     procedure Render(const S: ISurface); override;
     function HandleEvent(const E: TInputEvent): Boolean; override;
+    function CopySelection(const S: ISurface): Boolean; override;
     function Advance(const ANowMs: Int64): Boolean; override;
     function Animating: Boolean; override;
   end;
@@ -112,6 +113,17 @@ function TSingleChild.HandleEvent(const E: TInputEvent): Boolean;
 begin
   if FChild <> nil then
     Result := FChild.HandleEvent(E)
+  else
+    Result := False;
+end;
+
+function TSingleChild.CopySelection(const S: ISurface): Boolean;
+begin
+  { Forward like HandleEvent. Without this the walk stops at the first composite:
+    the tree ROOT is a TSingleChild, so nothing past it was ever reached and the
+    copy silently did nothing while selection itself worked. }
+  if FChild <> nil then
+    Result := FChild.CopySelection(S)
   else
     Result := False;
 end;
