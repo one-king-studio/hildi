@@ -177,7 +177,7 @@ The toolkit is good and it is trapped.
 
 - **Risk: the widgets-tier gate cannot go green without a hierarchy change.**
   Mitigation: the four app-coupled widgets take plain records and `of object`
-  callbacks; `TSkillDetail` (`TUIWidgetsSkillmodal.pas`) is the existing
+  callbacks; `TSkillDetail` (`HildiSkillModal.pas`) is the existing
   precedent for exactly this.
 - **Risk: changing mouse dispatch to topmost-first breaks existing widgets that
   rely on first-added-wins.** Mitigation: the current order is only observably

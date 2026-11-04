@@ -138,14 +138,21 @@ library, no native framework binding, no selection engine.
 
 ### Non-Goals
 
-- No general text selection or native scrollback integration — the terminal
-  (or tmux) owns that, via Shift+drag / copy-mode; we document, not rebuild.
+- **AMENDED 2026-11-04.** This originally read "no general text selection…
+  the terminal owns that". That is reversed: in-widget character-granular
+  selection was built in the TUI library (`src/tui/core/TUISelection.pas`,
+  `src/tui/widgets/TUIWidgetsSelectable.pas`) because selectable text is table
+  stakes for a reusable text toolkit, not a Hildi behaviour. Scrollback
+  selection remains the terminal's. Shift+drag must keep working, which is why
+  the toolkit ignores shift-modified mouse events.
 - No native clipboard bridge (`NSPasteboard`/X11/Wayland bindings): OSC 52
   covers local and remote; a native bridge adds platform code for no gain.
 - No clipboard *read* (paste) in v1 — bracketed paste already covers input.
-- No sync of selection to clipboard automatically (no "copy on select");
-
-  copies happen on explicit yank.
+- **AMENDED 2026-11-04.** This originally read "no copy on select". Copy-on-
+  release is now the default (`TTuiApp.CopyOnRelease`): the gesture that makes
+  a selection is the gesture that delivers it, so there is no keybinding to
+  discover and none to be unreachable. It cannot clear the clipboard by
+  accident, because an empty selection writes nothing.
 
 ## Notes
 

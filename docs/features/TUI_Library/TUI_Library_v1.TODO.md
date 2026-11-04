@@ -94,34 +94,57 @@ alone and the gate then passed twice.
 
 ### Phase 5: Widgets isolation gate
 
-- [ ] **Add** `examples/tui_widgets_standalone.pas`: uses `TPanel`, `TButton`,
-      `TList`, `TScrollContainer`, asserts a few cells. **It will not compile**
-      at this point — that failure is the driver for the rest of the phase.
-- [ ] **Add** `Makefile` target `tui-widgets-standalone` with
-      `-Fu core -Fu terminal -Fu widgets -Fu $(SRC)/markdown` and **no**
-      `-Fu $(SRC)`.
-- [ ] **De-couple** `TUIWidgetsPalette` from `HildiFuzzy`: inject a matcher as
-      `of object` callback, or take a pre-filtered index list.
-- [ ] **De-couple** `TUIWidgetsSessionsModal` from `HildiFuzzy` and
-      `HildiSession`: a plain row record, as `TSkillDetail` already does.
-- [ ] **De-couple** `TUIWidgetsApprovalModal` from `HildiApproval`: takes a
-      plain ask/decision record; the host maps.
-- [ ] **De-couple** `TUIWidgetsAgentList` from `HildiHarnessSubagent`: takes a
-      row record and emits selection events.
-- [ ] **Verify**: `make tui-widgets-standalone` builds, runs, passes.
-- [ ] **Commit**: `refactor(tui): ♻️ no widget unit names a Hildi unit`
+- [x] **Add** `examples/tui_widgets_standalone.pas` — it listed every widget
+      unit, so a single app import anywhere in the tier failed the build.
+- [x] **Add** `Makefile` target `tui-widgets-standalone` with
+      `-Fu core -Fu terminal -Fu fuzzy -Fu widgets -Fu $(SRC)/markdown` and
+      **no** `-Fu $(SRC)`.
+- [x] **Extract** `HildiFuzzy` to `src/fuzzy/FuzzyMath.pas` — 162 lines,
+      `SysUtils` only, two widgets importing it. The operator asked for this.
+- [x] **De-couple** `TUIWidgetsSessionsModal` from `HildiSession`: a local
+      `TSessionViewRow` (5 of the store row's 9 fields) plus a local `ShortId`.
+      The host maps through `ToViewRows`.
+- [x] **Verify**: `make tui-widgets-standalone` builds, runs, passes.
+- [x] **Commit**: `refactor(tui): ♻️ the widget tier is exportable, and the gates finally isolate`
+
+**DECISION — no `src/tui/app` tier.** Two widgets could not be de-coupled
+honestly: `TUIWidgetsApprovalModal` (renders a `TApprovalAsk` with its options,
+script span, workdir and subject) and `TUIWidgetsAgentList` (reads a
+`TSubagentRoster`). Mirroring either into TUI records would be a permanent
+second copy in the most execution-sensitive widget we have.
+
+**Operator's call: they live with the main program, not in the library.** They
+became `HildiApprovalModal` and `HildiAgentList` in `src/`. A generic use case
+can be extracted later; it is never hard to turn a class into its own module.
+
+**FINDING — the gates were not isolating.** Every standalone target compiled
+with `-FU$(DBGUNITS)`, the SAME unit output directory as the full test build, so
+FPC satisfied an app import from a previous run's `.ppu`. The first symptom was
+`HildiTLS` undefined in a tier that never mentions TLS. Each gate now owns
+`$(BUILD)/units/<tier>`. The five pre-existing gates were re-run under isolation
+and all still pass, so the hole was latent rather than a live false pass.
+
+**LATER DECISION — six more widgets left the library.** The gate passed and that
+was not enough. It proved no widget imports a Hildi unit, but
+`TUIWidgetsHistorymodal` was still a dialog about turns and undo, and
+`TUIWidgetsSessionsModal` about sessions: the data was plain records, so the
+import check went green while the domain stayed welded in. The real test is
+whether a stranger's project would want the unit. Six failed it:
+
+  `HildiChat` (2041), `HildiChatPanel` (1062), `HildiSkillModal` (462),
+  `HildiSessionsModal` (426), `HildiHistoryModal` (383), `HildiCompose` (241)
+
+The library is now 17 widget units and 11,283 lines; the domain widgets are
+6,129 lines in `src/`. Committed as `9076855`.
 
 ### Phase 6: Markdown seam
 
-- [ ] **Test**: `TestTUITestKit`/`TestMarkdownView` — a fake
-      `IMarkdownRenderer` returning fixed lines renders those lines.
-- [ ] **Implement**: `IMarkdownRenderer` + `TRenderLine` in core (toolkit
-      vocabulary only).
-- [ ] **Implement**: default implementation binding `src/markdown/`, shipped
-      with the module.
-- [ ] **Refactor** the four widgets off direct `MarkdownTypes`/`MarkdownTree`/
-      `MarkdownStream` imports.
-- [ ] **Commit**: `refactor(tui): ♻️ widgets take a renderer, not the markdown tree`
+- [x] **Abandoned**: `IMarkdownRenderer` + `TRenderLine`. It cannot work — see
+      the finding below.
+- [x] **Documented** `src/markdown` as an optional companion module instead.
+- [x] **Asserted** both configurations with two gates: `tui-widgets-standalone`
+      (no markdown path, no markdown units) and `tui-widgets-markdown-standalone`.
+- [x] **Commit**: `docs(tui): 📝 markdown is an optional companion, and both configurations gate`
 
 **FINDING — the SPEC's seam is the wrong shape, and the honest answer is smaller.**
 
@@ -154,26 +177,43 @@ decision, not an omission.
 
 ### Phase 7: Selection (character granularity)
 
-- [ ] **Test**: `TestTUISelection.TestSpanNormalisesWhenCaretPrecedesAnchor`
-- [ ] **Test**: `TestSpanClampsPastTheEndOfARow`
-- [ ] **Test**: `TestWideClusterIsNeverSplit` — CJK fixture; a column landing
-      mid-cluster snaps to its start.
-- [ ] **Test**: `TestSoftWrappedParagraphCopiesWithoutNewlines`
-- [ ] **Test**: `TestHardLineBreakCopiesWithNewline`
-- [ ] **Test**: `TestContentChangeMarksSelectionStale`
-- [ ] **Implement**: `TTextPos`, `TSelection`, `SelectionSpan` in
-      `src/tui/core/TUISelection.pas`.
-- [ ] **Implement**: `TSelectable` + `RenderSelection` using `Theme.AccentSoft`
-      in `src/tui/widgets/TUIWidgetsSelectable.pas`.
-- [ ] **Test**: `TestDragAcrossATextWidgetSelectsExactlyThatText` — press, three
-      motions, release, through `TTuiApp` + `TInputSourceScripted`; assert the
-      copied string.
-- [ ] **Test**: `TestShiftClickStartsNoSelection` — passed through to the host
-      hook untouched.
-- [ ] **Adopt** one text widget (`TMarkdownView` is the natural first: it owns a
-      wrapped-line cache already).
-- [ ] **Wire** the copy path to the OSC 52 transport from `TUI_Clipboard`.
-- [ ] **Commit**: `feat(tui): ✨ drag across text to select it, character by character`
+**Status: built, tested headlessly, and TABLED by the operator.** Select and
+copy are deferred so the library can land and unblock the lanes waiting on it.
+What is in the tree works to the extent it has been driven; what is not verified
+is whether the copy actually reaches the terminal clipboard.
+
+- [x] `TUISelection` — cells not string indices, half-open spans, wide and
+      combining clusters, wrap flags. 15 tests. (`0cb8a25`)
+- [x] `TSelectable` + `ISurface.Get` — a widget can be dragged across and the
+      surface read back so a highlight can RECOLOUR a cell. (`c91901f`)
+- [x] `WrapClusters` records why each row ended, so a copy never invents a
+      newline inside a soft-wrapped paragraph. (`553168d`)
+- [x] `TTextBlock` adopts it by re-parenting; selection is opt-in and default
+      off, because `TMarkdownView` builds one per block AND per table cell.
+      (`26c872d`)
+- [x] `TUIClipboard` — base64 + OSC 52, RFC 4648 vectors. (`f4e0c9a`)
+- [x] `TTuiApp.CopySelection`, `ISurface.SetClipboard`. (`f4e0c9a`)
+- [x] Wired: `TWidget.CopySelection` tree walk, `Ctrl+Y`, then copy-on-release
+      as the default. (`b1e0ac9`, `18fb840`)
+
+**The four bugs that made it unreachable.** Every one lived in the gap between
+"the component works" and "the app routes to it", and no unit test could see it:
+
+| Commit | What did not forward |
+| --- | --- |
+| `c47bcf0` | `TMarkdownView` had no `HandleEvent` at all |
+| `71da219` | `TChatItem` exited early for prose blocks — the common case |
+| `8407376` | `TSingleChild`, the tree ROOT, never forwarded `CopySelection` |
+| `b4124e1` | `TScrollContainer` never forwarded `CopySelection` |
+
+**The design gap this exposed, still open:** `TWidget` has accumulated
+`HitTest` and `CopySelection`; every composite must forward both, and nothing
+checks that it does. A test that walks the live tree asserting each composite
+forwards every protocol method its base declares would have caught all four
+before an operator did. That gate is the highest-value thing left.
+
+**Not done:** keyboard selection, word/line granularity, cross-widget selection,
+and any confirmation that OSC 52 reaches the clipboard in a real terminal.
 
 ### Phase 8: Test kit
 

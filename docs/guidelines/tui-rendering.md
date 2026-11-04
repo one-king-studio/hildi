@@ -1,7 +1,11 @@
 # TUI Rendering and Layout Invariants
 
-Hard-won constraints for the widget toolkit (`src/tui/core/*` = pure substrate, `src/tui/widgets/*` = components) and
-the app loop. Each one cost real debugging time; check them before changing a
+Hard-won constraints for the widget toolkit and the app loop. The module is
+three tiers: `src/tui/core/*` = pure substrate (RTL only),
+`src/tui/terminal/*` = adapters bound to a tty, `src/tui/widgets/*` = components.
+Each tier is enforced by a build gate; see `make check`.
+
+Every invariant below cost real debugging time. Check them before changing a
 widget's measure/arrange, the chat stack, or the app loop.
 
 ## Measure and Arrange must lay children out at the same width

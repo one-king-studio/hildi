@@ -169,24 +169,90 @@ model keyed by child, when a second widget actually needs it.
 
 ### Widget-side additions
 
+**Corrected to what shipped.** The original draft proposed an `ISelectableText`
+interface and composition as the primary path. Building it showed the interface
+was unnecessary — a subclass can simply answer four virtual methods — and that
+selection must be OPT-IN, because `TMarkdownView` constructs one `TTextBlock` per
+block *and* per table cell, so re-parenting it unconditionally would make every
+cell swallow left-clicks.
+
 ```pascal
 type
   TSelectable = class(TWidget)
   public
-    property Selection: TSelection read FSelection;
-    procedure ClearSelection;
-    { Paint the highlight for the visible rows of this selection. Called from a
-      subclass's Render after it has drawn its text. }
+    constructor Create;                       // no theme: selection is behaviour
+    procedure Arrange(const ABounds: TRect); override;  // sets the content origin
+    { Opt-in, default False. }
+    property Selectable: Boolean read FSelectable write FSelectable;
+    { Painted over a selected cell. Default reverse video, so a host that sets
+      nothing still gets a visible selection. }
+    property Highlight: TAttr read FHighlight write FHighlight;
+    procedure SetContentOrigin(AX, AY: Integer);
     procedure RenderSelection(const S: ISurface);
+    procedure ClearSelection;
+    procedure ContentChanged;
+    function SelectedText: string;
+    function CopySelection(const S: ISurface): Boolean; override;
+    property Selection: TSelection read FSelection;
+    property Dragging: Boolean read FDragging;
   protected
-    { The subclass supplies its text; nil means "not selectable right now". }
-    function SelectableText: ISelectableText; virtual;
+    function RowCount: Integer; virtual;
+    function RowTextAt(ARow: Integer): UnicodeString; virtual;
+    function RowWrapsAt(ARow: Integer): Boolean; virtual;
+    { The surface X of display column 0 on ARow. A block with a hanging indent
+      or a centred alignment does NOT start at its own Bounds.X, so the
+      highlight must ask rather than assume. Added after the first draft: without
+      it the highlight landed off the text on any indented or centred row. }
+    function RowOriginX(ARow: Integer): Integer; virtual;
   end;
 ```
 
-The widgets adopting selection by composition in v1 are the text drawers:
-`TChatPanel`, `TMarkdownView`, `TFileviewer`, `TDiffViewer`, `THistoryModal`.
-At least one ships in this feature; the rest are follow-on cards.
+`RenderSelection` recolours cells that are already drawn — it does not paint
+text. That is why `TSelectable` owns no text and cannot disagree with what the
+widget rendered: it changes attributes of what is there.
+
+**Adoption in v1:** `TTextBlock`, by re-parenting. Because `TMarkdownView` builds
+one per block and per table cell, that single change covers every markdown
+paragraph, list item, table cell and plain chat line. The other text drawers
+(`TFileviewer`, `TDiffViewer`) are follow-on cards, not v1.
+
+### Copy: on release, not on a key
+
+```pascal
+type
+  TTuiApp = class
+  public
+    function CopySelection: Boolean;
+    { Copy on mouse release. Default True. }
+    property CopyOnRelease: Boolean read FCopyOnRelease write FCopyOnRelease;
+  end;
+
+  TWidget = class
+    { Walk the tree; the first usable selection wins. Containers recurse in
+      reverse Add order, the same rule as mouse dispatch. }
+    function CopySelection(const S: ISurface): Boolean; virtual;
+  end;
+
+  ISurface = interface
+    procedure SetClipboard(const AText: UnicodeString);
+  end;
+```
+
+**This reverses the original draft**, which assumed an explicit keybinding. A
+keybinding has two problems the operator hit in sequence: it has to be
+discoverable, and it has to be REACHABLE — twice the tree did not forward events
+at all. Copy-on-release removes both: the gesture that makes a selection is the
+gesture that delivers it, and a press-release with no drag copies nothing, so it
+cannot clear the clipboard by accident.
+
+`ISurface.SetClipboard` is the toolkit's one outbound escape that is not a cell.
+`TSurfaceVideo` emits OSC 52 through `WriteOut`; `TSurfaceMemory` records the
+text and counts writes, which is all a headless surface can honestly offer.
+
+**Every composite must forward `CopySelection`**, exactly as it forwards
+`HandleEvent`. Four did not, and each was a bug found in a terminal rather than
+by a test: `TMarkdownView`, `TChatItem`, `TSingleChild`, `TScrollContainer`.
+Nothing currently checks this, and a gate for it is the highest-value follow-up.
 
 ### Markdown: an optional companion module, not a seam
 
