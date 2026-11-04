@@ -72,6 +72,17 @@ type
     function Names: TStringArray;
     { Which servers are open right now. }
     function OpenNames: TStringArray;
+    { One server's TRANSPORT state, from the manager's live set. False when the
+      name is not in the manager at all, which the caller must render as UNKNOWN
+      rather than "down" - the two are different claims. Returns the manager's
+      own state type, not a wire type: mapping to the wire is the protocol's job,
+      so this unit does not import it. }
+    function TransportStateOf(const AName: string;
+      out AState: TMcpServerState): Boolean;
+    { Drop one server's transport and open it again. Refreshes auth through the
+      existing OAuth path. Touches the TRANSPORT only, never FOpen: reconnecting
+      is not loading, so it must not change what the model can use. }
+    function Reconnect(const AName: string; out AError: string): Boolean;
 
     { IToolProvider }
     procedure Prepare;
@@ -162,6 +173,53 @@ begin
       SetLength(Result, Length(Result) + 1);
       Result[High(Result)] := FNames[I];
     end;
+end;
+
+function TMcpProvider.TransportStateOf(const AName: string;
+  out AState: TMcpServerState): Boolean;
+var
+  Rs: TMcpServerRuntimeArray;
+  I: Integer;
+begin
+  AState := mssStopped;
+  Result := False;
+  if FManager = nil then
+    Exit;
+  Rs := FManager.Runtimes;
+  for I := 0 to High(Rs) do
+    if SameText(Rs[I].Name, AName) then
+    begin
+      AState := Rs[I].State;
+      Exit(True);
+    end;
+end;
+
+function TMcpProvider.Reconnect(const AName: string; out AError: string): Boolean;
+var
+  I: Integer;
+begin
+  AError := '';
+  I := IndexOf(AName);
+  if I < 0 then
+  begin
+    AError := 'unknown MCP server: ' + AName;
+    Exit(False);
+  end;
+  if FManager = nil then
+  begin
+    AError := 'no MCP manager';
+    Exit(False);
+  end;
+  { Close then open: the close drops a dead transport (and its tools) so the open
+    starts clean, which is what makes an expired OAuth token refresh rather than
+    reuse a broken connection. FOpen is deliberately NOT set here - reconnecting
+    a transport must not change whether the server is loaded into context. }
+  FManager.CloseServer(AName);
+  Result := FManager.OpenServer(AName, AError);
+  if Result then
+    FLastUsedMs[I] := NowMs
+  else
+    AError := 'reconnect failed: ' + AError;
 end;
 
 function TMcpProvider.LoadSpec: TToolSpec;

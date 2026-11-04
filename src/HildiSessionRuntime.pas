@@ -22,7 +22,7 @@ interface
 uses
   Classes, Contnrs, SysUtils, SyncObjs,
   {$ifdef unix}BaseUnix, Sockets,{$endif}
-  HildiLLM, HildiAgent, HildiApproval, HildiMCPConfig,
+  HildiLLM, HildiAgent, HildiApproval, HildiMCPConfig, HildiMCPClient,
   HildiStore, HildiSession,
   HildiSessionProtocol, HildiSessionSocket,
   HildiSessionClient,
@@ -200,9 +200,22 @@ type
       Active comes from TMcpProvider.OpenNames, which reads FOpen. }
     procedure HandleMcpList(AClient: TClientConn;
       const ACommand: TSessionCommand);
+    { Answer scMcpProbe: probe every server through the manager and report the
+      connection state. This is the ONLY thing that may set a connection to
+      connected or disconnected; a list never guesses. }
+    procedure HandleMcpProbe(AClient: TClientConn;
+      const ACommand: TSessionCommand);
+    { Answer scMcpReconnect: drop one server's transport and open it again, which
+      refreshes auth through the existing OAuth path. Activation is deliberately
+      untouched - reconnecting a transport is not loading a capability. }
+    procedure HandleMcpReconnect(AClient: TClientConn;
+      const ACommand: TSessionCommand);
     { Build the row for one stored server, given the active set. }
     function McpRowFor(const ARow: TMcpServerRow;
-      const AActiveSet: TStringArray): TMcpRowStatus;
+      const AActiveSet: TStringArray;
+      AConnection: TMcpConnection): TMcpRowStatus;
+    { One server's connection, read from the manager's live runtime set. }
+    function McpConnectionOf(const AName: string): TMcpConnection;
     { Push the current catalogue to every client, after a change. }
     procedure BroadcastSkills;
     { Drain child events for the runtime loop; relay them as events. }
@@ -1442,7 +1455,8 @@ begin
 end;
 
 function TSessionRuntime.McpRowFor(const ARow: TMcpServerRow;
-  const AActiveSet: TStringArray): TMcpRowStatus;
+  const AActiveSet: TStringArray;
+  AConnection: TMcpConnection): TMcpRowStatus;
 var
   I: Integer;
 begin
@@ -1454,10 +1468,11 @@ begin
   Result.Transport := ARow.Transport;
   Result.Enabled := ARow.Enabled;
   Result.Auth := ARow.Auth;
-  { mcUnknown, never mcDisconnected: a list has not probed anything, and
-    claiming "down" for a server nobody asked about would be a lie the dialog
-    then acts on. scMcpProbe is the only thing that may answer this. }
-  Result.Connection := mcUnknown;
+  { Passed in, because the caller knows whether it probed. A list passes
+    mcUnknown: claiming "down" for a server nobody asked about is a lie the
+    dialog would then act on. scMcpProbe is the only thing that may pass a real
+    answer. }
+  Result.Connection := AConnection;
   { Active = the server's transport is open for THIS session, which is what
     load_mcp changes and what TTL decay closes. TMcpProvider.OpenNames is the
     single source; deriving it from the store instead would confuse "enabled"
@@ -1501,11 +1516,130 @@ begin
   E := EmitEvent(ekMcpList);
   SetLength(E.McpRows, Length(Rows));
   for I := 0 to High(Rows) do
-    E.McpRows[I] := McpRowFor(Rows[I], Live);
+    E.McpRows[I] := McpRowFor(Rows[I], Live, mcUnknown);
   ReplyTo(AClient, ACommand.Id, True, '');
   { Answer the ASKING client only: this is a request/response, and replaying it
     into the ring would hand a later attach a snapshot that may be minutes
     stale, presented as current. }
+  M := Default(TSessionMessage);
+  M.Kind := mkEvent;
+  M.Event := E;
+  QueueLine(AClient, TSessionCodec.Encode(M));
+end;
+
+function TSessionRuntime.McpConnectionOf(const AName: string): TMcpConnection;
+var
+  State: TMcpServerState;
+begin
+  { Not knowing the server is UNKNOWN, never disconnected: the manager has no
+    runtime for a name it was never given, and "we do not hold it" is not the
+    same claim as "its transport is down". }
+  if (FSession = nil) or (FSession.McpProvider = nil) then
+    Exit(mcUnknown);
+  if not FSession.McpProvider.TransportStateOf(AName, State) then
+    Exit(mcUnknown);
+  if State = mssConnected then
+    Result := mcConnected
+  else
+    Result := mcDisconnected;
+end;
+
+procedure TSessionRuntime.HandleMcpProbe(AClient: TClientConn;
+  const ACommand: TSessionCommand);
+var
+  Rows: TMcpServerRowArray;
+  Err: TStoreError;
+  Live: TStringArray;
+  E: TSessionEvent;
+  M: TSessionMessage;
+  I: Integer;
+begin
+  if (FSession = nil) or (FSession.View = nil) or
+    (FSession.View.Store = nil) then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'no store');
+    Exit;
+  end;
+  Rows := nil;
+  if not FSession.View.Store.ListMcpServers(Rows, Err) then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'could not list mcp servers');
+    Exit;
+  end;
+  Live := nil;
+  if FSession.McpProvider <> nil then
+    Live := FSession.McpProvider.OpenNames;
+  E := EmitEvent(ekMcpProbeResult);
+  SetLength(E.McpRows, Length(Rows));
+  for I := 0 to High(Rows) do
+    { The manager's live state IS the probe: it is the only thing that knows
+      whether a transport is up. An ACTIVE probe would spawn a process per server
+      and stall the dialog, which is exactly what opening a dialog must not do. }
+    E.McpRows[I] := McpRowFor(Rows[I], Live, McpConnectionOf(Rows[I].Name));
+  ReplyTo(AClient, ACommand.Id, True, '');
+  M := Default(TSessionMessage);
+  M.Kind := mkEvent;
+  M.Event := E;
+  QueueLine(AClient, TSessionCodec.Encode(M));
+end;
+
+procedure TSessionRuntime.HandleMcpReconnect(AClient: TClientConn;
+  const ACommand: TSessionCommand);
+var
+  Rows: TMcpServerRowArray;
+  Err: TStoreError;
+  Live: TStringArray;
+  E: TSessionEvent;
+  M: TSessionMessage;
+  I, Found: Integer;
+  Key: string;
+  ProbeErr: string;
+begin
+  if (FSession = nil) or (FSession.View = nil) or
+    (FSession.View.Store = nil) then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'no store');
+    Exit;
+  end;
+  Key := ACommand.McpKey;
+  Rows := nil;
+  if not FSession.View.Store.ListMcpServers(Rows, Err) then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'could not list mcp servers');
+    Exit;
+  end;
+  Found := -1;
+  for I := 0 to High(Rows) do
+    if SameText(Rows[I].Name, Key) then
+    begin
+      Found := I;
+      Break;
+    end;
+  if Found < 0 then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'unknown mcp server: ' + Key);
+    Exit;
+  end;
+  if FSession.McpProvider = nil then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'no mcp provider');
+    Exit;
+  end;
+  ProbeErr := '';
+  if not Rows[Found].Enabled then
+  begin
+    { Enabling is a config change, not a reconnect. Say so rather than opening a
+      server the operator turned off. }
+    ReplyTo(AClient, ACommand.Id, False, 'not enabled');
+    Exit;
+  end;
+  FSession.McpProvider.Reconnect(Key, ProbeErr);
+  Live := FSession.McpProvider.OpenNames;
+  E := EmitEvent(ekMcpReconnectDone);
+  SetLength(E.McpRows, 1);
+  E.McpRows[0] := McpRowFor(Rows[Found], Live, McpConnectionOf(Key));
+  E.McpRows[0].Error := ProbeErr;
+  ReplyTo(AClient, ACommand.Id, ProbeErr = '', ProbeErr);
   M := Default(TSessionMessage);
   M.Kind := mkEvent;
   M.Event := E;
