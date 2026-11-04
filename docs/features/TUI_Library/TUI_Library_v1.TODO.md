@@ -79,12 +79,18 @@ bounds, and declines it. `TestMouseOutsideEveryChildIsNotHandled` pins that.
 
 ### Phase 4: Terminal tier
 
-- [ ] **Move** `TUIInputTerminal.pas`, `TUIInputFD.pas`, `TUISurfaceVideo.pas`
+- [x] **Move** `TUIInputTerminal.pas`, `TUIInputFD.pas`, `TUISurfaceVideo.pas`
       to `src/tui/terminal/`. No content change.
-- [ ] **Modify** `Makefile`: add `-Fu$(SRC)/tui/terminal` to every target that
-      builds the TUI; `tui-standalone` stays on `core` only.
-- [ ] **Verify**: `make check`; `tui-standalone` still compiles with core alone.
-- [ ] **Commit**: `refactor(tui): ♻️ terminal adapters move to their own tier`
+- [x] **Modify** `Makefile`: add `-Fu$(SRC)/tui/terminal` to every target that
+      builds the TUI (22 paths); `tui-standalone` deliberately untouched, still
+      on `core` alone.
+- [x] **Verify**: `make check`; `tui-standalone` still compiles with core alone.
+- [x] **Commit**: `refactor(tui): ♻️ terminal adapters move to their own tier`
+
+**Flake, not a regression:** the first full gate failed on
+`TSessionRuntimeTest.TestAttachPushesTheSkillCatalogue` (a documented timing
+flake that spawns a runtime and completes a socket handshake). It passed 34/34
+alone and the gate then passed twice.
 
 ### Phase 5: Widgets isolation gate
 
