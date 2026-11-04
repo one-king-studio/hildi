@@ -16,7 +16,7 @@ uses
   TestCLI, TestTranscript, TestCommandPolicy, TestCommandTool,
   TestWorkspace, TestApproval, TestSession, TestTUISurface,
   TestTUIClock,
-  TestTUIInput, TestTUILayout, TestTUIText, TestTUIScroll,
+  TestTUIInput, TestTUILayout, TestTUIText, TestTUIScroll, TestTUISelection,
   TestTUIApp, TestTUIPerf, TestHarnessTurn, TestTUIPrompt,
   TestTUIApprovalModal, TestHarnessSession, TestHarnessView, TestSplit,
   TestHarnessApp, TestFileTool, TestTUIEncoder, TestTUIWidgets,
