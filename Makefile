@@ -157,7 +157,7 @@ endif
 LIB_SRCS  := $(wildcard $(SRC)/*.pas)
 ASYNC_SRCS := $(wildcard $(SRC)/async/*.pas)
 SHELL_SRCS := $(wildcard $(SRC)/shell/*.pas)
-TUILIB_SRCS := $(wildcard $(SRC)/tui/core/*.pas) $(wildcard $(SRC)/tui/widgets/*.pas)
+TUILIB_SRCS := $(wildcard $(SRC)/tui/core/*.pas) $(wildcard $(SRC)/tui/terminal/*.pas) $(wildcard $(SRC)/tui/widgets/*.pas)
 CHANGES_SRCS := $(wildcard $(SRC)/changes/*.pas)
 MARKDOWN_SRCS := $(wildcard $(SRC)/markdown/*.pas)
 FILEIGNORE_SRCS := $(wildcard $(SRC)/fileignore/*.pas)
