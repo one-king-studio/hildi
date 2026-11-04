@@ -75,6 +75,10 @@ type
     procedure ContentChanged;
     { The selected text, or '' when nothing usable is selected. }
     function SelectedText: string;
+    { Put the selection on the terminal clipboard and say whether anything was
+      copied. False means there was nothing usable - the caller shows nothing,
+      rather than reporting an error for a no-op. }
+    function CopySelection(const S: ISurface): Boolean;
     function HandleEvent(const E: TInputEvent): Boolean; override;
     property Selection: TSelection read FSelection;
     property Dragging: Boolean read FDragging;
@@ -181,6 +185,16 @@ begin
   end;
   Span := SelectionSpan(FSelection);
   Result := SelectionText(Span, Lines, Wraps);
+end;
+
+function TSelectable.CopySelection(const S: ISurface): Boolean;
+var
+  T: string;
+begin
+  T := SelectedText;
+  Result := T <> '';
+  if Result then
+    S.SetClipboard(UnicodeString(T));
 end;
 
 procedure TSelectable.RenderSelection(const S: ISurface);

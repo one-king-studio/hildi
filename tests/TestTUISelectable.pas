@@ -55,6 +55,8 @@ type
     procedure TestHighlightIsAbsentWhenNothingIsSelected;
     procedure TestClearSelectionRemovesTheHighlight;
     procedure TestContentChangeMarksTheSelectionStale;
+    procedure TestCopySelectionWritesTheSelectedText;
+    procedure TestCopySelectionWithNothingSelectedWritesNothing;
   end;
 
 implementation
@@ -368,6 +370,45 @@ begin
     AssertFalse('and no longer usable', SelectionIsUsable(W.Selection));
   finally
     W.Free;
+  end;
+end;
+
+procedure TSelectableTest.TestCopySelectionWritesTheSelectedText;
+var
+  W: TProbeSelectable;
+  S: TSurfaceMemory;
+begin
+  W := MakeProbe(['abcdef']);
+  S := TSurfaceMemory.Create(10, 2);
+  try
+    W.HandleEvent(Mouse(1, 0, mbLeft, maPress));
+    W.HandleEvent(Mouse(4, 0, mbLeft, maMotion));
+    AssertTrue('copy reported success', W.CopySelection(S));
+    AssertEquals('the selection reached the clipboard', 'bcd', S.ClipboardText);
+    AssertEquals('written exactly once', 1, S.ClipboardWrites);
+  finally
+    W.Free;
+    S.Free;
+  end;
+end;
+
+procedure TSelectableTest.TestCopySelectionWithNothingSelectedWritesNothing;
+var
+  W: TProbeSelectable;
+  S: TSurfaceMemory;
+begin
+  W := MakeProbe(['abcdef']);
+  S := TSurfaceMemory.Create(10, 2);
+  try
+    { A click with no drag selects nothing. Copying must not write an empty
+      sequence, which would CLEAR the operator's clipboard. }
+    W.HandleEvent(Mouse(2, 0, mbLeft, maPress));
+    W.HandleEvent(Mouse(2, 0, mbNone, maRelease));
+    AssertFalse('copy reported nothing to copy', W.CopySelection(S));
+    AssertEquals('clipboard untouched', 0, S.ClipboardWrites);
+  finally
+    W.Free;
+    S.Free;
   end;
 end;
 

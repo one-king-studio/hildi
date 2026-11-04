@@ -46,6 +46,11 @@ type
     { The palette index painted for cells whose attr has sfScreenBg. Set by the
       app from the theme so text backgrounds match the screen. }
     procedure SetScreenBg(AIndex: Byte);
+    { Put AText on the terminal's clipboard. The toolkit's one outbound escape
+      that is not a cell: OSC 52, so it works over SSH where no other mechanism
+      can reach the operator's machine. Nothing happens on a surface with no
+      terminal (the memory surface is a no-op, and says so by counting calls). }
+    procedure SetClipboard(const AText: UnicodeString);
     procedure Flush;
   end;
 
@@ -66,6 +71,8 @@ type
     FForceFull: Boolean;
     FInvalidations: Integer;
     FScreenBg: Byte;
+    FClipboard: UnicodeString;
+    FClipboardWrites: Integer;
     function IndexOf(X, Y: Integer): Integer;
     function EffectiveClip: TRect;
     function InClip(X, Y: Integer): Boolean;
@@ -80,6 +87,9 @@ type
     { Diagnostic: total Put calls, so a test can prove off-screen content is
       culled rather than drawn and clipped. }
     function PutCount: Integer;
+    { What the last SetClipboard was asked to copy, and how many times. } 
+    function ClipboardText: UnicodeString;
+    function ClipboardWrites: Integer;
     function RowText(Y, X, Len: Integer): UnicodeString;
     procedure ResetFrameStats;
     procedure Resize(AWidth, AHeight: Integer);
@@ -99,6 +109,11 @@ type
     function ClipRect: TRect;
     procedure Invalidate;
     procedure SetScreenBg(AIndex: Byte);
+    { Put AText on the terminal's clipboard. The toolkit's one outbound escape
+      that is not a cell: OSC 52, so it works over SSH where no other mechanism
+      can reach the operator's machine. Nothing happens on a surface with no
+      terminal (the memory surface is a no-op, and says so by counting calls). }
+    procedure SetClipboard(const AText: UnicodeString);
     procedure Flush;
   end;
 
@@ -307,6 +322,15 @@ begin
   Inc(FInvalidations);
 end;
 
+procedure TSurfaceMemory.SetClipboard(const AText: UnicodeString);
+begin
+  { No terminal to write to. Record the text so a test can assert what a widget
+    TRIED to copy, which is the only observable behaviour a headless surface can
+    honestly offer. }
+  FClipboard := AText;
+  Inc(FClipboardWrites);
+end;
+
 procedure TSurfaceMemory.SetScreenBg(AIndex: Byte);
 begin
   FScreenBg := AIndex;
@@ -360,6 +384,16 @@ end;
 function TSurfaceMemory.Invalidations: Integer;
 begin
   Result := FInvalidations;
+end;
+
+function TSurfaceMemory.ClipboardText: UnicodeString;
+begin
+  Result := FClipboard;
+end;
+
+function TSurfaceMemory.ClipboardWrites: Integer;
+begin
+  Result := FClipboardWrites;
 end;
 
 function TSurfaceMemory.PutCount: Integer;

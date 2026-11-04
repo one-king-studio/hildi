@@ -15,7 +15,7 @@ unit TUISurfaceVideo;
 interface
 
 uses
-  TUIBase, TUISurface,
+  TUIBase, TUISurface, TUIClipboard,
   TUIEncoder;
 
 type
@@ -52,6 +52,7 @@ type
     procedure Invalidate;
     procedure Resize(AWidth, AHeight: Integer);
     procedure SetScreenBg(AIndex: Byte);
+    procedure SetClipboard(const AText: UnicodeString);
     procedure Flush;
   end;
 
@@ -84,6 +85,16 @@ begin
   DoneEnhancedVideo;
   FEncoder.Free;
   inherited Destroy;
+end;
+
+procedure TSurfaceVideo.SetClipboard(const AText: UnicodeString);
+begin
+  { The one outbound escape that is not a cell. Emitted through WriteOut so it
+    is ordered with the frame bytes, and so a terminal that ignores OSC 52
+    simply drops it - there is no error to observe, which is why the sequence
+    itself is unit-tested at the byte level in TUIClipboard. }
+  if AText <> '' then
+    WriteOut(Osc52Clipboard(AText));
 end;
 
 procedure TSurfaceVideo.WriteOut(const AData: RawByteString);

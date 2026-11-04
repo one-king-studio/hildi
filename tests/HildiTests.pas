@@ -17,7 +17,7 @@ uses
   TestWorkspace, TestApproval, TestSession, TestTUISurface,
   TestTUIClock,
   TestTUIInput, TestTUILayout, TestTUIText, TestTUIScroll, TestTUISelection,
-  TestTUISelectable,
+  TestTUISelectable, TestTUIClipboard,
   TestTUIApp, TestTUIPerf, TestHarnessTurn, TestTUIPrompt,
   TestTUIApprovalModal, TestHarnessSession, TestHarnessView, TestSplit,
   TestHarnessApp, TestFileTool, TestTUIEncoder, TestTUIWidgets,
