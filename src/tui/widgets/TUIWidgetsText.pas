@@ -34,6 +34,10 @@ type
   end;
   TStyledClusters = array of TStyledCluster;
   TStyledLines = array of TStyledClusters;
+  { One flag per wrapped row: True when that row ended because the text did not
+    fit, False when it ended at a real line break. Selection needs this to avoid
+    inventing a newline inside a soft-wrapped paragraph. }
+  TWrapEnds = array of Boolean;
   { The wrapped lines of a text block, as Unicode strings. AnsiString would be
     lossy here: the toolkit works in UnicodeString, and the conversion would
     corrupt non-ASCII under an ASCII-only widestring manager. }
@@ -51,6 +55,7 @@ type
     FHangIndent: Integer;
     FCacheClusters: TStyledClusters;
     FCacheLines: TStyledLines;
+    FCacheWrapEnds: TWrapEnds;
     FCacheWidth: Integer;
     FClustersValid: Boolean;
     FLinesValid: Boolean;
@@ -321,13 +326,26 @@ begin
 end;
 
 function WrapClusters(const AClusters: TStyledClusters; AWidth, AIndent: Integer;
-  AMode: TWrapMode): TStyledLines;
+  AMode: TWrapMode; out AWrapEnds: TWrapEnds): TStyledLines;
 var
   I, J, K, N, W, CurW, BS, EffW: Integer;
   Cur, Line, Rem: TStyledClusters;
   Cluster: TStyledCluster;
+
+  { Takes the row explicitly. Reading Cur inside here was the bug: the word-wrap
+    path reassigns Cur to the truncated head, so a remainder computed afterwards
+    from Cur saw only that head and dropped the rest of the line. }
+  procedure PushRow(const ARow: TStyledClusters; AWrapped: Boolean);
+  begin
+    SetLength(Result, Length(Result) + 1);
+    Result[High(Result)] := ARow;
+    SetLength(AWrapEnds, Length(Result));
+    AWrapEnds[High(AWrapEnds)] := AWrapped;
+  end;
+
 begin
   Result := nil;
+  AWrapEnds := nil;
   Cur := nil;
   CurW := 0;
   for I := 0 to High(AClusters) do
@@ -335,8 +353,7 @@ begin
     Cluster := AClusters[I];
     if (Cluster.Ch = #10) or (Cluster.Ch = #13) then
     begin
-      SetLength(Result, Length(Result) + 1);
-      Result[High(Result)] := Cur;
+      PushRow(Cur, False);   { a real line break }
       Cur := nil;
       CurW := 0;
       Continue;
@@ -365,8 +382,9 @@ begin
         SetLength(Line, BS);
         for J := 0 to BS - 1 do
           Line[J] := Cur[J];
-        SetLength(Result, Length(Result) + 1);
-        Result[High(Result)] := Line;
+        { Push the head BEFORE Cur is reassigned: the remainder below is computed
+          from the full row. }
+        PushRow(Line, True);    { did not fit: a soft wrap }
         N := 0;
         SetLength(Rem, Length(Cur) - BS);
         for J := BS to High(Cur) do
@@ -390,8 +408,7 @@ begin
       end
       else
       begin
-        SetLength(Result, Length(Result) + 1);
-        Result[High(Result)] := Cur;
+        PushRow(Cur, True);  { did not fit: a soft wrap }
         Cur := nil;
         CurW := 0;
       end;
@@ -401,10 +418,7 @@ begin
     Inc(CurW, W);
   end;
   if Length(Cur) > 0 then
-  begin
-    SetLength(Result, Length(Result) + 1);
-    Result[High(Result)] := Cur;
-  end;
+    PushRow(Cur, False);  { the last row ends because the text ended }
 end;
 
 constructor TTextBlock.Create(const ASpans: array of TSpan; AWrap: TWrapMode);
@@ -456,7 +470,8 @@ function TTextBlock.CachedLines(AWidth: Integer): TStyledLines;
 begin
   if FLinesValid and (FCacheWidth = AWidth) then
     Exit(FCacheLines);
-  FCacheLines := WrapClusters(CachedClusters, AWidth, FHangIndent, FWrap);
+  FCacheLines := WrapClusters(CachedClusters, AWidth, FHangIndent, FWrap,
+    FCacheWrapEnds);
   FCacheWidth := AWidth;
   FLinesValid := True;
   Inc(FLayoutBuilds);
@@ -503,22 +518,25 @@ begin
 end;
 
 function TTextBlock.LineCountAt(AWidth: Integer): Integer;
+var
+  Dummy: TWrapEnds;
 begin
   if AWidth < 1 then
     AWidth := 1;
-  Result := Length(WrapClusters(CachedClusters, AWidth, FHangIndent, FWrap));
+  Result := Length(WrapClusters(CachedClusters, AWidth, FHangIndent, FWrap, Dummy));
 end;
 
 function TTextBlock.WrappedRows(AWidth: Integer): TWrappedRows;
 var
   Lines: TStyledLines;
+  Dummy: TWrapEnds;
   I, J: Integer;
   S: UnicodeString;
 begin
   Result := nil;
   if AWidth < 1 then
     AWidth := 1;
-  Lines := WrapClusters(CachedClusters, AWidth, FHangIndent, FWrap);
+  Lines := WrapClusters(CachedClusters, AWidth, FHangIndent, FWrap, Dummy);
   SetLength(Result, Length(Lines));
   for I := 0 to High(Lines) do
   begin
