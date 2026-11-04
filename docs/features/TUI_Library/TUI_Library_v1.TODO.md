@@ -51,18 +51,31 @@ is never just a directory.
 
 ### Phase 3: Hit-testing (also closes card #36)
 
-- [ ] **Test**: `TestTUIWidgets.TestHitTestDefaultsToBounds` — inside, outside,
-      and `Visible = False`.
-- [ ] **Test**: `TestContainerGivesOverlappingClickToTheTopmostChild` — two
-      children over the same cell; the last added wins.
-- [ ] **Test**: `TestModalMouseBehaviourIsUnchangedByTopmostFirstDispatch` —
-      pin the current modal behaviour **before** changing dispatch order.
-- [ ] **Implement**: `TWidget.HitTest` virtual; `TContainer.HandleEvent` walks
-      children in reverse for mouse events only (keys keep Add order — keyboard
-      focus is not z-order).
-- [ ] **Refactor**: `TApprovalModal.HitTest` (`:539`) overrides the protocol
-      method instead of shadowing it; `TFocusGroup`'s click-to-focus uses it.
-- [ ] **Commit**: `feat(tui): ✨ a widget can say whether a point is its own`
+- [x] **Test**: `TestHitTestDefaultsToBounds` — inside, outside, and
+      `Visible = False`.
+- [x] **Test**: `TestOverlappingMouseClickGoesToTheTopmostChild` — two
+      children over the same cell; the last added claims it and the bottom one
+      is never consulted.
+- [x] **Test**: `TestKeyboardDispatchKeepsAddOrder` — pins that keys are NOT
+      reordered, before the mouse change could have disturbed them.
+- [x] **Implement**: `TWidget.HitTest` virtual; `TContainer.HandleEvent` walks
+      children in reverse **for mouse only**.
+- [x] **Refactor**: `TApprovalModal.HitTest` renamed to `RowAt`.
+- [x] **Commit**: `feat(tui): ✨ a widget can say whether a point is its own`
+
+**Deviation — the SPEC was wrong twice here.**
+
+1. `TApprovalModal.HitTest` returns `Integer` (an option index), so it could not
+   override a `Boolean` protocol method; it would shadow it. Renamed to `RowAt`
+   instead of "overridden".
+2. The SPEC said containers gate dispatch on `HitTest`. They do not. All eight
+   mouse-handling widgets already bounds-check themselves, and a gate would
+   break drags that leave their widget — `TScrollContainer.FBarDragging` must
+   keep receiving motion after the pointer exits, or the scrollbar stops
+   mid-drag. Containers only order the offer; leaves decide.
+
+Consequence worth keeping: a child *is* still offered an event outside its
+bounds, and declines it. `TestMouseOutsideEveryChildIsNotHandled` pins that.
 
 ### Phase 4: Terminal tier
 
