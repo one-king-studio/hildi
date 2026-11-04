@@ -35,6 +35,10 @@ type
     procedure TestParseJsonEnvObject;
     procedure TestParseJsonErrors;
     procedure TestJsonRoundTrip;
+    { The prose fields are OURS and cannot be discovered from a server, so a
+      hand-written config must carry them - otherwise a description can only come
+      from the CLI or the dialog, and neither can set one today. }
+    procedure TestJsonRoundTripCarriesLabelDescriptionAndAuth;
   end;
 
 implementation
@@ -316,6 +320,33 @@ begin
   AssertEquals('args', 2, Length(Rows2[0].Args));
   AssertEquals('env', 'A=1', Rows2[0].Env[0]);
   AssertEquals('cwd', '/w', Rows2[0].WorkingDir);
+end;
+
+procedure TMcpConfigTest.TestJsonRoundTripCarriesLabelDescriptionAndAuth;
+var
+  Rows, Rows2: TMcpServerRowArray;
+  Err: string;
+  J: string;
+begin
+  { The prose fields are OURS and cannot be discovered from the server, so a
+    hand-written config must be able to set them - otherwise a description can
+    only ever come from the CLI or the dialog, and neither can today. }
+  Rows := nil;
+  SetLength(Rows, 1);
+  Rows[0].Name := 'browser';
+  Rows[0].Transport := mtHttp;
+  Rows[0].Url := 'https://example.test/mcp';
+  Rows[0].LabelText := 'Browser';
+  Rows[0].Description := 'control the user''s Chrome';
+  Rows[0].Auth := maOAuth;
+  Rows[0].Enabled := True;
+  J := FormatMcpServersJson(Rows);
+  AssertTrue('reparse', ParseMcpServersJson(J, msGlobal, 0, Rows2, Err));
+  AssertEquals('one row', 1, Length(Rows2));
+  AssertEquals('label survives', 'Browser', Rows2[0].LabelText);
+  AssertEquals('description survives', 'control the user''s Chrome',
+    Rows2[0].Description);
+  AssertTrue('auth survives', Rows2[0].Auth = maOAuth);
 end;
 
 initialization

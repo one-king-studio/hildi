@@ -431,6 +431,15 @@ begin
 
       if Entry.Find('cwd') is TJSONString then
         Row.WorkingDir := Entry.Find('cwd').AsString;
+      { Ours, not the server's: absent in any config written before these fields
+        existed, which decodes to '' and renders as the name alone. }
+      if Entry.Find('label') is TJSONString then
+        Row.LabelText := Entry.Find('label').AsString;
+      if Entry.Find('description') is TJSONString then
+        Row.Description := Entry.Find('description').AsString;
+      if (Entry.Find('auth') is TJSONString) and
+        (Entry.Find('auth').AsString = 'oauth') then
+        Row.Auth := maOAuth;
       if Entry.Find('enabled') is TJSONBoolean then
         Row.Enabled := Entry.Find('enabled').AsBoolean;
 
@@ -547,6 +556,14 @@ begin
       end;
       if ARows[I].WorkingDir <> '' then
         Entry.Add('cwd', ARows[I].WorkingDir);
+      { Ours, not the server's. Omitted when empty so an undescribed server's
+        config stays byte-identical to what it was before these fields existed. }
+      if ARows[I].LabelText <> '' then
+        Entry.Add('label', ARows[I].LabelText);
+      if ARows[I].Description <> '' then
+        Entry.Add('description', ARows[I].Description);
+      if ARows[I].Auth = maOAuth then
+        Entry.Add('auth', 'oauth');
       if not ARows[I].Enabled then
         Entry.Add('enabled', False);
       Servers.Add(ARows[I].Name, Entry);
