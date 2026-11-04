@@ -469,6 +469,27 @@ begin
   AEvent.Kind := ikMouse;
   AEvent.Mouse.X := Cx - 1;
   AEvent.Mouse.Y := Cy - 1;
+
+  { Modifier bits ride along with every event, motion included. Without these a
+    Shift+drag is indistinguishable from a plain drag, and shift is exactly how
+    a terminal's own selection is meant to stay reachable. }
+  if (Cb and 4) <> 0 then
+    Include(AEvent.Mouse.Mods, moShift);
+  if (Cb and 8) <> 0 then
+    Include(AEvent.Mouse.Mods, moAlt);
+  if (Cb and 16) <> 0 then
+    Include(AEvent.Mouse.Mods, moCtrl);
+
+  { What happened. The motion bit (32) is the only way to tell a drag from a
+    fresh press; the trailing 'm' versus 'M' is the only way to tell a release
+    from a press at the same coordinates. }
+  if ARelease then
+    AEvent.Mouse.Action := maRelease
+  else if (Cb and 32) <> 0 then
+    AEvent.Mouse.Action := maMotion
+  else
+    AEvent.Mouse.Action := maPress;
+
   if (Cb and 64) <> 0 then
   begin
     if (Cb and 1) = 0 then
@@ -485,6 +506,7 @@ begin
       2:
         AEvent.Mouse.Button := mbRight;
     else
+      { Button code 3 means "no button": a motion with nothing held. }
       AEvent.Mouse.Button := mbNone;
     end;
   if ARelease then

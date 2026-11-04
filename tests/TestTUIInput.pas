@@ -33,6 +33,9 @@ type
     procedure TestDecodeIgnoresUnknownSequence;
     procedure TestDecodeMouseWheel;
     procedure TestDecodeMouseMotionAndRelease;
+    procedure TestDecodeMouseActionDistinguishesMotionFromRelease;
+    procedure TestDecodeMouseModifiers;
+    procedure TestDecodeMouseClickIsAPress;
     procedure TestDecodeKittyKeyboard;
     procedure TestDecodeKittyFunctionalKeysIgnored;
     procedure TestDecodeKittyShiftedAndTextKeys;
@@ -341,6 +344,93 @@ begin
       Ord('5'), Ord(';'), Ord('5'), Ord('m')]);
     AssertTrue('release decoded', D.Next(E));
     AssertTrue('button released', E.Mouse.Button = mbNone);
+  finally
+    D.Free;
+  end;
+end;
+
+procedure TTuiInputTest.TestDecodeMouseActionDistinguishesMotionFromRelease;
+var
+  D: TKeyDecoder;
+  E: TInputEvent;
+begin
+  D := TKeyDecoder.Create;
+  try
+    { Motion with the left button held: Cb = 32 (0x20 motion bit) + 0 (left). }
+    D.Feed([27, Ord('['), Ord('<'), Ord('3'), Ord('2'), Ord(';'),
+      Ord('5'), Ord(';'), Ord('5'), Ord('M')]);
+    AssertTrue('motion decoded', D.Next(E));
+    AssertTrue('is a motion', E.Mouse.Action = maMotion);
+    AssertTrue('left still held', E.Mouse.Button = mbLeft);
+
+    { Motion with NO button held: Cb = 32 | 3, the "no button" code. }
+    D.Feed([27, Ord('['), Ord('<'), Ord('3'), Ord('5'), Ord(';'),
+      Ord('6'), Ord(';'), Ord('6'), Ord('M')]);
+    AssertTrue('bare motion decoded', D.Next(E));
+    AssertTrue('still a motion', E.Mouse.Action = maMotion);
+    AssertTrue('no button involved', E.Mouse.Button = mbNone);
+
+    { Release: the trailing 'm'. Same coordinates, different meaning. }
+    D.Feed([27, Ord('['), Ord('<'), Ord('0'), Ord(';'),
+      Ord('5'), Ord(';'), Ord('5'), Ord('m')]);
+    AssertTrue('release decoded', D.Next(E));
+    AssertTrue('is a release', E.Mouse.Action = maRelease);
+    AssertTrue('button released', E.Mouse.Button = mbNone);
+  finally
+    D.Free;
+  end;
+end;
+
+procedure TTuiInputTest.TestDecodeMouseModifiers;
+var
+  D: TKeyDecoder;
+  E: TInputEvent;
+begin
+  D := TKeyDecoder.Create;
+  try
+    { Shift (4) + Ctrl (16) + left (0) = 20. }
+    D.Feed([27, Ord('['), Ord('<'), Ord('2'), Ord('0'), Ord(';'),
+      Ord('5'), Ord(';'), Ord('5'), Ord('M')]);
+    AssertTrue('modified click decoded', D.Next(E));
+    AssertTrue('shift carried', moShift in E.Mouse.Mods);
+    AssertTrue('ctrl carried', moCtrl in E.Mouse.Mods);
+    AssertTrue('alt not set', not (moAlt in E.Mouse.Mods));
+    AssertTrue('button still left', E.Mouse.Button = mbLeft);
+
+    { Alt (8) alone, on a motion: modifiers survive the motion path too. }
+    D.Feed([27, Ord('['), Ord('<'), Ord('4'), Ord('0'), Ord(';'),
+      Ord('7'), Ord(';'), Ord('7'), Ord('M')]);
+    AssertTrue('modified motion decoded', D.Next(E));
+    AssertTrue('alt carried', moAlt in E.Mouse.Mods);
+    AssertTrue('is a motion', E.Mouse.Action = maMotion);
+  finally
+    D.Free;
+  end;
+end;
+
+procedure TTuiInputTest.TestDecodeMouseClickIsAPress;
+var
+  D: TKeyDecoder;
+  E: TInputEvent;
+begin
+  D := TKeyDecoder.Create;
+  try
+    { A plain left click, no modifiers: the common case must stay simple. }
+    D.Feed([27, Ord('['), Ord('<'), Ord('0'), Ord(';'),
+      Ord('1'), Ord('2'), Ord(';'), Ord('3'), Ord('M')]);
+    AssertTrue('click decoded', D.Next(E));
+    AssertTrue('is a press', E.Mouse.Action = maPress);
+    AssertTrue('left button', E.Mouse.Button = mbLeft);
+    AssertTrue('no modifiers', E.Mouse.Mods = []);
+    AssertEquals('x', 11, E.Mouse.X);
+    AssertEquals('y', 2, E.Mouse.Y);
+
+    { Wheel events are presses of a wheel button, not motions. }
+    D.Feed([27, Ord('['), Ord('<'), Ord('6'), Ord('4'), Ord(';'),
+      Ord('1'), Ord('0'), Ord(';'), Ord('5'), Ord('M')]);
+    AssertTrue('wheel decoded', D.Next(E));
+    AssertTrue('wheel is a press', E.Mouse.Action = maPress);
+    AssertTrue('wheel up', E.Mouse.Button = mbWheelUp);
   finally
     D.Free;
   end;

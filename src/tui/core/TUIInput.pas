@@ -31,10 +31,18 @@ type
   end;
 
   TMouseButton = (mbNone, mbLeft, mbMiddle, mbRight, mbWheelUp, mbWheelDown);
+
+  { What the terminal reported this event to be. Separate from Button because a
+    release carries no button, and a motion with the button held must not be
+    confused with either a fresh press or a release. A drag needs all three. }
+  TMouseAction = (maPress, maRelease, maMotion);
+
   TMouseEvent = record
     X, Y: Integer;
-    Button: TMouseButton;
-    Mods: TModifiers;
+    Button: TMouseButton;   // the button involved; mbNone on release, and on a
+                            // motion with nothing held
+    Action: TMouseAction;   // what happened at (X, Y)
+    Mods: TModifiers;       // shift/alt/ctrl as the terminal sent them
   end;
 
   TInputKind = (ikNone, ikKey, ikMouse, ikResize, ikPaste, ikFocus);

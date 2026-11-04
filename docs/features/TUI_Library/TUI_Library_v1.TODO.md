@@ -19,27 +19,35 @@ selection cannot receive a press without it.
 
 ### Phase 1: Gates first (free, catches everything after)
 
-- [ ] **Modify** `Makefile`: add `tui-standalone` and `changes-standalone` to the
+- [x] **Modify** `Makefile`: add `tui-standalone` and `changes-standalone` to the
       `check` target. No code change; both already pass on their own.
-- [ ] **Verify**: `make check` — same failure count as before the change (none).
-- [ ] **Commit**: `build(make): ✅ the TUI and changes isolation gates join make check`
+- [x] **Verify**: `make check` — same failure count as before the change (none).
+- [x] **Commit**: `build(make): ✅ the TUI and changes isolation gates join make check`
+
+**Deviation:** the first `make check` failed on `TFeaturesIndexTest`, which
+requires every directory under `docs/features/` to have a row in `FEATURES.md`.
+Added the `TUI Library` row. Recorded here because creating a feature directory
+is never just a directory.
 
 ### Phase 2: Mouse contract (the drag foundation)
 
-- [ ] **Test**: `TestTUIInputDecode.TestMouseMotionWithButtonReportsMotion` —
-      SGR `Cb` with bit 32 and button 0 → `Action = maMotion`,
-      `Button = mbLeft`. Fails: no `Action` field.
-- [ ] **Test**: `TestMouseReleaseIsNotConfusedWithMotion` — trailing `m` →
-      `maRelease`, `mbNone`.
-- [ ] **Test**: `TestMouseModifiersAreDecoded` — bits 4/8/16 → shift/alt/ctrl on
-      press, motion and release alike.
-- [ ] **Test**: `TestMouseWheelAndClickUnchanged` — the existing expectations,
-      pinned before the change and after it.
-- [ ] **Implement**: `TMouseAction` + `Action` + `Mods` in `TUIInput.pas`;
+- [x] **Test**: `TestTUIInputDecode.TestMouseMotionWithButtonReportsMotion` —
+      landed as `TestDecodeMouseActionDistinguishesMotionFromRelease`, which
+      covers all three actions in one method because they are only meaningful
+      against each other.
+- [x] **Test**: `TestMouseReleaseIsNotConfusedWithMotion` — the same method.
+- [x] **Test**: `TestMouseModifiersAreDecoded` — landed as
+      `TestDecodeMouseModifiers`; covers press and motion paths.
+- [x] **Test**: `TestMouseWheelAndClickUnchanged` — landed as
+      `TestDecodeMouseClickIsAPress`, which pins a plain press, x/y, empty
+      `Mods`, and that a wheel event is a press.
+- [x] **Implement**: `TMouseAction` + `Action` + `Mods` in `TUIInput.pas`;
       decode in `TUIInputDecode.MapMouse` (`:447`).
-- [ ] **Check** every existing `mbNone` arm still behaves:
-      `TUIWidgetsScroll.pas:368`, `TUIWidgetsApprovalModal.pas:919`.
-- [ ] **Commit**: `feat(tui): ✨ a mouse event knows motion from release, and carries modifiers`
+- [x] **Check** every existing `mbNone` arm still behaves:
+      `TUIWidgetsScroll.pas:368`, `TUIWidgetsApprovalModal.pas:919`. Both
+      deliberately conflate motion-with-no-button and release, and both still
+      get `mbNone`. The change is additive: `Button` semantics are untouched.
+- [x] **Commit**: `feat(tui): ✨ a mouse event knows motion from release, and carries modifiers`
 
 ### Phase 3: Hit-testing (also closes card #36)
 
