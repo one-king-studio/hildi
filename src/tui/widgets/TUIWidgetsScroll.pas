@@ -73,6 +73,7 @@ type
     function MaxScrollY: Integer;
     function MaxScrollX: Integer;
     function HandleEvent(const E: TInputEvent): Boolean; override;
+    function CopySelection(const S: ISurface): Boolean; override;
     procedure Arrange(const ABounds: TRect); override;
     procedure Render(const S: ISurface); override;
     property ScrollX: Integer read FScrollX write SetScrollX;
@@ -440,6 +441,16 @@ begin
   end;
   if not Result and (FChild <> nil) then
     Result := FChild.HandleEvent(E);
+end;
+
+function TScrollContainer.CopySelection(const S: ISurface): Boolean;
+begin
+  { Forward, like HandleEvent. A scroll container sits between the app and the
+    text, so without this the copy walk stops at the viewport. }
+  if FChild <> nil then
+    Result := FChild.CopySelection(S)
+  else
+    Result := False;
 end;
 
 procedure TScrollContainer.Arrange(const ABounds: TRect);
