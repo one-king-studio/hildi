@@ -79,7 +79,7 @@ type
     function ShowSummary: Boolean;
     function RightCol(const AText: UnicodeString): Integer;
     function RowOptionBase: Integer;
-    function HitTest(AX, AY: Integer): Integer;
+    function RowAt(AX, AY: Integer): Integer;
     procedure Choose(AIndex: Integer);
     procedure Deny;
     procedure CycleScope;
@@ -536,7 +536,7 @@ begin
   Result := FBounds.Y + 1 + Ord(FAsk.WorkDir <> '') + R + 1 + D + 1;
 end;
 
-function TApprovalModal.HitTest(AX, AY: Integer): Integer;
+function TApprovalModal.RowAt(AX, AY: Integer): Integer;
 var
   N, L, R, T, B, X, Option0, FooterRow: Integer;
 begin
@@ -915,7 +915,7 @@ begin
 
   if E.Kind = ikMouse then
   begin
-    Hit := HitTest(E.Mouse.X, E.Mouse.Y);
+    Hit := RowAt(E.Mouse.X, E.Mouse.Y);
     if E.Mouse.Button = mbNone then
     begin
       { Motion (or a release): brighten whatever is under the pointer. }

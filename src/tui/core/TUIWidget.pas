@@ -35,6 +35,11 @@ type
     procedure Render(const S: ISurface); virtual;
     { Consume an event. Return True if handled. }
     function HandleEvent(const E: TInputEvent): Boolean; virtual;
+    { True when (AX, AY) targets this widget. Default: the point is inside
+      FBounds and the widget is Visible. Coordinates are surface-absolute, the
+      same space as Bounds, so a widget whose clickable shape differs from its
+      rectangle overrides this rather than re-testing bounds itself. }
+    function HitTest(AX, AY: Integer): Boolean; virtual;
     { Update time-based content to ANowMs. Default: no-op. Must not arrange; the
       app calls this once per frame. Returns True when the content changed, so
       the app repaints only the frames that actually differ. }
@@ -151,6 +156,16 @@ end;
 function TWidget.HandleEvent(const E: TInputEvent): Boolean;
 begin
   Result := False;
+end;
+
+function TWidget.HitTest(AX, AY: Integer): Boolean;
+begin
+  { Inline rather than a shared helper: PointInRect lives in the widgets tier,
+    and core may not reach into it. Four comparisons is not worth a unit. }
+  Result := FVisible
+    and (FBounds.W > 0) and (FBounds.H > 0)
+    and (AX >= FBounds.X) and (AX < FBounds.X + FBounds.W)
+    and (AY >= FBounds.Y) and (AY < FBounds.Y + FBounds.H);
 end;
 
 function TWidget.Advance(const ANowMs: Int64): Boolean;
@@ -451,6 +466,18 @@ function TContainer.HandleEvent(const E: TInputEvent): Boolean;
 var
   I: Integer;
 begin
+  { Mouse events go to the last-added child first: children paint in Add order,
+    so the last one is what the operator can see, and a click must land on what
+    is visible rather than on whatever was added first. Keys keep Add order -
+    keyboard focus is not z-order, and reversing it would silently reorder every
+    Tab sequence in the app. }
+  if E.Kind = ikMouse then
+  begin
+    for I := FCount - 1 downto 0 do
+      if FWidgets[I].Visible and FWidgets[I].HandleEvent(E) then
+        Exit(True);
+    Exit(False);
+  end;
   for I := 0 to FCount - 1 do
     if FWidgets[I].Visible and FWidgets[I].HandleEvent(E) then
       Exit(True);

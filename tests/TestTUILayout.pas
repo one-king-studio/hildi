@@ -22,15 +22,22 @@ type
     FMarker: UnicodeString;
   public
     MeasureCalls: Integer;
+    { HandleEvent recording: a probe reports Handled and counts the call, so a
+      test can tell WHICH child an event reached. }
+    HandleCalls: Integer;
+    Handled: Boolean;
     constructor Create(APrefW, APrefH: Integer;
       const AMarker: UnicodeString = '#');
     function Measure(const AAvail: TSize): TSize; override;
     procedure Render(const S: ISurface); override;
+    function HandleEvent(const E: TInputEvent): Boolean; override;
   end;
 
   TTuiLayoutTest = class(TTestCase)
   private
     function Rc(AX, AY, AW, AH: Integer): TRect;
+    function Mouse(X, Y: Integer): TInputEvent;
+    function Key(AKind: TKeyKind): TInputEvent;
   published
     procedure TestFixedTracksTakeExactSize;
     procedure TestFillTracksShareRemainderByWeight;
@@ -40,6 +47,11 @@ type
     procedure TestVerticalStackIsOneColumnGrid;
     procedure TestEmptyAndZeroSizedTracks;
     procedure TestOverflowingContentIsClipped;
+    procedure TestHitTestDefaultsToBounds;
+    procedure TestHitTestIsFalseWhenInvisible;
+    procedure TestOverlappingMouseClickGoesToTheTopmostChild;
+    procedure TestKeyboardDispatchKeepsAddOrder;
+    procedure TestMouseOutsideEveryChildIsNotHandled;
   end;
 
 implementation
@@ -59,6 +71,18 @@ begin
   Result := Default(TSize);
   Result.W := FPrefW;
   Result.H := FPrefH;
+end;
+
+function TProbeWidget.HandleEvent(const E: TInputEvent): Boolean;
+begin
+  Inc(HandleCalls);
+  { Like every real leaf, the probe claims a mouse event only when the point is
+    its own. A probe that claimed everything would let a test "prove" dispatch
+    order while telling us nothing about how a real widget behaves. }
+  if E.Kind = ikMouse then
+    Result := Handled and HitTest(E.Mouse.X, E.Mouse.Y)
+  else
+    Result := Handled;
 end;
 
 procedure TProbeWidget.Render(const S: ISurface);
@@ -82,6 +106,132 @@ begin
   Result.Y := AY;
   Result.W := AW;
   Result.H := AH;
+end;
+
+function TTuiLayoutTest.Mouse(X, Y: Integer): TInputEvent;
+begin
+  Result := Default(TInputEvent);
+  Result.Kind := ikMouse;
+  Result.Mouse.X := X;
+  Result.Mouse.Y := Y;
+  Result.Mouse.Button := mbLeft;
+  Result.Mouse.Action := maPress;
+end;
+
+function TTuiLayoutTest.Key(AKind: TKeyKind): TInputEvent;
+begin
+  Result := Default(TInputEvent);
+  Result.Kind := ikKey;
+  Result.Key.Kind := AKind;
+end;
+
+procedure TTuiLayoutTest.TestHitTestDefaultsToBounds;
+var
+  W: TProbeWidget;
+begin
+  W := TProbeWidget.Create(1, 1);
+  try
+    W.Arrange(Rc(5, 3, 10, 4));
+    AssertTrue('top-left corner', W.HitTest(5, 3));
+    AssertTrue('last cell inside', W.HitTest(14, 6));
+    AssertFalse('just left', W.HitTest(4, 3));
+    AssertFalse('just above', W.HitTest(5, 2));
+    AssertFalse('one past the right edge', W.HitTest(15, 3));
+    AssertFalse('one past the bottom edge', W.HitTest(5, 7));
+  finally
+    W.Free;
+  end;
+end;
+
+procedure TTuiLayoutTest.TestHitTestIsFalseWhenInvisible;
+var
+  W: TProbeWidget;
+begin
+  W := TProbeWidget.Create(1, 1);
+  try
+    W.Arrange(Rc(0, 0, 10, 4));
+    AssertTrue('visible hit', W.HitTest(2, 2));
+    W.Visible := False;
+    AssertFalse('an invisible widget cannot be hit', W.HitTest(2, 2));
+  finally
+    W.Free;
+  end;
+end;
+
+procedure TTuiLayoutTest.TestOverlappingMouseClickGoesToTheTopmostChild;
+var
+  C: TContainer;
+  Bottom, Top: TProbeWidget;
+begin
+  { Both children occupy the same cell. Paint order is Add order, so the second
+    one is on top; a click must land on the thing the operator can see. The top
+    child claims the event, so the bottom one must never be consulted - that is
+    what distinguishes reverse order from Add order. }
+  C := TContainer.Create([Fixed(10)], [Fixed(4)]);
+  try
+    Bottom := TProbeWidget.Create(10, 4, 'b');
+    Top := TProbeWidget.Create(10, 4, 't');
+    Top.Handled := True;
+    C.Add(Bottom, 0, 0);
+    C.Add(Top, 0, 0);
+    C.Arrange(Rc(0, 0, 10, 4));
+
+    AssertTrue('the container reports the hit itself', C.HitTest(3, 1));
+    AssertTrue('the click was handled', C.HandleEvent(Mouse(3, 1)));
+    AssertEquals('topmost saw it', 1, Top.HandleCalls);
+    AssertEquals('bottom was never consulted', 0, Bottom.HandleCalls);
+  finally
+    C.Free;
+  end;
+end;
+
+procedure TTuiLayoutTest.TestKeyboardDispatchKeepsAddOrder;
+var
+  C: TContainer;
+  First, Second: TProbeWidget;
+begin
+  { Keyboard order is NOT z-order: the first child added still sees a key
+    first. Only mouse events are reordered, because only mouse events are about
+    what is visually on top. }
+  C := TContainer.Create([Fixed(10)], [Fixed(4)]);
+  try
+    First := TProbeWidget.Create(10, 4, 'a');
+    Second := TProbeWidget.Create(10, 4, 'b');
+    First.Handled := True;
+    C.Add(First, 0, 0);
+    C.Add(Second, 0, 0);
+    C.Arrange(Rc(0, 0, 10, 4));
+
+    AssertTrue('the key was handled', C.HandleEvent(Key(kkEnter)));
+    AssertEquals('first child saw it', 1, First.HandleCalls);
+    AssertEquals('second child never did', 0, Second.HandleCalls);
+  finally
+    C.Free;
+  end;
+end;
+
+procedure TTuiLayoutTest.TestMouseOutsideEveryChildIsNotHandled;
+var
+  C: TContainer;
+  A: TProbeWidget;
+begin
+  C := TContainer.Create([Fixed(4)], [Fixed(2)]);
+  try
+    A := TProbeWidget.Create(4, 2, 'a');
+    A.Handled := True;
+    C.Add(A, 0, 0);
+    C.Arrange(Rc(0, 0, 20, 10));
+    { (15, 8) is inside the container but outside its only child. }
+    AssertTrue('container bounds contain the point', C.HitTest(15, 8));
+    AssertFalse('no child claimed it', C.HandleEvent(Mouse(15, 8)));
+    { The child IS offered the event and declines it. Dispatch deliberately does
+      not gate on HitTest: a drag that leaves a widget's rectangle must keep
+      reaching it (the scrollbar drag relies on exactly that), so every leaf
+      bounds-checks itself instead. }
+    AssertEquals('the child was offered it and declined', 1, A.HandleCalls);
+  finally
+    C.Free;
+  end;
 end;
 
 procedure TTuiLayoutTest.TestFixedTracksTakeExactSize;
