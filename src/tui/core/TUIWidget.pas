@@ -110,6 +110,7 @@ type
     procedure Arrange(const ABounds: TRect); override;
     procedure Render(const S: ISurface); override;
     function HandleEvent(const E: TInputEvent): Boolean; override;
+    function HitTest(AX, AY: Integer): Boolean; override;
     function CopySelection(const S: ISurface): Boolean; override;
     function Advance(const ANowMs: Int64): Boolean; override;
     function Animating: Boolean; override;
@@ -471,6 +472,22 @@ begin
     if FWidgets[I].Visible then
       FWidgets[I].Render(S);
   S.PopClip;
+end;
+
+function TContainer.HitTest(AX, AY: Integer): Boolean;
+var
+  I: Integer;
+begin
+  { A container is a hit when it or any child is: the point may fall on gap or
+    padding inside the container's own rect, which is still the container's
+    area, so this checks children first and falls back to the inherited rect
+    test rather than replacing it. }
+  if inherited HitTest(AX, AY) then
+    Exit(True);
+  for I := 0 to FCount - 1 do
+    if FWidgets[I].Visible and FWidgets[I].HitTest(AX, AY) then
+      Exit(True);
+  Result := False;
 end;
 
 function TContainer.CopySelection(const S: ISurface): Boolean;
