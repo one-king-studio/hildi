@@ -218,6 +218,12 @@ function ErrorText(const AMessage, ADetail: string): string;
   loop, truncated - is never retried. }
 function IsRetryable(const AError: TLLMError): Boolean;
 
+{ Build an error value. Exported because whoever resolves configuration - a
+  session, a provider loader - has to report a leConfig failure through the same
+  type the client uses, rather than inventing a parallel one. }
+function ErrLLM(ACode: TLLMErrorCode; const AMessage, ADetail: string): TLLMError;
+function OkLLM: TLLMError;
+
 { A short, operator-facing phrase for an error code ("network error",
   "rate limited", "authentication failed", ...). }
 function OperatorPhrase(ACode: TLLMErrorCode): string;

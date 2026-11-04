@@ -9,7 +9,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry, Generics.Collections,
-  LLMClient, HildiAgent, HildiSession,
+  LLMClient, LLMEnv, LLMProvider, HildiAgent, HildiSession,
   HildiStore, HildiWorkspace,
   HildiRecallTool,
   HildiHarnessSession, HildiHarnessView, HildiSkills,
@@ -42,6 +42,12 @@ type
     procedure TearDown; override;
   published
     procedure TestInMemoryBuildsLoopAndTools;
+    { ResolveProviderConfig: store -> environment -> default, and an install with
+      no provider row must behave exactly as it did before. }
+    procedure TestNoProviderRowFallsThroughToTheEnvironment;
+    procedure TestStoredProviderSuppliesEndpointModelAndParameters;
+    procedure TestEnvironmentFillsOnlyWhatTheStoreLeftEmpty;
+    procedure TestStoredZeroTemperatureIsAppliedAsConfigured;
     procedure TestStoreCreatesSessionAndHistoryRoundTrips;
     procedure TestHistoryRestoresBlocks;
     procedure TestResumeUnknownSessionFails;
@@ -225,6 +231,153 @@ begin
   Result.Resume := AResume;
   Result.Transport := TFakeTransport.Create;
   FTransports.Add(TFakeTransport(Result.Transport));
+end;
+
+procedure THarnessSessionTest.TestNoProviderRowFallsThroughToTheEnvironment;
+var
+  StoreCfg: TStoreConfig;
+  Store: TSqliteStore;
+  Cfg: TLLMConfig;
+  Err: TLLMError;
+  StoreErr: TStoreError;
+begin
+  { THE BACKWARD-COMPATIBILITY TEST. An install that has never created a provider
+    row must behave exactly as it did before providers existed. }
+  StoreCfg := Default(TStoreConfig);
+  StoreCfg.DatabasePath := FStorePath;
+  StoreCfg.BusyTimeoutMs := 5000;
+  Store := TSqliteStore.Create(StoreCfg);
+  try
+    AssertTrue('store opens', Store.Open(StoreErr));
+    LLMEnv.SetProcessEnv('HILDI_LLM_MODEL', 'env-model');
+    Cfg := Default(TLLMConfig);
+    AssertTrue('resolves', ResolveProviderConfig(Store, Cfg, False, False, Cfg,
+      Err));
+    AssertEquals('model from the environment', 'env-model', Cfg.Model);
+    AssertEquals('no provider named', '', Cfg.Provider);
+    AssertEquals('the default endpoint', DefaultLLMEndpoint, Cfg.Endpoint);
+  finally
+    LLMEnv.SetProcessEnv('HILDI_LLM_MODEL', '');
+    Store.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestStoredProviderSuppliesEndpointModelAndParameters;
+var
+  StoreCfg: TStoreConfig;
+  Store: TSqliteStore;
+  Row: TProviderRow;
+  Cfg: TLLMConfig;
+  Err: TLLMError;
+  StoreErr: TStoreError;
+begin
+  StoreCfg := Default(TStoreConfig);
+  StoreCfg.DatabasePath := FStorePath;
+  StoreCfg.BusyTimeoutMs := 5000;
+  Store := TSqliteStore.Create(StoreCfg);
+  try
+    AssertTrue('store opens', Store.Open(StoreErr));
+    Row := Default(TProviderRow);
+    Row.Name := 'openrouter';
+    Row.Endpoint := 'https://openrouter.ai/api/v1/chat/completions';
+    Row.Model := 'openai/gpt-4o';
+    Row.Temperature := 0.3;
+    Row.HasTemperature := True;
+    Row.MaxTokens := 2048;
+    Row.HasMaxTokens := True;
+    AssertTrue('saved: ' + StoreErr.Message, Store.SaveProvider(Row, StoreErr));
+    AssertTrue('activated: ' + StoreErr.Message,
+      Store.SetActiveProvider('openrouter', StoreErr));
+
+    Cfg := Default(TLLMConfig);
+    AssertTrue('resolves', ResolveProviderConfig(Store, Cfg, False, False, Cfg,
+      Err));
+    { The provider NAME is what the client resolves its dialect from, so it has
+      to survive resolution - a stored row that did not name itself would send
+      OpenRouter traffic to the Fireworks adapter. }
+    AssertEquals('provider named', 'openrouter', Cfg.Provider);
+    AssertEquals('endpoint', Row.Endpoint, Cfg.Endpoint);
+    AssertEquals('model', 'openai/gpt-4o', Cfg.Model);
+    AssertTrue('temperature configured', Cfg.Temperature.Set_);
+    AssertEquals('temperature', 0.3, Cfg.Temperature.Value);
+    AssertTrue('max_tokens configured', Cfg.MaxTokens.Set_);
+    AssertEquals('max_tokens', 2048, Cfg.MaxTokens.Value);
+  finally
+    Store.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestEnvironmentFillsOnlyWhatTheStoreLeftEmpty;
+var
+  StoreCfg: TStoreConfig;
+  Store: TSqliteStore;
+  Row: TProviderRow;
+  Cfg: TLLMConfig;
+  Err: TLLMError;
+  StoreErr: TStoreError;
+begin
+  { The store supplies the model; the environment supplies the key. Neither
+    overwrites the other - the same "never override" rule ApplyEnv follows. }
+  StoreCfg := Default(TStoreConfig);
+  StoreCfg.DatabasePath := FStorePath;
+  StoreCfg.BusyTimeoutMs := 5000;
+  Store := TSqliteStore.Create(StoreCfg);
+  try
+    AssertTrue('store opens', Store.Open(StoreErr));
+    Row := Default(TProviderRow);
+    Row.Name := 'openai';
+    Row.Model := 'gpt-4o';
+    Row.Endpoint := 'https://api.openai.com/v1/chat/completions';
+    AssertTrue('saved', Store.SaveProvider(Row, StoreErr));
+    AssertTrue('activated', Store.SetActiveProvider('openai', StoreErr));
+    LLMEnv.SetProcessEnv('HILDI_LLM_API_KEY', 'env-key');
+
+    Cfg := Default(TLLMConfig);
+    AssertTrue('resolves', ResolveProviderConfig(Store, Cfg, False, False, Cfg,
+      Err));
+    AssertEquals('model from the store', 'gpt-4o', Cfg.Model);
+    AssertEquals('key from the environment', 'env-key', Cfg.ApiKey);
+  finally
+    LLMEnv.SetProcessEnv('HILDI_LLM_API_KEY', '');
+    Store.Free;
+  end;
+end;
+
+procedure THarnessSessionTest.TestStoredZeroTemperatureIsAppliedAsConfigured;
+var
+  StoreCfg: TStoreConfig;
+  Store: TSqliteStore;
+  Row: TProviderRow;
+  Cfg: TLLMConfig;
+  Err: TLLMError;
+  StoreErr: TStoreError;
+begin
+  { The tri-state surviving all the way through resolution. A stored 0.0 means
+    "deliberately deterministic" and must arrive as a CONFIGURED zero, not as an
+    absent parameter - otherwise the request silently omits the key and the
+    operator gets whatever the provider defaults to. }
+  StoreCfg := Default(TStoreConfig);
+  StoreCfg.DatabasePath := FStorePath;
+  StoreCfg.BusyTimeoutMs := 5000;
+  Store := TSqliteStore.Create(StoreCfg);
+  try
+    AssertTrue('store opens', Store.Open(StoreErr));
+    Row := Default(TProviderRow);
+    Row.Name := 'deterministic';
+    Row.Model := 'm';
+    Row.Temperature := 0.0;
+    Row.HasTemperature := True;
+    AssertTrue('saved', Store.SaveProvider(Row, StoreErr));
+    AssertTrue('activated', Store.SetActiveProvider('deterministic', StoreErr));
+
+    Cfg := Default(TLLMConfig);
+    AssertTrue('resolves', ResolveProviderConfig(Store, Cfg, False, False, Cfg,
+      Err));
+    AssertTrue('configured, not absent', Cfg.Temperature.Set_);
+    AssertEquals('and zero', 0.0, Cfg.Temperature.Value);
+  finally
+    Store.Free;
+  end;
 end;
 
 procedure THarnessSessionTest.TestInMemoryBuildsLoopAndTools;

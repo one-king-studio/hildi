@@ -14,7 +14,7 @@ interface
 uses
   Classes, Contnrs, SysUtils,
   AsyncBase, AsyncScheduler, AsyncConcurrency,
-  LLMClient, HildiAgent, HildiSkills, HildiSkillsFiles,
+  LLMClient, LLMProvider, HildiAgent, HildiSkills, HildiSkillsFiles,
   HildiApproval,
   HildiApprovalStore, HildiCommandTool,
   HildiFiles,
@@ -348,7 +348,151 @@ function DiscoverSkillFiles(ARegistry: TSkillRegistry;
   AWorkspaceId: Integer; const ASessionId: string;
   out AShadowed: TStringArray): Integer;
 
+{ Resolve the LLM config for a session: the ACTIVE STORED PROVIDER first, then
+  the environment, then the built-in defaults.
+
+  Exported because it is pure policy over a store and a config - no session
+  state, no I/O beyond the store read - so it is testable without building a
+  session, and Stage 3's dialog will want to preview exactly what a provider
+  choice would produce.
+
+  A missing provider row is NOT a failure: an install that has never configured
+  one must behave exactly as it did before providers existed. False means a
+  stored value cannot be used - a parameter out of range, or an unknown provider
+  name - which is reported, never guessed. }
+function ResolveProviderConfig(AStore: TSqliteStore;
+  const AOverrides: TLLMConfig; AExplicitEndpoint, AExplicitModel: Boolean;
+  out AConfig: TLLMConfig; out AError: TLLMError): Boolean;
+
 implementation
+
+{ Resolve the LLM config for a session: the active stored provider first, then the
+  environment, then the built-in defaults.
+
+  ORDER IS THE DESIGN. The store is what an operator configured through the app,
+  so it wins. The environment is how every install is configured TODAY and stays
+  as a fallback, not a replacement - an install with no provider row must behave
+  exactly as before. The built-in default is last.
+
+  An explicitly passed AConfig field always wins over all three: a caller that
+  set Endpoint or Model means it.
+
+  Returns False only when a stored value cannot be used - a parameter out of
+  range, or a secret missing for a named provider - because those are reports,
+  not guesses. A missing provider row is NOT a failure. }
+function ResolveProviderConfig(AStore: TSqliteStore;
+  const AOverrides: TLLMConfig; AExplicitEndpoint, AExplicitModel: Boolean;
+  out AConfig: TLLMConfig; out AError: TLLMError): Boolean;
+var
+  Row: TProviderRow;
+  StoreErr: TStoreError;
+  Secret: string;
+  EnvConfig: TLLMConfig;
+  ParamError: string;
+  HasRow: Boolean;
+begin
+  AError := ErrLLM(leOk, '', '');
+  Result := True;
+  AConfig := AOverrides;
+
+  HasRow := False;
+  if AStore <> nil then
+    HasRow := AStore.ActiveProvider(Row, StoreErr);
+
+  if HasRow then
+  begin
+    { The provider identity is what the client resolves its dialect from. }
+    AConfig.Provider := Row.Name;
+    if Row.Endpoint <> '' then
+      AConfig.Endpoint := Row.Endpoint;
+    if Row.Model <> '' then
+      AConfig.Model := Row.Model;
+    { Each parameter is copied only when the row CONFIGURED it. A NULL column
+      means "not set, let the provider decide" and must not overwrite a value the
+      caller passed - which is the same tri-state distinction the column exists
+      to preserve. }
+    if Row.HasTemperature then
+    begin
+      AConfig.Temperature.Set_ := True;
+      AConfig.Temperature.Value := Row.Temperature;
+    end;
+    if Row.HasTopP then
+    begin
+      AConfig.TopP.Set_ := True;
+      AConfig.TopP.Value := Row.TopP;
+    end;
+    if Row.HasMaxTokens then
+    begin
+      AConfig.MaxTokens.Set_ := True;
+      AConfig.MaxTokens.Value := Row.MaxTokens;
+    end;
+    if Row.HasFrequencyPenalty then
+    begin
+      AConfig.FrequencyPenalty.Set_ := True;
+      AConfig.FrequencyPenalty.Value := Row.FrequencyPenalty;
+    end;
+    if Row.HasPresencePenalty then
+    begin
+      AConfig.PresencePenalty.Set_ := True;
+      AConfig.PresencePenalty.Value := Row.PresencePenalty;
+    end;
+    if Row.HasSeed then
+    begin
+      AConfig.Seed.Set_ := True;
+      AConfig.Seed.Value := Row.Seed;
+    end;
+    if Length(Row.Stop) > 0 then
+      AConfig.Stop := Row.Stop;
+    { A stored key wins; the environment is the fallback. A named provider with
+      NO key and no environment key is a real configuration error, reported with
+      the provider named rather than as "authentication failed" - no request was
+      made. }
+    if AStore.ProviderSecret(Row.Name, Secret, StoreErr) and (Secret <> '') then
+      AConfig.ApiKey := Secret;
+  end;
+
+  { THE ENVIRONMENT FILLS ONLY WHAT IS STILL EMPTY. ApplyEnv never overrides an
+    existing variable, so this mirrors that rule one level up. }
+  EnvConfig := ResolveLLMConfig(Default(TLLMConfig));
+  if not AExplicitEndpoint and (AConfig.Endpoint = '') then
+    AConfig.Endpoint := EnvConfig.Endpoint;
+  if not AExplicitModel and (AConfig.Model = '') then
+    AConfig.Model := EnvConfig.Model;
+  if AConfig.ApiKey = '' then
+    AConfig.ApiKey := EnvConfig.ApiKey;
+  if not AConfig.Temperature.Set_ then
+    AConfig.Temperature := EnvConfig.Temperature;
+  if not AConfig.TopP.Set_ then
+    AConfig.TopP := EnvConfig.TopP;
+  if not AConfig.MaxTokens.Set_ then
+    AConfig.MaxTokens := EnvConfig.MaxTokens;
+  if not AConfig.FrequencyPenalty.Set_ then
+    AConfig.FrequencyPenalty := EnvConfig.FrequencyPenalty;
+  if not AConfig.PresencePenalty.Set_ then
+    AConfig.PresencePenalty := EnvConfig.PresencePenalty;
+  if not AConfig.Seed.Set_ then
+    AConfig.Seed := EnvConfig.Seed;
+  if Length(AConfig.Stop) = 0 then
+    AConfig.Stop := EnvConfig.Stop;
+
+  { A stored provider we cannot name in the registry would build a client that
+    silently speaks the wrong dialect - the exact failure the seam exists to
+    prevent. Reported here, before any I/O. }
+  if (AConfig.Provider <> '') and (ProviderByKey(AConfig.Provider) = nil) then
+  begin
+    AError := ErrLLM(leConfig, 'unknown provider', AConfig.Provider);
+    Exit(False);
+  end;
+
+  { Validate whatever combination resulted: a stored value out of range is
+    reported with the variable-level message the environment path already uses,
+    never clamped. }
+  if not ResolveLLMParams(AConfig, ParamError) then
+  begin
+    AError := ErrLLM(leConfig, 'invalid request parameter', ParamError);
+    Exit(False);
+  end;
+end;
 
 destructor THarnessSession.Destroy;
 begin
@@ -1614,6 +1758,7 @@ function THarnessSession.Init(const AConfig: THarnessSessionConfig;
 var
   EnvValue: string;
   LlmConfig: TLLMConfig;
+  ProviderError: TLLMError;
   ApprovalStore: IApprovalStore;
   ApprovalService: IApprovalService;
   ApprovalCtx: TApprovalContext;
@@ -1636,11 +1781,19 @@ begin
   Cap := ResolveToolResultCap(AConfig.ToolResultCap);
 
   LlmConfig := Default(TLLMConfig);
-  LlmConfig := ResolveLLMConfig(LlmConfig);
-  if AConfig.Model <> '' then
-    LlmConfig.Model := AConfig.Model;
-  if AConfig.Endpoint <> '' then
-    LlmConfig.Endpoint := AConfig.Endpoint;
+  { STORE -> ENVIRONMENT -> DEFAULT. The active provider row, when there is one,
+    supplies the endpoint, model, parameters and key; the environment fills only
+    what is still empty, so an install with no provider row behaves exactly as it
+    did before this existed. An explicit -m/--endpoint on the command line always
+    wins. }
+  ProviderError := ErrLLM(leOk, '', '');
+  if not ResolveProviderConfig(FView.Store, LlmConfig, AConfig.Endpoint <> '',
+    AConfig.Model <> '', LlmConfig, ProviderError) then
+  begin
+    AError := 'provider configuration: ' + ErrorText(ProviderError.Message,
+      ProviderError.Detail);
+    Exit(False);
+  end;
   FClient := TLLMClient.Create(LlmConfig, AConfig.Transport);
 
   FTools := TToolRegistry.Create;
