@@ -10,7 +10,10 @@ unit LLMClient;
 interface
 
 uses
-  Classes, SysUtils, LLMEnv;
+  Classes, SysUtils, LLMEnv, LLMProvider,
+  { Linked for its initialization: it installs the vendor registrar, so naming
+    it here is what makes ProviderByKey resolve a real vendor. }
+  LLMProviders;
 
 type
   TChatRole = (crSystem, crUser, crAssistant, crTool);
@@ -133,6 +136,10 @@ type
     Seed: TLLMParam;               // integer >= 0
     { Empty => no `stop` key. Sent as a JSON ARRAY when non-empty. }
     Stop: TStringArray;
+    { Which vendor dialect this request speaks. '' means Fireworks, because that
+      is what every install that has never configured a provider is - so an
+      existing setup needs no edit and no migration. }
+    Provider: string;
   end;
 
   TLLMTransport = class
@@ -164,6 +171,10 @@ type
     FTransport: TLLMTransport;
     FOwnsTransport: Boolean;
     FCancel: TLLMCancelCheck;
+    { The vendor dialect resolved from FConfig.Provider. Never nil: an unknown key
+      is a config error reported from Complete, and '' means Fireworks because
+      that is what every existing install is. }
+    FProvider: TLLMProvider;
     { A parameter that is present but unparseable. Carried out of Create because
       a constructor cannot fail, then reported from Complete - which already has
       an out AError: TLLMError - so the failure still happens before any I/O. }
@@ -254,6 +265,11 @@ type
     FHasData: Boolean;
     FOnText: TLLMTextEvent;
     FOnReasoning: TLLMReasoningEvent;
+    { The vendor dialect, so a chunk can be interpreted before the neutral rules
+      see it. Nil is legal and means "plain OpenAI shape", which keeps every
+      existing test and the in-memory fakes working untouched. }
+    FProvider: TLLMProvider;
+    FPendingFinishHint: string;
     FResult: TChatResult;
     FHasFinish: Boolean;
     FDone: Boolean;
@@ -618,6 +634,8 @@ begin
   inherited Create;
   FOnText := AOnText;
   FOnReasoning := AOnReasoning;
+  FProvider := nil;
+  FPendingFinishHint := '';
   FBuffer := '';
   FPending := '';
   FHasData := False;
@@ -727,10 +745,32 @@ var
   Reasoning: TJSONData;
   Finish: TJSONData;
   Usage: TJSONData;
+  Hint: string;
+  HintError: string;
 begin
   if AJson = nil then
     Exit;
   try
+    { THE VENDOR SEES THE CHUNK FIRST. Two things the neutral rules cannot know:
+      OpenRouter can deliver a genuine failure inside an HTTP 200 stream (a
+      choice carrying an `error` object), and OpenAI still documents the
+      deprecated `function_call` finish reason. Without this the first becomes a
+      clean stop with an empty answer and the second a turn that looks like the
+      model simply quit. }
+    if FProvider <> nil then
+    begin
+      Hint := '';
+      HintError := '';
+      if not FProvider.InspectChunk(AJson, HintError, Hint) then
+      begin
+        FProviderError := HintError;
+        FDone := True;
+        Exit;
+      end;
+      if Hint <> '' then
+        FPendingFinishHint := Hint;
+    end;
+
     Err := AJson.Find('error');
     if Err <> nil then
     begin
@@ -784,7 +824,16 @@ begin
     end;
 
     Finish := Choice.Find('finish_reason');
-    if (Finish <> nil) and (Finish.JSONType = jtString) then
+    { THE VENDOR'S RECLASSIFICATION WINS. It inspected this chunk first precisely
+      because its raw vocabulary needs translating - OpenAI's `function_call` is
+      real on the wire but has no neutral equivalent, and the naive mapping drops
+      it to frUnknown, which reads as "the model stopped" while a tool call was
+      actually requested. Checking the hint first is what makes the hook do its
+      job; checking it only as a fallback means it never fires for any reason the
+      parser already recognises. }
+    if FPendingFinishHint <> '' then
+      SetFinish(FPendingFinishHint)
+    else if (Finish <> nil) and (Finish.JSONType = jtString) then
       SetFinish(Finish.AsString);
   finally
     AJson.Free;
@@ -899,6 +948,15 @@ begin
     FResult.FinishReason := frLength
   else if AReason = 'content_filter' then
     FResult.FinishReason := frContentFilter
+  { `function_call` is OpenAI's DEPRECATED spelling of the same event, and it is
+    still in the published enum (openapi.yaml: stop | length | tool_calls |
+    content_filter | function_call). Mapping it here rather than only in a
+    vendor override means every caller gets it right, including an
+    OpenAI-compatible endpoint nobody wrote an adapter for. Left unmapped it
+    becomes frUnknown - a turn that looks like the model simply stopped while a
+    tool call was actually requested, so no tool runs and nothing reports why. }
+  else if AReason = 'function_call' then
+    FResult.FinishReason := frToolCalls
   else
     FResult.FinishReason := frUnknown;
 end;
@@ -928,7 +986,7 @@ end;
 { --- request serialization --------------------------------------------- }
 
 function BuildRequestBody(const AConfig: TLLMConfig;
-  const ARequest: TChatRequest): string;
+  AProvider: TLLMProvider; const ARequest: TChatRequest): string;
 var
   Root: TJSONObject;
   Msgs: TJSONArray;
@@ -936,11 +994,18 @@ var
   MObj, TObj, FnObj, Opts: TJSONObject;
   CallObj: TJSONArray;
   StopArr: TJSONArray;
+  Context: TProviderContext;
   I, J: Integer;
   Params: TJSONData;
 begin
   Root := TJSONObject.Create;
   try
+    { What a vendor needs to add its own fields: the endpoint it was configured
+      with, so a proxy or self-hosted install is handled without a special case. }
+    Context := Default(TProviderContext);
+    Context.Endpoint := AConfig.Endpoint;
+    Context.ApiKey := AConfig.ApiKey;
+    Context.Model := AConfig.Model;
     Root.Add('model', AConfig.Model);
     Root.Add('stream', True);
     { Ask the provider to send a final usage chunk; providers that ignore it
@@ -1023,6 +1088,12 @@ begin
       Root.Add('tools', Tools);
     end;
 
+    { THE VENDOR ADDS ITS OWN FIELDS LAST. It receives the finished neutral body,
+      so it can only add or rewrite what it owns - it can never corrupt the
+      message array it does not understand. }
+    if AProvider <> nil then
+      AProvider.DecorateRequest(Context, Root);
+
     Result := Root.AsJSON;
   finally
     Root.Free;
@@ -1042,6 +1113,13 @@ begin
   FConfigError := '';
   if not ResolveLLMParams(FConfig, FConfigError) then
     ;  // FConfigError is reported from Complete
+  { Resolve the vendor dialect. An empty key is Fireworks (every existing
+    install); a key nobody registered is a config error reported from Complete,
+    never a silent fallback - a typo must not quietly send traffic to the wrong
+    vendor. }
+  FProvider := ProviderByKey(FConfig.Provider);
+  if (FProvider = nil) and (FConfig.Provider <> '') then
+    FConfigError := 'unknown provider "' + FConfig.Provider + '"';
   if ATransport = nil then
   begin
     FTransport := TFPHTTPTransport.Create;
@@ -1117,13 +1195,20 @@ begin
     Exit(False);
   end;
 
-  Body := BuildRequestBody(FConfig, ARequest);
+  Body := BuildRequestBody(FConfig, FProvider, ARequest);
   Headers := TStringList.Create;
   Parser := TSSEParser.Create(AOnText, AOnReasoning);
+  { The parser needs the dialect to interpret chunks the neutral rules cannot:
+    an error carried inside a 200 stream, and a vendor-specific finish reason. }
+  Parser.FProvider := FProvider;
   try
     Headers.Values['Authorization'] := 'Bearer ' + FConfig.ApiKey;
     Headers.Values['Content-Type'] := 'application/json';
     Headers.Values['Accept'] := 'text/event-stream';
+    { Attribution or dialect headers, if the vendor has any. Added after the
+      required three so a provider cannot displace Authorization by accident. }
+    if FProvider <> nil then
+      FProvider.ExtraHeaders(Headers);
 
     FTransport.CancelCheck := FCancel;
     Cancelled := False;

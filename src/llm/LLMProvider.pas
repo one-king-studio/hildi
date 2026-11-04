@@ -122,13 +122,33 @@ const
   DefaultProviderKey = 'fireworks';
 
 type
-  { Forward: the registry is defined below, after the class it holds. }
-  TProviderModelRegistry = class;
+  { Owns the provider instances. Declared BEFORE the functions that mention it:
+    a forward type declaration cannot be completed later in the same interface
+    section, so the class has to come first and the functions follow. }
+  TProviderModelRegistry = class
+  private
+    FItems: TList;
+    function GetCount: Integer;
+    function GetItem(AIndex: Integer): TLLMProvider;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    procedure Add(AProvider: TLLMProvider);
+    function ByKey(const AKey: string): TLLMProvider;
+    property Count: Integer read GetCount;
+    property Items[AIndex: Integer]: TLLMProvider read GetItem; default;
+  end;
 
-{ Fills a registry with the vendors this build knows. Implemented in
-  LLMProviders so that adding a vendor is a new unit plus one line here - never
-  an edit to the seam, the client, or the harness. }
-procedure RegisterBuiltinProviders(ARegistry: TProviderModelRegistry); forward;
+{ REGISTRATION HOOK. The adapters live in LLMProviders, which depends on this
+  unit for the seam - so this unit cannot depend on it, and a plain forward
+  declaration would be unsolvable. LLMProviders installs its registrar in its
+  own initialization instead, which keeps the dependency one-way: adding a
+  vendor is a new unit plus one line there, never an edit to the seam. }
+type
+  TProviderRegistrar = procedure(ARegistry: TProviderModelRegistry);
+
+var
+  ProviderRegistrar: TProviderRegistrar = nil;
 
 { The label to show for a model. Prefers the vendor's own name; otherwise the
   id's last path segment, qualified by its parent when two leaves collide. The
@@ -144,23 +164,6 @@ function RegisteredProviders: TProviderModelRegistry;
 
 { '' resolves to Fireworks, because that is what every existing install is. }
 function ProviderByKey(const AKey: string): TLLMProvider;
-
-type
-  { Owns the provider instances. A bare array of class instances would leak and
-    would need freeing by every caller; one owner keeps it honest. }
-  TProviderModelRegistry = class
-  private
-    FItems: TList;
-    function GetCount: Integer;
-    function GetItem(AIndex: Integer): TLLMProvider;
-  public
-    constructor Create;
-    destructor Destroy; override;
-    procedure Add(AProvider: TLLMProvider);
-    function ByKey(const AKey: string): TLLMProvider;
-    property Count: Integer read GetCount;
-    property Items[AIndex: Integer]: TLLMProvider read GetItem; default;
-  end;
 
 implementation
 
@@ -297,14 +300,6 @@ begin
   Result := True;
 end;
 
-function TLLMProvider.InspectChunk(const AJson: TJSONObject;
-  out AProviderError, AFinishHint: string): Boolean;
-begin
-  AProviderError := '';
-  AFinishHint := '';
-  Result := True;
-end;
-
 { --- registry ------------------------------------------------------------ }
 
 constructor TProviderModelRegistry.Create;
@@ -360,7 +355,8 @@ begin
   if GSoleRegistry = nil then
   begin
     GSoleRegistry := TProviderModelRegistry.Create;
-    RegisterBuiltinProviders(GSoleRegistry);
+    if Assigned(ProviderRegistrar) then
+      ProviderRegistrar(GSoleRegistry);
   end;
   Result := GSoleRegistry;
 end;

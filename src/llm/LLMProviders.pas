@@ -504,4 +504,10 @@ begin
   ARegistry.Add(TOpenAIProvider.Create);
 end;
 
+initialization
+  { Install the registrar, so unloading this unit is what makes the vendors
+    exist. Referencing LLMProviders anywhere in the program links the adapters;
+    a program that never names a vendor gets none, which is the honest result. }
+  LLMProvider.ProviderRegistrar := @RegisterBuiltinProviders;
+
 end.

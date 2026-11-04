@@ -8,7 +8,7 @@ interface
 
 uses
   Classes, SysUtils, ctypes, fpcunit, testregistry, fpjson, jsonparser,
-  LLMClient, LLMFakes;
+  LLMClient, LLMProvider, LLMProviders, LLMFakes;
 
 type
   TTextCollector = class
@@ -57,6 +57,12 @@ type
     procedure TestLegacyEnvSpellingIsHonoured;
     procedure TestNewEnvSpellingWins;
     procedure TestExplicitConfigIsNotOverwrittenByTheEnvironment;
+    { The provider seam, actually wired: an unknown key must fail before any I/O,
+      and a real vendor must see the body and the chunks. }
+    procedure TestUnknownProviderKeyIsAConfigError;
+    procedure TestOpenRouterErrorInsideAStreamBecomesAProviderError;
+    procedure TestOpenAIFunctionCallFinishReasonBecomesToolCalls;
+    procedure TestProviderCanAddItsOwnHeaders;
     procedure TestMissingApiKeyFailsBeforeRequest;
     procedure TestRequestSerializationIncludesModelMessagesAndTools;
     procedure TestRequestSerializationIncludesToolCallsAndToolResults;
@@ -458,6 +464,124 @@ begin
   Cfg.Temperature.Value := 0.2;
   AssertTrue('resolved: ' + E, ResolveLLMParams(Cfg, E));
   AssertEquals('explicit value kept', 0.2, Cfg.Temperature.Value);
+end;
+
+procedure TLLMClientTest.TestUnknownProviderKeyIsAConfigError;
+var
+  Fake: TFakeTransport;
+  Client: TLLMClient;
+  Cfg: TLLMConfig;
+  Res: TChatResult;
+  Err: TLLMError;
+begin
+  { A typo must not quietly send traffic to the wrong vendor, and it must fail
+    before any network I/O. }
+  Fake := TFakeTransport.Create;
+  Cfg := Default(TLLMConfig);
+  Cfg.Endpoint := 'https://example.test/v1/chat/completions';
+  Cfg.Model := 'm';
+  Cfg.ApiKey := 'k';
+  Cfg.Provider := 'no-such-vendor';
+  Client := TLLMClient.Create(Cfg, Fake);
+  try
+    AssertFalse('fails', Client.Complete(UserRequest('hi'), nil, Res, Err));
+    AssertEquals('config error', Ord(leConfig), Ord(Err.Code));
+    AssertTrue('names the provider: ' + Err.Detail, Pos('no-such-vendor',
+      Err.Detail) > 0);
+    AssertTrue('no request sent', Fake.LastBody = '');
+  finally
+    Client.Free;
+    Fake.Free;
+  end;
+end;
+
+procedure TLLMClientTest.TestOpenRouterErrorInsideAStreamBecomesAProviderError;
+var
+  Fake: TFakeTransport;
+  Client: TLLMClient;
+  Cfg: TLLMConfig;
+  Res: TChatResult;
+  Err: TLLMError;
+begin
+  { OpenRouter can deliver a genuine failure inside an HTTP 200 SSE stream: the
+    choice carries an `error` object instead of content. Unhandled, that is a
+    clean stop with an empty answer - the worst failure mode, because nothing
+    looks wrong. }
+  Fake := TFakeTransport.Create;
+  Cfg := Default(TLLMConfig);
+  Cfg.Endpoint := 'https://openrouter.ai/api/v1/chat/completions';
+  Cfg.Model := 'openai/gpt-4o';
+  Cfg.ApiKey := 'k';
+  Cfg.Provider := 'openrouter';
+  Client := TLLMClient.Create(Cfg, Fake);
+  try
+    Fake.AddChunk('data: {"choices":[{"error":{"message":"upstream exploded"}}]}'
+      + SSEBlank);
+    AssertFalse('fails', Client.Complete(UserRequest('hi'), nil, Res, Err));
+    AssertEquals('provider error', Ord(leProvider), Ord(Err.Code));
+    AssertTrue('carries the cause: ' + Err.Detail,
+      Pos('upstream exploded', Err.Detail) > 0);
+  finally
+    Client.Free;
+    Fake.Free;
+  end;
+end;
+
+procedure TLLMClientTest.TestOpenAIFunctionCallFinishReasonBecomesToolCalls;
+var
+  Fake: TFakeTransport;
+  Client: TLLMClient;
+  Cfg: TLLMConfig;
+  Res: TChatResult;
+  Err: TLLMError;
+begin
+  { `function_call` is deprecated but still documented. The neutral parser drops
+    it to frUnknown, which reads as "the model just stopped" while a tool call
+    was actually requested - so the turn silently ends with no tool run. }
+  Fake := TFakeTransport.Create;
+  Cfg := Default(TLLMConfig);
+  Cfg.Endpoint := 'https://api.openai.com/v1/chat/completions';
+  Cfg.Model := 'gpt-4o';
+  Cfg.ApiKey := 'k';
+  Cfg.Provider := 'openai';
+  Client := TLLMClient.Create(Cfg, Fake);
+  try
+    { Built with the shared frame helpers, like every other streaming test: a
+      hand-rolled frame string is what made this fail while 52 neighbours passed
+      through the same parser. }
+    Fake.AddChunk(SSE('{"choices":[{"delta":{},"finish_reason":"function_call"}]}'));
+    Fake.AddChunk(DoneFrame);
+    AssertTrue('completes', Client.Complete(UserRequest('hi'), nil, Res, Err));
+    AssertEquals('mapped onto the verb that exists', Ord(frToolCalls),
+      Ord(Res.FinishReason));
+  finally
+    Client.Free;
+    Fake.Free;
+  end;
+end;
+
+procedure TLLMClientTest.TestProviderCanAddItsOwnHeaders;
+var
+  P: TLLMProvider;
+  Headers: TStringList;
+begin
+  { The only vendor-specific headers today are OpenRouter's attribution pair.
+    They are optional to OpenRouter and must never displace the three required
+    ones, which is why they are added after them. }
+  Headers := TStringList.Create;
+  try
+    P := ProviderByKey('openrouter');
+    AssertTrue('the provider resolves', P <> nil);
+    P.ExtraHeaders(Headers);
+    AssertTrue('attribution header present: ' + Headers.Text,
+      Pos('X-OpenRouter-Title', Headers.Text) > 0);
+    { A vendor with nothing extra adds nothing - not an Authorization. }
+    Headers.Clear;
+    ProviderByKey('fireworks').ExtraHeaders(Headers);
+    AssertEquals('fireworks adds nothing', 0, Headers.Count);
+  finally
+    Headers.Free;
+  end;
 end;
 
 procedure TLLMClientTest.TestMissingApiKeyFailsBeforeRequest;
