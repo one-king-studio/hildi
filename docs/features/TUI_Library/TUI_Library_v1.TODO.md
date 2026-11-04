@@ -123,6 +123,35 @@ alone and the gate then passed twice.
       `MarkdownStream` imports.
 - [ ] **Commit**: `refactor(tui): ♻️ widgets take a renderer, not the markdown tree`
 
+**FINDING — the SPEC's seam is the wrong shape, and the honest answer is smaller.**
+
+The SPEC proposed `IMarkdownRenderer.Render(md, width) -> TRenderLineArray`:
+flat styled lines. `TUIWidgetsMarkdownView` cannot work on flat lines. It uses
+`TMdNode`, `TMdDocument`, `TMdTableRow`, `TMdAlignArray` — the whole v2 node
+tree — because it renders GFM tables as a rounded grid at content width. Flattening
+to lines would mean re-deriving table structure from painted text. The interface
+would be a lie.
+
+The three coupled units are `TUIWidgetsMarkdownView`, `TUIWidgetsMdtheme` and
+`TUIWidgetsFileviewer`. They need the node tree, and `src/markdown` is already a
+standalone, RTL-only module with its own isolation gate — so taking it is a
+dependency on a *library*, not on the application.
+
+**Verified, not assumed:** the library builds and runs with **no `-Fu$(SRC)/markdown`
+and none of the three units**, via a throwaway program that omits them. So
+markdown is genuinely optional, and the tier rule is:
+
+- `src/tui/core`, `src/tui/terminal`, and the other 17 widgets: **RTL only**
+  (plus `src/fuzzy` for the palette).
+- `TUIWidgetsMarkdownView`, `TUIWidgetsMdtheme`, `TUIWidgetsFileviewer`: **plus
+  `src/markdown`**, which is documented as an optional companion.
+
+That is the smallest true statement. An `IMarkdownRenderer` would be a real API
+only if some consumer needed a different renderer — none does, and building one
+now costs an interface plus a re-derivation of table layout for no caller.
+Revisit if a second consumer appears. Recorded as a deliberate, reversible
+decision, not an omission.
+
 ### Phase 7: Selection (character granularity)
 
 - [ ] **Test**: `TestTUISelection.TestSpanNormalisesWhenCaretPrecedesAnchor`

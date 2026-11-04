@@ -409,10 +409,20 @@ tui-standalone: $(wildcard $(SRC)/tui/core/*.pas)
 # path. A widget that reaches into HildiSession, HildiApproval, HildiFuzzy or
 # HildiHarnessSubagent fails to link HERE - which is what keeps the tier
 # exportable instead of merely tidy.
-tui-widgets-standalone: $(TUILIB_SRCS) $(MARKDOWN_SRCS)
+tui-widgets-standalone: $(TUILIB_SRCS)
 	@mkdir -p $(DEBUG_BIN) $(BUILD)/units/tui-widgets
-	$(FPC) $(FPCARGS) $(DEBUG) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -Fu$(SRC)/markdown -FU$(BUILD)/units/tui-widgets -FE$(DEBUG_BIN) -o$(DEBUG_BIN)/tui-widgets-standalone $(EXAMPLES)/tui_widgets_standalone.pas
+	$(FPC) $(FPCARGS) $(DEBUG) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -FU$(BUILD)/units/tui-widgets -FE$(DEBUG_BIN) -o$(DEBUG_BIN)/tui-widgets-standalone $(EXAMPLES)/tui_widgets_standalone.pas
 	$(DEBUG_BIN)/tui-widgets-standalone
+
+# The same tier WITH the optional markdown companion. Two configurations, two
+# gates: without the define the three markdown widgets are absent from both the
+# program and the search path, which proves the other 17 need no markdown; with
+# it, the three that do need it are compiled and checked too. Leaving them out
+# of the first gate without this second one would mean nothing proves them.
+tui-widgets-markdown-standalone: $(TUILIB_SRCS) $(MARKDOWN_SRCS)
+	@mkdir -p $(DEBUG_BIN) $(BUILD)/units/tui-widgets-markdown
+	$(FPC) $(FPCARGS) $(DEBUG) -dTUI_WITH_MARKDOWN -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -Fu$(SRC)/markdown -FU$(BUILD)/units/tui-widgets-markdown -FE$(DEBUG_BIN) -o$(DEBUG_BIN)/tui-widgets-markdown-standalone $(EXAMPLES)/tui_widgets_standalone.pas
+	$(DEBUG_BIN)/tui-widgets-markdown-standalone
 
 changes-standalone: $(CHANGES_SRCS)
 	@mkdir -p $(DEBUG_BIN) $(BUILD)/units/changes
@@ -528,7 +538,8 @@ $(DEBUG_BIN)/hildi-agent-probe: $(EXAMPLES)/headless_agent.pas $(LIB_SRCS) $(TUI
 # isolation also removes the intra-process state pollution that makes a
 # single-process run of the whole suite report failures that are not real.
 check: test-parallel test-leak-parallel shell-standalone markdown-standalone \
-	tui-standalone tui-widgets-standalone changes-standalone
+	tui-standalone tui-widgets-standalone tui-widgets-markdown-standalone \
+	changes-standalone
 
 # The same functional suite, one process per suite, in parallel. Measured on a
 # 10-core machine: ~169 s and 36 spurious failures as one process, ~22 s and 0

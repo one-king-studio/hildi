@@ -20,16 +20,26 @@ uses
   {$ifdef unix}cthreads, cwstring,{$endif}   // cthreads first; cwstring for Unicode
   SysUtils,
   TUIBase, TUIInput, TUISurface, TUITheme, TUIWidget,
-  { EVERY unit in src/tui/**, listed deliberately. The gate must prove the whole
-    tier is exportable, so listing only what this program uses would leave the
-    rest unchecked - and an unlisted unit is an unproven one. The six Hildi
-    domain widgets (chat, compose, the three dialogs) are NOT here: they live in
-    src/ beside the harness, because they are Hildi's, not the library's. }
+  { EVERY library unit, listed deliberately: the gate must prove the whole tier
+    is exportable, so listing only what this program uses would leave the rest
+    unchecked - and an unlisted unit is an unproven one. The eight Hildi domain
+    widgets (chat, compose, the dialogs, the agent list) are NOT here: they live
+    in src/ beside the harness, because they are Hildi's, not the library's.
+
+    The three markdown widgets are conditional. Built WITHOUT the define they
+    are absent from the program AND from the search path, which is what proves
+    the other 17 widgets need no markdown at all. Built WITH it, they get a gate
+    of their own - otherwise taking them out of this list would leave them
+    unproven by anything. }
   TUIWidgetsText, TUIWidgetsPanel, TUIWidgetsButton, TUIWidgetsActions,
-  TUIWidgetsDiffviewer, TUIWidgetsEdit, TUIWidgetsFileviewer, TUIWidgetsFocus,
-  TUIWidgetsList, TUIWidgetsMarkdownView, TUIWidgetsMdtheme, TUIWidgetsModal,
+  TUIWidgetsDiffviewer, TUIWidgetsEdit, TUIWidgetsFocus,
+  TUIWidgetsList, TUIWidgetsModal,
   TUIWidgetsPalette, TUIWidgetsProgress, TUIWidgetsPrompt, TUIWidgetsScroll,
-  TUIWidgetsSpinner;
+  TUIWidgetsSpinner
+  {$ifdef TUI_WITH_MARKDOWN}
+  , TUIWidgetsMarkdownView, TUIWidgetsMdtheme, TUIWidgetsFileviewer
+  {$endif}
+  ;
 
 var
   Failures: Integer;

@@ -188,32 +188,38 @@ The widgets adopting selection by composition in v1 are the text drawers:
 `TChatPanel`, `TMarkdownView`, `TFileviewer`, `TDiffViewer`, `THistoryModal`.
 At least one ships in this feature; the rest are follow-on cards.
 
-### Markdown seam
+### Markdown: an optional companion module, not a seam
 
-Bundled, substitutable, one interface — not a plugin system.
+**This reverses the earlier design in this SPEC.** The original proposed an
+`IMarkdownRenderer` returning flat styled lines. That interface cannot work:
+`TUIWidgetsMarkdownView` renders GFM tables as a rounded grid at content width,
+so it needs `TMdNode`, `TMdDocument`, `TMdTableRow` and `TMdAlignArray` — the
+whole v2 node tree. Flattening to lines would mean re-deriving table structure
+from painted text, and the interface would be a lie.
 
-```pascal
-type
-  { Rendered blocks a widget needs, in the toolkit's own vocabulary so the
-    toolkit never imports markdown types. }
-  TRenderLine = record
-    Text: UnicodeString;
-    Attr: TAttr;
-  end;
-  TRenderLineArray = array of TRenderLine;
+The honest shape is smaller:
 
-  IMarkdownRenderer = interface
-    { Parse a document into styled lines for a given width. }
-    function Render(const AMarkdown: UnicodeString; AWidth: Integer): TRenderLineArray;
-  end;
-```
+| Tier | May use |
+| --- | --- |
+| `src/tui/core`, `src/tui/terminal` | RTL (+ `src/fuzzy` where needed) |
+| the 17 library widgets | core + terminal + RTL + `src/fuzzy` |
+| `TUIWidgetsMarkdownView`, `TUIWidgetsMdtheme`, `TUIWidgetsFileviewer` | the above **+ `src/markdown`** |
 
-Default: the binding to `src/markdown/` ships with the module, so `src/tui/`
-may name `src/markdown/` in `uses` and the isolation gate allows exactly that
-one sibling directory — no others. A consumer wanting no markdown overrides the
-renderer at construction. This keeps the honest, cheap option while giving the
-seam a name, and it means `MarkdownTypes` stops appearing directly in four
-widget units.
+`src/markdown` is already a standalone, RTL-only module with its own isolation
+gate (`markdown-standalone`), so depending on it is depending on a *library*,
+not on the application. That is the same relationship `src/shell` and `src/fuzzy`
+have to their consumers.
+
+**Verified, not assumed:** the library builds and runs with no
+`-Fu$(SRC)/markdown` and none of the three markdown units on the path. So
+markdown is genuinely optional, and a consumer wanting no markdown takes the
+other 17 widgets.
+
+No `IMarkdownRenderer` in v1. An interface earns its place when a second
+implementation exists; here it would cost a re-derivation of table layout for
+zero callers. If a consumer needs a different renderer, the node tree is the
+contract to abstract — which is a bigger decision than a lines interface, and
+should be made with that consumer in hand.
 
 ### Test kit
 
@@ -394,8 +400,8 @@ Ordered for independent value and independent revert. Each stage ends green.
    `src/tui/terminal/`, update the Makefile and gates.
 5. **Widgets gate.** Add the failing `tui-widgets-standalone`, then de-couple the
    four app-coupled widgets (records and `of object` callbacks) until it passes.
-6. **Markdown seam.** `IMarkdownRenderer`, default binding, four widgets moved
-   off direct `MarkdownTypes` imports.
+6. **Markdown boundary.** Document `src/markdown` as an optional companion
+   module and assert the three markdown widgets are the only units that need it.
 7. **Selection.** `TSelection`, `TSelectable`, highlight paint, one widget
    adopted, copy path wired to the existing OSC 52 transport.
 8. **Test kit.** `TUITestKit`, three migrations, docs.
@@ -406,5 +412,5 @@ Ordered for independent value and independent revert. Each stage ends green.
 
 - Keyboard selection and word/line granularity.
 - Cross-widget selection via a container model.
-- `IMarkdownRenderer` growing block-level output if a consumer needs it.
+- `src/markdown` growing a renderer abstraction if a second consumer appears.
 - A distributable package once a second consumer exists.
