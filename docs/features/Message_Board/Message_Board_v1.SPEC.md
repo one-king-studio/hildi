@@ -237,10 +237,17 @@ Contributed through `IToolProvider.PromptFragment`, so it rides `FormatTail` on 
 **last message** and costs only what follows the stable prefix:
 
 ```
-<board unread="2" q="1" d="4" f="7">last 2m</board>
+<board unread="2" questions="1" decisions="4" findings="7">last 2m</board>
 ```
 
-Six fields, no prose, no titles. **Budget: 120 bytes.** The manifest header that
+Four attributes and an age: no prose, no titles. The counts are **spelled out**,
+not `q`/`d`/`f` — one letter cannot say that `unread` means "new since your last
+look" while the rest are totals, and a model reading `q="0" d="8" f="22"`
+reasonably concluded that 22 findings needed attention. **The open tag is an
+attribute list and nothing else**; the gloss for `unread` lives in `StableText`
+with the rest of the element's description, never inside the tag.
+
+**Budget: 120 bytes.** The manifest header that
 explains the element lives in `StableText` (the system prompt), so the per-request
 element is pure data — the same split the skills manifest uses.
 

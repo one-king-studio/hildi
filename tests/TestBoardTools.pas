@@ -52,6 +52,8 @@ type
     procedure TestAllThreeToolsAreRegistered;
     { The TOC drops whole fields in a stated order, never truncating mid-field. }
     procedure TestTocDropOrderKeepsUnreadAndAge;
+    { The TOC's open tag is an attribute list and nothing else. }
+    procedure TestTocOpenTagIsWellFormedAttributes;
     { A peer is unaddressable if the board does not say who wrote an entry. }
     procedure TestReadNamesTheAuthor;
     { Full-text search spans titles, bodies and topics, and skips deleted. }
@@ -312,6 +314,57 @@ begin
   { And if a field was dropped, it is never one of the two protected ones. }
   if Pos('f="', Line) = 0 then
     AssertTrue('unread still there when f went', Pos('unread=', Line) > 0);
+end;
+
+procedure TBoardToolsTest.TestTocOpenTagIsWellFormedAttributes;
+{ The open tag is an ATTRIBUTE LIST, nothing else: `name="value"` pairs
+  separated by spaces. The gloss for `unread` used to be written inside the tag
+  - `<board unread="0" (new since your last look) questions="0" ...>` - which no
+  XML reader accepts, and which contradicted the closed-set element description
+  the system prompt gives the model. It rides every request, so it is not a
+  cosmetic nit. }
+var
+  R, E: string;
+  Line, OpenTag, Rest: string;
+  P: Integer;
+begin
+  AssertTrue('post', FTools.Post(PostJson('decision', 'retry', 't'), R, E));
+  Line := FTools.TocLine(E);
+  AssertTrue('the element exists', Line <> '');
+
+  P := Pos('>', Line);
+  AssertTrue('has an open tag', (P > 1) and (Line[1] = '<'));
+  OpenTag := Copy(Line, 1, P);          // includes both '<' and '>'
+  AssertTrue('starts with the element name: ' + OpenTag,
+    Copy(OpenTag, 1, 7) = '<board ');
+
+  { Everything between the name and '>' must be `name="value"` pairs. Strip the
+    name, then tokenise on spaces: every token has to contain exactly one '='
+    and a quoted value. Parentheses, commas and bare words are what the bug
+    looked like. }
+  Rest := Trim(Copy(OpenTag, 8, Length(OpenTag) - 8));
+  AssertTrue('has attributes: ' + OpenTag, Rest <> '');
+  while Rest <> '' do
+  begin
+    P := Pos(' ', Rest);
+    if P = 0 then
+    begin
+      AssertTrue('trailing token is name="value", got: ' + Rest,
+        (Pos('="', Rest) > 0) and (Rest[Length(Rest)] = '"'));
+      Rest := '';
+    end
+    else
+    begin
+      AssertTrue('token is name="value", got: ' + Copy(Rest, 1, P - 1),
+        (Pos('="', Copy(Rest, 1, P - 1)) > 0) and
+        (Copy(Rest, 1, P - 1)[P - 1] = '"'));
+      Rest := Trim(Copy(Rest, P + 1, MaxInt));
+    end;
+  end;
+
+  { And no prose smuggled in as a bare parenthetical anywhere in the tag. }
+  AssertTrue('no parenthesis in the open tag: ' + OpenTag,
+    (Pos('(', OpenTag) = 0) and (Pos(')', OpenTag) = 0));
 end;
 
 procedure TBoardToolsTest.TestAllThreeToolsAreRegistered;

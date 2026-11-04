@@ -703,8 +703,17 @@ var
       of the same kind, so a model seeing q="0" d="8" f="22" reasonably read
       "8 decisions and 22 findings NEED ATTENTION" - when in fact only `unread`
       means new-since-last-look; the others are totals. One letter cannot say
-      that, so the names do. }
-    Fields := 'unread="' + IntToStr(Unread) + '" (new since your last look)';
+      that, so the names do.
+
+      The gloss for that distinction is NOT repeated here. It used to be written
+      inside the open tag (`unread="0" (new since your last look)`), which is not
+      an attribute list at all - no XML reader accepts a bare parenthetical
+      between attributes - and the tag is `name="value"` pairs only. The
+      explanation already lives in the system prompt (HildiWrap's description of
+      <board>), where static prose belongs and where it is cached; repeating it
+      in the body would spend this element's 120-byte budget and push out the
+      very counts it explains. }
+    Fields := 'unread="' + IntToStr(Unread) + '"';
     if AWithQ then
       Fields := Fields + ' questions="' + IntToStr(Q) + '"';
     if AWithD then
