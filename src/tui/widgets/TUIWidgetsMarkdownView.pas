@@ -13,7 +13,7 @@ interface
 uses
   MarkdownTypes, MarkdownTree, MarkdownStream,
   TUIWidgetsMdtheme,
-  TUIBase, TUIWidget,
+  TUIBase, TUIInput, TUIWidget,
   TUIWidgetsText, TUISurface,
   TUIGrapheme;
 
@@ -98,6 +98,10 @@ type
       becomes one entry per item (and recurses into a nested list). }
     procedure ExpandBlock(const AId, ADepth: Integer);
   public
+    { Forward mouse events to the blocks, newest first. Without this the
+      view is a leaf that swallows nothing and delivers nothing: a press
+      never reached the TTextBlock that knows how to select. }
+    function HandleEvent(const E: TInputEvent): Boolean; override;
     constructor Create(const ATheme: TMdTheme); overload;
     constructor Create; overload;
     destructor Destroy; override;
@@ -864,6 +868,20 @@ begin
     RowH := FTail.Measure(Default(TSize)).H;
     FTail.Arrange(Rc(ABounds.X, Y, ABounds.W, RowH));
   end;
+end;
+
+function TMarkdownView.HandleEvent(const E: TInputEvent): Boolean;
+var
+  I: Integer;
+begin
+  { Reverse order: the last drawn block is on top where blocks overlap. }
+  if FTail <> nil then
+    if FTail.HandleEvent(E) then
+      Exit(True);
+  for I := High(FBlocks) downto 0 do
+    if FBlocks[I].HandleEvent(E) then
+      Exit(True);
+  Result := False;
 end;
 
 procedure TMarkdownView.Render(const S: ISurface);

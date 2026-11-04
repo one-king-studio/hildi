@@ -1423,6 +1423,15 @@ begin
       FOnToggle(Self);
     Exit(True);
   end;
+  { LAST, not first. A file row and a toggle both own their clicks: putting the
+    body ahead of them meant a click on a file row was swallowed by the text
+    block and the host never saw it (TestClickingAFileRowRaisesThePath caught
+    exactly that). Anything the item does not claim falls through here, which is
+    where prose blocks - which claim nothing above - hand the drag to their text. }
+  if FMarkdown <> nil then
+    Result := FMarkdown.HandleEvent(E)
+  else if FText <> nil then
+    Result := FText.HandleEvent(E);
 end;
 
 function TChatItem.Advance(const ANowMs: Int64): Boolean;
