@@ -29,7 +29,7 @@ type
     function RowTextAt(ARow: Integer): UnicodeString; override;
     function RowWrapsAt(ARow: Integer): Boolean; override;
   public
-    constructor Create(const ATheme: TTheme; const ARows: TStringArray);
+    constructor Create(const ARows: TStringArray);
     { Draw the rows as plain text, then the highlight - the real contract. }
     procedure Render(const S: ISurface); override;
   end;
@@ -61,11 +61,13 @@ implementation
 
 { TProbeSelectable }
 
-constructor TProbeSelectable.Create(const ATheme: TTheme;
-  const ARows: TStringArray);
+constructor TProbeSelectable.Create(const ARows: TStringArray);
 begin
-  inherited Create(ATheme);
+  inherited Create;
   FRows := ARows;
+  { Selection is opt-in now: a leaf that adopts this base must not swallow
+    presses unless the host asks. }
+  Selectable := True;
 end;
 
 function TProbeSelectable.RowCount: Integer;
@@ -129,7 +131,7 @@ function TSelectableTest.MakeProbe(const ARows: TStringArray): TProbeSelectable;
 var
   R: TRect;
 begin
-  Result := TProbeSelectable.Create(FTheme, ARows);
+  Result := TProbeSelectable.Create(ARows);
   R := Default(TRect);
   R.X := 0;
   R.Y := 0;

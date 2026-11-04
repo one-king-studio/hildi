@@ -13,7 +13,8 @@ interface
 
 uses
   TUIBase, TUIGrapheme,
-  TUIWidget, TUISurface;
+  TUIWidget, TUISurface,
+  TUIWidgetsSelectable;
 
 type
   TSpan = record
@@ -46,7 +47,7 @@ type
   { A leaf that holds styled text, measured and wrapped in display columns. The
     cluster build and the wrap are cached and only redone when the spans or the
     wrap width change, so a large block is not re-wrapped on every frame. }
-  TTextBlock = class(TWidget)
+  TTextBlock = class(TSelectable)
   private
     FSpans: array of TSpan;
     FWrap: TWrapMode;
@@ -89,6 +90,15 @@ type
     { Diagnostic: how many times the block has built clusters or wrapped. A
       steady-state measure/render must not increase it. }
     property LayoutBuilds: Integer read FLayoutBuilds;
+  protected
+    { Selection: the rows are the ones Render drew, from the same cache, so the
+      highlight and the copied text cannot drift from what is on screen. }
+    function RowCount: Integer; override;
+    function RowTextAt(ARow: Integer): UnicodeString; override;
+    function RowWrapsAt(ARow: Integer): Boolean; override;
+    { Honours the hanging indent and the alignment: a centred or indented block
+      does not start at its own left edge. }
+    function RowOriginX(ARow: Integer): Integer; override;
   end;
 
 { Split a hint line into two-tone spans. Input is one or more "key action"
@@ -464,6 +474,80 @@ begin
     Inc(FLayoutBuilds);
   end;
   Result := FCacheClusters;
+end;
+
+
+function TTextBlock.RowCount: Integer;
+begin
+  if FBounds.W <= 0 then
+    Exit(0);
+  Result := Length(CachedLines(FBounds.W));
+end;
+
+function TTextBlock.RowTextAt(ARow: Integer): UnicodeString;
+var
+  Lines: TStyledLines;
+  I: Integer;
+begin
+  Result := '';
+  if FBounds.W <= 0 then
+    Exit;
+  Lines := CachedLines(FBounds.W);
+  if (ARow < 0) or (ARow > High(Lines)) then
+    Exit;
+  { A row is a run of clusters, not a string: rebuild it so wide characters and
+    combining marks survive. }
+  for I := 0 to High(Lines[ARow]) do
+    Result := Result + Lines[ARow][I].Ch;
+end;
+
+function TTextBlock.RowWrapsAt(ARow: Integer): Boolean;
+begin
+  Result := False;
+  if FBounds.W <= 0 then
+    Exit;
+  { CachedLines fills FCacheWrapEnds as a side effect, so it must be called
+    first - the flag array belongs to the same cache as the rows. }
+  CachedLines(FBounds.W);
+  if (ARow >= 0) and (ARow <= High(FCacheWrapEnds)) then
+    Result := FCacheWrapEnds[ARow];
+end;
+
+function TTextBlock.RowOriginX(ARow: Integer): Integer;
+var
+  Lines: TStyledLines;
+  LW, Base, AvailW, Offset: Integer;
+begin
+  Result := FBounds.X;
+  if FBounds.W <= 0 then
+    Exit;
+  Lines := CachedLines(FBounds.W);
+  if (ARow < 0) or (ARow > High(Lines)) then
+    Exit;
+  LW := LineWidth(Lines[ARow]);
+  if ARow > 0 then
+  begin
+    Base := FHangIndent;
+    AvailW := FBounds.W - FHangIndent;
+  end
+  else
+  begin
+    Base := 0;
+    AvailW := FBounds.W;
+  end;
+  { Mirrors Render exactly. If these two ever disagree the highlight lands off
+    the text it belongs to, which is why this reads the same cache. }
+  case FAlign of
+    taCenter:
+      Offset := Base + (AvailW - LW) div 2;
+    taRight:
+      Offset := Base + AvailW - LW;
+  else
+    Offset := Base;
+  end;
+  if Offset < 0 then
+    Offset := 0;
+  Result := FBounds.X + Offset;
 end;
 
 function TTextBlock.CachedLines(AWidth: Integer): TStyledLines;

@@ -24,7 +24,7 @@ interface
 uses
   SysUtils,
   TUIBase, TUIInput,
-  TUISurface, TUITheme, TUIWidget,
+  TUISurface, TUIWidget,
   TUIGrapheme,
   TUISelection;
 
@@ -33,11 +33,12 @@ type
   private
     FSelection: TSelection;
     FDragging: Boolean;
-    FTheme: TTheme;
     { Surface coordinates of content cell (0, 0). A widget inside a scrolled
       container sets this once per frame so the highlight lands on the cells it
       actually painted. }
     FContentX, FContentY: Integer;
+    FHighlight: TAttr;
+    FSelectable: Boolean;
     function PosAt(AX, AY: Integer): TTextPos;
     procedure ClearStale;
   protected
@@ -48,8 +49,20 @@ type
     { True when ARow ended by wrapping rather than at a line break. Decides
       whether a copy joins that row to the next with a newline. }
     function RowWrapsAt(ARow: Integer): Boolean; virtual;
+    { The surface X of display column 0 on AIndex. A block with a hanging indent
+      or a centred alignment does not start at its own Bounds.X, so the
+      highlight must ask rather than assume. Default: the widget's left edge. }
+    function RowOriginX(ARow: Integer): Integer; virtual;
   public
-    constructor Create(const ATheme: TTheme);
+    { No theme: selection is a behaviour, not a look. The host sets Highlight, so
+      a widget that already owns a theme does not have to hand one over. }
+    constructor Create;
+    { Opt-in. Default False, so re-parenting an existing leaf does not silently
+      make every one of them swallow left-clicks. }
+    property Selectable: Boolean read FSelectable write FSelectable;
+    { The attribute painted over a selected cell. Defaults to reverse video, so
+      a host that sets nothing still gets a visible selection. }
+    property Highlight: TAttr read FHighlight write FHighlight;
     { Where content cell (0,0) sits on the surface. }
     procedure SetContentOrigin(AX, AY: Integer);
     { Paint the highlight over the cells already drawn for this selection. Must
@@ -69,13 +82,17 @@ type
 
 implementation
 
-constructor TSelectable.Create(const ATheme: TTheme);
+constructor TSelectable.Create;
 begin
   inherited Create;
-  FTheme := ATheme;
   FSelection := Default(TSelection);
   FContentX := 0;
   FContentY := 0;
+  FSelectable := False;
+  { Reverse video: readable on any theme, and visible even when a host forgets
+    to set one. A host that wants the softer accent assigns Highlight. }
+  FHighlight := Default(TAttr);
+  FHighlight.Style := [sfReverse];
 end;
 
 function TSelectable.RowCount: Integer;
@@ -91,6 +108,11 @@ end;
 function TSelectable.RowWrapsAt(ARow: Integer): Boolean;
 begin
   Result := False;
+end;
+
+function TSelectable.RowOriginX(ARow: Integer): Integer;
+begin
+  Result := FBounds.X;
 end;
 
 procedure TSelectable.SetContentOrigin(AX, AY: Integer);
@@ -164,7 +186,7 @@ end;
 procedure TSelectable.RenderSelection(const S: ISurface);
 var
   Span: TTextSpan;
-  Row, FirstCol, LastCol, Col, Y: Integer;
+  Row, FirstCol, LastCol, Col, Y, OriginX: Integer;
   C: TCell;
   Line: UnicodeString;
 begin
@@ -188,23 +210,24 @@ begin
     if FirstCol < 0 then
       FirstCol := 0;
     Y := FContentY + Row;
+    OriginX := RowOriginX(Row);
     Col := 0;
     { Walk the cells so a wide character is highlighted as a whole. Reading the
       cell back rather than assuming a width keeps the highlight on the cells
       the renderer actually painted. }
     while Col < LastCol do
     begin
-      C := S.Get(FContentX + Col, Y);
+      C := S.Get(OriginX + Col, Y);
       if (Col >= FirstCol) and (Col < LastCol) then
       begin
-        C.Attr := FTheme.AccentSoft;
-        S.Put(FContentX + Col, Y, C);
+        C.Attr := FHighlight;
+        S.Put(OriginX + Col, Y, C);
         { A wide cluster occupies two cells; paint its continuation to keep the
           background seamless, since Put on the first cell owns the glyph. }
         if (StringWidth(C.Ch) = 2) and (Col + 1 < LastCol) then
         begin
           C.Ch := '';
-          S.Put(FContentX + Col + 1, Y, C);
+          S.Put(OriginX + Col + 1, Y, C);
           Inc(Col);
         end;
       end;
@@ -219,6 +242,10 @@ var
 begin
   Result := False;
   if E.Kind <> ikMouse then
+    Exit;
+  { Opt-in. A leaf that adopted this base must not swallow presses unless the
+    host asked for selection. }
+  if not FSelectable then
     Exit;
   { Shift+click is the terminal's own selection. Consuming it would take
     Shift+drag away from the operator, which is the documented bypass. }
