@@ -3617,14 +3617,23 @@ begin
     Row.HasSeed := FProviderFormRow.HasSeed;
     Row.Stop := FProviderFormRow.Stop;
   end;
-  if FSession.Store.SaveProvider(Row, Err) then
+  if not FSession.Store.SaveProvider(Row, Err) then
   begin
-    CloseProviderForm;
-    LoadProviders;
-    SetState(psReady, 'saved: ' + Res.Name);
-  end
-  else
     AppendError('save: ' + Err.Message);
+    Exit;
+  end;
+  { THE KEY IS NOT A ROW FIELD. It goes to the secret store, keyed by name, and
+    only when the operator actually typed one - so editing a model does not force
+    retyping the secret, and an empty field never clears a working key. }
+  if Res.SecretSet then
+    if not FSession.Store.SetProviderSecret(Res.Name, Res.Secret, Err) then
+    begin
+      AppendError('save key: ' + Err.Message);
+      Exit;
+    end;
+  CloseProviderForm;
+  LoadProviders;
+  SetState(psReady, 'saved: ' + Res.Name);
 end;
 
 procedure THarnessApp.SyncProviderModal;

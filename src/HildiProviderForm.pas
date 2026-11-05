@@ -30,11 +30,17 @@ type
     Key: string;
     Endpoint: string;
     Model: string;
+    { The API key as typed. Transient: the host hands it to SetProviderSecret and
+      never puts it on a TProviderRow, because the row is what gets rendered. }
+    Secret: string;
+    { True when the operator typed a key. False leaves any stored key alone, so
+      editing the model does not require retyping the secret. }
+    SecretSet: Boolean;
   end;
 
   TProviderForm = class(TModal)
   private
-    FName, FKey, FEndpoint, FModel: TPromptLine;
+    FName, FKey, FEndpoint, FModel, FSecret: TPromptLine;
     FBody: TContainer;
     FFocus: Integer;
     FEditing: Boolean;
@@ -97,17 +103,23 @@ begin
   FKey := TPromptLine.Create('provider: ');
   FEndpoint := TPromptLine.Create('endpoint: ');
   FModel := TPromptLine.Create('model: ');
+  { The key is a field like any other, but it is NOT read back from the row: a
+    row has no secret, by design. Editing shows it empty and leaves the stored
+    key alone unless something is typed. }
+  FSecret := TPromptLine.Create('api key: ');
   FName.OnSubmit := SubmitText;
   FKey.OnSubmit := SubmitText;
   FEndpoint.OnSubmit := SubmitText;
   FModel.OnSubmit := SubmitText;
+  FSecret.OnSubmit := SubmitText;
   { The four prompts live in a container so TModal has something to arrange and
     render; a nil content would leave the frame empty. }
-  FBody := TContainer.Create([Fill(1)], [Auto, Auto, Auto, Auto]);
+  FBody := TContainer.Create([Fill(1)], [Auto, Auto, Auto, Auto, Auto]);
   FBody.Add(FName, 0, 0);
   FBody.Add(FKey, 0, 1);
   FBody.Add(FEndpoint, 0, 2);
   FBody.Add(FModel, 0, 3);
+  FBody.Add(FSecret, 0, 4);
   inherited Create(ATheme, FBody, False);
   if AEditing then
     SetTitle('edit provider')
@@ -124,6 +136,7 @@ begin
   FKey.Free;
   FEndpoint.Free;
   FModel.Free;
+  FSecret.Free;
   inherited Destroy;
 end;
 
@@ -144,6 +157,7 @@ begin
   FKey.Active := AIndex = 1;
   FEndpoint.Active := AIndex = 2;
   FModel.Active := AIndex = 3;
+  FSecret.Active := AIndex = 4;
   FFocus := AIndex;
 end;
 
@@ -154,7 +168,7 @@ begin
   Next := FFocus + ADelta;
   if Next < 0 then
     Next := 3;
-  if Next > 3 then
+  if Next > 4 then
     Next := 0;
   FocusField(Next);
 end;
@@ -199,6 +213,8 @@ begin
   Result.Key := Trim(string(FKey.Text));
   Result.Endpoint := Trim(string(FEndpoint.Text));
   Result.Model := Trim(string(FModel.Text));
+  Result.Secret := string(FSecret.Text);
+  Result.SecretSet := Result.Secret <> '';
 end;
 
 { The rules the SPEC pins, decided here because they need no store. }
@@ -291,8 +307,9 @@ begin
     0: Result := FName.HandleEvent(E);
     1: Result := FKey.HandleEvent(E);
     2: Result := FEndpoint.HandleEvent(E);
+    3: Result := FModel.HandleEvent(E);
   else
-    Result := FModel.HandleEvent(E);
+    Result := FSecret.HandleEvent(E);
   end;
   if Result then
     Changed;
