@@ -109,16 +109,60 @@ begin
   Result := True;
 end;
 
+{ Remove a directory and everything under it. RemoveDir removes an EMPTY
+  directory only, which is why the teardown below had been leaving every test's
+  tree behind. FPC's SysUtils has no DelTree, and FileUtil is not on this
+  project's unit path, so this is the two-level walk the smoke runner already
+  uses - enough for these fixtures, which nest at most two deep. }
+procedure RemoveTree(const APath: string);
+var
+  SR: TSearchRec;
+  Child: string;
+begin
+  if not DirectoryExists(APath) then
+    Exit;
+  if FindFirst(IncludeTrailingPathDelimiter(APath) + '*', faAnyFile, SR) = 0 then
+  begin
+    try
+      repeat
+        if (SR.Name = '.') or (SR.Name = '..') then
+          Continue;
+        Child := IncludeTrailingPathDelimiter(APath) + SR.Name;
+        if DirectoryExists(Child) then
+          RemoveTree(Child)
+        else
+          DeleteFile(Child);
+      until FindNext(SR) <> 0;
+    finally
+      FindClose(SR);
+    end;
+  end;
+  RemoveDir(APath);
+end;
+
 procedure TSkillsFilesTest.SetUp;
 begin
+  { The PID is part of the name because Random() alone is not unique ACROSS
+    PROCESSES: the parallel gate starts its workers together, each calls
+    Randomize seeded from the clock, and two workers can draw the same number.
+    They then shared one directory - a scan found the other process's skills,
+    and "one skill" failed as "expected 1 but was 2". That was a real red gate,
+    not a slow machine. }
   FDir := IncludeTrailingPathDelimiter(GetTempDir) + 'hh-skills-' +
-    IntToStr(Random(1000000));
+    IntToStr(GetProcessID) + '-' + IntToStr(Random(1000000));
   ForceDirectories(FDir);
 end;
 
 procedure TSkillsFilesTest.TearDown;
 begin
-  RemoveDir(FDir);
+  { RemoveDir removes an EMPTY directory only, and every test here writes
+    SKILL.md files into it, so the old teardown never removed anything: 8,296
+    `hh-skills-*` directories were left in the temp dir on this machine. They
+    were harmless while names came from Random, since a fresh number never landed
+    on a stale one - but a leak that accumulates a directory per test is a real
+    defect, and it is what made the collision below possible to miss for so
+    long. Drain it properly. }
+  RemoveTree(FDir);
 end;
 
 procedure TSkillsFilesTest.CaptureLoaded(const ASkill: TSkill);
