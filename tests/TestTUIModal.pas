@@ -38,6 +38,14 @@ type
     property MeasureCalls: Integer read FMeasureCalls;
   end;
 
+  { Content taller than any screen, so the 80% cap can be asserted where it
+    actually bites. TProbeContent reports a fixed 3 rows, which is now the FLOOR
+    case rather than the cap case. }
+  TBulkContent = class(TWidget)
+  public
+    function Measure(const AAvail: TSize): TSize; override;
+  end;
+
   { A modal whose content paints over the whole surface, including the footer
     rows, so the test can prove the CTAs are drawn last. }
   TBadContent = class(TProbeContent)
@@ -65,6 +73,9 @@ type
   published
     { Sizing }
     procedure TestMeasureCapsHeightAtEightyPercent;
+    { Autosize replaced the unconditional 80% height: a short dialog is the
+      floor plus chrome, not the cap. }
+    procedure TestMeasureTakesTheFloorForEmptyContent;
     procedure TestMeasureUsesAvailableHeightWhenTooShortToCap;
     procedure TestMeasureWidthInsetsAndHasAMinimum;
 
@@ -103,6 +114,13 @@ begin
   inherited Arrange(ABounds);
   FLastBounds := ABounds;
   Inc(FArrangeCalls);
+end;
+
+function TBulkContent.Measure(const AAvail: TSize): TSize;
+begin
+  Result := Default(TSize);
+  Result.W := 10;
+  Result.H := 1000;
 end;
 
 function TProbeContent.Measure(const AAvail: TSize): TSize;
@@ -213,14 +231,47 @@ procedure TModalTest.TestMeasureCapsHeightAtEightyPercent;
 var
   M: TModal;
   Avail: TSize;
+  Tall: TBulkContent;
 begin
+  { The cap is what keeps the transcript visible behind the dialog - but it is
+    now a CEILING, not the unconditional height. A dialog sizes to its content
+    and is clamped into [floor, 80%], which the operator asked for because a
+    two-row list used to fill 80% of the terminal with empty rows.
+
+    So the cap is asserted where it can actually bite: content TALLER than the
+    screen. A dialog with no content takes the floor, not the cap. }
+  Tall := TBulkContent.Create;
+  try
+    M := TModal.Create(FTheme, Tall, False);
+    try
+      Avail := Default(TSize);
+      Avail.W := 80;
+      Avail.H := 50;
+      AssertEquals('a tall dialog is capped at 80% of what is available', 40,
+        M.Measure(Avail).H);
+    finally
+      M.Free;
+    end;
+  finally
+    { TModal owns its content. }
+  end;
+end;
+
+procedure TModalTest.TestMeasureTakesTheFloorForEmptyContent;
+var
+  M: TModal;
+  Avail: TSize;
+begin
+  { Autosize: an empty dialog is the floor plus its chrome, not the whole cap. }
   M := TModal.Create(FTheme);
   try
     Avail := Default(TSize);
     Avail.W := 80;
     Avail.H := 50;
-    { The cap is what keeps the transcript visible behind the dialog. }
-    AssertEquals('height is 80% of what is available', 40, M.Measure(Avail).H);
+    AssertTrue('a short dialog is well under the cap, got ' +
+      IntToStr(M.Measure(Avail).H), M.Measure(Avail).H < 40);
+    AssertTrue('and at least the six-row floor plus chrome, got ' +
+      IntToStr(M.Measure(Avail).H), M.Measure(Avail).H >= 6 + 4);
   finally
     M.Free;
   end;

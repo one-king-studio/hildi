@@ -45,6 +45,10 @@ const
   FooterGap = 3;
   { Inline padding between the left border and the content. }
   ModalContentPad = 1;
+  { The content height a dialog never goes below, so a short list still reads as
+    a dialog rather than a strip. Six rows is the operator's number for the MCP
+    list and is a sane default for any list dialog. }
+  ModalContentMinRows = 6;
 
 type
   { The modal every dialog here shares. It owns the border, the title, the 80%
@@ -311,17 +315,43 @@ begin
 end;
 
 function TModal.Measure(const AAvail: TSize): TSize;
+var
+  ContentH, Want, Cap: Integer;
 begin
   Result := Default(TSize);
   Result.W := AAvail.W - 6;
   if Result.W < ModalMinWidth then
     Result.W := AAvail.W;
-  { Capped, so the transcript shows behind it. }
-  Result.H := (AAvail.H * ModalMaxHeightPercent) div 100;
-  if Result.H < ModalChromeRows + 3 then
-    Result.H := AAvail.H;
-  if Result.H > AAvail.H then
-    Result.H := AAvail.H;
+
+  { Capped, so the transcript shows behind it: at most 80% of the screen. }
+  Cap := (AAvail.H * ModalMaxHeightPercent) div 100;
+  if Cap < ModalChromeRows + 3 then
+    Cap := AAvail.H;
+  if Cap > AAvail.H then
+    Cap := AAvail.H;
+
+  { AUTOSIZE: a dialog as tall as the floor rather than as tall as the screen.
+    Height used to be the cap unconditionally, so a two-server list filled 80% of
+    the terminal with empty rows. The content is asked how tall it wants to be,
+    then clamped into [ModalContentMinRows, Cap] and padded with the chrome. }
+  ContentH := ModalContentMinRows;
+  if FScroll <> nil then
+    ContentH := FScroll.Measure(AAvail).H
+  else if FContent <> nil then
+    ContentH := FContent.Measure(AAvail).H;
+  if ContentH < ModalContentMinRows then
+    ContentH := ModalContentMinRows;
+
+  Want := ContentH + ModalChromeRows + ModalFooterRows;
+  { One row is taken by the divider above the footer, which ModalFooterRows
+    already counts; the frame adds the rest. }
+  if Want > Cap then
+    Want := Cap;
+  if Want < ModalChromeRows + ModalFooterRows + 1 then
+    Want := ModalChromeRows + ModalFooterRows + 1;
+  if Want > AAvail.H then
+    Want := AAvail.H;
+  Result.H := Want;
 end;
 
 { The total width of the footer: each pair's key and action, plus the gaps
