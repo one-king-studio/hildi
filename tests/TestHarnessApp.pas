@@ -2274,10 +2274,18 @@ end;
 
 procedure THarnessAppTest.TestEveryDispatchedCommandIsOfferedByThePalette;
 const
-  { Commands offered unconditionally. /redo is deliberately absent: it appears
-    only when there is something to redo, and a test asserting it is always there
-    would forbid that. }
-  Dispatched: array[0..1] of string = ('checkpoint', 'sessions');
+  { Commands offered whenever a driver is attached, which BuildWithStore always
+    does. /redo and /revert are deliberately absent: they appear only when there
+    is a turn to act on, and a test asserting they are always there would forbid
+    that. /skill is absent for the same reason - it needs an available skill.
+
+    NOTE: this list is hand-maintained, which is precisely how /mcp shipped
+    dispatched-but-not-offered: it was added to RunCommand and not to the
+    palette, and nothing here would have noticed. A derived list is not possible
+    (RunCommand's arms are string comparisons, not data), so the honest fix is
+    to keep this array beside the palette's Add() calls and extend it whenever a
+    command is added. It caught nothing in review; it catches drift after. }
+  Dispatched: array[0..2] of string = ('checkpoint', 'sessions', 'mcp');
 var
   I, J: Integer;
   Found: Boolean;
