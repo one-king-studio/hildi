@@ -169,6 +169,35 @@ var
 begin
   while not Terminated do
   begin
+    { DRAIN FIRST, then block. This order is the whole point: the handshake
+      consumed exactly one line from a buffer that may hold several.
+
+      Handshake() calls ReadLineTimeout twice, and each call reads up to 4096
+      bytes and extracts only the one line it wants. The runtime queues
+      mkAttached, the replay and the ekSkills catalogue back to back, so a single
+      recv commonly returns ALL of them together. The extra lines stay in FInBuf
+      - and the previous version of this loop blocked in fpRecv before looking,
+      so those events went unprocessed until some LATER byte arrived. On a quiet
+      session that is never: the client attached and then saw no events at all.
+
+      That was not a test flake. It is why attaching to a runtime whose first
+      writes coalesce could silently lose the replay and the skill catalogue -
+      the palette reports "no skills available" on a session that has them. It
+      showed up as a 20-second timeout only because a test was waiting. }
+    while True do
+    begin
+      FClient.FLock.Acquire;
+      try
+        if not ExtractLine(FClient.FInBuf, Line) then
+          Break;
+      finally
+        FClient.FLock.Release;
+      end;
+      if TSessionCodec.Decode(Line, M) then
+        FClient.HandleIncoming(M);
+    end;
+    if Terminated then
+      Break;
     N := fpRecv(FClient.FFd, @Tmp, SizeOf(Tmp), 0);
     if N > 0 then
     begin
@@ -184,18 +213,6 @@ begin
       Continue
     else
       Break;
-    while True do
-    begin
-      FClient.FLock.Acquire;
-      try
-        if not ExtractLine(FClient.FInBuf, Line) then
-          Break;
-      finally
-        FClient.FLock.Release;
-      end;
-      if TSessionCodec.Decode(Line, M) then
-        FClient.HandleIncoming(M);
-    end;
   end;
   if (not Terminated) and (FClient.FSink <> nil) then
     FClient.FSink.OnDetached('connection closed');
