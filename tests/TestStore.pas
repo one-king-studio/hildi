@@ -50,6 +50,11 @@ type
     procedure TestDeleteActiveProviderLeavesNoActiveRow;
     procedure TestProviderSecretRoundTrips;
     procedure TestMissingProviderSecretIsEmptyNotAnError;
+    { Agents: a configured behaviour (model + parameters + prompt). }
+    procedure TestAgentRoundTripsEveryParameter;
+    procedure TestAgentZeroTemperatureSurvivesAsConfiguredNotNull;
+    procedure TestActivatingAnAgentLeavesExactlyOneActive;
+    procedure TestTheDefaultHildiAgentExistsAndIsActive;
     procedure TestSettingMissingReturnsNotFound;
     procedure TestParameterizedValuesWithQuotesRoundTrip;
 
@@ -547,6 +552,117 @@ begin
       it - so this is '' and success, not a failure. }
     AssertTrue('succeeds: ' + Err.Message, S.ProviderSecret('none', Secret, Err));
     AssertEquals('empty', '', Secret);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestAgentRoundTripsEveryParameter;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Row, Got: TAgentRow;
+begin
+  Err := Default(TStoreError);
+  S := OpenStore;
+  try
+    Row := Default(TAgentRow);
+    Row.Name := 'reviewer';
+    Row.ProviderName := 'openrouter';
+    Row.Model := 'openai/gpt-4o';
+    Row.SystemPrompt := 'You review code.';
+    Row.Temperature := 0.2;  Row.HasTemperature := True;
+    Row.TopP := 0.9;         Row.HasTopP := True;
+    Row.MaxTokens := 4096;   Row.HasMaxTokens := True;
+    Row.Seed := 7;           Row.HasSeed := True;
+    AssertTrue('saved: ' + Err.Message, S.SaveAgent(Row, Err));
+
+    AssertTrue('loaded: ' + Err.Message, S.LoadAgent('reviewer', Got, Err));
+    AssertEquals('provider', 'openrouter', Got.ProviderName);
+    AssertEquals('model', 'openai/gpt-4o', Got.Model);
+    AssertEquals('prompt', 'You review code.', Got.SystemPrompt);
+    AssertEquals('temperature', 0.2, Got.Temperature);
+    AssertEquals('top_p', 0.9, Got.TopP);
+    AssertEquals('max_tokens', 4096, Got.MaxTokens);
+    AssertEquals('seed', 7, Got.Seed);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestAgentZeroTemperatureSurvivesAsConfiguredNotNull;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Row, Got: TAgentRow;
+begin
+  Err := Default(TStoreError);
+  { The tri-state, now in its correct home. A configured 0.0 must come back
+    CONFIGURED - a NOT NULL DEFAULT 0 column, or a reader that skips ColIsNull,
+    would make "deliberately deterministic" indistinguishable from "unset", and
+    the request would then omit the key entirely. }
+  S := OpenStore;
+  try
+    Row := Default(TAgentRow);
+    Row.Name := 'deterministic';
+    Row.Temperature := 0.0;
+    Row.HasTemperature := True;
+    AssertTrue('saved: ' + Err.Message, S.SaveAgent(Row, Err));
+    AssertTrue('loaded: ' + Err.Message, S.LoadAgent('deterministic', Got, Err));
+    AssertTrue('still CONFIGURED, not absent', Got.HasTemperature);
+    AssertEquals('and its value is zero', 0.0, Got.Temperature);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestActivatingAnAgentLeavesExactlyOneActive;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Row, Got: TAgentRow;
+  Rows: TAgentRowArray;
+  I, ActiveCount: Integer;
+begin
+  Err := Default(TStoreError);
+  S := OpenStore;
+  try
+    Row := Default(TAgentRow);
+    Row.Name := 'one';  AssertTrue('one', S.SaveAgent(Row, Err));
+    Row.Name := 'two';  AssertTrue('two', S.SaveAgent(Row, Err));
+    AssertTrue('activate one', S.SetActiveAgent('one', Err));
+    AssertTrue('activate two', S.SetActiveAgent('two', Err));
+    { The partial unique index makes a second active row impossible; this asserts
+      the switch really is a switch. }
+    AssertTrue('list', S.ListAgents(Rows, Err));
+    ActiveCount := 0;
+    for I := 0 to High(Rows) do
+      if Rows[I].Active then
+        Inc(ActiveCount);
+    { 'hildi' shipped active, so two would mean the switch leaked. }
+    AssertEquals('exactly one active', 1, ActiveCount);
+    AssertTrue('active', S.ActiveAgent(Got, Err));
+    AssertEquals('and it is the last one set', 'two', Got.Name);
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TStoreTest.TestTheDefaultHildiAgentExistsAndIsActive;
+var
+  S: TSqliteStore;
+  Err: TStoreError;
+  Got: TAgentRow;
+begin
+  Err := Default(TStoreError);
+  { An install with agents and none active resolves to nothing, so the migration
+    ships 'hildi' already active. This is the test that would catch a migration
+    that created the table but forgot the row. }
+  S := OpenStore;
+  try
+    AssertTrue('active agent: ' + Err.Message, S.ActiveAgent(Got, Err));
+    AssertEquals('the built-in one', 'hildi', Got.Name);
+    AssertTrue('and it is marked active', Got.Active);
   finally
     S.Free;
   end;

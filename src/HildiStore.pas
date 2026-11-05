@@ -77,6 +77,37 @@ type
 
   TProviderRowArray = array of TProviderRow;
 
+  { An AGENT is a configured BEHAVIOUR: a model, its sampling parameters, and an
+    optional behaviour prompt.
+
+    SEPARATE FROM A PROVIDER because a provider is a CONNECTION - endpoint,
+    credential, dialect - and temperature is not a property of a socket. Separate
+    from the model catalogue too: OpenRouter lists 455 models, so per-model
+    parameters would mean setting the same temperature 455 times.
+
+    Each parameter carries its own Has flag because the column is NULLABLE on
+    purpose: NULL means "omit the key from the request", and a temperature of 0
+    is a real, very different setting. The same tri-state the request body makes. }
+  TAgentRow = record
+    Id: Integer;
+    Name: string;             // unique; 'hildi' is the built-in one
+    ProviderName: string;     // the provider row this agent talks through
+    Model: string;
+    SystemPrompt: string;     // '' => no behaviour prompt of its own
+    Temperature: Double;       HasTemperature: Boolean;
+    TopP: Double;              HasTopP: Boolean;
+    MaxTokens: Integer;        HasMaxTokens: Boolean;
+    FrequencyPenalty: Double;  HasFrequencyPenalty: Boolean;
+    PresencePenalty: Double;   HasPresencePenalty: Boolean;
+    Seed: Integer;             HasSeed: Boolean;
+    Stop: TStringArray;       // empty => no stop key
+    Active: Boolean;
+    CreatedAt: Int64;
+    UpdatedAt: Int64;
+  end;
+
+  TAgentRowArray = array of TAgentRow;
+
   TMigration = record
     Version: Integer;
     Name: string;
@@ -184,6 +215,24 @@ type
       means "leave the stored key alone", so clearing needs its own verb rather
       than a sentinel shared with "no change". }
     function ClearProviderSecret(const AName: string;
+      out AError: TStoreError): Boolean;
+
+    { --- agents ----------------------------------------------------------- }
+    { A configured BEHAVIOUR: model + sampling parameters + system prompt.
+      Upsert by name, like providers. }
+    function SaveAgent(const ARow: TAgentRow;
+      out AError: TStoreError): Boolean;
+    function LoadAgent(const AName: string; out ARow: TAgentRow;
+      out AError: TStoreError): Boolean;
+    function ListAgents(out ARows: TAgentRowArray;
+      out AError: TStoreError): Boolean;
+    function DeleteAgent(const AName: string;
+      out AError: TStoreError): Boolean;
+    { Exactly one active, cleared-then-set in one transaction, same invariant as
+      providers. False with seNotFound when no agent is marked. }
+    function SetActiveAgent(const AName: string;
+      out AError: TStoreError): Boolean;
+    function ActiveAgent(out ARow: TAgentRow;
       out AError: TStoreError): Boolean;
 
     { OAuth tokens for a server (keyed by scope/workspace/name). }
@@ -4763,6 +4812,306 @@ begin
           DbErrorText));
       { Clearing an absent key is a SUCCESS: the caller asked for "no stored
         key", and that is now true. }
+      Result := True;
+    finally
+      Stmt.Free;
+    end;
+  finally
+    FLock.Release;
+  end;
+end;
+
+{ --- agents --------------------------------------------------------------- }
+
+const
+  AgentColumns =
+    'id, name, provider_name, model, system_prompt, temperature, top_p, ' +
+    'max_tokens, frequency_penalty, presence_penalty, seed, stop, active, ' +
+    'created_at, updated_at';
+
+function ReadAgentRow(Stmt: TStmt): TAgentRow;
+begin
+  Result := Default(TAgentRow);
+  Result.Id := Stmt.ColInt(0);
+  Result.Name := Stmt.ColText(1);
+  Result.ProviderName := Stmt.ColText(2);
+  Result.Model := Stmt.ColText(3);
+  Result.SystemPrompt := Stmt.ColText(4);
+  { Has* first: a NULL column reads as 0 from the float reader, so the TYPE is
+    the only reliable signal. NULL means "omit the key", which is not zero. }
+  Result.HasTemperature := not Stmt.ColIsNull(5);
+  Result.Temperature := Stmt.ColFloat(5);
+  Result.HasTopP := not Stmt.ColIsNull(6);
+  Result.TopP := Stmt.ColFloat(6);
+  Result.HasMaxTokens := not Stmt.ColIsNull(7);
+  Result.MaxTokens := Stmt.ColInt(7);
+  Result.HasFrequencyPenalty := not Stmt.ColIsNull(8);
+  Result.FrequencyPenalty := Stmt.ColFloat(8);
+  Result.HasPresencePenalty := not Stmt.ColIsNull(9);
+  Result.PresencePenalty := Stmt.ColFloat(9);
+  Result.HasSeed := not Stmt.ColIsNull(10);
+  Result.Seed := Stmt.ColInt(10);
+  DecodeMcpStrings(Stmt.ColText(11), Result.Stop);
+  Result.Active := Stmt.ColInt(12) <> 0;
+  Result.CreatedAt := Stmt.ColInt64(13);
+  Result.UpdatedAt := Stmt.ColInt64(14);
+end;
+
+function TSqliteStore.SaveAgent(const ARow: TAgentRow;
+  out AError: TStoreError): Boolean;
+var
+  Stmt, Q: TStmt;
+  Now2: Int64;
+  ExistingId: Integer;
+begin
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    if Trim(ARow.Name) = '' then
+      Exit(Fail(AError, seInvalidArgument, 'agent name is required', ''));
+    Now2 := NowUtcEpochSec;
+    ExistingId := 0;
+    Q := TStmt.Create(FDb, 'SELECT id FROM agents WHERE name = ?');
+    try
+      if not Q.Valid then
+        Exit(Fail(AError, seError, 'could not save agent', DbErrorText));
+      Q.BindText(1, ARow.Name);
+      if Q.Step = SQLITE_ROW then
+        ExistingId := Q.ColInt(0);
+    finally
+      Q.Free;
+    end;
+
+    if ExistingId = 0 then
+      Stmt := TStmt.Create(FDb,
+        'INSERT INTO agents (name, provider_name, model, system_prompt, ' +
+        'temperature, top_p, max_tokens, frequency_penalty, presence_penalty, ' +
+        'seed, stop, active, created_at, updated_at) ' +
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    else
+      Stmt := TStmt.Create(FDb,
+        'UPDATE agents SET provider_name = ?, model = ?, system_prompt = ?, ' +
+        'temperature = ?, top_p = ?, max_tokens = ?, frequency_penalty = ?, ' +
+        'presence_penalty = ?, seed = ?, stop = ?, updated_at = ? ' +
+        'WHERE name = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not save agent', DbErrorText));
+      if ExistingId = 0 then
+      begin
+        Stmt.BindText(1, ARow.Name);
+        Stmt.BindText(2, ARow.ProviderName);
+        Stmt.BindText(3, ARow.Model);
+        Stmt.BindText(4, ARow.SystemPrompt);
+        BindNullableFloat(Stmt, 5, ARow.Temperature, ARow.HasTemperature);
+        BindNullableFloat(Stmt, 6, ARow.TopP, ARow.HasTopP);
+        BindNullableInt(Stmt, 7, ARow.MaxTokens, ARow.HasMaxTokens);
+        BindNullableFloat(Stmt, 8, ARow.FrequencyPenalty,
+          ARow.HasFrequencyPenalty);
+        BindNullableFloat(Stmt, 9, ARow.PresencePenalty,
+          ARow.HasPresencePenalty);
+        BindNullableInt(Stmt, 10, ARow.Seed, ARow.HasSeed);
+        Stmt.BindText(11, EncodeMcpStrings(ARow.Stop));
+        Stmt.BindInt(12, Ord(ARow.Active));
+        Stmt.BindInt64(13, Now2);
+        Stmt.BindInt64(14, Now2);
+      end
+      else
+      begin
+        Stmt.BindText(1, ARow.ProviderName);
+        Stmt.BindText(2, ARow.Model);
+        Stmt.BindText(3, ARow.SystemPrompt);
+        BindNullableFloat(Stmt, 4, ARow.Temperature, ARow.HasTemperature);
+        BindNullableFloat(Stmt, 5, ARow.TopP, ARow.HasTopP);
+        BindNullableInt(Stmt, 6, ARow.MaxTokens, ARow.HasMaxTokens);
+        BindNullableFloat(Stmt, 7, ARow.FrequencyPenalty,
+          ARow.HasFrequencyPenalty);
+        BindNullableFloat(Stmt, 8, ARow.PresencePenalty,
+          ARow.HasPresencePenalty);
+        BindNullableInt(Stmt, 9, ARow.Seed, ARow.HasSeed);
+        Stmt.BindText(10, EncodeMcpStrings(ARow.Stop));
+        Stmt.BindInt64(11, Now2);
+        Stmt.BindText(12, ARow.Name);
+      end;
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not save agent', DbErrorText));
+    finally
+      Stmt.Free;
+    end;
+    Result := True;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.LoadAgent(const AName: string; out ARow: TAgentRow;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  ARow := Default(TAgentRow);
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb, 'SELECT ' + AgentColumns +
+      ' FROM agents WHERE name = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not load agent', DbErrorText));
+      Stmt.BindText(1, AName);
+      if Stmt.Step <> SQLITE_ROW then
+        Exit(Fail(AError, seNotFound, 'no such agent', AName));
+      ARow := ReadAgentRow(Stmt);
+      Result := True;
+    finally
+      Stmt.Free;
+    end;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.ListAgents(out ARows: TAgentRowArray;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+  N: Integer;
+begin
+  AError := OkError;
+  ARows := nil;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb, 'SELECT ' + AgentColumns +
+      ' FROM agents ORDER BY name');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not list agents', DbErrorText));
+      N := 0;
+      while Stmt.Step = SQLITE_ROW do
+      begin
+        SetLength(ARows, N + 1);
+        ARows[N] := ReadAgentRow(Stmt);
+        Inc(N);
+      end;
+      Result := True;
+    finally
+      Stmt.Free;
+    end;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.DeleteAgent(const AName: string;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb, 'DELETE FROM agents WHERE name = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not delete agent', DbErrorText));
+      Stmt.BindText(1, AName);
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not delete agent', DbErrorText));
+      Result := sqlite3_changes(FDb) > 0;
+      if not Result then
+        Fail(AError, seNotFound, 'no such agent', AName);
+    finally
+      Stmt.Free;
+    end;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.SetActiveAgent(const AName: string;
+  out AError: TStoreError): Boolean;
+var
+  Clear, SetIt: TStmt;
+begin
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    { Clear-then-set in ONE transaction: the partial unique index would reject
+      the set while another row is still active, so the pair must be atomic. }
+    if not DoExec('BEGIN IMMEDIATE', AError) then
+      Exit(False);
+    try
+      Clear := TStmt.Create(FDb,
+        'UPDATE agents SET active = 0 WHERE name <> ?');
+      try
+        if not Clear.Valid then
+          Exit(Fail(AError, seError, 'could not activate agent', DbErrorText));
+        Clear.BindText(1, AName);
+        if Clear.Step <> SQLITE_DONE then
+          Exit(Fail(AError, seError, 'could not activate agent', DbErrorText));
+      finally
+        Clear.Free;
+      end;
+      SetIt := TStmt.Create(FDb,
+        'UPDATE agents SET active = 1, updated_at = ? WHERE name = ?');
+      try
+        if not SetIt.Valid then
+          Exit(Fail(AError, seError, 'could not activate agent', DbErrorText));
+        SetIt.BindInt64(1, NowUtcEpochSec);
+        SetIt.BindText(2, AName);
+        if SetIt.Step <> SQLITE_DONE then
+          Exit(Fail(AError, seError, 'could not activate agent', DbErrorText));
+        if sqlite3_changes(FDb) = 0 then
+        begin
+          { Roll back rather than leave every agent inactive. }
+          DoExec('ROLLBACK', AError);
+          AError := OkError;
+          Exit(Fail(AError, seNotFound, 'no such agent', AName));
+        end;
+      finally
+        SetIt.Free;
+      end;
+      if not DoExec('COMMIT', AError) then
+        Exit(False);
+      Result := True;
+    except
+      DoExec('ROLLBACK', AError);
+      raise;
+    end;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.ActiveAgent(out ARow: TAgentRow;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  ARow := Default(TAgentRow);
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb, 'SELECT ' + AgentColumns +
+      ' FROM agents WHERE active = 1');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not load active agent', DbErrorText));
+      if Stmt.Step <> SQLITE_ROW then
+        Exit(Fail(AError, seNotFound, 'no active agent', ''));
+      ARow := ReadAgentRow(Stmt);
       Result := True;
     finally
       Stmt.Free;
