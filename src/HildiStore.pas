@@ -316,9 +316,14 @@ type
       out AError: TStoreError): Boolean;
 
     { Opens an LLM request within a turn, assigning its per-turn sequence. }
+    { AProvider and AParameters are recorded ON the request: which provider and
+      model produced it, and the parameters actually sent, as JSON evidence.
+      They default so an existing caller compiles unchanged, and '' means "not
+      known", never "none configured". }
     function BeginRequest(ATurnId: Int64; const AModel: string;
       AMessageCount: Integer; out ARequestId: Int64;
-      out AError: TStoreError): Boolean;
+      out AError: TStoreError; const AProvider: string = '';
+      const AParameters: string = ''): Boolean;
     function FinishRequest(ARequestId: Int64; AOk: Boolean;
       const AFinishReason: string; AErrorCode: Integer;
       const AErrorMessage, AErrorDetail: string; const AUsage: TTokenUsage;
@@ -459,7 +464,7 @@ end;
 function DefaultMigrations: TMigrationArray;
 begin
   Result := nil;
-  SetLength(Result, 23);
+  SetLength(Result, 24);
   Result[0].Version := 1;
   Result[0].Name := 'session history';
   Result[0].Statements := [
@@ -973,6 +978,25 @@ begin
       'last_used_at INTEGER NOT NULL DEFAULT 0)',
     'CREATE UNIQUE INDEX idx_providers_one_active ON providers (active) ' +
       'WHERE active = 1'
+  ];
+  { WHICH PROVIDER AND MODEL PRODUCED A REQUEST, and with what parameters.
+
+    Per REQUEST, not per turn: the provider can change mid-session, and a turn
+    that spanned two providers would otherwise have to lie about one. The turn
+    rolls the DISTINCT provider forward (see FinishTurn), so a report can group
+    by provider without joining requests for the common case.
+
+    The parameters are stored as the JSON that was actually sent, not as columns:
+    they are evidence for an audit ("what did we ask for"), never queried
+    individually, and a provider-specific field added later must not need a
+    migration. Empty string means no parameters were configured, which is the
+    same tri-state distinction the request body makes. }
+  Result[23].Version := 24;
+  Result[23].Name := 'provider and parameters on a request';
+  Result[23].Statements := [
+    'ALTER TABLE requests ADD COLUMN provider TEXT NOT NULL DEFAULT ''''',
+    'ALTER TABLE requests ADD COLUMN parameters TEXT NOT NULL DEFAULT ''''',
+    'ALTER TABLE turns ADD COLUMN provider TEXT NOT NULL DEFAULT '''''
   ];
 end;
 
@@ -2454,7 +2478,12 @@ begin
     'cached_tokens = (SELECT COALESCE(SUM(r.cached_tokens), 0) ' +
       'FROM requests r WHERE r.turn_id = turns.id), ' +
     'reasoning_tokens = (SELECT COALESCE(SUM(r.reasoning_tokens), 0) ' +
-      'FROM requests r WHERE r.turn_id = turns.id) ' +
+      'FROM requests r WHERE r.turn_id = turns.id), ' +
+    { Provider from the turn's newest request that recorded one: the per-request
+      rows stay the truth, and this column lets a report group without a join. }
+    'provider = COALESCE((SELECT r2.provider FROM requests r2 ' +
+      'WHERE r2.turn_id = turns.id AND r2.provider <> '''' ' +
+      'ORDER BY r2.seq DESC LIMIT 1), '''') ' +
     'WHERE session_id = ? AND status = ?');
   try
     if not Stmt.Valid then
@@ -2564,7 +2593,14 @@ begin
       'cached_tokens = (SELECT COALESCE(SUM(r.cached_tokens), 0) ' +
         'FROM requests r WHERE r.turn_id = turns.id), ' +
       'reasoning_tokens = (SELECT COALESCE(SUM(r.reasoning_tokens), 0) ' +
-        'FROM requests r WHERE r.turn_id = turns.id) ' +
+        'FROM requests r WHERE r.turn_id = turns.id), ' +
+      { The turn's provider, taken from its NEWEST request. The per-request rows
+        remain the truth - a turn can span a provider switch - and this column is
+        a convenience so a report can group by provider without a join. '' when
+        the turn recorded none, which is every pre-migration turn. }
+      'provider = COALESCE((SELECT r2.provider FROM requests r2 ' +
+        'WHERE r2.turn_id = turns.id AND r2.provider <> '''' ' +
+        'ORDER BY r2.seq DESC LIMIT 1), '''') ' +
       'WHERE id = ?');
     try
       if not Stmt.Valid then
@@ -2843,7 +2879,8 @@ end;
 
 function TSqliteStore.BeginRequest(ATurnId: Int64; const AModel: string;
   AMessageCount: Integer; out ARequestId: Int64;
-  out AError: TStoreError): Boolean;
+  out AError: TStoreError; const AProvider: string = '';
+  const AParameters: string = ''): Boolean;
 var
   Stmt: TStmt;
 begin
@@ -2866,17 +2903,20 @@ begin
       Stmt.Free;
     end;
     Stmt := TStmt.Create(FDb,
-      'INSERT INTO requests (turn_id, seq, model, message_count, created_at) ' +
+      'INSERT INTO requests (turn_id, seq, model, provider, parameters, ' +
+      'message_count, created_at) ' +
       'VALUES (?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM requests ' +
-      'WHERE turn_id = ?), ?, ?, ?)');
+      'WHERE turn_id = ?), ?, ?, ?, ?, ?)');
     try
       if not Stmt.Valid then
         Exit(Fail(AError, seError, 'could not begin request', DbErrorText));
       Stmt.BindInt64(1, ATurnId);
       Stmt.BindInt64(2, ATurnId);
       Stmt.BindText(3, AModel);
-      Stmt.BindInt(4, AMessageCount);
-      Stmt.BindInt64(5, NowMs);
+      Stmt.BindText(4, AProvider);
+      Stmt.BindText(5, AParameters);
+      Stmt.BindInt(6, AMessageCount);
+      Stmt.BindInt64(7, NowMs);
       if Stmt.Step <> SQLITE_DONE then
         Exit(Fail(AError, seError, 'could not begin request', DbErrorText));
     finally

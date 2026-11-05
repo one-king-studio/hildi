@@ -79,8 +79,12 @@ type
     { Turn/request audit. BeginTurn opens a loop; the user prompt is appended
       separately, linked to the open turn. Ids are 0 when not persisted. }
     function BeginTurn: Int64;
+    { AProvider/AParameters record WHICH provider produced this request and the
+      parameters actually sent. Optional so an existing store implementation
+      compiles unchanged; '' means "not known", never "none configured". }
     function BeginRequest(ATurnId: Int64; const AModel: string;
-      AMessageCount: Integer): Int64;
+      AMessageCount: Integer; const AProvider: string = '';
+      const AParameters: string = ''): Int64;
     procedure FinishRequest(ARequestId: Int64; const AOutcome: TRequestOutcome);
     procedure FinishTurn(ATurnId: Int64; const AOutcome: TTurnOutcome);
     { Drop every message the open turn appended, keeping the turn row. An early
@@ -105,8 +109,12 @@ type
     procedure AppendSkill(const ASkillKey, AText: string);
     function LoadedSkillKeys: TStringArray;
     function BeginTurn: Int64;
+    { AProvider/AParameters record WHICH provider produced this request and the
+      parameters actually sent. Optional so an existing store implementation
+      compiles unchanged; '' means "not known", never "none configured". }
     function BeginRequest(ATurnId: Int64; const AModel: string;
-      AMessageCount: Integer): Int64;
+      AMessageCount: Integer; const AProvider: string = '';
+      const AParameters: string = ''): Int64;
     procedure FinishRequest(ARequestId: Int64; const AOutcome: TRequestOutcome);
     procedure FinishTurn(ATurnId: Int64; const AOutcome: TTurnOutcome);
     procedure DropTurnMessages(ATurnId: Int64);
@@ -917,7 +925,8 @@ begin
 end;
 
 function TMemoryConversationStore.BeginRequest(ATurnId: Int64;
-  const AModel: string; AMessageCount: Integer): Int64;
+  const AModel: string; AMessageCount: Integer; const AProvider: string;
+  const AParameters: string): Int64;
 begin
   Result := 0;
 end;
@@ -1920,7 +1929,7 @@ begin
       RetryWaitedMs := 0;
       repeat
         RequestId := FStore.BeginRequest(TurnId, FClient.Model,
-          Length(Request.Messages));
+          Length(Request.Messages), FClient.ProviderKey);
         StartMs := GetTickCount64;
         Outcome := Default(TRequestOutcome);
         { Time the response's phases; the timed callbacks forward to AEvents. }

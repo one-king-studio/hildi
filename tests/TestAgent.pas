@@ -168,7 +168,8 @@ type
     function LoadedSkillKeys: TStringArray;
     function BeginTurn: Int64;
     function BeginRequest(ATurnId: Int64; const AModel: string;
-      AMessageCount: Integer): Int64;
+      AMessageCount: Integer; const AProvider: string = '';
+      const AParameters: string = ''): Int64;
     procedure FinishRequest(ARequestId: Int64; const AOutcome: TRequestOutcome);
     procedure FinishTurn(ATurnId: Int64; const AOutcome: TTurnOutcome);
     procedure DropTurnMessages(ATurnId: Int64);
@@ -186,6 +187,11 @@ type
     FinishTurns: Integer;
     LastTurnStatus: TTurnStatus;
     LastRequestModel: string;
+    { Which provider the loop named when it opened the request, and the
+      parameters it sent. Recorded so a test can assert the loop actually passes
+      them rather than trusting that it does. }
+    LastRequestProvider: string;
+    LastRequestParameters: string;
     LastRequestMessages: Integer;
     LastOutcome: TRequestOutcome;
     Reasoning: string;
@@ -213,7 +219,8 @@ type
     function LoadedSkillKeys: TStringArray;
     function BeginTurn: Int64;
     function BeginRequest(ATurnId: Int64; const AModel: string;
-      AMessageCount: Integer): Int64;
+      AMessageCount: Integer; const AProvider: string = '';
+      const AParameters: string = ''): Int64;
     procedure FinishRequest(ARequestId: Int64; const AOutcome: TRequestOutcome);
     procedure FinishTurn(ATurnId: Int64; const AOutcome: TTurnOutcome);
     procedure DropTurnMessages(ATurnId: Int64);
@@ -680,9 +687,11 @@ begin
 end;
 
 function TCountingStore.BeginRequest(ATurnId: Int64; const AModel: string;
-  AMessageCount: Integer): Int64;
+  AMessageCount: Integer; const AProvider: string;
+  const AParameters: string): Int64;
 begin
-  Result := FInner.BeginRequest(ATurnId, AModel, AMessageCount);
+  Result := FInner.BeginRequest(ATurnId, AModel, AMessageCount, AProvider,
+    AParameters);
 end;
 
 procedure TCountingStore.FinishRequest(ARequestId: Int64;
@@ -781,10 +790,13 @@ begin
 end;
 
 function TRecordingStore.BeginRequest(ATurnId: Int64; const AModel: string;
-  AMessageCount: Integer): Int64;
+  AMessageCount: Integer; const AProvider: string;
+  const AParameters: string): Int64;
 begin
   Inc(BeginRequests);
   LastRequestModel := AModel;
+  LastRequestProvider := AProvider;
+  LastRequestParameters := AParameters;
   LastRequestMessages := AMessageCount;
   Result := 1;
 end;

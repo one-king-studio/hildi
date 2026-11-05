@@ -48,7 +48,8 @@ type
     function LoadedSkillKeys: TStringArray;
     function BeginTurn: Int64;
     function BeginRequest(ATurnId: Int64; const AModel: string;
-      AMessageCount: Integer): Int64;
+      AMessageCount: Integer; const AProvider: string = '';
+      const AParameters: string = ''): Int64;
     procedure FinishRequest(ARequestId: Int64; const AOutcome: TRequestOutcome);
     procedure FinishTurn(ATurnId: Int64; const AOutcome: TTurnOutcome);
     procedure DropTurnMessages(ATurnId: Int64);
@@ -246,12 +247,17 @@ begin
 end;
 
 function TSqliteConversationStore.BeginRequest(ATurnId: Int64;
-  const AModel: string; AMessageCount: Integer): Int64;
+  const AModel: string; AMessageCount: Integer; const AProvider: string;
+  const AParameters: string): Int64;
 var
   Err: TStoreError;
 begin
   Result := 0;
-  if FStore.BeginRequest(ATurnId, AModel, AMessageCount, Result, Err) then
+  { The provider and the parameters travel with the request, so the store records
+    exactly what was asked of whom - including across a mid-session provider
+    switch, where a turn-level column could only tell half the truth. }
+  if FStore.BeginRequest(ATurnId, AModel, AMessageCount, Result, Err,
+    AProvider, AParameters) then
     FCurrentRequestId := Result
   else
     FCurrentRequestId := 0;

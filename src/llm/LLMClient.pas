@@ -181,6 +181,7 @@ type
     FConfigError: string;
     function Endpoint: string;
     function GetModel: string;
+    function GetProviderKey: string;
   public
     constructor Create(const AConfig: TLLMConfig; ATransport: TLLMTransport);
     destructor Destroy; override;
@@ -191,6 +192,9 @@ type
       out AResult: TChatResult; out AError: TLLMError): Boolean; overload;
     { The resolved model name, for recording on a request. }
     property Model: string read GetModel;
+    { The provider SLUG this client speaks ('fireworks', 'openrouter', ...),
+      for recording on a request. } 
+    property ProviderKey: string read GetProviderKey;
     { Consulted mid-stream; when it fires, Complete returns leCancelled. }
     property CancelCheck: TLLMCancelCheck read FCancel write FCancel;
   end;
@@ -1153,6 +1157,14 @@ end;
 function TLLMClient.GetModel: string;
 begin
   Result := FConfig.Model;
+end;
+
+function TLLMClient.GetProviderKey: string;
+begin
+  if FProvider <> nil then
+    Result := FProvider.Key
+  else
+    Result := FConfig.Provider;
 end;
 
 function TLLMClient.Complete(const ARequest: TChatRequest;
