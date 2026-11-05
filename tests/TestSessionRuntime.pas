@@ -40,6 +40,8 @@ type
     function Count: Integer;
     function EventAt(AIndex: Integer): TSessionEvent;
     function CountKind(AKind: TSessionEventKind): Integer;
+    { The ordinals of every event received, for a diagnostic message. }
+    function KindsSeen: string;
     property HelloSeen: Boolean read FHelloSeen;
     property AttachedSeen: Boolean read FAttachedSeen;
     property DetachedReason: string read FDetachedReason;
@@ -273,6 +275,26 @@ begin
   finally
     FLock.Release;
   end;
+end;
+
+function TRecordingSink.KindsSeen: string;
+var
+  I: Integer;
+begin
+  Result := '';
+  FLock.Acquire;
+  try
+    for I := 0 to High(FEvents) do
+    begin
+      if Result <> '' then
+        Result := Result + ',';
+      Result := Result + IntToStr(Ord(FEvents[I].Kind));
+    end;
+  finally
+    FLock.Release;
+  end;
+  if Result = '' then
+    Result := 'none';
 end;
 
 function TRecordingSink.CountKind(AKind: TSessionEventKind): Integer;
@@ -686,6 +708,7 @@ var
   I: Integer;
   Saw: Boolean;
   Fs: TFileStream;
+  Pushed: Boolean;
 begin
   { A skill on disk in the workspace, so the session has one to report. }
   SkillDir := IncludeTrailingPathDelimiter(FWs) + '.agents' + PathDelim +
@@ -718,8 +741,14 @@ begin
       has been observed at 3.19s, which is why the timeout is generous rather
       than tight. Passes 3/3 in isolation at 0.2s; the headroom is for the gate,
       not for the logic. }
-    AssertTrue('the catalogue was pushed on attach',
-      WaitCount(Sink, ekSkills, 1, 20000));
+    { THE DIAGNOSTIC: the two causes of "no catalogue" look identical from the
+      assertion alone - an empty sink means the attach never completed, while a
+      sink holding other kinds means HandleAttach skipped the push because
+      FSession.Skills was nil. Name what arrived so the next failure is data
+      rather than another guess. }
+    Pushed := WaitCount(Sink, ekSkills, 1, 20000);
+    AssertTrue(Format('the catalogue was pushed on attach (got %d event(s): %s)',
+      [Sink.Count, Sink.KindsSeen]), Pushed);
     Saw := False;
     for I := 0 to Sink.Count - 1 do
       if (Sink.EventAt(I).Kind = ekSkills) and
@@ -778,7 +807,12 @@ begin
       Driver := TSessionClient.Open(MakeClientConfig(Id, srDrive), Sink, Err);
       AssertNotNull('driver attaches: ' + Err, Driver);
       try
-        { The catalogue arrives on attach, which is what makes the key known. }
+        { The catalogue arrives on attach, which is what makes the key known.
+
+          The failure message names what DID arrive, because the two causes look
+          identical from the assertion alone: an empty sink means the attach never
+          completed, while a sink holding other kinds means the push was skipped.
+          Guessing between those two cost an afternoon once (board #127). }
         AssertTrue('catalogue pushed',
           WaitCount(Sink, ekSkills, 1, 20000));
 
