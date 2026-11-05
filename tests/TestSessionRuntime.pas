@@ -747,8 +747,9 @@ begin
       FSession.Skills was nil. Name what arrived so the next failure is data
       rather than another guess. }
     Pushed := WaitCount(Sink, ekSkills, 1, 20000);
-    AssertTrue(Format('the catalogue was pushed on attach (got %d event(s): %s)',
-      [Sink.Count, Sink.KindsSeen]), Pushed);
+    AssertTrue(Format('the catalogue was pushed on attach (got %d event(s): %s; '
+      + 'detached="%s"; error="%s")',
+      [Sink.Count, Sink.KindsSeen, Sink.DetachedReason, Sink.ErrorCode]), Pushed);
     Saw := False;
     for I := 0 to Sink.Count - 1 do
       if (Sink.EventAt(I).Kind = ekSkills) and
