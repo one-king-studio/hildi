@@ -112,6 +112,12 @@ type
     { The footer CTA: two-tone, split on ' middle-dot ' by the shared HintSpans
       walker. Empty means no footer and a plain bottom border. }
     procedure SetFooter(const AText: string);
+    { How many CTA pairs the last SetFooter produced. Introspection, not
+      decoration: a dialog's footer is split by the SAME rule the click path
+      uses, so asserting the count per call site is the only way to catch a
+      caller and the splitter disagreeing about the separator - the bug where
+      clicking "esc cancel" in the skill dialog loaded the skill. }
+    function FooterPairCount: Integer;
     function Measure(const AAvail: TSize): TSize; override;
     procedure Arrange(const ABounds: TRect); override;
     procedure Render(const S: ISurface); override;
@@ -277,6 +283,11 @@ procedure TModal.ScrollToTop;
 begin
   if FScroll <> nil then
     FScroll.ScrollTo(0, 0);
+end;
+
+function TModal.FooterPairCount: Integer;
+begin
+  Result := Length(FFooterKeys);
 end;
 
 function TModal.InnerRect: TRect;

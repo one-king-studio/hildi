@@ -38,6 +38,10 @@ type
     procedure SetUp; override;
     procedure TearDown; override;
   published
+    { Six CTAs joined by three spaces: the best case in the tree for catching a
+      splitter that does not understand the house separator. Before the fix this
+      collapsed to ONE pair, so every click reported 'enter'. }
+    procedure TestFooterSplitsIntoSixCtas;
     procedure TestListsRowsAndSelectsFirst;
     procedure TestFilterMatchesTitleKeywordAndId;
     procedure TestArchivedHiddenByDefaultAndToggled;
@@ -238,6 +242,19 @@ begin
   AssertEquals('no rows', 0, FModal.VisibleCount);
   Render;   // must not raise
   AssertTrue('rendered', True);
+end;
+
+procedure TSessionsModalTest.TestFooterSplitsIntoSixCtas;
+var
+  M: TSessionsModal;
+begin
+  M := TSessionsModal.Create(FTheme);
+  try
+    { SessionsFooter has six entries: enter, ctrl+p, ctrl+a, ctrl+r, ctrl+x, esc. }
+    AssertEquals('all six CTAs are separate pairs', 6, M.FooterPairCount);
+  finally
+    M.Free;
+  end;
 end;
 
 initialization

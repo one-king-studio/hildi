@@ -34,6 +34,11 @@ type
     procedure TestEscapeReportsNothing;
     procedure TestLongBodyScrolls;
     procedure TestOptionalFieldsDefaultEmpty;
+    { The footer this dialog BUILDS must split into as many pairs as it draws.
+      Checking the splitter alone is not enough: the bug where clicking
+      "esc cancel" loaded the skill was a caller and the splitter disagreeing
+      about the separator, and every unit test still passed. }
+    procedure TestFooterSplitsIntoTheCtasItDraws;
   end;
 
 function Rc(AX, AY, AW, AH: Integer): TRect;
@@ -182,6 +187,37 @@ begin
   AssertEquals('location', '', D.Location);
   AssertEquals('no resources', 0, Length(D.Resources));
   AssertFalse('not loaded', D.Loaded);
+end;
+
+procedure TSkillModalTest.TestFooterSplitsIntoTheCtasItDraws;
+var
+  M: TSkillModal;
+  D: TSkillDetail;
+begin
+  M := TSkillModal.Create(Default(TTheme));
+  try
+    { A loadable, unloaded skill draws TWO CTAs: use, cancel. They must split
+      into two pairs, or a click on either one reports the wrong key. }
+    D := Detail('alpha', 'Alpha');
+    D.Loaded := False;
+    M.SetDetail(D);
+    AssertEquals('an unloaded skill has use + cancel', 2, M.FooterPairCount);
+
+    { Already loaded: no load CTA, just dismiss. Still two pairs, because the
+      left-hand phrase is a label and 'esc cancel' is the binding. }
+    D.Loaded := True;
+    M.SetDetail(D);
+    AssertTrue('a loaded skill still has a split footer',
+      M.FooterPairCount >= 1);
+
+    { No key at all: one CTA only. }
+    D := Detail('', '');
+    D.Loaded := False;
+    M.SetDetail(D);
+    AssertEquals('a skill with no key has only cancel', 1, M.FooterPairCount);
+  finally
+    M.Free;
+  end;
 end;
 
 initialization

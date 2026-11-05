@@ -409,8 +409,12 @@ end;
 
 procedure TSkillModal.RefreshFooter;
 begin
-  { Two-tone via the modal's footer splitter. The separator is the dot, NOT two
-    spaces: HintSpans joins on it, and two spaces renders the whole line flat. }
+  { Two-tone via the modal's footer splitter. Groups are separated by a run of
+    SPACES, which is the house style the operator asked for in a4b7494 and the
+    only form the live call sites use. (This comment said "the dot, NOT two
+    spaces" - stale after that sweep, and wrong in a way that matters: a splitter
+    and a caller disagreeing about the separator is exactly the bug where
+    clicking "esc cancel" loaded the skill.) }
   if CanLoad then
     SetFooter('enter use   esc cancel')
   else if FContent.FDetail.Loaded then
