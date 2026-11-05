@@ -141,11 +141,47 @@ type
 
 implementation
 
+{ Remove a directory and everything under it. FPC's SysUtils has no DelTree and
+  FileUtil is not on this project's unit path, so this is the FindFirst walk the
+  smoke runner uses. }
+procedure RemoveTree(const APath: string);
+var
+  SR: TSearchRec;
+  Child: string;
+begin
+  if not DirectoryExists(APath) then
+    Exit;
+  if FindFirst(IncludeTrailingPathDelimiter(APath) + '*', faAnyFile, SR) = 0 then
+  begin
+    try
+      repeat
+        if (SR.Name = '.') or (SR.Name = '..') then
+          Continue;
+        Child := IncludeTrailingPathDelimiter(APath) + SR.Name;
+        if DirectoryExists(Child) then
+          RemoveTree(Child)
+        else
+          DeleteFile(Child);
+      until FindNext(SR) <> 0;
+    finally
+      FindClose(SR);
+    end;
+  end;
+  RemoveDir(APath);
+end;
+
 procedure THarnessSessionTest.SetUp;
 begin
   FTransports := TObjectList<TFakeTransport>.Create(True);
+  { The PID is part of the name because Random() is not unique ACROSS
+    PROCESSES: the parallel gate starts its workers together, each calls
+    Randomize seeded from the clock, and two workers can draw the same number.
+    They then shared one directory - and because some tests here WRITE
+    AGENTS.md while TestAgentsMdAbsentLeavesNoBlock asserts its ABSENCE, a
+    shared dir made that test fail with "got a block" for no reason anyone
+    could see in the test itself. }
   FDir := IncludeTrailingPathDelimiter(GetTempDir) + 'hh-session-' +
-    IntToStr(Random(1000000));
+    IntToStr(GetProcessID) + '-' + IntToStr(Random(1000000));
   ForceDirectories(FDir);
   FStorePath := IncludeTrailingPathDelimiter(FDir) + 'store.db';
 end;
@@ -155,8 +191,13 @@ begin
   FTransports.Free;
   if FileExists(FStorePath) then
     DeleteFile(FStorePath);
-  if DirectoryExists(FDir) then
-    RemoveDir(FDir);
+  { RemoveDir removes an EMPTY directory only, and the AGENTS.md tests write
+    files into this one, so the old teardown left every such tree behind: 8,783
+    hh-session-* directories were sitting in the temp dir on this machine, some
+    still carrying an AGENTS.md. That leak is what made the collision possible
+    to miss - a fresh random number never landed on a stale tree, so nothing
+    pointed at it. }
+  RemoveTree(FDir);
 end;
 
 { Write a text file, creating parent directories. Small local helper so the
