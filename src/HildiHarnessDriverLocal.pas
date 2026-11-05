@@ -12,6 +12,7 @@ uses
   HildiApproval, HildiHarnessTurn,
   HildiHarnessDriver, HildiHarnessSession,
   HildiSession, HildiSkills,
+  HildiMCPConfig, HildiMCPClient,
   HildiStore;
 
 { The in-process driver over a session that has a built loop. }
@@ -31,6 +32,14 @@ type
     { The turn in flight is a checkpoint turn: on completion the driver records a
       checkpoint from the assistant's reply. }
     FCheckpointTurn: Boolean;
+    { One server's connection, read from the manager's live set. }
+    function ConnectionOf(const AName: string): TMcpConnection;
+    { The stored rows, or False when the session has no store to read them from. }
+    function RowsNow(out ARows: TMcpServerRowArray): Boolean;
+    { Build rows via the SHARED McpRowOf and push them as one event. AOnly ''
+      means every server; AError is attached to the single row when present. }
+    procedure PushMcpRows(const ARows: TMcpServerRowArray;
+      AKind: TTurnEventKind; const AOnly: string; const AError: string);
   public
     constructor Create(ASession: THarnessSession);
     procedure StartTurn(const AText: string);
@@ -54,6 +63,16 @@ type
     { Load a skill by key. LoadSkillByName records the session approval first, so
       an operator-typed load does not prompt. A refusal is pushed as an error. }
     procedure LoadSkill(const AKey: string);
+    { The MCP list, built in-process from the same shared McpRowOf the runtime
+      uses, and pushed as an event so the app has ONE code path whether the
+      driver is local or remote. }
+    procedure McpList;
+    { A fresh connection read. In-process there is no round trip to make: the
+      provider's live state already IS the probe. }
+    procedure McpProbe(const AKey: string);
+    { Reopen one dropped transport. Never touches OpenNames, so activation is
+      unchanged - reconnecting is not loading. }
+    procedure McpReconnect(const AKey: string);
     procedure Checkpoint;
     function PopEvent(out AEvent: TTurnEvent): Boolean;
     function Dropped: Int64;
@@ -311,6 +330,124 @@ begin
   E.SkillKeys := FSession.Skills.Keys;
   E.SkillLoadedKeys := FSession.Skills.LoadedKeys;
   FSession.Queue.Push(E);
+end;
+
+function TLocalDriver.ConnectionOf(const AName: string): TMcpConnection;
+var
+  State: TMcpServerState;
+begin
+  { Not knowing a server is UNKNOWN, never disconnected: "we do not hold it" is a
+    different claim from "its transport is down", and a list must not invent the
+    stronger one. }
+  if FSession.McpProvider = nil then
+    Exit(mcUnknown);
+  if not FSession.McpProvider.TransportStateOf(AName, State) then
+    Exit(mcUnknown);
+  if State = mssConnected then
+    Result := mcConnected
+  else
+    Result := mcDisconnected;
+end;
+
+function TLocalDriver.RowsNow(out ARows: TMcpServerRowArray): Boolean;
+var
+  Err: TStoreError;
+begin
+  ARows := nil;
+  Result := False;
+  if (FSession.View = nil) or (FSession.View.Store = nil) then
+    Exit;
+  Result := FSession.View.Store.ListMcpServers(ARows, Err);
+end;
+
+procedure TLocalDriver.PushMcpRows(const ARows: TMcpServerRowArray;
+  AKind: TTurnEventKind; const AOnly: string; const AError: string);
+var
+  E: TTurnEvent;
+  Live: TStringArray;
+  I, N: Integer;
+
+  procedure AddOne(const ARow: TMcpServerRow);
+  begin
+    SetLength(E.McpRows, N + 1);
+    E.McpRows[N] := McpRowOf(ARow, Live, ConnectionOf(ARow.Name));
+    Inc(N);
+  end;
+
+begin
+  Live := nil;
+  if FSession.McpProvider <> nil then
+    Live := FSession.McpProvider.OpenNames;
+  E := Default(TTurnEvent);
+  E.Kind := AKind;
+  N := 0;
+  if AOnly = '' then
+  begin
+    for I := 0 to High(ARows) do
+      AddOne(ARows[I]);
+  end
+  else
+    for I := 0 to High(ARows) do
+      if SameText(ARows[I].Name, AOnly) then
+      begin
+        AddOne(ARows[I]);
+        Break;
+      end;
+  if (AError <> '') and (N > 0) then
+    E.McpRows[N - 1].Error := AError;
+  FSession.Queue.Push(E);
+end;
+
+procedure TLocalDriver.McpList;
+var
+  Rows: TMcpServerRowArray;
+begin
+  if not RowsNow(Rows) then
+  begin
+    { No store means no servers to list. Say nothing rather than a misleading
+      empty list the dialog would render as "you have none". }
+    Exit;
+  end;
+  { mcUnknown for every row: nobody has probed, so no row may claim an answer. }
+  PushMcpRows(Rows, teMcpList, '', '');
+end;
+
+procedure TLocalDriver.McpProbe(const AKey: string);
+var
+  Rows: TMcpServerRowArray;
+begin
+  if not RowsNow(Rows) then
+    Exit;
+  PushMcpRows(Rows, teMcpProbeResult, AKey, '');
+end;
+
+procedure TLocalDriver.McpReconnect(const AKey: string);
+var
+  Rows: TMcpServerRowArray;
+  Err: string;
+  I, Found: Integer;
+begin
+  if not RowsNow(Rows) then
+    Exit;
+  Found := -1;
+  for I := 0 to High(Rows) do
+    if SameText(Rows[I].Name, AKey) then
+    begin
+      Found := I;
+      Break;
+    end;
+  Err := '';
+  if Found < 0 then
+    Err := 'unknown mcp server: ' + AKey
+  else if not Rows[Found].Enabled then
+    { Enabling is a config change, not a reconnect. Refuse rather than quietly
+      opening a server the operator turned off. }
+    Err := 'not enabled'
+  else if FSession.McpProvider = nil then
+    Err := 'no mcp provider'
+  else
+    FSession.McpProvider.Reconnect(AKey, Err);
+  PushMcpRows(Rows, teMcpReconnectDone, AKey, Err);
 end;
 
 function TLocalDriver.PopEvent(out AEvent: TTurnEvent): Boolean;

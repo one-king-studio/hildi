@@ -17,6 +17,8 @@ uses
   Classes, SyncObjs, SysUtils,
   HildiLLM, HildiApproval,
   HildiHarnessTurn,
+  { For TMcpRowStatusArray, which the sink holds and the turn event carries. }
+  HildiMCPConfig,
   HildiSessionProtocol, HildiSessionClient;
 
 type
@@ -51,6 +53,18 @@ type
       as a teSkillDetail event, so the client never blocks the UI thread. }
     procedure SkillDetail(const AKey: string);
     procedure LoadSkill(const AKey: string);
+    { The MCP server list, as of the last ekMcpList. A snapshot for the same
+      reason SkillKeys is one: there are a handful of servers, and a client that
+      missed an event is corrected by the next one. }
+    procedure McpList;
+    { Ask for a FRESH connection probe. An empty key probes every server. Kept
+      separate from McpList because a probe may spawn a process or make an HTTP
+      call per server, while listing is a store read. Fire-and-forget: the answer
+      arrives as a teMcpProbeResult event, so the UI thread never blocks. }
+    procedure McpProbe(const AKey: string);
+    { Reopen one dropped transport. Deliberately does NOT change activation:
+      reconnecting is a transport operation, and loading is not. }
+    procedure McpReconnect(const AKey: string);
     procedure Checkpoint;
     { UI thread: pop the next event, if any. }
     function PopEvent(out AEvent: TTurnEvent): Boolean;
@@ -90,6 +104,10 @@ type
       back into the driver. }
     LastSkillKeys: TStringArray;
     LastSkillLoadedKeys: TStringArray;
+    { The last MCP rows, held here for the same reason as the catalogue: this is
+      where the ekMcp* events arrive, and the driver reads through its sink
+      rather than the sink reaching back into the driver. }
+    LastMcpRows: TMcpRowStatusArray;
     constructor Create(AQueue: TTurnQueue);
     procedure OnHello(const AHello: TSessionHello);
     procedure OnAttached(const AAttached: TSessionAttached);
@@ -112,6 +130,10 @@ type
       copy that could drift. }
     function EnsureClient(out AError: string): Boolean;
     procedure SendSkillCommand(AKind: TSessionCommandKind; const AKey: string);
+    { The MCP commands carry a server key where the turn commands carry a turn
+      id, so they cannot reuse SendCommand's signature - the same reason
+      SendSkillCommand exists. }
+    procedure SendMcpCommand(AKind: TSessionCommandKind; const AKey: string);
     procedure SendCommand(AKind: TSessionCommandKind; const AText,
       AAskRef: string; const AChoice: TApprovalChoice;
       const ASessionId: string; ATurnId: Int64 = 0);
@@ -143,6 +165,12 @@ type
     { Load a skill by key. The runtime asks for approval; a refusal arrives as
       an error event, so this never reports success it cannot vouch for. }
     procedure LoadSkill(const AKey: string);
+    { The MCP server list, as of the last ekMcpList the sink captured. }
+    procedure McpList;
+    { Ask for a fresh probe; the answer arrives as an event. }
+    procedure McpProbe(const AKey: string);
+    { Reopen one dropped transport, leaving activation alone. }
+    procedure McpReconnect(const AKey: string);
     function PopEvent(out AEvent: TTurnEvent): Boolean;
     function Dropped: Int64;
     procedure Close;
@@ -174,6 +202,13 @@ begin
     LastSkillKeys := AEvent.SkillKeys;
     LastSkillLoadedKeys := AEvent.SkillLoadedKeys;
   end;
+  { Every ekMcp* event carries a FULL row array, so the sink just replaces what
+    it held - same reasoning as the skill catalogue. A probe answers with fewer
+    rows than the list did, so this deliberately overwrites rather than merges:
+    a partial snapshot presented as the whole list is the staleness the
+    event-carries-everything rule exists to prevent. }
+  if AEvent.Kind in [ekMcpList, ekMcpProbeResult, ekMcpReconnectDone] then
+    LastMcpRows := AEvent.McpRows;
   if MapSessionEvent(AEvent, E) then
     FQueue.Push(E);
 end;
@@ -306,6 +341,23 @@ begin
         E.SkillResources := AEvent.SkillResources;
         E.SkillBody := AEvent.SkillBody;
         E.SkillIsLoaded := AEvent.SkillIsLoaded;
+      end;
+    ekMcpList:
+      begin
+        E.Kind := teMcpList;
+        E.McpRows := AEvent.McpRows;
+      end;
+    ekMcpProbeResult:
+      begin
+        E.Kind := teMcpProbeResult;
+        E.McpRows := AEvent.McpRows;
+      end;
+    ekMcpReconnectDone:
+      begin
+        { No activation field: reconnecting must not change whether the model can
+          use the server, and carrying a flag here would invite exactly that. }
+        E.Kind := teMcpReconnectDone;
+        E.McpRows := AEvent.McpRows;
       end;
   else
     { loop_started, turn_started, approval_resolved, drive_*, gap, loop_exited:
@@ -446,6 +498,31 @@ begin
   end;
 end;
 
+procedure TRemoteDriver.SendMcpCommand(AKind: TSessionCommandKind;
+  const AKey: string);
+var
+  Cmd: TSessionCommand;
+  Err: string;
+begin
+  if not EnsureClient(Err) then
+  begin
+    PushError(Err);
+    Exit;
+  end;
+  Inc(FNextId);
+  Cmd := Default(TSessionCommand);
+  Cmd.Kind := AKind;
+  Cmd.Id := 't' + IntToStr(FNextId);
+  { An EMPTY key on scMcpProbe means every server, so the field is set as given
+    rather than defaulted. }
+  Cmd.McpKey := AKey;
+  if not FClient.Send(Cmd) then
+  begin
+    FSink.Detached := True;
+    PushError('could not send to the runtime');
+  end;
+end;
+
 procedure TRemoteDriver.StartTurn(const AText: string);
 begin
   SendCommand(scPrompt, AText, '', Default(TApprovalChoice), '');
@@ -522,6 +599,23 @@ end;
 procedure TRemoteDriver.LoadSkill(const AKey: string);
 begin
   SendSkillCommand(scLoadSkill, AKey);
+end;
+
+procedure TRemoteDriver.McpList;
+begin
+  SendMcpCommand(scMcpList, '');
+end;
+
+procedure TRemoteDriver.McpProbe(const AKey: string);
+begin
+  { Fire-and-forget: the rows come back as a teMcpProbeResult event, so a probe
+    that spawns a process never blocks the UI thread. }
+  SendMcpCommand(scMcpProbe, AKey);
+end;
+
+procedure TRemoteDriver.McpReconnect(const AKey: string);
+begin
+  SendMcpCommand(scMcpReconnect, AKey);
 end;
 
 function TRemoteDriver.PopEvent(out AEvent: TTurnEvent): Boolean;

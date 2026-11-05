@@ -105,6 +105,52 @@ type
     Context: TMcpConfigContext;
   end;
 
+  { Whether a server's TRANSPORT is up. Observed by a probe, never stored: a
+    persisted connection state is a lie the moment the transport dies. }
+  TMcpConnection = (mcUnknown, mcConnected, mcDisconnected);
+
+  { One server as the management dialog needs it: identity, both status columns,
+    and the last error if a probe failed. Connection and Enabled are separate
+    fields because they answer different questions - "is it up" versus "may the
+    LLM use it" - and collapsing them is what made state="closed" ambiguous.
+
+    These live HERE, in the pure config unit, rather than beside the wire codec
+    that first declared them: two consumers need them (the wire event and the
+    in-process turn event), and a record type copied into the second one would
+    drift from the first the moment a field was added. This unit has no
+    dependencies, so sharing costs nothing. }
+  TMcpRowStatus = record
+    Key: string;
+    LabelText: string;           // '' => render the key
+    Description: string;         // '' => render nothing
+    Scope: TMcpScope;
+    Transport: TMcpTransportKind;
+    Connection: TMcpConnection;  // mcUnknown until a probe answers
+    Enabled: Boolean;            // in the manifest; callable with load_mcp
+    { Loaded into THIS session's context right now. Separate from Enabled because
+      they are asked by different consumers: the manifest reads Enabled, the
+      loaded set reads Active. A server can be enabled and inactive - the normal
+      lazy case, not an error. Sourced from TMcpProvider.OpenNames. }
+    Active: Boolean;
+    Auth: TMcpAuthKind;          // learned when the record was added
+    Error: string;               // '' unless the last probe/reconnect failed
+  end;
+
+  TMcpRowStatusArray = array of TMcpRowStatus;
+
+{ Build one dialog row from a stored server, given the session's active set and a
+  probed connection state.
+
+  SHARED by both drivers and the runtime on purpose: the row is assembled from
+  five sources (the record, the store's enabled flag, the provider's open set, the
+  probe, and the label/description fallbacks), and three copies of that assembly
+  would drift the first time a field was added. AConnection is passed IN because
+  the caller knows whether it probed: a list passes mcUnknown, and only a probe
+  may pass a real answer. }
+function McpRowOf(const ARow: TMcpServerRow;
+  const AActiveSet: TStringArray;
+  AConnection: TMcpConnection): TMcpRowStatus;
+
 { Merge rows for a context by precedence (agent > workspace > global): a more
   specific row overrides the same name; distinct names union. Returns the
   enabled servers only, sorted by name for determinism. }
@@ -146,6 +192,37 @@ implementation
 
 uses
   fpjson, jsonparser;
+
+function McpRowOf(const ARow: TMcpServerRow;
+  const AActiveSet: TStringArray;
+  AConnection: TMcpConnection): TMcpRowStatus;
+var
+  I: Integer;
+begin
+  Result := Default(TMcpRowStatus);
+  Result.Key := ARow.Name;
+  Result.LabelText := ARow.LabelText;
+  Result.Description := ARow.Description;
+  Result.Scope := ARow.Scope;
+  Result.Transport := ARow.Transport;
+  Result.Enabled := ARow.Enabled;
+  Result.Auth := ARow.Auth;
+  { Passed in, not probed here: the caller knows whether anyone asked. A list
+    passes mcUnknown, because claiming "down" for a server nobody probed is a lie
+    the dialog would then act on. Only a probe may pass a real answer. }
+  Result.Connection := AConnection;
+  { Active = the server is open for THIS session, which is what load_mcp changes
+    and what TTL decay closes. TMcpProvider.OpenNames is the single source;
+    deriving it from the store would confuse "enabled" with "loaded", which is
+    the exact conflation this feature exists to end. }
+  Result.Active := False;
+  for I := 0 to High(AActiveSet) do
+    if SameText(AActiveSet[I], ARow.Name) then
+    begin
+      Result.Active := True;
+      Break;
+    end;
+end;
 
 function IsValidMcpName(const AName: string): Boolean;
 var

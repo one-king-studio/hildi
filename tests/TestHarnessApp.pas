@@ -68,6 +68,10 @@ type
     LoadedSkills: TStringArray;
     { Which skill detail the app asked for, so a test can assert the request. }
     DetailRequested: string;
+    { MCP: how many list calls, and the last key probed/reconnected. }
+    McpListCalls: Integer;
+    McpProbedKey: string;
+    McpReconnectedKey: string;
     LoadedId: string;
     procedure StartTurn(const AText: string);
     procedure QueuePrompt(const AText: string);
@@ -86,6 +90,12 @@ type
     procedure SkillDetail(const AKey: string);
     procedure LoadSkill(const AKey: string);
     procedure UnloadSkill(const AKey: string);
+    { MCP: records what the app asked for, so a test can assert the request
+      without a runtime. The rows are handed back by a test through PushRows,
+      since the mock has no manager to build them from. }
+    procedure McpList;
+    procedure McpProbe(const AKey: string);
+    procedure McpReconnect(const AKey: string);
     function PopEvent(out AEvent: TTurnEvent): Boolean;
     function Dropped: Int64;
     procedure Close;
@@ -432,6 +442,21 @@ begin
   { Records the request. The mock holds no bodies, so no event is pushed - the
     app's request is what a test asserts here. }
   DetailRequested := AKey;
+end;
+
+procedure TRecordingDriver.McpList;
+begin
+  Inc(McpListCalls);
+end;
+
+procedure TRecordingDriver.McpProbe(const AKey: string);
+begin
+  McpProbedKey := AKey;
+end;
+
+procedure TRecordingDriver.McpReconnect(const AKey: string);
+begin
+  McpReconnectedKey := AKey;
 end;
 
 procedure TRecordingDriver.LoadSkill(const AKey: string);

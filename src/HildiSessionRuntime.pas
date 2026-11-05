@@ -210,7 +210,9 @@ type
       untouched - reconnecting a transport is not loading a capability. }
     procedure HandleMcpReconnect(AClient: TClientConn;
       const ACommand: TSessionCommand);
-    { Build the row for one stored server, given the active set. }
+    { Build the row for one stored server, given the active set. Delegates to the
+      shared McpRowOf in HildiMCPConfig, so the runtime and the local driver
+      cannot assemble the same row two different ways. }
     function McpRowFor(const ARow: TMcpServerRow;
       const AActiveSet: TStringArray;
       AConnection: TMcpConnection): TMcpRowStatus;
@@ -1457,33 +1459,11 @@ end;
 function TSessionRuntime.McpRowFor(const ARow: TMcpServerRow;
   const AActiveSet: TStringArray;
   AConnection: TMcpConnection): TMcpRowStatus;
-var
-  I: Integer;
 begin
-  Result := Default(TMcpRowStatus);
-  Result.Key := ARow.Name;
-  Result.LabelText := ARow.LabelText;
-  Result.Description := ARow.Description;
-  Result.Scope := ARow.Scope;
-  Result.Transport := ARow.Transport;
-  Result.Enabled := ARow.Enabled;
-  Result.Auth := ARow.Auth;
-  { Passed in, because the caller knows whether it probed. A list passes
-    mcUnknown: claiming "down" for a server nobody asked about is a lie the
-    dialog would then act on. scMcpProbe is the only thing that may pass a real
-    answer. }
-  Result.Connection := AConnection;
-  { Active = the server's transport is open for THIS session, which is what
-    load_mcp changes and what TTL decay closes. TMcpProvider.OpenNames is the
-    single source; deriving it from the store instead would confuse "enabled"
-    with "loaded". }
-  Result.Active := False;
-  for I := 0 to High(AActiveSet) do
-    if SameText(AActiveSet[I], ARow.Name) then
-    begin
-      Result.Active := True;
-      Break;
-    end;
+  { One implementation, in HildiMCPConfig: the local driver builds the same row
+    for the in-process path, and two copies of this assembly would drift the
+    first time a field was added. }
+  Result := McpRowOf(ARow, AActiveSet, AConnection);
 end;
 
 procedure TSessionRuntime.HandleMcpList(AClient: TClientConn;

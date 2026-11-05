@@ -18,7 +18,10 @@ interface
 uses
   Classes, SysUtils, SyncObjs,
   AsyncQueue,
-  HildiLLM, HildiApproval;
+  HildiLLM, HildiApproval,
+  { For TMcpRowStatusArray. A deliberately dependency-free unit: the row type is
+    shared with the wire codec rather than declared twice. }
+  HildiMCPConfig;
 
 type
   TTurnEventKind = (
@@ -51,7 +54,16 @@ type
     teSkills,
     { One skill's full detail, answering a SkillDetail request. Appended last so
       stored ordinals are unchanged. }
-    teSkillDetail
+    teSkillDetail,
+    { The MCP server list, answering McpList. Carries BOTH status columns -
+      connection (probed) and enabled (the record) - so the dialog never infers
+      one from the other. Appended last so stored ordinals are unchanged. }
+    teMcpList,
+    { Fresh connection results, answering McpProbe. Appended last. }
+    teMcpProbeResult,
+    { One server's state after a reconnect. Activation is deliberately NOT here:
+      reconnecting a transport must not change whether the model can use it. }
+    teMcpReconnectDone
   );
 
   TTurnEvent = record
@@ -97,6 +109,11 @@ type
     SkillResources: TStringArray;
     SkillBody: string;
     SkillIsLoaded: Boolean;
+    { teMcpList / teMcpProbeResult / teMcpReconnectDone: the rows. A full array
+      rather than a delta, for the same reason SkillKeys is a full list - there
+      are a handful of servers, and a client that missed an event is corrected by
+      the next one instead of drifting. }
+    McpRows: TMcpRowStatusArray;
   end;
 
   { A thread-safe, BOUNDED FIFO. Push from the worker thread, Pop from the UI

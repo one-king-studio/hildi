@@ -76,32 +76,9 @@ type
       loaded into the session's context. }
     ekMcpReconnectDone);
 
-  { Whether a server's TRANSPORT is up. Observed by a probe, never stored: a
-    persisted connection state is a lie the moment the transport dies. }
-  TMcpConnection = (mcUnknown, mcConnected, mcDisconnected);
-
-  { One server as the dialog needs it: identity, both status columns, and the
-    last error if a probe failed. Connection and Enabled are separate fields
-    because they answer different questions - "is it up" versus "may the LLM use
-    it" - and collapsing them is what made state="closed" ambiguous. }
-  TMcpRowStatus = record
-    Key: string;
-    LabelText: string;           // '' => render the key
-    Description: string;         // '' => render nothing
-    Scope: TMcpScope;
-    Transport: TMcpTransportKind;
-    Connection: TMcpConnection;  // mcUnknown until a probe answers
-    Enabled: Boolean;            // in the manifest; callable with load_mcp
-    { Loaded into THIS session's context right now. Separate from Enabled because
-      they are asked by different consumers: the manifest reads Enabled, the
-      loaded set reads Active. A server can be enabled and inactive - the normal
-      lazy case, not an error. Sourced from TMcpProvider.OpenNames. }
-    Active: Boolean;
-    Auth: TMcpAuthKind;          // learned when the record was added
-    Error: string;               // '' unless the last probe/reconnect failed
-  end;
-
-  TMcpRowStatusArray = array of TMcpRowStatus;
+  { TMcpConnection and TMcpRowStatus live in HildiMCPConfig: the in-process turn
+    event carries the same rows as the wire event, so one declaration serves both
+    and they cannot drift. This unit owns only their WIRE form, below. }
 
   { One streamed event. A flat record with optional fields, the same shape as
     TTurnEvent: only the fields named by Kind are meaningful. }
