@@ -173,8 +173,73 @@ that render such text already list `cwstring` second on Unix.
 
 ## Isolation and resources
 
-- Create a unique temp directory per test (`GetTempDir` + a unique suffix) in
-  `SetUp` and remove it in `TearDown`.
+### Temp directories: unique ACROSS PROCESSES, and actually removed
+
+Two bugs of this shape were live in the suite at once, and each cost a session
+chasing a "flake" that was neither flaky nor a race.
+
+**1. `Random()` alone is not unique across processes.** The parallel gate starts
+its workers together, each calls `Randomize` seeded from the clock, and two can
+draw the same number. They then share one directory:
+
+```pascal
+// WRONG - two workers can draw the same number
+FDir := GetTempDir + 'hh-skills-' + IntToStr(Random(1000000));
+
+// RIGHT - the PID makes it unique across processes
+FDir := GetTempDir + 'hh-skills-' + IntToStr(GetProcessID) + '-' +
+  IntToStr(Random(1000000));
+```
+
+It is especially poisonous when one test *writes* a file that another asserts is
+*absent*: `TestAgentsMdAbsentLeavesNoBlock` failed with "got a block" because a
+concurrent worker had written an `AGENTS.md` into the shared directory. Nothing
+in that test was wrong, and it passed in isolation every time.
+
+**2. `RemoveDir` removes an EMPTY directory only.** Every test that wrote a file
+into its temp dir had been leaving the whole tree behind - 8,296 `hh-skills-*`
+and 8,783 `hh-session-*` directories had accumulated in `$TMPDIR`. The leak also
+*hid* bug 1: a fresh random number never landed on a stale tree, so nothing
+pointed at the collision.
+
+FPC's `SysUtils` has no `DelTree`, and `FileUtil` is **not** on this project's
+unit path. Drain the tree explicitly:
+
+```pascal
+procedure RemoveTree(const APath: string);
+var
+  SR: TSearchRec;
+  Child: string;
+begin
+  if not DirectoryExists(APath) then
+    Exit;
+  if FindFirst(IncludeTrailingPathDelimiter(APath) + '*', faAnyFile, SR) = 0 then
+  begin
+    try
+      repeat
+        if (SR.Name = '.') or (SR.Name = '..') then
+          Continue;
+        Child := IncludeTrailingPathDelimiter(APath) + SR.Name;
+        if DirectoryExists(Child) then
+          RemoveTree(Child)
+        else
+          DeleteFile(Child);
+      until FindNext(SR) <> 0;
+    finally
+      FindClose(SR);
+    end;
+  end;
+  RemoveDir(APath);
+end;
+```
+
+**How to recognise it:** a suite that passes in isolation but fails under
+`make check`, especially a *negative* test ("no block", "one skill, not two").
+Before believing a flake, run `ls /tmp | grep <prefix> | wc -l`. If it is in the
+thousands, the teardown is broken and a collision may already be happening.
+
+- Create a unique temp directory per test (`GetTempDir` + PID + a unique suffix)
+  in `SetUp` and remove it **recursively** in `TearDown`.
 - SQLite in WAL mode creates sibling `-wal` and `-shm` files; delete those as
   well as the database file so `TearDown` actually cleans up.
 - Own every thread and object: `WaitFor` and `Free` in `TearDown`, and free
@@ -206,6 +271,56 @@ separate direct connection in the test rather than widening the production API.
 - N threads claiming from a shared queue must produce exactly N distinct claims;
   assert count and uniqueness, not order.
 - Avoid `Sleep` to "wait for" a thread; use `WaitFor`.
+
+## Buffered readers: drain before you block
+
+A line buffer that can hold more than its reader consumes is safe only if the
+reader empties it **before** waiting for more. Reversing that order silently
+strands data, and the symptom reads as a timeout rather than as a bug.
+
+`TClientReader.Execute` did:
+
+```pascal
+// WRONG - a line already in FInBuf is skipped past by the blocking recv
+while not Terminated do
+begin
+  N := fpRecv(FClient.FFd, @Tmp, SizeOf(Tmp), 0);
+  ... append to FInBuf ...
+  while ExtractLine(FClient.FInBuf, Line) do HandleIncoming(Line);  // too late
+end;
+```
+
+`Handshake()` calls `ReadLineTimeout` twice, and each call recvs up to 4096 bytes
+but extracts only the one line it wants. The runtime queues `mkAttached`, the
+replay and the `ekSkills` catalogue back to back, so one recv commonly returns
+all three. The surplus stayed in `FInBuf`, and the blocking recv went straight
+past it - so a client attaching to a runtime whose first writes coalesce saw
+**no events at all**, forever. The palette reported "no skills available" on a
+session that had them.
+
+The fix is to drain first, then block, re-checking the stop flag between:
+
+```pascal
+while not Terminated do
+begin
+  while ExtractLine(FClient.FInBuf, Line) do HandleIncoming(Line);   // drain
+  if Terminated then Break;
+  N := fpRecv(FClient.FFd, @Tmp, SizeOf(Tmp), 0);                    // then wait
+  ... append to FInBuf ...
+end;
+```
+
+**Diagnose it by naming the data.** The failure said only "the catalogue was
+pushed on attach", which is equally true of "received nothing" and "received
+everything but the catalogue". Adding the event count to the message -
+`got 0 event(s): none` - identified it immediately. Two confident diagnoses
+before that were both wrong, and both cost a board entry.
+
+**Audit result, so nobody repeats it:** of the four readers in `src/`, only the
+client had this bug. `TSessionRuntime.ReadClient` drains to `EAGAIN` before
+parsing, `HildiStdioChild.ReadLine` checks the buffer before `select`, and
+`HildiMCPOAUTHFlow` carries no buffer across calls. The client was the only one
+with a *blocking* read over a persistent buffer.
 
 ## Don't touch the network
 
@@ -260,6 +375,14 @@ Hard-won FPC `fcl-db` behaviours that affect both implementation and tests:
 - "Compatible" APIs have edge cases: verify the exact call path (transactions,
   connect-time vs statement-time pragmas) with a small probe before writing the
   spec or the code.
+- Temp dirs named from `Random()` collide **across processes**; include
+  `GetProcessID`. And `RemoveDir` only removes an empty directory - drain it, or
+  the leak hides the collision.
+- A buffered reader must drain its buffer before blocking on the socket, or it
+  strands lines that already arrived. Put the received count in any "nothing
+  arrived" assertion so the message distinguishes the two causes.
+- `DelTree` does not exist in FPC's `SysUtils`, and `FileUtil` is not on this
+  project's unit path.
 
 ## Related
 
