@@ -60,9 +60,10 @@ type
       given and never reads the store itself. }
     procedure SetItems(const AItems: TProviderListItemArray);
     function SelectedName: string;
-    { 'close' | 'delete'. The host performs them. There is deliberately NO
+    { 'add' | 'edit' | 'cancel'. The host performs them. There is deliberately NO
       'activate': this dialog manages providers, it does not switch them -
-      switching is /model, which chooses a provider+model pair. }
+      switching is /model, which chooses a provider+model pair. Removal is an
+      action of the EDIT form, not of the list. }
     property OnAction: TProviderActionEvent read FOnAction write FOnAction;
     function HandleEvent(const E: TInputEvent): Boolean; override;
   protected
@@ -308,8 +309,12 @@ begin
     NO 'enter activate'. This dialog MANAGES providers; it does not switch them.
     Switching is /model, which chooses a provider+model pair, and keeping the two
     separate is what stops a list view from silently changing what a session
-    talks to. }
-  SetFooter('d delete   esc close');
+    talks to.
+
+    'ctrl+a add' is CHORDED rather than a bare 'a': a lone letter beside a
+    destructive action is too easy to hit while reading the list. Removal lives
+    in the EDIT form, not here, so the list has no destructive CTA at all. }
+  SetFooter('ctrl+a add   enter edit   esc cancel');
 end;
 
 procedure TProviderModal.SetItems(const AItems: TProviderListItemArray);
@@ -325,7 +330,7 @@ end;
 procedure TProviderModal.RequestClose;
 begin
   if Assigned(FOnAction) then
-    FOnAction('close');
+    FOnAction('cancel');
 end;
 
 function TProviderModal.HandleEvent(const E: TInputEvent): Boolean;
@@ -341,12 +346,21 @@ begin
           RequestClose;
           Exit(True);
         end;
+      kkEnter:
+        begin
+          { Edit the selected row. With nothing selected there is nothing to
+            edit, and opening an empty form would be a worse answer than doing
+            nothing. }
+          if (SelectedName <> '') and Assigned(FOnAction) then
+            FOnAction('edit');
+          Exit(True);
+        end;
       kkChar:
         begin
-          if (E.Key.Ch = 'd') or (E.Key.Ch = 'D') then
+          if (moCtrl in E.Key.Mods) and ((E.Key.Ch = 'a') or (E.Key.Ch = 'A')) then
           begin
-            if (SelectedName <> '') and Assigned(FOnAction) then
-              FOnAction('delete');
+            if Assigned(FOnAction) then
+              FOnAction('add');
             Exit(True);
           end;
         end;
@@ -362,10 +376,15 @@ end;
 
 procedure TProviderModal.FooterClicked(const AKey: string);
 begin
-  if AKey = 'd' then
+  if AKey = 'ctrl+a' then
+  begin
+    if Assigned(FOnAction) then
+      FOnAction('add');
+  end
+  else if AKey = 'enter' then
   begin
     if (SelectedName <> '') and Assigned(FOnAction) then
-      FOnAction('delete');
+      FOnAction('edit');
   end
   else if AKey = 'esc' then
     RequestClose

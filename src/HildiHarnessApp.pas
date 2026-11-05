@@ -19,7 +19,7 @@ uses
   HildiCompose, HildiChatPanel,
   TUIWidgetsPalette,
   HildiApprovalModal,
-  HildiProviderDialog, HildiProviderDialogUi,
+  HildiProviderDialog, HildiProviderDialogUi, HildiProviderForm,
   TUIWidgetsPanel, TUITheme,
   TUIApp, HildiHarnessTurn,
   HildiHarnessDriver, HildiHarnessView,
@@ -124,6 +124,13 @@ type
       answer to reconcile. }
     FProviderModal: TProviderModal;
     FCloseProviderModal: Boolean;
+    { The add/edit form, and the row it was opened for. FProviderEditing says
+      which shape its footer takes; FProviderFormRow is what a save updates and
+      what a remove deletes. }
+    FProviderForm: TProviderForm;
+    FCloseProviderForm: Boolean;
+    FProviderEditing: Boolean;
+    FProviderFormRow: TProviderRow;
     FHistoryShown: Boolean;
     FHistoryIntent: THistoryIntent;
     FDiffShown: Boolean;
@@ -303,6 +310,9 @@ type
     procedure CloseProviderModal;
     procedure SyncProviderModal;
     procedure ProviderModalAction(const AAction: string);
+    procedure ShowProviderForm(const ARow: TProviderRow; AEditing: Boolean);
+    procedure CloseProviderForm;
+    procedure ProviderFormAction(const AAction: string);
     procedure LoadProviders;
     procedure McpModalClosed;
     procedure CloseDiff;
@@ -3454,24 +3464,49 @@ procedure THarnessApp.ProviderModalAction(const AAction: string);
 var
   Err: TStoreError;
   Name: string;
+  EditRow: TProviderRow;
 begin
-  if AAction = 'close' then
+  if AAction = 'cancel' then
   begin
     { Deferred: the widget is dispatching, so the pop waits for SyncProviderModal. }
     FCloseProviderModal := True;
     Exit;
   end;
-  if AAction <> 'delete' then
-    Exit;
   if (FProviderModal = nil) or (FSession = nil) or (FSession.Store = nil) then
     Exit;
-  Name := FProviderModal.SelectedName;
+  if AAction = 'add' then
+  begin
+    ShowProviderForm(Default(TProviderRow), False);
+    Exit;
+  end;
+  if AAction = 'edit' then
+  begin
+    Name := FProviderModal.SelectedName;
+    if Name = '' then
+      Exit;
+    { Load the row fresh rather than trusting a copy: the list was built from a
+      query, and editing must start from what is STORED, not from what was
+      rendered some frames ago. }
+    if not FSession.Store.LoadProvider(Name, EditRow, Err) then
+    begin
+      AppendError('load ' + Name + ': ' + Err.Message);
+      Exit;
+    end;
+    ShowProviderForm(EditRow, True);
+    Exit;
+  end;
+  if AAction <> 'delete' then
+    Exit;
+  { Removal now lives in the EDIT form, so this branch is reached only from
+    there - the list has no destructive CTA at all. }
+  Name := FProviderFormRow.Name;
   if Name = '' then
     Exit;
   { Deleting the ACTIVE provider is allowed and leaves no active row; resolution
     then falls through to the environment. That is a real state, not an error. }
   if FSession.Store.DeleteProvider(Name, Err) then
   begin
+    CloseProviderForm;
     LoadProviders;
     SetState(psReady, 'deleted: ' + Name);
   end
@@ -3479,8 +3514,116 @@ begin
     AppendError('delete ' + Name + ': ' + Err.Message);
 end;
 
+procedure THarnessApp.ShowProviderForm(const ARow: TProviderRow;
+  AEditing: Boolean);
+var
+  Wrap: TContainer;
+  R: TRect;
+begin
+  FProviderFormRow := ARow;
+  FProviderEditing := AEditing;
+  { The list stays beneath: the form is a second plane, so cancelling returns to
+    the list rather than to a blank screen. }
+  FProviderForm := TProviderForm.Create(FTheme, RegisteredProviderKeys, AEditing);
+  FProviderForm.OnAction := ProviderFormAction;
+  if AEditing then
+    FProviderForm.LoadFrom(ARow);
+  FProviderForm.Visible := True;
+  Wrap := TContainer.Create([Fill(1), Auto, Fill(1)], [Fill(1), Auto, Fill(1)]);
+  Wrap.Add(FProviderForm, 1, 1);
+  R := Default(TRect);
+  R.W := FSurface.Width;
+  R.H := FSurface.Height;
+  Wrap.Arrange(R);
+  FApp.PushPlane(TPlane.Create(Wrap, True, True));
+  if AEditing then
+    SetState(psReady, 'Edit provider')
+  else
+    SetState(psReady, 'Add provider');
+end;
+
+procedure THarnessApp.CloseProviderForm;
+begin
+  if FApp.ModalActive then
+    FApp.PopPlane;
+  FProviderForm := nil;
+  SetState(psReady, 'Ready');
+end;
+
+procedure THarnessApp.ProviderFormAction(const AAction: string);
+var
+  Err: TStoreError;
+  Res: TProviderFormResult;
+  Row: TProviderRow;
+begin
+  if AAction = 'cancel' then
+  begin
+    { Deferred, same reason as the list: the widget is mid-dispatch. }
+    FCloseProviderForm := True;
+    Exit;
+  end;
+  if (FProviderForm = nil) or (FSession = nil) or (FSession.Store = nil) then
+    Exit;
+  if AAction = 'remove' then
+  begin
+    if FProviderFormRow.Name = '' then
+      Exit;
+    if FSession.Store.DeleteProvider(FProviderFormRow.Name, Err) then
+    begin
+      CloseProviderForm;
+      LoadProviders;
+      SetState(psReady, 'deleted: ' + FProviderFormRow.Name);
+    end
+    else
+      AppendError('delete: ' + Err.Message);
+    Exit;
+  end;
+  if (AAction <> 'add') and (AAction <> 'save') then
+    Exit;
+  { The form has already validated; this only transcribes. }
+  Res := FProviderForm.Result_;
+  Row := Default(TProviderRow);
+  Row.Name := Res.Name;
+  Row.Key := Res.Key;
+  Row.Endpoint := Res.Endpoint;
+  Row.Model := Res.Model;
+  { Editing preserves what the form does not show: the parameters, and the active
+    flag. Losing them on a rename would silently reset a configured provider. }
+  if FProviderEditing then
+  begin
+    Row.Active := FProviderFormRow.Active;
+    Row.Temperature := FProviderFormRow.Temperature;
+    Row.HasTemperature := FProviderFormRow.HasTemperature;
+    Row.TopP := FProviderFormRow.TopP;
+    Row.HasTopP := FProviderFormRow.HasTopP;
+    Row.MaxTokens := FProviderFormRow.MaxTokens;
+    Row.HasMaxTokens := FProviderFormRow.HasMaxTokens;
+    Row.FrequencyPenalty := FProviderFormRow.FrequencyPenalty;
+    Row.HasFrequencyPenalty := FProviderFormRow.HasFrequencyPenalty;
+    Row.PresencePenalty := FProviderFormRow.PresencePenalty;
+    Row.HasPresencePenalty := FProviderFormRow.HasPresencePenalty;
+    Row.Seed := FProviderFormRow.Seed;
+    Row.HasSeed := FProviderFormRow.HasSeed;
+    Row.Stop := FProviderFormRow.Stop;
+  end;
+  if FSession.Store.SaveProvider(Row, Err) then
+  begin
+    CloseProviderForm;
+    LoadProviders;
+    SetState(psReady, 'saved: ' + Res.Name);
+  end
+  else
+    AppendError('save: ' + Err.Message);
+end;
+
 procedure THarnessApp.SyncProviderModal;
 begin
+  if FCloseProviderForm then
+  begin
+    FCloseProviderForm := False;
+    CloseProviderForm;
+    Exit;
+  end;
   if FCloseProviderModal then
   begin
     FCloseProviderModal := False;
