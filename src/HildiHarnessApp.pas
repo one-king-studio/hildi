@@ -3436,6 +3436,8 @@ procedure THarnessApp.ShowProviderModal;
 var
   Wrap: TContainer;
   R: TRect;
+  Existing: TProviderRowArray;
+  Probe: TStoreError;
 begin
   { Already open: refresh in place rather than close-and-reopen under the
     operator's cursor. }
@@ -3446,6 +3448,15 @@ begin
   end;
   if FApp.ModalActive then
     Exit;
+  { NOTHING CONFIGURED MEANS THERE IS NOTHING TO LIST, so go straight to the add
+    form. An empty list with a 'ctrl+a add' footer is a dead end that asks the
+    operator to work out the next step; the form IS the next step. }
+  if (FSession <> nil) and (FSession.Store <> nil) then
+    if FSession.Store.ListProviders(Existing, Probe) and (Length(Existing) = 0) then
+    begin
+      ShowProviderForm(Default(TProviderRow), False);
+      Exit;
+    end;
   FProviderModal := TProviderModal.Create(FTheme);
   FProviderModal.OnAction := ProviderModalAction;
   FProviderModal.Visible := True;
