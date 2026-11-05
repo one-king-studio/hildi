@@ -19,6 +19,7 @@ uses
   HildiHarnessDriver, HildiHarnessDriverLocal,
   HildiHarnessApp,
   HildiHarnessSubagentSpy,
+  HildiMCPConfig,
   HildiSessionProtocol, HildiSessionClient,
   HildiStore,
   HildiSession, LLMFakes,
@@ -72,6 +73,11 @@ type
     McpListCalls: Integer;
     McpProbedKey: string;
     McpReconnectedKey: string;
+    { Events this fake will hand back, in order. The real driver's PopEvent
+      drains the runtime's turn queue; the fake has no runtime, so a test seeds
+      this instead. Without it an app test cannot deliver an event at all, and
+      DrainQueue would see an empty queue forever. }
+    Pending: array of TTurnEvent;
     LoadedId: string;
     procedure StartTurn(const AText: string);
     procedure QueuePrompt(const AText: string);
@@ -96,6 +102,8 @@ type
     procedure McpList;
     procedure McpProbe(const AKey: string);
     procedure McpReconnect(const AKey: string);
+    { Seed an event for the app to drain. See Pending. }
+    procedure PushEvent(const E: TTurnEvent);
     function PopEvent(out AEvent: TTurnEvent): Boolean;
     function Dropped: Int64;
     procedure Close;
@@ -250,6 +258,18 @@ type
     { The panel marks each skill row, so the operator can see what is already in
       context without opening anything. }
     procedure TestSkillListMarksLoadedUnloaded;
+    { /mcp asks the driver for the server list and hands the rows to the
+      dialog. Both halves are easy to get wrong in ways nothing else notices:
+      the command can be dispatched without asking, and the event can arrive
+      without opening anything (the seam had no caller for exactly that
+      reason). }
+    procedure TestMcpCommandAsksTheDriverForTheList;
+    { A teMcpList event opens the dialog. Driven through the queue rather than
+      by calling the private ShowMcpModal, so this covers the event wiring too. }
+    procedure TestMcpListEventOpensTheDialog;
+    { A probe answers with ONE row, and a reconnect with one. They must refresh
+      the open dialog, not replace the whole list with a single row. }
+    procedure TestMcpProbeRefreshesWithoutClosingTheDialog;
     procedure TestStatusShowsWorkspaceAndConsumption;
     procedure TestStatusSumsTurns;
     procedure TestResumeHeaderMatchesLive;
@@ -468,10 +488,24 @@ procedure TRecordingDriver.UnloadSkill(const AKey: string);
 begin
 end;
 
+procedure TRecordingDriver.PushEvent(const E: TTurnEvent);
+begin
+  SetLength(Pending, Length(Pending) + 1);
+  Pending[High(Pending)] := E;
+end;
+
 function TRecordingDriver.PopEvent(out AEvent: TTurnEvent): Boolean;
 begin
   AEvent := Default(TTurnEvent);
-  Result := False;
+  Result := Length(Pending) > 0;
+  if not Result then
+    Exit;
+  AEvent := Pending[0];
+  { Shift, so the order a test seeded is the order the app sees. The arrays are
+    tiny (a handful of events), so the copy is not worth avoiding. }
+  if Length(Pending) > 1 then
+    Move(Pending[1], Pending[0], (Length(Pending) - 1) * SizeOf(TTurnEvent));
+  SetLength(Pending, Length(Pending) - 1);
 end;
 
 function TRecordingDriver.Dropped: Int64;
@@ -2495,6 +2529,78 @@ begin
   AssertTrue('input summed', Pos('3k in', FApp.StatsText) > 0);
   AssertTrue('output summed', Pos('300 out', FApp.StatsText) > 0);
   AssertTrue('two requests', Pos('2 req', FApp.StatsText) > 0);
+end;
+
+procedure THarnessAppTest.TestMcpCommandAsksTheDriverForTheList;
+begin
+  { The command must ASK. It cannot show anything by itself: the rows come from
+    the runtime over scMcpList, which is why /mcp sits after the csConnected
+    guard. }
+  BuildWithStore;
+  FRecording := TRecordingDriver.Create;
+  FApp.Attach(FSession.View, FRecording);
+  AssertEquals('no list request before the command', 0, FRecording.McpListCalls);
+
+  FApp.Panel.Palette.OnRun('mcp');
+  FApp.Step;
+
+  AssertEquals('/mcp asked the driver once', 1, FRecording.McpListCalls);
+end;
+
+procedure THarnessAppTest.TestMcpListEventOpensTheDialog;
+var
+  E: TTurnEvent;
+begin
+  { The other half: the answer opens the dialog. Without this the seam is a
+    transport with no caller - which is exactly what it was before, and the
+    events fell through the case unnoticed. }
+  BuildWithStore;
+  FRecording := TRecordingDriver.Create;
+  FApp.Attach(FSession.View, FRecording);
+  AssertFalse('no dialog yet', FApp.ModalActive);
+
+  SetLength(E.McpRows, 2);
+  E.Kind := teMcpList;
+  E.McpRows[0].Key := 'alpha';
+  E.McpRows[0].Enabled := True;
+  E.McpRows[0].Connection := mcUnknown;
+  E.McpRows[1].Key := 'beta';
+  E.McpRows[1].Enabled := False;
+  E.McpRows[1].Connection := mcDisconnected;
+  FRecording.PushEvent(E);
+  FApp.Step;
+
+  AssertTrue('the list event opened the dialog', FApp.ModalActive);
+end;
+
+procedure THarnessAppTest.TestMcpProbeRefreshesWithoutClosingTheDialog;
+var
+  E: TTurnEvent;
+begin
+  { A probe answers with the rows it probed - one, in the dialog's own flow.
+    Replacing the list with a single row, or closing and reopening the dialog,
+    would both be wrong: the operator is looking at it, and the rest of the
+    servers have not stopped existing. }
+  BuildWithStore;
+  FRecording := TRecordingDriver.Create;
+  FApp.Attach(FSession.View, FRecording);
+
+  SetLength(E.McpRows, 2);
+  E.Kind := teMcpList;
+  E.McpRows[0].Key := 'alpha';
+  E.McpRows[1].Key := 'beta';
+  FRecording.PushEvent(E);
+  FApp.Step;
+  AssertTrue('dialog open after the list', FApp.ModalActive);
+
+  SetLength(E.McpRows, 1);
+  E.Kind := teMcpProbeResult;
+  E.McpRows[0].Key := 'alpha';
+  E.McpRows[0].Connection := mcConnected;
+  FRecording.PushEvent(E);
+  FApp.Step;
+
+  AssertTrue('still open after a probe', FApp.ModalActive);
 end;
 
 procedure THarnessAppTest.TestStatusShowsWorkspaceAndConsumption;
