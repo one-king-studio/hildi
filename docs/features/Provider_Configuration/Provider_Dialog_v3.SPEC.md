@@ -32,10 +32,13 @@ and works while connecting.
 ### Functional
 
 - [ ] `/provider` opens a dialog listing every stored provider, marking the active one.
-- [ ] Selecting a provider makes it active (`SetActiveProvider`).
+- [ ] **`/provider` does NOT switch providers.** It lists, configures and manages.
+      Switching is `/model`, which chooses a provider+model pair. A list view that
+      silently changed what a session talks to would be the wrong affordance.
 - [ ] The dialog shows the provider's endpoint, model and non-default parameters.
 - [ ] Deleting the active provider is allowed (board decision: it leaves no active row).
 - [ ] The dialog works with no runtime attached.
+- [ ] The active provider is shown as a fact (a marker), never as a control.
 - [ ] A provider whose `Key` is not a registered adapter is shown as unusable,
       not hidden.
 

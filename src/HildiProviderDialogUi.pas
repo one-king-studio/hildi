@@ -22,8 +22,6 @@ uses
   HildiProviderDialog;
 
 type
-  { Activated: the operator chose this provider, by NAME (activation is by name). }
-  TProviderPickedEvent = procedure(const AName: string) of object;
   { A key was pressed that the host must act on. '' means close. }
   TProviderActionEvent = procedure(const AAction: string) of object;
 
@@ -52,9 +50,7 @@ type
   TProviderModal = class(TModal)
   private
     FRows: TProviderRows;
-    FOnPick: TProviderPickedEvent;
     FOnAction: TProviderActionEvent;
-    procedure Pick;
     procedure RequestClose;
     procedure RefreshFooter;
   public
@@ -64,7 +60,6 @@ type
       given and never reads the store itself. }
     procedure SetItems(const AItems: TProviderListItemArray);
     function SelectedName: string;
-    property OnPick: TProviderPickedEvent read FOnPick write FOnPick;
     { 'close' | 'delete' | 'activate'. The host performs them. }
     property OnAction: TProviderActionEvent read FOnAction write FOnAction;
     function HandleEvent(const E: TInputEvent): Boolean; override;
@@ -308,8 +303,13 @@ procedure TProviderModal.RefreshFooter;
 begin
   { A single string: TModal splits it into CTA pairs with the SAME rule its
     click path uses. Building the pairs by hand is the bug where a caller and the
-    splitter disagree and clicking 'esc close' activates instead. }
-  SetFooter('enter activate   d delete   esc close');
+    splitter disagree and clicking 'esc close' activates instead.
+
+    NO 'enter activate'. This dialog MANAGES providers; it does not switch them.
+    Switching is /model, which chooses a provider+model pair, and keeping the two
+    separate is what stops a list view from silently changing what a session
+    talks to. }
+  SetFooter('d delete   esc close');
 end;
 
 procedure TProviderModal.SetItems(const AItems: TProviderListItemArray);
@@ -320,12 +320,6 @@ end;
 function TProviderModal.SelectedName: string;
 begin
   Result := FRows.SelectedName;
-end;
-
-procedure TProviderModal.Pick;
-begin
-  if (SelectedName <> '') and Assigned(FOnPick) then
-    FOnPick(SelectedName);
 end;
 
 procedure TProviderModal.RequestClose;
@@ -345,11 +339,6 @@ begin
       kkEscape:
         begin
           RequestClose;
-          Exit(True);
-        end;
-      kkEnter:
-        begin
-          Pick;
           Exit(True);
         end;
       kkChar:
@@ -373,9 +362,7 @@ end;
 
 procedure TProviderModal.FooterClicked(const AKey: string);
 begin
-  if AKey = 'enter' then
-    Pick
-  else if AKey = 'd' then
+  if AKey = 'd' then
   begin
     if (SelectedName <> '') and Assigned(FOnAction) then
       FOnAction('delete');

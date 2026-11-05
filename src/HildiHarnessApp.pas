@@ -303,7 +303,6 @@ type
     procedure CloseProviderModal;
     procedure SyncProviderModal;
     procedure ProviderModalAction(const AAction: string);
-    procedure ProviderModalPick(const AName: string);
     procedure LoadProviders;
     procedure McpModalClosed;
     procedure CloseDiff;
@@ -3438,7 +3437,6 @@ begin
   if FApp.ModalActive then
     Exit;
   FProviderModal := TProviderModal.Create(FTheme);
-  FProviderModal.OnPick := ProviderModalPick;
   FProviderModal.OnAction := ProviderModalAction;
   FProviderModal.Visible := True;
   Wrap := TContainer.Create([Fill(1), Auto, Fill(1)], [Fill(1), Auto, Fill(1)]);
@@ -3450,23 +3448,6 @@ begin
   FApp.PushPlane(TPlane.Create(Wrap, True, True));
   LoadProviders;
   SetState(psReady, 'Providers');
-end;
-
-procedure THarnessApp.ProviderModalPick(const AName: string);
-var
-  Err: TStoreError;
-begin
-  { Activation is BY NAME and the store clears the old active row in one
-    transaction, so this cannot leave two active providers behind. }
-  if (FSession = nil) or (FSession.Store = nil) then
-    Exit;
-  if FSession.Store.SetActiveProvider(AName, Err) then
-  begin
-    LoadProviders;
-    SetState(psReady, 'provider: ' + AName);
-  end
-  else
-    AppendError('activate ' + AName + ': ' + Err.Message);
 end;
 
 procedure THarnessApp.ProviderModalAction(const AAction: string);
