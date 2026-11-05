@@ -401,8 +401,11 @@ begin
 
   if HasRow then
   begin
-    { The provider identity is what the client resolves its dialect from. }
-    AConfig.Provider := Row.Name;
+    { Row.Key is the provider SLUG the client resolves its adapter from - not
+      the row's Name. An operator may hold two OpenRouter rows ("work",
+      "personal") and both must speak the OpenRouter dialect; using Name here
+      made any operator-chosen label unresolvable. }
+    AConfig.Provider := Row.Key;
     if Row.Endpoint <> '' then
       AConfig.Endpoint := Row.Endpoint;
     if Row.Model <> '' then

@@ -58,7 +58,12 @@ type
     environment layer already refuses to tell. }
   TProviderRow = record
     Id: Integer;
-    Name: string;              // unique; the key every other surface uses
+    Name: string;              // unique; the operator's label, NOT a provider key
+    { The provider SLUG this row speaks - 'fireworks', 'openrouter', 'openai'.
+      Separate from Name on purpose: an operator may hold two OpenRouter rows
+      ("work" and "personal") and both must resolve to the same adapter. Using
+      Name as this key made any operator-chosen label unresolvable. }
+    Key: string;
     Endpoint: string;
     Model: string;
     Temperature: Double;       HasTemperature: Boolean;
@@ -952,6 +957,7 @@ begin
     'CREATE TABLE providers (' +
       'id INTEGER PRIMARY KEY AUTOINCREMENT, ' +
       'name TEXT NOT NULL UNIQUE, ' +
+      'provider TEXT NOT NULL DEFAULT '''', ' +
       'endpoint TEXT NOT NULL DEFAULT '''', ' +
       'model TEXT NOT NULL DEFAULT '''', ' +
       'temperature REAL, ' +
@@ -4458,7 +4464,7 @@ end;
 
 const
   ProviderColumns =
-    'id, name, endpoint, model, temperature, top_p, max_tokens, ' +
+    'id, name, provider, endpoint, model, temperature, top_p, max_tokens, ' +
     'frequency_penalty, presence_penalty, seed, stop, active, ' +
     'created_at, updated_at, last_used_at';
 
@@ -4504,28 +4510,34 @@ begin
   Result := Default(TProviderRow);
   Result.Id := Stmt.ColInt(0);
   Result.Name := Stmt.ColText(1);
-  Result.Endpoint := Stmt.ColText(2);
-  Result.Model := Stmt.ColText(3);
+  Result.Key := Stmt.ColText(2);
+  Result.Endpoint := Stmt.ColText(3);
+  Result.Model := Stmt.ColText(4);
   { The Has* flags are what make NULL mean "absent" rather than "zero". A NULL
     column and a 0.0 both arrive as 0 from sqlite3_column_double, so the column
-    TYPE is the only reliable signal - read it, not the value. }
-  Result.HasTemperature := not Stmt.ColIsNull(4);
-  Result.Temperature := Stmt.ColFloat(4);
-  Result.HasTopP := not Stmt.ColIsNull(5);
-  Result.TopP := Stmt.ColFloat(5);
-  Result.HasMaxTokens := not Stmt.ColIsNull(6);
-  Result.MaxTokens := Stmt.ColInt(6);
-  Result.HasFrequencyPenalty := not Stmt.ColIsNull(7);
-  Result.FrequencyPenalty := Stmt.ColFloat(7);
-  Result.HasPresencePenalty := not Stmt.ColIsNull(8);
-  Result.PresencePenalty := Stmt.ColFloat(8);
-  Result.HasSeed := not Stmt.ColIsNull(9);
-  Result.Seed := Stmt.ColInt(9);
-  DecodeMcpStrings(Stmt.ColText(10), Result.Stop);
-  Result.Active := Stmt.ColInt(11) <> 0;
-  Result.CreatedAt := Stmt.ColInt64(12);
-  Result.UpdatedAt := Stmt.ColInt64(13);
-  Result.LastUsedAt := Stmt.ColInt64(14);
+    TYPE is the only reliable signal - read it, not the value.
+
+    INDICES MUST MATCH ProviderColumns EXACTLY, written out rather than derived:
+    inserting `provider` shifted every one of them, and an off-by-one here is
+    silent - a reader one column off returns a plausible number for the wrong
+    parameter. The round-trip test is what catches it. }
+  Result.HasTemperature := not Stmt.ColIsNull(5);
+  Result.Temperature := Stmt.ColFloat(5);
+  Result.HasTopP := not Stmt.ColIsNull(6);
+  Result.TopP := Stmt.ColFloat(6);
+  Result.HasMaxTokens := not Stmt.ColIsNull(7);
+  Result.MaxTokens := Stmt.ColInt(7);
+  Result.HasFrequencyPenalty := not Stmt.ColIsNull(8);
+  Result.FrequencyPenalty := Stmt.ColFloat(8);
+  Result.HasPresencePenalty := not Stmt.ColIsNull(9);
+  Result.PresencePenalty := Stmt.ColFloat(9);
+  Result.HasSeed := not Stmt.ColIsNull(10);
+  Result.Seed := Stmt.ColInt(10);
+  DecodeMcpStrings(Stmt.ColText(11), Result.Stop);
+  Result.Active := Stmt.ColInt(12) <> 0;
+  Result.CreatedAt := Stmt.ColInt64(13);
+  Result.UpdatedAt := Stmt.ColInt64(14);
+  Result.LastUsedAt := Stmt.ColInt64(15);
 end;
 
 function TSqliteStore.SaveProvider(const ARow: TProviderRow;
@@ -4563,15 +4575,15 @@ begin
     if ExistingId = 0 then
     begin
       Stmt := TStmt.Create(FDb,
-        'INSERT INTO providers (name, endpoint, model, temperature, top_p, ' +
-        'max_tokens, frequency_penalty, presence_penalty, seed, stop, active, ' +
-        'created_at, updated_at, last_used_at) ' +
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        'INSERT INTO providers (name, provider, endpoint, model, temperature, ' +
+        'top_p, max_tokens, frequency_penalty, presence_penalty, seed, stop, ' +
+        'active, created_at, updated_at, last_used_at) ' +
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     end
     else
       Stmt := TStmt.Create(FDb,
-        'UPDATE providers SET endpoint = ?, model = ?, temperature = ?, ' +
-        'top_p = ?, max_tokens = ?, frequency_penalty = ?, ' +
+        'UPDATE providers SET provider = ?, endpoint = ?, model = ?, ' +
+        'temperature = ?, top_p = ?, max_tokens = ?, frequency_penalty = ?, ' +
         'presence_penalty = ?, seed = ?, stop = ?, updated_at = ? ' +
         'WHERE name = ?');
     try
@@ -4580,6 +4592,26 @@ begin
       if ExistingId = 0 then
       begin
         Stmt.BindText(1, ARow.Name);
+        Stmt.BindText(2, ARow.Key);
+        Stmt.BindText(3, ARow.Endpoint);
+        Stmt.BindText(4, ARow.Model);
+        BindNullableFloat(Stmt, 5, ARow.Temperature, ARow.HasTemperature);
+        BindNullableFloat(Stmt, 6, ARow.TopP, ARow.HasTopP);
+        BindNullableInt(Stmt, 7, ARow.MaxTokens, ARow.HasMaxTokens);
+        BindNullableFloat(Stmt, 8, ARow.FrequencyPenalty,
+          ARow.HasFrequencyPenalty);
+        BindNullableFloat(Stmt, 9, ARow.PresencePenalty,
+          ARow.HasPresencePenalty);
+        BindNullableInt(Stmt, 10, ARow.Seed, ARow.HasSeed);
+        Stmt.BindText(11, EncodeMcpStrings(ARow.Stop));
+        Stmt.BindInt(12, Ord(ARow.Active));
+        Stmt.BindInt64(13, Now2);
+        Stmt.BindInt64(14, Now2);
+        Stmt.BindInt64(15, ARow.LastUsedAt);
+      end
+      else
+      begin
+        Stmt.BindText(1, ARow.Key);
         Stmt.BindText(2, ARow.Endpoint);
         Stmt.BindText(3, ARow.Model);
         BindNullableFloat(Stmt, 4, ARow.Temperature, ARow.HasTemperature);
@@ -4591,26 +4623,8 @@ begin
           ARow.HasPresencePenalty);
         BindNullableInt(Stmt, 9, ARow.Seed, ARow.HasSeed);
         Stmt.BindText(10, EncodeMcpStrings(ARow.Stop));
-        Stmt.BindInt(11, Ord(ARow.Active));
-        Stmt.BindInt64(12, Now2);
-        Stmt.BindInt64(13, Now2);
-        Stmt.BindInt64(14, ARow.LastUsedAt);
-      end
-      else
-      begin
-        Stmt.BindText(1, ARow.Endpoint);
-        Stmt.BindText(2, ARow.Model);
-        BindNullableFloat(Stmt, 3, ARow.Temperature, ARow.HasTemperature);
-        BindNullableFloat(Stmt, 4, ARow.TopP, ARow.HasTopP);
-        BindNullableInt(Stmt, 5, ARow.MaxTokens, ARow.HasMaxTokens);
-        BindNullableFloat(Stmt, 6, ARow.FrequencyPenalty,
-          ARow.HasFrequencyPenalty);
-        BindNullableFloat(Stmt, 7, ARow.PresencePenalty,
-          ARow.HasPresencePenalty);
-        BindNullableInt(Stmt, 8, ARow.Seed, ARow.HasSeed);
-        Stmt.BindText(9, EncodeMcpStrings(ARow.Stop));
-        Stmt.BindInt64(10, Now2);
-        Stmt.BindText(11, ARow.Name);
+        Stmt.BindInt64(11, Now2);
+        Stmt.BindText(12, ARow.Name);
       end;
       if Stmt.Step <> SQLITE_DONE then
         Exit(Fail(AError, seError, 'could not save provider', DbErrorText));

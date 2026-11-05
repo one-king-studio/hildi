@@ -279,6 +279,7 @@ begin
     AssertTrue('store opens', Store.Open(StoreErr));
     Row := Default(TProviderRow);
     Row.Name := 'openrouter';
+    Row.Key := 'openrouter';
     Row.Endpoint := 'https://openrouter.ai/api/v1/chat/completions';
     Row.Model := 'openai/gpt-4o';
     Row.Temperature := 0.3;
@@ -326,6 +327,7 @@ begin
     AssertTrue('store opens', Store.Open(StoreErr));
     Row := Default(TProviderRow);
     Row.Name := 'openai';
+    Row.Key := 'openai';
     Row.Model := 'gpt-4o';
     Row.Endpoint := 'https://api.openai.com/v1/chat/completions';
     AssertTrue('saved', Store.SaveProvider(Row, StoreErr));
@@ -363,7 +365,11 @@ begin
   try
     AssertTrue('store opens', Store.Open(StoreErr));
     Row := Default(TProviderRow);
+    { A LABEL that is not a provider slug: Name and Key are separate fields.
+      This is the case that exposed the flaw - using Name as the key made any
+      operator-chosen label unresolvable. }
     Row.Name := 'deterministic';
+    Row.Key := 'fireworks';
     Row.Model := 'm';
     Row.Temperature := 0.0;
     Row.HasTemperature := True;
