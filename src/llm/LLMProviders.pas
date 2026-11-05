@@ -279,9 +279,11 @@ end;
 procedure TFireworksProvider.DecorateRequest(const AContext: TProviderContext;
   ARoot: TJSONObject);
 begin
-  { Nothing yet. `service_tier: "priority"` belongs here when the operator can
-    set it: it is a Fireworks serverless mode with no cross-vendor meaning, which
-    is precisely the kind of field this hook exists for. }
+  { `service_tier` is a Fireworks serverless mode (priority / fast / ultra-fast)
+    with no cross-vendor meaning, which is exactly what this hook exists for:
+    emitted only by the adapter that understands it, ignored by the others. }
+  if AContext.Tier <> '' then
+    ARoot.Add('service_tier', AContext.Tier);
 end;
 
 { --- TOpenRouterProvider ------------------------------------------------- }

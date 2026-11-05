@@ -140,6 +140,13 @@ type
       is what every install that has never configured a provider is - so an
       existing setup needs no edit and no migration. }
     Provider: string;
+    { Which AGENT (behaviour) this request runs under. '' means none resolved,
+      which is the state of an install with no active agent. }
+    AgentName: string;
+    { Neither is discoverable from any catalogue, so both are operator-set.
+      '' means omit the key from the body, like every other optional parameter. }
+    ReasoningEffort: string;
+    Tier: string;              // Fireworks serverless mode; others ignore it
   end;
 
   TLLMTransport = class
@@ -1077,6 +1084,9 @@ begin
     Context.Endpoint := AConfig.Endpoint;
     Context.ApiKey := AConfig.ApiKey;
     Context.Model := AConfig.Model;
+    { The tier rides the CONTEXT, not the neutral body: only the Fireworks
+      adapter understands it, and it emits `service_tier` from DecorateRequest. }
+    Context.Tier := AConfig.Tier;
     Root.Add('model', AConfig.Model);
     Root.Add('stream', True);
     { Ask the provider to send a final usage chunk; providers that ignore it
@@ -1111,6 +1121,11 @@ begin
         StopArr.Add(AConfig.Stop[I]);
       Root.Add('stop', StopArr);
     end;
+    { reasoning_effort is in the OpenAI-compatible shape, so it is neutral.
+      `tier` is NOT - it is Fireworks' serverless mode, so it rides the provider's
+      DecorateRequest and other adapters simply ignore it. }
+    if AConfig.ReasoningEffort <> '' then
+      Root.Add('reasoning_effort', AConfig.ReasoningEffort);
 
     Msgs := TJSONArray.Create;
     for I := 0 to High(ARequest.Messages) do

@@ -60,6 +60,10 @@ type
     Endpoint: string;   // the chat endpoint, as configured
     ApiKey: string;     // read only by the caller that performs the request
     Model: string;
+    { Fireworks' serverless mode. Carried here rather than in the neutral body
+      because it has no cross-vendor meaning - only the adapter that understands
+      it should emit it. }
+    Tier: string;
   end;
 
   { Fetches a URL and returns the body. Injected so this unit performs no I/O:

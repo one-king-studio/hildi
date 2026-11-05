@@ -385,19 +385,83 @@ function ResolveProviderConfig(AStore: TSqliteStore;
   out AConfig: TLLMConfig; out AError: TLLMError): Boolean;
 var
   Row: TProviderRow;
+  Agent: TAgentRow;
   StoreErr: TStoreError;
   Secret: string;
   EnvConfig: TLLMConfig;
   ParamError: string;
   HasRow: Boolean;
+  HasAgent: Boolean;
 begin
   AError := ErrLLM(leOk, '', '');
   Result := True;
   AConfig := AOverrides;
 
+  { THE AGENT COMES FIRST. It is the behaviour: it may name the provider to talk
+    through, may prefer a model, and carries the sampling parameters. Reading it
+    before the provider is what lets an agent select WHICH provider applies. }
+  HasAgent := False;
+  if AStore <> nil then
+    HasAgent := AStore.ActiveAgent(Agent, StoreErr);
+
+  if HasAgent then
+  begin
+    { An agent's parameters are CONFIGURED-OR-NOT, and that survives into the
+      request: unset means the key is omitted, a configured 0.0 is sent. This is
+      the tri-state the nullable columns exist to carry. }
+    if Agent.HasTemperature then
+    begin
+      AConfig.Temperature.Set_ := True;
+      AConfig.Temperature.Value := Agent.Temperature;
+    end;
+    if Agent.HasTopP then
+    begin
+      AConfig.TopP.Set_ := True;
+      AConfig.TopP.Value := Agent.TopP;
+    end;
+    if Agent.HasMaxTokens then
+    begin
+      AConfig.MaxTokens.Set_ := True;
+      AConfig.MaxTokens.Value := Agent.MaxTokens;
+    end;
+    if Agent.HasFrequencyPenalty then
+    begin
+      AConfig.FrequencyPenalty.Set_ := True;
+      AConfig.FrequencyPenalty.Value := Agent.FrequencyPenalty;
+    end;
+    if Agent.HasPresencePenalty then
+    begin
+      AConfig.PresencePenalty.Set_ := True;
+      AConfig.PresencePenalty.Value := Agent.PresencePenalty;
+    end;
+    if Agent.HasSeed then
+    begin
+      AConfig.Seed.Set_ := True;
+      AConfig.Seed.Value := Agent.Seed;
+    end;
+    if Length(Agent.Stop) > 0 then
+      AConfig.Stop := Agent.Stop;
+    { A PREFERRED model, not a prescribed one: the operator can still override it
+      at prompt time, which is why an explicit model wins below. Most agents
+      prescribe nothing and leave the choice to the operator. }
+    if (not AExplicitModel) and (Agent.Model <> '') then
+      AConfig.Model := Agent.Model;
+    AConfig.AgentName := Agent.Name;
+    AConfig.ReasoningEffort := Agent.ReasoningEffort;
+    AConfig.Tier := Agent.Tier;
+  end;
+
   HasRow := False;
   if AStore <> nil then
-    HasRow := AStore.ActiveProvider(Row, StoreErr);
+  begin
+    { The provider the AGENT named, when it named one; otherwise the active one.
+      An agent that points at a provider is how two behaviours can talk through
+      two different connections. }
+    if HasAgent and (Agent.ProviderName <> '') then
+      HasRow := AStore.LoadProvider(Agent.ProviderName, Row, StoreErr)
+    else
+      HasRow := AStore.ActiveProvider(Row, StoreErr);
+  end;
 
   if HasRow then
   begin
