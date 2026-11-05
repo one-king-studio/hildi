@@ -114,6 +114,9 @@ begin
     row has no secret, by design. Editing shows it empty and leaves the stored
     key alone unless something is typed. }
   FSecret := TPromptLine.Create('api key: ');
+  { Masked on screen, plain in memory. A secret field that renders its own value
+    is a shoulder-surfing bug in a dialog whose whole job includes collecting it. }
+  FSecret.Mask := True;
   FName.OnSubmit := SubmitText;
   FKey.OnSubmit := SubmitText;
   FEndpoint.OnSubmit := SubmitText;

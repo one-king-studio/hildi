@@ -28,6 +28,10 @@ type
     FPrompt: UnicodeString;
     FActive: Boolean;
     FAttr: TAttr;
+    { When set, the text is DRAWN as this character repeated, one per cluster.
+      The real text is untouched: masking is a rendering concern, and a field
+      whose value silently became asterisks would corrupt what it collected. }
+    FMask: Boolean;
     FOnSubmit: TPromptSubmittedEvent;
     procedure SetActive(AValue: Boolean);
     procedure InsertText(const ACh: UnicodeString);
@@ -54,6 +58,8 @@ type
     property Active: Boolean read FActive write SetActive;
     property Prompt: UnicodeString read FPrompt write FPrompt;
     property Attr: TAttr read FAttr write FAttr;
+    { Draw the text masked. The VALUE is still Text; only the glyphs change. }
+    property Mask: Boolean read FMask write FMask;
     property OnSubmit: TPromptSubmittedEvent read FOnSubmit write FOnSubmit;
   end;
 
@@ -262,7 +268,17 @@ begin
   PromptCells := nil;
   TextCells := nil;
   AddCells(PromptCells, FPrompt, FAttr);
-  AddCells(TextCells, FText, TextAttr);
+  if FMask then
+  begin
+    { One bullet per cluster, so the cursor column stays aligned with what is
+      drawn. Using the real text for WIDTH and a bullet for the GLYPH is what
+      keeps a wide character from shifting the caret. }
+    TextCells := nil;
+    for I := 0 to High(Clusters(FText)) do
+      AddCells(TextCells, UnicodeString(#$2022), TextAttr);
+  end
+  else
+    AddCells(TextCells, FText, TextAttr);
 
   PromptW := 0;
   for I := 0 to High(PromptCells) do
