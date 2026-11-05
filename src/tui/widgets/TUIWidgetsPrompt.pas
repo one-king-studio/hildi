@@ -41,6 +41,10 @@ type
     constructor Create(const APrompt: string = '> ');
     { Clears the text and cursor; history is kept. }
     procedure Clear;
+    { Replace the text and put the caret at its end. A FORM needs to seed a field
+      from stored values; InsertText is private because typing and seeding are
+      different operations with different caret expectations. }
+    procedure SetText(const AText: string);
     procedure AddHistory(const AText: string);
     function Text: string;
     function Measure(const AAvail: TSize): TSize; override;
@@ -100,6 +104,12 @@ begin
   FActive := True;
   FHistoryPos := 0;
   Clear;
+end;
+
+procedure TPromptLine.SetText(const AText: string);
+begin
+  FText := UnicodeString(AText);
+  FCursor := Length(FText);
 end;
 
 procedure TPromptLine.Clear;
