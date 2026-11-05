@@ -469,7 +469,7 @@ end;
 function DefaultMigrations: TMigrationArray;
 begin
   Result := nil;
-  SetLength(Result, 24);
+  SetLength(Result, 25);
   Result[0].Version := 1;
   Result[0].Name := 'session history';
   Result[0].Statements := [
@@ -1002,6 +1002,51 @@ begin
     'ALTER TABLE requests ADD COLUMN provider TEXT NOT NULL DEFAULT ''''',
     'ALTER TABLE requests ADD COLUMN parameters TEXT NOT NULL DEFAULT ''''',
     'ALTER TABLE turns ADD COLUMN provider TEXT NOT NULL DEFAULT '''''
+  ];
+  { AGENTS: a configured BEHAVIOUR - a model, its sampling parameters, and an
+    optional behaviour prompt.
+
+    WHY NOT ON providers: a provider is a CONNECTION (endpoint, credential,
+    dialect). Sampling is not a property of a socket.
+    WHY NOT ON a catalogue model: OpenRouter lists 455 models, so per-model
+    parameters would mean setting the same temperature 455 times. A catalogue is
+    DISCOVERY; configuration does not belong in it.
+    WHY AN AGENT: the behaviour prompt is the missing piece. "Use gpt-4o at 0.3"
+    is a selection; "use gpt-4o at 0.3 and behave like this" is an agent.
+
+    A DEFAULT AGENT IS INSERTED, because an install with no agents has nothing to
+    run on. 'hildi' is the built-in behaviour every existing session already gets,
+    so naming it makes the implicit explicit rather than inventing a new default.
+
+    Parameter columns are NULLABLE for the same reason as before: NULL means
+    "omit the key from the request", never zero. }
+  Result[24].Version := 25;
+  Result[24].Name := 'agents';
+  Result[24].Statements := [
+    'CREATE TABLE agents (' +
+      'id INTEGER PRIMARY KEY AUTOINCREMENT, ' +
+      'name TEXT NOT NULL UNIQUE, ' +
+      'provider_name TEXT NOT NULL DEFAULT '''', ' +
+      'model TEXT NOT NULL DEFAULT '''', ' +
+      'system_prompt TEXT NOT NULL DEFAULT '''', ' +
+      'temperature REAL, ' +
+      'top_p REAL, ' +
+      'max_tokens INTEGER, ' +
+      'frequency_penalty REAL, ' +
+      'presence_penalty REAL, ' +
+      'seed INTEGER, ' +
+      'stop TEXT NOT NULL DEFAULT ''[]'', ' +
+      'active INTEGER NOT NULL DEFAULT 0, ' +
+      'created_at INTEGER NOT NULL, ' +
+      'updated_at INTEGER NOT NULL)',
+    'CREATE UNIQUE INDEX idx_agents_one_active ON agents (active) ' +
+      'WHERE active = 1',
+    { The built-in agent. ACTIVE, because every install must have something to
+      run on the moment this migration lands - a store with agents but none
+      active would resolve to nothing. }
+    'INSERT INTO agents (name, provider_name, model, system_prompt, active, ' +
+      'created_at, updated_at) ' +
+      'VALUES (''hildi'', '''', '''', '''', 1, 0, 0)'
   ];
 end;
 
