@@ -30,9 +30,11 @@ uses
   TUIWidgetsDiffviewer,
   HildiHistoryModal,
   HildiSkillModal,
+  HildiMcpModal,
   TUIWidgetsActions,
   HildiHarnessSubagent, HildiHarnessSubagentSpy,
   HildiAgentList, TUIWidgetsList,
+  HildiMCPConfig,
   HildiSessionProtocol, HildiSessionClient,
   HildiChangesStore, ChangesTypes, ChangesStore, ChangesSummary,
   HildiUTF8;
@@ -104,6 +106,15 @@ type
       event, because the wire carries only identifiers in the catalogue. }
     FSkillModal: TSkillModal;
     FCloseSkillModal: Boolean;
+    { The MCP management dialog (/mcp): every installed server with its
+      connection, enabled and active columns. nil when closed. Reuse of a
+      teMcpList/teMcpProbeResult event opens or refreshes it, so the app has one
+      path whether the driver answered in-process or over the wire. }
+    FMcpModal: TMcpModal;
+    { Deferred close, for the same reason as FCloseSkillModal: the widget sets it
+      from inside its own HandleEvent, and a plane cannot be popped while its own
+      widget is dispatching. }
+    FCloseMcpModal: Boolean;
     FHistoryShown: Boolean;
     FHistoryIntent: THistoryIntent;
     FDiffShown: Boolean;
@@ -266,6 +277,14 @@ type
     procedure CloseSkillModal;
     procedure SkillModalClosed(Sender: TObject);
     procedure SyncSkillModal;
+    { The MCP management dialog: open it from an event, refresh it in place,
+      reconcile the plane after a deferred close, and act on its CTAs. }
+    procedure ShowMcpModal(const ARows: TMcpRowStatusArray);
+    procedure CloseMcpModal;
+    procedure SyncMcpModal;
+    procedure McpModalReconnect(const AKey: string);
+    procedure McpModalAdd;
+    procedure McpModalClosed;
     procedure CloseDiff;
     procedure DiffClosed(Sender: TObject);
     { Subagents: feed the roster, toggle/show the agent list, spy on a child. }
@@ -1270,6 +1289,11 @@ begin
   if FDriver <> nil then
     Add('checkpoint', 'create a checkpoint for this session');
   Add('sessions', 'list and manage this workspace''s sessions');
+  { /mcp asks the runtime for the server list (scMcpList), so like /checkpoint it
+    needs a driver. The predicate matches RunCommand's own guard, so "offered"
+    and "actionable" cannot drift apart. }
+  if FDriver <> nil then
+    Add('mcp', 'manage MCP servers');
   { /new needs a workspace to mint the session into, which an unattached TUI does
     not have: csIdle means no session and no runtime yet. Offering it there would
     invite a command that can only report "no store". }
@@ -1385,6 +1409,14 @@ begin
   if FConnState <> csConnected then
   begin
     AppendError('not connected yet');
+    Exit;
+  end;
+  if (AName = 'mcp') and (FDriver <> nil) then
+  begin
+    { The server list comes from the runtime (scMcpList), so unlike /sessions and
+      /new this needs a live connection - it sits AFTER the csConnected guard.
+      The dialog opens when ekMcpList answers, not here. }
+    FDriver.McpList;
     Exit;
   end;
   if (AName = 'skill') and (FDriver <> nil) then
@@ -2409,6 +2441,16 @@ begin
         here rather than at the click keeps the app on ONE path whether the
         driver answered in-process or over the wire. }
       ShowSkillDetail(E);
+    teMcpList, teMcpProbeResult:
+      { The list, or a fresh probe. BOTH open-or-refresh the dialog: a probe
+        answers with fewer rows than the list, so it must refresh rather than
+        replace the whole picture. ShowMcpModal decides which, because it is the
+        only place that knows whether a dialog is already up. }
+      ShowMcpModal(E.McpRows);
+    teMcpReconnectDone:
+      { One server, after a reconnect. Refresh the open dialog so the operator
+        sees the new connection state without reopening it. }
+      ShowMcpModal(E.McpRows);
   else
     ;
   end;
@@ -3153,6 +3195,83 @@ begin
     FSkillModal := nil;
 end;
 
+procedure THarnessApp.ShowMcpModal(const ARows: TMcpRowStatusArray);
+var
+  Wrap: TContainer;
+  R: TRect;
+begin
+  { Already open: replace the rows in place. A probe answers with one row and a
+    reconnect with one row, so re-opening the dialog on every answer would close
+    and reopen it under the operator's cursor. }
+  if (FMcpModal <> nil) and FApp.ModalActive then
+  begin
+    FMcpModal.SetRows(ARows);
+    Exit;
+  end;
+  if FApp.ModalActive then
+    Exit;
+  FMcpModal := TMcpModal.Create(FTheme);
+  FMcpModal.SetRows(ARows);
+  FMcpModal.OnReconnect := McpModalReconnect;
+  FMcpModal.OnAdd := McpModalAdd;
+  FMcpModal.OnClose := McpModalClosed;
+  FMcpModal.Visible := True;
+  Wrap := TContainer.Create([Fill(1), Auto, Fill(1)], [Fill(1), Auto, Fill(1)]);
+  Wrap.Add(FMcpModal, 1, 1);
+  R := Default(TRect);
+  R.W := FSurface.Width;
+  R.H := FSurface.Height;
+  Wrap.Arrange(R);
+  FApp.PushPlane(TPlane.Create(Wrap, True, True));
+  SetState(psReady, 'MCP servers');
+end;
+
+procedure THarnessApp.McpModalReconnect(const AKey: string);
+begin
+  { The dialog reports; the driver acts. No close: the operator may reconnect
+    several servers in one visit, and the answer arrives as an event that
+    refreshes the row. }
+  if FDriver <> nil then
+    FDriver.McpReconnect(AKey);
+end;
+
+procedure THarnessApp.McpModalAdd;
+begin
+  { The add form is not built yet. Say so plainly rather than closing the dialog
+    as if something happened - a CTA that silently does nothing is worse than one
+    that explains itself. }
+  SetState(psReady, 'Add server: not built yet');
+end;
+
+procedure THarnessApp.McpModalClosed;
+begin
+  { Escape inside the dialog: its own handler is dispatching, so the pop waits
+    for SyncMcpModal. Same discipline as the skill dialog and the diff pane. }
+  FCloseMcpModal := True;
+end;
+
+procedure THarnessApp.CloseMcpModal;
+begin
+  if FApp.ModalActive then
+    FApp.PopPlane;
+  FMcpModal := nil;
+  SetState(psReady, 'Ready');
+end;
+
+procedure THarnessApp.SyncMcpModal;
+begin
+  if FCloseMcpModal then
+  begin
+    FCloseMcpModal := False;
+    CloseMcpModal;
+    Exit;
+  end;
+  { An unhandled Escape pops the plane in TTuiApp without telling the app; clear
+    the dangling widget so the state does not lie. }
+  if (FMcpModal <> nil) and (not FApp.ModalActive) then
+    FMcpModal := nil;
+end;
+
 procedure THarnessApp.CloseDiff;
 begin
   if not FDiffShown then
@@ -3862,6 +3981,7 @@ begin
   SyncSessionsModal;
   SyncDiff;
   SyncSkillModal;
+  SyncMcpModal;
   SyncHistory;
   CheckInterruptWindow;
   DrainQueue;
