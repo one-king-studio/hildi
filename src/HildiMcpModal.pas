@@ -47,6 +47,8 @@ type
     { -1 when the point is not over a row. Private, per the established shape:
       HitTest answers "is the point mine", a row index is this widget's own
       business. }
+    { A one-line message from the host, e.g. why an action could not run. }
+    FErrorHint: string;
     function RowAt(AY: Integer): Integer;
     function RowTop(AIndex: Integer): Integer;
     procedure Move(ASteps: Integer);
@@ -55,6 +57,8 @@ type
     procedure SetRows(const ARows: TMcpRowStatusArray);
     { The selected row's key, '' when the list is empty. }
     function SelectedKey: string;
+    { Show a message under the list (an action that could not run). '' clears it. }
+    procedure SetHint(const AText: string);
     procedure SelectFirst;
     function Measure(const AAvail: TSize): TSize; override;
     procedure Arrange(const ABounds: TRect); override;
@@ -83,6 +87,8 @@ type
       has answered; this widget only renders what it is given. }
     procedure SetRows(const ARows: TMcpRowStatusArray);
     function SelectedKey: string;
+    { A message under the list, from the host. '' clears it. }
+    procedure SetHint(const AText: string);
     property OnReconnect: TMcpReconnectEvent read FOnReconnect write FOnReconnect;
     property OnAdd: TMcpAddEvent read FOnAdd write FOnAdd;
     { The host closes its own modal. }
@@ -182,6 +188,11 @@ begin
     Result := FRows[FSel].Key
   else
     Result := '';
+end;
+
+procedure TMcpRows.SetHint(const AText: string);
+begin
+  FErrorHint := AText;
 end;
 
 procedure TMcpRows.SelectFirst;
@@ -294,7 +305,18 @@ begin
       the line, so a hover-highlighted status cannot lose its colour. }
     if I = FSel then
       PutText(S, FBounds.X, Y, ClipCells(Key, KeyW), SelAttr);
+    { A failed probe or reconnect is the one thing the operator must not miss,
+      and it was silently dropped: the row carried Error and nothing painted it,
+      so a reconnect that failed looked exactly like one that did nothing. It
+      replaces the STATUS cell rather than extending the line, because a long
+      error would otherwise push the row past the frame. }
+    if FRows[I].Error <> '' then
+      PutText(S, StatusX, Y, ClipCells(UnicodeString(FRows[I].Error),
+        FBounds.W - (StatusX - FBounds.X)), BadAttr);
   end;
+  if (FErrorHint <> '') then
+    PutText(S, FBounds.X, FBounds.Y + FBounds.H - 1,
+      ClipCells(UnicodeString(FErrorHint), FBounds.W), BadAttr);
 end;
 
 function TMcpRows.HandleEvent(const E: TInputEvent): Boolean;
@@ -395,6 +417,11 @@ begin
   Result := FRows.SelectedKey;
 end;
 
+procedure TMcpModal.SetHint(const AText: string);
+begin
+  FRows.SetHint(AText);
+end;
+
 procedure TMcpModal.RequestClose;
 begin
   if Assigned(FOnClose) then
@@ -432,9 +459,13 @@ begin
           end;
           if (E.Key.Ch = 'a') or (E.Key.Ch = 'A') then
           begin
+            { The host decides whether it can add. It does NOT close the dialog:
+              the operator pressed a key to DO something, and closing as if it
+              worked is what made /mcp's 'a' look broken - the status-line
+              message was written and then immediately overwritten by the close.
+              A message set here stays until the next keystroke. }
             if Assigned(FOnAdd) then
               FOnAdd();
-            RequestClose;
             Exit(True);
           end;
         end;
@@ -452,9 +483,9 @@ begin
     Reconnect
   else if AKey = 'a' then
   begin
+    { Same rule as the key: report, do not pretend to close. }
     if Assigned(FOnAdd) then
       FOnAdd();
-    RequestClose;
   end
   else
     inherited FooterClicked(AKey);

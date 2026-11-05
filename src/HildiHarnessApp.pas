@@ -115,6 +115,9 @@ type
       from inside its own HandleEvent, and a plane cannot be popped while its own
       widget is dispatching. }
     FCloseMcpModal: Boolean;
+    { The rows the dialog is CURRENTLY showing. A probe and a reconnect answer
+      with one row each, so they merge into this instead of replacing it. }
+    FMcpCurrentRows: TMcpRowStatusArray;
     FHistoryShown: Boolean;
     FHistoryIntent: THistoryIntent;
     FDiffShown: Boolean;
@@ -280,6 +283,10 @@ type
     { The MCP management dialog: open it from an event, refresh it in place,
       reconcile the plane after a deferred close, and act on its CTAs. }
     procedure ShowMcpModal(const ARows: TMcpRowStatusArray);
+    { Fold ONE answered row into the open dialog. Replacing the list outright
+      with a one-row answer is what made a reconnect appear to delete every
+      other server. }
+    procedure MergeMcpRow(const ARow: TMcpRowStatus);
     procedure CloseMcpModal;
     procedure SyncMcpModal;
     procedure McpModalReconnect(const AKey: string);
@@ -2441,16 +2448,23 @@ begin
         here rather than at the click keeps the app on ONE path whether the
         driver answered in-process or over the wire. }
       ShowSkillDetail(E);
-    teMcpList, teMcpProbeResult:
-      { The list, or a fresh probe. BOTH open-or-refresh the dialog: a probe
-        answers with fewer rows than the list, so it must refresh rather than
-        replace the whole picture. ShowMcpModal decides which, because it is the
-        only place that knows whether a dialog is already up. }
+    teMcpList:
+      { The FULL list: replaces what the dialog shows. }
       ShowMcpModal(E.McpRows);
+    teMcpProbeResult:
+      { ONE row, for the server that was probed. It MERGES, because replacing
+        the list with a single row is the bug that made a reconnect appear to
+        delete every other server from the dialog. }
+      if Length(E.McpRows) = 1 then
+        MergeMcpRow(E.McpRows[0])
+      else
+        ShowMcpModal(E.McpRows);
     teMcpReconnectDone:
-      { One server, after a reconnect. Refresh the open dialog so the operator
-        sees the new connection state without reopening it. }
-      ShowMcpModal(E.McpRows);
+      { Also ONE row, for the same reason. }
+      if Length(E.McpRows) = 1 then
+        MergeMcpRow(E.McpRows[0])
+      else
+        ShowMcpModal(E.McpRows);
   else
     ;
   end;
@@ -3205,11 +3219,13 @@ begin
     and reopen it under the operator's cursor. }
   if (FMcpModal <> nil) and FApp.ModalActive then
   begin
+    FMcpCurrentRows := ARows;
     FMcpModal.SetRows(ARows);
     Exit;
   end;
   if FApp.ModalActive then
     Exit;
+  FMcpCurrentRows := ARows;
   FMcpModal := TMcpModal.Create(FTheme);
   FMcpModal.SetRows(ARows);
   FMcpModal.OnReconnect := McpModalReconnect;
@@ -3224,6 +3240,42 @@ begin
   Wrap.Arrange(R);
   FApp.PushPlane(TPlane.Create(Wrap, True, True));
   SetState(psReady, 'MCP servers');
+end;
+
+procedure THarnessApp.MergeMcpRow(const ARow: TMcpRowStatus);
+var
+  Rows: TMcpRowStatusArray;
+  I: Integer;
+  Merged: Boolean;
+begin
+  { No dialog, or one that is not showing: a single row is all we have, so open
+    with it rather than dropping the answer. }
+  if (FMcpModal = nil) or (not FApp.ModalActive) then
+  begin
+    SetLength(Rows, 1);
+    Rows[0] := ARow;
+    ShowMcpModal(Rows);
+    Exit;
+  end;
+  Rows := FMcpCurrentRows;
+  Merged := False;
+  for I := 0 to High(Rows) do
+    if SameText(Rows[I].Key, ARow.Key) then
+    begin
+      Rows[I] := ARow;
+      Merged := True;
+      Break;
+    end;
+  if not Merged then
+  begin
+    { A server the list never showed - added by the CLI while this dialog was
+      open. Append it: dropping the answer would hide the very thing that just
+      happened. }
+    SetLength(Rows, Length(Rows) + 1);
+    Rows[High(Rows)] := ARow;
+  end;
+  FMcpCurrentRows := Rows;
+  FMcpModal.SetRows(Rows);
 end;
 
 procedure THarnessApp.McpModalReconnect(const AKey: string);
@@ -3255,6 +3307,7 @@ begin
   if FApp.ModalActive then
     FApp.PopPlane;
   FMcpModal := nil;
+  FMcpCurrentRows := nil;
   SetState(psReady, 'Ready');
 end;
 
