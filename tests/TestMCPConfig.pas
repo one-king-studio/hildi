@@ -39,6 +39,17 @@ type
       hand-written config must carry them - otherwise a description can only come
       from the CLI or the dialog, and neither can set one today. }
     procedure TestJsonRoundTripCarriesLabelDescriptionAndAuth;
+    { The row the dialog renders. Both status columns come from different
+      sources and must never be derived from one another - that conflation is
+      the whole reason this feature exists. }
+    procedure TestRowKeepsEnabledAndActiveIndependent;
+    { A server nobody probed is UNKNOWN. Rendering it as "down" would be a claim
+      the client cannot support, and the dialog would act on it. }
+    procedure TestRowLeavesAnUnprobedServerUnknown;
+    { Reconnecting a transport must not change whether the model can use a
+      server: they are separate facts, and the reconnect path passes the new
+      connection state in while Active comes from the open set. }
+    procedure TestRowConnectionChangesWithoutTouchingActive;
   end;
 
 implementation
@@ -347,6 +358,77 @@ begin
   AssertEquals('description survives', 'control the user''s Chrome',
     Rows2[0].Description);
   AssertTrue('auth survives', Rows2[0].Auth = maOAuth);
+end;
+
+procedure TMcpConfigTest.TestRowKeepsEnabledAndActiveIndependent;
+var
+  R: TMcpRowStatus;
+  Active: TStringArray;
+begin
+  { The two columns answer different questions: Enabled is "may the LLM use it"
+    (the stored record, which the manifest reads), Active is "is it in this
+    session's context" (the provider's open set). A row can be either without the
+    other, and BOTH cases must survive - testing only the enabled-and-active case
+    would pass an implementation that simply copied one into the other. }
+  SetLength(Active, 1);
+  Active[0] := 'config-only';
+
+  { Enabled but NOT active: the normal lazy case, not an error. }
+  R := McpRowOf(Row('config-only', msWorkspace, 0, '', True), Active,
+    mcConnected);
+  AssertTrue('enabled', R.Enabled);
+  AssertTrue('and active, because it is in the open set', R.Active);
+
+  { Enabled, absent from the open set: enabled must survive on its own. }
+  R := McpRowOf(Row('not-loaded', msWorkspace, 0, '', True), Active,
+    mcDisconnected);
+  AssertTrue('still enabled', R.Enabled);
+  AssertFalse('but not active - lazily opened, not an error', R.Active);
+
+  { Disabled in the record but somehow open: Active must NOT be forced to follow
+    Enabled. This is the case that catches "derive active from enabled". }
+  R := McpRowOf(Row('config-only', msWorkspace, 0, '', False), Active,
+    mcConnected);
+  AssertFalse('disabled', R.Enabled);
+  AssertTrue('yet active, because the open set says so', R.Active);
+end;
+
+procedure TMcpConfigTest.TestRowLeavesAnUnprobedServerUnknown;
+var
+  R: TMcpRowStatus;
+begin
+  { mcUnknown is the decode default and must stay that way through the row
+    builder. "Nobody asked" and "we asked and it is down" are different claims,
+    and a list that renders the first as the second is lying to the operator. }
+  R := McpRowOf(Row('probe-me', msGlobal), nil, mcUnknown);
+  AssertTrue('an unprobed server stays unknown',
+    R.Connection = mcUnknown);
+  AssertFalse('and is not reported as down',
+    R.Connection = mcDisconnected);
+end;
+
+procedure TMcpConfigTest.TestRowConnectionChangesWithoutTouchingActive;
+var
+  R: TMcpRowStatus;
+  Active: TStringArray;
+  Before, After: Boolean;
+begin
+  { Reconnect passes a FRESH connection state while Active still comes from the
+    open set. If the builder let one imply the other, a reconnect would silently
+    change what the model can use - the exact bug the separate columns exist to
+    prevent. }
+  SetLength(Active, 1);
+  Active[0] := 'srv';
+
+  R := McpRowOf(Row('srv', msGlobal), Active, mcDisconnected);
+  Before := R.Active;
+  R := McpRowOf(Row('srv', msGlobal), Active, mcConnected);
+  After := R.Active;
+
+  AssertTrue('a reconnect changed the connection',
+    R.Connection = mcConnected);
+  AssertTrue('active before', Before);
+  AssertTrue('active after, unchanged by the reconnect', After);
 end;
 
 initialization
