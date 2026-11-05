@@ -490,6 +490,9 @@ type
     property Busy: Boolean read FBusy;
     property PromptActive: Boolean read GetPromptActive;
     property ModalActive: Boolean read GetModalActive;
+    { How many MCP rows the dialog is holding. A one-row probe or reconnect
+      answer must MERGE, not replace, and this is the fact that proves it. }
+    function McpRowCountForTest: Integer;
     { The stream, for tests: block count, kinds and text. }
     property Panel: TChatPanel read FPanel;
     { The status bar's left part (the workspace). }
@@ -3240,6 +3243,11 @@ begin
   Wrap.Arrange(R);
   FApp.PushPlane(TPlane.Create(Wrap, True, True));
   SetState(psReady, 'MCP servers');
+end;
+
+function THarnessApp.McpRowCountForTest: Integer;
+begin
+  Result := Length(FMcpCurrentRows);
 end;
 
 procedure THarnessApp.MergeMcpRow(const ARow: TMcpRowStatus);

@@ -270,6 +270,11 @@ type
     { A probe answers with ONE row, and a reconnect with one. They must refresh
       the open dialog, not replace the whole list with a single row. }
     procedure TestMcpProbeRefreshesWithoutClosingTheDialog;
+    { The operator's own case: two servers listed, then a reconnect answers for
+      ONE of them. That answer must MERGE. It used to replace the list, so the
+      other server vanished from the dialog - and it is also the path that was
+      reported as a crash, so this drives a real render through Step. }
+    procedure TestMcpReconnectKeepsTheOtherServersListed;
     procedure TestStatusShowsWorkspaceAndConsumption;
     procedure TestStatusSumsTurns;
     procedure TestResumeHeaderMatchesLive;
@@ -2601,6 +2606,45 @@ begin
   FApp.Step;
 
   AssertTrue('still open after a probe', FApp.ModalActive);
+end;
+
+procedure THarnessAppTest.TestMcpReconnectKeepsTheOtherServersListed;
+var
+  E: TTurnEvent;
+begin
+  { Two servers, as the operator has (browser and playwright). }
+  BuildWithStore;
+  FRecording := TRecordingDriver.Create;
+  FApp.Attach(FSession.View, FRecording);
+
+  SetLength(E.McpRows, 2);
+  E.Kind := teMcpList;
+  E.McpRows[0].Key := 'browser';
+  E.McpRows[0].Enabled := True;
+  E.McpRows[0].Connection := mcUnknown;
+  E.McpRows[1].Key := 'playwright';
+  E.McpRows[1].Enabled := True;
+  E.McpRows[1].Connection := mcUnknown;
+  FRecording.PushEvent(E);
+  FApp.Step;
+  AssertTrue('dialog open after the list', FApp.ModalActive);
+
+  { The reconnect answers for ONE server. Step renders, so a crash in the
+    render path fails here rather than in the operator's terminal. }
+  SetLength(E.McpRows, 1);
+  E.Kind := teMcpReconnectDone;
+  E.McpRows[0].Key := 'browser';
+  E.McpRows[0].Enabled := True;
+  E.McpRows[0].Connection := mcDisconnected;
+  E.McpRows[0].Error := 'spawn failed';
+  FRecording.PushEvent(E);
+  FApp.Step;
+
+  { The dialog survives, and - the point - the OTHER server is still in it.
+    A one-row answer must not become the whole list. }
+  AssertTrue('still open after a reconnect', FApp.ModalActive);
+  AssertTrue('the list was not replaced by one row',
+    FApp.McpRowCountForTest = 2);
 end;
 
 procedure THarnessAppTest.TestStatusShowsWorkspaceAndConsumption;
