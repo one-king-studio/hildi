@@ -228,6 +228,18 @@ function IsRetryable(const AError: TLLMError): Boolean;
 function ErrLLM(ACode: TLLMErrorCode; const AMessage, ADetail: string): TLLMError;
 function OkLLM: TLLMError;
 
+type
+  { The production TModelFetch: a plain GET with an optional bearer token.
+
+    A CLASS rather than a free function because TModelFetch is a method pointer,
+    and because real HTTPS needs the same TLS validation the chat transport uses -
+    fetching a catalogue must not be the one call that skips the CA check. }
+  THTTPModelFetch = class
+  public
+    function Fetch(const AUrl, AApiKey: string;
+      out ABody, AError: string; out AStatus: Integer): Boolean;
+  end;
+
 { A short, operator-facing phrase for an error code ("network error",
   "rate limited", "authentication failed", ...). }
 function OperatorPhrase(ACode: TLLMErrorCode): string;
@@ -582,6 +594,55 @@ function TChunkProxyStream.Seek(const Offset: Int64;
   Origin: TSeekOrigin): Int64;
 begin
   Result := 0;
+end;
+
+{ --- THTTPModelFetch ---------------------------------------------------- }
+
+function THTTPModelFetch.Fetch(const AUrl, AApiKey: string;
+  out ABody, AError: string; out AStatus: Integer): Boolean;
+var
+  Client: TFPHTTPClient;
+  Stream: TStringStream;
+  TLSError: string;
+begin
+  Result := False;
+  ABody := '';
+  AError := '';
+  AStatus := 0;
+  { Same TLS gate as the chat transport: browsing a catalogue must not be the
+    one path that skips the CA check. }
+  if not ValidateTLSConfig(TLSError) then
+  begin
+    AError := 'TLS configuration error: ' + TLSError;
+    Exit;
+  end;
+  Client := TFPHTTPClient.Create(nil);
+  Stream := TStringStream.Create('');
+  try
+    Client.ConnectTimeout := DefaultConnectTimeoutMs;
+    Client.IOTimeout := DefaultReadTimeoutMs;
+    Client.AllowRedirect := True;
+    { A public catalogue (OpenRouter) needs no token; sending an empty bearer
+      would be worse than sending none. }
+    if AApiKey <> '' then
+      Client.AddHeader('Authorization', 'Bearer ' + AApiKey);
+    Client.AddHeader('Accept', 'application/json');
+    try
+      Client.Get(AUrl, Stream);
+      AStatus := Client.ResponseStatusCode;
+      ABody := Stream.DataString;
+      Result := True;
+    except
+      on E: Exception do
+      begin
+        AError := E.Message;
+        Result := False;
+      end;
+    end;
+  finally
+    Stream.Free;
+    Client.Free;
+  end;
 end;
 
 { --- TFPHTTPTransport --------------------------------------------------- }
