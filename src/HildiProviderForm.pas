@@ -45,6 +45,7 @@ type
     FFocus: Integer;
     FEditing: Boolean;
     FError: string;
+    FBusy: Boolean;
     FKeys: TStringArray;
     FOnAction: TProviderFormAction;
     procedure RefreshFooter;
@@ -63,10 +64,16 @@ type
     function Result_: TProviderFormResult;
     { The user pressed ctrl+r: cycle to the next provider slug. }
     function OnNextProvider: Boolean;
+    { The host reports a failed connection check here. The form does no I/O.
+      A BUSY state holds the modal open and disables the CTAs while a check is in
+      flight, so the operator cannot double-submit. }
+    procedure SetError(const AText: string);
+    procedure SetBusy(AValue: Boolean);
     property Error_: string read FError;
     property OnAction: TProviderFormAction read FOnAction write FOnAction;
     function HandleEvent(const E: TInputEvent): Boolean; override;
   protected
+    procedure RenderContent(const S: ISurface); override;
     procedure FooterClicked(const AKey: string); override;
   end;
 
@@ -199,6 +206,16 @@ begin
   Changed;
 end;
 
+procedure TProviderForm.SetError(const AText: string);
+begin
+  FError := AText;
+end;
+
+procedure TProviderForm.SetBusy(AValue: Boolean);
+begin
+  FBusy := AValue;
+end;
+
 procedure TProviderForm.Changed;
 begin
   { A validation message refers to the previous content, so it is cleared the
@@ -253,6 +270,8 @@ var
   R: TProviderFormResult;
   Bad: string;
 begin
+  if FBusy then
+    Exit;
   R := Result_;
   Bad := ValidateForm(R, FKeys);
   if Bad <> '' then
@@ -313,6 +332,29 @@ begin
   end;
   if Result then
     Changed;
+end;
+
+procedure TProviderForm.RenderContent(const S: ISurface);
+var
+  Inner: TRect;
+  Y: Integer;
+  MsgAttr: TAttr;
+begin
+  inherited RenderContent(S);
+  { THE MESSAGE MUST BE VISIBLE. FError was set from the day validation landed and
+    nothing painted it, so every "name is required" went unseen. A connection
+    failure would have been worse: the modal simply refused to close with no
+    explanation. }
+  Inner := InnerRect;
+  Y := Inner.Y + 5;                 // one row per field, below the last
+  if Y < Inner.Y + Inner.H then
+  begin
+    MsgAttr := OnBg(Theme.Accent, Theme.Bg);
+    if FBusy then
+      PutText(S, Inner.X, Y, 'checking connection...', MsgAttr)
+    else if FError <> '' then
+      PutText(S, Inner.X, Y, UnicodeString(FError), MsgAttr);
+  end;
 end;
 
 procedure TProviderForm.FooterClicked(const AKey: string);

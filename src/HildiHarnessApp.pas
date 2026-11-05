@@ -313,6 +313,10 @@ type
     procedure ShowProviderForm(const ARow: TProviderRow; AEditing: Boolean);
     procedure CloseProviderForm;
     procedure ProviderFormAction(const AAction: string);
+    { Verify that a provider+key actually authenticates, BEFORE it is committed.
+      Uses the models endpoint: it is the cheapest call that requires auth. }
+    function CheckProviderConnection(const ARow: TProviderRow;
+      const ASecret: string; out AError: TStoreError): Boolean;
     procedure LoadProviders;
     procedure McpModalClosed;
     procedure CloseDiff;
@@ -3474,6 +3478,7 @@ end;
 procedure THarnessApp.ProviderModalAction(const AAction: string);
 var
   Err: TStoreError;
+  Err2: TStoreError;
   Name: string;
   EditRow: TProviderRow;
 begin
@@ -3525,6 +3530,49 @@ begin
     AppendError('delete ' + Name + ': ' + Err.Message);
 end;
 
+{ Probe a provider's credentials. The MODELS endpoint is the cheapest call that
+  requires auth: a chat completion would cost tokens and could fail for reasons
+  that are not authentication at all.
+
+  Returns False with a TStoreError-shaped message so the caller can show it in the
+  form without a second error type. }
+function THarnessApp.CheckProviderConnection(const ARow: TProviderRow;
+  const ASecret: string; out AError: TStoreError): Boolean;
+var
+  Provider: TLLMProvider;
+  Ctx: TProviderContext;
+  Fetch: THTTPModelFetch;
+  Models: TProviderModelArray;
+  Msg: string;
+  Status: Integer;
+begin
+  Result := False;
+  AError := Default(TStoreError);
+  Provider := ProviderByKey(ARow.Key);
+  if Provider = nil then
+  begin
+    AError.Message := 'unknown provider "' + ARow.Key + '"';
+    Exit;
+  end;
+  Ctx := Default(TProviderContext);
+  Ctx.Endpoint := ARow.Endpoint;
+  Ctx.ApiKey := ASecret;
+  Ctx.Model := ARow.Model;
+  Fetch := THTTPModelFetch.Create;
+  try
+    if Provider.ListModels(Ctx, Fetch.Fetch, Models, Msg, Status) then
+      Exit(True);
+    { A 401/403 is the answer we care about; anything else is reported verbatim so
+      the operator can tell "wrong key" from "no network". }
+    if (Status = 401) or (Status = 403) then
+      AError.Message := 'authentication failed (HTTP ' + IntToStr(Status) + ')'
+    else
+      AError.Message := Msg;
+  finally
+    Fetch.Free;
+  end;
+end;
+
 procedure THarnessApp.ShowProviderForm(const ARow: TProviderRow;
   AEditing: Boolean);
 var
@@ -3564,6 +3612,7 @@ end;
 procedure THarnessApp.ProviderFormAction(const AAction: string);
 var
   Err: TStoreError;
+  Err2: TStoreError;
   Res: TProviderFormResult;
   Row: TProviderRow;
 begin
@@ -3626,11 +3675,23 @@ begin
     only when the operator actually typed one - so editing a model does not force
     retyping the secret, and an empty field never clears a working key. }
   if Res.SecretSet then
+  begin
+    { CHECK BEFORE COMMITTING THE KEY, and keep the modal open if it fails. A
+      saved-but-wrong key is the worst outcome: the dialog closes, the provider
+      looks configured, and the failure only surfaces on the next turn as an
+      authentication error with no obvious cause. }
+    if not CheckProviderConnection(Row, Res.Secret, Err2) then
+    begin
+      FProviderForm.SetBusy(False);
+      FProviderForm.SetError('connection failed: ' + Err2.Message);
+      Exit;
+    end;
     if not FSession.Store.SetProviderSecret(Res.Name, Res.Secret, Err) then
     begin
       AppendError('save key: ' + Err.Message);
       Exit;
     end;
+  end;
   CloseProviderForm;
   LoadProviders;
   SetState(psReady, 'saved: ' + Res.Name);
