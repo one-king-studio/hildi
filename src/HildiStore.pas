@@ -94,6 +94,11 @@ type
     ProviderName: string;     // the provider row this agent talks through
     Model: string;
     SystemPrompt: string;     // '' => no behaviour prompt of its own
+    { Reasoning effort and Fireworks' serverless tier. Empty means "omit the
+      key" - neither is discovered from any catalogue, so both are operator-set,
+      and `tier` is provider-specific (the Fireworks adapter emits it). }
+    ReasoningEffort: string;
+    Tier: string;
     Temperature: Double;       HasTemperature: Boolean;
     TopP: Double;              HasTopP: Boolean;
     MaxTokens: Integer;        HasMaxTokens: Boolean;
@@ -1032,6 +1037,8 @@ begin
       'provider_name TEXT NOT NULL DEFAULT '''', ' +
       'model TEXT NOT NULL DEFAULT '''', ' +
       'system_prompt TEXT NOT NULL DEFAULT '''', ' +
+      'reasoning_effort TEXT NOT NULL DEFAULT '''', ' +
+      'tier TEXT NOT NULL DEFAULT '''', ' +
       'temperature REAL, ' +
       'top_p REAL, ' +
       'max_tokens INTEGER, ' +
@@ -1054,7 +1061,12 @@ begin
       what ran - as distinct from an agent, which is what you intend. }
     'ALTER TABLE requests ADD COLUMN provider TEXT NOT NULL DEFAULT ''''',
     'ALTER TABLE requests ADD COLUMN parameters TEXT NOT NULL DEFAULT ''''',
-    'ALTER TABLE turns ADD COLUMN provider TEXT NOT NULL DEFAULT '''''
+    'ALTER TABLE requests ADD COLUMN agent_name TEXT NOT NULL DEFAULT ''''',
+    { On the TURN as well, so a summary can report what ran without joining
+      requests. }
+    'ALTER TABLE turns ADD COLUMN provider TEXT NOT NULL DEFAULT ''''',
+    'ALTER TABLE turns ADD COLUMN agent_name TEXT NOT NULL DEFAULT ''''',
+    'ALTER TABLE turns ADD COLUMN model TEXT NOT NULL DEFAULT '''''
   ];
 end;
 
@@ -4825,9 +4837,9 @@ end;
 
 const
   AgentColumns =
-    'id, name, provider_name, model, system_prompt, temperature, top_p, ' +
-    'max_tokens, frequency_penalty, presence_penalty, seed, stop, active, ' +
-    'created_at, updated_at';
+    'id, name, provider_name, model, system_prompt, reasoning_effort, tier, ' +
+    'temperature, top_p, max_tokens, frequency_penalty, presence_penalty, ' +
+    'seed, stop, active, created_at, updated_at';
 
 function ReadAgentRow(Stmt: TStmt): TAgentRow;
 begin
@@ -4837,24 +4849,29 @@ begin
   Result.ProviderName := Stmt.ColText(2);
   Result.Model := Stmt.ColText(3);
   Result.SystemPrompt := Stmt.ColText(4);
-  { Has* first: a NULL column reads as 0 from the float reader, so the TYPE is
-    the only reliable signal. NULL means "omit the key", which is not zero. }
-  Result.HasTemperature := not Stmt.ColIsNull(5);
-  Result.Temperature := Stmt.ColFloat(5);
-  Result.HasTopP := not Stmt.ColIsNull(6);
-  Result.TopP := Stmt.ColFloat(6);
-  Result.HasMaxTokens := not Stmt.ColIsNull(7);
-  Result.MaxTokens := Stmt.ColInt(7);
-  Result.HasFrequencyPenalty := not Stmt.ColIsNull(8);
-  Result.FrequencyPenalty := Stmt.ColFloat(8);
-  Result.HasPresencePenalty := not Stmt.ColIsNull(9);
-  Result.PresencePenalty := Stmt.ColFloat(9);
-  Result.HasSeed := not Stmt.ColIsNull(10);
-  Result.Seed := Stmt.ColInt(10);
-  DecodeMcpStrings(Stmt.ColText(11), Result.Stop);
-  Result.Active := Stmt.ColInt(12) <> 0;
+  Result.ReasoningEffort := Stmt.ColText(5);
+  Result.Tier := Stmt.ColText(6);
+  { Has* FIRST, and the index must match AgentColumns exactly. A NULL column
+    reads as 0 from the float reader, so the TYPE is the only reliable signal:
+    NULL means "omit the key", which is not the same as zero. }
+  Result.HasTemperature := not Stmt.ColIsNull(7);
+  Result.Temperature := Stmt.ColFloat(7);
+  Result.HasTopP := not Stmt.ColIsNull(8);
+  Result.TopP := Stmt.ColFloat(8);
+  Result.HasMaxTokens := not Stmt.ColIsNull(9);
+  Result.MaxTokens := Stmt.ColInt(9);
+  Result.HasFrequencyPenalty := not Stmt.ColIsNull(10);
+  Result.FrequencyPenalty := Stmt.ColFloat(10);
+  Result.HasPresencePenalty := not Stmt.ColIsNull(11);
+  Result.PresencePenalty := Stmt.ColFloat(11);
+  Result.HasSeed := not Stmt.ColIsNull(12);
+  Result.Seed := Stmt.ColInt(12);
+  DecodeMcpStrings(Stmt.ColText(13), Result.Stop);
+  Result.Active := Stmt.ColInt(14) <> 0;
+  Result.CreatedAt := Stmt.ColInt64(15);
+  Result.UpdatedAt := Stmt.ColInt64(16);
   Result.CreatedAt := Stmt.ColInt64(13);
-  Result.UpdatedAt := Stmt.ColInt64(14);
+  Result.UpdatedAt := Stmt.ColInt64(16);
 end;
 
 function TSqliteStore.SaveAgent(const ARow: TAgentRow;
@@ -4887,12 +4904,14 @@ begin
     if ExistingId = 0 then
       Stmt := TStmt.Create(FDb,
         'INSERT INTO agents (name, provider_name, model, system_prompt, ' +
-        'temperature, top_p, max_tokens, frequency_penalty, presence_penalty, ' +
-        'seed, stop, active, created_at, updated_at) ' +
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        'reasoning_effort, tier, temperature, top_p, max_tokens, ' +
+        'frequency_penalty, presence_penalty, seed, stop, active, ' +
+        'created_at, updated_at) ' +
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
     else
       Stmt := TStmt.Create(FDb,
         'UPDATE agents SET provider_name = ?, model = ?, system_prompt = ?, ' +
+        'reasoning_effort = ?, tier = ?, ' +
         'temperature = ?, top_p = ?, max_tokens = ?, frequency_penalty = ?, ' +
         'presence_penalty = ?, seed = ?, stop = ?, updated_at = ? ' +
         'WHERE name = ?');
@@ -4905,35 +4924,39 @@ begin
         Stmt.BindText(2, ARow.ProviderName);
         Stmt.BindText(3, ARow.Model);
         Stmt.BindText(4, ARow.SystemPrompt);
-        BindNullableFloat(Stmt, 5, ARow.Temperature, ARow.HasTemperature);
-        BindNullableFloat(Stmt, 6, ARow.TopP, ARow.HasTopP);
-        BindNullableInt(Stmt, 7, ARow.MaxTokens, ARow.HasMaxTokens);
-        BindNullableFloat(Stmt, 8, ARow.FrequencyPenalty,
+        Stmt.BindText(5, ARow.ReasoningEffort);
+        Stmt.BindText(6, ARow.Tier);
+        BindNullableFloat(Stmt, 7, ARow.Temperature, ARow.HasTemperature);
+        BindNullableFloat(Stmt, 8, ARow.TopP, ARow.HasTopP);
+        BindNullableInt(Stmt, 9, ARow.MaxTokens, ARow.HasMaxTokens);
+        BindNullableFloat(Stmt, 10, ARow.FrequencyPenalty,
           ARow.HasFrequencyPenalty);
-        BindNullableFloat(Stmt, 9, ARow.PresencePenalty,
+        BindNullableFloat(Stmt, 11, ARow.PresencePenalty,
           ARow.HasPresencePenalty);
-        BindNullableInt(Stmt, 10, ARow.Seed, ARow.HasSeed);
-        Stmt.BindText(11, EncodeMcpStrings(ARow.Stop));
-        Stmt.BindInt(12, Ord(ARow.Active));
-        Stmt.BindInt64(13, Now2);
-        Stmt.BindInt64(14, Now2);
+        BindNullableInt(Stmt, 12, ARow.Seed, ARow.HasSeed);
+        Stmt.BindText(13, EncodeMcpStrings(ARow.Stop));
+        Stmt.BindInt(14, Ord(ARow.Active));
+        Stmt.BindInt64(15, Now2);
+        Stmt.BindInt64(16, Now2);
       end
       else
       begin
         Stmt.BindText(1, ARow.ProviderName);
         Stmt.BindText(2, ARow.Model);
         Stmt.BindText(3, ARow.SystemPrompt);
-        BindNullableFloat(Stmt, 4, ARow.Temperature, ARow.HasTemperature);
-        BindNullableFloat(Stmt, 5, ARow.TopP, ARow.HasTopP);
-        BindNullableInt(Stmt, 6, ARow.MaxTokens, ARow.HasMaxTokens);
-        BindNullableFloat(Stmt, 7, ARow.FrequencyPenalty,
+        Stmt.BindText(4, ARow.ReasoningEffort);
+        Stmt.BindText(5, ARow.Tier);
+        BindNullableFloat(Stmt, 6, ARow.Temperature, ARow.HasTemperature);
+        BindNullableFloat(Stmt, 7, ARow.TopP, ARow.HasTopP);
+        BindNullableInt(Stmt, 8, ARow.MaxTokens, ARow.HasMaxTokens);
+        BindNullableFloat(Stmt, 9, ARow.FrequencyPenalty,
           ARow.HasFrequencyPenalty);
-        BindNullableFloat(Stmt, 8, ARow.PresencePenalty,
+        BindNullableFloat(Stmt, 10, ARow.PresencePenalty,
           ARow.HasPresencePenalty);
-        BindNullableInt(Stmt, 9, ARow.Seed, ARow.HasSeed);
-        Stmt.BindText(10, EncodeMcpStrings(ARow.Stop));
-        Stmt.BindInt64(11, Now2);
-        Stmt.BindText(12, ARow.Name);
+        BindNullableInt(Stmt, 11, ARow.Seed, ARow.HasSeed);
+        Stmt.BindText(12, EncodeMcpStrings(ARow.Stop));
+        Stmt.BindInt64(13, Now2);
+        Stmt.BindText(14, ARow.Name);
       end;
       if Stmt.Step <> SQLITE_DONE then
         Exit(Fail(AError, seError, 'could not save agent', DbErrorText));
