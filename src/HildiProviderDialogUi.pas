@@ -60,7 +60,9 @@ type
       given and never reads the store itself. }
     procedure SetItems(const AItems: TProviderListItemArray);
     function SelectedName: string;
-    { 'close' | 'delete' | 'activate'. The host performs them. }
+    { 'close' | 'delete'. The host performs them. There is deliberately NO
+      'activate': this dialog manages providers, it does not switch them -
+      switching is /model, which chooses a provider+model pair. }
     property OnAction: TProviderActionEvent read FOnAction write FOnAction;
     function HandleEvent(const E: TInputEvent): Boolean; override;
   protected
@@ -98,8 +100,6 @@ end;
 
 const
   RowHeight = 2;             // summary line + its detail line
-  FooterKeys: array[0..2] of string = ('enter', 'd', 'esc');
-  FooterActions: array[0..2] of string = ('activate', 'delete', 'close');
 
 { --- TProviderRows ------------------------------------------------------- }
 
