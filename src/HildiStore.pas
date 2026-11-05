@@ -184,6 +184,11 @@ type
       out AError: TStoreError): Boolean;
     function SetProviderSecret(const AName, ASecret: string;
       out AError: TStoreError): Boolean;
+    { Remove a provider's stored key. An EMPTY key cannot express this: '' already
+      means "leave the stored key alone", so clearing needs its own verb rather
+      than a sentinel shared with "no change". }
+    function ClearProviderSecret(const AName: string;
+      out AError: TStoreError): Boolean;
 
     { OAuth tokens for a server (keyed by scope/workspace/name). }
     function SaveOAuthToken(const ARow: TOAuthTokenRow;
@@ -4764,6 +4769,36 @@ begin
       Result := sqlite3_changes(FDb) > 0;
       if not Result then
         Fail(AError, seNotFound, 'no such provider', AName);
+    finally
+      Stmt.Free;
+    end;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TSqliteStore.ClearProviderSecret(const AName: string;
+  out AError: TStoreError): Boolean;
+var
+  Stmt: TStmt;
+begin
+  AError := OkError;
+  FLock.Acquire;
+  try
+    if not EnsureOpen(AError) then
+      Exit(False);
+    Stmt := TStmt.Create(FDb, 'DELETE FROM settings WHERE key = ?');
+    try
+      if not Stmt.Valid then
+        Exit(Fail(AError, seError, 'could not clear provider secret',
+          DbErrorText));
+      Stmt.BindText(1, ProviderSecretKey(AName));
+      if Stmt.Step <> SQLITE_DONE then
+        Exit(Fail(AError, seError, 'could not clear provider secret',
+          DbErrorText));
+      { Clearing an absent key is a SUCCESS: the caller asked for "no stored
+        key", and that is now true. }
+      Result := True;
     finally
       Stmt.Free;
     end;

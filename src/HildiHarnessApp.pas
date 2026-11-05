@@ -3674,7 +3674,17 @@ begin
   { THE KEY IS NOT A ROW FIELD. It goes to the secret store, keyed by name, and
     only when the operator actually typed one - so editing a model does not force
     retyping the secret, and an empty field never clears a working key. }
-  if Res.SecretSet then
+  { A CLEAR is a different request from "a new key": the operator asked for no
+    stored key, which is a legitimate state - the environment may supply one. }
+  if Res.SecretClear then
+  begin
+    if not FSession.Store.ClearProviderSecret(Res.Name, Err) then
+    begin
+      AppendError('clear key: ' + Err.Message);
+      Exit;
+    end;
+  end
+  else if Res.SecretSet then
   begin
     { CHECK BEFORE COMMITTING THE KEY, and keep the modal open if it fails. A
       saved-but-wrong key is the worst outcome: the dialog closes, the provider

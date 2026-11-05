@@ -36,6 +36,9 @@ type
     { True when the operator typed a key. False leaves any stored key alone, so
       editing the model does not require retyping the secret. }
     SecretSet: Boolean;
+    { True when the operator asked to REMOVE the stored key. Separate from
+      SecretSet because '' cannot mean both "leave it" and "delete it". }
+    SecretClear: Boolean;
   end;
 
   TProviderForm = class(TModal)
@@ -46,6 +49,7 @@ type
     FEditing: Boolean;
     FError: string;
     FBusy: Boolean;
+    FSecretClear: Boolean;
     FKeys: TStringArray;
     FOnAction: TProviderFormAction;
     procedure RefreshFooter;
@@ -156,7 +160,7 @@ begin
     remove, which is destructive and therefore chorded rather than a bare letter
     beside save. }
   if FEditing then
-    SetFooter('ctrl+d remove   enter save   esc cancel')
+    SetFooter('ctrl+x clear key   ctrl+d remove   enter save   esc cancel')
   else
     SetFooter('enter add   esc cancel');
 end;
@@ -235,6 +239,7 @@ begin
   Result.Model := Trim(string(FModel.Text));
   Result.Secret := string(FSecret.Text);
   Result.SecretSet := Result.Secret <> '';
+  Result.SecretClear := FSecretClear;
 end;
 
 { The rules the SPEC pins, decided here because they need no store. }
@@ -317,6 +322,15 @@ begin
       end;
       if (E.Key.Kind = kkChar) and (E.Key.Ch = 'r') then
         Exit(OnNextProvider);
+      if (FEditing) and ((E.Key.Ch = 'x') or (E.Key.Ch = 'X')) then
+      begin
+        { Marks the stored key for removal and says so, because a chord that
+          silently arms a destructive change is worse than one that is loud. }
+        FSecretClear := True;
+        FSecret.SetText('');
+        FError := 'the stored key will be removed on save';
+        Exit(True);
+      end;
     end;
     if E.Key.Kind = kkEscape then
     begin
@@ -362,7 +376,13 @@ end;
 
 procedure TProviderForm.FooterClicked(const AKey: string);
 begin
-  if AKey = 'ctrl+d' then
+  if (AKey = 'ctrl+x') and FEditing then
+  begin
+    FSecretClear := True;
+    FSecret.SetText('');
+    FError := 'the stored key will be removed on save';
+  end
+  else if AKey = 'ctrl+d' then
   begin
     if FEditing and Assigned(FOnAction) then
       FOnAction('remove');
