@@ -6,11 +6,18 @@ unit HildiMcpModal;
   about text and layout: a stranger's project would not want it. It sits beside
   HildiSkillModal, which is the same shape.
 
-  A COMPOSITE, so it forwards every protocol method its base declares. That is
-  not tidiness: TWidget grew HitTest and CopySelection, and four composites in
-  the app failed to forward one and each was found by an operator in a terminal
-  rather than by a test. Measure/Arrange/Render/HandleEvent/Advance/Animating/
-  HitTest/CopySelection are all overridden below. }
+  A COMPOSITE, in the specific sense that matters here: TModal owns the frame and
+  renders FRows as its ONE content widget, so TMcpModal overrides only
+  HandleEvent - it must offer input to the rows before claiming keys itself - and
+  FooterClicked. It does NOT re-declare Measure/Arrange/Render/HitTest/
+  CopySelection/Advance/Animating: TModal already forwards those to its content,
+  and a second forward here would be a no-op that looked like diligence.
+
+  Checked, not assumed, because the distinction is exactly what four composites
+  got wrong: TModal forwards CopySelection and HandleEvent to FContent, and
+  TMcpRows returns False from Advance and Animating, so there is no animation to
+  forward today. If TMcpRows ever animates, TMcpModal must override both, and
+  nothing will fail if it does not. }
 
 {$mode delphi}{$H+}
 
