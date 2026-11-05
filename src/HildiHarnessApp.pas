@@ -3615,6 +3615,8 @@ var
   Err2: TStoreError;
   Res: TProviderFormResult;
   Row: TProviderRow;
+  ExistingActive: TProviderRow;
+  HadActive: Boolean;
 begin
   if AAction = 'cancel' then
   begin
@@ -3653,6 +3655,25 @@ begin
   begin
     AppendError('save: ' + Err.Message);
     Exit;
+  end;
+  { THE FIRST PROVIDER BECOMES ACTIVE. Setting `active` is not a "switch" - it
+    is establishing the initial state, which is why it belongs here and not on a
+    list CTA. Without it a newly added provider is saved and then never used:
+    ActiveProvider finds nothing, resolution falls through to the environment,
+    and the operator sees their configuration silently ignored.
+
+    Only when NOTHING is active, so a second provider never displaces the first
+    behind the operator's back. Changing which one is in use stays /model's job. }
+  if not FProviderEditing then
+  begin
+    HadActive := False;
+    if not FSession.Store.ActiveProvider(ExistingActive, Err) then
+      HadActive := False
+    else
+      HadActive := True;
+    if (not HadActive) then
+      if not FSession.Store.SetActiveProvider(Res.Name, Err) then
+        AppendError('activate: ' + Err.Message);
   end;
   { THE KEY IS NOT A ROW FIELD. It goes to the secret store, keyed by name, and
     only when the operator actually typed one - so editing a model does not force
