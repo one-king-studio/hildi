@@ -221,8 +221,25 @@ function McpResultToText(const AResultJson: string): string;
 function McpResultIsError(const AResultJson: string): Boolean;
 
 const
-  DefaultMcpListTimeoutMs = 10000;
-  DefaultMcpCallTimeoutMs = 60000;
+  { LISTING must be near-instant: initialize and tools/list are a local spawn
+    plus a handshake. A server that never answers its tools/list used to leave
+    the dialog spinning for ten seconds before anything was said. Five seconds
+    is generous for that and is what the operator asked for. }
+  DefaultMcpListTimeoutMs = 5000;
+  { CALLING a tool is a different question, and it is bounded by TOTAL elapsed
+    time, not by time-to-first-byte: WaitResponse sets one deadline and reads
+    until the response arrives. So a browser fetch that legitimately takes 20 s
+    to render would be killed by a 20 s total budget even though its first byte
+    came back immediately.
+
+    Twenty seconds is the operator's ceiling for a server fetch and is three
+    times tighter than the old 60 s, which could hang a turn for a minute. It is
+    deliberately NOT five: five is right for "are you there", wrong for "go and
+    fetch this page".
+
+    A single slow tool overrides this on its own row (CallTimeoutMs); a global
+    raise would make every other server wait too. }
+  DefaultMcpCallTimeoutMs = 20000;
   McpClientName = 'hildi';
   McpClientVersion = '0.1';
   MaxSchemaProperties = 64;
