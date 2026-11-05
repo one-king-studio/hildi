@@ -185,41 +185,85 @@ end;
 
 procedure TModal.SetFooter(const AText: string);
 var
-  Segs: TStringArray;
-  I, P: Integer;
-  Seg: string;
+  U, Norm, Seg: UnicodeString;
+  I, N, P: Integer;
+
+  procedure AddPair(const ASeg: UnicodeString);
+  var
+    Q: Integer;
+  begin
+    if ASeg = '' then
+      Exit;
+    Q := Pos(' ', ASeg);
+    SetLength(FFooterKeys, Length(FFooterKeys) + 1);
+    SetLength(FFooterActions, Length(FFooterActions) + 1);
+    if Q > 0 then
+    begin
+      { A pair splits at its FIRST space: 'enter' plus ' accept'. }
+      FFooterKeys[High(FFooterKeys)] := string(UTF8Encode(Copy(ASeg, 1, Q - 1)));
+      FFooterActions[High(FFooterActions)] := string(UTF8Encode(Copy(ASeg, Q, MaxInt)));
+    end
+    else
+    begin
+      { A lone phrase has no binding to dim, so it is all action. It must still
+        be clickable-by-key? No: an empty key cannot be clicked, by design. }
+      FFooterKeys[High(FFooterKeys)] := '';
+      FFooterActions[High(FFooterActions)] := string(UTF8Encode(ASeg));
+    end;
+  end;
+
 begin
-  { Input is the readable 'enter use \u00b7 esc cancel' form - the DOT is in the
-    caller's string, not in the rendering. Each segment splits at its first space
-    into a key and an action, matching how TApprovalModal lays out 'enter' plus
-    ' accept'. }
   FFooterKeys := nil;
   FFooterActions := nil;
   if AText = '' then
     Exit;
-  Segs := AText.Split([' ' + string(UTF8Encode(UnicodeString(WideChar($00B7)))) + ' ']);
-  for I := 0 to High(Segs) do
+
+  { TWO separators are accepted: a run of two or more spaces, and the middle dot.
+    This is the rule HintSpans already uses for DRAWING the footer, and the two
+    must agree - they did not. Every CTA call site was swept to spaces in
+    a4b7494, but this splitter still handled only the dot, so in production each
+    footer collapsed to ONE segment: it drew correctly through HintSpans and
+    reported the wrong CTA on a click. Found by TestTUIModal.
+
+    Normalise first, into a separator that cannot occur in a hint. }
+  { AText is a UTF-8 AnsiString: the source is compiled as UTF-8 and every call
+    site passes a literal. Decode it explicitly rather than assigning straight
+    into a UnicodeString, which would treat the UTF-8 bytes as Latin-1 and turn
+    the middle dot into two characters that match nothing. }
+  U := UTF8Decode(RawByteString(AText));
+  N := Length(U);
+  Norm := '';
+  I := 1;
+  while I <= N do
   begin
-    Seg := Trim(Segs[I]);
-    if Seg = '' then
-      Continue;
-    P := Pos(' ', Seg);
-    if P > 0 then
+    if (U[I] = ' ') and (I < N) and (U[I + 1] = ' ') then
     begin
-      SetLength(FFooterKeys, Length(FFooterKeys) + 1);
-      SetLength(FFooterActions, Length(FFooterActions) + 1);
-      FFooterKeys[High(FFooterKeys)] := Copy(Seg, 1, P - 1);
-      FFooterActions[High(FFooterActions)] := Copy(Seg, P, MaxInt);
+      Norm := Norm + #1;
+      while (I <= N) and (U[I] = ' ') do
+        Inc(I);
+    end
+    else if U[I] = WideChar($00B7) then
+    begin
+      Norm := Norm + #1;
+      Inc(I);
     end
     else
     begin
-      { A lone phrase with no key: all action, no binding to dim. }
-      SetLength(FFooterKeys, Length(FFooterKeys) + 1);
-      SetLength(FFooterActions, Length(FFooterActions) + 1);
-      FFooterKeys[High(FFooterKeys)] := '';
-      FFooterActions[High(FFooterActions)] := Seg;
+      Norm := Norm + U[I];
+      Inc(I);
     end;
   end;
+
+  Seg := '';
+  for I := 1 to Length(Norm) do
+    if Norm[I] = #1 then
+    begin
+      AddPair(Trim(Seg));
+      Seg := '';
+    end
+    else
+      Seg := Seg + Norm[I];
+  AddPair(Trim(Seg));
 end;
 
 procedure TModal.ContentWidthChanged(AWidth: Integer);
