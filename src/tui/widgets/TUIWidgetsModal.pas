@@ -122,6 +122,7 @@ type
     procedure Arrange(const ABounds: TRect); override;
     procedure Render(const S: ISurface); override;
     function HandleEvent(const E: TInputEvent): Boolean; override;
+    function CopySelection(const S: ISurface): Boolean; override;
     procedure ScrollToTop;
   end;
 
@@ -515,7 +516,24 @@ begin
         end;
   end;
   if FScroll <> nil then
-    Result := FScroll.HandleEvent(E);
+    Result := FScroll.HandleEvent(E)
+  else if FContent <> nil then
+    { A NON-scrollable modal has no scroller between it and its content, and this
+      arm was missing: events went nowhere. Found by the forwarding gate. }
+    Result := FContent.HandleEvent(E);
+end;
+
+function TModal.CopySelection(const S: ISurface): Boolean;
+begin
+  { The frame is chrome; the copyable text is in the content. Without this the
+    copy walk stopped at the dialog - every modal was a copy dead end, which is
+    exactly the class of bug the forwarding gate exists to catch. }
+  if FScroll <> nil then
+    Result := FScroll.CopySelection(S)
+  else if FContent <> nil then
+    Result := FContent.CopySelection(S)
+  else
+    Result := False;
 end;
 
 end.

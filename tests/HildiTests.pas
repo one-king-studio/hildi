@@ -38,7 +38,7 @@ uses
   TestAsyncObservable, TestAsyncSubject, TestAsyncOperators,
   TestAsyncTime, TestAsyncContext, TestAsyncConcurrency,
   TestAsyncParity, TestSkills, TestSkillsFiles, TestWrap, TestReplyMeta, TestHandoff,
-  TestTUISessionsModal, TestTUIModal, TestTUIDiffviewer, TestTUIHistorymodal, TestFuzzy, TestTUIActions, TestPatch, TestYAML,
+  TestTUISessionsModal, TestTUIModal, TestTUIForwarding, TestTUIDiffviewer, TestTUIHistorymodal, TestFuzzy, TestTUIActions, TestPatch, TestYAML,
   TestCommandPaths,
   SmokeProvider, TestSmokeProvider,
   TestShellParser, TestShellIsolation, TestShellInterpreter,

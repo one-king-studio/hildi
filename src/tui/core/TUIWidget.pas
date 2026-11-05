@@ -478,16 +478,16 @@ function TContainer.HitTest(AX, AY: Integer): Boolean;
 var
   I: Integer;
 begin
-  { A container is a hit when it or any child is: the point may fall on gap or
-    padding inside the container's own rect, which is still the container's
-    area, so this checks children first and falls back to the inherited rect
-    test rather than replacing it. }
-  if inherited HitTest(AX, AY) then
-    Exit(True);
+  { CHILDREN FIRST, then the container's own rect. Asking the most specific
+    widget first is what makes the recursion observable and testable; the
+    earlier order returned early on the container's own bounds, so a child was
+    only consulted for points OUTSIDE its parent - the opposite of useful, and
+    it meant the recursion could not be relied on. The union is unchanged: a
+    point on the container's gap or padding is still the container's. }
   for I := 0 to FCount - 1 do
     if FWidgets[I].Visible and FWidgets[I].HitTest(AX, AY) then
       Exit(True);
-  Result := False;
+  Result := inherited HitTest(AX, AY);
 end;
 
 function TContainer.CopySelection(const S: ISurface): Boolean;
