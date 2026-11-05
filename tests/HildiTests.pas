@@ -57,7 +57,8 @@ uses
   HildiTasks, HildiTasksStore, TestTasksStore,
   HildiTasksTools, TestTasksTools, TestFeaturesIndex,
   HildiCoordination, TestCoordination,
-  HildiChangesRecorder, TestChangesRecorder;
+  HildiChangesRecorder, TestChangesRecorder,
+  HildiProviderDialog, TestProviderDialog;
 
 var
   Runner: TTestRunner;
