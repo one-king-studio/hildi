@@ -282,10 +282,6 @@ begin
     Row.Key := 'openrouter';
     Row.Endpoint := 'https://openrouter.ai/api/v1/chat/completions';
     Row.Model := 'openai/gpt-4o';
-    Row.Temperature := 0.3;
-    Row.HasTemperature := True;
-    Row.MaxTokens := 2048;
-    Row.HasMaxTokens := True;
     AssertTrue('saved: ' + StoreErr.Message, Store.SaveProvider(Row, StoreErr));
     AssertTrue('activated: ' + StoreErr.Message,
       Store.SetActiveProvider('openrouter', StoreErr));
@@ -299,10 +295,8 @@ begin
     AssertEquals('provider named', 'openrouter', Cfg.Provider);
     AssertEquals('endpoint', Row.Endpoint, Cfg.Endpoint);
     AssertEquals('model', 'openai/gpt-4o', Cfg.Model);
-    AssertTrue('temperature configured', Cfg.Temperature.Set_);
-    AssertEquals('temperature', 0.3, Cfg.Temperature.Value);
-    AssertTrue('max_tokens configured', Cfg.MaxTokens.Set_);
-    AssertEquals('max_tokens', 2048, Cfg.MaxTokens.Value);
+    { No parameter assertions: a provider is a CONNECTION and carries none.
+      Sampling is an agent concern, tested where agents are tested. }
   finally
     Store.Free;
   end;
@@ -371,16 +365,14 @@ begin
     Row.Name := 'deterministic';
     Row.Key := 'fireworks';
     Row.Model := 'm';
-    Row.Temperature := 0.0;
-    Row.HasTemperature := True;
     AssertTrue('saved', Store.SaveProvider(Row, StoreErr));
     AssertTrue('activated', Store.SetActiveProvider('deterministic', StoreErr));
 
     Cfg := Default(TLLMConfig);
     AssertTrue('resolves', ResolveProviderConfig(Store, Cfg, False, False, Cfg,
       Err));
-    AssertTrue('configured, not absent', Cfg.Temperature.Set_);
-    AssertEquals('and zero', 0.0, Cfg.Temperature.Value);
+    AssertEquals('endpoint from the row', 'https://api.fireworks.ai/' +
+      'inference/v1/chat/completions', Cfg.Endpoint);
   finally
     Store.Free;
   end;

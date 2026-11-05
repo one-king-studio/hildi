@@ -80,18 +80,9 @@ begin
   Parts := '';
   Add(ProviderSlug(ARow));
   Add(ARow.Model);
-  { Only parameters that are SET. An unset parameter is not "0", it is "not
-    configured", and showing nothing is the honest rendering. }
-  if ARow.HasTemperature then
-    Add(Format('temp %g', [ARow.Temperature]));
-  if ARow.HasTopP then
-    Add(Format('top_p %g', [ARow.TopP]));
-  if ARow.HasMaxTokens then
-    Add(Format('max %d', [ARow.MaxTokens]));
-  if ARow.HasSeed then
-    Add(Format('seed %d', [ARow.Seed]));
-  if Length(ARow.Stop) > 0 then
-    Add('stop x' + IntToStr(Length(ARow.Stop)));
+  { A provider is a CONNECTION: endpoint, credential, dialect. Sampling
+    parameters are not shown here because they do not live here - they belong to
+    an agent, which is the behaviour, not the socket. }
   if Parts = '' then
     Parts := '(unconfigured)';
   Result := Parts;

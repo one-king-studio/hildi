@@ -3647,25 +3647,8 @@ begin
   Row.Key := Res.Key;
   Row.Endpoint := Res.Endpoint;
   Row.Model := Res.Model;
-  { Editing preserves what the form does not show: the parameters, and the active
-    flag. Losing them on a rename would silently reset a configured provider. }
-  if FProviderEditing then
-  begin
-    Row.Active := FProviderFormRow.Active;
-    Row.Temperature := FProviderFormRow.Temperature;
-    Row.HasTemperature := FProviderFormRow.HasTemperature;
-    Row.TopP := FProviderFormRow.TopP;
-    Row.HasTopP := FProviderFormRow.HasTopP;
-    Row.MaxTokens := FProviderFormRow.MaxTokens;
-    Row.HasMaxTokens := FProviderFormRow.HasMaxTokens;
-    Row.FrequencyPenalty := FProviderFormRow.FrequencyPenalty;
-    Row.HasFrequencyPenalty := FProviderFormRow.HasFrequencyPenalty;
-    Row.PresencePenalty := FProviderFormRow.PresencePenalty;
-    Row.HasPresencePenalty := FProviderFormRow.HasPresencePenalty;
-    Row.Seed := FProviderFormRow.Seed;
-    Row.HasSeed := FProviderFormRow.HasSeed;
-    Row.Stop := FProviderFormRow.Stop;
-  end;
+  { A provider is a CONNECTION: name, slug, endpoint, model. It has no sampling
+    parameters - those belong to an agent - so there is nothing else to carry. }
   if not FSession.Store.SaveProvider(Row, Err) then
   begin
     AppendError('save: ' + Err.Message);

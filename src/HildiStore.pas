@@ -66,13 +66,9 @@ type
     Key: string;
     Endpoint: string;
     Model: string;
-    Temperature: Double;       HasTemperature: Boolean;
-    TopP: Double;              HasTopP: Boolean;
-    MaxTokens: Integer;        HasMaxTokens: Boolean;
-    FrequencyPenalty: Double;  HasFrequencyPenalty: Boolean;
-    PresencePenalty: Double;   HasPresencePenalty: Boolean;
-    Seed: Integer;             HasSeed: Boolean;
-    Stop: TStringArray;        // empty => no stop key
+    { Sampling parameters are NOT here. A provider is a CONNECTION - endpoint,
+      credential, vendor dialect. Sampling belongs to an AGENT, which is a
+      behaviour: model + parameters + prompt. }
     Active: Boolean;
     CreatedAt: Int64;
     UpdatedAt: Int64;
@@ -469,7 +465,7 @@ end;
 function DefaultMigrations: TMigrationArray;
 begin
   Result := nil;
-  SetLength(Result, 25);
+  SetLength(Result, 23);
   Result[0].Version := 1;
   Result[0].Name := 'session history';
   Result[0].Statements := [
@@ -962,67 +958,25 @@ begin
     row may have active = 1, enforced by the database instead of by code that
     remembers to clear the old flag. }
   Result[22].Version := 23;
-  Result[22].Name := 'providers';
+  Result[22].Name := 'providers, agents and request provenance';
   Result[22].Statements := [
+    { --- a connection ------------------------------------------------- }
     'CREATE TABLE providers (' +
       'id INTEGER PRIMARY KEY AUTOINCREMENT, ' +
       'name TEXT NOT NULL UNIQUE, ' +
       'provider TEXT NOT NULL DEFAULT '''', ' +
       'endpoint TEXT NOT NULL DEFAULT '''', ' +
       'model TEXT NOT NULL DEFAULT '''', ' +
-      'temperature REAL, ' +
-      'top_p REAL, ' +
-      'max_tokens INTEGER, ' +
-      'frequency_penalty REAL, ' +
-      'presence_penalty REAL, ' +
-      'seed INTEGER, ' +
-      'stop TEXT NOT NULL DEFAULT ''[]'', ' +
       'active INTEGER NOT NULL DEFAULT 0, ' +
       'created_at INTEGER NOT NULL, ' +
       'updated_at INTEGER NOT NULL, ' +
       'last_used_at INTEGER NOT NULL DEFAULT 0)',
     'CREATE UNIQUE INDEX idx_providers_one_active ON providers (active) ' +
-      'WHERE active = 1'
-  ];
-  { WHICH PROVIDER AND MODEL PRODUCED A REQUEST, and with what parameters.
-
-    Per REQUEST, not per turn: the provider can change mid-session, and a turn
-    that spanned two providers would otherwise have to lie about one. The turn
-    rolls the DISTINCT provider forward (see FinishTurn), so a report can group
-    by provider without joining requests for the common case.
-
-    The parameters are stored as the JSON that was actually sent, not as columns:
-    they are evidence for an audit ("what did we ask for"), never queried
-    individually, and a provider-specific field added later must not need a
-    migration. Empty string means no parameters were configured, which is the
-    same tri-state distinction the request body makes. }
-  Result[23].Version := 24;
-  Result[23].Name := 'provider and parameters on a request';
-  Result[23].Statements := [
-    'ALTER TABLE requests ADD COLUMN provider TEXT NOT NULL DEFAULT ''''',
-    'ALTER TABLE requests ADD COLUMN parameters TEXT NOT NULL DEFAULT ''''',
-    'ALTER TABLE turns ADD COLUMN provider TEXT NOT NULL DEFAULT '''''
-  ];
-  { AGENTS: a configured BEHAVIOUR - a model, its sampling parameters, and an
-    optional behaviour prompt.
-
-    WHY NOT ON providers: a provider is a CONNECTION (endpoint, credential,
-    dialect). Sampling is not a property of a socket.
-    WHY NOT ON a catalogue model: OpenRouter lists 455 models, so per-model
-    parameters would mean setting the same temperature 455 times. A catalogue is
-    DISCOVERY; configuration does not belong in it.
-    WHY AN AGENT: the behaviour prompt is the missing piece. "Use gpt-4o at 0.3"
-    is a selection; "use gpt-4o at 0.3 and behave like this" is an agent.
-
-    A DEFAULT AGENT IS INSERTED, because an install with no agents has nothing to
-    run on. 'hildi' is the built-in behaviour every existing session already gets,
-    so naming it makes the implicit explicit rather than inventing a new default.
-
-    Parameter columns are NULLABLE for the same reason as before: NULL means
-    "omit the key from the request", never zero. }
-  Result[24].Version := 25;
-  Result[24].Name := 'agents';
-  Result[24].Statements := [
+      'WHERE active = 1',
+    { --- a behaviour --------------------------------------------------- }
+    { NULLABLE parameter columns: NULL is the SQL spelling of "omit the key from
+      the request". NOT NULL DEFAULT 0 would make every agent a zero-temperature
+      agent, which is a real and very different setting. }
     'CREATE TABLE agents (' +
       'id INTEGER PRIMARY KEY AUTOINCREMENT, ' +
       'name TEXT NOT NULL UNIQUE, ' +
@@ -1041,12 +995,17 @@ begin
       'updated_at INTEGER NOT NULL)',
     'CREATE UNIQUE INDEX idx_agents_one_active ON agents (active) ' +
       'WHERE active = 1',
-    { The built-in agent. ACTIVE, because every install must have something to
-      run on the moment this migration lands - a store with agents but none
-      active would resolve to nothing. }
+    { The built-in agent arrives ACTIVE: an install with agents and none active
+      resolves to nothing, and every session already runs on this behaviour. }
     'INSERT INTO agents (name, provider_name, model, system_prompt, active, ' +
       'created_at, updated_at) ' +
-      'VALUES (''hildi'', '''', '''', '''', 1, 0, 0)'
+      'VALUES (''hildi'', '''', '''', '''', 1, 0, 0)',
+    { --- what a request actually recorded ------------------------------ }
+    { Per REQUEST, because a provider can change mid-session. This is HISTORY -
+      what ran - as distinct from an agent, which is what you intend. }
+    'ALTER TABLE requests ADD COLUMN provider TEXT NOT NULL DEFAULT ''''',
+    'ALTER TABLE requests ADD COLUMN parameters TEXT NOT NULL DEFAULT ''''',
+    'ALTER TABLE turns ADD COLUMN provider TEXT NOT NULL DEFAULT '''''
   ];
 end;
 
@@ -4554,8 +4513,7 @@ end;
 
 const
   ProviderColumns =
-    'id, name, provider, endpoint, model, temperature, top_p, max_tokens, ' +
-    'frequency_penalty, presence_penalty, seed, stop, active, ' +
+    'id, name, provider, endpoint, model, active, ' +
     'created_at, updated_at, last_used_at';
 
 { Epoch SECONDS, matching every other *_at column in this schema. NowMs returns
@@ -4603,31 +4561,14 @@ begin
   Result.Key := Stmt.ColText(2);
   Result.Endpoint := Stmt.ColText(3);
   Result.Model := Stmt.ColText(4);
-  { The Has* flags are what make NULL mean "absent" rather than "zero". A NULL
-    column and a 0.0 both arrive as 0 from sqlite3_column_double, so the column
-    TYPE is the only reliable signal - read it, not the value.
-
-    INDICES MUST MATCH ProviderColumns EXACTLY, written out rather than derived:
-    inserting `provider` shifted every one of them, and an off-by-one here is
-    silent - a reader one column off returns a plausible number for the wrong
-    parameter. The round-trip test is what catches it. }
-  Result.HasTemperature := not Stmt.ColIsNull(5);
-  Result.Temperature := Stmt.ColFloat(5);
-  Result.HasTopP := not Stmt.ColIsNull(6);
-  Result.TopP := Stmt.ColFloat(6);
-  Result.HasMaxTokens := not Stmt.ColIsNull(7);
-  Result.MaxTokens := Stmt.ColInt(7);
-  Result.HasFrequencyPenalty := not Stmt.ColIsNull(8);
-  Result.FrequencyPenalty := Stmt.ColFloat(8);
-  Result.HasPresencePenalty := not Stmt.ColIsNull(9);
-  Result.PresencePenalty := Stmt.ColFloat(9);
-  Result.HasSeed := not Stmt.ColIsNull(10);
-  Result.Seed := Stmt.ColInt(10);
-  DecodeMcpStrings(Stmt.ColText(11), Result.Stop);
-  Result.Active := Stmt.ColInt(12) <> 0;
-  Result.CreatedAt := Stmt.ColInt64(13);
-  Result.UpdatedAt := Stmt.ColInt64(14);
-  Result.LastUsedAt := Stmt.ColInt64(15);
+  { INDICES MUST MATCH ProviderColumns EXACTLY. A provider no longer carries
+    sampling parameters - those belong to an agent - so the list shrank and every
+    index after `model` moved. An off-by-one here is silent: a reader one column
+    off returns a plausible value for the wrong field. }
+  Result.Active := Stmt.ColInt(5) <> 0;
+  Result.CreatedAt := Stmt.ColInt64(6);
+  Result.UpdatedAt := Stmt.ColInt64(7);
+  Result.LastUsedAt := Stmt.ColInt64(8);
 end;
 
 function TSqliteStore.SaveProvider(const ARow: TProviderRow;
@@ -4665,17 +4606,14 @@ begin
     if ExistingId = 0 then
     begin
       Stmt := TStmt.Create(FDb,
-        'INSERT INTO providers (name, provider, endpoint, model, temperature, ' +
-        'top_p, max_tokens, frequency_penalty, presence_penalty, seed, stop, ' +
+        'INSERT INTO providers (name, provider, endpoint, model, ' +
         'active, created_at, updated_at, last_used_at) ' +
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
     end
     else
       Stmt := TStmt.Create(FDb,
         'UPDATE providers SET provider = ?, endpoint = ?, model = ?, ' +
-        'temperature = ?, top_p = ?, max_tokens = ?, frequency_penalty = ?, ' +
-        'presence_penalty = ?, seed = ?, stop = ?, updated_at = ? ' +
-        'WHERE name = ?');
+        'updated_at = ? WHERE name = ?');
     try
       if not Stmt.Valid then
         Exit(Fail(AError, seError, 'could not save provider', DbErrorText));
@@ -4685,36 +4623,18 @@ begin
         Stmt.BindText(2, ARow.Key);
         Stmt.BindText(3, ARow.Endpoint);
         Stmt.BindText(4, ARow.Model);
-        BindNullableFloat(Stmt, 5, ARow.Temperature, ARow.HasTemperature);
-        BindNullableFloat(Stmt, 6, ARow.TopP, ARow.HasTopP);
-        BindNullableInt(Stmt, 7, ARow.MaxTokens, ARow.HasMaxTokens);
-        BindNullableFloat(Stmt, 8, ARow.FrequencyPenalty,
-          ARow.HasFrequencyPenalty);
-        BindNullableFloat(Stmt, 9, ARow.PresencePenalty,
-          ARow.HasPresencePenalty);
-        BindNullableInt(Stmt, 10, ARow.Seed, ARow.HasSeed);
-        Stmt.BindText(11, EncodeMcpStrings(ARow.Stop));
-        Stmt.BindInt(12, Ord(ARow.Active));
-        Stmt.BindInt64(13, Now2);
-        Stmt.BindInt64(14, Now2);
-        Stmt.BindInt64(15, ARow.LastUsedAt);
+        Stmt.BindInt(5, Ord(ARow.Active));
+        Stmt.BindInt64(6, Now2);
+        Stmt.BindInt64(7, Now2);
+        Stmt.BindInt64(8, ARow.LastUsedAt);
       end
       else
       begin
         Stmt.BindText(1, ARow.Key);
         Stmt.BindText(2, ARow.Endpoint);
         Stmt.BindText(3, ARow.Model);
-        BindNullableFloat(Stmt, 4, ARow.Temperature, ARow.HasTemperature);
-        BindNullableFloat(Stmt, 5, ARow.TopP, ARow.HasTopP);
-        BindNullableInt(Stmt, 6, ARow.MaxTokens, ARow.HasMaxTokens);
-        BindNullableFloat(Stmt, 7, ARow.FrequencyPenalty,
-          ARow.HasFrequencyPenalty);
-        BindNullableFloat(Stmt, 8, ARow.PresencePenalty,
-          ARow.HasPresencePenalty);
-        BindNullableInt(Stmt, 9, ARow.Seed, ARow.HasSeed);
-        Stmt.BindText(10, EncodeMcpStrings(ARow.Stop));
-        Stmt.BindInt64(11, Now2);
-        Stmt.BindText(12, ARow.Name);
+        Stmt.BindInt64(4, Now2);
+        Stmt.BindText(5, ARow.Name);
       end;
       if Stmt.Step <> SQLITE_DONE then
         Exit(Fail(AError, seError, 'could not save provider', DbErrorText));

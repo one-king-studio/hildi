@@ -18,8 +18,8 @@ type
     function MakeRow(const AName, AKey, AModel: string): TProviderRow;
     function ItemsOf(const ARows: TProviderRowArray): TProviderListItemArray;
   published
-    procedure TestSummaryNamesSlugModelAndParameters;
-    procedure TestSummaryOmitsUnsetParameters;
+    procedure TestSummaryNamesSlugAndModel;
+    
     procedure TestAProviderWithNoAdapterIsShownUnusable;
     procedure TestAnEmptyKeyIsUnusable;
     procedure TestTheActiveProviderIsMarked;
@@ -55,28 +55,15 @@ begin
   Result := ProviderListItems(ARows, AnyAdapter);
 end;
 
-procedure TProviderDialogTest.TestSummaryNamesSlugModelAndParameters;
+procedure TProviderDialogTest.TestSummaryNamesSlugAndModel;
 var
   R: TProviderRow;
 begin
+  { A provider is a CONNECTION: slug and model. Sampling parameters are not part
+    of it - they belong to an agent - so the summary deliberately stops here. }
   R := MakeRow('work', 'openrouter', 'openai/gpt-4o');
-  R.Temperature := 0.3;
-  R.HasTemperature := True;
-  AssertEquals('slug, model and the set parameter',
-    'openrouter - openai/gpt-4o - temp 0.3', ProviderSummary(R));
-end;
-
-procedure TProviderDialogTest.TestSummaryOmitsUnsetParameters;
-var
-  R: TProviderRow;
-begin
-  { An unset parameter is NOT zero - it is "not configured". Showing
-    "temp 0" for an unset temperature would tell the operator the opposite of
-    the truth, and is the same sentinel mistake the request body refuses. }
-  R := MakeRow('bare', 'openrouter', 'some/model');
-  AssertEquals('only what is set', 'openrouter - some/model',
-    ProviderSummary(R));
-  AssertTrue('no temp shown', Pos('temp', ProviderSummary(R)) = 0);
+  AssertEquals('slug and model',
+    'openrouter - openai/gpt-4o', ProviderSummary(R));
 end;
 
 procedure TProviderDialogTest.TestAProviderWithNoAdapterIsShownUnusable;

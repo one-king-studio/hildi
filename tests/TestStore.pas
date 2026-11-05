@@ -43,8 +43,6 @@ type
       parameter must come back ABSENT, and a configured 0.0 must come back
       configured. Those are different requests. }
     procedure TestProviderRoundTripsEveryParameter;
-    procedure TestZeroTemperatureSurvivesAsConfiguredNotNull;
-    procedure TestNullParameterComesBackAbsent;
     procedure TestSaveProviderUpdatesByNameInsteadOfDuplicating;
     procedure TestListProvidersIsOrderedByName;
     procedure TestActivatingAProviderLeavesExactlyOneActive;
@@ -381,78 +379,11 @@ begin
     Row.Name := 'fireworks';
     Row.Endpoint := 'https://api.fireworks.ai/inference/v1/chat/completions';
     Row.Model := 'accounts/fireworks/models/x';
-    Row.Temperature := 0.25;  Row.HasTemperature := True;
-    Row.TopP := 0.9;          Row.HasTopP := True;
-    Row.MaxTokens := 4096;    Row.HasMaxTokens := True;
-    Row.FrequencyPenalty := 0.5;  Row.HasFrequencyPenalty := True;
-    Row.PresencePenalty := -0.5;  Row.HasPresencePenalty := True;
-    Row.Seed := 42;           Row.HasSeed := True;
-    SetLength(Row.Stop, 2);
-    Row.Stop[0] := 'STOP';
-    Row.Stop[1] := '</answer>';
     AssertTrue('saved: ' + Err.Message, S.SaveProvider(Row, Err));
 
     AssertTrue('loaded: ' + Err.Message, S.LoadProvider('fireworks', Got, Err));
     AssertEquals('endpoint', Row.Endpoint, Got.Endpoint);
     AssertEquals('model', Row.Model, Got.Model);
-    AssertEquals('temperature', 0.25, Got.Temperature);
-    AssertEquals('top_p', 0.9, Got.TopP);
-    AssertEquals('max_tokens', 4096, Got.MaxTokens);
-    AssertEquals('frequency_penalty', 0.5, Got.FrequencyPenalty);
-    AssertEquals('presence_penalty', -0.5, Got.PresencePenalty);
-    AssertEquals('seed', 42, Got.Seed);
-    AssertEquals('two stops', 2, Length(Got.Stop));
-    AssertEquals('stop 0', 'STOP', Got.Stop[0]);
-    AssertEquals('stop 1', '</answer>', Got.Stop[1]);
-  finally
-    S.Free;
-  end;
-end;
-
-procedure TStoreTest.TestZeroTemperatureSurvivesAsConfiguredNotNull;
-var
-  S: TSqliteStore;
-  Err: TStoreError;
-  Row, Got: TProviderRow;
-begin
-  Err := Default(TStoreError);
-  { THE round-trip trap. A configured 0.0 temperature must come back configured.
-    A `NOT NULL DEFAULT 0` column, or a reader that skips ColIsNull, would make
-    "deliberately deterministic" indistinguishable from "not configured" - and
-    the request would then omit the key entirely. }
-  S := OpenStore;
-  try
-    Row := Default(TProviderRow);
-    Row.Name := 'deterministic';
-    Row.Temperature := 0.0;
-    Row.HasTemperature := True;
-    AssertTrue('saved: ' + Err.Message, S.SaveProvider(Row, Err));
-    AssertTrue('loaded: ' + Err.Message, S.LoadProvider('deterministic', Got, Err));
-    AssertTrue('still CONFIGURED, not absent', Got.HasTemperature);
-    AssertEquals('and its value is zero', 0.0, Got.Temperature);
-  finally
-    S.Free;
-  end;
-end;
-
-procedure TStoreTest.TestNullParameterComesBackAbsent;
-var
-  S: TSqliteStore;
-  Err: TStoreError;
-  Row, Got: TProviderRow;
-begin
-  Err := Default(TStoreError);
-  S := OpenStore;
-  try
-    Row := Default(TProviderRow);
-    Row.Name := 'bare';
-    AssertTrue('saved: ' + Err.Message, S.SaveProvider(Row, Err));
-    AssertTrue('loaded: ' + Err.Message, S.LoadProvider('bare', Got, Err));
-    AssertFalse('temperature absent', Got.HasTemperature);
-    AssertFalse('top_p absent', Got.HasTopP);
-    AssertFalse('max_tokens absent', Got.HasMaxTokens);
-    AssertFalse('seed absent', Got.HasSeed);
-    AssertEquals('no stop entries', 0, Length(Got.Stop));
   finally
     S.Free;
   end;

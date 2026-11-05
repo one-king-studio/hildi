@@ -410,42 +410,10 @@ begin
       AConfig.Endpoint := Row.Endpoint;
     if Row.Model <> '' then
       AConfig.Model := Row.Model;
-    { Each parameter is copied only when the row CONFIGURED it. A NULL column
-      means "not set, let the provider decide" and must not overwrite a value the
-      caller passed - which is the same tri-state distinction the column exists
-      to preserve. }
-    if Row.HasTemperature then
-    begin
-      AConfig.Temperature.Set_ := True;
-      AConfig.Temperature.Value := Row.Temperature;
-    end;
-    if Row.HasTopP then
-    begin
-      AConfig.TopP.Set_ := True;
-      AConfig.TopP.Value := Row.TopP;
-    end;
-    if Row.HasMaxTokens then
-    begin
-      AConfig.MaxTokens.Set_ := True;
-      AConfig.MaxTokens.Value := Row.MaxTokens;
-    end;
-    if Row.HasFrequencyPenalty then
-    begin
-      AConfig.FrequencyPenalty.Set_ := True;
-      AConfig.FrequencyPenalty.Value := Row.FrequencyPenalty;
-    end;
-    if Row.HasPresencePenalty then
-    begin
-      AConfig.PresencePenalty.Set_ := True;
-      AConfig.PresencePenalty.Value := Row.PresencePenalty;
-    end;
-    if Row.HasSeed then
-    begin
-      AConfig.Seed.Set_ := True;
-      AConfig.Seed.Value := Row.Seed;
-    end;
-    if Length(Row.Stop) > 0 then
-      AConfig.Stop := Row.Stop;
+    { NO PARAMETERS COPIED HERE. A provider is a CONNECTION - endpoint,
+      credential, dialect. Sampling parameters belong to an AGENT, which is the
+      behaviour, so they are applied when the active agent is resolved. Migration
+      23 originally put them on the provider row; that was the conflation. }
     { A stored key wins; the environment is the fallback. A named provider with
       NO key and no environment key is a real configuration error, reported with
       the provider named rather than as "authentication failed" - no request was
