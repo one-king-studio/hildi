@@ -12,13 +12,14 @@ interface
 
 uses
   Classes, SysUtils, DateUtils, Generics.Collections,
-  LLMClient, HildiApproval,
+  LLMClient, LLMProvider, HildiApproval,
   TUIBase, TUIInput,
   TUISurface, TUIWidget,
   TUIWidgetsText, HildiChat,
   HildiCompose, HildiChatPanel,
   TUIWidgetsPalette,
   HildiApprovalModal,
+  HildiProviderDialog, HildiProviderDialogUi,
   TUIWidgetsPanel, TUITheme,
   TUIApp, HildiHarnessTurn,
   HildiHarnessDriver, HildiHarnessView,
@@ -118,6 +119,11 @@ type
     { The rows the dialog is CURRENTLY showing. A probe and a reconnect answer
       with one row each, so they merge into this instead of replacing it. }
     FMcpCurrentRows: TMcpRowStatusArray;
+    { The provider dialog. Unlike /mcp this needs no driver and no event: it reads
+      and writes the providers table the app already owns, so there is no async
+      answer to reconcile. }
+    FProviderModal: TProviderModal;
+    FCloseProviderModal: Boolean;
     FHistoryShown: Boolean;
     FHistoryIntent: THistoryIntent;
     FDiffShown: Boolean;
@@ -291,6 +297,14 @@ type
     procedure SyncMcpModal;
     procedure McpModalReconnect(const AKey: string);
     procedure McpModalAdd;
+    { The provider management dialog: open from the store, reconcile the plane
+      after a deferred close, and act on its CTAs. }
+    procedure ShowProviderModal;
+    procedure CloseProviderModal;
+    procedure SyncProviderModal;
+    procedure ProviderModalAction(const AAction: string);
+    procedure ProviderModalPick(const AName: string);
+    procedure LoadProviders;
     procedure McpModalClosed;
     procedure CloseDiff;
     procedure DiffClosed(Sender: TObject);
@@ -1299,6 +1313,9 @@ begin
   if FDriver <> nil then
     Add('checkpoint', 'create a checkpoint for this session');
   Add('sessions', 'list and manage this workspace''s sessions');
+  { No driver needed: the provider dialog reads the store the app already owns,
+    so unlike /mcp it is offered even while connecting. }
+  Add('provider', 'configure the LLM provider');
   { /mcp asks the runtime for the server list (scMcpList), so like /checkpoint it
     needs a driver. The predicate matches RunCommand's own guard, so "offered"
     and "actionable" cannot drift apart. }
@@ -1413,6 +1430,15 @@ begin
   if AName = 'new' then
   begin
     StartNewSession;
+    Exit;
+  end;
+  { /provider reads and writes the providers table the app already owns, so it
+    needs NO runtime - it sits HERE, before the connection guard, beside /new and
+    /sessions. That is the whole reason this dialog is simpler than /mcp: nothing
+    has to be asked of a driver, so nothing has to arrive as an event. }
+  if AName = 'provider' then
+  begin
+    ShowProviderModal;
     Exit;
   end;
   { While connecting or failed, other commands have no driver; refuse cleanly. }
@@ -3360,6 +3386,140 @@ begin
     FMcpModal := nil;
 end;
 
+{ --- the provider dialog ------------------------------------------------ }
+
+{ Whether a slug names a registered adapter. A free function because the pure
+  unit takes a plain function pointer, not a method. }
+function ProviderHasAdapter(const AKey: string): Boolean;
+begin
+  Result := ProviderByKey(AKey) <> nil;
+end;
+
+{ Read the providers table and show them. The ONLY store read for this dialog:
+  the widget renders what it is handed, so the assembly is testable and this
+  procedure stays thin. }
+procedure THarnessApp.LoadProviders;
+var
+  Rows: TProviderRowArray;
+  Items: TProviderListItemArray;
+  Err: TStoreError;
+begin
+  if (FSession = nil) or (FSession.Store = nil) then
+  begin
+    SetState(psReady, 'no store; providers unavailable');
+    Exit;
+  end;
+  if not FSession.Store.ListProviders(Rows, Err) then
+  begin
+    { A store failure is NOT an empty list. Saying "none configured" when the
+      query failed would be a lie the operator cannot see through. }
+    AppendError('providers: ' + Err.Message);
+    Exit;
+  end;
+  { The resolver is ProviderByKey from the provider library, so "usable" is a
+    fact about the registered adapters rather than a guess. }
+  Items := ProviderListItems(Rows, @ProviderHasAdapter);
+  if FProviderModal <> nil then
+    FProviderModal.SetItems(Items);
+end;
+
+procedure THarnessApp.ShowProviderModal;
+var
+  Wrap: TContainer;
+  R: TRect;
+begin
+  { Already open: refresh in place rather than close-and-reopen under the
+    operator's cursor. }
+  if (FProviderModal <> nil) and FApp.ModalActive then
+  begin
+    LoadProviders;
+    Exit;
+  end;
+  if FApp.ModalActive then
+    Exit;
+  FProviderModal := TProviderModal.Create(FTheme);
+  FProviderModal.OnPick := ProviderModalPick;
+  FProviderModal.OnAction := ProviderModalAction;
+  FProviderModal.Visible := True;
+  Wrap := TContainer.Create([Fill(1), Auto, Fill(1)], [Fill(1), Auto, Fill(1)]);
+  Wrap.Add(FProviderModal, 1, 1);
+  R := Default(TRect);
+  R.W := FSurface.Width;
+  R.H := FSurface.Height;
+  Wrap.Arrange(R);
+  FApp.PushPlane(TPlane.Create(Wrap, True, True));
+  LoadProviders;
+  SetState(psReady, 'Providers');
+end;
+
+procedure THarnessApp.ProviderModalPick(const AName: string);
+var
+  Err: TStoreError;
+begin
+  { Activation is BY NAME and the store clears the old active row in one
+    transaction, so this cannot leave two active providers behind. }
+  if (FSession = nil) or (FSession.Store = nil) then
+    Exit;
+  if FSession.Store.SetActiveProvider(AName, Err) then
+  begin
+    LoadProviders;
+    SetState(psReady, 'provider: ' + AName);
+  end
+  else
+    AppendError('activate ' + AName + ': ' + Err.Message);
+end;
+
+procedure THarnessApp.ProviderModalAction(const AAction: string);
+var
+  Err: TStoreError;
+  Name: string;
+begin
+  if AAction = 'close' then
+  begin
+    { Deferred: the widget is dispatching, so the pop waits for SyncProviderModal. }
+    FCloseProviderModal := True;
+    Exit;
+  end;
+  if AAction <> 'delete' then
+    Exit;
+  if (FProviderModal = nil) or (FSession = nil) or (FSession.Store = nil) then
+    Exit;
+  Name := FProviderModal.SelectedName;
+  if Name = '' then
+    Exit;
+  { Deleting the ACTIVE provider is allowed and leaves no active row; resolution
+    then falls through to the environment. That is a real state, not an error. }
+  if FSession.Store.DeleteProvider(Name, Err) then
+  begin
+    LoadProviders;
+    SetState(psReady, 'deleted: ' + Name);
+  end
+  else
+    AppendError('delete ' + Name + ': ' + Err.Message);
+end;
+
+procedure THarnessApp.SyncProviderModal;
+begin
+  if FCloseProviderModal then
+  begin
+    FCloseProviderModal := False;
+    CloseProviderModal;
+    Exit;
+  end;
+  { An unhandled Escape pops the plane in TTuiApp without telling the app; clear
+    the dangling widget so the state does not lie. }
+  if (FProviderModal <> nil) and (not FApp.ModalActive) then
+    FProviderModal := nil;
+end;
+
+procedure THarnessApp.CloseProviderModal;
+begin
+  if FApp.ModalActive then
+    FApp.PopPlane;
+  FProviderModal := nil;
+  SetState(psReady, 'Ready');
+end;
+
 procedure THarnessApp.CloseDiff;
 begin
   if not FDiffShown then
@@ -4069,6 +4229,7 @@ begin
   SyncSessionsModal;
   SyncDiff;
   SyncSkillModal;
+  SyncProviderModal;
   SyncMcpModal;
   SyncHistory;
   CheckInterruptWindow;
