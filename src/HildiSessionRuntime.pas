@@ -210,6 +210,10 @@ type
       untouched - reconnecting a transport is not loading a capability. }
     procedure HandleMcpReconnect(AClient: TClientConn;
       const ACommand: TSessionCommand);
+    { Answer scMcpAdd: validate and save ONE record. Never connects - see SPEC
+      7.1 - and re-answers with the list so the dialog updates in place. }
+    procedure HandleMcpAdd(AClient: TClientConn;
+      const ACommand: TSessionCommand);
     { Build the row for one stored server, given the active set. Delegates to the
       shared McpRowOf in HildiMCPConfig, so the runtime and the local driver
       cannot assemble the same row two different ways. }
@@ -1200,12 +1204,12 @@ begin
       HandleSkillDetail(AClient, ACommand);
     scMcpList:
       HandleMcpList(AClient, ACommand);
-    { Probe, reconnect and add are Phase 3 and still unimplemented. Replying with
-      a named error rather than falling through keeps the case exhaustive and
-      tells a client exactly why, instead of looking like a hang. }
-    scMcpProbe, scMcpReconnect, scMcpAdd:
-      SendError(AClient, 'not_implemented',
-        'mcp probe, reconnect and add are not implemented yet', '');
+    scMcpProbe:
+      HandleMcpProbe(AClient, ACommand);
+    scMcpReconnect:
+      HandleMcpReconnect(AClient, ACommand);
+    scMcpAdd:
+      HandleMcpAdd(AClient, ACommand);
   end;
 end;
 
@@ -1625,6 +1629,73 @@ begin
   M.Event := E;
   QueueLine(AClient, TSessionCodec.Encode(M));
 end;
+
+procedure TSessionRuntime.HandleMcpAdd(AClient: TClientConn;
+  const ACommand: TSessionCommand);
+var
+  Parsed: TMcpServerRowArray;
+  Err: string;
+  StoreErr: TStoreError;
+  Row: TMcpServerRow;
+begin
+  if AClient.Role <> srDrive then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'not_driver');
+    Exit;
+  end;
+  if (FSession = nil) or (FSession.View = nil) or
+    (FSession.View.Store = nil) then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'no store');
+    Exit;
+  end;
+  if ACommand.McpRecordJson = '' then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'missing record');
+    Exit;
+  end;
+  { The wire carries ONE record as an `mcpServers` document, so it is parsed by
+    the same function the config file and the CLI use. A second representation
+    would drift from those two. }
+  if not ParseMcpServersJson(ACommand.McpRecordJson, msWorkspace,
+    FSession.View.WorkspaceId, Parsed, Err) then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, Err);
+    Exit;
+  end;
+  if Length(Parsed) <> 1 then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, 'exactly one server expected');
+    Exit;
+  end;
+  Row := Parsed[0];
+  { Validation is the SHARED one, so the dialog and the CLI cannot disagree
+    about what is legal. The message goes back verbatim for the form to show. }
+  if not ValidateMcpServerRow(Row, Err) then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, Err);
+    Exit;
+  end;
+  if not FSession.View.Store.SaveMcpServer(Row, StoreErr) then
+  begin
+    ReplyTo(AClient, ACommand.Id, False, StoreErr.Message);
+    Exit;
+  end;
+  { Adding NEVER connects: connecting is `r`'s job, and an add that connected
+    would block the dialog on a spawn or an OAuth browser flow (SPEC 7.1).
+
+    Nothing is reconciled here either, deliberately. THarnessSession already
+    wires ReconcileMcpSkills to FLoop.OnTurnStart, so the new server is declared
+    to the manifest at the next turn boundary - which is when the model could
+    first use it. Reconciling now would be a second path to the same state, and
+    the list below already shows the new row because it reads the store. }
+  ReplyTo(AClient, ACommand.Id, True, '');
+  { Re-answer with the list, which the event contract already promises after a
+    successful add: the dialog updates in place rather than making a second
+    round trip. }
+  HandleMcpList(AClient, ACommand);
+end;
+
 
 procedure TSessionRuntime.BroadcastSkills;
 var

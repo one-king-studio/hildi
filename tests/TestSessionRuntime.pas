@@ -13,6 +13,7 @@ uses
   {$ifdef unix}BaseUnix,{$endif}
   HildiLLM, HildiAgent, HildiApproval,
   HildiStore, HildiSession,
+  HildiMCPConfig,
   HildiSessionProtocol, HildiSessionSocket,
   HildiSessionClient, HildiSessionRuntime,
   HildiWorkspace, LLMFakes;
@@ -163,6 +164,15 @@ type
       socket file alive after the runtime exits, and the next connect() then
       succeeds against a backlog nobody accepts ("runtime did not greet"). }
     procedure TestListenSocketIsCloseOnExec;
+
+    { scMcpAdd saves a record and never connects (SPEC 7.1). Two things are
+      easy to get wrong and invisible otherwise: the command can be accepted
+      without reaching the store, and the reply can claim success for a row
+      that ValidateMcpServerRow would reject. }
+    procedure TestMcpAddSavesAndNeverConnects;
+    { A bad key must be REFUSED with the validator's own message, so the form
+      can show it. Accepting it would create a row the CLI would then reject. }
+    procedure TestMcpAddRefusesAnInvalidRecord;
 
     { The stall watchdog. The signal is NOT a timeout: a turn whose worker still
       runs is never stalled, however long its tool call takes. Only a turn whose
@@ -2188,6 +2198,138 @@ begin
     Rt.Stop;
     WaitFinished(Th, 3000);
     Th.Free;
+    DeleteSocket(Id);
+  end;
+end;
+
+procedure TSessionRuntimeTest.TestMcpAddSavesAndNeverConnects;
+var
+  Id: string;
+  Fake: TFakeTransport;
+  Rt: TSessionRuntime;
+  Th: TRuntimeThread;
+  Sink: TRecordingSink;
+  Driver: TSessionClient;
+  Err: string;
+  Cmd: TSessionCommand;
+  Reply: TSessionMessage;
+  Rows: TMcpServerRowArray;
+  StoreErr: TStoreError;
+  Store: TSqliteStore;
+  Found: Boolean;
+  I: Integer;
+begin
+  { The add path end to end: a record crosses the wire as JSON, is validated by
+    the SHARED validator, and lands in the store. }
+  Id := NewSession;
+  Fake := TFakeTransport.Create;
+  try
+    Rt := MakeRuntime(Id, Fake, 0);
+    Th := TRuntimeThread.Create(Rt);
+    try
+      Th.Start;
+      AssertTrue('bound', WaitForSocket(Id, 5000));
+      Sink := TRecordingSink.Create;
+      Driver := TSessionClient.Open(MakeClientConfig(Id, srDrive), Sink, Err);
+      AssertNotNull('driver attaches: ' + Err, Driver);
+      try
+        Cmd := Default(TSessionCommand);
+        Cmd.Kind := scMcpAdd;
+        Cmd.Id := 'a1';
+        { One server, in the same `mcpServers` shape a config file uses - the
+          wire reuses ParseMcpServersJson rather than growing a second form. }
+        Cmd.McpRecordJson :=
+          '{"mcpServers":{"added":{"command":"/bin/echo","args":["hi"],' +
+          '"description":"added over the wire"}}}';
+        AssertTrue('add replied', Driver.SendAndWait(Cmd, 5000, Reply));
+        AssertTrue('the runtime accepted: ' + Reply.ErrorMessage, Reply.Ok);
+      finally
+        Driver.Free;
+        Sink := nil;
+      end;
+    finally
+      Rt.Stop;
+      WaitFinished(Th, 3000);
+      Th.Free;
+    end;
+  finally
+    Fake.Free;
+    DeleteSocket(Id);
+  end;
+
+  { Read the STORE directly, not the reply: the reply says "saved", and the
+    point of the assertion is that a row is really there. }
+  Store := TSqliteStore.Create(StoreConfig);
+  try
+    AssertTrue('store opens', Store.Open(StoreErr));
+    Rows := nil;
+    AssertTrue('list', Store.ListMcpServers(Rows, StoreErr));
+    Found := False;
+    for I := 0 to High(Rows) do
+      if SameText(Rows[I].Name, 'added') then
+      begin
+        Found := True;
+        AssertEquals('the description survived the wire',
+          'added over the wire', Rows[I].Description);
+        AssertEquals('the command survived', '/bin/echo', Rows[I].Command);
+        AssertTrue('and it is enabled by default', Rows[I].Enabled);
+      end;
+    AssertTrue('the row was saved', Found);
+    Store.Close;
+  finally
+    Store.Free;
+  end;
+end;
+
+procedure TSessionRuntimeTest.TestMcpAddRefusesAnInvalidRecord;
+var
+  Id: string;
+  Fake: TFakeTransport;
+  Rt: TSessionRuntime;
+  Th: TRuntimeThread;
+  Sink: TRecordingSink;
+  Driver: TSessionClient;
+  Err: string;
+  Cmd: TSessionCommand;
+  Reply: TSessionMessage;
+begin
+  { A key with a space is not a legal server name. The add must refuse it with
+    the VALIDATOR's message - the same one the CLI shows - rather than saving a
+    row the config layer would then ignore. }
+  Id := NewSession;
+  Fake := TFakeTransport.Create;
+  try
+    Rt := MakeRuntime(Id, Fake, 0);
+    Th := TRuntimeThread.Create(Rt);
+    try
+      Th.Start;
+      AssertTrue('bound', WaitForSocket(Id, 5000));
+      Sink := TRecordingSink.Create;
+      Driver := TSessionClient.Open(MakeClientConfig(Id, srDrive), Sink, Err);
+      AssertNotNull('driver attaches: ' + Err, Driver);
+      try
+        Cmd := Default(TSessionCommand);
+        Cmd.Kind := scMcpAdd;
+        Cmd.Id := 'a2';
+        Cmd.McpRecordJson :=
+          '{"mcpServers":{"bad name":{"command":"/bin/echo"}}}';
+        AssertTrue('add replied', Driver.SendAndWait(Cmd, 5000, Reply));
+        AssertFalse('the runtime refused it', Reply.Ok);
+        { ReplyTo carries its reason in ErrorCode, not ErrorMessage - this file's
+          handlers all put prose there ('no store', 'not_driver'). Asserting
+          ErrorMessage would pass for the wrong reason on an empty reply. }
+        AssertTrue('and said why: ' + Reply.ErrorCode, Reply.ErrorCode <> '');
+      finally
+        Driver.Free;
+        Sink := nil;
+      end;
+    finally
+      Rt.Stop;
+      WaitFinished(Th, 3000);
+      Th.Free;
+    end;
+  finally
+    Fake.Free;
     DeleteSocket(Id);
   end;
 end;

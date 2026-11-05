@@ -195,6 +195,14 @@ type
     { scMcpProbe / scMcpReconnect: which server. An EMPTY key on scMcpProbe
       means every server, so a dialog opening costs one command, not N. }
     McpKey: string;
+    { scMcpAdd: the record to save, as one `mcpServers` JSON document.
+      JSON rather than eleven parallel fields, because the record is already
+      parsed and formatted by ParseMcpServersJson/FormatMcpServersJson for the
+      CLI and the config file - so the wire reuses that pair instead of growing
+      a third representation that could drift. The runtime validates the parsed
+      row with ValidateMcpServerRow, so the dialog and the CLI cannot disagree
+      about what is legal. }
+    McpRecordJson: string;
     { scCheckpoint: no payload; it starts a checkpoint turn. }
   end;
 
@@ -1085,7 +1093,7 @@ begin
     scMcpProbe, scMcpReconnect:
       PutStr(O, 'mcp_key', C.McpKey);
     scMcpAdd:
-      ;   // the record rides the store, not this command (see scMcpAdd docs)
+      PutStr(O, 'mcp_record', C.McpRecordJson);
     scShutdown, scCheckpoint, scSkills, scMcpList:
       ;   // no payload beyond the name
   end;
@@ -1127,8 +1135,10 @@ begin
       decoding an empty string is correct rather than a fallback. }
     scMcpProbe, scMcpReconnect:
       C.McpKey := OptStr(O, 'mcp_key');
+    scMcpAdd:
+      C.McpRecordJson := OptStr(O, 'mcp_record');
     scAttach, scDetach, scInterrupt, scClaimDrive, scReleaseDrive, scPing,
-    scShutdown, scCheckpoint, scSkills, scMcpList, scMcpAdd:
+    scShutdown, scCheckpoint, scSkills, scMcpList:
       ;
   end;
   Result := True;
