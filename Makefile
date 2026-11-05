@@ -164,7 +164,7 @@ FUZZY_SRCS := $(wildcard $(SRC)/fuzzy/*.pas)
 FILEIGNORE_SRCS := $(wildcard $(SRC)/fileignore/*.pas)
 TEST_SRCS := $(wildcard $(TESTS)/*.pas)
 
-.PHONY: all test test-leak watch check release clean help libsqlite libmbedtls deps store-demo agent-cli release-agent-cli release-tui release-agent tui-agent-release tui-demo widgets-demo layout-demo headless-agent tui-agent bench perf agents agent-% mcp-smoke smoke smoke-list async-standalone async-bench async-freeze async-examples probe heap-report
+.PHONY: library-demo all test test-leak watch check release clean help libsqlite libmbedtls deps store-demo agent-cli release-agent-cli release-tui release-agent tui-agent-release tui-demo widgets-demo layout-demo headless-agent tui-agent bench perf agents agent-% mcp-smoke smoke smoke-list async-standalone async-bench async-freeze async-examples probe heap-report
 
 # Fetch and verify every vendored dependency. The README tells a new contributor
 # to run this first, and it used to be a silent no-op: there was no `deps` rule,
@@ -265,6 +265,15 @@ widgets-demo: $(DEBUG_BIN)/hildi-widgets-demo
 $(DEBUG_BIN)/hildi-widgets-demo: $(EXAMPLES)/tui_widgets_demo.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS)
 	@mkdir -p $(DEBUG_BIN) $(DBGUNITS)
 	$(FPC) $(FPCARGS) $(DEBUG) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$@ $<
+
+# The library's own tour. Builds against src/tui/** ALONE - no -Fu$(SRC) - so if
+# a library widget ever reaches into the application this stops compiling.
+library-demo: $(DEBUG_BIN)/tui-library-demo
+	$(DEBUG_BIN)/tui-library-demo
+
+$(DEBUG_BIN)/tui-library-demo: $(EXAMPLES)/tui_library_demo.pas $(TUILIB_SRCS)
+	@mkdir -p $(DEBUG_BIN) $(DBGUNITS)
+	$(FPC) $(FPCARGS) $(DEBUG) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$@ $<
 
 # Mock of the Board Dashboard: three zones over static data, so the operator can
 # judge the layout before the feature is specified. Reads no store, writes none.

@@ -217,25 +217,39 @@ and any confirmation that OSC 52 reaches the clipboard in a real terminal.
 
 ### Phase 8: Test kit
 
-- [ ] **Implement** `src/tui/TUITestKit.pas`: `TTestSurface` alias,
+- [x] **Implement** `src/tui/TUITestKit.pas`: `TTestSurface` alias,
       `TWidgetFixture`, event builders, `TAppFixture`.
 - [ ] **Migrate** three test files: `TestTUIWidgets`, `TestTUIScroll`,
       `TestTUIHistorymodal`.
-- [ ] **Test**: `TestTUITestKit` — the kit renders a known widget and asserts a
+- [x] **Test**: `TestTUITestKit` — the kit renders a known widget and asserts a
       known cell.
-- [ ] **Commit**: `feat(tui): ✨ the test kit ships with the toolkit`
+- [x] **Commit**: `feat(tui): ✨ the test kit ships with the toolkit` (`79a525c`)
+
+**`TAppFixture` was written and withdrawn.** A `TTuiApp` over a
+`TInputSourceScripted` - exactly what an end-to-end selection test wants - raised
+`EAccessViolation` in the suite while the identical sequence passed standalone,
+so the fault is shared state and was not root-caused. Shipping a fixture that
+crashes the suite is worse than shipping none. It is removed with a note at its
+old site; the reproduction is the next step, not a guess.
+
+**The three-file migration is NOT done.** `TWidgetFixture` exists and is tested,
+but no existing test file was migrated onto it, so the duplication it exists to
+remove is still there. That is the remaining work in this phase.
 
 ### Phase 9: Demo, docs, index
 
-- [ ] **Add** `examples/tui_library_demo.pas` — build a window, a list, a
+- [x] **Add** `examples/tui_library_demo.pas` — a themed window, a scrolling
+      list, a selectable text pane, a progress bar and a spinner. Builds with
+      `library-demo`, which uses **no `-Fu$(SRC)`**, so the demo doubles as proof
+      the module is exportable.
       selectable text pane; run it by hand.
 - [ ] **Drive it in a terminal.** Record what was seen on the board, including
       "looks right". Padding, wide characters and drag highlight are arithmetic
       nobody has watched yet.
-- [ ] **Amend** `docs/features/TUI_Clipboard/FEATURE.md`: in-widget selection is
+- [x] **Amend** `docs/features/TUI_Clipboard/FEATURE.md`: in-widget selection is
       the toolkit's; scrollback selection stays the terminal's; Shift+drag must
       keep working.
-- [ ] **Update** `docs/features/FEATURES.md` status.
+- [x] **Update** `docs/features/FEATURES.md` status.
 - [ ] **Rename** this file to `TUI_Library_v1.DONE.md` when every box is ticked.
 - [ ] **Commit**: `docs(tui): 📝 the library has a demo, a home, and a status`
 
