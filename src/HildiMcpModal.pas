@@ -49,6 +49,14 @@ type
       business. }
     { A one-line message from the host, e.g. why an action could not run. }
     FErrorHint: string;
+    { BUSY: an action is in flight (a probe or a reconnect, which may wait on a
+      server that never answers its tools/list). While busy the list paints a
+      spinner and every CTA is refused, because letting the operator close the
+      dialog mid-action is how a hang became "it crashed" - the modal vanished
+      with nothing to say what was happening. }
+    FBusy: Boolean;
+    FBusyText: string;
+    FBusySinceMs: Int64;
     function RowAt(AY: Integer): Integer;
     function RowTop(AIndex: Integer): Integer;
     procedure Move(ASteps: Integer);
@@ -59,6 +67,11 @@ type
     function SelectedKey: string;
     { Show a message under the list (an action that could not run). '' clears it. }
     procedure SetHint(const AText: string);
+    { An action started: show a spinner with AText and refuse every CTA until
+      ClearBusy. }
+    procedure SetBusy(const AText: string);
+    procedure ClearBusy;
+    property Busy: Boolean read FBusy;
     procedure SelectFirst;
     function Measure(const AAvail: TSize): TSize; override;
     procedure Arrange(const ABounds: TRect); override;
@@ -78,6 +91,9 @@ type
     { TModal has no close protocol: the HOST owns FCloseModal. So dismissal is a
       callback rather than a method on this widget - the same shape OnAdd uses. }
     FOnClose: TMcpAddEvent;
+    { An action is in flight. Owned here because the DIALOG decides what to
+      refuse (Esc, the other CTAs); the rows widget only paints it. }
+    FBusy: Boolean;
     procedure RequestClose;
     procedure Reconnect;
     procedure RefreshFooter;
@@ -89,6 +105,12 @@ type
     function SelectedKey: string;
     { A message under the list, from the host. '' clears it. }
     procedure SetHint(const AText: string);
+    { An action started: spinner + elapsed, and every CTA (including Esc) is
+      refused until ClearBusy. A server that never answers its tools/list hangs
+      here, and this is what says "waiting" instead of "crashed". }
+    procedure SetBusy(const AText: string);
+    procedure ClearBusy;
+    property Busy: Boolean read FBusy;
     property OnReconnect: TMcpReconnectEvent read FOnReconnect write FOnReconnect;
     property OnAdd: TMcpAddEvent read FOnAdd write FOnAdd;
     { The host closes its own modal. }
@@ -96,7 +118,16 @@ type
     function HandleEvent(const E: TInputEvent): Boolean; override;
   protected
     procedure FooterClicked(const AKey: string); override;
+    { TModal does not forward Animating, so without this the app never repaints
+      while busy and the spinner freezes on its first frame - the very "unclear
+      what is happening" the indicator exists to fix. }
+    function Animating: Boolean; override;
   end;
+
+{ The spinner frame for a start time. A pure function of the clock, so Redraw
+  advances it without the widget owning a timer - the app already redraws every
+  frame, and a TSpinner here would need Advance() plumbing for one glyph. }
+function SpinnerFrame(const AStartMs: Int64): string;
 
 { The three statuses as one short line, so a row fits a narrow dialog. Separate
   glyphs per fact because "down" and "not in use" are different answers and the
@@ -110,6 +141,19 @@ const
   { Status column width: enough for "up on loaded" plus its separators. }
   MaxKeyCols = 18;
   MaxDescCols = 40;
+
+function SpinnerFrame(const AStartMs: Int64): string;
+const
+  Frames: array[0..9] of string =
+    ('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏');
+var
+  Elapsed: Int64;
+begin
+  Elapsed := GetTickCount64 - AStartMs;
+  if Elapsed < 0 then
+    Elapsed := 0;
+  Result := Frames[(Elapsed div 90) mod 10];
+end;
 
 function McpStatusText(const ARow: TMcpRowStatus): string;
 begin
@@ -193,6 +237,19 @@ end;
 procedure TMcpRows.SetHint(const AText: string);
 begin
   FErrorHint := AText;
+end;
+
+procedure TMcpRows.SetBusy(const AText: string);
+begin
+  FBusy := True;
+  FBusyText := AText;
+  FBusySinceMs := GetTickCount64;
+end;
+
+procedure TMcpRows.ClearBusy;
+begin
+  FBusy := False;
+  FBusyText := '';
 end;
 
 procedure TMcpRows.SelectFirst;
@@ -314,7 +371,21 @@ begin
       PutText(S, StatusX, Y, ClipCells(UnicodeString(FRows[I].Error),
         FBounds.W - (StatusX - FBounds.X)), BadAttr);
   end;
-  if (FErrorHint <> '') then
+  if FBusy then
+  begin
+    { The elapsed count is the point: a server that never answers its tools/list
+      hangs here, and "2s... 7s... 31s..." is what tells the operator it is
+      WAITING rather than crashed. }
+    Line := ClipCells(UnicodeString(SpinnerFrame(FBusySinceMs)),
+      FBounds.W);
+    PutText(S, FBounds.X, FBounds.Y + FBounds.H - 1, Line, BadAttr);
+    if FBounds.W > 2 then
+      PutText(S, FBounds.X + 2, FBounds.Y + FBounds.H - 1,
+        ClipCells(UnicodeString(FBusyText + ' ' +
+          IntToStr((GetTickCount64 - FBusySinceMs) div 1000) + 's'),
+          FBounds.W - 2), BadAttr);
+  end
+  else if (FErrorHint <> '') then
     PutText(S, FBounds.X, FBounds.Y + FBounds.H - 1,
       ClipCells(UnicodeString(FErrorHint), FBounds.W), BadAttr);
 end;
@@ -377,12 +448,15 @@ end;
 
 function TMcpRows.Advance(const ANowMs: Int64): Boolean;
 begin
-  Result := False;
+  { True while busy: the elapsed counter and the spinner both change every
+    frame, so the app must keep repainting. Returning False (as this did) would
+    freeze the indicator at its first frame. }
+  Result := FBusy;
 end;
 
 function TMcpRows.Animating: Boolean;
 begin
-  Result := False;
+  Result := FBusy;
 end;
 
 { --- TMcpModal ---------------------------------------------------------- }
@@ -403,7 +477,11 @@ begin
     keeps ONE separator alive in the tree. The dot is still accepted by both the
     splitter and the drawing walk, but a second style in use is how the two
     drifted apart in the first place. }
-  SetFooter('a add   r reconnect   esc close');
+  { Chords, not single letters: a bare 'a' is typable text in a form, and a
+    dialog whose CTAs are one letter apart invites a mistyped destructive key.
+    'connect' rather than 'reconnect' because the key is for TESTING a server -
+    it works whether or not the transport was ever up. }
+  SetFooter('ctrl+a add   ctrl+t connect   esc close');
 end;
 
 procedure TMcpModal.SetRows(const ARows: TMcpRowStatusArray);
@@ -424,6 +502,10 @@ end;
 
 procedure TMcpModal.RequestClose;
 begin
+  { The single close path, so the busy guard lives here as well as in the key
+    arm: nothing may dismiss the dialog while an action is unresolved. }
+  if FBusy then
+    Exit;
   if Assigned(FOnClose) then
     FOnClose();
 end;
@@ -432,10 +514,32 @@ procedure TMcpModal.Reconnect;
 var
   Key: string;
 begin
+  if FBusy then
+    Exit;
   Key := FRows.SelectedKey;
   if (Key = '') or (not Assigned(FOnReconnect)) then
+  begin
+    FRows.SetHint('select a server first');
     Exit;
+  end;
   FOnReconnect(Key);
+end;
+
+function TMcpModal.Animating: Boolean;
+begin
+  Result := FBusy;
+end;
+
+procedure TMcpModal.SetBusy(const AText: string);
+begin
+  FBusy := True;
+  FRows.SetBusy(AText);
+end;
+
+procedure TMcpModal.ClearBusy;
+begin
+  FBusy := False;
+  FRows.ClearBusy;
 end;
 
 function TMcpModal.HandleEvent(const E: TInputEvent): Boolean;
@@ -447,26 +551,37 @@ begin
     case E.Key.Kind of
       kkEscape:
         begin
+          { BLOCKED while an action is in flight. Closing the dialog during a
+            hung tools/list is what made a slow server look like a crash: the
+            modal vanished and nothing said the work was still running. Esc is
+            swallowed (True) so the unhandled-Escape path cannot pop the plane
+            either. }
+          if FBusy then
+            Exit(True);
           RequestClose;
           Exit(True);
         end;
       kkChar:
         begin
-          if (E.Key.Ch = 'r') or (E.Key.Ch = 'R') then
+          { A CHORD, so a plain letter still belongs to the list: ctrl+t tests a
+            server, ctrl+a adds one. }
+          if moCtrl in E.Key.Mods then
           begin
-            Reconnect;
-            Exit(True);
-          end;
-          if (E.Key.Ch = 'a') or (E.Key.Ch = 'A') then
-          begin
-            { The host decides whether it can add. It does NOT close the dialog:
-              the operator pressed a key to DO something, and closing as if it
-              worked is what made /mcp's 'a' look broken - the status-line
-              message was written and then immediately overwritten by the close.
-              A message set here stays until the next keystroke. }
-            if Assigned(FOnAdd) then
-              FOnAdd();
-            Exit(True);
+            if (E.Key.Ch = 't') or (E.Key.Ch = 'T') then
+            begin
+              Reconnect;
+              Exit(True);
+            end;
+            if (E.Key.Ch = 'a') or (E.Key.Ch = 'A') then
+            begin
+              { Refused while busy, like ctrl+t: stacking a second action on top
+                of an unresolved one is how two waits become one invisible one. }
+              if FBusy then
+                Exit(True);
+              if Assigned(FOnAdd) then
+                FOnAdd();
+              Exit(True);
+            end;
           end;
         end;
     else
@@ -477,13 +592,19 @@ end;
 
 procedure TMcpModal.FooterClicked(const AKey: string);
 begin
+  { The click carries the pair's KEY, which is now the chord text. }
   if AKey = 'esc' then
-    RequestClose
-  else if AKey = 'r' then
-    Reconnect
-  else if AKey = 'a' then
   begin
-    { Same rule as the key: report, do not pretend to close. }
+    if FBusy then
+      Exit;
+    RequestClose;
+  end
+  else if AKey = 'ctrl+t' then
+    Reconnect
+  else if AKey = 'ctrl+a' then
+  begin
+    if FBusy then
+      Exit;
     if Assigned(FOnAdd) then
       FOnAdd();
   end

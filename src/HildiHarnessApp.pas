@@ -2457,17 +2457,28 @@ begin
     teMcpProbeResult:
       { ONE row, for the server that was probed. It MERGES, because replacing
         the list with a single row is the bug that made a reconnect appear to
-        delete every other server from the dialog. }
-      if Length(E.McpRows) = 1 then
-        MergeMcpRow(E.McpRows[0])
-      else
-        ShowMcpModal(E.McpRows);
+        delete every other server from the dialog.
+
+        This is also an ANSWER, so it ends the wait: without clearing busy here
+        the dialog would refuse Esc forever after one probe. }
+      begin
+        if FMcpModal <> nil then
+          FMcpModal.ClearBusy;
+        if Length(E.McpRows) = 1 then
+          MergeMcpRow(E.McpRows[0])
+        else
+          ShowMcpModal(E.McpRows);
+      end;
     teMcpReconnectDone:
-      { Also ONE row, for the same reason. }
-      if Length(E.McpRows) = 1 then
-        MergeMcpRow(E.McpRows[0])
-      else
-        ShowMcpModal(E.McpRows);
+      { Also ONE row, for the same reason - and also the end of a wait. }
+      begin
+        if FMcpModal <> nil then
+          FMcpModal.ClearBusy;
+        if Length(E.McpRows) = 1 then
+          MergeMcpRow(E.McpRows[0])
+        else
+          ShowMcpModal(E.McpRows);
+      end;
   else
     ;
   end;
@@ -3290,9 +3301,25 @@ procedure THarnessApp.McpModalReconnect(const AKey: string);
 begin
   { The dialog reports; the driver acts. No close: the operator may reconnect
     several servers in one visit, and the answer arrives as an event that
-    refreshes the row. }
-  if FDriver <> nil then
-    FDriver.McpReconnect(AKey);
+    refreshes the row.
+
+    BUSY, because the answer may take a long time: a server that never answers
+    its tools/list hangs the runtime's OpenServer until the list timeout, and
+    without this the dialog looked frozen - which the operator reported as a
+    crash. The dialog now refuses Esc and the other CTAs until the answer
+    arrives. A driver that is gone clears it immediately rather than stranding
+    the dialog busy forever. }
+  if FDriver = nil then
+  begin
+    if FMcpModal <> nil then
+      FMcpModal.SetHint('not connected');
+    Exit;
+  end;
+  if FMcpModal <> nil then
+    FMcpModal.SetHint('');
+  if FMcpModal <> nil then
+    FMcpModal.SetBusy('connecting ' + AKey + '...');
+  FDriver.McpReconnect(AKey);
 end;
 
 procedure THarnessApp.McpModalAdd;
