@@ -67,6 +67,10 @@ type
     procedure TestHandoffRendersAsACarriedContextBox;
     procedure TestCollapsedToolCaretRidesTheBottomBorder;
     procedure TestLongToolTitleIsTruncated;
+    { A LIVE tool box names how long it has run. Twenty seconds is a normal
+      browser fetch and also exactly what a hung server looks like; the spinner
+      animates for both, so only a number separates them. }
+    procedure TestLiveToolTitleShowsElapsedSeconds;
     procedure TestLiveThoughtShowsTheTail;
     procedure TestExpandedThoughtDrawsABox;
     procedure TestThinkingIndicatorRenders;
@@ -612,6 +616,43 @@ begin
       AssertTrue('reason shown as the title',
         Pos('looking for the build file', S.RowText(0, 0, 60)) > 0);
       AssertEquals('tool border colour', 23, S.CellAt(0, 0).Attr.Fg);
+    finally
+      It.Free;
+    end;
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TTuiChatTest.TestLiveToolTitleShowsElapsedSeconds;
+var
+  It: TChatItem;
+  S: TSurfaceMemory;
+  R: UnicodeString;
+begin
+  S := TSurfaceMemory.Create(60, 3);
+  try
+    It := TChatItem.Create(ckTool, 'Running make check', 'body', FTheme);
+    try
+      It.Arrange(Rc(0, 0, 60, 3));
+
+      { Settled: the title is the label alone. }
+      It.Live := False;
+      It.Render(S);
+      R := S.RowText(0, 0, 60);
+      AssertTrue('a settled tool shows its label',
+        Pos('Running make check', R) > 0);
+      AssertTrue('and no seconds', Pos('0s', R) = 0);
+
+      { Live: the label gains an elapsed count. The item stamps the clock when it
+        goes live, so this asserts the SHAPE rather than a duration - a test that
+        waited for real seconds would be slow and flaky. }
+      It.Live := True;
+      S.Clear(Default(TAttr));
+      It.Render(S);
+      R := S.RowText(0, 0, 60);
+      AssertTrue('a live tool shows its label', Pos('Running make check', R) > 0);
+      AssertTrue('and an elapsed count, got: ' + string(R), Pos('0s', R) > 0);
     finally
       It.Free;
     end;

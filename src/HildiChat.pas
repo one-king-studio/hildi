@@ -105,6 +105,9 @@ type
     FOnFile: TChatFileEvent;
     FOnAnimatingChanged: TChatAnimatingEvent;
     FSpark: UnicodeString;
+    { When this block went live, so a long-running tool can show its elapsed
+      time. 0 means "not live / unknown". }
+    FLiveSinceMs: Int64;
     FLive: Boolean;
     { This item animates now (the thinking row, or a live thought/tool box whose
       corner shows the spinner). The stack keeps a running count so
@@ -691,6 +694,13 @@ begin
     Exit;
   Was := FAnimating;
   FLive := AValue;
+  { Stamp the start so the box can say how long it has been running. A tool call
+    can legitimately take 20 s (a browser fetch), and without a number the box is
+    indistinguishable from a hung one. }
+  if FLive then
+    FLiveSinceMs := GetTickCount64
+  else
+    FLiveSinceMs := 0;
   { A live thought/tool box shows the corner spinner, so it animates; a settled
     one does not. }
   FAnimating := (FKind = ckThinking) or (FLive and (FKind in [ckThought, ckTool, ckTurnChanges]));
@@ -1151,6 +1161,8 @@ end;
 procedure TChatItem.Render(const S: ISurface);
 var
   L, R, T, B, X, I, TitleMaxW: Integer;
+  { Seconds a live tool box has been running. }
+  ElapsedS: Int64;
   Border, SurfaceAttr, TitleAttr, CaretAttr: TAttr;
   Clip: TRect;
   Title, DispLabel: UnicodeString;
@@ -1263,6 +1275,15 @@ begin
     SurfaceAttr := OnBg(FTheme.Text, FTheme.SunkenBg);
     Border := OnBg(FTheme.Text, FTheme.SunkenBg);
     Border.Fg := ToolBorderFg;
+    { A LIVE tool call names how long it has been running. Twenty seconds is a
+      normal browser fetch, but it is also how long a hung server looks - and
+      the spinner alone cannot tell them apart. The seconds do. }
+    if FLive and (FLiveSinceMs > 0) then
+    begin
+      ElapsedS := (GetTickCount64 - FLiveSinceMs) div 1000;
+      DispLabel := TruncateTitle(
+        UnicodeString(FLabel + ' ' + IntToStr(ElapsedS) + 's'), TitleMaxW);
+    end;
   end
   else
   begin
