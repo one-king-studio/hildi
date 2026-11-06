@@ -106,6 +106,13 @@ type
     ErrorDetail: string;
     RequestCount: Integer;
     MessageCount: Integer;
+    { WHAT RAN, for reporting and recall. `model` and `provider` are the newest
+      request's; `agent_name` is the behaviour it ran under. Together they are the
+      SELECTION - which is why no separate table is needed: a session's current
+      provider+model is simply its newest turn's. }
+    AgentName: string;
+    Model: string;
+    Provider: string;
     Usage: TTokenUsage;     // rolled up from the turn's requests
     { The context window in play: a turn's own is 0 (unused); a session
       aggregate sets it to the largest prompt it ever sent. }

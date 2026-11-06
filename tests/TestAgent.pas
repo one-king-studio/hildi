@@ -169,7 +169,7 @@ type
     function BeginTurn: Int64;
     function BeginRequest(ATurnId: Int64; const AModel: string;
       AMessageCount: Integer; const AProvider: string = '';
-      const AParameters: string = ''): Int64;
+      const AParameters: string = ''; const AAgentName: string = ''): Int64;
     procedure FinishRequest(ARequestId: Int64; const AOutcome: TRequestOutcome);
     procedure FinishTurn(ATurnId: Int64; const AOutcome: TTurnOutcome);
     procedure DropTurnMessages(ATurnId: Int64);
@@ -220,7 +220,7 @@ type
     function BeginTurn: Int64;
     function BeginRequest(ATurnId: Int64; const AModel: string;
       AMessageCount: Integer; const AProvider: string = '';
-      const AParameters: string = ''): Int64;
+      const AParameters: string = ''; const AAgentName: string = ''): Int64;
     procedure FinishRequest(ARequestId: Int64; const AOutcome: TRequestOutcome);
     procedure FinishTurn(ATurnId: Int64; const AOutcome: TTurnOutcome);
     procedure DropTurnMessages(ATurnId: Int64);
@@ -688,10 +688,10 @@ end;
 
 function TCountingStore.BeginRequest(ATurnId: Int64; const AModel: string;
   AMessageCount: Integer; const AProvider: string;
-  const AParameters: string): Int64;
+  const AParameters: string; const AAgentName: string): Int64;
 begin
   Result := FInner.BeginRequest(ATurnId, AModel, AMessageCount, AProvider,
-    AParameters);
+    AParameters, AAgentName);
 end;
 
 procedure TCountingStore.FinishRequest(ARequestId: Int64;
@@ -791,7 +791,7 @@ end;
 
 function TRecordingStore.BeginRequest(ATurnId: Int64; const AModel: string;
   AMessageCount: Integer; const AProvider: string;
-  const AParameters: string): Int64;
+  const AParameters: string; const AAgentName: string): Int64;
 begin
   Inc(BeginRequests);
   LastRequestModel := AModel;

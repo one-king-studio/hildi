@@ -49,7 +49,7 @@ type
     function BeginTurn: Int64;
     function BeginRequest(ATurnId: Int64; const AModel: string;
       AMessageCount: Integer; const AProvider: string = '';
-      const AParameters: string = ''): Int64;
+      const AParameters: string = ''; const AAgentName: string = ''): Int64;
     procedure FinishRequest(ARequestId: Int64; const AOutcome: TRequestOutcome);
     procedure FinishTurn(ATurnId: Int64; const AOutcome: TTurnOutcome);
     procedure DropTurnMessages(ATurnId: Int64);
@@ -248,7 +248,7 @@ end;
 
 function TSqliteConversationStore.BeginRequest(ATurnId: Int64;
   const AModel: string; AMessageCount: Integer; const AProvider: string;
-  const AParameters: string): Int64;
+  const AParameters: string; const AAgentName: string): Int64;
 var
   Err: TStoreError;
 begin

@@ -378,7 +378,7 @@ type
     function BeginRequest(ATurnId: Int64; const AModel: string;
       AMessageCount: Integer; out ARequestId: Int64;
       out AError: TStoreError; const AProvider: string = '';
-      const AParameters: string = ''): Boolean;
+      const AParameters: string = ''; const AAgentName: string = ''): Boolean;
     function FinishRequest(ARequestId: Int64; AOk: Boolean;
       const AFinishReason: string; AErrorCode: Integer;
       const AErrorMessage, AErrorDetail: string; const AUsage: TTokenUsage;
@@ -2553,7 +2553,17 @@ begin
       rows stay the truth, and this column lets a report group without a join. }
     'provider = COALESCE((SELECT r2.provider FROM requests r2 ' +
       'WHERE r2.turn_id = turns.id AND r2.provider <> '''' ' +
-      'ORDER BY r2.seq DESC LIMIT 1), '''') ' +
+      'ORDER BY r2.seq DESC LIMIT 1), ''''), ' +
+    { The same newest-row rule for agent and model, so a turn records the
+      SELECTION it ended on. A turn that spanned a change keeps the per-request
+      rows as the truth; these columns are for reporting and for deriving a
+      session's current choice. }
+    'agent_name = COALESCE((SELECT r3.agent_name FROM requests r3 ' +
+      'WHERE r3.turn_id = turns.id AND r3.agent_name <> '''' ' +
+      'ORDER BY r3.seq DESC LIMIT 1), ''''), ' +
+    'model = COALESCE((SELECT r4.model FROM requests r4 ' +
+      'WHERE r4.turn_id = turns.id AND r4.model <> '''' ' +
+      'ORDER BY r4.seq DESC LIMIT 1), '''') ' +
     'WHERE session_id = ? AND status = ?');
   try
     if not Stmt.Valid then
@@ -2670,7 +2680,13 @@ begin
         the turn recorded none, which is every pre-migration turn. }
       'provider = COALESCE((SELECT r2.provider FROM requests r2 ' +
         'WHERE r2.turn_id = turns.id AND r2.provider <> '''' ' +
-        'ORDER BY r2.seq DESC LIMIT 1), '''') ' +
+        'ORDER BY r2.seq DESC LIMIT 1), ''''), ' +
+      'agent_name = COALESCE((SELECT r3.agent_name FROM requests r3 ' +
+        'WHERE r3.turn_id = turns.id AND r3.agent_name <> '''' ' +
+        'ORDER BY r3.seq DESC LIMIT 1), ''''), ' +
+      'model = COALESCE((SELECT r4.model FROM requests r4 ' +
+        'WHERE r4.turn_id = turns.id AND r4.model <> '''' ' +
+        'ORDER BY r4.seq DESC LIMIT 1), '''') ' +
       'WHERE id = ?');
     try
       if not Stmt.Valid then
@@ -2950,7 +2966,7 @@ end;
 function TSqliteStore.BeginRequest(ATurnId: Int64; const AModel: string;
   AMessageCount: Integer; out ARequestId: Int64;
   out AError: TStoreError; const AProvider: string = '';
-  const AParameters: string = ''): Boolean;
+  const AParameters: string = ''; const AAgentName: string = ''): Boolean;
 var
   Stmt: TStmt;
 begin
@@ -2974,9 +2990,9 @@ begin
     end;
     Stmt := TStmt.Create(FDb,
       'INSERT INTO requests (turn_id, seq, model, provider, parameters, ' +
-      'message_count, created_at) ' +
+      'agent_name, message_count, created_at) ' +
       'VALUES (?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM requests ' +
-      'WHERE turn_id = ?), ?, ?, ?, ?, ?)');
+      'WHERE turn_id = ?), ?, ?, ?, ?, ?, ?)');
     try
       if not Stmt.Valid then
         Exit(Fail(AError, seError, 'could not begin request', DbErrorText));
@@ -2985,8 +3001,9 @@ begin
       Stmt.BindText(3, AModel);
       Stmt.BindText(4, AProvider);
       Stmt.BindText(5, AParameters);
-      Stmt.BindInt(6, AMessageCount);
-      Stmt.BindInt64(7, NowMs);
+      Stmt.BindText(6, AAgentName);
+      Stmt.BindInt(7, AMessageCount);
+      Stmt.BindInt64(8, NowMs);
       if Stmt.Step <> SQLITE_DONE then
         Exit(Fail(AError, seError, 'could not begin request', DbErrorText));
     finally

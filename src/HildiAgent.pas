@@ -84,7 +84,7 @@ type
       compiles unchanged; '' means "not known", never "none configured". }
     function BeginRequest(ATurnId: Int64; const AModel: string;
       AMessageCount: Integer; const AProvider: string = '';
-      const AParameters: string = ''): Int64;
+      const AParameters: string = ''; const AAgentName: string = ''): Int64;
     procedure FinishRequest(ARequestId: Int64; const AOutcome: TRequestOutcome);
     procedure FinishTurn(ATurnId: Int64; const AOutcome: TTurnOutcome);
     { Drop every message the open turn appended, keeping the turn row. An early
@@ -114,7 +114,7 @@ type
       compiles unchanged; '' means "not known", never "none configured". }
     function BeginRequest(ATurnId: Int64; const AModel: string;
       AMessageCount: Integer; const AProvider: string = '';
-      const AParameters: string = ''): Int64;
+      const AParameters: string = ''; const AAgentName: string = ''): Int64;
     procedure FinishRequest(ARequestId: Int64; const AOutcome: TRequestOutcome);
     procedure FinishTurn(ATurnId: Int64; const AOutcome: TTurnOutcome);
     procedure DropTurnMessages(ATurnId: Int64);
@@ -935,7 +935,7 @@ end;
 
 function TMemoryConversationStore.BeginRequest(ATurnId: Int64;
   const AModel: string; AMessageCount: Integer; const AProvider: string;
-  const AParameters: string): Int64;
+  const AParameters: string; const AAgentName: string): Int64;
 begin
   Result := 0;
 end;
@@ -1939,7 +1939,7 @@ begin
       RetryWaitedMs := 0;
       repeat
         RequestId := FStore.BeginRequest(TurnId, FClient.Model,
-          Length(Request.Messages), FClient.ProviderKey);
+          Length(Request.Messages), FClient.ProviderKey, '', FConfig.AgentName);
         StartMs := GetTickCount64;
         Outcome := Default(TRequestOutcome);
         { Time the response's phases; the timed callbacks forward to AEvents. }
