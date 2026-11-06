@@ -163,7 +163,8 @@ function FormatUserMessage(const AContent: string): string;
   empty. The workspace is omitted when unknown; usage only when a limit is
   known. The guard is always present, always last. }
 function FormatTail(const AContext: string; ATimestampMs: Int64;
-  AUsageTokens, ALimitTokens: Integer; const AWorkspace, AAdvisory: string): string;
+  AUsageTokens, ALimitTokens: Integer; const AWorkspace, AAdvisory: string;
+  const AAgentPrompt: string = ''): string;
 
 implementation
 
@@ -191,7 +192,8 @@ begin
 end;
 
 function FormatTail(const AContext: string; ATimestampMs: Int64;
-  AUsageTokens, ALimitTokens: Integer; const AWorkspace, AAdvisory: string): string;
+  AUsageTokens, ALimitTokens: Integer; const AWorkspace, AAdvisory: string;
+  const AAgentPrompt: string = ''): string;
 var
   Body: string;
 begin
@@ -215,6 +217,16 @@ begin
        (AUsageTokens * 100) div ALimitTokens]) + LineEnding;
   if AContext <> '' then
     Body := Body + AContext + LineEnding;
+  { THE AGENT'S BEHAVIOUR. Inside <context> because it is state about how this
+    session runs, not an instruction to act now - the guard says everything here
+    except <advisory> is data, and that stays true. It rides the TAIL rather than
+    the system prompt for the same reason the mode line does: the active agent can
+    change between prompts, and the system message is written once and never
+    rewritten. Empty for the default 'hildi' agent, so behaviour is unchanged for
+    every install that has configured nothing. }
+  if AAgentPrompt <> '' then
+    Body := Body + '  <agent>' + EscapeXmlContent(AAgentPrompt) +
+      '</agent>' + LineEnding;
   { The advisory rides OUTSIDE <context>, as its own element, and the prompt says
     so. It is not state: it is the one genuine harness INSTRUCTION (the tool-limit
     nudge). Keeping it inside <context> made the guard's central claim false -

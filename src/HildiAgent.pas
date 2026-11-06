@@ -284,6 +284,15 @@ type
       grounds shell paths instead of guessing one (it has guessed /workspace).
       Empty when unknown. }
     WorkspaceRoot: string;
+    { The active agent's behaviour instructions, appended to the tail. Empty for
+      the built-in agent, which is why an install with no configured agent
+      behaves exactly as it did before agents existed. Rides the TAIL rather than
+      the system prompt because the active agent can change between prompts, and
+      the system message is written once and never rewritten. }
+    AgentPrompt: string;
+    { Which agent is active, recorded on each request so a turn's provenance says
+      what ran and under which behaviour. }
+    AgentName: string;
     { Tool-call budget for one turn. From SoftToolLimit the model is nudged
       every ToolNoticeStep calls (the call is intercepted and it must resubmit);
       at HardToolLimit it is locked down; one call past that ends the turn as a
@@ -1387,7 +1396,8 @@ begin
     if not IsPrewrappedUserMessage(Result.Messages[N].Content) then
       Result.Messages[N].Content := Result.Messages[N].Content +
         LineEnding + FormatTail(Context, NowUtcMs, FLastPromptTokens,
-          FConfig.MaxContextTokens, FConfig.WorkspaceRoot, FPendingAdvisory);
+          FConfig.MaxContextTokens, FConfig.WorkspaceRoot, FPendingAdvisory,
+          FConfig.AgentPrompt);
   end;
   { The advisory rode the tail it was just given, so it is delivered once. }
   FPendingAdvisory := '';

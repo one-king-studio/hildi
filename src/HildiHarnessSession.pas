@@ -110,6 +110,11 @@ type
       block landed - the split between the frozen system message and the
       per-turn stable text is the whole point of the design. }
     FSystemPromptText: string;
+    { The active agent's behaviour prompt and name, captured at resolution and
+      handed to the loop. Empty when no agent resolved, which is the state of an
+      install that has configured nothing. }
+    FActiveAgentPrompt: string;
+    FActiveAgentName: string;
     FGate: TApprovalGate;
     { The shared turn pool: one bounded executor for the session, so turns reuse
       threads instead of spawning and joining a TThread per turn. }
@@ -1794,6 +1799,8 @@ var
   EnvValue: string;
   LlmConfig: TLLMConfig;
   ProviderError: TLLMError;
+  AgentRow: TAgentRow;
+  AgentErr: TStoreError;
   ApprovalStore: IApprovalStore;
   ApprovalService: IApprovalService;
   ApprovalCtx: TApprovalContext;
@@ -1830,6 +1837,19 @@ begin
     Exit(False);
   end;
   FClient := TLLMClient.Create(LlmConfig, AConfig.Transport);
+  { Capture the active agent's behaviour for the tail. Read here rather than
+    threaded through ResolveProviderConfig, which returns a TLLMConfig and has no
+    business carrying prompt text. Absent or empty is the normal state: the
+    built-in agent defines no behaviour, so an install that has configured
+    nothing behaves exactly as it did before agents existed. }
+  FActiveAgentPrompt := '';
+  FActiveAgentName := '';
+  if FView.Store <> nil then
+    if FView.Store.ActiveAgent(AgentRow, AgentErr) then
+    begin
+      FActiveAgentPrompt := AgentRow.SystemPrompt;
+      FActiveAgentName := AgentRow.Name;
+    end;
 
   FTools := TToolRegistry.Create;
   RegisterDefaultTools(FTools);
@@ -2011,6 +2031,13 @@ begin
   { State the workspace root in the user turn's <context>, so the model grounds
     shell paths instead of guessing one. }
   AgentConfig.WorkspaceRoot := FView.WorkspaceRoot;
+  { The active agent's behaviour rides the TAIL, not the system prompt: the agent
+    can change between prompts, and the system message is written once and never
+    rewritten. Both are empty when no agent resolved, which is the state of an
+    install that has configured nothing - and that must behave exactly as it did
+    before agents existed. }
+  AgentConfig.AgentPrompt := FActiveAgentPrompt;
+  AgentConfig.AgentName := FActiveAgentName;
   AgentConfig.RetryMaxAttempts := AConfig.RetryMaxAttempts;
 
   FLoop := TAgentLoop.Create(FClient, FConversation, FTools, AgentConfig);
