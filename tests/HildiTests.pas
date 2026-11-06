@@ -59,7 +59,7 @@ uses
   HildiCoordination, TestCoordination,
   HildiChangesRecorder, TestChangesRecorder,
   HildiProviderDialog, HildiProviderDialogUi, HildiProviderForm, TestProviderDialog,
-  HildiAgentDialog, TestAgentDialog;
+  HildiAgentDialog, HildiAgentDialogUi, TestAgentDialog;
 
 var
   Runner: TTestRunner;

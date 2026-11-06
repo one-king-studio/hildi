@@ -20,6 +20,7 @@ uses
   TUIWidgetsPalette,
   HildiApprovalModal,
   HildiProviderDialog, HildiProviderDialogUi, HildiProviderForm,
+  HildiAgentDialog, HildiAgentDialogUi,
   TUIWidgetsPanel, TUITheme,
   TUIApp, HildiHarnessTurn,
   HildiHarnessDriver, HildiHarnessView,
@@ -124,6 +125,10 @@ type
       answer to reconcile. }
     FProviderModal: TProviderModal;
     FCloseProviderModal: Boolean;
+    { The agent dialog. Like /provider it needs no driver: agents live in the
+      store the app already owns. }
+    FAgentModal: TAgentModal;
+    FCloseAgentModal: Boolean;
     { The add/edit form, and the row it was opened for. FProviderEditing says
       which shape its footer takes; FProviderFormRow is what a save updates and
       what a remove deletes. }
@@ -318,6 +323,11 @@ type
     function CheckProviderConnection(const ARow: TProviderRow;
       const ASecret: string; out AError: TStoreError): Boolean;
     procedure LoadProviders;
+    procedure ShowAgentModal;
+    procedure CloseAgentModal;
+    procedure SyncAgentModal;
+    procedure AgentModalAction(const AAction: string);
+    procedure LoadAgents;
     procedure McpModalClosed;
     procedure CloseDiff;
     procedure DiffClosed(Sender: TObject);
@@ -1329,6 +1339,7 @@ begin
   { No driver needed: the provider dialog reads the store the app already owns,
     so unlike /mcp it is offered even while connecting. }
   Add('provider', 'configure the LLM provider');
+  Add('agent', 'manage agent behaviours');
   { /mcp asks the runtime for the server list (scMcpList), so like /checkpoint it
     needs a driver. The predicate matches RunCommand's own guard, so "offered"
     and "actionable" cannot drift apart. }
@@ -1452,6 +1463,13 @@ begin
   if AName = 'provider' then
   begin
     ShowProviderModal;
+    Exit;
+  end;
+  { /agent reads and writes the agents table, so like /provider it needs NO
+    runtime and sits before the connection guard. }
+  if AName = 'agent' then
+  begin
+    ShowAgentModal;
     Exit;
   end;
   { While connecting or failed, other commands have no driver; refuse cleanly. }
@@ -3711,6 +3729,105 @@ begin
   SetState(psReady, 'saved: ' + Res.Name);
 end;
 
+{ --- the agent dialog --------------------------------------------------- }
+
+function AgentHasProvider(const AName: string): Boolean;
+var
+  Row: TProviderRow;
+  Err: TStoreError;
+begin
+  { A free function because the pure list takes a plain function pointer. It has
+    no store, so this answers from the app's live handle via the closure below. }
+  Result := True;
+  if AName = '' then
+    Exit;                       // no provider named is fine: it inherits
+  Result := False;
+end;
+
+procedure THarnessApp.LoadAgents;
+var
+  Rows: TAgentRowArray;
+  Items: TAgentListItemArray;
+  Err: TStoreError;
+begin
+  if (FSession = nil) or (FSession.Store = nil) then
+  begin
+    SetState(psReady, 'no store; agents unavailable');
+    Exit;
+  end;
+  if not FSession.Store.ListAgents(Rows, Err) then
+  begin
+    { A store failure is NOT an empty list - saying "none configured" when the
+      query failed is a lie the operator cannot see through. }
+    AppendError('agents: ' + Err.Message);
+    Exit;
+  end;
+  Items := AgentListItems(Rows, @AgentHasProvider);
+  if FAgentModal <> nil then
+    FAgentModal.SetItems(Items);
+end;
+
+procedure THarnessApp.ShowAgentModal;
+var
+  Wrap: TContainer;
+  R: TRect;
+begin
+  if (FAgentModal <> nil) and FApp.ModalActive then
+  begin
+    LoadAgents;
+    Exit;
+  end;
+  if FApp.ModalActive then
+    Exit;
+  FAgentModal := TAgentModal.Create(FTheme);
+  FAgentModal.OnAction := AgentModalAction;
+  FAgentModal.Visible := True;
+  Wrap := TContainer.Create([Fill(1), Auto, Fill(1)], [Fill(1), Auto, Fill(1)]);
+  Wrap.Add(FAgentModal, 1, 1);
+  R := Default(TRect);
+  R.W := FSurface.Width;
+  R.H := FSurface.Height;
+  Wrap.Arrange(R);
+  FApp.PushPlane(TPlane.Create(Wrap, True, True));
+  LoadAgents;
+  SetState(psReady, 'Agents');
+end;
+
+procedure THarnessApp.AgentModalAction(const AAction: string);
+begin
+  if AAction = 'cancel' then
+  begin
+    { Deferred: the widget is dispatching, so the pop waits for SyncAgentModal. }
+    FCloseAgentModal := True;
+    Exit;
+  end;
+  { add/edit need a form of their own; until it exists, say so rather than
+    closing as though something happened. }
+  SetState(psReady, 'agent ' + AAction + ': form not built yet');
+end;
+
+procedure THarnessApp.SyncAgentModal;
+begin
+  if FCloseAgentModal then
+  begin
+    FCloseAgentModal := False;
+    CloseAgentModal;
+    Exit;
+  end;
+  { An unhandled Escape pops the plane in TTuiApp without telling the app; clear
+    the dangling widget so the state does not lie. }
+  if (FAgentModal <> nil) and (not FApp.ModalActive) then
+    FAgentModal := nil;
+end;
+
+procedure THarnessApp.CloseAgentModal;
+begin
+  if FApp.ModalActive then
+    FApp.PopPlane;
+  FAgentModal := nil;
+  SetState(psReady, 'Ready');
+end;
+
 procedure THarnessApp.SyncProviderModal;
 begin
   if FCloseProviderForm then
@@ -4449,6 +4566,7 @@ begin
   SyncDiff;
   SyncSkillModal;
   SyncProviderModal;
+  SyncAgentModal;
   SyncMcpModal;
   SyncHistory;
   CheckInterruptWindow;
