@@ -804,7 +804,16 @@ begin
     HttpCfg.URL := FConfig.Server.Url;
     HttpCfg.Headers := Copy(FConfig.Server.Headers, 0,
       Length(FConfig.Server.Headers));
-    HttpCfg.ReadTimeoutMs := FConfig.ListTimeoutMs;
+    { The transport's own socket timeout must be the LARGEST budget, not the
+      list one. WaitResponse enforces the per-call deadline itself, but a socket
+      read shorter than that budget cuts a legitimate call short: with this set
+      to ListTimeoutMs (5s), an HTTP tools/call that took 8s failed at 5s even
+      though its budget was 20s. Take the max so the deadline that fires is
+      always WaitResponse's, which knows which operation is running. }
+    if FConfig.CallTimeoutMs > FConfig.ListTimeoutMs then
+      HttpCfg.ReadTimeoutMs := FConfig.CallTimeoutMs
+    else
+      HttpCfg.ReadTimeoutMs := FConfig.ListTimeoutMs;
     HttpT := THttpTransport.Create(HttpCfg);
     if Assigned(FConfig.TokenSource) then
       HttpT.TokenSource := FConfig.TokenSource;
