@@ -47,7 +47,9 @@ type
     procedure Clear;
     { Replace the text and put the caret at its end. A FORM needs to seed a field
       from stored values; InsertText is private because typing and seeding are
-      different operations with different caret expectations. }
+      different operations with different caret expectations. (Two lanes added
+      this within hours of each other - the provider form and TForm both needed
+      to prefill, which is itself evidence it was missing.) }
     procedure SetText(const AText: string);
     procedure AddHistory(const AText: string);
     function Text: string;
