@@ -164,7 +164,7 @@ FUZZY_SRCS := $(wildcard $(SRC)/fuzzy/*.pas)
 FILEIGNORE_SRCS := $(wildcard $(SRC)/fileignore/*.pas)
 TEST_SRCS := $(wildcard $(TESTS)/*.pas)
 
-.PHONY: library-demo all test test-leak watch check release clean help libsqlite libmbedtls deps store-demo agent-cli release-agent-cli release-tui release-agent tui-agent-release tui-demo widgets-demo layout-demo headless-agent tui-agent bench perf agents agent-% mcp-smoke smoke smoke-list async-standalone async-bench async-freeze async-examples probe heap-report
+.PHONY: library-demo all test test-leak watch check release clean help libsqlite libmbedtls deps store-demo agent-cli release-agent-cli release-tui release-agent tui-agent-release tui-demo widgets-demo layout-demo headless-agent tui-agent bench perf agents agent-% mcp-smoke mcp-probe smoke smoke-list async-standalone async-bench async-freeze async-examples probe heap-report
 
 # Fetch and verify every vendored dependency. The README tells a new contributor
 # to run this first, and it used to be a silent no-op: there was no `deps` rule,
@@ -233,6 +233,19 @@ $(DEBUG_BIN)/hildi-agent-cli: $(EXAMPLES)/agent_cli.pas $(LIB_SRCS) $(TUILIB_SRC
 # `make check` (the suite is hermetic). See examples/mcp_smoke.pas.
 mcp-smoke: libsqlite libmbedtls $(DEBUG_BIN)/mcp-smoke
 	$(DEBUG_BIN)/mcp-smoke
+
+# Phase-level diagnostic for ONE MCP server: which step hangs, and for how long.
+# The client's Open() hides spawn/initialize/tools-list behind one call and one
+# timeout, so a failure says only "it failed". This prints each phase's elapsed
+# time and the server's own stderr, so "never spawned" is visibly different from
+# "spawned, initialized, then hung on tools/list".
+#   make mcp-probe ARGS="npx -- -y @browsermcp/mcp"
+mcp-probe: $(DEBUG_BIN)/mcp-probe
+	$(DEBUG_BIN)/mcp-probe $(ARGS)
+
+$(DEBUG_BIN)/mcp-probe: $(EXAMPLES)/mcp_probe.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ)
+	@mkdir -p $(DEBUG_BIN) $(DBGUNITS)
+	$(FPC) $(FPCARGS) $(DEBUG) $(SQLITE_LDFLAGS) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC) -Fu$(SRC)/tui/core -Fu$(SRC)/tui/terminal -Fu$(SRC)/fuzzy -Fu$(SRC)/tui/widgets -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$@ $<
 
 $(DEBUG_BIN)/mcp-smoke: $(EXAMPLES)/mcp_smoke.pas $(LIB_SRCS) $(TUILIB_SRCS) $(MARKDOWN_SRCS) $(CHANGES_SRCS) $(SQLITE_AR) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ)
 	@mkdir -p $(DEBUG_BIN) $(DBGUNITS)
