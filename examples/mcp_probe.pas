@@ -54,6 +54,14 @@ begin
   else
     WriteLn(Format('  %-14s %6d ms   FAILED: %s',
       [AName, Elapsed(AStart), ADetail]));
+  { FLUSHED, and to STDERR as well as stdout. The first version of this probe
+    hung against the real browser server and printed nothing at all, because
+    stdout was block-buffered to a file - so the one tool built to find a hang
+    could not report its own. A diagnostic must be unbuffered. }
+  Flush(Output);
+  WriteLn(StdErr, Format('  %-14s %6d ms   %s',
+    [AName, Elapsed(AStart), BoolToStr(AOk, 'ok', 'FAILED')]));
+  Flush(StdErr);
 end;
 
 { Send one JSON-RPC request and read until its response arrives. Reports the

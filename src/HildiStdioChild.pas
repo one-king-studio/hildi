@@ -214,17 +214,30 @@ var
 begin
   if (FProcess = nil) or (FProcess.Stderr = nil) then
     Exit;
-  repeat
-    N := fpRead(FProcess.Stderr.Handle, @Tmp, SizeOf(Tmp));
-    if N > 0 then
-    begin
-      SetLength(Chunk, N);
-      Move(Tmp[0], Chunk[1], N);
-      FStderr := FStderr + Chunk;
-      if Length(FStderr) > FMaxStderrBytes then
-        Delete(FStderr, 1, Length(FStderr) - FMaxStderrBytes);
-    end;
-  until N <= 0;
+  { ONE read, not a loop to EOF. select() promised at least one byte is
+    available; it promised nothing about the second read. The old `until N <= 0`
+    loop therefore blocked on the pipe the moment the child had written a chunk
+    of stderr and then gone quiet - which is exactly what a server does while it
+    waits on a browser bridge or a download.
+
+    That made every timeout in this unit useless. ReadLine's deadline is checked
+    BETWEEN select calls, so a block inside here can never be interrupted: a 7s
+    budget, or the product's 5s list timeout, ran for as long as the child chose
+    to stay quiet. The operator watched /mcp count past 1000 seconds.
+
+    Reading one chunk per wakeup still drains the pipe: ReadLine loops back to
+    select, sees stderr readable again, and calls this again. A child that floods
+    stderr cannot starve the deadline either, because Remaining is recomputed at
+    the top of each iteration. }
+  N := fpRead(FProcess.Stderr.Handle, @Tmp, SizeOf(Tmp));
+  if N > 0 then
+  begin
+    SetLength(Chunk, N);
+    Move(Tmp[0], Chunk[1], N);
+    FStderr := FStderr + Chunk;
+    if Length(FStderr) > FMaxStderrBytes then
+      Delete(FStderr, 1, Length(FStderr) - FMaxStderrBytes);
+  end;
 end;
 
 function TStdioChild.ReadLine(out ALine: string; ATimeoutMs: Integer;
