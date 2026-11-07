@@ -38,6 +38,12 @@ type
     procedure TestCallDeniedByApproval;
     procedure TestUnsupportedProtocolRefused;
     procedure TestListTimeoutDropsServer;
+    { THE PRODUCT-SHAPE REPRODUCTION. The test above hangs with NO stderr
+      output, which is the case that always worked. The operator's failure had
+      the server write a line to stderr first - and the old drain looped to EOF
+      on a blocking pipe, so the list timeout above it could never fire. This
+      adds the stderr line and asserts the OPEN is still bounded. }
+    procedure TestListTimeoutHoldsWhenTheChildAlsoWritesStderr;
     procedure TestServerRequestAnsweredAndIgnored;
     procedure TestReconcileOpensNewServer;
     procedure TestReconcileNoOpWhenConnected;
@@ -217,6 +223,37 @@ begin
     AssertTrue('registered', Client.Find('mcp_fake_echo', Tool));
     AssertTrue('call', Tool.Handler('{"message":"hi","reason":"testing"}', Res, Err));
     AssertEquals('result', 'echoed', Res);
+  finally
+    Client.Free;
+  end;
+end;
+
+procedure TMcpClientTest.TestListTimeoutHoldsWhenTheChildAlsoWritesStderr;
+var
+  Client: TMcpClient;
+  Approval: IApprovalService;
+  Err: string;
+  Script: string;
+  Start: Int64;
+begin
+  { Answer initialize, write one line to stderr, then hang on tools/list while
+    staying ALIVE. That is what a browser-bridge server does. With the old
+    stderr drain this blocked inside fpRead and the 400 ms list timeout never
+    fired: /mcp spun past 1000 seconds. }
+  Script := 'read line; ' + Line(InitJson) +
+    'read line; printf ' + Q + 'starting browser bridge\n' + Q +
+    ' >&2; read line; sleep 30';
+  Approval := TFakeApproval.Create(True);
+  Client := TMcpClient.Create(ClientConfig(Script, 400), Approval, nil);
+  try
+    Err := '';
+    Start := GetTickCount64;
+    AssertFalse('dropped', Client.Open(Err));
+    { Generous ceiling, but far below the child's 30s sleep: the point is that
+      the deadline fired at all. }
+    AssertTrue('bounded despite the stderr line, took ' +
+      IntToStr(GetTickCount64 - Start) + ' ms', GetTickCount64 - Start < 5000);
+    AssertTrue('and said why: ' + Err, Pos('timed out', Err) > 0);
   finally
     Client.Free;
   end;
