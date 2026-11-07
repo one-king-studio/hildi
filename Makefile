@@ -568,9 +568,13 @@ $(DEBUG_BIN)/hildi-agent-probe: $(EXAMPLES)/headless_agent.pas $(LIB_SRCS) $(TUI
 # scripts/test-parallel.sh): ~21 s each instead of ~169 s and ~103 s, and the
 # isolation also removes the intra-process state pollution that makes a
 # single-process run of the whole suite report failures that are not real.
-check: test-parallel test-leak-parallel shell-standalone markdown-standalone \
-	tui-standalone tui-widgets-standalone tui-widgets-markdown-standalone \
-	llm-standalone changes-standalone
+# The TUI binary is a PREREQUISITE, not a recipe: `make check` builds and links
+# the actual application. Without it a green gate said nothing about whether
+# `build/debug/bin/hildi` compiles - and that bit us once, when the operator was
+# handed a stale binary because the gate had not rebuilt it.
+check: $(DEBUG_BIN)/hildi test-parallel test-leak-parallel shell-standalone \
+	markdown-standalone tui-standalone tui-widgets-standalone \
+	tui-widgets-markdown-standalone llm-standalone changes-standalone
 
 # The same functional suite, one process per suite, in parallel. Measured on a
 # 10-core machine: ~169 s and 36 spurious failures as one process, ~22 s and 0
