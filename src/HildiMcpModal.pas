@@ -502,10 +502,8 @@ end;
 
 procedure TMcpModal.RequestClose;
 begin
-  { The single close path, so the busy guard lives here as well as in the key
-    arm: nothing may dismiss the dialog while an action is unresolved. }
-  if FBusy then
-    Exit;
+  { No busy guard. Escape is the operator's way out and must never be refused;
+    a hung action leaves the dialog with nothing else to try. }
   if Assigned(FOnClose) then
     FOnClose();
 end;
@@ -551,13 +549,11 @@ begin
     case E.Key.Kind of
       kkEscape:
         begin
-          { BLOCKED while an action is in flight. Closing the dialog during a
-            hung tools/list is what made a slow server look like a crash: the
-            modal vanished and nothing said the work was still running. Esc is
-            swallowed (True) so the unhandled-Escape path cannot pop the plane
-            either. }
-          if FBusy then
-            Exit(True);
+          { ALWAYS closes, busy or not. Blocking Escape while busy was a trap:
+            a server that hangs means the answer never arrives, so the dialog
+            refused the one key that could get the operator out. A dialog must
+            never be able to trap the operator - the work can continue in the
+            background, and closing simply stops watching it. }
           RequestClose;
           Exit(True);
         end;
@@ -594,11 +590,7 @@ procedure TMcpModal.FooterClicked(const AKey: string);
 begin
   { The click carries the pair's KEY, which is now the chord text. }
   if AKey = 'esc' then
-  begin
-    if FBusy then
-      Exit;
-    RequestClose;
-  end
+    RequestClose
   else if AKey = 'ctrl+t' then
     Reconnect
   else if AKey = 'ctrl+a' then

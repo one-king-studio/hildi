@@ -214,6 +214,11 @@ type
       7.1 - and re-answers with the list so the dialog updates in place. }
     procedure HandleMcpAdd(AClient: TClientConn;
       const ACommand: TSessionCommand);
+    { Answer a reconnect that never reached the provider. Emits the SAME terminal
+      event a real attempt does, because that event is what clears the app's
+      busy state - a bare reply leaves the dialog permanently busy. }
+    procedure EmitMcpReconnectFailed(AClient: TClientConn; const AKey,
+      AReason: string);
     { Build the row for one stored server, given the active set. Delegates to the
       shared McpRowOf in HildiMCPConfig, so the runtime and the local driver
       cannot assemble the same row two different ways. }
@@ -1567,6 +1572,26 @@ begin
   QueueLine(AClient, TSessionCodec.Encode(M));
 end;
 
+procedure TSessionRuntime.EmitMcpReconnectFailed(AClient: TClientConn;
+  const AKey, AReason: string);
+var
+  E: TSessionEvent;
+  M: TSessionMessage;
+  Row: TMcpRowStatus;
+begin
+  E := EmitEvent(ekMcpReconnectDone);
+  SetLength(E.McpRows, 1);
+  Row := Default(TMcpRowStatus);
+  Row.Key := AKey;
+  Row.Connection := mcUnknown;
+  Row.Error := AReason;
+  E.McpRows[0] := Row;
+  M := Default(TSessionMessage);
+  M.Kind := mkEvent;
+  M.Event := E;
+  QueueLine(AClient, TSessionCodec.Encode(M));
+end;
+
 procedure TSessionRuntime.HandleMcpReconnect(AClient: TClientConn;
   const ACommand: TSessionCommand);
 var
@@ -1602,11 +1627,17 @@ begin
   if Found < 0 then
   begin
     ReplyTo(AClient, ACommand.Id, False, 'unknown mcp server: ' + Key);
+    { AND an event. A reply alone is not enough: the app's busy state is cleared
+      by teMcpReconnectDone, and mkReply is consumed by the client's request/
+      response path, never surfaced to the UI. A refusal that only replied left
+      the dialog busy forever - the operator could not even press Escape. }
+    EmitMcpReconnectFailed(AClient, Key, 'unknown mcp server: ' + Key);
     Exit;
   end;
   if FSession.McpProvider = nil then
   begin
     ReplyTo(AClient, ACommand.Id, False, 'no mcp provider');
+    EmitMcpReconnectFailed(AClient, Key, 'no mcp provider');
     Exit;
   end;
   ProbeErr := '';
@@ -1615,6 +1646,7 @@ begin
     { Enabling is a config change, not a reconnect. Say so rather than opening a
       server the operator turned off. }
     ReplyTo(AClient, ACommand.Id, False, 'not enabled');
+    EmitMcpReconnectFailed(AClient, Key, 'not enabled: enable it first');
     Exit;
   end;
   FSession.McpProvider.Reconnect(Key, ProbeErr);

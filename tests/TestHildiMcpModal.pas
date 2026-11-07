@@ -48,9 +48,10 @@ type
       to the list. The bare-letter case is the regression: 'a' used to add. }
     procedure TestChordsAddAndConnect;
     procedure TestBareLetterDoesNotAct;
-    { While an action is in flight nothing may dismiss the dialog. This is what
-      made a hung tools/list look like a crash: the modal vanished. }
-    procedure TestEscapeIsRefusedWhileBusy;
+    { Escape ALWAYS closes, including while an action is in flight: refusing it
+      trapped the operator when a server hung and no answer ever came. The
+      action CTAs are still refused while busy. }
+    procedure TestEscapeClosesEvenWhileBusy;
     procedure TestEscapeClosesWhenIdle;
     { The indicator the operator asked for: a spinner, the action's text, and a
       seconds count that keeps moving. }
@@ -188,25 +189,27 @@ begin
   AssertEquals('a bare letter never connects', 0, FReconnects);
 end;
 
-procedure THildiMcpModalTest.TestEscapeIsRefusedWhileBusy;
+procedure THildiMcpModalTest.TestEscapeClosesEvenWhileBusy;
 begin
+  { ESCAPE ALWAYS CLOSES. The first version of the busy state refused it, which
+    trapped the operator: a hung server means the answer never arrives, so the
+    one key that could get them out was the one key the dialog ignored. A dialog
+    must never be able to trap the operator - the work can continue in the
+    background, and closing only stops watching it. }
   Seed(['browser']);
   FModal.SetBusy('connecting browser...');
 
-  FModal.HandleEvent(Key(kkEscape));
-  AssertEquals('escape did not close while busy', 0, FCloses);
-
-  { And Escape must also be swallowed, so the app's unhandled-Escape path cannot
-    pop the plane behind the dialog's back. }
+  AssertEquals('no close yet', 0, FCloses);
   AssertTrue('the key was consumed', FModal.HandleEvent(Key(kkEscape)));
+  AssertEquals('escape closed despite the action being in flight', 1, FCloses);
 
-  { Ctrl+A is refused too - the operator cannot stack a second action. }
+  { The ACTION CTAs are still refused: stacking a second action on an unresolved
+    one is how two waits become one invisible one. Only Escape is exempt. }
   FModal.HandleEvent(Ctrl('a'));
-  AssertEquals('add refused while busy', 0, FAdds);
-
+  AssertEquals('add still refused while busy', 0, FAdds);
   FModal.ClearBusy;
-  FModal.HandleEvent(Key(kkEscape));
-  AssertEquals('escape closes once the action resolved', 1, FCloses);
+  FModal.HandleEvent(Ctrl('a'));
+  AssertEquals('add works once the action resolved', 1, FAdds);
 end;
 
 procedure THildiMcpModalTest.TestEscapeClosesWhenIdle;
