@@ -308,10 +308,21 @@ begin
   Result := '';
   if R.Name = '' then
     Exit('name is required');
-  { A provider is OPTIONAL: an agent that names none inherits whichever provider
-    is active, which is the common case. Only a name that does not resolve is a
-    problem. }
-  if R.ProviderName = '' then
+  { A MODEL IS ONLY MEANINGFUL WITH A PROVIDER. 'openai/gpt-4o' names a model in
+    OpenRouter's namespace; the same id means something else - or nothing - under
+    another provider. So the two are a PAIR: either both are given, or neither is.
+    Half a pair is refused rather than saved, because it would resolve to whatever
+    the other half happened to be at prompt time. }
+  if (R.ProviderName = '') <> (R.Model = '') then
+  begin
+    if R.Model <> '' then
+      Exit('a model needs a provider')
+    else
+      Exit('a provider needs a model');
+  end;
+  { NEITHER given is fine: the agent then inherits the active selection, which is
+    the common case - most agents name no model at all. }
+  if (R.ProviderName = '') and (R.Model = '') then
     Exit('');
   Known := False;
   for I := 0 to High(AProviders) do

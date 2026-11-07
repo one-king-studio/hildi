@@ -397,6 +397,10 @@ var
   ParamError: string;
   HasRow: Boolean;
   HasAgent: Boolean;
+  { True when the agent named BOTH a provider and a model, or neither. Half a
+    pair is treated as none: a model id is only meaningful relative to a provider
+    namespace, so taking one without the other would silently mis-pair them. }
+  AgentNamesPair: Boolean;
 begin
   AError := ErrLLM(leOk, '', '');
   Result := True;
@@ -408,6 +412,11 @@ begin
   HasAgent := False;
   if AStore <> nil then
     HasAgent := AStore.ActiveAgent(Agent, StoreErr);
+  { The agent names a model+provider PAIR or neither. Computed here, once, so
+    both the model application and the provider lookup below read the same
+    decision - and a row with half a pair (possible from an older write) degrades
+    to "inherits", not to a mismatched pairing. }
+  AgentNamesPair := HasAgent and (Agent.ProviderName <> '') and (Agent.Model <> '');
 
   if HasAgent then
   begin
@@ -446,10 +455,16 @@ begin
     end;
     if Length(Agent.Stop) > 0 then
       AConfig.Stop := Agent.Stop;
-    { A PREFERRED model, not a prescribed one: the operator can still override it
-      at prompt time, which is why an explicit model wins below. Most agents
-      prescribe nothing and leave the choice to the operator. }
-    if (not AExplicitModel) and (Agent.Model <> '') then
+    { THE MODEL AND PROVIDER ARE ONE CHOICE, so they are applied as a PAIR or not
+      at all. A model id only means something relative to a provider namespace:
+      'openai/gpt-4o' is an OpenRouter id, and the same string under another
+      provider means something else or nothing. Taking the agent's model while
+      falling back to a DIFFERENT provider would silently pair an id with the
+      wrong namespace, so half a pair is treated as none.
+
+      A preferred pair, not a prescribed one: an explicit model still wins below,
+      and most agents name none at all, leaving the choice to the operator. }
+    if AgentNamesPair and (not AExplicitModel) then
       AConfig.Model := Agent.Model;
     AConfig.AgentName := Agent.Name;
     AConfig.ReasoningEffort := Agent.ReasoningEffort;
@@ -459,10 +474,10 @@ begin
   HasRow := False;
   if AStore <> nil then
   begin
-    { The provider the AGENT named, when it named one; otherwise the active one.
-      An agent that points at a provider is how two behaviours can talk through
-      two different connections. }
-    if HasAgent and (Agent.ProviderName <> '') then
+    { The provider from the agent's PAIR, when it named one; otherwise the active
+      one. An agent pointing at a provider is how two behaviours can talk through
+      two different connections - but only ever together with its model. }
+    if AgentNamesPair then
       HasRow := AStore.LoadProvider(Agent.ProviderName, Row, StoreErr)
     else
       HasRow := AStore.ActiveProvider(Row, StoreErr);
