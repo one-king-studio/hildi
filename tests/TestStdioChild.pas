@@ -20,6 +20,13 @@ type
     procedure TestBrokenPipeOnWrite;
     procedure TestTooLongLine;
     procedure TestStderrDoesNotBlockStdout;
+    { THE ONE THAT WAS MISSING. The test above writes stderr and then EXITS, so
+      the drain's next read returns EOF and nothing blocks. This reproduces the
+      real failure: the child writes stderr and then STAYS ALIVE AND QUIET, which
+      is what a server does while waiting on a browser bridge. Against the old
+      `until N <= 0` drain, ReadLine blocked inside fpRead forever and its
+      deadline could never fire - /mcp counted past 1000 seconds. }
+    procedure TestStderrThenSilenceStillTimesOut;
     procedure TestCloseKillsNonCooperativeChild;
     procedure TestCloseIsIdempotent;
     procedure TestNormalizeExitMapping;
@@ -144,6 +151,36 @@ begin
     AssertEquals('stdout line', 'out', Line);
     AssertTrue('stderr captured', Pos('warning', C.StderrTail) > 0);
   finally
+    C.Free;
+  end;
+end;
+
+procedure TStdioChildTest.TestStderrThenSilenceStillTimesOut;
+var
+  C: TStdioChild;
+  Err, Line: string;
+  Reason: TStdioReadResult;
+  T0, Elapsed: Int64;
+begin
+  { Writes one line of stderr, then sleeps: alive, quiet, producing nothing on
+    stdout. This is the shape that wedged the product. }
+  C := TStdioChild.Create(ShConfig(
+    'printf "starting browser bridge...\n" >&2; sleep 30'));
+  try
+    AssertTrue('started', C.Start(Err));
+    T0 := Int64(GetTickCount64);
+    { A 500 ms budget must RETURN in about 500 ms. The assertion is on the
+      outcome and a generous ceiling, not an exact duration. }
+    AssertFalse('read timed out rather than blocking',
+      C.ReadLine(Line, 500, Reason));
+    Elapsed := Int64(GetTickCount64) - T0;
+    AssertTrue('reported a timeout', Reason = srTimeout);
+    AssertTrue('and returned promptly, took ' + IntToStr(Elapsed) + ' ms',
+      Elapsed < 10000);
+    { The stderr line was still captured, so the fix drains without losing it. }
+    AssertTrue('stderr captured', Pos('starting browser bridge', C.StderrTail) > 0);
+  finally
+    C.Close;
     C.Free;
   end;
 end;
