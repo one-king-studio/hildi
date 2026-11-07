@@ -20,7 +20,7 @@ uses
   TUIWidgetsPalette,
   HildiApprovalModal,
   HildiProviderDialog, HildiProviderDialogUi, HildiProviderForm,
-  HildiAgentDialog, HildiAgentDialogUi,
+  HildiAgentDialog, HildiAgentDialogUi, HildiAgentForm,
   TUIWidgetsPanel, TUITheme,
   TUIApp, HildiHarnessTurn,
   HildiHarnessDriver, HildiHarnessView,
@@ -129,6 +129,13 @@ type
       store the app already owns. }
     FAgentModal: TAgentModal;
     FCloseAgentModal: Boolean;
+    { The add/edit form, and the row it was opened for. Same shape as the
+      provider's: FAgentEditing picks the footer, FAgentFormRow is what a save
+      updates and what a remove deletes. }
+    FAgentForm: TAgentForm;
+    FCloseAgentForm: Boolean;
+    FAgentEditing: Boolean;
+    FAgentFormRow: TAgentRow;
     { The add/edit form, and the row it was opened for. FProviderEditing says
       which shape its footer takes; FProviderFormRow is what a save updates and
       what a remove deletes. }
@@ -328,6 +335,9 @@ type
     procedure SyncAgentModal;
     procedure AgentModalAction(const AAction: string);
     procedure LoadAgents;
+    procedure ShowAgentForm(const ARow: TAgentRow; AEditing: Boolean);
+    procedure CloseAgentForm;
+    procedure AgentFormAction(const AAction: string);
     procedure McpModalClosed;
     procedure CloseDiff;
     procedure DiffClosed(Sender: TObject);
@@ -3731,17 +3741,24 @@ end;
 
 { --- the agent dialog --------------------------------------------------- }
 
+var
+  { The store the resolver consults. A unit-level variable because the pure list
+    takes a plain function pointer, not a method - and threading a store through
+    a function-pointer signature would infect a unit that deliberately has no
+    store. LoadAgents sets it immediately before use. }
+  AgentProviderStore: TSqliteStore = nil;
+
 function AgentHasProvider(const AName: string): Boolean;
 var
   Row: TProviderRow;
   Err: TStoreError;
 begin
-  { A free function because the pure list takes a plain function pointer. It has
-    no store, so this answers from the app's live handle via the closure below. }
-  Result := True;
+  { No provider named is FINE: the agent inherits the active one. }
   if AName = '' then
-    Exit;                       // no provider named is fine: it inherits
-  Result := False;
+    Exit(True);
+  if AgentProviderStore = nil then
+    Exit(False);
+  Result := AgentProviderStore.LoadProvider(AName, Row, Err);
 end;
 
 procedure THarnessApp.LoadAgents;
@@ -3762,9 +3779,120 @@ begin
     AppendError('agents: ' + Err.Message);
     Exit;
   end;
+  AgentProviderStore := FSession.Store;
   Items := AgentListItems(Rows, @AgentHasProvider);
   if FAgentModal <> nil then
     FAgentModal.SetItems(Items);
+end;
+
+procedure THarnessApp.ShowAgentForm(const ARow: TAgentRow; AEditing: Boolean);
+var
+  Wrap: TContainer;
+  R: TRect;
+  Rows: TProviderRowArray;
+  Names: TStringArray;
+  Err: TStoreError;
+  I: Integer;
+begin
+  FAgentFormRow := ARow;
+  FAgentEditing := AEditing;
+  { The provider field is a PICK from what exists, so the form needs the list.
+    A provider name that does not exist is a broken agent; refusing to type one
+    is cheaper than showing the breakage afterwards. }
+  Names := nil;
+  if (FSession <> nil) and (FSession.Store <> nil) then
+    if FSession.Store.ListProviders(Rows, Err) then
+      for I := 0 to High(Rows) do
+      begin
+        SetLength(Names, Length(Names) + 1);
+        Names[High(Names)] := Rows[I].Name;
+      end;
+  FAgentForm := TAgentForm.Create(FTheme, Names, AEditing);
+  FAgentForm.OnAction := AgentFormAction;
+  if AEditing then
+    FAgentForm.LoadFrom(ARow);
+  FAgentForm.Visible := True;
+  Wrap := TContainer.Create([Fill(1), Auto, Fill(1)], [Fill(1), Auto, Fill(1)]);
+  Wrap.Add(FAgentForm, 1, 1);
+  R := Default(TRect);
+  R.W := FSurface.Width;
+  R.H := FSurface.Height;
+  Wrap.Arrange(R);
+  FApp.PushPlane(TPlane.Create(Wrap, True, True));
+  if AEditing then
+    SetState(psReady, 'Edit agent')
+  else
+    SetState(psReady, 'Add agent');
+end;
+
+procedure THarnessApp.CloseAgentForm;
+begin
+  if FApp.ModalActive then
+    FApp.PopPlane;
+  FAgentForm := nil;
+  SetState(psReady, 'Ready');
+end;
+
+procedure THarnessApp.AgentFormAction(const AAction: string);
+var
+  Err: TStoreError;
+  Res: TAgentFormResult;
+  Row: TAgentRow;
+begin
+  if AAction = 'cancel' then
+  begin
+    { Deferred, same reason as every other dialog: the widget is mid-dispatch. }
+    FCloseAgentForm := True;
+    Exit;
+  end;
+  if (FAgentForm = nil) or (FSession = nil) or (FSession.Store = nil) then
+    Exit;
+  if AAction = 'remove' then
+  begin
+    if FAgentFormRow.Name = '' then
+      Exit;
+    if FSession.Store.DeleteAgent(FAgentFormRow.Name, Err) then
+    begin
+      CloseAgentForm;
+      LoadAgents;
+      SetState(psReady, 'deleted: ' + FAgentFormRow.Name);
+    end
+    else
+      AppendError('delete: ' + Err.Message);
+    Exit;
+  end;
+  if (AAction <> 'add') and (AAction <> 'save') then
+    Exit;
+  { The form has validated, including the pair rule; this only transcribes. }
+  Res := FAgentForm.Result_;
+  Row := Default(TAgentRow);
+  Row.Name := Res.Name;
+  Row.ProviderName := Res.ProviderName;
+  Row.Model := Res.Model;
+  Row.SystemPrompt := Res.SystemPrompt;
+  Row.ReasoningEffort := Res.ReasoningEffort;
+  Row.Tier := Res.Tier;
+  Row.Temperature := Res.Temperature;
+  Row.HasTemperature := Res.HasTemperature;
+  Row.TopP := Res.TopP;
+  Row.HasTopP := Res.HasTopP;
+  Row.MaxTokens := Res.MaxTokens;
+  Row.HasMaxTokens := Res.HasMaxTokens;
+  { What the form does NOT show survives an edit: the active flag and the stop
+    sequences. A rename must not silently reset either. }
+  if FAgentEditing then
+  begin
+    Row.Active := FAgentFormRow.Active;
+    Row.Stop := FAgentFormRow.Stop;
+  end;
+  if FSession.Store.SaveAgent(Row, Err) then
+  begin
+    CloseAgentForm;
+    LoadAgents;
+    SetState(psReady, 'saved: ' + Res.Name);
+  end
+  else
+    AppendError('save: ' + Err.Message);
 end;
 
 procedure THarnessApp.ShowAgentModal;
@@ -3794,6 +3922,9 @@ begin
 end;
 
 procedure THarnessApp.AgentModalAction(const AAction: string);
+var
+  Err: TStoreError;
+  EditRow: TAgentRow;
 begin
   if AAction = 'cancel' then
   begin
@@ -3801,13 +3932,36 @@ begin
     FCloseAgentModal := True;
     Exit;
   end;
-  { add/edit need a form of their own; until it exists, say so rather than
-    closing as though something happened. }
-  SetState(psReady, 'agent ' + AAction + ': form not built yet');
+  if (FAgentModal = nil) or (FSession = nil) or (FSession.Store = nil) then
+    Exit;
+  if AAction = 'add' then
+  begin
+    ShowAgentForm(Default(TAgentRow), False);
+    Exit;
+  end;
+  if AAction = 'edit' then
+  begin
+    { Load fresh: the list was built some frames ago, and an edit must start from
+      what is STORED or two edits in a row can resurrect the older values. }
+    if FAgentModal.SelectedName = '' then
+      Exit;
+    if not FSession.Store.LoadAgent(FAgentModal.SelectedName, EditRow, Err) then
+    begin
+      AppendError('load: ' + Err.Message);
+      Exit;
+    end;
+    ShowAgentForm(EditRow, True);
+  end;
 end;
 
 procedure THarnessApp.SyncAgentModal;
 begin
+  if FCloseAgentForm then
+  begin
+    FCloseAgentForm := False;
+    CloseAgentForm;
+    Exit;
+  end;
   if FCloseAgentModal then
   begin
     FCloseAgentModal := False;
