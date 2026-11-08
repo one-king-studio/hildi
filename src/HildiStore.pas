@@ -519,7 +519,7 @@ end;
 function DefaultMigrations: TMigrationArray;
 begin
   Result := nil;
-  SetLength(Result, 23);
+  SetLength(Result, 24);
   Result[0].Version := 1;
   Result[0].Name := 'session history';
   Result[0].Statements := [
@@ -1067,6 +1067,25 @@ begin
     'ALTER TABLE turns ADD COLUMN provider TEXT NOT NULL DEFAULT ''''',
     'ALTER TABLE turns ADD COLUMN agent_name TEXT NOT NULL DEFAULT ''''',
     'ALTER TABLE turns ADD COLUMN model TEXT NOT NULL DEFAULT '''''
+  ];
+  { MCP TIMEOUTS: clear values that were never CHOSEN.
+
+    A row's list/call timeout wins over the client default, and 0 means "use the
+    default". Stored rows carry 60000/180000 - which are exactly the old
+    compiled-in defaults and the mcp_smoke example's hardcoded pair - so the new
+    5s/20s defaults never applied to them, and a hung server still took a minute
+    to report. The operator asked for 5s and got 60.
+
+    Zero only those two exact pairs: a value that differs was deliberately set
+    by someone and is left alone. This is a one-way data fix, so it is narrow on
+    purpose. }
+  Result[23].Version := 24;
+  Result[23].Name := 'mcp timeouts reset to the client default';
+  Result[23].Statements := [
+    'UPDATE mcp_servers SET list_timeout_ms = 0 ' +
+      'WHERE list_timeout_ms = 60000',
+    'UPDATE mcp_servers SET call_timeout_ms = 0 ' +
+      'WHERE call_timeout_ms = 180000'
   ];
 end;
 
