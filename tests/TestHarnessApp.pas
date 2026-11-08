@@ -275,6 +275,10 @@ type
       other server vanished from the dialog - and it is also the path that was
       reported as a crash, so this drives a real render through Step. }
     procedure TestMcpReconnectKeepsTheOtherServersListed;
+    { Escape must stay escaped. Closing the dialog while an action is still in
+      flight is the normal exit now that Escape always works, so a late answer
+      must NOT pop the dialog back up and undo it. }
+    procedure TestALateMcpAnswerDoesNotReopenAClosedDialog;
     procedure TestStatusShowsWorkspaceAndConsumption;
     procedure TestStatusSumsTurns;
     procedure TestResumeHeaderMatchesLive;
@@ -2645,6 +2649,40 @@ begin
   AssertTrue('still open after a reconnect', FApp.ModalActive);
   AssertTrue('the list was not replaced by one row',
     FApp.McpRowCountForTest = 2);
+end;
+
+procedure THarnessAppTest.TestALateMcpAnswerDoesNotReopenAClosedDialog;
+var
+  E: TTurnEvent;
+begin
+  BuildWithStore;
+  FRecording := TRecordingDriver.Create;
+  FApp.Attach(FSession.View, FRecording);
+
+  SetLength(E.McpRows, 1);
+  E.Kind := teMcpList;
+  E.McpRows[0].Key := 'browser';
+  FRecording.PushEvent(E);
+  FApp.Step;
+  AssertTrue('dialog opened by the list', FApp.ModalActive);
+
+  { The operator dismisses it - the one means of escape, and the reason a hang
+    is survivable at all. Escape goes through the real input source, as the
+    other modal tests do. }
+  FInput.Push(Key(kkEscape));
+  FApp.Step;
+  FApp.Step;
+
+  { The action that was in flight answers afterwards. Reopening here would undo
+    the escape. }
+  SetLength(E.McpRows, 1);
+  E.Kind := teMcpReconnectDone;
+  E.McpRows[0].Key := 'browser';
+  E.McpRows[0].Error := 'timed out waiting for MCP response';
+  FRecording.PushEvent(E);
+  FApp.Step;
+
+  AssertFalse('a late answer did not reopen the dialog', FApp.ModalActive);
 end;
 
 procedure THarnessAppTest.TestStatusShowsWorkspaceAndConsumption;

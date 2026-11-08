@@ -3334,15 +3334,14 @@ var
   I: Integer;
   Merged: Boolean;
 begin
-  { No dialog, or one that is not showing: a single row is all we have, so open
-    with it rather than dropping the answer. }
+  { NO DIALOG MEANS THE OPERATOR CLOSED IT. Drop the answer rather than
+    reopening: Escape now always works (it has to - a hung server would otherwise
+    trap them), so this is the common case, not the rare one. Popping the dialog
+    back up seconds after they dismissed it would undo their one means of
+    escaping, which is worse than losing a status update. The next /mcp shows
+    the truth anyway, because the list is read from the store. }
   if (FMcpModal = nil) or (not FApp.ModalActive) then
-  begin
-    SetLength(Rows, 1);
-    Rows[0] := ARow;
-    ShowMcpModal(Rows);
     Exit;
-  end;
   Rows := FMcpCurrentRows;
   Merged := False;
   for I := 0 to High(Rows) do
