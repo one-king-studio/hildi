@@ -154,11 +154,12 @@ end;
   catalogue at all - which is different from an empty one, and must not be
   presented as "this vendor has no models". }
 function CatalogueData(const ABody: string; out AArray: TJSONArray;
-  out AError: string): Boolean;
+  out ADoc: TJSONData; out AError: string): Boolean;
 var
   D: TJSONData;
 begin
   AArray := nil;
+  ADoc := nil;
   AError := '';
   if Trim(ABody) = '' then
   begin
@@ -187,6 +188,13 @@ begin
       Exit(False);
     end;
     AArray := TJSONArray(TJSONObject(D).Find('data'));
+    { OWNERSHIP GOES TO THE CALLER. The array is a CHILD of D, so freeing D here
+      handed every caller a pointer into released memory: all three parsers read
+      it immediately, which is why this surfaced as EBusError / EObjectCheck on
+      the first model rather than as a failed parse. D is nilled so the finally
+      below does not free it. }
+    ADoc := D;
+    D := nil;
     Result := True;
   finally
     D.Free;
@@ -224,10 +232,13 @@ var
   I: Integer;
   Kind: string;
   D: TJSONData;
+  Doc: TJSONData;
 begin
   AModels := nil;
-  if not CatalogueData(ABody, Arr, AError) then
+  Doc := nil;
+  if not CatalogueData(ABody, Arr, Doc, AError) then
     Exit(False);
+  try
   for I := 0 to Arr.Count - 1 do
   begin
     if not (Arr.Items[I] is TJSONObject) then
@@ -274,6 +285,12 @@ begin
     AModels[High(AModels)] := M;
   end;
   Result := True;
+  finally
+    { The document OUTLIVES the array: Arr is a child of it. Freeing here is what
+      makes the parse safe; the previous version freed it inside CatalogueData,
+      under the caller's feet. }
+    Doc.Free;
+  end;
 end;
 
 procedure TFireworksProvider.DecorateRequest(const AContext: TProviderContext;
@@ -323,11 +340,14 @@ var
   M: TProviderModel;
   Arch: TJSONObject;
   D: TJSONData;
+  Doc: TJSONData;
   I: Integer;
 begin
   AModels := nil;
-  if not CatalogueData(ABody, Arr, AError) then
+  Doc := nil;
+  if not CatalogueData(ABody, Arr, Doc, AError) then
     Exit(False);
+  try
   for I := 0 to Arr.Count - 1 do
   begin
     if not (Arr.Items[I] is TJSONObject) then
@@ -365,6 +385,12 @@ begin
     AModels[High(AModels)] := M;
   end;
   Result := True;
+  finally
+    { The document OUTLIVES the array: Arr is a child of it. Freeing here is what
+      makes the parse safe; the previous version freed it inside CatalogueData,
+      under the caller's feet. }
+    Doc.Free;
+  end;
 end;
 
 procedure TOpenRouterProvider.ExtraHeaders(AHeaders: TStrings);
@@ -440,11 +466,14 @@ var
   Arr: TJSONArray;
   Obj: TJSONObject;
   M: TProviderModel;
+  Doc: TJSONData;
   I: Integer;
 begin
   AModels := nil;
-  if not CatalogueData(ABody, Arr, AError) then
+  Doc := nil;
+  if not CatalogueData(ABody, Arr, Doc, AError) then
     Exit(False);
+  try
   for I := 0 to Arr.Count - 1 do
   begin
     if not (Arr.Items[I] is TJSONObject) then
@@ -466,6 +495,12 @@ begin
     AModels[High(AModels)] := M;
   end;
   Result := True;
+  finally
+    { The document OUTLIVES the array: Arr is a child of it. Freeing here is what
+      makes the parse safe; the previous version freed it inside CatalogueData,
+      under the caller's feet. }
+    Doc.Free;
+  end;
 end;
 
 function TOpenAIProvider.InspectChunk(const AJson: TJSONObject;

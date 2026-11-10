@@ -17,7 +17,11 @@ program llm_standalone;
 {$mode delphi}{$H+}
 
 uses
-  SysUtils, Classes, fpjson, LLMEnv, LLMTLS, LLMProvider, LLMClient;
+  SysUtils, Classes, fpjson, LLMEnv, LLMTLS, LLMProvider, LLMClient,
+  { Linked for its initialization: it INSTALLS the vendor registrar. Without it
+    the registry is empty, ByKey returns nil, and the first provider dereference
+    is an EObjectCheck. }
+  LLMProviders;
 
 var
   Failures: Integer;
@@ -54,7 +58,8 @@ begin
   try
     Result := Reg.Count;
   finally
-    Reg.Free;
+    { NOT freed: RegisteredProviders returns a library-owned singleton, so
+      freeing it leaves the global pointing at released memory. }
   end;
 end;
 
@@ -66,9 +71,12 @@ begin
   try
     Result := Reg.ByKey('fireworks');
   finally
-    { The registry owns its providers, so the instance is copied out by pointer
-      and the registry is freed: this program does not use it afterwards. }
-    Reg.Free;
+    { NOT freed. RegisteredProviders returns a library-owned SINGLETON, so
+      freeing it leaves that global pointing at released memory - and the next
+      call returns the dangling pointer rather than rebuilding, because the field
+      is still non-nil. That is the whole bug: the example destroyed the
+      registry, then read it. }
+    
   end;
 end;
 

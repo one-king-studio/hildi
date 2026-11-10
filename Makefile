@@ -464,9 +464,12 @@ markdown-standalone: $(MARKDOWN_SRCS)
 # ONLY src/llm, with no harness unit on the search path. This is the library's
 # central claim - that it is pure and the application owns persistence and policy
 # - and a dependency on HildiStore or HildiAgent fails the build right here.
-llm-standalone: $(LLM_SRCS)
+# The LLM library reaches the TLS shim (LLMTLS wraps mbedTLS), so this gate needs
+# the same link flags as every other TLS-linked target. Without them it fails at
+# LINK time with `_hildi_tls_*` undefined.
+llm-standalone: $(LLM_SRCS) $(MBEDTLS_STAMP) $(TLS_SHIM_OBJ) $(CACERT_OBJ)
 	@mkdir -p $(DEBUG_BIN) $(DBGUNITS)
-	$(FPC) $(FPCARGS) $(DEBUG) -Fu$(SRC)/llm -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$(DEBUG_BIN)/llm-standalone $(EXAMPLES)/llm_standalone.pas
+	$(FPC) $(FPCARGS) $(DEBUG) $(TLS_LDFLAGS) $(SYS_LDFLAGS) -Fu$(SRC)/llm -FU$(DBGUNITS) -FE$(DEBUG_BIN) -o$(DEBUG_BIN)/llm-standalone $(EXAMPLES)/llm_standalone.pas
 	$(DEBUG_BIN)/llm-standalone
 
 # A visible demo of the STREAMING parser: feed a document a few characters at a
